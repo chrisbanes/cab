@@ -9,6 +9,22 @@ export type ExpectedWorkspaceComparisonRead = {
   changeSet: "all" | "staged" | "unstaged" | null;
 };
 
+/** The cache key of one comparison read; Changes stores reads under it and Files looks them up. */
+export function comparisonReadKey(
+  auth: string,
+  taskId: string,
+  expected: ExpectedWorkspaceComparisonRead,
+) {
+  return JSON.stringify({
+    auth,
+    taskId,
+    target: expected.target,
+    repositoryId: expected.repositoryId,
+    baseBranch: expected.baseBranch,
+    changeSet: expected.changeSet,
+  });
+}
+
 export function matchesWorkspaceComparisonRead(
   data: ComparisonData,
   expected: ExpectedWorkspaceComparisonRead,

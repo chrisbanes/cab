@@ -164,9 +164,6 @@ test("production local review composes exact multi-origin anchors and sends one 
 
   // Current file: select lines 2–3 and comment.
   const files = page.locator("#files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /review\.txt/ }).click();
   await files.getByRole("button", { name: "Line 2: second" }).click();
   await files
@@ -327,9 +324,6 @@ test("production local review composes exact multi-origin anchors and sends one 
 
   // An unsent draft does not cross sign-out.
   await openTaskTab(page, "Files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /review\.txt/ }).click();
   await files.getByRole("button", { name: "Line 1: first" }).click();
   await files
@@ -385,16 +379,11 @@ test("production local review composes exact multi-origin anchors and sends one 
 async function selectLine(page: Page, line: string) {
   await openTaskTab(page, "Files");
   const files = page.locator("#files");
-  const repository = files.getByRole("button", {
-    name: /repo-alpha, repository, full path/,
-  });
+  // Files opens at the repository root; the first call opens the file, later calls find it open.
+  const file = files.getByRole("button", { name: /review\.txt/ });
   const target = files.getByRole("button", { name: line });
-  // The first call opens the file; later calls find it already open.
-  await repository.or(target).first().waitFor();
-  if (await repository.isVisible()) {
-    await repository.click();
-    await files.getByRole("button", { name: /review\.txt/ }).click();
-  }
+  await file.or(target).first().waitFor();
+  if (!(await target.isVisible())) await file.click();
   await target.click();
 }
 
@@ -505,9 +494,6 @@ test("a refused comment save shows one plain alert, keeps the text and puts the 
     web.password,
   );
   const files = page.locator("#files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /review\.txt/ }).click();
   await files.getByRole("button", { name: "Line 2: second" }).click();
   await files
@@ -561,9 +547,6 @@ test("a comment save whose response is lost stays one exact request until it is 
     web.password,
   );
   const files = page.locator("#files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /review\.txt/ }).click();
   await files.getByRole("button", { name: "Line 2: second" }).click();
   await files
@@ -1032,9 +1015,6 @@ async function loseStageAnswer(
     web.password,
   );
   const files = page.locator("#files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /review\.txt/ }).click();
   await files.getByRole("button", { name: "Line 2: second" }).click();
   await files
@@ -1238,9 +1218,6 @@ test("a refused replay on a new entry is reported in the panel and does not bloc
   // The leftover composer does not hold the Add button: a new comment can start here.
   await openTaskTab(page, "Files");
   const files = page.locator("#files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /diff\.txt/ }).click();
   await files.getByRole("button", { name: "Line 1: keep" }).click();
   await files
@@ -1283,9 +1260,6 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
     });
   }, refusal);
   await openTaskTab(page, "Files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /review\.txt/ }).click();
   await files
     .getByRole("form", { name: "Review comment" })
@@ -1313,9 +1287,6 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
   assert.equal(await page.getByText(refusal, { exact: true }).count(), 1);
   // A comment started elsewhere replaces that composer, and its refusal goes with it.
   await openTaskTab(page, "Files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /diff\.txt/ }).click();
   await files.getByRole("button", { name: "Line 1: keep" }).click();
   await files
@@ -1610,9 +1581,6 @@ test("phone local review comments and sends to a receipt using the keyboard", as
     web.password,
   );
   const files = page.locator("#files");
-  await files
-    .getByRole("button", { name: /repo-alpha, repository, full path/ })
-    .click();
   await files.getByRole("button", { name: /review\.txt/ }).click();
   await files.getByRole("button", { name: "Line 2: second" }).click();
   const add = files.getByRole("button", {

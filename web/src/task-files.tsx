@@ -14,14 +14,22 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
+import { comparisonReadKey } from "./comparison-read-match.js";
 import { Button, StatusBadge } from "./components.js";
+import {
+  changeLetter,
+  changeMarkers,
+  changeWord,
+} from "./file-change-markers.js";
 import type { PDFDocumentProxy, PDFDocumentLoadingTask } from "pdfjs-dist";
 import {
   TaskFileTabState,
   type ReviewAnchorCandidate,
+  type TaskChangesState,
   type TaskFilesState,
 } from "./task-workspace-state.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
+import { clockLabel } from "./presentation.js";
 import { RangeControls } from "./range-controls.js";
 import { useOperatorResource } from "./resource.js";
 import { workspaceFileAnchor } from "./review-anchor.js";
@@ -830,11 +838,14 @@ export function TaskFiles({
   session,
   taskId,
   state,
+  changes,
 }: {
   client: OperatorClient;
   session: Session;
   taskId: string;
   state: TaskFilesState;
+  /** Read-only: the Branch comparisons the Changes tab has already read. Files never reads one. */
+  changes: TaskChangesState;
 }) {
   const [, render] = useState(0);
   const readingArea = useRef<HTMLDivElement>(null);
@@ -897,6 +908,30 @@ export function TaskFiles({
         explorerEntries.current[index]?.focus(),
       );
   }, [directory, directoryKey, state, changed]);
+  // Open at a repository root once, when nothing else has chosen a location: a link, an open
+  // tab or any navigation wins, and the jump never moves focus.
+  useEffect(() => {
+    if (state.defaultLocationApplied) return;
+    if (activeTab || state.scope.kind !== "workspace" || state.path.length) {
+      state.defaultLocationApplied = true;
+      return;
+    }
+    if (directory?.state !== "ready" || directory.scope.kind !== "workspace")
+      return;
+    state.defaultLocationApplied = true;
+    const repositories = directory.entries.flatMap((entry) =>
+      entry.kind === "repository" ? [entry.repositoryId] : [],
+    );
+    const repositoryId =
+      changes.repositoryId && repositories.includes(changes.repositoryId)
+        ? changes.repositoryId
+        : repositories[0];
+    if (!repositoryId) return;
+    state.scope = { kind: "repository", repositoryId };
+    state.path = [];
+    state.explorerFocusKey = null;
+    changed();
+  }, [activeTab, directory, changes, state, changed]);
   const directoryObservedAt =
     directoryResource.state.data?.observedAt ?? state.directoryObservedAt;
   const previewKey = activeTab
@@ -970,6 +1005,7 @@ export function TaskFiles({
     path: string[],
     focusEntryKey: string | null = null,
   ) => {
+    state.defaultLocationApplied = true;
     state.scope = scope;
     state.path = path;
     state.mobileView = "list";
@@ -983,6 +1019,7 @@ export function TaskFiles({
   };
   const selectFile = (path: string[], focusEntryKey: string) => {
     const key = JSON.stringify([state.scope, path]);
+    state.defaultLocationApplied = true;
     if (!state.tabs.some((tab) => tab.key === key))
       state.tabs.push(new TaskFileTabState(key, state.scope, [...path]));
     state.activeTabKey = key;
@@ -995,6 +1032,7 @@ export function TaskFiles({
   const openTab = (key: string) => {
     const tab = state.tabs.find((item) => item.key === key);
     if (!tab) return;
+    state.defaultLocationApplied = true;
     state.activeTabKey = key;
     state.scope = tab.scope;
     state.path = tab.path.slice(0, -1);
@@ -1028,6 +1066,34 @@ export function TaskFiles({
         explorerEntries.current[index]?.focus(),
       );
   };
+  // Markers come only from the Branch read the Changes tab holds for this repository and the base
+  // it is using; a missing read is silent and an unusable one is explained.
+  const markerRepository =
+    state.scope.kind === "repository" ? state.scope.repositoryId : null;
+  const comparisonRead = markerRepository
+    ? changes.comparisonReads[
+        comparisonReadKey(session.csrfToken, taskId, {
+          target: "branch",
+          repositoryId: markerRepository,
+          baseBranch: changes.baseBranchByRepository[markerRepository] ?? null,
+          changeSet: null,
+        })
+      ]
+    : undefined;
+  const markers = markerRepository
+    ? changeMarkers(comparisonRead, markerRepository, state.path)
+    : null;
+  const markersUnusable = comparisonRead !== undefined && markers === null;
+  const deletedRows =
+    markers && directory?.state === "ready"
+      ? markers.deleted.filter(
+          (item) =>
+            !directory.entries.some(
+              (entry) =>
+                entry.kind !== "repository" && entry.name === item.name,
+            ),
+        )
+      : [];
   const currentPath = pathLabel(state.scope, state.path);
   const selectedLabel = activeTab
     ? pathLabel(activeTab.scope, activeTab.path)
@@ -1130,6 +1196,22 @@ export function TaskFiles({
         >
           <h4>Explorer</h4>
           <p className="file-current-location">{currentPath}</p>
+          {markers && (
+            <p className="file-observation">
+              Changes marked from the Branch comparison
+              {markers.baseBranch ? ` against ${markers.baseBranch}` : ""} read
+              at {clockLabel(markers.observedAt)}.
+              {markers.truncated
+                ? " It lists only part of the changes, so some changed files may not be marked."
+                : ""}
+            </p>
+          )}
+          {markersUnusable && (
+            <p className="file-observation">
+              Changed files aren't marked: the Changes tab has no complete
+              Branch comparison for this repository.
+            </p>
+          )}
           {directory?.state === "ready" ? (
             <ul
               className="file-entry-list"
@@ -1149,13 +1231,25 @@ export function TaskFiles({
                     : entry.size === null
                       ? entry.kind
                       : `${entry.kind} · ${entry.size.toLocaleString()} bytes`;
+                const change =
+                  entry.kind === "repository"
+                    ? undefined
+                    : markers?.files.get(entry.name);
+                const holdsChanges =
+                  entry.kind === "directory" &&
+                  markers?.directories.has(entry.name);
+                const changeNote = change
+                  ? `, ${changeWord[change]} in Branch comparison`
+                  : holdsChanges
+                    ? ", contains changed files"
+                    : "";
                 return (
                   <li key={`${entry.kind}:${name}`}>
                     <button
                       type="button"
                       className="file-entry"
                       title={fullPath}
-                      aria-label={`${name}, ${size}, full path ${fullPath}${entry.ignored ? ", ignored" : ""}`}
+                      aria-label={`${name}, ${size}, full path ${fullPath}${entry.ignored ? ", ignored" : ""}${changeNote}`}
                       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Space"
                       tabIndex={
                         state.explorerFocusKey === entryKey ||
@@ -1248,11 +1342,42 @@ export function TaskFiles({
                         {size}
                         {entry.ignored ? " · ignored" : ""}
                       </span>
+                      <span
+                        className="file-entry-marker"
+                        data-change={
+                          change ?? (holdsChanges ? "within" : undefined)
+                        }
+                        aria-hidden="true"
+                      >
+                        {change
+                          ? changeLetter[change]
+                          : holdsChanges
+                            ? "•"
+                            : ""}
+                      </span>
                     </button>
                   </li>
                 );
               })}
-              {directory.entries.length === 0 && (
+              {deletedRows.map((item) => (
+                <li
+                  key={`deleted:${item.name}`}
+                  className="file-entry-deleted"
+                  data-change="deleted"
+                >
+                  <span className="file-entry-name">
+                    {item.name}
+                    {item.directory ? "/" : ""}
+                  </span>
+                  <span className="file-entry-metadata">
+                    deleted in Branch comparison
+                  </span>
+                  <span className="file-entry-marker" aria-hidden="true">
+                    {changeLetter.deleted}
+                  </span>
+                </li>
+              ))}
+              {directory.entries.length === 0 && deletedRows.length === 0 && (
                 <li>No entries in this location.</li>
               )}
             </ul>

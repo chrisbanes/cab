@@ -1958,6 +1958,7 @@ export function TaskWorkspace({
             session={session}
             taskId={taskId}
             state={state.files}
+            changes={state.changes}
           />
         </TabPanel>
         <TabPanel tab="changes" active={state.tab}>

@@ -4,12 +4,14 @@ import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 
 const test = browserSuite("operator-files-browser");
@@ -104,7 +106,7 @@ function sourceRepository(
 ) {
   const path = join(root, name);
   mkdirSync(path, { recursive: true });
-  execFileSync("git", ["init", "--quiet", path]);
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
   execFileSync("git", [
     "-C",
     path,
@@ -454,6 +456,29 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Files", exact: true }).waitFor();
 
+  // With no link or open tab, the explorer opens at a repository root without a click
+  // and without moving focus; the workspace row is one navigation away.
+  const openedList = page.getByRole("list", { name: /^Files in Repository / });
+  await openedList.waitFor();
+  assert.match(
+    (await openedList.getAttribute("aria-label")) ?? "",
+    /^Files in Repository (alpha|beta)$/,
+  );
+  assert.equal(
+    await page
+      .getByRole("button", { name: /, repository, full path / })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      document.activeElement?.classList.contains("file-entry"),
+    ),
+    false,
+  );
+  await page
+    .getByRole("button", { name: "Workspace root", exact: true })
+    .click();
   const alphaRootButton = page.getByRole("button", {
     name: /alpha, repository, full path Repository alpha/,
   });
@@ -469,6 +494,10 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   await page.keyboard.press("ArrowRight");
   const guideButton = page.getByRole("button", { name: /guide\.md/ });
   await guideButton.waitFor();
+  // The navigation moves focus to the first entry a frame after the listing renders.
+  await page.waitForFunction(() =>
+    document.activeElement?.classList.contains("file-entry"),
+  );
   const explorerLabels = await page
     .locator(".file-entry")
     .evaluateAll((entries) =>
@@ -1195,5 +1224,376 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   assert.equal(
     (await page.locator("body").innerText()).includes(betaSource),
     false,
+  );
+});
+
+function git(root: string, ...args: string[]) {
+  return execFileSync("git", ["-C", root, ...args], {
+    encoding: "utf8",
+  }).trim();
+}
+
+/** A repository on `main` with an older `old` base, a disconnected `unrelated` branch and files to change. */
+function markedRepository(root: string, name: string) {
+  const path = sourceRepository(root, name, {
+    "README.md": `# ${name}\n`,
+    "keep.txt": "unchanged\n",
+    "gone.txt": "to be deleted\n",
+    "src/app/menu.ts": "export const menu = 1;\n",
+  });
+  git(path, "branch", "old");
+  writeFileSync(join(path, "extra.txt"), "added after old\n");
+  git(path, "add", "extra.txt");
+  git(path, "commit", "--quiet", "-m", "extra");
+  const disconnected = git(
+    path,
+    "commit-tree",
+    git(path, "write-tree"),
+    "-m",
+    "disconnected",
+  );
+  git(path, "branch", "unrelated", disconnected);
+  return path;
+}
+
+/** One commit on the task branch: a modified, an added and a deleted file. */
+function commitWorkspaceChanges(workspace: string) {
+  writeFileSync(join(workspace, "src/app/menu.ts"), "export const menu = 2;\n");
+  writeFileSync(join(workspace, "added.md"), "added\n");
+  git(workspace, "rm", "--quiet", "gone.txt");
+  git(workspace, "add", "-A");
+  git(workspace, "commit", "--quiet", "-m", "files change");
+}
+
+async function startMarkedFiles(
+  j: BrowserJourney,
+  {
+    repositories,
+    viewport = { width: 1280, height: 900 },
+    path = "?section=files",
+  }: {
+    repositories: Array<{ id: string; ref?: string }>;
+    viewport?: { width: number; height: number };
+    path?: string;
+  },
+) {
+  const fixture = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => fixture.close(browser, primary),
+    "fixture.close",
+    () => fixture.lifecycle.steps,
+  );
+  const task = await seedReviewTask(
+    fixture,
+    "Files markers",
+    "Mark changed files",
+    "Mark files from the Branch comparison",
+    repositories.map(({ id, ref }) => ({
+      repositoryId: id,
+      path: markedRepository(join(fixture.directory, "sources"), id),
+      ...(ref ? { ref } : {}),
+    })),
+  );
+  const binding = await fixture.service.taskWorkspace(task.taskId);
+  assert.ok(binding);
+  const workspaces = Object.fromEntries(
+    binding.repositories.map((repository) => [
+      repository.repositoryId,
+      repository.workspacePath,
+    ]),
+  );
+  if (workspaces.alpha) commitWorkspaceChanges(workspaces.alpha);
+  const web = await j.start("fixture.web", () => fixture.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport });
+  j.observe(page);
+  page.setDefaultTimeout(15_000);
+  const comparisonRequests: string[] = [];
+  const directoryRequests: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/comparisons"))
+      comparisonRequests.push(request.url());
+    if (url.pathname.endsWith("/files")) directoryRequests.push(request.url());
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  await page.goto(`${web.origin}/app/tasks/${task.taskId}${path}`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("heading", { name: "Files", exact: true }).waitFor();
+  const files = page.getByRole("tabpanel", { name: "Files" });
+  return {
+    web,
+    task,
+    page,
+    files,
+    workspaces,
+    comparisonRequests,
+    directoryRequests,
+    consoleErrors,
+    /** The explorer list for a location, matched by its label prefix. */
+    list: (location: string) =>
+      files.getByRole("list", { name: new RegExp(`^Files in ${location}`) }),
+    entry: (name: RegExp) =>
+      files.locator(".file-entry").filter({ hasText: name }),
+  };
+}
+
+const focusedEntry = (page: Page) =>
+  page.evaluate(() => document.activeElement?.classList.contains("file-entry"));
+
+test("Files opens at the repository root with changed files marked from the Branch comparison", async (_t, j) => {
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "alpha", ref: "main" }],
+  });
+  const { page, files } = s;
+  const list = s.list("Repository alpha");
+  await list.waitFor();
+  // No workspace row is shown and nothing was clicked.
+  assert.equal(
+    await files
+      .getByRole("button", { name: /, repository, full path / })
+      .count(),
+    0,
+  );
+  const added = list.getByRole("button", {
+    name: /^added\.md, .*, added in Branch comparison$/,
+  });
+  await added.waitFor();
+  assert.equal(await added.locator(".file-entry-marker").innerText(), "A");
+  const gone = list.locator("li.file-entry-deleted", { hasText: "gone.txt" });
+  await gone.waitFor();
+  assert.equal(await gone.locator(".file-entry-marker").innerText(), "D");
+  assert.equal(await gone.getByRole("button").count(), 0);
+  assert.equal(
+    await list.getByRole("button", { name: /^gone\.txt/ }).count(),
+    0,
+  );
+  const src = list.getByRole("button", {
+    name: /^src, directory, .*, contains changed files$/,
+  });
+  assert.equal(await src.locator(".file-entry-marker").innerText(), "•");
+  assert.equal(
+    await list
+      .getByRole("button", { name: /^keep\.txt/ })
+      .locator(".file-entry-marker")
+      .innerText(),
+    "",
+  );
+  await files
+    .getByText(
+      /Changes marked from the Branch comparison against main read at \d{2}:\d{2}\./,
+    )
+    .waitFor();
+  // The jump never moves focus.
+  assert.equal(await focusedEntry(page), false);
+
+  // Markers continue inside folders, and reading them starts no comparison read.
+  const reads = s.comparisonRequests.length;
+  await src.focus();
+  await page.keyboard.press("ArrowRight");
+  const app = files.getByRole("button", {
+    name: /^app, directory, .*, contains changed files$/,
+  });
+  await app.waitFor();
+  await page.waitForFunction(() =>
+    document.activeElement?.getAttribute("aria-label")?.startsWith("app, "),
+  );
+  await page.keyboard.press("ArrowRight");
+  const menu = files.getByRole("button", {
+    name: /^menu\.ts, .*, modified in Branch comparison$/,
+  });
+  await menu.waitFor();
+  assert.equal(await menu.locator(".file-entry-marker").innerText(), "M");
+  assert.equal(s.comparisonRequests.length, reads);
+  assert.ok(
+    s.comparisonRequests.every(
+      (url) => new URL(url).searchParams.get("target") === "branch",
+    ),
+  );
+  assert.deepEqual(s.consoleErrors, []);
+});
+
+test("Files first-open location yields to a link and does not repeat", async (_t, j) => {
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "beta" }, { id: "alpha", ref: "main" }],
+    path: "?section=files&repository=alpha&path=README.md",
+  });
+  const { page, files } = s;
+  // The link opens its file and keeps alpha, although beta is listed first.
+  const openTab = files.locator(".file-tab-open[aria-current='page']");
+  await openTab.waitFor();
+  assert.equal(await openTab.innerText(), "README.md");
+  await s.list("Repository alpha").waitFor();
+
+  // Going back to the workspace root stays there across tab switches and a remount.
+  await files
+    .getByRole("button", { name: "Workspace root", exact: true })
+    .click();
+  await s.list("Workspace").waitFor();
+  await openTaskTab(page, "Changes");
+  await openTaskTab(page, "Files");
+  await s.list("Workspace").waitFor();
+  await page
+    .getByRole("link", { name: "Overview", exact: true })
+    .first()
+    .click();
+  await page.getByRole("heading", { name: "Overview", level: 1 }).waitFor();
+  await page.goBack();
+  await openTaskTab(page, "Files");
+  await s.list("Workspace").waitFor();
+  assert.equal(
+    await files.getByRole("button", { name: /^beta, repository,/ }).count(),
+    1,
+  );
+  assert.equal(await focusedEntry(page), false);
+});
+
+test("Files markers follow the Changes tab's repository, base branch and refresh, never another repository", async (_t, j) => {
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "beta" }, { id: "alpha", ref: "main" }],
+  });
+  const { page, files } = s;
+  const unmarked =
+    "Changed files aren't marked: the Changes tab has no complete Branch comparison for this repository.";
+  const changes = page.getByRole("tabpanel", { name: "Changes" });
+  const marker = (name: RegExp) =>
+    s.entry(name).locator(".file-entry-marker").innerText();
+
+  // beta is listed first and keeps the HEAD ref: it has no complete comparison to mark from.
+  await s.list("Repository beta").waitFor();
+  await files.getByText(unmarked).waitFor();
+  assert.equal(await files.getByText(/Changes marked from/).count(), 0);
+  assert.equal(await marker(/^README\.md/), "");
+
+  // alpha has not been read by the Changes tab yet: no marker and no claim about it.
+  await files
+    .getByRole("button", { name: "Workspace root", exact: true })
+    .click();
+  await files.getByRole("button", { name: /^alpha, repository,/ }).click();
+  await s.list("Repository alpha").waitFor();
+  await s.entry(/^added\.md/).waitFor();
+  assert.equal(await marker(/^added\.md/), "");
+  assert.equal(await files.getByText(unmarked).count(), 0);
+  assert.equal(await files.getByText(/Changes marked from/).count(), 0);
+
+  // Reading alpha in Changes marks it in Files, without a Files reload.
+  await openTaskTab(page, "Changes");
+  await page.getByLabel("Repository", { exact: true }).selectOption("alpha");
+  await changes
+    .getByLabel("Workspace comparison files")
+    .getByRole("button", { name: /added\.md/ })
+    .waitFor();
+  await openTaskTab(page, "Files");
+  await s
+    .entry(/^added\.md/)
+    .locator(".file-entry-marker", { hasText: "A" })
+    .waitFor();
+  assert.equal(await marker(/^▸ src/), "•");
+
+  // beta never borrows alpha's markers.
+  await files
+    .getByRole("button", { name: "Workspace root", exact: true })
+    .click();
+  await files.getByRole("button", { name: /^beta, repository,/ }).click();
+  await s.list("Repository beta").waitFor();
+  await files.getByText(unmarked).waitFor();
+  assert.equal(await marker(/^README\.md/), "");
+  await files
+    .getByRole("button", { name: "Workspace root", exact: true })
+    .click();
+  await files.getByRole("button", { name: /^alpha, repository,/ }).click();
+  await s
+    .entry(/^added\.md/)
+    .locator(".file-entry-marker", { hasText: "A" })
+    .waitFor();
+
+  // A later commit reaches Files only through the Changes tab's Refresh comparison.
+  const workspace = s.workspaces.alpha as string;
+  writeFileSync(join(workspace, "keep.txt"), "changed later\n");
+  writeFileSync(join(workspace, "late.md"), "late\n");
+  git(workspace, "add", "-A");
+  git(workspace, "commit", "--quiet", "-m", "later change");
+  assert.equal(await marker(/^keep\.txt/), "");
+  await openTaskTab(page, "Changes");
+  await changes
+    .getByRole("button", { name: "Refresh comparison", exact: true })
+    .click();
+  await openTaskTab(page, "Files");
+  await s
+    .entry(/^keep\.txt/)
+    .locator(".file-entry-marker", { hasText: "M" })
+    .waitFor();
+  // The listing predates late.md, so it has no row until Files re-reads its listing.
+  assert.equal(await s.entry(/^late\.md/).count(), 0);
+  await files
+    .getByRole("button", { name: "Refresh files", exact: true })
+    .click();
+  await s
+    .entry(/^late\.md/)
+    .locator(".file-entry-marker", { hasText: "A" })
+    .waitFor();
+
+  // Another base branch swaps the markers; one with no merge base clears them with a sentence.
+  await openTaskTab(page, "Changes");
+  await changes.getByLabel("Local base branch").selectOption("old");
+  await openTaskTab(page, "Files");
+  await s
+    .entry(/^extra\.txt/)
+    .locator(".file-entry-marker", { hasText: "A" })
+    .waitFor();
+  await openTaskTab(page, "Changes");
+  await changes.getByLabel("Local base branch").selectOption("unrelated");
+  await openTaskTab(page, "Files");
+  await files.getByText(unmarked).waitFor();
+  assert.equal(await marker(/^added\.md/), "");
+  assert.equal(await marker(/^extra\.txt/), "");
+  assert.equal(await files.getByText(/Changes marked from/).count(), 0);
+  assert.deepEqual(s.consoleErrors, []);
+});
+
+test("Files stays at the workspace root when the task has no repositories", async (_t, j) => {
+  const s = await startMarkedFiles(j, { repositories: [] });
+  const { page, files } = s;
+  await s.list("Workspace").waitFor();
+  await openTaskTab(page, "Changes");
+  await openTaskTab(page, "Files");
+  await s.list("Workspace").waitFor();
+  assert.equal(await files.getByRole("alert").count(), 0);
+  assert.equal(
+    await files.getByText(/Changes marked from|aren't marked/).count(),
+    0,
+  );
+  assert.deepEqual(s.consoleErrors, []);
+});
+
+test("Files first open on a phone shows the repository list view", async (_t, j) => {
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "alpha", ref: "main" }],
+    viewport: { width: 390, height: 844 },
+  });
+  const { page } = s;
+  await s.list("Repository alpha").waitFor();
+  await s
+    .entry(/^added\.md/)
+    .locator(".file-entry-marker", { hasText: "A" })
+    .waitFor();
+  assert.equal(
+    await page.locator(".file-workbench").getAttribute("data-mobile-view"),
+    "list",
+  );
+  assert.equal(await page.locator(".file-reading-area").isVisible(), false);
+  assert.equal(await focusedEntry(page), false);
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+    true,
   );
 });
