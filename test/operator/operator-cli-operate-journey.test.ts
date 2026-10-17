@@ -15,7 +15,6 @@ test("an operator journey through the CLI reads back through the UI projections"
   const { cli, s, d, file } = o;
   const session = async (path: string) =>
     ((await (await s.sessionGet(path)).json()) as Json).data;
-  const outcome = file("outcome.md", "Journey outcome");
 
   // Create a blocked task, then add and remove a dependency and make it ready.
   let r = await cli("rw", [
@@ -25,8 +24,8 @@ test("an operator journey through the CLI reads back through the UI projections"
     s.projectId,
     "--title",
     "Journey",
-    "--outcome-file",
-    outcome,
+    "--outcome",
+    "Journey outcome",
     "--ready",
     "false",
     "--blocker",
@@ -62,20 +61,30 @@ test("an operator journey through the CLI reads back through the UI projections"
   ]);
   assert.equal(r.code, 0, r.out);
   task = await session(`/api/operator/tasks/${taskId}`);
-  r = await cli("rw", [
-    "task",
-    "configure",
-    taskId,
-    "--expected-version",
-    String(task.task.version),
-    "--ready",
-    "true",
-  ]);
+  r = await cli("rw", ["task", "configure", taskId, "--ready", "true"]);
   assert.equal(r.code, 0, r.out);
   const list = await session(
     `/api/operator/task-list?projectId=${s.projectId}`,
   );
   assert.equal(list.tasks.find((x: Json) => x.id === taskId)?.ready, true);
+  // Without --ready a new task is ready.
+  r = await cli("rw", [
+    "task",
+    "create",
+    "--project",
+    s.projectId,
+    "--title",
+    "Default ready",
+    "--outcome",
+    "Defaults",
+    "--blocker",
+    s.taskId,
+  ]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(
+    (await session(`/api/operator/tasks/${r.json().data.taskId}`)).task.ready,
+    true,
+  );
 
   // Follow up a completed lead, then message the resumed lead.
   const { task: led } = await completedLead(s.f, "Journey lead");

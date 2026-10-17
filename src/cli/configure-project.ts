@@ -10,14 +10,15 @@ import {
   type Change,
   checkExpected,
   consistentRead,
+  inlineText,
   readImpact,
-  readTextFile,
   requireOut,
   uuidOrNone,
   positiveIntFlag,
   writePrepared,
 } from "./configure.js";
 import {
+  givenInstructions,
   instructionChange,
   proposedInstructions,
 } from "./configure-profile.js";
@@ -43,7 +44,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID --out FILE [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID --out FILE [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       flags: [
         "out",
@@ -52,6 +53,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "paused",
         "lead-profile",
         "diagnostic-capture",
+        "instructions",
         "instructions-file",
         "restore-revision",
       ],
@@ -74,6 +76,8 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             "invalid-input",
             "--diagnostic-capture must be enhanced or baseline.",
           );
+        // Read once before connecting: standard input cannot be read again on a retried read.
+        const given = await givenInstructions(ctx);
         const session = await ctx.connect([
           "cli.identity",
           "workspace.read",
@@ -89,8 +93,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           (r) => r.data.project.version,
           async () => {
             current = await instructionsOf(client, id);
-            proposed = await proposedInstructions(ctx.values, (r) =>
-              instructionsOf(client, id, r),
+            proposed = await proposedInstructions(
+              ctx.values,
+              (r) => instructionsOf(client, id, r),
+              given,
             );
             impact = await readImpact(
               client,
@@ -170,9 +176,16 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare-create",
     {
       usage:
-        "project prepare-create --out FILE --name S [--lead-profile ID|none] [--instructions-file PATH] [--id UUID]",
+        "project prepare-create --out FILE --name S [--lead-profile ID|none] [--instructions TEXT|- | --instructions-file PATH] [--id UUID]",
       positionals: 0,
-      flags: ["out", "name", "lead-profile", "instructions-file", "id"],
+      flags: [
+        "out",
+        "name",
+        "lead-profile",
+        "instructions",
+        "instructions-file",
+        "id",
+      ],
       async run(ctx) {
         requireOut(ctx);
         if (ctx.values.name === undefined)
@@ -183,10 +196,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             : uuidArg(ctx.values.id, "--id");
         const lead =
           uuidOrNone(ctx.values["lead-profile"], "lead-profile") ?? null;
-        const instructions = await readTextFile(
-          ctx.values["instructions-file"],
-          "instructions-file",
-        );
+        const instructions = await inlineText(ctx, "instructions");
         const session = await ctx.connect(["cli.identity", "workspace.read"]);
         return writePrepared(ctx, session, {
           kind: "project.create",

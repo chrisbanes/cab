@@ -75,8 +75,8 @@ test("configuration journey through the CLI and the shared service", async (t) =
     seed.profileId,
     "--name",
     "Shared lead v2",
-    "--instructions-file",
-    text("p.md", "Journey profile text"),
+    "--instructions",
+    "Journey profile text",
     "--out",
     profileDoc,
   ]);

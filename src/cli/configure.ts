@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import {
   configurationImpactSchema,
   operatorCommandSchema,
+  fitsTextField,
+  textMaxLength,
 } from "../operator/contracts.js";
 import { type CoverageGap, coverage, uuidArg } from "./browse.js";
 import {
@@ -159,6 +161,93 @@ export async function readTextFile(path: string | undefined, flag: string) {
       },
     );
   }
+}
+
+/** A character takes at most 4 UTF-8 bytes, so more input is certainly over the field limit. */
+const STDIN_LIMIT = textMaxLength * 4;
+const tooLong = `longer than the ${textMaxLength} characters a field takes`;
+const shorten = `Shorten the text to ${textMaxLength} characters or fewer.`;
+
+/** All of standard input as UTF-8; Ctrl-C (the CLI's abort signal) ends a read that never closes. */
+function readStdin(ctx: WriteContext, flag: string): Promise<string> {
+  const { stdin, signal } = ctx.deps;
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const stop = (settle: () => void) => {
+      stdin.off("data", onData);
+      stdin.off("end", onEnd);
+      stdin.off("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+      stdin.pause();
+      settle();
+    };
+    const fail = (why: string, fix: string) =>
+      stop(() =>
+        reject(
+          new CliError(
+            "invalid-input",
+            `Cannot read --${flag} - from standard input: ${why}.`,
+            { fix },
+          ),
+        ),
+      );
+    const onData = (chunk: Buffer | string) => {
+      const buffer = Buffer.from(chunk);
+      size += buffer.length;
+      if (size > STDIN_LIMIT) fail(`it is ${tooLong}`, shorten);
+      else chunks.push(buffer);
+    };
+    const onEnd = () =>
+      stop(() => resolve(Buffer.concat(chunks).toString("utf8")));
+    const onError = () =>
+      fail("it could not be read", `Pass the text with --${flag} TEXT.`);
+    const onAbort = () =>
+      fail("it was interrupted", `Run the command again with the text.`);
+    if (stdin.readableEnded)
+      return fail("it was already read", `Pass the text with --${flag} TEXT.`);
+    if (signal?.aborted) return onAbort();
+    stdin.on("data", onData);
+    stdin.once("end", onEnd);
+    stdin.once("error", onError);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * The text of `--NAME TEXT|-` or `--NAME-FILE FILE`; undefined when neither is given.
+ * `-` reads standard input to its end before anything connects, and empty input is
+ * refused. Text, never a token: credentials do not come from standard input.
+ */
+export async function inlineText(
+  ctx: WriteContext,
+  name: "outcome" | "instructions",
+) {
+  const inline = ctx.values[name];
+  const file = ctx.values[`${name}-file`];
+  if (inline !== undefined && file !== undefined)
+    throw new CliError(
+      "usage",
+      `Use either --${name} or --${name}-file, not both.`,
+    );
+  const text =
+    inline === "-"
+      ? await readStdin(ctx, name)
+      : (inline ?? (await readTextFile(file, `${name}-file`)));
+  if (inline === "-" && !text?.trim())
+    throw new CliError(
+      "invalid-input",
+      `Standard input for --${name} - was empty.`,
+      { fix: `Pipe the text in, or pass it as --${name} TEXT.` },
+    );
+  // The service refuses longer text however it was given; say so before connecting.
+  if (text !== undefined && !fitsTextField(text))
+    throw new CliError(
+      "invalid-input",
+      `--${inline === undefined ? `${name}-file` : name} is ${[...text].length} characters, ${tooLong}.`,
+      { fix: shorten },
+    );
+  return text;
 }
 
 export function requireOut(ctx: WriteContext): string {
