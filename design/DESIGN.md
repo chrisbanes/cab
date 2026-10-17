@@ -2022,9 +2022,18 @@ as follows:
   subtitle (plain text with heading, list and checklist markers removed, clamped to
   three lines; when more follows, a closed "Full desired outcome" disclosure in the
   status strip renders the whole outcome as Markdown and stays open across a
-  refresh; a redacted outcome shows neither; the brief keeps the full text) and
-  Execution plus, while
-  the task is open, Stop…, at every width. A finished task offers no Stop…; an
+  refresh; a redacted outcome shows neither; the brief keeps the full text) and,
+  from 760px, Execution plus, while the task is open, Stop…. Below 760px
+  (`47-phone-task-overview`) the header is one row: an icon-only Back (named as
+  below), the one-line title over a mono subtitle (`repository#N`, or "Local task"),
+  and one outline "Task actions" control holding Execution and Stop…. Production
+  draws that control as a native disclosure with a 44px summary, not an ARIA menu:
+  it is the same element at every width and held open from 760px, so resizing never
+  remounts the Stop confirmation; Escape closes the confirmation first, then the
+  disclosure, and a tap outside closes it. The phone drops the outcome line and the
+  strip's ID slot (the subtitle carries the identity), so the strip's "Full desired
+  outcome" disclosure also shows a one-line outcome there. A finished task offers no
+  Stop…; an
   existing Stop stays as a disabled "Stop requested". Back is the only back
   control: with an in-session origin it reads the origin view ("Board",
   "Overview", "Inbox", "Search", "Tasks"; named "Back to originating view") and

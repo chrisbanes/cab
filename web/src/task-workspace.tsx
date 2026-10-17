@@ -1923,12 +1923,6 @@ export function TaskWorkspace({
                     <h3 className="section-heading">Shared brief</h3>
                     <span className="metadata muted">{briefSummary}</span>
                   </summary>
-                  <p className="metadata muted task-provenance">
-                    Requirements ·{" "}
-                    {source?.kind === "github" || data.source
-                      ? "GitHub"
-                      : "Local"}
-                  </p>
                   {state.selectedSource && !source && (
                     <p role="alert">
                       Selected source revision is unavailable. Current

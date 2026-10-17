@@ -289,6 +289,7 @@ export function PageHeader({
   desktopBack,
   plain,
   shortTitle,
+  shortSubtitle,
   compactPhone,
 }: {
   title: string;
@@ -304,6 +305,8 @@ export function PageHeader({
   plain?: boolean;
   /** Phone title, rendered in the same h1 and shown below 760px instead of `title`. */
   shortTitle?: string | undefined;
+  /** Phone subtitle, a separate line the detail header shows in place of `subtitle` below 760px. */
+  shortSubtitle?: string | undefined;
   /** Phone only: Back and a centred title, with no subtitle (a create form's Back names its parent). */
   compactPhone?: boolean | undefined;
 }) {
@@ -353,6 +356,9 @@ export function PageHeader({
           )}
         </h1>
         {subtitle && <p className="introduction muted">{subtitle}</p>}
+        {shortSubtitle && (
+          <p className="page-subtitle-short">{shortSubtitle}</p>
+        )}
       </div>
       {badge && (
         <StatusBadge className="page-header-count">{badge}</StatusBadge>

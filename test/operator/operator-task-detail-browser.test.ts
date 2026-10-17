@@ -157,7 +157,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   const header = page.locator(".page-header");
   // The subtitle is the outcome's first line; the strip carries state and the lead.
   assert.equal(
-    await header.locator(".page-header-title p").textContent(),
+    await header.locator(".page-header-title p.introduction").textContent(),
     "Context",
   );
   const strip = page.locator("[data-task-strip]");
@@ -390,9 +390,11 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     "Unsent reply",
   );
 
-  // Phone: Back, Execution and Stop… stay in the first viewport at 44px; one column.
+  // Phone: Back stays in the first viewport at 44px; Execution and Stop… are in the one
+  // Task actions disclosure, also at 44px; one column.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => scrollTo(0, 0));
+  await header.locator(".task-header-overflow-toggle").click();
   for (const name of ["Execution", "Stop…", "Back to Atlas"]) {
     const control = header.getByRole(name === "Stop…" ? "button" : "link", {
       name,
@@ -543,12 +545,23 @@ test("An empty local task says so honestly", async (_t, j) => {
   await page.getByRole("heading", { name: "Empty task", level: 1 }).waitFor();
   const review = page.locator("#review");
   await review.getByText("No result recorded.", { exact: true }).waitFor();
-  // A one-line outcome is the whole subtitle, with nothing to disclose.
+  // A one-line outcome is the whole recorded subtitle. On a phone the header carries the
+  // identity instead, so the strip's disclosure is where the outcome is read.
   assert.equal(
-    await page.locator(".page-header-title p").textContent(),
+    await page.locator(".page-header-title p.introduction").textContent(),
     "Write the field notes guide.",
   );
-  assert.equal(await page.locator("details.task-outcome").count(), 0);
+  assert.equal(
+    await page.locator(".page-header-title p.introduction").isVisible(),
+    false,
+  );
+  assert.equal(
+    await page.locator(".page-subtitle-short").textContent(),
+    "Local task",
+  );
+  const phoneOutcome = page.locator("details.task-outcome[data-phone-only]");
+  await phoneOutcome.locator("summary").click();
+  await phoneOutcome.getByText("Write the field notes guide.").waitFor();
   await openOverviewCard(page, "assignments");
   await page
     .locator("#assignments")
@@ -792,6 +805,7 @@ for (const engine of [
 
       // Phone: stacked 44px dialog buttons.
       await page.setViewportSize({ width: 390, height: 844 });
+      await page.locator(".task-header-overflow-toggle").click();
       await stop.click();
       const buttons = await dialog
         .getByRole("button")
@@ -2717,7 +2731,7 @@ test("The outcome shows its first line and a closed disclosure with rendered Mar
   const a = await seed(fixture.f);
   const { web, page } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
-  const subtitle = page.locator(".page-header-title p");
+  const subtitle = page.locator(".page-header-title p.introduction");
   await subtitle.waitFor();
   assert.equal(await subtitle.textContent(), "Context");
   const disclosure = page.locator("[data-task-strip] details.task-outcome");
@@ -2772,7 +2786,10 @@ test("A redacted outcome shows no subtitle and no disclosure", async (_t, j) => 
     .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
     .waitFor();
   await page.locator("[data-task-strip]").waitFor();
-  assert.equal(await page.locator(".page-header-title p").count(), 0);
+  assert.equal(
+    await page.locator(".page-header-title p.introduction").count(),
+    0,
+  );
   assert.equal(await page.locator("details.task-outcome").count(), 0);
   await page.unrouteAll({ behavior: "wait" });
 });
@@ -4134,4 +4151,210 @@ test("Returning from evidence, Files or Changes restores Overview disclosures, s
       `scroll after ${tab}`,
     );
   }
+});
+
+test("Phone task header is Back, title, identity subtitle and one Task actions control reachable by keyboard", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const ids = await seedCatalog(fixture.f);
+  const finished = await seedReviewTask(
+    fixture.f,
+    "Finished project",
+    "Finished task",
+    "One line outcome.",
+  );
+  const stopped = await seedReviewTask(
+    fixture.f,
+    "Stopped project",
+    "Stopped task",
+    "One line outcome.",
+  );
+  fixture.f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE domain_tasks SET state = 'done', version = version + 1 WHERE id = ?",
+    ).run(finished.taskId);
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",
+    ).run(stopped.taskId);
+  });
+  const { web, page } = await fixture.launch({ width: 390, height: 844 });
+  const stops: string[] = [];
+  page.on("request", (r) => {
+    if (
+      r.method() === "POST" &&
+      new URL(r.url()).pathname === "/runtime/control/stop"
+    )
+      stops.push(r.url());
+  });
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page
+    .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
+    .waitFor();
+  const header = page.locator(".page-header");
+  const toggle = header.locator(".task-header-overflow-toggle");
+  const overflow = header.locator("details.task-header-overflow");
+  const activeIs = (text: string) =>
+    page.waitForFunction(
+      (text) => document.activeElement?.textContent === text,
+      text,
+    );
+
+  // Back, the title on one line over the mono identity, and exactly one other control.
+  const back = header.getByRole("link", { name: "Back to Atlas", exact: true });
+  const backBox = await back.boundingBox();
+  assert.ok(
+    backBox && backBox.width >= 44 && backBox.height >= 44,
+    "Back is 44px",
+  );
+  const h1 = header.locator("h1");
+  assert.deepEqual(
+    await h1.evaluate((e) => {
+      const style = getComputedStyle(e);
+      return [
+        style.whiteSpace,
+        style.textOverflow,
+        e.scrollHeight <= e.clientHeight + 1,
+      ];
+    }),
+    ["nowrap", "ellipsis", true],
+  );
+  const identity = header.locator(".page-subtitle-short");
+  assert.equal(await identity.textContent(), "Local task");
+  assert.ok(await identity.isVisible());
+  assert.match(
+    await identity.evaluate((e) => getComputedStyle(e).fontFamily),
+    /mono/i,
+  );
+  assert.equal(await header.locator(".introduction").isVisible(), false);
+  assert.deepEqual(
+    await header
+      .locator("a, button, summary")
+      .evaluateAll((els) =>
+        els
+          .filter((e) => e.checkVisibility())
+          .map((e) => e.getAttribute("aria-label") ?? e.textContent?.trim()),
+      ),
+    ["Back to Atlas", "Task actions"],
+  );
+  const toggleBox = await toggle.boundingBox();
+  assert.ok(toggleBox && toggleBox.width >= 44 && toggleBox.height >= 44);
+  assert.equal(
+    await header.getByRole("link", { name: "Execution" }).isVisible(),
+    false,
+  );
+  assert.equal(
+    await header.getByRole("button", { name: "Stop…" }).isVisible(),
+    false,
+  );
+
+  // The keyboard opens it; Execution then Stop… follow in order; Stop… asks before it posts.
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await overflow.and(page.locator("[open]")).waitFor();
+  await page.keyboard.press("Tab");
+  await activeIs("Execution");
+  await page.keyboard.press("Tab");
+  await activeIs("Stop…");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("alertdialog", {
+    name: "Stop Ship an accessible command menu?",
+  });
+  await dialog.waitFor();
+  await activeIs("Keep running");
+  // Escape closes the dialog first and returns to Stop…, then closes the overflow.
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached" });
+  await activeIs("Stop…");
+  assert.notEqual(await overflow.getAttribute("open"), null);
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() =>
+    document.activeElement?.classList.contains("task-header-overflow-toggle"),
+  );
+  assert.equal(await overflow.getAttribute("open"), null);
+  assert.deepEqual(stops, []);
+
+  // Resizing to desktop with the dialog open keeps the same dialog: nothing remounts.
+  await page.keyboard.press("Enter");
+  await overflow.and(page.locator("[open]")).waitFor();
+  await header.getByRole("button", { name: "Stop…" }).click();
+  await dialog.waitFor();
+  const keep = await dialog
+    .getByRole("button", { name: "Keep running" })
+    .elementHandle();
+  assert.ok(keep);
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await settle(page);
+  assert.ok(
+    await keep.evaluate((e) => e.isConnected),
+    "Keep running is the same element",
+  );
+  assert.ok(await dialog.isVisible());
+  // The open modal hides the page from role queries, so these are located by class.
+  assert.ok(await header.locator(".task-header-actions a").isVisible());
+  assert.ok(await header.locator(".task-header-actions button").isVisible());
+  assert.equal(await toggle.isVisible(), false);
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached" });
+  // The desktop header shows the actions without the disclosure's summary.
+  assert.notEqual(await overflow.getAttribute("open"), null);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await settle(page);
+
+  // An imported task's identity is its repository and number.
+  await page.goto(`${web.origin}/app/tasks/${ids.importedId}`);
+  await header.locator(".page-subtitle-short").waitFor();
+  assert.equal(
+    await header.locator(".page-subtitle-short").textContent(),
+    "fixture/source#42",
+  );
+
+  // A finished task offers Execution and no Stop….
+  await page.goto(`${web.origin}/app/tasks/${finished.taskId}`);
+  await toggle.click();
+  assert.deepEqual(
+    await header
+      .locator(".task-header-actions > *")
+      .evaluateAll((els) => els.map((e) => [e.tagName, e.textContent])),
+    [["A", "Execution"]],
+  );
+
+  // A recorded Stop stays a disabled "Stop requested".
+  await page.goto(`${web.origin}/app/tasks/${stopped.taskId}`);
+  await toggle.click();
+  const requested = header.getByRole("button", {
+    name: "Stop requested",
+    exact: true,
+  });
+  await requested.waitFor();
+  assert.ok(await requested.isDisabled());
+  assert.ok(
+    await header
+      .getByRole("link", { name: "Execution", exact: true })
+      .isVisible(),
+  );
+
+  // A tap outside the open overflow closes it.
+  await page.mouse.click(4, 700);
+  await page.waitForFunction(
+    () =>
+      !document.querySelector(".task-header-overflow")?.hasAttribute("open"),
+  );
+
+  // A one-line outcome is read through the strip's disclosure on a phone, and only there.
+  const outcome = page.locator(
+    "[data-task-strip] details.task-outcome[data-phone-only]",
+  );
+  assert.equal(
+    await outcome.locator("summary").textContent(),
+    "Full desired outcome",
+  );
+  await outcome.locator("summary").click();
+  await outcome.getByText("One line outcome.").waitFor();
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await settle(page);
+  assert.equal(await outcome.isVisible(), false);
+  // From 760px the header keeps the recorded outcome and carries no phone identity line.
+  assert.equal(await header.locator(".page-subtitle-short").isVisible(), false);
+  assert.ok(await header.locator(".introduction").isVisible());
+  assert.deepEqual(stops, []);
 });

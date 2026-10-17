@@ -1,3 +1,4 @@
+import { Ellipsis } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -18,6 +19,7 @@ import {
   taskReadiness,
 } from "./task-overview.js";
 import { type TaskTab, taskTabs } from "./task-tabs.js";
+import { useMediaQuery } from "./use-media-query.js";
 import { stateIcons } from "./task-views.js";
 import {
   Dialog,
@@ -33,6 +35,8 @@ export interface TaskHeaderReport {
   taskId: string;
   title: string;
   subtitle?: string | undefined;
+  /** The mono identity the phone header shows under the title: `repository#N` or "Local task". */
+  identity: string;
   back: { href: string; label: string; ariaLabel: string; history: boolean };
   stop: { affected: string; held: boolean; open: boolean };
 }
@@ -50,6 +54,7 @@ export function taskHeaderReport(
     title,
     // The outcome's first line; the strip discloses the rest and carries state and readiness.
     subtitle: outcomeLine(data.task.outcome).line || undefined,
+    identity: taskIdentity(data).label,
     back: origin
       ? {
           href: origin,
@@ -67,7 +72,12 @@ export function taskHeaderReport(
   };
 }
 
-/** Execution and Stop… (frame 46a). Stop confirms first, then posts the retained Stop form. */
+/**
+ * Execution and Stop… (frame 46a). From 760px they sit in the header; on a phone (frame 47)
+ * the one "Task actions" disclosure holds them. It is one element at every width, forced open
+ * from 760px, so a resize never remounts the Stop dialog. Stop confirms first, then posts the
+ * retained Stop form.
+ */
 export function TaskHeaderActions({
   report,
   csrfToken,
@@ -76,8 +86,31 @@ export function TaskHeaderActions({
   csrfToken: string;
 }) {
   const [open, setOpen] = useState(false),
-    [sent, setSent] = useState(false);
-  const keep = useRef<HTMLButtonElement>(null);
+    [sent, setSent] = useState(false),
+    [menuOpen, setMenuOpen] = useState(false);
+  const phone = useMediaQuery("(max-width: 759px)");
+  const keep = useRef<HTMLButtonElement>(null),
+    overflow = useRef<HTMLDetailsElement>(null);
+  // A tap outside closes the phone overflow; the Stop dialog's own layer is not outside.
+  const dialogOpen = useRef(open);
+  dialogOpen.current = open;
+  useEffect(() => {
+    if (!phone) return;
+    const away = (event: PointerEvent) => {
+      const details = overflow.current;
+      if (
+        details?.open &&
+        !dialogOpen.current &&
+        !details.contains(event.target as Node)
+      ) {
+        // Close the element itself: its own toggle event may still be queued behind this tap.
+        details.open = false;
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [phone]);
   // A page restored from the back-forward cache after the Stop post starts closed again.
   useEffect(() => {
     const restored = (event: PageTransitionEvent) => {
@@ -90,66 +123,95 @@ export function TaskHeaderActions({
     return () => removeEventListener("pageshow", restored);
   }, []);
   return (
-    <div className="task-header-actions">
-      <ActionLink variant="secondary" href={`/runtime/task/${report.taskId}`}>
-        Execution
-      </ActionLink>
-      {report.stop.held ? (
-        <Button variant="destructive" disabled>
-          Stop requested
-        </Button>
-      ) : report.stop.open ? (
-        <Dialog
-          open={open}
-          onOpenChange={(next) => {
-            setOpen(next);
-            if (!next) setSent(false);
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button variant="destructive">Stop…</Button>
-          </DialogTrigger>
-          <DialogContent
-            role="alertdialog"
-            className="stop-dialog"
-            onOpenAutoFocus={(event) => {
-              event.preventDefault();
-              keep.current?.focus();
+    <details
+      ref={overflow}
+      className="task-header-overflow"
+      open={!phone || menuOpen}
+      onToggle={(event) => {
+        if (phone) setMenuOpen(event.currentTarget.open);
+      }}
+      onKeyDown={(event) => {
+        // The dialog closes on its own Escape first (it prevents the default); the next one
+        // closes the overflow and returns to its summary.
+        if (
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          !phone ||
+          !event.currentTarget.open ||
+          !event.currentTarget.contains(event.target as Node)
+        )
+          return;
+        event.preventDefault();
+        event.currentTarget.open = false;
+        setMenuOpen(false);
+        event.currentTarget.querySelector("summary")?.focus();
+      }}
+    >
+      <summary className="task-header-overflow-toggle">
+        <Ellipsis aria-hidden="true" />
+        <span className="sr-only">Task actions</span>
+      </summary>
+      <div className="task-header-actions">
+        <ActionLink variant="secondary" href={`/runtime/task/${report.taskId}`}>
+          Execution
+        </ActionLink>
+        {report.stop.held ? (
+          <Button variant="destructive" disabled>
+            Stop requested
+          </Button>
+        ) : report.stop.open ? (
+          <Dialog
+            open={open}
+            onOpenChange={(next) => {
+              setOpen(next);
+              if (!next) setSent(false);
             }}
           >
-            <DialogTitle>Stop {report.title}?</DialogTitle>
-            <DialogDescription className="body">
-              {report.stop.affected}
-            </DialogDescription>
-            <p className="body">
-              Stops new work and asks running turns to end; some effects may
-              still finish, and files, history and results are kept.
-            </p>
-            {/* The retained Stop control; it answers with the Execution page. */}
-            <form
-              method="post"
-              action="/runtime/control/stop"
-              className="stop-dialog-actions"
-              onSubmit={(event) => {
-                if (sent) event.preventDefault();
-                else setSent(true);
+            <DialogTrigger asChild>
+              <Button variant="destructive">Stop…</Button>
+            </DialogTrigger>
+            <DialogContent
+              role="alertdialog"
+              className="stop-dialog"
+              onOpenAutoFocus={(event) => {
+                event.preventDefault();
+                keep.current?.focus();
               }}
             >
-              <input type="hidden" name="csrfToken" value={csrfToken} />
-              <input type="hidden" name="taskId" value={report.taskId} />
-              <Button type="submit" variant="destructive" disabled={sent}>
-                Stop task
-              </Button>
-              <DialogClose asChild>
-                <Button ref={keep} type="button" variant="secondary">
-                  Keep running
+              <DialogTitle>Stop {report.title}?</DialogTitle>
+              <DialogDescription className="body">
+                {report.stop.affected}
+              </DialogDescription>
+              <p className="body">
+                Stops new work and asks running turns to end; some effects may
+                still finish, and files, history and results are kept.
+              </p>
+              {/* The retained Stop control; it answers with the Execution page. */}
+              <form
+                method="post"
+                action="/runtime/control/stop"
+                className="stop-dialog-actions"
+                onSubmit={(event) => {
+                  if (sent) event.preventDefault();
+                  else setSent(true);
+                }}
+              >
+                <input type="hidden" name="csrfToken" value={csrfToken} />
+                <input type="hidden" name="taskId" value={report.taskId} />
+                <Button type="submit" variant="destructive" disabled={sent}>
+                  Stop task
                 </Button>
-              </DialogClose>
-            </form>
-          </DialogContent>
-        </Dialog>
-      ) : null}
-    </div>
+                <DialogClose asChild>
+                  <Button ref={keep} type="button" variant="secondary">
+                    Keep running
+                  </Button>
+                </DialogClose>
+              </form>
+            </DialogContent>
+          </Dialog>
+        ) : null}
+      </div>
+    </details>
   );
 }
 
@@ -205,8 +267,12 @@ export function TaskStrip({
         )}
         <span>Accountable lead · {data.lead?.name ?? "Unconfigured"}</span>
       </div>
-      {outcome.more && data.task.outcome && (
-        <details className="task-outcome">
+      {/* On a phone the header subtitle is the identity, so a one-line outcome is read here too. */}
+      {(outcome.more || outcome.line) && data.task.outcome && (
+        <details
+          className="task-outcome"
+          data-phone-only={outcome.more ? undefined : true}
+        >
           <summary>Full desired outcome</summary>
           <MarkdownPreview text={data.task.outcome} />
         </details>

@@ -1542,8 +1542,8 @@ for (const viewport of [
     );
     await page.getByText(/^Selected source revision is unavailable/).waitFor();
     assert.equal(
-      await page.locator("#brief .task-provenance").textContent(),
-      "Requirements · GitHub",
+      await page.locator("#brief > details > summary .metadata").textContent(),
+      "Requirements · GitHub · Retained source unavailable",
     );
     await page.goto(`${web.origin}/app/tasks`);
     await page
