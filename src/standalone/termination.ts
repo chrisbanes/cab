@@ -82,6 +82,12 @@ function processIsAbsent(processId: number): boolean | undefined {
   }
 }
 
+/** Reasons of a `conflict` that still prove the original process is gone. */
+export const PROCESS_IDENTIFIER_REUSED =
+  "Original process identifier is now reused";
+export const HOST_BOOT_DIFFERS =
+  "Host boot identity differs from the original execution";
+
 /**
  * Verifies only a same-boot macOS PID absence. A live/reused PID, changed boot,
  * missing birth identity, or unreadable OS evidence is never treated as exit.
@@ -110,7 +116,7 @@ export class MacProcessTerminationVerifier implements TerminationVerifier {
     if (currentBootId !== parsed.data.bootId)
       return {
         kind: "conflict",
-        reason: "Host boot identity differs from the original execution",
+        reason: HOST_BOOT_DIFFERS,
       };
     const pid = Number(parsed.data.processId);
     const absent = processIsAbsent(pid);
@@ -139,7 +145,7 @@ export class MacProcessTerminationVerifier implements TerminationVerifier {
       };
     return {
       kind: "conflict",
-      reason: "Original process identifier is now reused",
+      reason: PROCESS_IDENTIFIER_REUSED,
     };
   }
 }

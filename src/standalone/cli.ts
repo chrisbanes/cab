@@ -1,5 +1,6 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
+import { ROOT_REFUSAL } from "./launchd.js";
 import { OperatorApi } from "./operator-api.js";
 import { OperatorWebBundle, OperatorWebBoundary } from "./operator-web.js";
 import { serviceReadiness } from "./readiness.js";
@@ -205,5 +206,15 @@ export async function main(
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url)
+if (
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
+  // The service's own entry point, as launchd starts it, never runs as root.
+  // A fixed message on stderr, not a stack trace, in the launchd log.
+  if (process.getuid?.() === 0 || process.geteuid?.() === 0) {
+    process.stderr.write(`${ROOT_REFUSAL}\n`);
+    process.exit(1);
+  }
   await main();
+}

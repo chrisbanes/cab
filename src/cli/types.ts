@@ -8,6 +8,10 @@ export type CliDeps = {
   stderr: NodeJS.WriteStream;
   fetch: typeof fetch;
   platform: NodeJS.Platform;
+  /** The caller's uid; tests inject it (default: the process's). */
+  uid?: number;
+  /** The `gh` the doctor warning probes (default `gh` on the daemon's PATH); tests inject it. */
+  ghExecutable?: string;
   keychain: () => CredentialStore;
   now: () => number;
   /** Command request timeout; expiry is an unknown outcome (default 60 s). */

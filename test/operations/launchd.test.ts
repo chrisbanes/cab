@@ -19,6 +19,8 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { diagnosticLimitsFromEnv } from "../../src/standalone/execution-diagnostics.js";
 import {
+  assertNotRoot,
+  ROOT_REFUSAL,
   renderLaunchAgent,
   writeLaunchAgent,
   type LaunchAgentConfiguration,
@@ -408,4 +410,217 @@ test("operations CLI renders diagnostic retention options and refuses bad ones",
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
+});
+
+const environmentKeys = (plist: string) => {
+  const block =
+    /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(
+      plist,
+    )?.[1] ?? "";
+  return [...block.matchAll(/<key>([^<]*)<\/key>/g)].map((m) => m[1]);
+};
+
+const withDaemonAccount = (
+  fixture: ReturnType<typeof createFixture>,
+  userName = "operator",
+): LaunchAgentConfiguration => {
+  const home = join(fixture.root, "home");
+  mkdirSync(home, { mode: 0o755 });
+  return { ...fixture.configuration, userName, home };
+};
+
+test("daemon plist renders UserName and HOME with the LaunchAgent environment and no secrets", () => {
+  const fixture = createFixture();
+  const canaries = {
+    GH_TOKEN: "canary-gh-1144",
+    GITHUB_TOKEN: "canary-github-1144",
+    CLAUDE_CODE_OAUTH_TOKEN: "canary-claude-1144",
+    ENSEMBLE_DELIVERY_TOKEN: "canary-delivery-1144",
+  };
+  const saved = Object.fromEntries(
+    Object.keys(canaries).map((key) => [key, process.env[key]]),
+  );
+  Object.assign(process.env, canaries);
+  try {
+    const configuration = withDaemonAccount(fixture);
+    const plist = renderLaunchAgent({
+      ...configuration,
+      diagnosticRetentionDays: 7,
+    });
+    assert.match(plist, /<key>UserName<\/key>\s*<string>operator<\/string>/);
+    assert.deepEqual(environmentKeys(plist), [
+      "PATH",
+      "HOME",
+      "ENSEMBLE_OPERATOR_AUTH_FILE",
+      "ENSEMBLE_OPERATOR_ORIGIN",
+      "ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS",
+    ]);
+    assert.match(
+      plist,
+      new RegExp(
+        `<key>PATH</key>\\s*<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>\\s*<key>HOME</key>\\s*<string>${configuration.home?.replaceAll("/", "\\/")}</string>`,
+      ),
+    );
+    for (const value of Object.values(canaries))
+      assert.equal(plist.includes(value), false, value);
+    const argumentsXml = [
+      configuration.nodePath,
+      configuration.cliPath,
+      "operator",
+      configuration.dataDirectory,
+      String(configuration.port),
+    ]
+      .map((value) => `    <string>${xmlEscape(value)}</string>`)
+      .join("\n");
+    assert.ok(
+      plist.includes(
+        `<key>ProgramArguments</key>\n  <array>\n${argumentsXml}\n  </array>`,
+      ),
+    );
+    assert.ok(
+      plist.includes(
+        `<key>StandardOutPath</key>\n  <string>${xmlEscape(configuration.stdoutPath)}</string>`,
+      ),
+    );
+    assert.ok(
+      plist.includes(
+        `<key>StandardErrorPath</key>\n  <string>${xmlEscape(configuration.stderrPath)}</string>`,
+      ),
+    );
+    assert.ok(plist.includes("<key>RunAtLoad</key>\n  <true/>"));
+    assert.ok(plist.includes("<key>KeepAlive</key>\n  <false/>"));
+  } finally {
+    for (const [key, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("daemon plist fields are absent from the LaunchAgent", () => {
+  const fixture = createFixture();
+  try {
+    const plist = renderLaunchAgent(fixture.configuration);
+    assert.equal(plist.includes("UserName"), false);
+    assert.equal(plist.includes("<key>HOME</key>"), false);
+    assert.deepEqual(environmentKeys(plist), [
+      "PATH",
+      "ENSEMBLE_OPERATOR_AUTH_FILE",
+      "ENSEMBLE_OPERATOR_ORIGIN",
+    ]);
+    // The daemon rendering differs from it only by the two added entries.
+    const daemon = renderLaunchAgent(withDaemonAccount(fixture));
+    assert.equal(
+      daemon
+        .replace(/\n {2}<key>UserName<\/key>\n {2}<string>[^<]*<\/string>/, "")
+        .replace(/\n {4}<key>HOME<\/key>\n {4}<string>[^<]*<\/string>/, ""),
+      plist,
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("daemon plist rejects root, unsafe names, relative or symlinked home and half-set fields", () => {
+  const fixture = createFixture();
+  try {
+    const good = withDaemonAccount(fixture);
+    const link = join(fixture.root, "home-link");
+    symlinkSync(good.home as string, link);
+    const file = join(fixture.root, "home-file");
+    writeFileSync(file, "");
+    const cases: Partial<LaunchAgentConfiguration>[] = [
+      { userName: "root" },
+      { userName: "ROOT" },
+      { userName: "" },
+      { userName: "-flag" },
+      { userName: "a b" },
+      { userName: "a</string>" },
+      { userName: "x".repeat(256) },
+      { home: "relative/home" },
+      { home: link },
+      { home: file },
+      { home: join(fixture.root, "missing") },
+      { userName: undefined },
+      { home: undefined },
+    ];
+    for (const override of cases)
+      assert.throws(
+        () => renderLaunchAgent({ ...good, ...override }),
+        /./,
+        Object.keys(override).join(),
+      );
+    assert.doesNotThrow(() => renderLaunchAgent(good));
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("daemon plist passes plutil -lint", {
+  skip: process.platform !== "darwin",
+}, () => {
+  const fixture = createFixture();
+  try {
+    const plistPath = join(fixture.root, "daemon.plist");
+    const configuration = withDaemonAccount(fixture);
+    writeFileSync(plistPath, renderLaunchAgent(configuration));
+    assert.equal(lintPlistIfAvailable(plistPath), true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("assertNotRoot refuses uid 0 with a fixed message and allows others", () => {
+  assert.throws(
+    () => assertNotRoot(0),
+    (error: Error) =>
+      error.message === ROOT_REFUSAL &&
+      error.message ===
+        "Ensemble does not run as root; run it as the account that owns the service" &&
+      !error.message.includes("/"),
+  );
+  assert.doesNotThrow(() => assertNotRoot(501));
+  assert.doesNotThrow(() => assertNotRoot(undefined));
+});
+
+test("the service entry point refuses root before main runs", () => {
+  // A preload makes the process report uid 0. With the guard in place the entry exits at once;
+  // without it main() would only fail on its missing arguments, so the message tells them apart.
+  const entry = resolve("dist/src/standalone/cli.js");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "data:text/javascript,process.getuid=()=>0;process.geteuid=()=>0",
+      entry,
+      "operator",
+    ],
+    { encoding: "utf8", timeout: 20_000 },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(
+    result.stderr.trim(),
+    "Ensemble does not run as root; run it as the account that owns the service",
+  );
+});
+
+test("the service entry point refuses an effective uid of 0 before main runs", () => {
+  // A preload makes the process report uid 0. With the guard in place the entry exits at once;
+  // without it main() would only fail on its missing arguments, so the message tells them apart.
+  const entry = resolve("dist/src/standalone/cli.js");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "data:text/javascript,process.getuid=()=>501;process.geteuid=()=>0",
+      entry,
+      "operator",
+    ],
+    { encoding: "utf8", timeout: 20_000 },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(
+    result.stderr.trim(),
+    "Ensemble does not run as root; run it as the account that owns the service",
+  );
 });
