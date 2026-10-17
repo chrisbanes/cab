@@ -241,8 +241,15 @@ If the copy ran but the job is not loaded, the re-run prints only the `launchctl
 bootstrap` step. The re-run compares `system/<label>` and
 `/Library/LaunchDaemons/<label>.plist` with the install record: the plist must be a
 regular file (not a symbolic link) owned by root that others cannot write, with
-the recorded sha256, and the loaded job's path must be that plist. When they match it
-waits for `/app` and exits 0 with `"started":true` and no steps, then prints the
+the recorded sha256, and the loaded job's path must be that plist. It reports
+`"started":true` (exit 0, no steps) only when `launchctl print` shows the loaded job with a
+process, that process's identity can be read, and the process listening on the port
+(read with `lsof -nP -iTCP:PORT -sTCP:LISTEN`) is that same pid and no other, and
+`/app` answers 200 from it, still under the same pid afterwards. A loaded job with no
+process, an unreadable identity, another or an unknown listener on the port, or a
+process that never serves, exits 1 with a message that keeps the record and gives the
+read-only checks. It never trusts a 200 from whatever else holds the port. After it reports
+started it prints the
 manual `ensemble auth login` line, `ensemble doctor` and the app URL (it never opens
 the browser), as the LaunchAgent install does when it could not sign in. When the job is not loaded it
 prints the steps again with `"started":false`. When the plist or job differs from
@@ -292,34 +299,44 @@ sudo /bin/rm -f /Library/LaunchDaemons/local.ensemble.service.plist
 
 It keeps the record and staged plist; run `service uninstall` again after the
 commands. Removing the job does not stop its process at once, so the record also
-keeps the service process Ensemble last saw. `service install --mode daemon`
-re-runs, and `service uninstall` while the job is loaded, read it with
-`launchctl print` and store its pid, start time and boot session in the record
-(`observedProcess`; `null` for a loaded job with no process, `"unknown"` when its
-identity could not be read). That is the only thing either command writes, and only
-when it differs from the stored value: under `STATE/launchd`, never under `/Library`,
-and uninstall does it before it prints the steps, so a record that cannot be written
-fails the command (exit 1, fixed message, record unchanged) and no steps are printed.
-Nothing is ever signalled. The confirmation covers only
-the main service process last observed, not its descendants, so run the printed
-commands right after the `uninstall` that printed them; if the host rebooted or the
-job restarted in between, run `service uninstall` again first so that it observes
-the running process. When the job and the plist are
-gone, uninstall clears the record only once that process is confirmed gone: its pid is
-absent, belongs to a process with another start time, or predates this boot, and
-`127.0.0.1:PORT` is free. Then it removes the staged plist and the record and exits 0
-with `"complete":true`; that is also the point from which `service install` restores
-the LaunchAgent, and until then install in the other mode, and upgrade, stay refused.
-If the process is still running or cannot be identified, no process was ever recorded
-and a log file exists or the port is busy, or the port is still in use, it exits 1
-and keeps the record. Its message gives the read-only checks (`launchctl print
+keeps what Ensemble has seen of the service (`observed`). `service install --mode daemon`
+re-runs, and `service uninstall` while the job is loaded, read `launchctl print` and
+fold it in: the pid, start time and boot session of each process seen, and whether a
+loaded job had no process yet or one whose identity could not be read. What is
+recorded only moves up. A job seen with no pid is treated as maybe-started, never as
+never-started, because launchd may start it a moment later; a recorded identity is
+dropped only once its exit is confirmed, so a restarted job keeps the earlier process
+until that is confirmed too; an unreadable identity is kept for good (only removing the
+record by hand clears it). That is the only thing either command writes, and only
+when it changes: under `STATE/launchd`, never under `/Library`, and uninstall does it
+before it prints the steps, so a record that cannot be written fails the command
+(exit 1, fixed message, record unchanged) and no steps are printed. Nothing is ever
+signalled. The confirmation covers only the main service processes seen, not their
+descendants, so run the printed commands right after the `uninstall` that printed
+them; if the host rebooted or the job restarted in between, run `service uninstall`
+again first so that it observes the running process.
+
+When the job and the plist are gone, uninstall clears the record only if all of these
+hold, and otherwise exits 1 and keeps it:
+
+- every recorded process is confirmed gone: its pid is absent, belongs to a process
+  with another start time, or predates this boot;
+- no process was left unidentified;
+- `127.0.0.1:PORT` is free;
+- if no process was ever identified (the job was never seen, or only seen without a
+  pid), neither log file exists. A job that was installed but never started has no log, so
+  uninstall completes at once. That inference needs launchd to create the log files when
+  it starts the job, which [#1149](https://github.com/chrisbanes/ensemble/issues/1149)
+  checks.
+
+The message names the unmet condition and the read-only checks (`launchctl print
 system/<label>` exits 113, `lsof -nP -iTCP:PORT -sTCP:LISTEN` prints nothing,
-`ps -axo pid,lstart,command` shows no release `cli.js` process); run uninstall again
+`ps -axo pid,lstart,command` shows no release `cli.js` process). Run uninstall again
 once the process has exited, or, after confirming nothing runs, delete the record and
-the staged plist by hand. A daemon that was installed but never started has no process
-to wait for, so uninstall completes at once. That inference needs launchd to create
-the log files when it starts the job, which [#1149](https://github.com/chrisbanes/ensemble/issues/1149)
-checks. It refuses, changing nothing, when a daemon job or plist exists without a
+the staged plist by hand. When it completes it removes the staged plist and the record and
+exits 0 with `"complete":true`; that is also the point from which `service install`
+restores the LaunchAgent, and until then install in the other mode, and upgrade, stay
+refused. It refuses, changing nothing, when a daemon job or plist exists without a
 record, or differs from it. Data, auth, snapshots, releases and logs are kept as with
 the LaunchAgent.
 

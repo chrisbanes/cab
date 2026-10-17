@@ -582,3 +582,24 @@ test("assertNotRoot refuses uid 0 with a fixed message and allows others", () =>
   assert.doesNotThrow(() => assertNotRoot(501));
   assert.doesNotThrow(() => assertNotRoot(undefined));
 });
+
+test("the service entry point refuses root before main runs", () => {
+  // A preload makes the process report uid 0. With the guard in place the entry exits at once;
+  // without it main() would only fail on its missing arguments, so the message tells them apart.
+  const entry = resolve("dist/src/standalone/cli.js");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "data:text/javascript,process.getuid=()=>0;process.geteuid=()=>0",
+      entry,
+      "operator",
+    ],
+    { encoding: "utf8", timeout: 20_000 },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(
+    result.stderr.trim(),
+    "Ensemble does not run as root; run it as the account that owns the service",
+  );
+});

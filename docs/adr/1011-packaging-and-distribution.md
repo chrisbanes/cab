@@ -59,7 +59,7 @@ account, renders the same plist plus `UserName` and `HOME`, records it
 (`mode` in the one install record per label), and prints the `sudo` commands that
 copy it to `/Library/LaunchDaemons` and load it; it only ever calls `launchctl print`.
 The modes are never both installed; uninstall clears the daemon record only once the
-service process last observed under launchd is confirmed gone. Upgrade refuses a daemon install, so upgrading
+service processes observed under launchd are confirmed gone. Upgrade refuses a daemon install, so upgrading
 means switching to the LaunchAgent, upgrading, and switching back. A daemon cannot read the login
 keychain, so GitHub credentials there use a file-based `gh` login
 (`gh auth login --insecure-storage`, a plaintext token at rest) through the existing

@@ -69,6 +69,8 @@ class FakeLaunchd {
   systemJobs = new Map<string, { path: string; pid: number }>();
   /** The account a daemon plist runs as; setup points `home` at the fixture home. */
   home = "";
+  /** Who listens on the daemon's port; by default the system job's own pid. */
+  listeners: number[] | null | undefined;
   ghStorage: GhTokenStorage = "unknown";
   ghProbes = 0;
   alive = new Set<number>();
@@ -213,6 +215,11 @@ class FakeLaunchd {
       },
       hostname: () => "test-host",
       account: () => ({ name: "operator", home: this.home }),
+      portOwner: async () => {
+        if (this.listeners !== undefined) return this.listeners;
+        const job = [...this.systemJobs.values()][0];
+        return job && job.pid > 0 ? [job.pid] : [];
+      },
       ghTokenStorage: async () => {
         this.ghProbes += 1;
         return this.ghStorage;
@@ -2225,25 +2232,42 @@ test("daemon mode re-run verifies the installed plist and job against the record
   assert.deepEqual(f.launchd.opened, []);
   // The running service is recorded, as the process to confirm gone at uninstall.
   const observed = f.record();
-  assert.deepEqual(observed.observedProcess, {
-    processId: "5000",
-    processStartedAt: "start-0",
-    bootId: "boot-1",
+  assert.deepEqual(observed.observed, {
+    processes: [
+      { processId: "5000", processStartedAt: "start-0", bootId: "boot-1" },
+    ],
+    unidentified: false,
+    identified: true,
   });
   assert.deepEqual(
-    { ...observed, observedProcess: undefined },
-    { ...JSON.parse(recordBytes.toString("utf8")), observedProcess: undefined },
+    { ...observed, observed: undefined },
+    { ...JSON.parse(recordBytes.toString("utf8")), observed: undefined },
   );
   // Verifying the same process again rewrites nothing.
   const stable = statSync(f.recordPath);
   assert.equal((await f.installDaemon()).code, 0);
   assert.equal(statSync(f.recordPath).ino, stable.ino);
   assert.equal(statSync(f.recordPath).mtimeMs, stable.mtimeMs);
-  // A restarted job is a different process: the record follows it.
+  // A restarted job is another process, and the first is still unconfirmed: both are kept.
   f.launchd.systemJobs.set(f.options.label, { path: f.installed, pid: 5001 });
   f.launchd.alive.add(5001);
   assert.equal((await f.installDaemon()).code, 0);
-  assert.equal(f.record().observedProcess.processId, "5001");
+  assert.deepEqual(
+    f
+      .record()
+      .observed.processes.map((p: { processId: string }) => p.processId),
+    ["5000", "5001"],
+  );
+  // Once the first is confirmed gone the next observation drops it, and only it.
+  f.launchd.alive.delete(5000);
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.deepEqual(
+    f
+      .record()
+      .observed.processes.map((p: { processId: string }) => p.processId),
+    ["5001"],
+  );
+  assert.equal(f.record().observed.identified, true);
 });
 
 test("daemon mode re-run refuses a plist or job that does not match the record", async (t) => {
@@ -2455,7 +2479,7 @@ test("daemon mode uninstall prints the sudo steps until the job and plist are go
 
   rmSync(f.installed);
   // The job's process, recorded while it was loaded, has exited too.
-  assert.equal(f.record().observedProcess.processId, "5000");
+  assert.equal(f.record().observed.processes[0].processId, "5000");
   f.launchd.alive.delete(5000);
   result = await f.uninstall();
   assert.equal(result.code, 0, result.stderr);
@@ -2801,7 +2825,8 @@ async function runningDaemon(t: { after(fn: () => void): void }) {
   runSudoSteps(f);
   assert.equal((await f.uninstall()).code, 0);
   assert.equal(
-    JSON.parse(readFileSync(f.recordPath, "utf8")).observedProcess.processId,
+    JSON.parse(readFileSync(f.recordPath, "utf8")).observed.processes[0]
+      .processId,
     "5000",
   );
   // The operator boots the job out and removes the plist; the process is separate.
@@ -2888,10 +2913,7 @@ test("daemon mode uninstall holds while the port is still in use", async (t) => 
   try {
     const held = await f.uninstall();
     assert.equal(held.code, 1);
-    assert.match(
-      JSON.parse(held.stderr).error,
-      /port \d+ on 127\.0\.0\.1 is still in use/,
-    );
+    assert.match(JSON.parse(held.stderr).error, /its port is still in use/);
     assert.equal(existsSync(f.recordPath), true);
   } finally {
     await new Promise((done) => listener.close(done));
@@ -2908,7 +2930,7 @@ test("daemon mode uninstall holds a process that was never recorded or could not
   assert.equal(held.code, 1);
   assert.match(
     JSON.parse(held.stderr).error,
-    /no service process was ever recorded/,
+    /may have run without being recorded/,
   );
   assert.equal(existsSync(f.recordPath), true);
 
@@ -2920,7 +2942,7 @@ test("daemon mode uninstall holds a process that was never recorded or could not
   try {
     held = await f.uninstall();
     assert.equal(held.code, 1);
-    assert.match(JSON.parse(held.stderr).error, /ever recorded/);
+    assert.match(JSON.parse(held.stderr).error, /its port is still in use/);
   } finally {
     await new Promise((done) => listener.close(done));
   }
@@ -2931,7 +2953,7 @@ test("daemon mode uninstall holds a process that was never recorded or could not
   runSudoSteps(f);
   f.launchd.identityUnavailable = true;
   assert.equal((await f.uninstall()).code, 0);
-  assert.equal(f.record().observedProcess, "unknown");
+  assert.equal(f.record().observed.unidentified, true);
   runSudoUninstallSteps(f);
   f.launchd.alive.delete(5000);
   held = await f.uninstall();
@@ -2939,15 +2961,36 @@ test("daemon mode uninstall holds a process that was never recorded or could not
   assert.match(JSON.parse(held.stderr).error, /could not be identified/);
   assert.equal(existsSync(f.recordPath), true);
 
-  // A job that was loaded with no process needs only a free port.
+  // A job seen with no process yet is not "never started": it may start in the sudo window.
   f = await setup(t);
   assert.equal((await f.installDaemon()).code, 0);
   f.launchd.systemJobs.set(f.options.label, { path: f.installed, pid: 0 });
   copyFileSync(f.staged, f.installed);
   chmodSync(f.installed, 0o644);
-  f.launchd.overrides = {};
   assert.equal((await f.uninstall()).code, 0);
-  assert.equal(f.record().observedProcess, null);
+  assert.deepEqual(f.record().observed, {
+    processes: [],
+    unidentified: false,
+    identified: false,
+  });
+  // Launchd starts it before the operator's bootout; it has not bound the port, but it logged.
+  writeFileSync(f.record().configuration.stderrPath, "starting\n");
+  runSudoUninstallSteps(f);
+  held = await f.uninstall();
+  assert.equal(held.code, 1);
+  assert.match(
+    JSON.parse(held.stderr).error,
+    /may have run without being recorded/,
+  );
+  assert.equal(existsSync(f.recordPath), true);
+
+  // The same sequence with no sign of a run completes.
+  f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  f.launchd.systemJobs.set(f.options.label, { path: f.installed, pid: 0 });
+  copyFileSync(f.staged, f.installed);
+  chmodSync(f.installed, 0o644);
+  assert.equal((await f.uninstall()).code, 0);
   runSudoUninstallSteps(f);
   assert.equal(JSON.parse((await f.uninstall()).stdout).complete, true);
 });
@@ -2956,7 +2999,7 @@ test("daemon mode verify and uninstall runs interleave without losing the record
   const f = await setup(t);
   assert.equal((await f.installDaemon()).code, 0);
   runSudoSteps(f);
-  const recorded = () => f.record().observedProcess?.processId;
+  const recorded = () => f.record().observed?.processes[0]?.processId;
   assert.equal((await f.installDaemon()).code, 0);
   assert.equal(recorded(), "5000");
   assert.equal((await f.uninstall()).code, 0);
@@ -2982,7 +3025,10 @@ test("daemon mode only an agent record never carries an observed process", async
   assert.equal((await f.install()).code, 0);
   writeFileSync(
     f.recordPath,
-    JSON.stringify({ ...f.record(), observedProcess: null }),
+    JSON.stringify({
+      ...f.record(),
+      observed: { processes: [], unidentified: false, identified: false },
+    }),
   );
   const refused = await f.uninstall();
   assert.equal(refused.code, 1);
@@ -3060,7 +3106,7 @@ test("daemon mode record update failure leaves the record intact, fails with a f
   // Writable again: the same commands now record the process and carry on.
   rmSync(blocker, { recursive: true });
   assert.equal((await f.installDaemon()).code, 0);
-  assert.equal(f.record().observedProcess.processId, "5000");
+  assert.equal(f.record().observed.processes[0].processId, "5000");
 });
 
 test("daemon mode refuses the service and init-auth as root before starting or creating anything", async (t) => {
@@ -3098,4 +3144,132 @@ test("daemon mode refuses the service and init-auth as root before starting or c
   assert.equal(out.stderr.split(`${ROOT_MESSAGE}\n`).length - 1, 3);
   assert.equal(existsSync(authDir), false);
   assert.deepEqual(root.calls, []);
+});
+
+test("daemon mode verify never reports started for a loaded job without a process or a port another process holds", async (t) => {
+  const cases: [string, (f: Fixture) => unknown, RegExp][] = [
+    [
+      "loaded with no pid",
+      (f) => {
+        f.launchd.systemJobs.set(f.options.label, {
+          path: f.installed,
+          pid: 0,
+        });
+      },
+      /loaded but has no running process/,
+    ],
+    [
+      "identity unreadable",
+      (f) => {
+        runSudoSteps(f);
+        f.launchd.identityUnavailable = true;
+      },
+      /process could not be identified/,
+    ],
+    [
+      "another process answers on the port",
+      (f) => {
+        runSudoSteps(f);
+        f.launchd.listeners = [9999];
+      },
+      /another process answers on the port/,
+    ],
+    [
+      "listeners shared with another process",
+      (f) => {
+        runSudoSteps(f);
+        f.launchd.listeners = [5000, 9999];
+      },
+      /another process answers on the port/,
+    ],
+    [
+      "the listener cannot be established",
+      (f) => {
+        runSudoSteps(f);
+        f.launchd.listeners = null;
+      },
+      /could not be established/,
+    ],
+    [
+      "the job's process does not serve the port",
+      (f) => {
+        runSudoSteps(f);
+        f.launchd.listeners = [];
+      },
+      /not serving the port/,
+    ],
+  ];
+  for (const [name, arrange, error] of cases) {
+    const f = await setup(t);
+    assert.equal((await f.installDaemon()).code, 0, name);
+    copyFileSync(f.staged, f.installed);
+    chmodSync(f.installed, 0o644);
+    arrange(f);
+    const result = await f.installDaemon();
+    assert.equal(result.code, 1, name);
+    assert.equal(result.stdout, "", `${name}: no started result`);
+    const message = JSON.parse(result.stderr).error;
+    assert.match(message, error, name);
+    assert.match(message, /could not be confirmed running/, name);
+    assert.match(message, /lsof -nP -iTCP:\d+ -sTCP:LISTEN/, name);
+    assert.equal(existsSync(f.recordPath), true, name);
+    assert.deepEqual(f.launchd.mutations(), [], name);
+  }
+  // A foreign listener never gets /app asked of it: only the job's own pid is probed.
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  f.launchd.listeners = [9999];
+  assert.equal((await f.installDaemon()).code, 1);
+  assert.deepEqual(f.launchd.fetched, []);
+});
+
+test("daemon mode a pid that appears after the job was seen without one is recorded and never lost", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  // First seen loaded with no process yet (it starts in the sudo window).
+  f.launchd.systemJobs.set(f.options.label, { path: f.installed, pid: 0 });
+  copyFileSync(f.staged, f.installed);
+  chmodSync(f.installed, 0o644);
+  assert.equal((await f.uninstall()).code, 0);
+  assert.equal(f.record().observed.identified, false);
+  // It started: the next look records its identity on top of the earlier observation.
+  runSudoSteps(f);
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.equal(f.record().observed.identified, true);
+  assert.equal(f.record().observed.processes[0].processId, "5000");
+  // Booted out while that process lives on: held, whatever else the logs and port say.
+  runSudoUninstallSteps(f);
+  const held = await f.uninstall();
+  assert.equal(held.code, 1);
+  assert.match(
+    JSON.parse(held.stderr).error,
+    /recorded process may still be running/,
+  );
+  assert.equal(existsSync(f.recordPath), true);
+  f.launchd.alive.delete(5000);
+  assert.equal(JSON.parse((await f.uninstall()).stdout).complete, true);
+});
+
+test("daemon mode verify holds when the job's process changes while it waits for /app", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  // The job exits and launchd starts another process while the first /app answer is read.
+  f.launchd.overrides = {
+    fetch: async () => {
+      f.launchd.systemJobs.set(f.options.label, {
+        path: f.installed,
+        pid: 5001,
+      });
+      return new Response(null, { status: 200 });
+    },
+  };
+  const result = await f.installDaemon();
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  assert.match(
+    JSON.parse(result.stderr).error,
+    /its process changed while verifying/,
+  );
 });

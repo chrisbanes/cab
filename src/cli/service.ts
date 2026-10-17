@@ -43,6 +43,16 @@ import {
   isInBound,
 } from "../operator/diagnostic-retention.js";
 import { connectionNameSchema } from "./connections.js";
+import {
+  type DaemonFacts,
+  type Job,
+  type Listener,
+  type Observed,
+  daemonDecision,
+  MAX_OBSERVED_PROCESSES,
+  refineObserved,
+  type Seen,
+} from "./daemon-ownership.js";
 import { DEFAULT_FIX, fixLine, shellWord } from "./remedy.js";
 import type { CliDeps } from "./types.js";
 
@@ -80,9 +90,10 @@ the manual login line. --connection defaults to local; --no-open skips the brows
 install --mode daemon prepares a LaunchDaemon that starts at boot, before anyone logs
 in. It runs as you, never as root: it renders and records the plist, then prints the
 sudo commands that install and start it; run them, then run the same install command
-again, with the same options and no TARBALL, to verify. It does not sign in or run doctor. The two modes are
+again, with the same options and no TARBALL, to verify; it reports started only when the
+job's own process serves the port. It does not sign in or run doctor. The two modes are
 never both installed; uninstall prints the matching sudo commands for a daemon and clears
-its record only once the service process it last saw has exited. upgrade
+its record only once every service process it saw has exited. upgrade
 refuses a daemon install; see the macOS operations guide for the switch-back procedure.
 upgrade stops the job, takes a verified snapshot, starts VERSION_DIR and checks
 readiness through a logged-in CLI connection with a read credential. A failed
@@ -146,6 +157,8 @@ export type ServiceHost = {
   isRoot(): boolean;
   /** Where a LaunchDaemon plist is installed. */
   daemonsDir(): string;
+  /** Pids listening on 127.0.0.1's TCP `port` (read-only); null when that cannot be established. */
+  portOwner(port: number): Promise<number[] | null>;
   launchctl(args: string[]): Promise<{ status: number; stdout: string }>;
   /** Whether `plutil -lint` accepts the file. */
   lint(path: string): Promise<boolean>;
@@ -262,6 +275,14 @@ const processIdentitySchema = z
   })
   .strict();
 
+const observedSchema = z
+  .object({
+    processes: z.array(processIdentitySchema).max(MAX_OBSERVED_PROCESSES),
+    unidentified: z.boolean(),
+    identified: z.boolean(),
+  })
+  .strict();
+
 const recordSchema = z
   .object({
     schema: z.literal(RECORD_SCHEMA),
@@ -273,23 +294,20 @@ const recordSchema = z
     plistSha256: z.string().regex(/^[0-9a-f]{64}$/),
     configuration: configurationSchema,
     /**
-     * Daemon only: the service process last seen under launchd. Absent means none was
-     * ever observed, null that the job was loaded with no process, "unknown" that it
-     * ran but could not be identified, an identity that process. Uninstall clears the
-     * record only once it is confirmed gone.
+     * Daemon only: what Ensemble has seen of the service process under launchd. Absent
+     * means launchd was never seen running it. Uninstall clears the record only once
+     * every process recorded here is confirmed gone (see daemon-ownership.ts).
      */
-    observedProcess: z
-      .union([processIdentitySchema, z.null(), z.literal("unknown")])
-      .optional(),
+    observed: observedSchema.optional(),
   })
   .strict()
   .refine(
-    ({ mode, configuration: { userName, home }, observedProcess }) =>
+    ({ mode, configuration: { userName, home }, observed }) =>
       mode === "daemon"
         ? userName !== undefined && home !== undefined
         : userName === undefined &&
           home === undefined &&
-          observedProcess === undefined,
+          observed === undefined,
     "daemon fields do not match the mode",
   );
 type InstallRecord = z.infer<typeof recordSchema>;
@@ -763,28 +781,32 @@ class Service {
   }
 
   /**
-   * Records the process launchd runs for the loaded daemon so that a later uninstall can
-   * confirm its exit. It reads launchd and the process table only, and writes only the
-   * install record, atomically (temp file and rename in the same directory, fsynced), and
-   * only when what it sees differs from what the record holds; a record that cannot be
-   * written stays as it was and fails the command with a fixed message. No pid is recorded as null; a process whose identity
-   * cannot be read replaces the old identity with "unknown", which holds uninstall.
+   * Folds what launchd runs now into the record: reads `launchctl print` output and the
+   * process table only, and writes only the install record, atomically (temp file and
+   * rename in the same directory, fsynced), and only when it changed. Observations only
+   * move up and an identity is dropped only once its exit is confirmed, so a loaded job
+   * with no pid yet is remembered as maybe-started, never as never-started. A record that
+   * cannot be written stays as it was and fails the command with a fixed message.
    */
   async observeDaemon(
     record: InstallRecord,
     job: { pid: number | undefined },
-  ): Promise<InstallRecord> {
-    let observed: InstallRecord["observedProcess"];
-    if (job.pid === undefined) observed = null;
-    else {
+  ): Promise<{ record: InstallRecord; seen: Seen }> {
+    let seen: Seen = "no-process";
+    if (job.pid !== undefined) {
       const parsed = processIdentitySchema.safeParse(
         await this.host.captureIdentity(job.pid),
       );
-      observed = parsed.success ? parsed.data : "unknown";
+      seen = parsed.success ? parsed.data : "unreadable";
     }
-    if (JSON.stringify(observed) === JSON.stringify(record.observedProcess))
-      return record;
-    const next: InstallRecord = { ...record, observedProcess: observed };
+    const previous = record.observed && {
+      ...record.observed,
+      processes: await this.unconfirmed(record.observed.processes),
+    };
+    const observed = refineObserved(previous, seen);
+    if (JSON.stringify(observed) === JSON.stringify(record.observed))
+      return { record, seen };
+    const next: InstallRecord = { ...record, observed };
     try {
       this.writeRecord(next);
     } catch {
@@ -792,38 +814,60 @@ class Service {
         "The install record could not be updated with the running service process; nothing was changed",
       );
     }
-    return next;
+    return { record: next, seen };
   }
 
-  /**
-   * The one decision before a daemon record is cleared, and so before another mode may
-   * start: null when its service process is confirmed gone, else the hold message. Gone
-   * means the observed pid is absent, was reused or predates this boot, and the port is
-   * free. A process never observed holds unless the job provably never ran (no log file
-   * and a free port). Only reads: it never signals a process or changes launchd.
-   */
-  async daemonHold(record: InstallRecord): Promise<string | null> {
-    const { label } = this.options;
-    const { port, stdoutPath, stderrPath } = record.configuration;
-    const portBusy = !(await portIsFree(port));
-    const ran = [stdoutPath, stderrPath].some(
-      (path) => lstatSync(path, { throwIfNoEntry: false }) !== undefined,
+  /** The recorded processes whose exit is not confirmed. */
+  async unconfirmed(processes: Observed["processes"]) {
+    const gone = await Promise.all(
+      processes.map((process) => this.host.exited(process)),
     );
-    let reason: string | null = null;
-    if (record.observedProcess === undefined) {
-      if (ran || portBusy)
-        reason = "no service process was ever recorded for it";
-    } else if (record.observedProcess === "unknown")
-      reason = "its process could not be identified";
-    else if (
-      record.observedProcess !== null &&
-      !(await this.host.exited(record.observedProcess))
-    )
-      reason = "its recorded process may still be running";
-    if (reason === null && portBusy)
-      reason = `port ${port} on 127.0.0.1 is still in use`;
-    if (reason === null) return null;
-    return `The ${label} service could not be confirmed stopped (${reason}); the install record is kept. Check that \`launchctl print ${this.systemTarget}\` exits 113, that \`lsof -nP -iTCP:${port} -sTCP:LISTEN\` prints nothing and that \`ps -axo pid,lstart,command\` shows no ${shellWord(record.configuration.cliPath)} process; then run \`ensemble service uninstall\` again, or, once you have confirmed none is running, remove ${shellWord(this.recordPath)} and ${shellWord(this.stagedDaemon)} yourself`;
+    return processes.filter((_, index) => !gone[index]);
+  }
+
+  /** The facts about the daemon that both verification and uninstall decide on. */
+  async daemonFacts(
+    operation: DaemonFacts["operation"],
+    record: InstallRecord,
+    job: Job,
+    plistPresent: boolean,
+    extra: Pick<DaemonFacts, "identityRead" | "listener">,
+  ): Promise<DaemonFacts> {
+    const { port, stdoutPath, stderrPath } = record.configuration;
+    // Only an uninstall that could complete needs the process, port and log evidence.
+    const settled =
+      operation === "uninstall" && job.state === "absent" && !plistPresent;
+    return {
+      operation,
+      job,
+      plistPresent,
+      observed: record.observed,
+      processesGone: settled
+        ? (await this.unconfirmed(record.observed?.processes ?? [])).length ===
+          0
+        : true,
+      portBusy: settled ? !(await portIsFree(port)) : false,
+      logsPresent: settled
+        ? [stdoutPath, stderrPath].some(
+            (path) => lstatSync(path, { throwIfNoEntry: false }) !== undefined,
+          )
+        : false,
+      ...extra,
+    };
+  }
+
+  /** The hold message: what is unconfirmed and the read-only checks, then the way on. */
+  holdMessage(
+    kind: "stopped" | "running",
+    reason: string,
+    record: InstallRecord,
+  ): string {
+    const { label } = this.options;
+    const { port, cliPath } = record.configuration;
+    const checks = `Check that \`launchctl print ${this.systemTarget}\` ${kind === "stopped" ? "exits 113" : "shows a pid"}, that \`lsof -nP -iTCP:${port} -sTCP:LISTEN\` ${kind === "stopped" ? "prints nothing" : "lists only that pid"} and that \`ps -axo pid,lstart,command\` shows ${kind === "stopped" ? `no ${shellWord(cliPath)} process` : `that pid running ${shellWord(cliPath)}`}`;
+    return kind === "stopped"
+      ? `The ${label} service could not be confirmed stopped (${reason}); the install record is kept. ${checks}; then run \`ensemble service uninstall\` again, or, once you have confirmed none is running, remove ${shellWord(this.recordPath)} and ${shellWord(this.stagedDaemon)} yourself`
+      : `The ${label} service could not be confirmed running (${reason}); the install record is kept. ${checks}; then run the install command again, or \`ensemble service uninstall\` to remove the daemon`;
   }
 
   /** Whether the staged plist is the one the record describes. */
@@ -929,6 +973,48 @@ class Service {
         "The CLI connection cannot read readiness; run `ensemble auth login` with a read credential first",
       );
     }
+  }
+
+  /**
+   * Waits for `/app` on the daemon's origin answering 200 while the listener on its port is
+   * the job's own pid; returns who holds the port when that never happens, and throws the
+   * usual health failure when the job's process listens but does not serve.
+   */
+  async waitForListener(
+    pid: number,
+    configuration: Pick<Configuration, "port" | "origin">,
+  ): Promise<Listener> {
+    let listener = "free" as Listener;
+    try {
+      await this.waitFor(
+        "The service did not serve /app within 120 s",
+        HEALTH_PROBE_MS,
+        async (signal) => {
+          const owners = await this.host.portOwner(configuration.port);
+          listener =
+            owners === null
+              ? "unknown"
+              : owners.length === 0
+                ? "free"
+                : owners.every((owner) => owner === pid)
+                  ? "ours"
+                  : "foreign";
+          if (listener !== "ours") return undefined;
+          const response = await this.host.fetch(
+            `${configuration.origin}/app`,
+            {
+              signal,
+            },
+          );
+          await response.body?.cancel();
+          return response.status === 200 ? true : undefined;
+        },
+      );
+    } catch (error) {
+      // An interrupt, or the job's own process listening without serving, is a failure.
+      if (this.io.signal?.aborted || listener === "ours") throw error;
+    }
+    return listener;
   }
 
   waitForApp(origin: string) {
@@ -1469,9 +1555,34 @@ async function verifyDaemon(
     record.configuration.stderrPath,
   ];
   if (job !== null) {
-    await service.observeDaemon(record, job);
+    // What this run sees is recorded first: a record that cannot be written fails here.
+    const { record: observed, seen } = await service.observeDaemon(record, job);
     setStage("health");
-    await service.waitForApp(record.configuration.origin);
+    // Started means this job's own process serves the port, not merely that something does.
+    const listener: Listener =
+      job.pid !== undefined && seen !== "unreadable"
+        ? await service.waitForListener(job.pid, observed.configuration)
+        : "free";
+    const decision = daemonDecision(
+      await service.daemonFacts(
+        "verify",
+        observed,
+        { state: "loaded", pid: job.pid },
+        true,
+        { identityRead: seen !== "unreadable", listener },
+      ),
+    );
+    if (decision.kind === "hold")
+      throw refuse(service.holdMessage("running", decision.reason, observed));
+    // It must still be the same process after the wait.
+    if ((await service.loadedJob(service.systemTarget))?.pid !== job.pid)
+      throw refuse(
+        service.holdMessage(
+          "running",
+          "its process changed while verifying",
+          observed,
+        ),
+      );
     await finishDaemonInstall(service, record.version, logs, true, true, first);
     return 0;
   }
@@ -1803,7 +1914,7 @@ async function uninstallDaemon(
   )
     throw service.daemonMismatch();
   // The last chance to read the running process before the operator boots it out.
-  if (job !== null) record = await service.observeDaemon(record, job);
+  if (job !== null) record = (await service.observeDaemon(record, job)).record;
   const steps = [
     ...(job === null
       ? []
@@ -1812,10 +1923,19 @@ async function uninstallDaemon(
       ? []
       : [`sudo /bin/rm -f ${shellWord(service.installedDaemon)}`]),
   ];
-  const complete = steps.length === 0;
+  const decision = daemonDecision(
+    await service.daemonFacts(
+      "uninstall",
+      record,
+      job === null ? { state: "absent" } : { state: "loaded", pid: job.pid },
+      hash !== null,
+      { identityRead: true, listener: "free" },
+    ),
+  );
+  if (decision.kind === "hold")
+    throw refuse(service.holdMessage("stopped", decision.reason, record));
+  const complete = decision.kind === "complete";
   if (complete) {
-    const hold = await service.daemonHold(record);
-    if (hold !== null) throw refuse(hold);
     rmSync(service.stagedDaemon, { force: true });
     rmSync(service.recordPath, { force: true });
   } else {
@@ -1956,7 +2076,19 @@ export function defaultServiceHost(): ServiceHost {
   const termination = import("../standalone/termination.js");
   return {
     uid: process.getuid?.() ?? -1,
-    isRoot: () => process.getuid?.() === 0,
+    isRoot: () => process.getuid?.() === 0 || process.geteuid?.() === 0,
+    portOwner: async (port) => {
+      const result = await run("/usr/sbin/lsof", [
+        "-nP",
+        `-iTCP:${port}`,
+        "-sTCP:LISTEN",
+        "-Fp",
+      ]);
+      // lsof exits 1 with no output when nothing listens; any other failure is unknown.
+      if (result.status === 1 && result.stdout.trim() === "") return [];
+      if (result.status !== 0) return null;
+      return [...result.stdout.matchAll(/^p(\d+)$/gm)].map((m) => Number(m[1]));
+    },
     daemonsDir: () => DAEMONS_DIR,
     launchctl: (args) => run("/bin/launchctl", args),
     lint: async (path) =>

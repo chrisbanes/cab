@@ -416,7 +416,7 @@ is the opt-in route to starting at boot before login: it prepares a LaunchDaemon
 runs as the service account, never as root, and prints the `sudo` commands that install
 and start it; the two modes are never both installed, upgrade refuses a daemon install
 and uninstall prints the matching `sudo` commands, clearing the record only once the
-recorded service process is confirmed gone. A daemon cannot read the login
+recorded service processes are confirmed gone and its port is free. A daemon cannot read the login
 keychain, so GitHub access there needs a file-based `gh` login (a plaintext token at
 rest), and a power cut with FileVault on leaves the disk locked until someone unlocks
 it; a planned restart uses `sudo fdesetup authrestart`. These preserve database state and
