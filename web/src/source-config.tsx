@@ -35,6 +35,7 @@ import {
   useLoadedDraft,
   useNewerPrivateRead,
   usePrivateValues,
+  useRereadForEdit,
 } from "./settings.js";
 import { ghLoginCopy } from "./discovery-credential.js";
 import {
@@ -117,6 +118,20 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         !r.removed &&
         (typeof r.query === "string" || typeof r.path === "string"),
     );
+  // Retained edits are compared with the saved values; read again if the first read missed.
+  useRereadForEdit(
+    data.source.version,
+    [...selections, ...repositories].some(
+      (r) =>
+        r.keep && (typeof r.query === "string" || typeof r.path === "string"),
+    ) &&
+      (d.phase === "editing" ||
+        d.phase === "conflict" ||
+        d.phase === "rejected"),
+    privateData?.version,
+    priv.state.pending,
+    priv.refresh,
+  );
   const lines = sourceChanges(data.source, v, known),
     removesAll = removesAllAccess(data.source, v),
     stale = staleSourceRows(data.source, v),

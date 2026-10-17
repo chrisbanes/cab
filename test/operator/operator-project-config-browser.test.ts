@@ -1108,6 +1108,8 @@ test("an edited private text stays edited after leaving the page and can still b
   await changes(page)
     .getByText("Instructions edited", { exact: true })
     .waitFor();
+  // Save waits while the saved text is read again to compare it with the edit.
+  await assertOffHold(page, "Save project");
   assert.equal(await saveProject(page).isEnabled(), true);
   // The baseline travelled with the edit, so typing the saved text back is no edit.
   await instructionsField(page).fill(SENTINEL);
@@ -2837,6 +2839,65 @@ test("Save waits for saved queries and paths to be read again, and an edit never
       ?.kind,
     "repository",
   );
+});
+
+test("Save waits for a local path to be read again, and a same-kind replacement drops a pending removal", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const path = page.getByLabel("Local repository path", { exact: true });
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await path.waitFor();
+  const mine = await createCheckout(f.directory, "hold-mine");
+  const theirs = await createCheckout(f.directory, "hold-theirs");
+  await path.fill(mine);
+  await page.getByRole("button", { name: "Remove S-3" }).click();
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      // The same id, redefined as another GitHub Project: the pending removal no longer fits.
+      { id: "S-3", kind: "project", projectNodeId: "PVT_other", filter: "" },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", path: theirs, ref: "main" }],
+  } as Parameters<OperatorApi["execute"]>[0]);
+  const posts = watchPosts(page);
+  const release = await holdReads(page);
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await assertOnHold(page, "Save changes", posts);
+  release();
+  await assertOffHold(page, "Save changes");
+  await page
+    .getByText("S-3 was removed or replaced elsewhere", { exact: false })
+    .waitFor();
+  assert.equal(await page.getByText("Will be removed").count(), 0);
+  await page
+    .getByText(
+      "This was changed elsewhere since you started editing. Saving replaces it.",
+    )
+    .waitFor();
+  const body = commandBody(page);
+  await save.click();
+  const sent = await body;
+  assert.deepEqual(sent.selections, [
+    { id: "S-1", keep: true },
+    { id: "S-2", keep: true },
+    { id: "S-3", keep: true },
+  ]);
+  assert.equal((sent.repositories as { path?: string }[])[0]?.path, mine);
 });
 
 test("a pending removal is dropped when the source was replaced under the same id", async (_t, journey) => {

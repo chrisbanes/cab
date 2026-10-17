@@ -413,7 +413,7 @@ export function adoptSourceRows(source: Source, v: Values) {
       if (!r.keep) return false;
       const latest = loaded.selections.find((s) => s.id === r.id);
       return latest
-        ? latest.kind !== r.kind &&
+        ? (latest.kind !== r.kind || latest.descriptor !== r.descriptor) &&
             (Boolean(r.removed) || typeof r.query === "string")
         : !r.removed && typeof r.query === "string";
     })
@@ -426,7 +426,7 @@ export function adoptSourceRows(source: Source, v: Values) {
         loaded.selections,
         (r) => r.id,
         (r, latest) =>
-          latest.kind !== r.kind
+          latest.kind !== r.kind || latest.descriptor !== r.descriptor
             ? { ...latest, rowKey: r.rowKey ?? crypto.randomUUID() }
             : {
                 ...latest,
