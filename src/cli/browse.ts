@@ -226,6 +226,7 @@ export function nextCommand(ctx: BrowseContext, token: string): string {
     ["after", v.after],
     ["before", v.before],
     ["historical", v.historical],
+    ["verbose", v.verbose],
     ["limit", v.limit],
     ["cursor", token],
   ];
@@ -251,6 +252,8 @@ export function browseOutput(
     observedAt: number;
     gaps?: CoverageGap[];
     notes?: string[];
+    /** The notes are printed only under `--verbose`; `coverage.notes` always carries them. */
+    verboseNotes?: true;
     continuity?: "changed";
     page?: {
       kind: string;
@@ -289,7 +292,9 @@ export function browseOutput(
     human: [
       o.human,
       ...cov.gaps.map((gap) => `Gap: ${gap}`),
-      ...notes.map((note) => `Note: ${note}`),
+      ...(o.verboseNotes && !ctx.values.verbose
+        ? []
+        : notes.map((note) => `Note: ${note}`)),
       ...more,
     ].join("\n"),
   };

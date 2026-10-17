@@ -31,17 +31,20 @@ import {
   serviceHelp,
   snapshotCommand,
 } from "./service.js";
-import { jsonLine, terminalSafe } from "./render.js";
+import { jsonLine, terminalSafe, unavailable } from "./render.js";
 import {
   DEFAULT_FIX,
   fixLine,
   nextLine,
+  nextText,
   remedyFor,
   shellWord,
+  taskHeldLabels,
 } from "./remedy.js";
 import { RequestJournal } from "./request-journal.js";
 import { closureSuffix, waitLines } from "./task-write.js";
 import { unmetReason } from "../operator/readiness-text.js";
+import { taskColumnOf } from "../operator/task-presentation.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
@@ -138,6 +141,7 @@ const OPTIONS_HELP = `Options:
                         for at most --max-duration S (default 900, max 86400)
   --help                Show this help
   --all                 With --help: list every command and option
+  --verbose             execution list/get and logs only: also print capture notes
   --version             Show the Ensemble version
 `;
 
@@ -257,6 +261,7 @@ export const OPTIONS = {
   output: { type: "string" },
   help: { type: "boolean" },
   all: { type: "boolean" },
+  verbose: { type: "boolean" },
   version: { type: "boolean" },
   limit: { type: "string" },
   cursor: { type: "string" },
@@ -499,6 +504,19 @@ function rejectManaged(env: NodeJS.ProcessEnv) {
     );
 }
 
+/**
+ * The options a command takes, besides the always-allowed ones: a write command's `flags`, and for
+ * every other command the options its usage line names. Undefined for a key that is no command.
+ */
+export function declaredOptions(key: string): readonly string[] | undefined {
+  const write = writeCommands.get(key);
+  if (write) return write.flags;
+  const usage = browseCommands.get(key)?.usage ?? BUILTIN_USAGE.get(key);
+  return usage === undefined ? undefined : usageOptions(usage);
+}
+export const usageOptions = (usage: string) =>
+  [...usage.matchAll(/(?<![\w-])--([a-z][a-z-]*)/g)].map((m) => m[1] ?? "");
+
 async function run(
   positionals: string[],
   values: Values,
@@ -510,6 +528,10 @@ async function run(
   // `logs` and `doctor` are the only single-word commands.
   const singleWord = area === "logs" || area === "doctor";
   const key = singleWord ? area : `${area} ${action}`;
+  // Before any handler runs, so no command acts on an option it does not take.
+  const declared = declaredOptions(key);
+  if (!declared) throw new CliError("usage", "Unknown command.");
+  rejectUnusedFlags(values, declared);
   if (key === "auth login") {
     expectArgs(positionals, 2);
     rejectManaged(deps.env);
@@ -526,10 +548,10 @@ async function run(
       data: identity,
       human: [
         `Connection:   ${session.name}`,
-        `Service:      ${identity.service.origin}`,
+        `URL:          ${session.url}`,
         `Installation: ${identity.service.installationId}`,
         `Credential:   ${identity.credential.name} (${identity.credential.scope}), expires ${expires}`,
-        `API:          version ${identity.apiVersion}; ${identity.capabilities.join(", ")}`,
+        `API:          version ${identity.apiVersion}`,
       ].join("\n"),
     };
   }
@@ -616,6 +638,10 @@ async function run(
     );
     const { task } = read.data;
     const readiness = unmetReason(read.data.source?.readiness);
+    const column = taskColumnOf(read.data);
+    const held = taskHeldLabels(read.data);
+    const next = nextText(read.data.attention.codes, column);
+    const { lead, leadAssignmentId } = read.data;
     return {
       ...session.result,
       data: read.data,
@@ -627,8 +653,15 @@ async function run(
         `${task.title ?? "(untitled)"}`,
         `Task:    ${task.id}`,
         `Project: ${task.projectId}`,
-        `State:   ${task.state}${closureSuffix(read.data.source?.closure)}${task.ready ? " (ready)" : ""}`,
+        `State:   ${column}${closureSuffix(read.data.source?.closure)}`,
         `Version: ${task.version}`,
+        ...(lead
+          ? [
+              `Lead:    ${unavailable(lead.name)}${leadAssignmentId ? ` (assignment ${leadAssignmentId})` : ""}`,
+            ]
+          : []),
+        `Execution: ${read.data.execution.state}${held.length ? `; held: ${held.join(", ")}` : ""}`,
+        `Next:    ${next.text}${next.operator ? ` (ensemble inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
         ...(task.outcome ? ["", task.outcome] : []),
@@ -638,7 +671,6 @@ async function run(
   const write = writeCommands.get(key);
   if (write) {
     expectArgs(positionals, 2 + write.positionals);
-    rejectUnusedFlags(values, write.flags);
     rejectManaged(deps.env);
     let session: Awaited<ReturnType<typeof connect>> | undefined;
     const output = await write.run({
@@ -732,6 +764,7 @@ async function connect(
     );
   return {
     name,
+    url: connection.url,
     client,
     identity,
     result: {

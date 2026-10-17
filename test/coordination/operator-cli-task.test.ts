@@ -951,7 +951,7 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
     );
   };
   observe();
-  await agree("held", "open (closed on GitHub; held)");
+  await agree("held", "Paused (closed on GitHub; held)");
   const { version } = d.githubConfiguration(s.projectId);
   d.execute({
     type: "github.configure",
@@ -978,7 +978,7 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
     sources.completeFromProviderClosure(taskId, () => true),
     true,
   );
-  await agree("completed", "done (closed on GitHub)");
+  await agree("completed", "Done (closed on GitHub)");
 });
 
 test("a pending own-delivery closure proof is not shown as GitHub closure on any task view", async (t) => {
@@ -1852,6 +1852,9 @@ test("a task created not ready names the configure command", async (t) => {
   const taskId = createdId(created.out);
   const version = (await o.cli("ro", ["task", "get", taskId])).json().data.task
     .version;
+  // The status block reads the UI's column, not the raw state and readiness.
+  assert.match(created.out, /^State: +(Draft|Paused), version \d+$/m);
+  assert.doesNotMatch(created.out, /\(not ready\)|\bopen\b/);
   assert.equal(
     created.out.trimEnd().split("\n").at(-1),
     `Next: ensemble task configure ${taskId} --expected-version ${version} --ready true`,

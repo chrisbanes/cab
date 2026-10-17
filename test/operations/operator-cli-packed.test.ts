@@ -302,7 +302,7 @@ test("the packed CLI installs offline and works against a real service over loop
   assert.equal(r.code, 0, r.err);
   r = await cli(["auth", "status", "--connection", "remote"], trusted);
   assert.equal(r.code, 0, r.err);
-  assert.match(r.out, new RegExp(`Service: +https://localhost:${proxyPort}`));
+  assert.match(r.out, new RegExp(`URL: +https://localhost:${proxyPort}$`, "m"));
   r = await cli(
     [
       "task",

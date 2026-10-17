@@ -1,5 +1,6 @@
 import { uuidArg } from "./browse.js";
 import { exactCommand, positiveIntFlag } from "./configure.js";
+import { taskHeldLabels } from "./remedy.js";
 import {
   connectWrite,
   type Effect,
@@ -79,16 +80,14 @@ const control = (verb: "stop" | "resume"): [string, WriteCommand] => [
         if (!receipt.stopCleared) effect = "none";
         else if (receipt.requeued > 0) effect = "queued";
         const remaining = after
-          ? Object.entries(after.execution.holds)
-              .filter(([name, held]) => held && name !== "stop")
-              .map(([name]) => name)
+          ? taskHeldLabels(after).filter((label) => label !== "Stop requested")
           : [];
         notes.push(
           receipt.stopCleared
             ? "Resume cleared only the operator Stop."
             : "No operator Stop was in effect; nothing changed.",
           ...(remaining.length
-            ? [`No work started: still held by ${remaining.join(", ")}.`]
+            ? [`No work started; still held: ${remaining.join(", ")}.`]
             : []),
         );
       }

@@ -92,7 +92,7 @@ const itemLine = (i: Page["data"]["items"][number]) =>
 
 export const logsCommand: BrowseCommand = {
   usage:
-    "logs --execution WORK_ID [--kind input|setting|runtime|tool|service] [--severity info|warn|error] [--after T] [--before T] [--limit N] [--cursor TOKEN] [--follow [--interval S] [--max-duration S]] [--output jsonl]",
+    "logs --execution WORK_ID [--kind input|setting|runtime|tool|service] [--severity info|warn|error] [--after T] [--before T] [--limit N] [--cursor TOKEN] [--follow [--interval S] [--max-duration S]] [--output jsonl] [--verbose]",
   positionals: 0,
   capabilities: ["cli.identity", "execution.read", "diagnostics.read"],
   async run(ctx) {
@@ -143,6 +143,7 @@ export const logsCommand: BrowseCommand = {
         data: { ...d, resumeCursor: resume(d.resumeAfter) },
         observedAt: read.observedAt,
         notes: CAPTURE_NOTES,
+        verboseNotes: true,
         gaps: captureCoverage(d.capture, d.gaps, d.items, d.health.eventSource),
         page: {
           kind: "logs",
@@ -247,7 +248,7 @@ export const logsCommand: BrowseCommand = {
       out(
         [
           `End: ${reason}`,
-          ...CAPTURE_NOTES.map((n) => `Note: ${n}`),
+          ...(v.verbose ? CAPTURE_NOTES.map((n) => `Note: ${n}`) : []),
           `Resume: ${nextCommand(ctx, resumeCursor)}`,
         ].join("\n"),
       );

@@ -179,10 +179,21 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    plaintext fallback; without the Keychain or a token file, login fails with
    `credential-store-unavailable`. Success ends with `Next: ensemble doctor` (with
    `--connection NAME` when that login is not the one a bare command selects).
-3. `ensemble auth status`, `ensemble task get TASK_ID [--output json]`,
+3. `ensemble auth status` (the connection, its saved `URL:`, the installation, the
+   credential and `API: version N`; the capability list and the service's own origin
+   are in `--output json`), `ensemble task get TASK_ID [--output json]`,
    `ensemble connection list|use NAME|remove NAME` and `ensemble auth logout`.
    Logout and removal delete only local state; the server credential stays active
    until revoked or expired.
+   `task get` prints the task's State as the web UI's column (Ready, Running, Waiting,
+   Paused, Stopping, Uncertain, Draft, Done or Cancelled), then `Version:`, `Lead:`
+   (the lead's name and, once it has one, its assignment id, the `--to` of `task
+   message`; no line without a lead), `Execution:` (the execution state, with the holds
+   in the UI's words after `held:`) and `Next:` (who acts next, by the List's rule; an
+   operator action also names `ensemble inbox list --project ID`). The three ownership
+   holds (writer, capacity and uncertainty) read as one `Ownership held`; `Stop
+   requested` and `Task hold` are the others. The separate flags stay in JSON and
+   in `recovery get`.
 4. Read-only browsing, with either credential scope:
    - `project list|get ID|instructions ID [--revision N]|revisions ID` and the same
      for `profile`;
@@ -194,6 +205,15 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    - `result list TASK_ID`, `result get TASK_ID RESULT_ID`,
      `result evidence TASK_ID RESULT_ID ITEM_ID [--out PATH]` and
      `artifact get TASK_ID ARTIFACT_ID --out PATH`.
+
+   Tables lead with the title or name and end with the full id, which every command
+   takes: `task list` is `Title`, `Project` (the name, and omitted under `--project`),
+   `State` and `Next` (the web UI's column and who acts next), `Lead` and `Task id`;
+   `task search` is `Title`, `Project` (omitted under `--project`), `Type`, `Created`, `Excerpt` and `Task id`;
+   `project list` is `Name`, `Lead` (the profile's name), `Paused`, `Version` and
+   `Project id`; `profile list` is `Name`, `Revoked`, `Version`, `Summary` and
+   `Profile id`. `project list` and `profile list` end with a `Runtime:` line only when
+   the runtime is unavailable.
 
    Lists take `--limit N` (default 50, at most 200; task list caps at 100 and search
    at 50, reported as `limit-capped`) and `--cursor TOKEN`. One invocation reads one
@@ -255,7 +275,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    `operation get` and the exact retry. Exit codes: 2 invalid input, 3
    authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
-   outcome, 7 unsupported service. Write commands reject flags they do not use. Every
+   outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--output` and `--help` are always accepted, and `--version` and `--help` are answered before any command. Every
    human error of the operator commands ends with one `Fix:` line on stderr
    (`src/cli/remedy.ts`). `service` and `snapshot` print their usage errors (the
    message, their own command lines and the same line) but keep their own lifecycle
@@ -298,6 +318,11 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      per problem. It needs `diagnostics.read`, changes nothing, never prints token
      values or paths, and exits 0 whenever the read succeeds, whatever the checks
      report. `--output json` returns the unmodified service `data`.
+
+   `execution list`, `execution get` and `logs` print their two capture notes (tool
+   observation is incomplete; reasoning is not collected) only with `--verbose`, once
+   each, and a `More:` or `Resume:` line keeps the flag. `coverage.notes` in JSON
+   carries them either way. Only those three commands take `--verbose`; any other refuses it.
 
    Capture is on by default (`enhanced`) for task-bound executions; `project.configure`
    with `diagnosticCapture: "baseline"` (shown by `project get`) reduces later
@@ -379,7 +404,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    - `task stop TASK_ID [--expected-version N]` is best-effort cancellation: new
      turns are held, and effects may continue until termination is verified. It
      reads nothing first. `task resume TASK_ID [--expected-version N]` clears only
-     the operator Stop and lists the holds that remain. Both are receipted
+     the operator Stop and lists the holds that remain by the UI's names (`Task hold`, `Ownership held`). Both are receipted
      `task.stop`/`task.resume` commands; the web UI's Stop and the retained forms
      use the same hold.
 

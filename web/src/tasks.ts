@@ -1,8 +1,4 @@
-import {
-  type AttentionCode,
-  attentionNext,
-  nextAttention,
-} from "../../src/operator/attention.js";
+import { attentionNext } from "../../src/operator/attention.js";
 import { unmetReason } from "../../src/operator/readiness-text.js";
 import {
   taskListPageSchema,
@@ -10,19 +6,15 @@ import {
   type TaskListPage,
   type TaskListSummary,
 } from "../../src/operator/contracts.js";
+import {
+  columns,
+  nextActor,
+  type TaskColumn,
+  taskColumn,
+} from "../../src/operator/task-presentation.js";
 import type { OperatorClient } from "./api.js";
-export const columns = [
-  "Ready",
-  "Running",
-  "Waiting",
-  "Paused",
-  "Stopping",
-  "Uncertain",
-  "Draft",
-  "Done",
-  "Cancelled",
-] as const;
-export type TaskColumn = (typeof columns)[number];
+export { columns, nextActor, taskColumn };
+export type { TaskColumn };
 /** Everything except the terminal columns: unfinished work, Draft included. */
 export const activeColumns: readonly TaskColumn[] = columns.slice(0, 7);
 export const isActiveColumn = (column: TaskColumn) =>
@@ -87,26 +79,6 @@ export async function loadTaskList(
     cursor = next;
   }
   throw Error("catalog-too-large");
-}
-export function taskColumn(task: TaskListSummary): TaskColumn {
-  const s = task.execution.state;
-  if (s === "stopping") return "Stopping";
-  if (s === "uncertain") return "Uncertain";
-  if (s === "running" || s === "starting") return "Running";
-  if (task.state === "done") return "Done";
-  if (task.state === "cancelled") return "Cancelled";
-  // Closed on GitHub without own delivery: paused until resolved, never Draft or Ready.
-  if (
-    task.project.paused ||
-    s === "paused" ||
-    task.source?.closure === "held" ||
-    task.source?.closure === "unattributed"
-  )
-    return "Paused";
-  if (!task.ready) return "Draft";
-  if (!task.admission.eligible || s === "waiting" || task.execution.holds.task)
-    return "Waiting";
-  return "Ready";
 }
 export const taskDetailHref = (task: Pick<TaskListSummary, "id">) =>
   `/app/tasks/${task.id}`;
@@ -236,24 +208,6 @@ export function capacityNotice(tasks: readonly TaskListSummary[]) {
 export const isUncertain = (task: TaskListSummary) =>
   task.attention.codes.includes("execution-uncertain") ||
   taskColumn(task) === "Uncertain";
-/**
- * Who acts next, from the attention codes in the shared precedence and the task's column: one
- * rule for the List and the task detail.
- */
-export function nextActor(
-  codes: readonly AttentionCode[],
-  column: TaskColumn,
-): { code?: AttentionCode; text: string; operator: boolean } {
-  const next = nextAttention(codes, column === "Uncertain");
-  if (next) return next;
-  const text =
-    column === "Done"
-      ? "Next: none · no decision"
-      : column === "Cancelled"
-        ? "Next: none · history retained"
-        : "No operator decision";
-  return { text, operator: false };
-}
 export const taskNext = (task: TaskListSummary) =>
   nextActor(task.attention.codes, taskColumn(task)).text;
 /** One rule for "Next: you": the row and card text and the card's attention tone. */
