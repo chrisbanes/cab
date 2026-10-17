@@ -246,6 +246,16 @@ test("setup headers follow the first-run and settings frames", () => {
     ),
     ["Settings", "Projects", "Create project"],
   );
+  // Setup latches the heading for the visit, so the project it creates keeps it.
+  assert.equal(
+    settingsHeader("/app/settings/projects/new", "", workspace(1), true)?.title,
+    "Set up your first project",
+  );
+  assert.equal(
+    settingsHeader("/app/settings/projects/new", "", workspace(0), false)
+      ?.title,
+    "Create project",
+  );
 });
 
 test("a Project is sent only while the current list shows it", () => {
@@ -596,17 +606,25 @@ test("the ready check judges the lead's own model and effort against the support
   );
 });
 
-test("setup sends the source credential only for a signed-in source login", () => {
-  const rows = [emptyRow("discovered")];
-  const signedIn = buildProjectCreate(values, rows, "", {
-    state: "signed-in",
-    login: "octo",
-  }).command;
+test("setup sends the source credential only for a signed-in login and at least one repository", () => {
+  const rows = [
+    {
+      ...typeRepository(emptyRow("typed"), "acme/atlas"),
+      ref: "main",
+      path: "~/src/atlas",
+    },
+  ];
+  const login = { state: "signed-in" as const, login: "octo" };
+  const signedIn = buildProjectCreate(values, rows, "", login).command;
   assert.equal(
     (signedIn as { sourceCredentialRef?: string }).sourceCredentialRef,
     "gh:github.com",
   );
   assert.equal(operatorCommandSchema.safeParse(signedIn).success, true);
+  // A repository-free project has no source to use the login, so none is recorded.
+  const free = buildProjectCreate(values, [emptyRow("discovered")], "", login);
+  assert.equal("sourceCredentialRef" in free.command, false);
+  assert.equal(operatorCommandSchema.safeParse(free.command).success, true);
   for (const gh of [
     undefined,
     null,

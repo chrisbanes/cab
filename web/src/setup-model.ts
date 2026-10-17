@@ -115,7 +115,7 @@ export function buildProjectCreate(
   },
   rows: SetupRow[],
   githubProjectNodeId: string,
-  /** The source login setup showed as signed in; anything else records no credential. */
+  /** The source login setup showed as signed in; with anything else, or no repository, no credential is recorded. */
   sourceGh: z.infer<typeof ghLoginStateSchema> | null | undefined = null,
 ) {
   const included = rows.flatMap((r, i) => (blankRow(r) ? [] : [i]));
@@ -145,8 +145,9 @@ export function buildProjectCreate(
     ...(githubProjectNodeId
       ? { githubProject: { projectNodeId: githubProjectNodeId } }
       : {}),
-    // Omitted, never undefined, so a create without it keeps its payload hash.
-    ...(sourceGh?.state === "signed-in"
+    // Omitted, never undefined, so a create without it keeps its payload hash. A project
+    // without a repository has no source to use it, and setup shows the line only with one.
+    ...(sourceGh?.state === "signed-in" && included.length
       ? { sourceCredentialRef: "gh:github.com" }
       : {}),
   } as OperatorCommand;

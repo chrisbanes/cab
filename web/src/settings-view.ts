@@ -49,10 +49,12 @@ export function settingsHeader(
   pathname: string,
   query: string,
   workspace: Workspace | null,
+  /** Setup latches the first-run heading for the visit, so creating the project keeps it. */
+  firstRunOverride?: boolean,
 ): SettingsHeader | null {
   if (pathname === "/app/settings") return { title: "Settings", trail: [] };
   if (pathname === "/app/settings/projects/new")
-    return workspace?.data.projects.length === 0
+    return (firstRunOverride ?? workspace?.data.projects.length === 0)
       ? {
           title: "Set up your first project",
           trail: [
