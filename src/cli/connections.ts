@@ -250,7 +250,11 @@ export async function readTokenFile(
   const text = await readOwnerOnlyFile(
     path,
     uid,
-    (why) => new CliError("invalid-token-file", `Token file rejected: ${why}.`),
+    (why, fix) =>
+      new CliError("invalid-token-file", `Token file rejected: ${why}.`, {
+        fix,
+      }),
+    "Check the path given to --token-file.",
   );
   const token = text.trim();
   // The token schema is fixed-length, so an oversized file fails here too.

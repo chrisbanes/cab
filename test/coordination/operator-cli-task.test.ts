@@ -1114,3 +1114,36 @@ test("task get names an imported Draft task's unmet readiness condition", async 
   });
   assert.match(await get(), /^Readiness: Not Ready: missing label `ready`$/m);
 });
+
+test("a missing outcome file says it is missing", async (t) => {
+  const o = await startCliOperator(t);
+  const { s } = o;
+  const sent = posts(o);
+  const missing = `${o.h.dir}/no-such-outcome.md`;
+  const args = [
+    "task",
+    "create",
+    "--project",
+    s.projectId,
+    "--title",
+    "Missing",
+    "--outcome-file",
+    missing,
+    "--ready",
+    "false",
+    "--connection",
+    "rw",
+  ];
+  const human = await o.h.run(args);
+  assert.equal(human.code, 2);
+  assert.match(
+    human.err,
+    new RegExp(`Cannot read --outcome-file ${missing}: it does not exist\\.`),
+  );
+  assert.match(human.err, /^Fix: Check the path given to --outcome-file\.$/m);
+  const json = await o.h.run([...args, "--output", "json"]);
+  assert.equal(json.code, 2);
+  assert.equal(json.json().error.code, "invalid-input");
+  assert.equal(json.json().error.category, "usage");
+  assert.equal(posts(o), sent, "nothing was sent");
+});

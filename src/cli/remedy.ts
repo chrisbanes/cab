@@ -92,3 +92,9 @@ export function remedyFor(error: CliError, category: string): string {
     "Run 'ensemble --help'."
   );
 }
+
+/** A path to paste into a shell command: double-quoted unless that would expand it. */
+export const shellQuote = (path: string) =>
+  /[$`\\"!]/.test(path)
+    ? `'${path.replaceAll("'", "'\\''")}'`
+    : JSON.stringify(path);

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { CliError } from "../../src/cli/connections.js";
 import {
   readRecoveryDocument,
   writeRecoveryDocument,
@@ -56,4 +57,27 @@ test("recovery documents round-trip with their digest and refuse anything else",
       /Recovery document rejected/,
     );
   }
+});
+
+test("a missing or open recovery document names the prepare command or the chmod", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ensemble-recovery-document-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const refusal = (path: string) =>
+    readRecoveryDocument(path).then(
+      () => assert.fail("expected a refusal"),
+      (error: CliError) => error,
+    );
+  const missing = await refusal(join(dir, "nofile"));
+  assert.equal(missing.code, "change-document-invalid");
+  assert.match(
+    missing.message,
+    /Recovery document rejected: it does not exist\./,
+  );
+  assert.match(missing.extra.fix ?? "", /ensemble recovery prepare/);
+  const open = join(dir, "open.json");
+  writeFileSync(open, "{}", { mode: 0o600 });
+  chmodSync(open, 0o640);
+  const mode = await refusal(open);
+  assert.match(mode.message, /its mode is 0640; it must be 0600/);
+  assert.equal(mode.extra.fix, `chmod 600 "${open}"`);
 });

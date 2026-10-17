@@ -17,6 +17,7 @@ import type { BrowseContext } from "../../src/cli/browse.js";
 import {
   CliError,
   KeychainCredentialStore,
+  readTokenFile,
 } from "../../src/cli/connections.js";
 import { type CliDeps, EXIT } from "../../src/cli/main.js";
 import { CATEGORY_FIX, DEFAULT_FIX, remedyFor } from "../../src/cli/remedy.js";
@@ -783,4 +784,64 @@ test("a TLS verification failure has no request id in human output", async (t) =
   });
   assert.equal(json.json().error.code, "tls-verification-failed");
   assert.match(json.json().error.requestId, /^[0-9a-f-]{36}$/);
+});
+
+test("a rejected token file names the fix", async (t) => {
+  const h = harness(t);
+  const login = (file: string) =>
+    h.run([
+      "auth",
+      "login",
+      "--connection",
+      "a",
+      "--url",
+      "http://127.0.0.1:9",
+      "--token-file",
+      file,
+    ]);
+  const real = h.tokenFile(syntheticToken());
+  chmodSync(real, 0o644);
+  let r = await login(real);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /\(invalid-token-file\)/);
+  assert.match(r.err, /Token file rejected: its mode is 0644; it must be 0600/);
+  assert.deepEqual(fixLines(r.err), [`Fix: chmod 600 "${real}"`]);
+
+  const missing = join(h.dir, "missing.token");
+  r = await login(missing);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /Token file rejected: it does not exist\./);
+  assert.deepEqual(fixLines(r.err), [
+    "Fix: Check the path given to --token-file.",
+  ]);
+
+  chmodSync(real, 0o600);
+  const link = join(h.dir, "link.token");
+  symlinkSync(real, link);
+  r = await login(link);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /Token file rejected: it is a symlink\./);
+  assert.deepEqual(fixLines(r.err), [
+    "Fix: Pass the file itself, not a symlink to it.",
+  ]);
+
+  // Nothing was sent, saved or stored by any refusal.
+  assert.deepEqual(h.fetches, []);
+  assert.deepEqual(readdirSyncSafe(h.configDir), []);
+  assert.equal(h.keychain.items.size, 0);
+
+  // Another owner's file never recommends a chmod.
+  const foreign = await readTokenFile(
+    real,
+    (process.getuid?.() ?? 0) + 1,
+  ).catch((error: unknown) => error);
+  assert.ok(foreign instanceof CliError);
+  assert.equal(foreign.code, "invalid-token-file");
+  assert.match(foreign.message, /it is owned by another user/);
+  assert.ok(!foreign.extra.fix?.includes("chmod"));
+  // A path that a shell would expand is quoted so the fix cannot run anything.
+  const odd = join(h.dir, "$(touch pwned)`x`.token");
+  writeFileSync(odd, `${syntheticToken()}\n`, { mode: 0o644 });
+  r = await login(odd);
+  assert.deepEqual(fixLines(r.err), [`Fix: chmod 600 '${odd}'`]);
 });

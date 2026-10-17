@@ -658,3 +658,40 @@ test("stale revisions, tampering, wrong services and denials send nothing", asyn
   for (const line of h.outputs.filter((o) => o.includes('"error"')))
     assert.ok(!line.includes(instructionSecret));
 });
+
+test("a missing change document says it is missing and sends nothing", async (t) => {
+  const h = harness(t);
+  const missing = join(h.dir, "nofile");
+  const r = await h.run(["project", "apply", "--file", missing]);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /\(change-document-invalid\)/);
+  assert.match(r.err, /Change document rejected: it does not exist\./);
+  assert.match(
+    r.err,
+    /^Fix: Prepare it first with 'ensemble project prepare'/m,
+  );
+  assert.deepEqual(h.fetches, []);
+  assert.equal(existsSync(join(h.configDir, "requests.jsonl")), false);
+  const json = await h.run([
+    "profile",
+    "apply",
+    "--file",
+    missing,
+    "--output",
+    "json",
+  ]);
+  assert.equal(json.code, 2);
+  assert.equal(json.err, "");
+  assert.equal(json.json().error.code, "change-document-invalid");
+  assert.ok(!json.out.includes("Fix:"));
+
+  // A document others can read is refused with the exact chmod.
+  const open = join(h.dir, "open.json");
+  writeFileSync(open, "{}", { mode: 0o600 });
+  chmodSync(open, 0o644);
+  const mode = await h.run(["capacity", "apply", "--file", open]);
+  assert.equal(mode.code, 2);
+  assert.match(mode.err, /its mode is 0644; it must be 0600 or stricter/);
+  assert.match(mode.err, new RegExp(`^Fix: chmod 600 "${open}"$`, "m"));
+  assert.deepEqual(h.fetches, []);
+});

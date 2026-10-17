@@ -35,6 +35,7 @@ import {
   requireOut,
   writePrepared,
 } from "./configure.js";
+import { openFailure } from "./change-document.js";
 import { readProject } from "./configure-project.js";
 import { CliError } from "./connections.js";
 import { receiptLines } from "./operation.js";
@@ -264,8 +265,10 @@ export type SourceEdit = z.infer<typeof editSchema>;
 /** Reads the edit file: owner's regular file, no symlink, at most 64 KiB of strict JSON. */
 async function readEdit(path: string | undefined): Promise<SourceEdit> {
   if (!path) throw new CliError("usage", "--edit-file FILE is required.");
-  const invalid = (why: string) =>
-    new CliError("invalid-input", `--edit-file ${why}.`);
+  const invalid = (why: string, fix?: string) =>
+    new CliError("invalid-input", `--edit-file ${why}.`, {
+      ...(fix ? { fix } : {}),
+    });
   let text: string;
   try {
     const handle = await open(
@@ -275,20 +278,32 @@ async function readEdit(path: string | undefined): Promise<SourceEdit> {
     try {
       const stat = await handle.stat();
       if (!stat.isFile() || stat.size > MAX_EDIT_BYTES)
-        throw invalid("must be a regular file of at most 64 KiB");
+        throw invalid(
+          "must be a regular file of at most 64 KiB",
+          "Pass a regular file of at most 64 KiB.",
+        );
       text = await handle.readFile("utf8");
     } finally {
       await handle.close();
     }
   } catch (error) {
     if (error instanceof CliError) throw error;
-    throw invalid("must be a readable regular file, not a symlink");
+    const { why, fix } = openFailure(
+      error,
+      path,
+      "Check the path given to --edit-file.",
+    );
+    throw new CliError(
+      "invalid-input",
+      `Cannot read --edit-file ${path}: ${why}.`,
+      { fix },
+    );
   }
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
-    throw invalid("is not JSON");
+    throw invalid("is not JSON", "Write the edit as one JSON object.");
   }
   const parsed = editSchema.safeParse(value);
   if (!parsed.success)

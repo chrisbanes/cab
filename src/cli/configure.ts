@@ -10,6 +10,7 @@ import {
   type ChangeDocument,
   type ChangeKind,
   canonicalJson,
+  openFailure,
   readChangeDocument,
   writeChangeDocument,
 } from "./change-document.js";
@@ -105,8 +106,19 @@ export async function readTextFile(path: string | undefined, flag: string) {
   if (path === undefined) return undefined;
   try {
     return await readFile(path, "utf8");
-  } catch {
-    throw new CliError("invalid-input", `Cannot read --${flag} ${path}.`);
+  } catch (error) {
+    const { why, fix } = openFailure(
+      error,
+      path,
+      `Check the path given to --${flag}.`,
+    );
+    throw new CliError(
+      "invalid-input",
+      `Cannot read --${flag} ${path}: ${why}.`,
+      {
+        fix,
+      },
+    );
   }
 }
 
@@ -285,7 +297,7 @@ export async function applyFile(
 ): Promise<WriteOutput> {
   if (!ctx.values.file) throw new CliError("usage", "--file FILE is required.");
   const requested = optionalRequestId(ctx.values);
-  const document = await readChangeDocument(ctx.values.file);
+  const document = await readChangeDocument(ctx.values.file, area);
   if (AREA[document.kind] !== area)
     throw new CliError(
       "change-document-invalid",
