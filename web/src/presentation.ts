@@ -21,7 +21,7 @@ export const codeSentence = (
   code: string,
   sentences: Readonly<Partial<Record<string, string>>>,
   fallback: string,
-) => sentences[code] ?? fallback;
+) => (Object.hasOwn(sentences, code) ? sentences[code] : undefined) ?? fallback;
 
 /** A line's heading, list and checklist markers, including a bare "- [ ]" left empty. */
 const lineMarkers =

@@ -77,3 +77,11 @@ test("the outcome line is its first non-empty line without Markdown markers", ()
   assert.deepEqual(outcomeLine("  \n- [ ]  \n"), { line: "", more: false });
   assert.deepEqual(outcomeLine(null), { line: "", more: false });
 });
+
+test("an inherited object key is not a mapped code", () => {
+  for (const code of ["constructor", "toString", "__proto__", "hasOwnProperty"])
+    assert.equal(
+      codeSentence(code, { known: "Known." }, "Fallback."),
+      "Fallback.",
+    );
+});
