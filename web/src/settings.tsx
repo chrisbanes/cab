@@ -182,6 +182,10 @@ export function useNewerPrivateRead(
       latest.current();
   }, [readAt]);
 }
+export const textHold =
+  "Save is on hold until the saved text is read again to compare it with your edit.";
+export const sourceHold =
+  "Save is on hold until the saved queries and paths are read again to compare them with your edits.";
 /**
  * An edited private text must be compared with what is saved now, so read it again when the
  * loaded version moved past the last private read (for example after reviewing another
@@ -477,6 +481,7 @@ export function DraftOutcome({
   session,
   label,
   saveDisabled = false,
+  hold,
   discard,
   refresh,
   review,
@@ -489,6 +494,12 @@ export function DraftOutcome({
   label: string;
   /** Save stays disabled until the change list is non-empty. */
   saveDisabled?: boolean;
+  /**
+   * Why Save waits: an edit of private text cannot be sent until the saved text has been
+   * read again to compare with it. Save stays focusable (`aria-disabled`) and the reason is
+   * shown and announced.
+   */
+  hold?: string | undefined;
   /** Restores the loaded values; shown while there is unsaved input. */
   discard?: () => void;
   /**
@@ -505,6 +516,8 @@ export function DraftOutcome({
   children?: ReactNode;
 }) {
   const idle = draft.phase !== "unknown";
+  const holdId = useId();
+  const held = Boolean(hold) && idle && draft.phase !== "recorded";
   return (
     <>
       {idle && (
@@ -516,6 +529,11 @@ export function DraftOutcome({
               draft.phase === "recorded" ||
               saveDisabled
             }
+            aria-disabled={held || undefined}
+            aria-describedby={held ? holdId : undefined}
+            onClick={(e) => {
+              if (held) e.preventDefault();
+            }}
           >
             {draft.phase === "pending" ? "Saving…" : label}
           </Button>
@@ -528,6 +546,11 @@ export function DraftOutcome({
               </Button>
             )}
         </div>
+      )}
+      {held && (
+        <p id={holdId} className="metadata muted" role="status">
+          {hold}
+        </p>
       )}
       <DraftMessage
         draft={draft}
@@ -623,8 +646,11 @@ export async function submitDraft(
   refresh: () => void,
   /** Pre-submit field errors: when any is present nothing is sent. */
   errors: Record<string, string> = {},
+  /** Save is on hold (see `DraftOutcome`): nothing is sent, however it was triggered. */
+  held = false,
 ) {
   e.preventDefault();
+  if (held) return;
   await sendDraft(
     e.currentTarget,
     d,

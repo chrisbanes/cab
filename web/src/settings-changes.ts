@@ -405,32 +405,38 @@ export function adoptSourceRows(source: Source, v: Values) {
         !loaded.repositories.some((s) => s.repositoryId === r.repositoryId),
     )
     .map((r) => String(r.repositoryId));
-  // Saved search queries the operator edited but that were removed elsewhere.
-  const droppedQueries = parseRows(v.selections)
-    .filter(
-      (r) =>
-        r.keep &&
-        !r.removed &&
-        typeof r.query === "string" &&
-        !loaded.selections.some((s) => s.id === r.id),
-    )
+  // Saved sources the operator edited or marked for removal that were removed elsewhere, or
+  // replaced by a source of another kind under the same id: the edit does not fit the new
+  // source, so it is dropped rather than carried onto it.
+  const droppedSelections = parseRows(v.selections)
+    .filter((r) => {
+      if (!r.keep) return false;
+      const latest = loaded.selections.find((s) => s.id === r.id);
+      return latest
+        ? latest.kind !== r.kind &&
+            (Boolean(r.removed) || typeof r.query === "string")
+        : !r.removed && typeof r.query === "string";
+    })
     .map((r) => String(r.id));
   return {
-    dropped: [...droppedQueries, ...dropped],
+    dropped: [...droppedSelections, ...dropped],
     selections: JSON.stringify(
       merge(
         selections,
         loaded.selections,
         (r) => r.id,
-        (r, latest) => ({
-          ...latest,
-          rowKey: r.rowKey ?? crypto.randomUUID(),
-          ...(r.removed ? { removed: true } : {}),
-          // An edited query stays until the operator saves or discards it, with its baseline.
-          ...(typeof r.query === "string"
-            ? { query: r.query, queryBase: String(r.queryBase ?? "") }
-            : {}),
-        }),
+        (r, latest) =>
+          latest.kind !== r.kind
+            ? { ...latest, rowKey: r.rowKey ?? crypto.randomUUID() }
+            : {
+                ...latest,
+                rowKey: r.rowKey ?? crypto.randomUUID(),
+                ...(r.removed ? { removed: true } : {}),
+                // An edited query stays until the operator saves or discards it, with its baseline.
+                ...(typeof r.query === "string"
+                  ? { query: r.query, queryBase: String(r.queryBase ?? "") }
+                  : {}),
+              },
       ),
     ),
     repositories: JSON.stringify(

@@ -38,6 +38,7 @@ import {
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
+  textHold,
   useNewerPrivateRead,
   usePrivateValues,
   useRereadForEdit,
@@ -290,6 +291,9 @@ function GeneralTab(p: TabProps) {
     priv.refresh,
   );
   const lines = projectChanges(data, d.values, revealed);
+  // An edit is compared with the saved text before it is sent; until that read is current, wait.
+  const holdSave =
+    typeof d.values.instructions === "string" && revealed === undefined;
   const v = d.values;
   const command = () => ({
     type: "project.configure",
@@ -318,6 +322,8 @@ function GeneralTab(p: TabProps) {
                 p.session,
                 command(),
                 p.refreshConfiguration,
+                {},
+                holdSave,
               )
             }
           >
@@ -365,6 +371,7 @@ function GeneralTab(p: TabProps) {
               session={p.session}
               label="Save project"
               saveDisabled={lines.length === 0}
+              hold={holdSave ? textHold : undefined}
               discard={() => reloadDraft(d, initial)}
               refresh={p.refreshConfiguration}
               review={() => d.adoptLatest(data.project.version, initial)}

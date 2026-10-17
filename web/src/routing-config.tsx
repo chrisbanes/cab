@@ -24,6 +24,7 @@ import {
   submitDraft,
   useDraft,
   useLoadedDraft,
+  textHold,
   useNewerPrivateRead,
   usePrivateValues,
   useRereadForEdit,
@@ -122,6 +123,8 @@ export function RoutingTab(p: TabProps) {
     priv.refresh,
   );
   const lines = routingChanges(data, d.values, revealed);
+  const holdSave =
+    typeof d.values.guidance === "string" && revealed === undefined;
   const candidates = Array.isArray(d.values.candidateProfileIds)
     ? d.values.candidateProfileIds
     : [];
@@ -148,6 +151,8 @@ export function RoutingTab(p: TabProps) {
                 p.session,
                 routingCommand(projectId, d.values, data, revealed),
                 p.refreshConfiguration,
+                {},
+                holdSave,
               )
             }
           >
@@ -208,6 +213,7 @@ export function RoutingTab(p: TabProps) {
               session={p.session}
               label="Save routing"
               saveDisabled={lines.length === 0}
+              hold={holdSave ? textHold : undefined}
               discard={() => reloadDraft(d, initial)}
               refresh={p.refreshConfiguration}
               review={() => d.adoptLatest(data.routing.version, initial)}

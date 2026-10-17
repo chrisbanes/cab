@@ -31,6 +31,7 @@ import {
   reloadDraft,
   submitDraft,
   useDraft,
+  sourceHold,
   useLoadedDraft,
   useNewerPrivateRead,
   usePrivateValues,
@@ -107,6 +108,15 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     conditions = parseRows(v.conditions),
     repositories = parseRows(v.repositories),
     isLocked = locked(d);
+  // A retained query or path edit is compared with the saved value before it is sent.
+  const holdSave =
+    known === undefined &&
+    [...selections, ...repositories].some(
+      (r) =>
+        r.keep &&
+        !r.removed &&
+        (typeof r.query === "string" || typeof r.path === "string"),
+    );
   const lines = sourceChanges(data.source, v, known),
     removesAll = removesAllAccess(data.source, v),
     stale = staleSourceRows(data.source, v),
@@ -144,7 +154,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     ]);
     const rows = adoptSourceRows(data.source, d.values);
     if (rows.dropped.length)
-      d.notice = `Loaded the latest version. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
+      d.notice = `Loaded the latest version. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed or replaced elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
     d.set("selections", rows.selections);
     d.set("repositories", rows.repositories);
   };
@@ -309,6 +319,8 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
           p.session,
           sourceCommand(projectId, v, known),
           p.refreshConfiguration,
+          {},
+          holdSave,
         )
       }
     >
@@ -817,6 +829,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         session={p.session}
         label="Save changes"
         saveDisabled={blocked}
+        hold={holdSave ? sourceHold : undefined}
         discard={() => reloadDraft(d, initial)}
         refresh={p.refreshConfiguration}
         review={adopt}

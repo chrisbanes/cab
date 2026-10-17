@@ -500,6 +500,58 @@ const leaveAndReturn = async (page: Page, tab: string, other: string) => {
 const noChanges = async (page: Page) =>
   assert.equal(await changes(page).getByRole("listitem").count(), 0);
 
+/** Hold every private-values read until `release` is called. */
+const holdReads = async (page: Page) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/private-values", async (route) => {
+    await gate;
+    await route.continue().catch(() => {});
+  });
+  return release;
+};
+/** Command posts the page sends from now on. */
+const watchPosts = (page: Page) => {
+  const posts: Record<string, unknown>[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      posts.push(r.postDataJSON() as Record<string, unknown>);
+  });
+  return posts;
+};
+/** Save waits for the comparison read: focusable, announced with its reason, and sends nothing. */
+const assertOnHold = async (
+  page: Page,
+  save: string,
+  posts: Record<string, unknown>[],
+) => {
+  const button = page.getByRole("button", { name: save, exact: true });
+  await page
+    .getByRole("status")
+    .filter({ hasText: "Save is on hold" })
+    .waitFor();
+  assert.equal(await button.getAttribute("aria-disabled"), "true");
+  assert.ok(await button.getAttribute("aria-describedby"));
+  const before = posts.length;
+  await button.evaluate((e) => (e as HTMLElement).click());
+  await settled(page);
+  assert.equal(posts.length, before, "Save on hold sends nothing");
+};
+const assertOffHold = async (page: Page, save: string) => {
+  await page
+    .getByRole("status")
+    .filter({ hasText: "Save is on hold" })
+    .waitFor({ state: "detached" });
+  assert.equal(
+    await page
+      .getByRole("button", { name: save, exact: true })
+      .getAttribute("aria-disabled"),
+    null,
+  );
+};
+
 /** The form is clean: nothing listed, no Discard, and Save is off. */
 const assertClean = async (page: Page, save: string) => {
   await changes(page).getByText("No changes yet.", { exact: false }).waitFor();
@@ -716,6 +768,161 @@ test("readiness matching with no condition is no edit, and the adopted note goes
     () => !document.body.innerText.includes("Loaded the latest version."),
   );
   await assertClean(page, "Save changes");
+});
+
+test("Save waits for the saved text to be read again after Review changes", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("MY EDIT");
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    instructions: "THEIR TEXT",
+  });
+  const posts = watchPosts(page);
+  const release = await holdReads(page);
+  await saveProject(page).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  // The newer version is adopted, but the comparison read has not come back: nothing is sent.
+  await assertOnHold(page, "Save project", posts);
+  assert.equal(posts.length, 1);
+  assert.equal(d.project(ids.atlas).instructions, "THEIR TEXT");
+  release();
+  await assertOffHold(page, "Save project");
+  await page
+    .getByText(
+      "This was changed elsewhere since you started editing. Saving replaces it.",
+    )
+    .waitFor();
+  await saveProject(page).click();
+  await savedOutcome(page);
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1]?.instructions, "MY EDIT");
+  assert.equal(d.project(ids.atlas).instructions, "MY EDIT");
+});
+
+test("Save stays on hold with a way out when the comparison read fails", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("MY EDIT");
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    instructions: "THEIR TEXT",
+  });
+  const posts = watchPosts(page);
+  await page.route("**/private-values", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable" } }),
+    }),
+  );
+  await saveProject(page).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByRole("alert")
+    .filter({ hasText: "Couldn't check whether this changed elsewhere." })
+    .waitFor();
+  await assertOnHold(page, "Save project", posts);
+  // Discard is the way out of a read that never comes back; Try again is the other.
+  await page.getByRole("button", { name: "Discard changes" }).waitFor();
+  await page.unroute("**/private-values");
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await assertOffHold(page, "Save project");
+  assert.equal(posts.length, 1);
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await assertClean(page, "Save project");
+  assert.equal(d.project(ids.atlas).instructions, "THEIR TEXT");
+});
+
+test("routing and profile saves wait for the comparison read after Review changes", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  const d = f.service.domain();
+  const field = page.getByRole("textbox", {
+    name: "Routing guidance",
+    exact: true,
+  });
+  await revealButton(page, "routing guidance").click();
+  await field.fill("MY GUIDANCE");
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    guidance: "THEIR GUIDANCE",
+    candidateProfileIds: [ids.profiles.Eli as string],
+  });
+  const posts = watchPosts(page);
+  const release = await holdReads(page);
+  await page.getByRole("button", { name: "Save routing", exact: true }).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await assertOnHold(page, "Save routing", posts);
+  assert.equal(d.routing(ids.relay).guidance, "THEIR GUIDANCE");
+  release();
+  await assertOffHold(page, "Save routing");
+  await page
+    .getByText(
+      "This was changed elsewhere since you started editing. Saving replaces it.",
+    )
+    .waitFor();
+
+  // The same on the profile page.
+  const reviewer = ids.profiles.Reviewer as string;
+  await page.goto(`${web.origin}/app/profiles/${reviewer}/settings`);
+  await page.getByRole("button", { name: "Reveal instructions" }).click();
+  const instructions = page.getByRole("textbox", {
+    name: "Instructions",
+    exact: true,
+  });
+  await instructions.fill("MY INSTRUCTIONS");
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: reviewer,
+    expectedVersion: Number(d.profile(reviewer).version),
+    instructions: "THEIR INSTRUCTIONS",
+  });
+  const profilePosts = watchPosts(page);
+  const releaseProfile = await holdReads(page);
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await assertOnHold(page, "Save profile", profilePosts);
+  assert.equal(d.profile(reviewer).instructions, "THEIR INSTRUCTIONS");
+  releaseProfile();
+  await assertOffHold(page, "Save profile");
 });
 
 test("a reverted routing edit leaves the form clean and picks up a later read", async (_t, journey) => {
@@ -1054,6 +1261,7 @@ test("a private read older than the loaded version is flagged on an edit", async
     .waitFor();
   assert.equal(await instructionsField(page).inputValue(), "MY EDIT");
   assert.equal(await showsText(page, "THEIR TEXT"), false);
+  await assertOnHold(page, "Save project", watchPosts(page));
 });
 
 test("line breaks saved as CRLF do not turn typing and deleting a character into an edit", async (_t, journey) => {
@@ -2314,7 +2522,7 @@ test("an edited query and local path survive adopting a newer source version unl
     .click();
   await page
     .getByText(
-      "Loaded the latest version. S-2 was removed elsewhere, so your edits to it were discarded.",
+      "Loaded the latest version. S-2 was removed or replaced elsewhere, so your edits to it were discarded.",
     )
     .waitFor();
   assert.equal(await query.count(), 0);
@@ -2536,6 +2744,133 @@ test("a query edit says so when the private read is older than the source versio
     .waitFor();
   assert.equal(await query.inputValue(), "MY EDIT");
   assert.equal(await showsText(page, "THEIR QUERY"), false);
+  await assertOnHold(page, "Save changes", watchPosts(page));
+});
+
+test("Save waits for saved queries and paths to be read again, and an edit never changes a row's kind", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const query = page.getByLabel("Search query", { exact: true });
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await query.waitFor();
+  const writer = (s2: object) =>
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId: ids.atlas,
+      expectedVersion: d.githubConfiguration(ids.atlas).version,
+      selections: [{ id: "S-1", keep: true }, s2, { id: "S-3", keep: true }],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+    } as Parameters<OperatorApi["execute"]>[0]);
+
+  // Another writer changes the same query; while the comparison read is out, nothing is sent.
+  await query.fill("MINE");
+  await writer({ id: "S-2", kind: "search", query: "THEIR QUERY" });
+  const posts = watchPosts(page);
+  const release = await holdReads(page);
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await assertOnHold(page, "Save changes", posts);
+  // Enter in a field submits the form too, and sends nothing while Save is on hold.
+  const before = posts.length;
+  await query.press("Enter");
+  await settled(page);
+  assert.equal(posts.length, before);
+  release();
+  await assertOffHold(page, "Save changes");
+  await page
+    .getByText(
+      "This was changed elsewhere since you started editing. Saving replaces it.",
+    )
+    .waitFor();
+  const kept = d
+    .githubConfiguration(ids.atlas)
+    .selections.find((x) => x.id === "S-2");
+  assert.equal(kept?.kind === "search" && kept.query, "THEIR QUERY");
+
+  // Another writer replaces the search with a repository under the same id: the edit and a
+  // pending removal are dropped, never carried onto the new source.
+  await query.fill("MINE AGAIN");
+  await writer({
+    id: "S-2",
+    kind: "repository",
+    repositoryId: "acme/atlas",
+    owner: "acme",
+    name: "atlas",
+  });
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByText(
+      "Loaded the latest version. S-2 was removed or replaced elsewhere, so your edits to it were discarded.",
+    )
+    .waitFor();
+  assert.equal(await query.count(), 0);
+  await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
+  const body = commandBody(page);
+  await save.click();
+  const sent = await body;
+  assert.deepEqual(sent.selections, [
+    { id: "S-1", keep: true },
+    { id: "S-2", keep: true },
+    { id: "S-3", keep: true },
+  ]);
+  await savedOutcome(page);
+  assert.equal(
+    d.githubConfiguration(ids.atlas).selections.find((x) => x.id === "S-2")
+      ?.kind,
+    "repository",
+  );
+});
+
+test("a pending removal is dropped when the source was replaced under the same id", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  await page.getByRole("button", { name: "Remove S-2" }).click();
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", kind: "project", projectNodeId: "PVT_new", filter: "" },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  } as Parameters<OperatorApi["execute"]>[0]);
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByText("S-2 was removed or replaced elsewhere", { exact: false })
+    .waitFor();
+  assert.equal(await page.getByText("Will be removed").count(), 0);
+  await noChanges(page);
 });
 
 test("an unknown source save with rows removed elsewhere keeps its one action and message", async (_t, journey) => {

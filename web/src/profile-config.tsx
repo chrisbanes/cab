@@ -44,6 +44,7 @@ import {
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
+  textHold,
   useNewerPrivateRead,
   usePrivateValues,
   useRereadForEdit,
@@ -338,6 +339,8 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
     priv.refresh,
   );
   const lines = data ? profileChanges(data, d.values, revealed) : [];
+  const holdSave =
+    typeof d.values.instructions === "string" && revealed === undefined;
   const name = data?.profile.name ?? "this profile";
   const command = () => {
     if (!data) return {};
@@ -422,6 +425,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                       runtimeChanged(data.runtime, d.values)
                         ? runtimeErrors(d.values, claudeSettings(p.workspace))
                         : {},
+                      holdSave,
                     )
                   }
                 >
@@ -484,6 +488,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     session={p.session}
                     label="Save profile"
                     saveDisabled={lines.length === 0}
+                    hold={holdSave ? textHold : undefined}
                     discard={() => initial && reloadDraft(d, initial)}
                     refresh={() => {
                       p.refresh();
