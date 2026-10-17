@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { commentReasonCodes } from "./github-reasons.js";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
@@ -1371,6 +1372,8 @@ export const taskSchema = envelope(
           available: z.boolean(),
           mode: z.enum(["allow", "approval"]).nullable(),
           reason: safeText,
+          /** Why a comment cannot be posted; absent from older servers. `available` and `reason` are unchanged. */
+          reasonCode: z.enum(commentReasonCodes).nullable().optional(),
         })
         .strict()
         .optional(),

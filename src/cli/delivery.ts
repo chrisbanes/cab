@@ -41,7 +41,14 @@ function deliveryView(read: TaskRead) {
     projectId: task.projectId,
     taskVersion: task.version,
     delivery: delivery ?? null,
-    commentPolicy: commentPolicy ?? null,
+    // The CLI contract is the three policy fields; `reasonCode` is for the web.
+    commentPolicy: commentPolicy
+      ? {
+          available: commentPolicy.available,
+          mode: commentPolicy.mode,
+          reason: commentPolicy.reason,
+        }
+      : null,
     issue: source
       ? {
           repositoryName: source.repositoryName,
