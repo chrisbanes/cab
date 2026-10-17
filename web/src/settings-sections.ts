@@ -30,6 +30,9 @@ export function settingsSectionOrder(
 export const settingsSectionHref = (id: SettingsSectionId) =>
   `/app/settings#${id}`;
 
+/** Add Claude, the panel at the top of the Runtime page. */
+export const addClaudeHref = "/app/settings/runtime#add-claude";
+
 /** A Readiness check's own article, by its public check id. */
 export const readinessCheckHref = (checkId: string) =>
   `/app/settings#readiness-${checkId}`;

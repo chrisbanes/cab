@@ -1128,7 +1128,7 @@ export function ProjectSetup(
           </p>
           <ActionLink
             variant="secondary"
-            href={firstRun ? "/app" : "/app/settings"}
+            href={firstRun ? "/app" : settingsSectionHref("projects")}
           >
             Cancel
           </ActionLink>

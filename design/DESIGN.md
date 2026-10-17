@@ -1691,7 +1691,11 @@ Presentation and interaction rules that the canvas does not show on its own.
   restore. The current section follows the fragment (the first section when none; a
   check anchor marks Readiness). Readiness checks have their own anchors
   (`#readiness-claude-executable`) and the Runtime page has
-  `/app/settings/runtime#add-claude`; Home checklist Settings actions use them.
+  `/app/settings/runtime#add-claude`; Home checklist Settings actions use them. A
+  purpose-specific link into Settings (a task's readiness or Add Claude Fix, a Claude
+  token failure route, a setup or checklist action, a form's Cancel) opens its section
+  or anchor and never bare Settings; only the generic Settings entries (sidebar, account
+  menu, breadcrumbs) stay bare.
 - On settings pages no primary navigation item is selected. Project configuration
   selects its own project in the sidebar.
 - The account menu (`113-account-menu`) lists Settings (`/app/settings`), Getting

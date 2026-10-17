@@ -1096,7 +1096,10 @@ test("Setup disables Resume with the reason and Add Claude for a Claude lead wit
     name: "Add Claude",
     exact: true,
   });
-  assert.equal(await addClaude.getAttribute("href"), "/app/settings/runtime");
+  assert.equal(
+    await addClaude.getAttribute("href"),
+    "/app/settings/runtime#add-claude",
+  );
   // The fix opens in a new tab, so this ready check is still here afterwards.
   assert.equal(await addClaude.getAttribute("target"), "_blank");
   const tab = page.context().waitForEvent("page");

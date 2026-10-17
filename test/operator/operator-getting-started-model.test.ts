@@ -457,5 +457,10 @@ test("no two checklist rows open the same screen", () => {
     const hrefs = links(all);
     assert.ok(hrefs.length >= 3, name);
     assert.equal(new Set(hrefs).size, hrefs.length, `${name}: ${hrefs}`);
+    assert.equal(
+      hrefs.includes("/app/settings"),
+      false,
+      `${name}: bare Settings`,
+    );
   }
 });

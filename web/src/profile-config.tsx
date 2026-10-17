@@ -50,6 +50,7 @@ import {
   type SettingsProps,
 } from "./settings.js";
 import type { ConfigurationDraft } from "./settings-state.js";
+import { settingsSectionHref } from "./settings-sections.js";
 
 /** New profiles start on the first enabled runtime (Codex, then Claude), else Codex. */
 export const defaultHarness = (workspace: SettingsProps["workspace"]) =>
@@ -250,7 +251,10 @@ export function ProfileCreate(p: SettingsProps) {
                   Create another profile
                 </Button>
               ) : (
-                <ActionLink variant="secondary" href="/app/settings">
+                <ActionLink
+                  variant="secondary"
+                  href={settingsSectionHref("profiles")}
+                >
                   Cancel
                 </ActionLink>
               )}

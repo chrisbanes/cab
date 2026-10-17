@@ -5,6 +5,7 @@ import type {
 import {
   readinessCheckHref,
   settingsSectionHref,
+  addClaudeHref,
 } from "./settings-sections.js";
 import type { ReadinessRead } from "./setup-model.js";
 
@@ -254,7 +255,7 @@ export function checklistRows(input: {
           {
             kind: "link",
             label: "Add Claude",
-            href: "/app/settings/runtime#add-claude",
+            href: addClaudeHref,
           },
           !claude
             ? readiness.state === "loading"
