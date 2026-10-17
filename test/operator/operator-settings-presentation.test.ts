@@ -10,9 +10,8 @@ import {
   nextSelectionId,
   parseRows,
   profileChanges,
-  profilePrivateFields,
   projectChanges,
-  projectPrivateFields,
+  privateField,
   removesAllAccess,
   routingChanges,
   routingCommand,
@@ -119,37 +118,28 @@ test("project and profile change lists name each change without private values",
   // An unedited reveal adds no line and no command field, and the text is never a line.
   const base = { name: "Atlas", leadProfileId: mira, paused: false };
   assert.deepEqual(projectChanges(c, base, "PRIVATE"), []);
-  assert.deepEqual(projectPrivateFields(base, "PRIVATE"), {});
+  assert.deepEqual(privateField("instructions", undefined, "PRIVATE"), {});
   assert.deepEqual(
     projectChanges(c, { ...base, instructions: "PRIVATE" }, "PRIVATE"),
     [],
   );
-  assert.deepEqual(
-    projectPrivateFields({ ...base, instructions: "PRIVATE" }, "PRIVATE"),
-    {},
-  );
+  assert.deepEqual(privateField("instructions", "PRIVATE", "PRIVATE"), {});
   assert.deepEqual(
     projectChanges(c, { ...base, instructions: "" }, "PRIVATE"),
     ["Instructions cleared"],
   );
-  assert.deepEqual(
-    projectPrivateFields({ ...base, instructions: "" }, "PRIVATE"),
-    {
-      instructions: "",
-    },
-  );
+  assert.deepEqual(privateField("instructions", "", "PRIVATE"), {
+    instructions: "",
+  });
   assert.deepEqual(
     projectChanges(c, { ...base, instructions: "NEW" }, "PRIVATE"),
     ["Instructions edited"],
   );
-  assert.deepEqual(
-    projectPrivateFields({ ...base, instructions: "NEW" }, "PRIVATE"),
-    {
-      instructions: "NEW",
-    },
-  );
+  assert.deepEqual(privateField("instructions", "NEW", "PRIVATE"), {
+    instructions: "NEW",
+  });
   // Without a revealed baseline an edit still counts, so the version fence decides.
-  assert.deepEqual(projectPrivateFields({ ...base, instructions: "NEW" }), {
+  assert.deepEqual(privateField("instructions", "NEW", undefined), {
     instructions: "NEW",
   });
   assert.equal(
@@ -202,13 +192,10 @@ test("project and profile change lists name each change without private values",
     profileChanges(p, { ...same, instructions: "OLD" }, "OLD"),
     [],
   );
-  assert.deepEqual(profilePrivateFields({ ...same }, "OLD"), {});
-  assert.deepEqual(
-    profilePrivateFields({ ...same, instructions: "NEW" }, "OLD"),
-    {
-      instructions: "NEW",
-    },
-  );
+  assert.deepEqual(privateField("instructions", undefined, "OLD"), {});
+  assert.deepEqual(privateField("instructions", "NEW", "OLD"), {
+    instructions: "NEW",
+  });
 });
 
 test("routing lines and command keep guidance out unless edited", () => {
@@ -325,7 +312,7 @@ test("source rows, change lines and command use keep markers and never put a val
   const lines = sourceChanges(c.source, values);
   assert.deepEqual(lines, [
     "− S-3 · GitHub Project PVT_x",
-    "+ S-4 · Search (query private) · added inactive",
+    "+ S-4 · Search · added inactive",
     "Readiness: any of 1 condition",
     "Ref for acme/atlas: main → dev",
     "Local path changed for acme/atlas",

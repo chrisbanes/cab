@@ -24,6 +24,7 @@ import {
   submitDraft,
   useDraft,
   useLoadedDraft,
+  useNewerPrivateRead,
   usePrivateValues,
 } from "./settings.js";
 
@@ -102,6 +103,12 @@ export function RoutingTab(p: TabProps) {
     priv.state,
     (r) => ({ version: r.data.routing.version, text: r.data.routing.guidance }),
     data.routing.version,
+  );
+  useNewerPrivateRead(
+    data.routing.version,
+    priv.state.data?.data.routing.version,
+    priv.state.fetchedAt,
+    p.refreshConfiguration,
   );
   const lines = routingChanges(data, d.values, revealed);
   const candidates = Array.isArray(d.values.candidateProfileIds)

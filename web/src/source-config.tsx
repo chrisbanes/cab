@@ -32,6 +32,7 @@ import {
   submitDraft,
   useDraft,
   useLoadedDraft,
+  useNewerPrivateRead,
   usePrivateValues,
 } from "./settings.js";
 import { ghLoginCopy } from "./discovery-credential.js";
@@ -72,6 +73,12 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const known =
     privateData?.version === data.source.version ? privateData : undefined;
   const staleKnown = privateData !== undefined && known === undefined;
+  useNewerPrivateRead(
+    data.source.version,
+    privateData?.version,
+    priv.state.fetchedAt,
+    p.refreshConfiguration,
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-read once per source version.
   useEffect(() => {
     if (staleKnown && !priv.state.pending) priv.refresh();
@@ -207,13 +214,20 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         <p className="metadata muted">
           {priv.state.pending ? `Loading ${label.toLowerCase()}…` : unavailable}
         </p>
-        {!priv.state.pending && (
-          <div>
-            <Button type="button" variant="secondary" onClick={priv.refresh}>
-              Try again
-            </Button>
-          </div>
-        )}
+        <div>
+          <Button
+            type="button"
+            variant="secondary"
+            aria-label={`Try again to load the ${label.toLowerCase()}`}
+            aria-busy={priv.state.pending || undefined}
+            aria-disabled={priv.state.pending || undefined}
+            onClick={() => {
+              if (!priv.state.pending) priv.refresh();
+            }}
+          >
+            Try again
+          </Button>
+        </div>
       </div>
     );
   };

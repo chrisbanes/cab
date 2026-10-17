@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import {
-  browserSuite,
-  captureBrowserEvidence,
-} from "../fixtures/browser-diagnostics.js";
+import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import type { Page } from "playwright";
 import {
+  captureSettingsEvidence as captureBrowserEvidence,
   noPageOverflow,
   outcomeMessages,
   phone,

@@ -4,13 +4,11 @@ import { realpath } from "node:fs/promises";
 import type { Page } from "playwright";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import {
-  browserSuite,
-  captureBrowserEvidence,
-} from "../fixtures/browser-diagnostics.js";
+import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { fakeDiscovery } from "../fixtures/setup-home.js";
 import {
+  captureSettingsEvidence as captureBrowserEvidence,
   createCheckout,
   noPageOverflow,
   outcomeMessages,
@@ -438,6 +436,9 @@ test("a reveal leaves no trace in the URL, history or storage", async (_t, journ
   page.on("request", (r) => {
     requests.push(`${r.url()} ${r.postData() ?? ""}`);
   });
+  const consoleText: string[] = [];
+  page.on("console", (m) => consoleText.push(m.text()));
+  page.on("pageerror", (e) => consoleText.push(e.message));
   const read = page.waitForResponse((r) => r.url().endsWith("/private-values"));
   await revealButton(page, "instructions").click();
   await instructionsField(page).waitFor();
@@ -466,7 +467,30 @@ test("a reveal leaves no trace in the URL, history or storage", async (_t, journ
     `/api/operator/projects/${ids.atlas}/private-values`,
   ]);
   assert.equal(requests.filter((r) => r.includes("PRIVATE")).length, 0);
+  assert.equal(consoleText.filter((t) => t.includes("PRIVATE")).length, 0);
   assert.equal(requests.filter((r) => r.includes("/private-values")).length, 1);
+});
+
+test("revealing after another writer saved opens the newer version", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  await page.getByLabel("Project name", { exact: true }).waitFor();
+  bumpProject(f, ids.atlas, "Atlas elsewhere");
+  await revealButton(page, "instructions").click();
+  // The read is newer than the loaded form, so the form re-reads and then opens the field.
+  await instructionsField(page).waitFor();
+  assert.equal(await instructionsField(page).inputValue(), SENTINEL);
+  assert.equal(
+    await instructionsField(page).evaluate((e) => e === document.activeElement),
+    true,
+  );
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "Atlas elsewhere",
+  );
+  assert.equal(await saveProject(page).isDisabled(), true);
 });
 
 test("a failed reveal keeps focus and explains without the text", async (_t, journey) => {
@@ -548,7 +572,7 @@ test("two tabs: a reveal never sends unedited text and a stale edit conflicts", 
     await revealButton(page, "instructions").waitFor();
     assert.equal(await showsText(page, SENTINEL), false);
 
-    // Editing the older reveal is a stale edit: the other tab saves first, so this one conflicts.
+    // Another writer moves the project on after this edit, so the save conflicts.
     await revealButton(page, "instructions").click();
     await instructionsField(page).fill("EDITED IN TAB ONE");
     bumpProject(f, ids.atlas, "Atlas moved on");
@@ -734,6 +758,18 @@ test("phone project settings lead with state and next step and keep the form usa
       "Set or change the credential in GitHub source settings, then preview this source version.",
     )
     .waitFor();
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas phone");
+  await changes(page).getByText("Project name: Atlas → Atlas phone").waitFor();
+  // Reveal works at phone width: a tappable control, the field in view, no overflow.
+  const reveal = revealButton(page, "instructions");
+  assert.ok(((await reveal.boundingBox())?.height ?? 0) >= 32);
+  await reveal.click();
+  const field = instructionsField(page);
+  await field.waitFor();
+  assert.equal(await field.inputValue(), SENTINEL);
+  assert.equal(await field.evaluate((e) => e === document.activeElement), true);
+  await noPageOverflow(page);
+  await page.reload();
   await page.getByLabel("Project name", { exact: true }).fill("Atlas phone");
   await changes(page).getByText("Project name: Atlas → Atlas phone").waitFor();
   await noPageOverflow(page);
@@ -1061,9 +1097,7 @@ test("GitHub source shows local paths and search queries plainly and edits them 
     .selectOption({ label: "Search" });
   await query.last().fill("PRIVATE NEW QUERY");
   await page.getByText("New · inactive").waitFor();
-  await changes(page)
-    .getByText("+ S-4 · Search (query private) · added inactive")
-    .waitFor();
+  await changes(page).getByText("+ S-4 · Search · added inactive").waitFor();
   const checkout = await createCheckout(f.directory, "atlas-checkout-2");
   await query.first().fill("PRIVATE EDITED QUERY");
   await path.fill(checkout);
@@ -1071,7 +1105,7 @@ test("GitHub source shows local paths and search queries plainly and edits them 
   assert.deepEqual(lines, [
     "Search query edited for S-2",
     "− S-3 · GitHub Project PVT_atlas",
-    "+ S-4 · Search (query private) · added inactive",
+    "+ S-4 · Search · added inactive",
     "Local path changed for acme/atlas",
   ]);
   assert.equal(lines.join(" ").includes("PRIVATE"), false);
@@ -1136,10 +1170,14 @@ test("GitHub source private values unavailable keeps rows kept and saveable", as
   await page.reload();
   await page.getByText("Local path unavailable", { exact: true }).waitFor();
   await page.getByText("Query unavailable", { exact: true }).waitFor();
-  const retry = page.getByRole("button", { name: "Try again", exact: true });
+  const retry = page.getByRole("button", { name: /^Try again to load the/ });
   assert.equal(await retry.count(), 2);
+  assert.equal(await retry.first().isEnabled(), true);
   assert.equal(await showsText(page, "PRIVATE"), false);
-  assert.equal(await page.getByLabel("Local repository path").count(), 0);
+  assert.equal(
+    await page.getByLabel("Local repository path", { exact: true }).count(),
+    0,
+  );
   // Other edits are not blocked, and nothing is sent for the unread values.
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   assert.equal(await save.isDisabled(), true);

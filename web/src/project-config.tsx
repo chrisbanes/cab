@@ -10,8 +10,8 @@ import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
 import {
+  privateField,
   projectChanges,
-  projectPrivateFields,
   type ProjectConfigurationData,
   type Values,
 } from "./settings-changes.js";
@@ -38,6 +38,7 @@ import {
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
+  useNewerPrivateRead,
   usePrivateValues,
   type SettingsProps,
 } from "./settings.js";
@@ -271,6 +272,12 @@ function GeneralTab(p: TabProps) {
     }),
     data.project.version,
   );
+  useNewerPrivateRead(
+    data.project.version,
+    priv.state.data?.data.project.version,
+    priv.state.fetchedAt,
+    p.refreshConfiguration,
+  );
   const lines = projectChanges(data, d.values, revealed);
   const v = d.values;
   const command = () => ({
@@ -285,7 +292,7 @@ function GeneralTab(p: TabProps) {
     ...(v.leadProfileId !== (data.project.leadProfileId ?? "")
       ? { leadProfileId: v.leadProfileId || null }
       : {}),
-    ...projectPrivateFields(v, revealed),
+    ...privateField("instructions", v.instructions, revealed),
   });
   return (
     <div className="settings-split">

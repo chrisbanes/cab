@@ -1660,18 +1660,19 @@ Presentation and interaction rules that the canvas does not show on its own.
   per-project summary.
 - Project configuration has General, Routing, GitHub source, and Sync & placement
   tabs. Each section saves separately against its own version.
-- Settings edit values in place. Instructions, routing guidance and saved search
-  queries open as "Kept · Reveal" in the project General, profile and Routing forms
+- Settings edit values in place. Instructions and routing guidance open as "Kept ·
+  Reveal" in the project General, profile and Routing forms
   (`118-project-config-general`, `123-profile-revoked`,
   `124-routing-relay-unsaved`). Reveal loads the exact text into the same multiline
   field for the signed-in operator only, and Reveal itself is not recorded
   (`118b-project-instructions-revealed`, `123b-profile-instructions-revealed`). An
   edit shows one value-free line under "Changes to save" ("Instructions edited",
-  "Instructions cleared", "Routing guidance edited", "Routing guidance cleared",
-  "Search query edited for S-2", "Local path changed for acme/atlas") and saves as an
-  ordinary versioned change. Leaving the page, signing out or a newer saved version
-  returns an unedited reveal to "Kept · Reveal"; an edit stays like any other unsaved
-  input. Local paths show plainly. GitHub Project filters stay "Filter kept · private".
+  "Instructions cleared", "Routing guidance edited", "Routing guidance cleared") and
+  saves as an ordinary versioned change. Leaving the page, signing out or a newer
+  saved version returns an unedited reveal to "Kept · Reveal"; an edit stays like any
+  other unsaved input. On the GitHub source tab, local paths and saved search queries
+  show plainly and edit in place ("Search query edited for S-2", "Local path changed
+  for acme/atlas"); GitHub Project filters stay "Filter kept · private".
 - After routing saves, the form reloads the saved version. Guidance returns to
   "Kept · Reveal", and Save stays disabled until something changes
   (`125-routing-relay-saved`).

@@ -152,6 +152,25 @@ export function revealedText<T>(
   return value && value.version === version ? value.text : undefined;
 }
 /**
+ * A private read at a newer section version than the loaded configuration means another
+ * writer saved since it loaded. Re-read the configuration once so Reveal opens the field
+ * instead of stalling on a version that never matches.
+ */
+export function useNewerPrivateRead(
+  loaded: number | undefined,
+  read: number | undefined,
+  readAt: number | null,
+  refresh: () => void,
+) {
+  const latest = useRef(refresh);
+  latest.current = refresh;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: act once per completed private read.
+  useEffect(() => {
+    if (loaded !== undefined && read !== undefined && read > loaded)
+      latest.current();
+  }, [readAt]);
+}
+/**
  * "Kept · Reveal" until the signed-in operator reveals a private text, then the same
  * multiline field. Revealed text is shown from `revealed` and enters the draft only once
  * the operator edits it, so an unedited reveal is never sent or kept across pages.

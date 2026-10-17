@@ -38,16 +38,11 @@ export function privateEdit(
   return value === "" ? "cleared" : "edited";
 }
 /** The command field for an edited private text; empty when it was not edited. */
-const privateField = (
+export const privateField = (
   name: "instructions" | "guidance",
   value: Values[string] | undefined,
   revealed: string | undefined,
 ) => (privateEdit(value, revealed) ? { [name]: String(value) } : {});
-/** Command fields for the project instructions edit (omitted unless edited). */
-export const projectPrivateFields = (v: Values, revealed?: string) =>
-  privateField("instructions", v.instructions, revealed);
-/** Command fields for the profile instructions edit (omitted unless edited). */
-export const profilePrivateFields = projectPrivateFields;
 const nameOf = (
   profiles: { id: string; name: string | null }[],
   id: string | null | undefined,
@@ -265,7 +260,7 @@ function newSelectionLine(r: SourceRow) {
       ? `Repository ${r.owner}/${r.name}`
       : r.kind === "project"
         ? `GitHub Project ${r.projectNodeId} · filter private`
-        : "Search (query private)";
+        : "Search";
   return `+ ${r.id} · ${what} · added inactive`;
 }
 

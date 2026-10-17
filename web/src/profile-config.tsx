@@ -12,8 +12,8 @@ import {
 } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import {
+  privateField,
   profileChanges,
-  profilePrivateFields,
   runtimeChanged,
   type Values,
 } from "./settings-changes.js";
@@ -44,6 +44,7 @@ import {
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
+  useNewerPrivateRead,
   usePrivateValues,
   type SettingsProps,
 } from "./settings.js";
@@ -319,6 +320,12 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
         data.profile.version,
       )
     : undefined;
+  useNewerPrivateRead(
+    data?.profile.version,
+    priv.state.data?.data.profile.version,
+    priv.state.fetchedAt,
+    resource.refresh,
+  );
   const lines = data ? profileChanges(data, d.values, revealed) : [];
   const name = data?.profile.name ?? "this profile";
   const command = () => {
@@ -340,7 +347,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
       )
         ? { capabilities: v.capabilities }
         : {}),
-      ...profilePrivateFields(v, revealed),
+      ...privateField("instructions", v.instructions, revealed),
       ...(Boolean(v.revoked) !== data.profile.revoked
         ? { revoked: Boolean(v.revoked) }
         : {}),

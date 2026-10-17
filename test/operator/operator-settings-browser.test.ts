@@ -5,10 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  browserSuite,
-  captureBrowserEvidence,
-} from "../fixtures/browser-diagnostics.js";
+import { browserSuite } from "../fixtures/browser-diagnostics.js";
 const sourceFixtureValue = process.env.FIXTURE_GITHUB;
 before(() => {
   process.env.FIXTURE_GITHUB = "offline-settings-source-value";
@@ -25,6 +22,7 @@ import {
 } from "../fixtures/operator-account.js";
 import { chromium, type Browser, type Page } from "playwright";
 import {
+  captureSettingsEvidence,
   outcomeMessages,
   savedOutcome,
   seedImportedConflict,
@@ -125,7 +123,7 @@ async function instructionsKept(page: Page) {
   );
 }
 async function capture(page: Page, name: string) {
-  return captureBrowserEvidence(page, name);
+  return captureSettingsEvidence(page, name);
 }
 async function signIn(
   page: Page,
@@ -333,7 +331,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
       `${width}px page has no overflow`,
     );
     if (width === 320)
-      await captureBrowserEvidence(page, "320-long-source-observations-button");
+      await capture(page, "320-long-source-observations-button");
   }
   assert.equal(f.runtime.turns, 0);
 });
