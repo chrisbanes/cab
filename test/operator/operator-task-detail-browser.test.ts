@@ -441,18 +441,17 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
     content: ".board-columns .board-column{min-width:600px !important}",
   });
   const board = page.locator(".board-columns");
-  await board.evaluate((e) => {
-    e.scrollLeft = e.scrollWidth;
-  });
-  const boardScroll = await board.evaluate((e) => e.scrollLeft);
-  assert.ok(boardScroll > 0, "the board scrolls horizontally");
   // The card sits in the first column, off screen at this scroll. A pointer click would first
-  // scroll the board to it, and whether that scroll is recorded before the navigation depends
-  // on load; opening it from the keyboard leaves the board where it is.
-  await card.evaluate((el) =>
-    (el as HTMLElement).focus({ preventScroll: true }),
-  );
-  await page.keyboard.press("Enter");
+  // scroll the board to it. Leave in the same turn as the scroll, before its event can save it.
+  const boardScroll = await card.evaluate((el) => {
+    const area = el.closest<HTMLElement>(".board-columns")!;
+    area.scrollLeft = area.scrollWidth;
+    const offset = area.scrollLeft;
+    (el as HTMLElement).focus({ preventScroll: true });
+    (el as HTMLElement).click();
+    return offset;
+  });
+  assert.ok(boardScroll > 0, "the board scrolls horizontally");
   const back = page.getByRole("link", {
     name: "Back to originating view",
     exact: true,
@@ -478,6 +477,20 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   assert.equal(await page.evaluate(() => history.length), length);
   await card.waitFor();
   assert.equal(await board.evaluate((e) => e.scrollLeft), boardScroll);
+  // Sidebar search submits through the shell's navigation callback, not its link handler.
+  const searchScroll = await board.evaluate((e) => {
+    e.scrollLeft = 150;
+    const offset = e.scrollLeft;
+    document
+      .querySelector<HTMLFormElement>(".sidebar .search-work")!
+      .requestSubmit();
+    return offset;
+  });
+  await page.waitForURL((u) => u.pathname === "/app/search");
+  assert.equal(await page.evaluate(() => history.state?.board), undefined);
+  await page.goBack();
+  await card.waitFor();
+  assert.equal(await board.evaluate((e) => e.scrollLeft), searchScroll);
   // After sign-out and sign-in the header reads "Task" until the new read lands.
   await card.click();
   await page

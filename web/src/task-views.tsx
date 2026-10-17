@@ -12,7 +12,7 @@ import {
   ChevronRight,
   type LucideIcon,
 } from "lucide-react";
-import { useState, useRef, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import type {
   InboxItem,
@@ -247,6 +247,33 @@ export function TaskBoard({
       "",
     );
   };
+  const capture = useCallback(() => {
+    if (!board.current) return;
+    history.replaceState(
+      {
+        ...history.state,
+        board: { selected, scrollLeft: board.current.scrollLeft },
+      },
+      "",
+    );
+  }, [selected]);
+  useLayoutEffect(() => {
+    // Capture the source entry before navigation; its scroll event may still be queued.
+    const leave = (event: Event) => {
+      if (
+        (event.target as Element | null)?.closest(
+          event.type === "submit" ? ".sidebar .search-work" : 'a[href^="/app"]',
+        )
+      )
+        capture();
+    };
+    document.addEventListener("click", leave, true);
+    document.addEventListener("submit", leave, true);
+    return () => {
+      document.removeEventListener("click", leave, true);
+      document.removeEventListener("submit", leave, true);
+    };
+  }, [capture]);
   useLayoutEffect(() => {
     if (board.current)
       board.current.scrollLeft = history.state?.board?.scrollLeft ?? 0;
@@ -332,19 +359,7 @@ export function TaskBoard({
   return (
     <div className="task-board">
       {columnsTarget ? createPortal(chips, columnsTarget) : chips}
-      <div
-        className="board-columns"
-        ref={board}
-        onScroll={(e) =>
-          history.replaceState(
-            {
-              ...history.state,
-              board: { selected, scrollLeft: e.currentTarget.scrollLeft },
-            },
-            "",
-          )
-        }
-      >
+      <div className="board-columns" ref={board} onScroll={capture}>
         {columns.map((column, index) => (
           <section
             key={column}
