@@ -99,7 +99,7 @@ export async function searchRecords(
     await apply("after", searchDayStart(filters.from), async () => {
       const from = page.getByLabel("From date", { exact: true });
       await from.fill(filters.from as string);
-      await from.blur();
+      await from.press("Enter");
     });
   if (filters.through)
     await apply("before", searchDayEnd(filters.through), async () => {

@@ -961,27 +961,32 @@ test("Search leads with the field and shows filters beside the result count once
   assert.equal(searchParam("cursor"), null);
   await page.unroute("**/api/operator/search?*");
 
-  // Dates apply on blur or Enter, never on each keystroke, and only when changed.
+  // Dates apply on Enter (or with another control), never on each keystroke or on blur.
   const now = new Date(),
     day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const before = searchReads.length;
+  const before = searchReads.length,
+    entries = await page.evaluate(() => history.length);
   await filters.from.fill(day);
+  await filters.from.blur();
   await renderedFrame();
   assert.equal(searchParam("after"), null);
   assert.equal(searchReads.length, before);
+  assert.equal(await page.evaluate(() => history.length), entries);
+  await page.getByText("Dates not applied yet.").waitFor();
   await replaced(async () => {
-    await filters.from.blur();
+    await filters.from.press("Enter");
     await page.waitForURL(
       (url) => url.searchParams.get("after") === searchDayStart(day),
     );
   });
   assert.equal(await filters.from.inputValue(), day);
-  const entries = await page.evaluate(() => history.length),
+  assert.equal(await page.getByText("Dates not applied yet.").count(), 0);
+  // Enter with nothing pending applies nothing.
+  const applied = await page.evaluate(() => history.length),
     reads = searchReads.length;
-  await filters.from.focus();
-  await filters.from.blur();
+  await filters.from.press("Enter");
   await renderedFrame();
-  assert.equal(await page.evaluate(() => history.length), entries);
+  assert.equal(await page.evaluate(() => history.length), applied);
   assert.equal(searchReads.length, reads);
   await filters.through.fill(day);
   await renderedFrame();
@@ -1140,6 +1145,8 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
   j.observe(page);
   page.setDefaultTimeout(5000);
   const field = (name: string) => page.getByLabel(name, { exact: true });
+  const searchParam = (name: string) =>
+    new URL(page.url()).searchParams.get(name);
   const activeId = () => page.evaluate(() => document.activeElement?.id ?? "");
   const waitActive = (id: string) =>
     page.waitForFunction((id) => document.activeElement?.id === id, id);
@@ -1215,30 +1222,37 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
   await page.waitForURL((url) => url.searchParams.get("historical") === "true");
   await waitActive("search-historical");
 
-  // Tab out of From applies it and lands on Through.
+  // Tab out of From applies nothing and lands on Through; Enter there applies both dates at once.
+  const entriesBefore = await page.evaluate(() => history.length);
   await field("From date").fill(day(-2));
   await leave("search-from-date", "Tab");
-  await page.waitForURL(
-    (url) => url.searchParams.get("after") === searchDayStart(day(-2)),
-  );
   await waitActive("search-through-date");
+  assert.equal(searchParam("after"), null);
   assert.equal(await field("From date").inputValue(), day(-2));
-
-  // Shift+Tab out of From applies it and lands on Type.
-  await field("From date").fill(day(-1));
-  await leave("search-from-date", "Shift+Tab");
-  await page.waitForURL(
-    (url) => url.searchParams.get("after") === searchDayStart(day(-1)),
-  );
-  await waitActive("search-type");
-
-  // Enter in Through applies it and keeps focus there.
+  await page.getByText("Dates not applied yet.").waitFor();
   await field("Through date").fill(day(0));
   await page.keyboard.press("Enter");
   await page.waitForURL(
-    (url) => url.searchParams.get("before") === searchDayEnd(day(0)),
+    (url) =>
+      url.searchParams.get("after") === searchDayStart(day(-2)) &&
+      url.searchParams.get("before") === searchDayEnd(day(0)),
   );
   await waitActive("search-through-date");
+  assert.equal(await page.evaluate(() => history.length), entriesBefore + 1);
+  assert.equal(await page.getByText("Dates not applied yet.").count(), 0);
+
+  // Shift+Tab out of From applies nothing and lands on Type; changing Type applies both (here clearing it).
+  await field("From date").fill(day(-1));
+  await leave("search-from-date", "Shift+Tab");
+  await waitActive("search-type");
+  assert.equal(searchParam("after"), searchDayStart(day(-2)));
+  await field("Record type").selectOption("");
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("after") === searchDayStart(day(-1)) &&
+      !url.searchParams.has("type"),
+  );
+  await waitActive("search-type");
 
   // Refresh results keeps focus and does not replace the page.
   await page
@@ -1281,4 +1295,312 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
   await page.goBack();
   await page.waitForURL(searchURL);
   assert.equal(await field("From date").inputValue(), day(-1));
+});
+
+test("Search applies the whole header form in one navigation, whichever control commits it", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(
+    f,
+    "Matrix alpha",
+    "Matrix alpha",
+    "- [ ] Matrix alpha",
+  );
+  a.result("Matrix result alpha");
+  const b = await seedReviewTask(
+    f,
+    "Matrix beta",
+    "Matrix beta",
+    "- [ ] Matrix beta",
+  );
+  b.result("Matrix result beta");
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const field = (name: string) => page.getByLabel(name, { exact: true });
+  const searchParam = (name: string) =>
+    new URL(page.url()).searchParams.get(name);
+  // The app numbers the entries it pushes; history.length stops growing at the browser's limit.
+  const entries = () => page.evaluate(() => history.state?.entryIndex ?? 0);
+  const waitActive = (id: string) =>
+    page.waitForFunction((id) => document.activeElement?.id === id, id);
+  const day = (offset: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const open = async () => {
+    // Re-entering the current URL would be a reload, which purges the private query.
+    await page.goto("about:blank");
+    await page.goto(`${web.origin}/app/search?query=Matrix`);
+    await page.locator("#search-count").waitFor();
+  };
+  const replaced = async (action: () => Promise<unknown>) => {
+    await page
+      .locator(".search-workspace")
+      .evaluate((el) => el.setAttribute("data-replaced", ""));
+    await action();
+    await page
+      .locator(".search-workspace[data-replaced]")
+      .waitFor({ state: "detached" });
+  };
+
+  await page.goto(`${web.origin}/app/search`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel(searchFieldLabel).waitFor();
+
+  type Pending = { from?: string; through?: string };
+  const states: Record<string, Pending> = {
+    clean: {},
+    "dirty From": { from: day(-2) },
+    "dirty Through": { through: day(0) },
+    "both dirty": { from: day(-2), through: day(0) },
+    "From after Through": { from: day(0), through: day(-2) },
+  };
+  // Each control commits the form: its own change plus whatever dates are typed.
+  const controls: Record<
+    string,
+    {
+      id: string;
+      params: Record<string, string>;
+      act: (pending: Pending) => Promise<unknown>;
+    }
+  > = {
+    Project: {
+      id: "search-project",
+      params: { projectId: a.projectId },
+      act: async () => {
+        await field("Project").focus();
+        await field("Project").selectOption(a.projectId);
+      },
+    },
+    Type: {
+      id: "search-type",
+      params: { type: "result" },
+      act: async () => {
+        await field("Record type").focus();
+        await field("Record type").selectOption("result");
+      },
+    },
+    "Include historical records": {
+      id: "search-historical",
+      params: { historical: "true" },
+      act: () => field("Include historical records").click(),
+    },
+    "Search records": {
+      id: "search-records",
+      params: {},
+      act: () =>
+        page
+          .getByRole("button", { name: "Search records", exact: true })
+          .click(),
+    },
+    "Enter in the field": {
+      id: "retained-query",
+      params: {},
+      act: async () => {
+        await page.locator("#retained-query").focus();
+        await page.keyboard.press("Enter");
+      },
+    },
+    "Refresh results": {
+      id: "search-refresh",
+      params: {},
+      act: () =>
+        page
+          .getByRole("button", { name: "Refresh results", exact: true })
+          .click(),
+    },
+    "Enter in a date": {
+      id: "",
+      params: {},
+      act: (pending) =>
+        field(pending.from ? "From date" : "Through date").press("Enter"),
+    },
+  };
+  for (const [control, spec] of Object.entries(controls)) {
+    for (const [state, pending] of Object.entries(states)) {
+      const dirty = Boolean(pending.from || pending.through);
+      if (control === "Enter in a date" && !dirty) continue;
+      const label = `${control} with ${state} dates`;
+      await open();
+      if (pending.from) await field("From date").fill(pending.from);
+      if (pending.through) await field("Through date").fill(pending.through);
+      if (dirty) await page.getByText("Dates not applied yet.").waitFor();
+      const before = await entries();
+      // Refresh only re-reads when nothing is pending; typed dates are applied with it otherwise.
+      const navigates = !(control === "Refresh results" && !dirty);
+      const expected: Record<string, string | null> = {
+        query: "Matrix",
+        historical: "false",
+        projectId: null,
+        type: null,
+        after: pending.from ? searchDayStart(pending.from) : null,
+        before: pending.through ? searchDayEnd(pending.through) : null,
+        ...spec.params,
+      };
+      if (navigates) {
+        await replaced(async () => {
+          await spec.act(pending);
+          await page.waitForURL((url) =>
+            Object.entries(expected).every(
+              ([name, value]) => url.searchParams.get(name) === value,
+            ),
+          );
+        });
+      } else {
+        await Promise.all([
+          page.waitForResponse(
+            (r) => new URL(r.url()).pathname === "/api/operator/search",
+          ),
+          spec.act(pending),
+        ]);
+      }
+      assert.equal(await entries(), before + (navigates ? 1 : 0), label);
+      if (navigates)
+        for (const [name, value] of Object.entries(expected))
+          assert.equal(searchParam(name), value, `${label}: ${name}`);
+      else assert.equal(page.url(), `${web.origin}/app/search?query=Matrix`);
+      assert.equal(
+        await page.getByText("Dates not applied yet.").count(),
+        0,
+        label,
+      );
+      assert.equal(
+        await field("From date").inputValue(),
+        pending.from ?? "",
+        label,
+      );
+      assert.equal(
+        await field("Through date").inputValue(),
+        pending.through ?? "",
+        label,
+      );
+      assert.equal(
+        await field("Include historical records").isChecked(),
+        expected.historical === "true",
+        label,
+      );
+      assert.equal(
+        await field("Record type").inputValue(),
+        expected.type ?? "",
+        label,
+      );
+      assert.equal(
+        await field("Project").inputValue(),
+        expected.projectId ?? "",
+        label,
+      );
+      if (navigates && spec.id) await waitActive(spec.id);
+      await page.locator("#search-count").waitFor();
+      if (state === "From after Through") {
+        // The range is applied as typed and reads as no match, not as an error.
+        await page.getByText(/No permitted retained match/).waitFor();
+      } else {
+        await page.locator("[data-search-record]").first().waitFor();
+        if (expected.projectId) {
+          const provenance = await page
+            .locator(".search-provenance")
+            .allTextContents();
+          assert.ok(
+            provenance.length > 0 &&
+              provenance.every((t) => t.startsWith("Matrix alpha · ")),
+            label,
+          );
+        }
+        if (expected.type) {
+          const kinds = await page
+            .locator("[data-search-record] .search-match-head > :first-child")
+            .allTextContents();
+          assert.ok(
+            kinds.length > 0 && kinds.every((k) => k === "Result"),
+            label,
+          );
+        }
+      }
+    }
+  }
+
+  // Rapid consecutive commits: a read held from before never renders over the final form.
+  let release!: () => void, entered!: () => void, delivered!: () => void;
+  const barrier = new Promise<void>((resolve) => (release = resolve)),
+    entry = new Promise<void>((resolve) => (entered = resolve)),
+    done = new Promise<void>((resolve) => (delivered = resolve));
+  let held = false;
+  await page.route("**/api/operator/search?*", async (route) => {
+    if (held) return route.continue();
+    held = true;
+    const response = await route.fetch();
+    entered();
+    await barrier;
+    await route
+      .fulfill({ response })
+      .catch((error) =>
+        assert.match(String(error), /already handled|Target.*closed/),
+      )
+      .finally(delivered);
+  });
+  await page.goto(`${web.origin}/app/search?query=Matrix`);
+  await entry;
+  await replaced(async () => {
+    await field("Record type").selectOption("result");
+    await page.waitForURL((url) => url.searchParams.get("type") === "result");
+  });
+  await replaced(async () => {
+    await field("Include historical records").click();
+    await page.waitForURL(
+      (url) => url.searchParams.get("historical") === "true",
+    );
+  });
+  await page.locator("[data-search-record]").first().waitFor();
+  release();
+  await done;
+  await page.evaluate(
+    () => new Promise<void>((r) => requestAnimationFrame(() => r())),
+  );
+  assert.equal(searchParam("type"), "result");
+  assert.equal(await field("Include historical records").isChecked(), true);
+  assert.equal(await field("Record type").inputValue(), "result");
+  const kinds = await page
+    .locator("[data-search-record] .search-match-head > :first-child")
+    .allTextContents();
+  assert.ok(kinds.length > 0 && kinds.every((k) => k === "Result"));
+  await page.unroute("**/api/operator/search?*");
+
+  // Back and Forward restore each entry's dates and filters.
+  await field("From date").fill(day(-2));
+  await field("Through date").fill(day(0));
+  await replaced(async () => {
+    await field("Through date").press("Enter");
+    await page.waitForURL((url) => url.searchParams.has("before"));
+  });
+  await page.goBack();
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLInputElement>("#search-from-date")?.value ===
+      "",
+  );
+  assert.equal(searchParam("after"), null);
+  assert.equal(await field("Include historical records").isChecked(), true);
+  await page.goForward();
+  await page.waitForFunction(
+    (value) =>
+      document.querySelector<HTMLInputElement>("#search-from-date")?.value ===
+      value,
+    day(-2),
+  );
+  assert.equal(await field("Through date").inputValue(), day(0));
+  assert.equal(searchParam("before"), searchDayEnd(day(0)));
 });

@@ -964,7 +964,7 @@ selected match and position.
   selected. Historical R2 in the state specimens has the same complete ownership.
 - **States belong to flows:** search filters edit the current query scope. They sit in
   the results header beside the count once there is a query, and apply on change
-  (From and Through on blur or Enter); Refresh
+  (From and Through with Enter or any other control); Refresh
   provider status retries the read in the current delivery view. Existing checks,
   findings, comparison and recovery controls remain. `75-search-states`, `76-phone-search-states`, `71-delivery-alternatives`
   and `72-phone-delivery-alternatives` are canvas review specimens with no product navigation into them.
@@ -1955,14 +1955,18 @@ the frames as follows:
   in a row under the field as in `73-search`. They sit in the results header with
   the count, Refresh results on the count's row and the filters on the row beneath,
   and show only once there is a query, including while the first read loads or has
-  failed. Project, Type and the history checkbox apply on change; From and Through
-  apply on blur or Enter, and only when the value changed; a date left for a result
-  link or outside the page stays uncommitted so that click is not lost. Every applied
-  filter is a new Search entry that drops the cursor, and Back/Forward restores each
-  entry's values. Focus stays on the control that applied the filter (or goes to the
-  control Tab or Shift+Tab was heading for), and Tab order is the reading order:
-  field, Search records, Refresh results, then Project, Type, From, Through and the
-  history checkbox.
+  failed. Project, Type and the history checkbox apply on change. From and Through
+  never apply on blur, because replacing the page then would detach the control being
+  clicked; they apply with Enter in either field or together with whichever other
+  control commits next (Project, Type, the checkbox, Search records, Enter in the
+  field, or Refresh results, which applies them as a new search instead of re-reading).
+  Typed dates stay visible in their fields with the line "Dates not applied yet. Press
+  Enter to apply them." until then. A From after Through is applied as typed and reads
+  as no match. Every commit is one new Search entry that drops the cursor and reads
+  the whole form; Back/Forward restores each entry's values. Clicking a result link
+  with a date pending opens the task and commits nothing. Focus stays on the control
+  that committed, and Tab order is the reading order: field, Search records, Refresh
+  results, then Project, Type, From, Through and the history checkbox.
 - Date is From and Through date fields rather than one "Any date" select, and
   history is the "Include historical records" checkbox.
 - Provenance is "project · current/historical · time". The search read model

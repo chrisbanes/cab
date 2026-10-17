@@ -2,9 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useRef,
   useState,
-  type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -97,9 +95,6 @@ type Filters = {
  * that had focus is named here, with the entry it belongs to, so the next page focuses it again.
  */
 let restoreFocus: { navKey: unknown; id: string } | null = null;
-/** The controls a date blur can hand focus to without losing the person's next action. */
-const keepsFocus =
-  "[class~='search-query-row'], [class~='search-results-head']";
 export class SearchState {
   dataPath = "";
   data: z.infer<typeof searchReadSchema> | null = null;
@@ -138,8 +133,10 @@ export function Search({
   const origin = (history.state as { workspaceOrigin?: string } | null)
     ?.workspaceOrigin;
   const backToItem = returnsToItem(origin);
-  // The date values the URL already holds, so a blur or Enter that changes nothing pushes no entry.
-  const applied = useRef({ after, before });
+  // Dates typed but not applied yet. They are part of the form: any control that commits reads them.
+  const datesPending =
+    after !== localDay(params.get("after")) ||
+    before !== localDay(params.get("before"));
   useLayoutEffect(() => {
     const id =
       restoreFocus?.navKey === history.state?.navKey ? restoreFocus?.id : null;
@@ -193,7 +190,6 @@ export function Search({
       before,
       ...over,
     };
-    applied.current = { after: f.after, before: f.before };
     state.data = null;
     state.scrollY = 0;
     const p = new URLSearchParams({
@@ -211,26 +207,12 @@ export function Search({
       ? { navKey: history.state?.navKey, id: focusId }
       : null;
   }
-  const datesChanged = () =>
-    after !== applied.current.after || before !== applied.current.before;
+  // Leaving a date field applies nothing: replacing the page on blur would detach the control
+  // being clicked before its own event arrives. Enter, or any other control, applies the form.
   const dateEnter = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    if (datesChanged()) submit({}, e.currentTarget.id);
-  };
-  /**
-   * Applies the dates when focus moves to another Search control or to nothing, and hands focus
-   * to that control on the next page. Moving to a result link or out of the page leaves the
-   * value uncommitted: replacing the page under that click would lose it.
-   */
-  const dateBlur = (e: FocusEvent<HTMLInputElement>) => {
-    const next = e.relatedTarget;
-    const target =
-      next instanceof HTMLElement && next.id && next.closest(keepsFocus)
-        ? next.id
-        : "";
-    if ((next ? target : document.hasFocus()) && datesChanged())
-      submit({}, target);
+    if (datesPending) submit({}, e.currentTarget.id);
   };
   return (
     <section className="search-workspace" aria-label="Retained record search">
@@ -316,7 +298,8 @@ export function Search({
               id="search-refresh"
               variant="secondary"
               onClick={() => {
-                resource.refresh();
+                if (datesPending) submit();
+                else resource.refresh();
                 onRefresh?.();
               }}
             >
@@ -370,7 +353,6 @@ export function Search({
                   type="date"
                   value={after}
                   onChange={(e) => setAfter(e.target.value)}
-                  onBlur={dateBlur}
                   onKeyDown={dateEnter}
                 />
               </label>
@@ -383,7 +365,6 @@ export function Search({
                   type="date"
                   value={before}
                   onChange={(e) => setBefore(e.target.value)}
-                  onBlur={dateBlur}
                   onKeyDown={dateEnter}
                 />
               </label>
@@ -399,6 +380,11 @@ export function Search({
                 />
                 Include historical records
               </label>
+              {datesPending && (
+                <p className="metadata search-pending" role="status">
+                  Dates not applied yet. Press Enter to apply them.
+                </p>
+              )}
             </div>
           </div>
           {data && (
