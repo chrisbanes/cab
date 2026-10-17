@@ -6,6 +6,8 @@ import {
   type InboxItem,
   type PushSubscriptionRecord,
   pushFailureSchema,
+  pushRevokedReasonSchema,
+  type pushTestOutcomeSchema,
   type inboxReadSchema,
 } from "../operator/contracts.js";
 import { runtimeInboxHeadline } from "../operator/runtime-restart-copy.js";
@@ -15,6 +17,7 @@ import {
   fetchPushTransport,
   loadOrCreateVapidKeys,
   PushError,
+  pushHostAllowed,
   type PushResponse,
   type PushTransport,
   pushHeaders,
@@ -37,12 +40,7 @@ const MAX_RETRY_AFTER_MS = 600_000;
 const MAX_INBOX_PAGES = 100;
 const PROJECT_NAME_LIMIT = 64;
 
-export type PushOutcome =
-  | "sent"
-  | "gone"
-  | "rejected"
-  | "unavailable"
-  | "timeout";
+export type PushOutcome = z.infer<typeof pushTestOutcomeSchema>;
 export type InboxRead = z.infer<typeof inboxReadSchema>;
 export type PushPayload = { v: 1; title: string; url: string; tag: string };
 
@@ -57,7 +55,12 @@ export function pushPayload(
     case "approval":
     case "intervention": {
       const project =
-        [...(item.projectName ?? "").replace(/\p{Cc}/gu, " ")]
+        [
+          ...(item.projectName ?? "").replace(
+            /[\p{Cc}\p{Cf}\u2028\u2029]/gu,
+            " ",
+          ),
+        ]
           .slice(0, PROJECT_NAME_LIMIT)
           .join("")
           .trim() || "a project";
@@ -100,7 +103,7 @@ const rowSchema = z
     lastSuccessAt: z.number().int().nullable(),
     lastFailure: pushFailureSchema.nullable(),
     revokedAt: z.number().int().nullable(),
-    revokedReason: z.enum(["operator", "gone", "key-changed"]).nullable(),
+    revokedReason: pushRevokedReasonSchema.nullable(),
   })
   .strict();
 type Row = z.infer<typeof rowSchema>;
@@ -257,7 +260,7 @@ export class OperatorPushStore {
   /** Clears the endpoint and keys. Idempotent: revoking a revoked row changes nothing. */
   revoke(
     id: string,
-    reason: "operator" | "gone" | "key-changed",
+    reason: z.infer<typeof pushRevokedReasonSchema>,
     now: number,
   ): PushSubscriptionRecord {
     return transaction(this.db, () => {
@@ -340,7 +343,9 @@ export class OperatorPushStore {
         "INSERT OR IGNORE INTO operator_push_alerts(key) VALUES (?)",
       );
       for (const key of fresh) insert.run(key);
-      if (!baselined)
+      // shortcut: a partial first read records what it saw without ending the baseline, so a
+      // task it could not read is not announced later; if reads stay partial nothing new is sent.
+      if (!baselined && complete)
         this.db.prepare("UPDATE operator_push_state SET baselined = 1").run();
       if (complete) {
         const present = new Set(current);
@@ -452,10 +457,6 @@ export class OperatorPush {
     return new OperatorPush(options, keys);
   }
 
-  available(): boolean {
-    return this.keys !== undefined;
-  }
-
   read() {
     return {
       available: this.keys !== undefined,
@@ -546,8 +547,10 @@ export class OperatorPush {
     const read = await this.readAll();
     const byKey = new Map<string, InboxItem>();
     for (const item of read.items) byKey.set(inboxAlertKey(item), item);
+    // Alerts are only recorded when they can still be sent: a stop in mid-read drops nothing.
+    if (this.stopped) return;
     const fresh = this.store.applyRead([...byKey.keys()], read.complete);
-    if (!fresh.length || this.stopped) return;
+    if (!fresh.length) return;
     const devices = this.store.activeIds();
     for (const key of fresh) {
       const item = byKey.get(key);
@@ -609,6 +612,12 @@ export class OperatorPush {
   private async attempt(delivery: Delivery): Promise<void> {
     const keys = this.keys;
     const target = this.store.target(delivery.subscriptionId);
+    // A stored endpoint is checked again at send time, so a changed database cannot widen it.
+    if (target && !pushHostAllowed(new URL(target.endpoint).hostname)) {
+      this.store.recordFailure(delivery.subscriptionId, "rejected");
+      delivery.done?.("rejected");
+      return;
+    }
     if (!keys || !target) {
       delivery.done?.("gone");
       return;

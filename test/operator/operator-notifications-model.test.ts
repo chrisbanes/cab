@@ -129,18 +129,23 @@ test("a subscription made under another key is turn on again even when its row i
   );
 });
 
-const open = (tags: string[]) => {
+const READ_AT = 1_000_000;
+const open = (tags: string[], timestamp = READ_AT - 1) => {
   const closed: string[] = [];
   return {
     closed,
-    list: tags.map((tag) => ({ tag, close: () => closed.push(tag) })),
+    list: tags.map((tag) => ({
+      tag,
+      timestamp,
+      close: () => closed.push(tag),
+    })),
   };
 };
 
 test("closing keeps current alerts and closes only the resolved ones", () => {
   const n = open(["q1", "runtime:codex:S1", "runtime:codex:S0"]);
   assert.equal(
-    closeResolved(n.list, new Set(["q1", "runtime:codex:S1"]), true),
+    closeResolved(n.list, new Set(["q1", "runtime:codex:S1"]), true, READ_AT),
     1,
   );
   assert.deepEqual(n.closed, ["runtime:codex:S0"]);
@@ -148,20 +153,27 @@ test("closing keeps current alerts and closes only the resolved ones", () => {
 
 test("a recovered runtime's notification closes when no alert is current", () => {
   const n = open(["runtime:codex:S1"]);
-  closeResolved(n.list, new Set(), true);
+  closeResolved(n.list, new Set(), true, READ_AT);
   assert.deepEqual(n.closed, ["runtime:codex:S1"]);
 });
 
 test("an incomplete read closes nothing", () => {
   const n = open(["q1", "runtime:codex:S1"]);
-  assert.equal(closeResolved(n.list, new Set(), false), 0);
+  assert.equal(closeResolved(n.list, new Set(), false, READ_AT), 0);
   assert.deepEqual(n.closed, []);
 });
 
 test("test notifications and untagged ones are never closed as resolved", () => {
   const n = open(["test:notification", ""]);
-  closeResolved(n.list, new Set(), true);
+  closeResolved(n.list, new Set(), true, READ_AT);
   assert.deepEqual(n.closed, []);
+});
+
+test("a notification that arrived after the read began is kept, since the read may not have seen it", () => {
+  const n = open(["q-new"], READ_AT);
+  const later = open(["q-newer"], READ_AT + 5);
+  closeResolved([...n.list, ...later.list], new Set(), true, READ_AT);
+  assert.deepEqual([...n.closed, ...later.closed], []);
 });
 
 test("a browser label names the browser and system from the user agent", () => {

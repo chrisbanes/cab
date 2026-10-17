@@ -706,7 +706,7 @@ untested; the bounded live journeys ran the service outside launchd.
 ### Browser notifications
 
 Settings → Notifications turns on browser notifications, one browser at a time.
-Nothing is sent, read or stored until the operator does that. While at least one browser
+Nothing is sent or read, and no subscription is stored, until the operator does that. While at least one browser
 is subscribed, the operator process reads the same Inbox as the UI every 15 seconds and
 sends one encrypted Web Push per newly seen alert to each active browser; with none, it
 reads nothing. A push carries a title ("Question in Relay: 2 waiting", "Codex runtime
@@ -714,8 +714,10 @@ unavailable") and an Inbox link, no question text, task content, error text or c
 Opening it shows that request after sign-in. It never answers or approves anything.
 
 - **Key.** The operator process creates `STATE/auth/operator-push-vapid.json` (mode `0600`,
-  owner-only, beside the operator auth file) when it first starts, for a fresh or an
-  upgraded install; it needs no plist change. A key file
+  owner-only, beside the operator auth file) when it first starts. It is the same for
+  a LaunchAgent and a [LaunchDaemon](#launchdaemon-mode) install, a fresh or an upgraded
+  one: the daemon runs as the same non-root account and uses the same auth directory, so
+  nothing changes in either plist. A key file
   that is a symbolic link, owned by another user, readable by others, oversized or corrupt
   is refused: Settings → Notifications then reads "Unavailable on the service" and the rest
   of the operator UI keeps running. The private key lives only in this file, never in the

@@ -26,8 +26,9 @@ export class PushError extends Error {
 
 const RECORD_SIZE = 4096;
 const TAG_LENGTH = 16;
-/** One record: the plaintext, a one-byte delimiter and the GCM tag fit in the record size. */
-export const PUSH_PLAINTEXT_LIMIT = RECORD_SIZE - TAG_LENGTH - 1;
+/** Push services must accept 4096 bytes in all: the header (salt, record size, key id, key), the delimiter and the tag come out of it. */
+const HEADER_LENGTH = 16 + 4 + 1 + 65;
+export const PUSH_PLAINTEXT_LIMIT = 4096 - HEADER_LENGTH - 1 - TAG_LENGTH;
 const MAX_ENDPOINT_LENGTH = 2048;
 const KEY_FILE_FORMAT = "ensemble-operator-push-vapid";
 const MAX_KEY_FILE_BYTES = 4_096;
@@ -51,9 +52,11 @@ export const endpointDigest = (endpoint: string) =>
 
 const b64 = (value: Buffer) => value.toString("base64url");
 
+/** Strict base64url of an exact length; trailing padding some browsers add is tolerated. */
 function decodeKey(value: string, length: number): Buffer {
-  const decoded = Buffer.from(value, "base64url");
-  if (decoded.length !== length || b64(decoded) !== value)
+  const text = value.replace(/={0,2}$/, "");
+  const decoded = Buffer.from(text, "base64url");
+  if (decoded.length !== length || b64(decoded) !== text)
     throw new PushError("invalid-input");
   return decoded;
 }
@@ -81,6 +84,13 @@ export function validatePushEndpoint(input: unknown): ValidatedSubscription {
     );
   if (!shape || endpoint.length > MAX_ENDPOINT_LENGTH)
     throw new PushError("invalid-input");
+  // DNS limits, so a stored host always fits the metadata the list returns.
+  const hostText = shape[1] ?? "";
+  if (
+    hostText.length > 253 ||
+    hostText.split(".").some((label) => !label || label.length > 63)
+  )
+    throw new PushError("invalid-input");
   let url: URL;
   try {
     url = new URL(endpoint);
@@ -94,6 +104,7 @@ export function validatePushEndpoint(input: unknown): ValidatedSubscription {
     url.password ||
     url.port ||
     url.hash ||
+    url.href.length > MAX_ENDPOINT_LENGTH ||
     host !== (shape[1] ?? "").toLowerCase() ||
     !pushHostAllowed(host)
   )
@@ -112,8 +123,8 @@ export function validatePushEndpoint(input: unknown): ValidatedSubscription {
   return {
     endpoint: url.href,
     host,
-    p256dh: keys.p256dh,
-    auth: keys.auth,
+    p256dh: b64(p256dh),
+    auth: b64(decodeKey(keys.auth, 16)),
     label,
   };
 }
@@ -261,18 +272,21 @@ async function createKeyFile(
     dirname(file),
     `.${basename(file)}.${randomBytes(16).toString("hex")}.tmp`,
   );
-  const handle = await open(temporary, "wx", 0o600);
+  // Every path removes the temporary file, so a failed write never leaves key material behind.
   try {
-    await handle.chmod(0o600);
-    await handle.writeFile(contents, { encoding: "utf8" });
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
-    await link(temporary, file);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      await handle.chmod(0o600);
+      await handle.writeFile(contents, { encoding: "utf8" });
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try {
+      await link(temporary, file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
   } finally {
     await unlink(temporary).catch(() => undefined);
   }

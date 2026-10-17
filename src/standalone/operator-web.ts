@@ -142,7 +142,7 @@ export class OperatorWebBundle {
       files.set(`/assets/${name}`, { body: await readFile(path), type });
     }
     // The push worker is served at /app/service-worker.js so its scope is /app/. A build without
-    // one serves none, so the worker route answers 404 and the page reports push unavailable.
+    // one serves none: the worker route answers 404 and turning notifications on fails in the browser.
     const workerPath = join(directory, "service-worker.js"),
       worker = await lstat(workerPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") return undefined;

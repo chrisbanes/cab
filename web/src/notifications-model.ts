@@ -59,24 +59,29 @@ export const TEST_TAG_PREFIX = "test:";
 
 export interface OpenNotification {
   tag: string;
+  /** Milliseconds since the epoch at which the browser created it. */
+  timestamp: number;
   close(): void;
 }
 
 /**
  * Closes the notifications whose alert is no longer in the Inbox. Only a complete read can say a
- * request is gone, so a partial read closes nothing. Test notifications and ones without a tag
- * are not alerts and stay.
+ * request is gone, so a partial read closes nothing, and a notification newer than the read's
+ * start may be about an alert the read never saw, so it stays. Test notifications and ones
+ * without a tag are not alerts and stay.
  */
 export function closeResolved(
   open: readonly OpenNotification[],
   current: ReadonlySet<string>,
   complete: boolean,
+  readStartedAt: number,
 ): number {
   if (!complete) return 0;
   let closed = 0;
   for (const notification of open) {
     if (!notification.tag || notification.tag.startsWith(TEST_TAG_PREFIX))
       continue;
+    if (notification.timestamp >= readStartedAt) continue;
     if (!current.has(notification.tag)) {
       notification.close();
       closed++;

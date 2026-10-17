@@ -70,7 +70,7 @@ export class FakePushService {
     string,
     (PushResponse | "hang" | Error)[]
   >();
-  private defaultResponse: PushResponse = { status: 201 };
+  private readonly defaultResponse: PushResponse = { status: 201 };
 
   /** Makes a subscription on an allowlisted host with real P-256 keys. */
   device(label = "Test browser", host = "fcm.googleapis.com"): FakeDevice {
@@ -94,10 +94,6 @@ export class FakePushService {
   /** Answers the device's next requests in order, then the default. */
   script(device: FakeDevice, ...responses: (PushResponse | "hang" | Error)[]) {
     this.scripts.set(device.endpoint, responses);
-  }
-
-  respondToAll(response: PushResponse) {
-    this.defaultResponse = response;
   }
 
   for(device: FakeDevice): RecordedPush[] {

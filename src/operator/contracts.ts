@@ -3185,6 +3185,11 @@ export const pushSubscribeRequestSchema = z
     label: pushSubscriptionLabelSchema,
   })
   .strict();
+export const pushRevokedReasonSchema = z.enum([
+  "operator",
+  "gone",
+  "key-changed",
+]);
 export const pushFailureSchema = z.enum(["rejected", "unavailable", "timeout"]);
 /** Metadata only: never the endpoint, p256dh or auth. */
 export const pushSubscriptionSchema = z
@@ -3198,7 +3203,7 @@ export const pushSubscriptionSchema = z
     lastFailure: pushFailureSchema.nullable(),
     state: z.enum(["active", "revoked"]),
     revokedAt: time.nullable(),
-    revokedReason: z.enum(["operator", "gone", "key-changed"]).nullable(),
+    revokedReason: pushRevokedReasonSchema.nullable(),
   })
   .strict();
 export type PushSubscriptionRecord = z.infer<typeof pushSubscriptionSchema>;

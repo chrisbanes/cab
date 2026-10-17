@@ -9,7 +9,9 @@ import {
   detailRows,
   type OutcomeTone,
 } from "./action-feedback.js";
+import { ClientError } from "./api.js";
 import { Button, StatusBadge } from "./components.js";
+import { When } from "./operator-credentials.js";
 import {
   base64UrlToBytes,
   browserLabel,
@@ -103,26 +105,26 @@ async function readBrowser(publicKey: string | null): Promise<BrowserRead> {
 export async function closeResolvedNotifications(
   items: readonly InboxItem[],
   complete: boolean,
+  readStartedAt: number,
 ): Promise<void> {
   if (!complete || !supported()) return;
   try {
     const open = await (await registration())?.getNotifications();
     if (open?.length)
-      closeResolved(open, new Set(items.map(inboxAlertKey)), complete);
+      closeResolved(
+        open.map((n) => ({
+          tag: n.tag,
+          // Not in every DOM typing; a notification without one counts as older than the read.
+          timestamp: (n as { timestamp?: number }).timestamp ?? 0,
+          close: () => n.close(),
+        })),
+        new Set(items.map(inboxAlertKey)),
+        complete,
+        readStartedAt,
+      );
   } catch {
     // Closing is a courtesy; the Inbox stays the source of truth.
   }
-}
-
-function When({ at }: { at: number }) {
-  return (
-    <time dateTime={new Date(at).toISOString()}>
-      {new Date(at).toLocaleString([], {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })}
-    </time>
-  );
 }
 
 const cards: Record<
@@ -223,13 +225,25 @@ export function NotificationsSection(p: SettingsProps) {
   }, [state, busy]);
 
   const fail = (error: unknown, did: string, resource?: string): Outcome => {
-    const code = error instanceof Error ? error.message : "request-failed";
+    // An error that is not the service's own is the browser's push service refusing.
+    const code =
+      error instanceof ClientError
+        ? error.code
+        : error instanceof Error
+          ? "browser-push-failed"
+          : "request-failed";
+    const cause =
+      code === "browser-push-failed"
+        ? "this browser's push service refused it"
+        : code === "conflict" && did.startsWith("turn on")
+          ? "20 browsers already receive notifications; revoke one first"
+          : failureCause(code);
     return {
       tone: code === "command-outcome-unknown" ? "warning" : "error",
       message:
         code === "command-outcome-unknown"
           ? `We couldn't confirm ${did}. We're reloading the list below.`
-          : `Couldn't ${did}: ${failureCause(code)}. We're reloading the list below.`,
+          : `Couldn't ${did}: ${cause}. We're reloading the list below.`,
       details: { resource, code },
     };
   };

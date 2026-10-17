@@ -515,6 +515,11 @@ const intervention = (code: TaskInboxItem["attentionCode"]): TaskInboxItem => ({
   evidence: `/app/tasks/${taskId}#history`,
   conversation: null,
 });
+const interventionFor = (id: string): TaskInboxItem => ({
+  ...intervention("execution-uncertain"),
+  id: `intervention:${id}`,
+  taskId: id,
+});
 const runtimeItem = (
   harness: "codex" | "claude",
   since: number,
@@ -534,10 +539,17 @@ const runtimeItem = (
 
 /** A scripted Inbox: the test says what each read returns. */
 function scripted() {
-  const state: { read: InboxRead; reads: number; fail: boolean } = {
+  const state: {
+    read: InboxRead;
+    reads: number;
+    fail: boolean;
+    /** Holds every read until released. */
+    hold: Promise<void> | null;
+  } = {
     read: inboxOf([]),
     reads: 0,
     fail: false,
+    hold: null,
   };
   return {
     state,
@@ -546,6 +558,7 @@ function scripted() {
     },
     readInbox: () => async (): Promise<InboxRead> => {
       state.reads++;
+      if (state.hold) await state.hold;
       if (state.fail) throw new Error("503");
       return state.read;
     },
@@ -913,6 +926,136 @@ test("at most four sends are in flight at once and the rest wait their turn", as
     assert.equal(x.fake.maxInFlight, 4);
     x.clock.advance(50);
     await x.push.settle();
+  } finally {
+    await x.f.close();
+  }
+});
+
+test("a partial first read does not end the baseline, so an item it could not see is not announced later", async () => {
+  const inbox = scripted();
+  const x = await pushFixture({ readInbox: inbox.readInbox });
+  try {
+    const a = x.subscribe();
+    inbox.set([interventionFor(randomUUID())], false);
+    await x.tick();
+    inbox.set([interventionFor(randomUUID()), interventionFor(randomUUID())]);
+    await x.tick();
+    assert.equal(
+      x.fake.requests.length,
+      0,
+      "the baseline ends on a complete read",
+    );
+    inbox.set([...inbox.state.read.data.items, interventionFor(randomUUID())]);
+    await x.tick();
+    assert.equal(x.fake.for(a.device).length, 1, "later alerts are announced");
+  } finally {
+    await x.f.close();
+  }
+});
+
+test("a tick never overlaps itself and a stop in the middle of a read records nothing", async () => {
+  const inbox = scripted();
+  const x = await pushFixture({ readInbox: inbox.readInbox });
+  try {
+    x.subscribe();
+    await x.tick();
+    let release!: () => void;
+    inbox.state.hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    inbox.set([interventionFor(randomUUID())]);
+    const before = inbox.state.reads;
+    const first = x.push.tick();
+    const second = x.push.tick();
+    assert.equal(second, first, "the second call joins the running tick");
+    await settle(() => inbox.state.reads === before + 1);
+    const stopping = x.push.stop();
+    release();
+    await stopping;
+    await first;
+    assert.equal(inbox.state.reads, before + 1);
+    assert.deepEqual(
+      ledger(x.f),
+      [],
+      "an alert read during a stop is not recorded unsent",
+    );
+    assert.equal(x.fake.requests.length, 0);
+  } finally {
+    await x.f.close();
+  }
+});
+
+test("a Retry-After shorter than the schedule still waits the schedule", async () => {
+  const x = await pushFixture();
+  try {
+    const d = x.subscribe();
+    await x.tick();
+    x.fake.script(
+      d.device,
+      { status: 429, retryAfterSeconds: 1 },
+      { status: 201 },
+    );
+    await seedOwnQuestion(x.f);
+    await x.tick();
+    x.clock.advance(29_999);
+    await x.push.settle();
+    assert.equal(x.fake.for(d.device).length, 1);
+    x.clock.advance(1);
+    await x.push.settle();
+    assert.equal(x.fake.for(d.device).length, 2);
+  } finally {
+    await x.f.close();
+  }
+});
+
+test("every other 4xx and a redirect is a rejected push, not retried and not a revocation", async () => {
+  const inbox = scripted();
+  const x = await pushFixture({ readInbox: inbox.readInbox });
+  try {
+    const statuses = [401, 413, 418, 301];
+    const devices = statuses.map((status) => {
+      const d = x.subscribe(`Status ${status}`);
+      x.fake.script(d.device, { status });
+      return d;
+    });
+    inbox.set([]);
+    await x.tick();
+    inbox.set([interventionFor(randomUUID())]);
+    await x.tick();
+    x.clock.advance(1_000_000);
+    await x.push.settle();
+    for (const d of devices) {
+      assert.equal(x.fake.for(d.device).length, 1, d.row.label);
+      const row = x.push.read().subscriptions.find((r) => r.id === d.row.id);
+      assert.equal(row?.lastFailure, "rejected", d.row.label);
+      assert.equal(row?.state, "active", d.row.label);
+    }
+  } finally {
+    await x.f.close();
+  }
+});
+
+test("past 500 pending pushes the oldest waiting ones are dropped and recorded, and sends stay bounded", async () => {
+  const inbox = scripted();
+  const x = await pushFixture({ readInbox: inbox.readInbox });
+  try {
+    const devices = Array.from({ length: 20 }, (_, i) => {
+      const d = x.subscribe(`Device ${i}`);
+      x.fake.script(d.device, ...Array(40).fill("hang"));
+      return d;
+    });
+    inbox.set([]);
+    await x.tick();
+    // 26 alerts to 20 devices is 520 pushes; four are in flight and hung.
+    inbox.set(Array.from({ length: 26 }, () => interventionFor(randomUUID())));
+    await x.push.tick();
+    await settle(() => x.fake.requests.length === 4);
+    assert.equal(x.fake.requests.length, 4);
+    const dropped = x.push
+      .read()
+      .subscriptions.filter((r) => r.lastFailure === "unavailable").length;
+    assert.ok(dropped > 0, "some waiting pushes were dropped and recorded");
+    assert.equal(devices.length, 20);
   } finally {
     await x.f.close();
   }
@@ -1318,6 +1461,22 @@ test("subscribe, list, test and revoke round trip through the session routes", a
   assert.equal(fake.for(device).length, 2);
 });
 
+test("a session that ends while a test is in flight gets no answer", async (t) => {
+  const { fake, clock, s } = await httpFixture(t);
+  const device = fake.device("Slow");
+  const { subscription: row } = (await (
+    await s.sessionPost(SUBSCRIPTIONS, subscription(device))
+  ).json()) as { subscription: { id: string } };
+  fake.script(device, "hang");
+  const pending = s.sessionPost(`${SUBSCRIPTIONS}/${row.id}/test`, {});
+  await settle(() => fake.requests.length === 1);
+  assert.equal((await s.sessionPost("/api/operator/logout", {})).status, 200);
+  clock.advance(10_000);
+  const answer = await pending;
+  assert.equal(answer.status, 401);
+  assert.equal(JSON.stringify(await answer.json()).includes("outcome"), false);
+});
+
 test("a test notification answered 410 revokes the device", async (t) => {
   const { fake, push, s } = await httpFixture(t);
   const device = fake.device("Gone");
@@ -1459,20 +1618,11 @@ test("push routes validate bodies, ids and methods", async (t) => {
     ((await big.json()) as { error: { code: string } }).error.code,
     "body-too-large",
   );
+  // A body that is not JSON is refused by type, with a valid session and token.
   assert.equal(
-    (
-      await fetch(`${s.origin}${SUBSCRIPTIONS}`, {
-        method: "POST",
-        headers: {
-          cookie: s.cookie,
-          origin: s.authOrigin,
-          "content-type": "text/plain",
-          "x-csrf-token": "x",
-        },
-        body: "x",
-      })
-    ).status,
-    403,
+    (await s.sessionPost(SUBSCRIPTIONS, "x", { "content-type": "text/plain" }))
+      .status,
+    415,
   );
   assert.deepEqual(push.read().subscriptions, []);
   const missing = randomUUID();

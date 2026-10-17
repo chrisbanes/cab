@@ -17,6 +17,7 @@ import { tmpdir } from "../fixtures/temp.js";
 import { FakePushService, decryptPush } from "../fixtures/fake-push.js";
 import {
   encryptPayload,
+  PUSH_PLAINTEXT_LIMIT,
   fetchPushTransport,
   loadOrCreateVapidKeys,
   PushError,
@@ -70,10 +71,24 @@ test("a payload round trips through a random subscriber key", () => {
   const body = encryptPayload(device.keys, text);
   assert.equal(decryptPush(body, device), text);
   assert.equal(body.includes(Buffer.from("/app/inbox")), false);
+  // Header, delimiter and tag come out of the 4096 bytes every push service accepts.
+  assert.equal(
+    encryptPayload(device.keys, "x".repeat(PUSH_PLAINTEXT_LIMIT)).length,
+    4096,
+  );
   assert.throws(
-    () => encryptPayload(device.keys, "x".repeat(4080)),
+    () => encryptPayload(device.keys, "x".repeat(PUSH_PLAINTEXT_LIMIT + 1)),
     (e) => e instanceof PushError && e.code === "invalid-input",
   );
+});
+
+test("every payload gets a fresh salt and ephemeral key", () => {
+  const device = new FakePushService().device();
+  const [a, b] = [1, 2].map(() => encryptPayload(device.keys, "same text"));
+  assert.ok(a && b);
+  assert.notDeepEqual(a.subarray(0, 16), b.subarray(0, 16), "salt");
+  assert.notDeepEqual(a.subarray(21, 86), b.subarray(21, 86), "ephemeral key");
+  assert.notDeepEqual(a.subarray(86), b.subarray(86), "ciphertext");
 });
 
 test("VAPID authorization carries a verifiable ES256 JWT for the endpoint origin", async () => {
@@ -183,6 +198,12 @@ test("endpoint validation accepts only vendor push hosts over plain https", () =
     "//fcm.googleapis.com/abc",
     "ftp://fcm.googleapis.com/abc",
     `https://fcm.googleapis.com/${"a".repeat(2049 - "https://fcm.googleapis.com/".length)}`,
+    // Hosts that do not fit DNS, so a stored host always fits the list's metadata.
+    `https://${"a".repeat(64)}.push.apple.com/x`,
+    `https://${`${"a".repeat(60)}.`.repeat(5)}push.apple.com/x`,
+    "https://a..push.apple.com/x",
+    // Normalisation that grows the address past the limit.
+    `https://fcm.googleapis.com/x?${"'".repeat(700)}`,
   ])
     refuses(input({ endpoint }));
 });
@@ -205,7 +226,19 @@ test("endpoint validation checks keys and labels", () => {
   );
   refuses(input({ keys: { ...valid, auth: sized(15) } }));
   refuses(input({ keys: { ...valid, auth: sized(17) } }));
-  refuses(input({ keys: { ...valid, auth: `${valid.auth}=` } }));
+  // Padding some browsers add is tolerated and stored without it.
+  assert.equal(
+    validatePushEndpoint(input({ keys: { ...valid, auth: `${valid.auth}==` } }))
+      .auth,
+    valid.auth,
+  );
+  assert.equal(
+    validatePushEndpoint(
+      input({ keys: { ...valid, p256dh: `${valid.p256dh}=` } }),
+    ).p256dh,
+    valid.p256dh,
+  );
+  refuses(input({ keys: { ...valid, auth: `${valid.auth}===` } }));
   refuses(input({ label: "" }));
   refuses(input({ label: "x".repeat(65) }));
   refuses(input({ label: "tab\there" }));
@@ -288,7 +321,13 @@ test("an unsafe VAPID key file fails closed without revealing its contents", asy
     await symlink(join(directory, "target.json"), file);
   });
   await unsafe(async (file) => {
-    await writeFile(file, " ".repeat(5000), { mode: 0o600 });
+    // Valid but padded past the limit: only the size check stands between it and the parser.
+    await loadOrCreateVapidKeys(`${file}.valid`);
+    await writeFile(
+      file,
+      `${await readFile(`${file}.valid`, "utf8")}${" ".repeat(5000)}`,
+      { mode: 0o600 },
+    );
   });
   await unsafe(async (file) => {
     await writeFile(file, "SECRET-NOT-JSON", { mode: 0o600 });
