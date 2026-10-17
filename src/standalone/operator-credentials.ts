@@ -211,6 +211,7 @@ export function operatorRouteAuthority(
       "/api/operator/logout",
       "/api/operator/setup/folders",
       "/api/operator/setup/verify-checkout",
+      "/api/operator/setup/home",
       "/api/operator/credentials",
     ].includes(path) ||
     /^\/api\/operator\/credentials\/[^/]+\/(?:rotate|revoke)$/.test(path) ||
