@@ -90,9 +90,9 @@ function Commands() {
         {claudeTokenWrite}
       </pre>
       <p className="metadata muted">
-        3. Enter the reference below as <code>file:</code> followed by the
-        absolute path, with <code>$HOME</code> replaced by your home directory,
-        or <code>env:NAME</code>, and save.
+        3. Click Set below and save a reference: <code>file:</code> and the
+        absolute path of that token file, or <code>env:NAME</code>. The field
+        starts with the token file's path when the service can work it out.
       </p>
     </div>
   );
@@ -152,7 +152,7 @@ export function AddClaudePanel(p: SettingsProps) {
       description="Make a Claude subscription token available to the service and confirm it works."
     >
       <Commands />
-      <ClaudeTokenRow {...p} drafts={drafts} />
+      <ClaudeTokenRow {...p} drafts={drafts} prefill />
       <TokenReadable {...p} checkNonce={checkNonce} />
     </Panel>
   );

@@ -288,6 +288,21 @@ export async function signIn(
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
 }
+/** Reloads the page and returns once the service home read has been answered and rendered. */
+export async function reloadAfterSetupHome(page: Page) {
+  const answered = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/operator/setup/home",
+  );
+  await page.reload();
+  await (await answered).finished();
+  // Two frames let the answered read render before the test acts on it.
+  await page.evaluate(
+    () =>
+      new Promise<void>((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => done())),
+      ),
+  );
+}
 /**
  * Evidence capture for the settings pages. The source tab shows saved search queries and
  * local paths, and a revealed field shows private text, so every text field and every

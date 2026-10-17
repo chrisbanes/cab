@@ -29,7 +29,12 @@ works without reading the operations guide.
    and types the `pbpaste` line shown below them. That line is never copied: it reads
    the clipboard, so copying it would replace the token. The token never passes
    through the web UI.
-3. The operator enters `file:/absolute/path` (or `env:NAME`) and saves.
+3. The operator clicks Set. While no reference is configured and the service can
+   report its home folder, the field opens with `file:<home>/.ensemble/claude/claude-token`;
+   saving sends exactly what the field shows. Otherwise the field opens empty and the
+   operator enters `file:/absolute/path` (or `env:NAME`). A reference that starts with
+   `~`, `$HOME` or `${HOME}` is refused before it is sent, with the full path offered
+   when the home folder is known. A configured reference is never shown or replaced.
 4. A live **Token readable** check runs immediately and shows pass, or the unsafe-file
    reason without the path or value.
 

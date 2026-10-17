@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
@@ -15,6 +16,7 @@ import {
   noPageOverflow,
   outcomeMessages,
   phone,
+  reloadAfterSetupHome,
   savedOutcome,
   startSettings,
 } from "../fixtures/operator-settings.js";
@@ -191,4 +193,39 @@ test("Settings sets a file: Claude token reference and shows it unavailable when
     assert.equal(text.includes(directory), false);
     assert.equal(text.includes(canary), false);
   }
+});
+
+test("the Settings overview Claude row is not prefilled and refuses ~", async (t, journey) => {
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), "ensemble-claude-token-home-")),
+  );
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, "Home Folder ünï");
+  mkdirSync(home);
+  const { page } = await startSettings(
+    journey,
+    "/app/settings",
+    undefined,
+    undefined,
+    { setup: { home } },
+  );
+  await reloadAfterSetupHome(page);
+  const row = page.getByRole("region", { name: "Claude subscription token" });
+  await row.getByText("Claude subscription token · not configured").waitFor();
+  let sent = 0;
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/operator/commands")) sent++;
+  });
+  await row.getByRole("button", { name: "Set", exact: true }).click();
+  const input = row.getByLabel("Claude token reference");
+  assert.equal(await input.inputValue(), "");
+  await input.fill("~/t");
+  await row.getByRole("button", { name: "Save reference" }).click();
+  await row
+    .getByRole("alert")
+    .filter({
+      hasText: `Use the full path: file:${home}/t. ~ and $HOME are not expanded.`,
+    })
+    .waitFor();
+  assert.equal(sent, 0);
 });

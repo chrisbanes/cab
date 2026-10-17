@@ -4,6 +4,7 @@ import {
   claudeTokenStatusSchema,
   discoveryStatusSchema,
   type ghLoginStateSchema,
+  setupHomeSchema,
 } from "../../src/operator/contracts.js";
 import { Button } from "./components.js";
 import { useOperatorResource } from "./resource.js";
@@ -37,6 +38,8 @@ function ReferenceRow({
   fieldLabel,
   note,
   configuredLine,
+  prefill,
+  validate,
 }: {
   p: SettingsProps;
   endpoint: string;
@@ -47,6 +50,13 @@ function ReferenceRow({
   note: string;
   /** The line for a configured reference; never names it. */
   configuredLine: (s: ReferenceStatus) => string;
+  /**
+   * A reference to put in an empty field when Set opens it. It is applied once, at the click,
+   * and only while no reference is configured; a later change of this prop never touches the form.
+   */
+  prefill?: string | undefined;
+  /** Field errors for a reference; when any is present nothing is sent. */
+  validate?: (reference: string) => Record<string, string>;
 }) {
   const loader = useCallback(
     (signal: AbortSignal) =>
@@ -91,7 +101,17 @@ function ReferenceRow({
           <Button
             type="button"
             variant="secondary"
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              // A configured reference is never loaded, a typed one wins, and a late read does nothing.
+              if (
+                prefill &&
+                status.state.status === "fresh" &&
+                s?.configured === false &&
+                String(d.values.credentialRef ?? "") === ""
+              )
+                d.startOperation({ credentialRef: prefill, key: key() });
+              setOpen(true);
+            }}
           >
             {s?.configured ? "Change" : "Set"}
           </Button>
@@ -109,6 +129,7 @@ function ReferenceRow({
               p.session,
               send(String(d.values.credentialRef ?? "")),
               reread,
+              validate?.(String(d.values.credentialRef ?? "")),
             )
           }
         >
@@ -354,8 +375,21 @@ export function DiscoveryCredentialRow(
   );
 }
 
+const claudeTokenPath = "/.ensemble/claude/claude-token";
+/** `~`, `$HOME` or `${HOME}` at the start of a reference, with or without `file:`. */
+const homeForm = /^(?:file:)?(?:~|\$HOME|\$\{HOME\})(?=\/|$)/;
+
 /** The Claude subscription token reference, in the Runtime and recovery panel. */
-export function ClaudeTokenRow(p: SettingsProps) {
+export function ClaudeTokenRow(p: SettingsProps & { prefill?: boolean }) {
+  const loader = useCallback(
+    (signal: AbortSignal) =>
+      p.client.read("/api/operator/setup/home", setupHomeSchema, signal),
+    [p.client],
+  );
+  // A missing, failed or pending read leaves the field as it was: empty, with no error.
+  const read = useOperatorResource(p.session.csrfToken, loader);
+  const home = read.state.data?.data.home ?? null;
+  const current = read.state.status === "fresh" ? home : null;
   return (
     <ReferenceRow
       p={p}
@@ -372,6 +406,19 @@ export function ClaudeTokenRow(p: SettingsProps) {
             ? "reference configured · available"
             : "reference configured · token unavailable"
       }
+      prefill={
+        p.prefill && current ? `file:${current}${claudeTokenPath}` : undefined
+      }
+      validate={(reference) => {
+        const text = reference.trim();
+        const form = homeForm.exec(text);
+        if (!form) return {};
+        return {
+          credentialRef: home
+            ? `Use the full path: file:${home}${text.slice(form[0].length)}. ~ and $HOME are not expanded.`
+            : "Use the full path: replace ~ or $HOME with your home folder's absolute path.",
+        };
+      }}
     />
   );
 }
