@@ -613,11 +613,31 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     await page.getByRole("link", { name: /external link|unsafe link/ }).count(),
     0,
   );
-  await page.locator("summary").getByText("Full path", { exact: true }).click();
+  // One header line; hash and read times wait in a collapsed disclosure.
+  const header = page.locator(".file-header");
+  assert.match(
+    await header.locator(".file-header-line").innerText(),
+    /^guide\.md · text\/markdown · [\d,]+ bytes · \d{2}:\d{2}$/,
+  );
+  const provenance = header.locator("details.file-provenance");
+  assert.equal(await provenance.getAttribute("open"), null);
+  await provenance
+    .locator("summary")
+    .getByText("Provenance & limits", { exact: true })
+    .click();
+  assert.deepEqual(await provenance.locator("dt").allTextContents(), [
+    "Location",
+    "Listing observed",
+    "File read",
+    "SHA-256",
+  ]);
   assert.equal(
-    await page.locator(".file-preview details code").innerText(),
+    await provenance.locator("dd").first().innerText(),
     "Repository alpha/guide.md",
   );
+  assert.equal(await provenance.locator("dd").last().innerText(), stableHash);
+  assert.equal(await page.getByText("Source view").count(), 0);
+  assert.equal(await page.getByText("Full path", { exact: true }).count(), 0);
 
   await page.getByRole("button", { name: "Source", exact: true }).click();
   const wrapButton = page.getByRole("button", { name: "Wrap", exact: true });
@@ -735,7 +755,10 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     previewPaths.filter((path) => path === "guide.md").length,
     firstGuideReads,
   );
-  await page.getByText(new RegExp(stableHash)).waitFor();
+  assert.equal(
+    await page.locator(".file-provenance dd").last().textContent(),
+    stableHash,
+  );
   const refreshResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return (
@@ -868,9 +891,8 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     refreshedGuide.replace(/\n$/, "").split("\n"),
   );
   await page
-    .locator("p.identifier")
-    .getByText(new RegExp(refreshedHash))
-    .waitFor();
+    .locator(".file-provenance dd", { hasText: refreshedHash })
+    .waitFor({ state: "attached" });
   const afterFailedRefresh = await inspectReadingArea();
   _t.diagnostic(
     `reading area after confirmed 503 and retained-preview notice: ${JSON.stringify(afterFailedRefresh)}`,
@@ -927,7 +949,9 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     "BETA_ONLY repository content\n",
   );
   assert.equal(betaPayload.data.preview?.sha256, betaHash);
-  await page.getByText(new RegExp(betaHash)).waitFor();
+  await page
+    .locator(".file-provenance dd", { hasText: betaHash })
+    .waitFor({ state: "attached" });
   const betaReads = previewPaths.filter((path) => path === "beta.txt").length;
 
   await page
@@ -940,9 +964,8 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     .click();
   await page.getByRole("button", { name: /guide\.md/ }).click();
   await page
-    .locator("p.identifier")
-    .getByText(new RegExp(refreshedHash))
-    .waitFor();
+    .locator(".file-provenance dd", { hasText: refreshedHash })
+    .waitFor({ state: "attached" });
   const afterCachedReturn = await inspectReadingArea();
   _t.diagnostic(
     `reading area after cached A→B→A return cleared the refresh notice: ${JSON.stringify(afterCachedReturn)}`,
@@ -1012,7 +1035,9 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   assert.equal(codePayload.data.preview?.kind, "text");
   assert.equal(codePayload.data.preview?.text, codeText);
   assert.equal(codePayload.data.preview?.sha256, codeHash);
-  await page.getByText(new RegExp(codeHash)).waitFor();
+  await page
+    .locator(".file-provenance dd", { hasText: codeHash })
+    .waitFor({ state: "attached" });
   assert.deepEqual(
     await page.locator(".file-source-lines .file-line-text").allTextContents(),
     codeText.replace(/\n$/, "").split("\n"),
@@ -1271,10 +1296,13 @@ async function startMarkedFiles(
     repositories,
     viewport = { width: 1280, height: 900 },
     path = "?section=files",
+    prepare,
   }: {
     repositories: Array<{ id: string; ref?: string }>;
     viewport?: { width: number; height: number };
     path?: string;
+    /** Adds files to the task workspaces before the page opens. */
+    prepare?: (workspaces: Record<string, string>) => void;
   },
 ) {
   const fixture = await j.start("fixture.create", () =>
@@ -1306,6 +1334,7 @@ async function startMarkedFiles(
     ]),
   );
   if (workspaces.alpha) commitWorkspaceChanges(workspaces.alpha);
+  prepare?.(workspaces);
   const web = await j.start("fixture.web", () => fixture.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({ viewport });
@@ -1596,4 +1625,122 @@ test("Files first open on a phone shows the repository list view", async (_t, j)
     ),
     true,
   );
+});
+
+const clock = (at: number) => {
+  const date = new Date(at);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+};
+
+test("Files shows a one-line file header with hash and read times under Provenance & limits", async (_t, j) => {
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "alpha", ref: "main" }],
+    prepare: (workspaces) => {
+      writeFileSync(
+        join(workspaces.alpha as string, "pixel.png"),
+        pngImage(3, 2),
+      );
+      writeFileSync(
+        join(workspaces.alpha as string, "paper.pdf"),
+        pdf(1, 200, 200),
+      );
+    },
+  });
+  const { page, files } = s;
+  const header = files.locator(".file-header");
+  const line = header.locator(".file-header-line");
+  const disclosure = header.locator("details.file-provenance");
+  const open = (name: RegExp) => files.getByRole("button", { name }).click();
+  const previewRead = (name: string) =>
+    page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname.endsWith("/preview") &&
+        url.searchParams.get("path") === name
+      );
+    });
+  const values = async () => ({
+    labels: await disclosure.locator("dt").allTextContents(),
+    hash: await disclosure.locator("dd").last().textContent(),
+  });
+
+  // A text file: one line, no charset or hash in it, and a collapsed disclosure.
+  await s.list("Repository alpha").waitFor();
+  const keepRead = previewRead("keep.txt");
+  await open(/^keep\.txt,/);
+  const keepObservedAt = (
+    (await (await keepRead).json()) as { observedAt: number }
+  ).observedAt;
+  await line.waitFor();
+  assert.equal(
+    await line.innerText(),
+    `keep.txt · text/plain · 10 bytes · ${clock(keepObservedAt)}`,
+  );
+  assert.doesNotMatch(await header.innerText(), /charset|as of/);
+  assert.equal(await files.getByText("Full path", { exact: true }).count(), 0);
+  assert.equal(await files.getByText(/Source view/).count(), 0);
+  assert.equal(await disclosure.getAttribute("open"), null);
+  assert.equal(await header.getByText(/[0-9a-f]{64}/).isVisible(), false);
+  await disclosure.locator("summary").click();
+  const keepHash = createHash("sha256").update("unchanged\n").digest("hex");
+  assert.deepEqual(await values(), {
+    labels: ["Location", "Listing observed", "File read", "SHA-256"],
+    hash: keepHash,
+  });
+  assert.equal(
+    await disclosure.locator("dd").first().innerText(),
+    "Repository alpha/keep.txt",
+  );
+
+  // A second tab starts collapsed and carries its own hash.
+  const readmeRead = previewRead("README.md");
+  await open(/^README\.md,/);
+  await readmeRead;
+  await files
+    .locator(".file-tab-open[aria-current='page']", { hasText: "README.md" })
+    .waitFor();
+  assert.equal(await disclosure.getAttribute("open"), null);
+  await disclosure.locator("summary").click();
+  assert.equal(
+    (await values()).hash,
+    createHash("sha256").update("# alpha\n").digest("hex"),
+  );
+
+  // Refresh brings the new hash and time, and the change notice still appears.
+  await files.locator(".file-tab-open", { hasText: "keep.txt" }).click();
+  await header.getByText(/^keep\.txt · /).waitFor();
+  writeFileSync(
+    join(s.workspaces.alpha as string, "keep.txt"),
+    "changed on disk\n",
+  );
+  const refreshRead = previewRead("keep.txt");
+  await files
+    .getByRole("button", { name: "Refresh selected file", exact: true })
+    .click();
+  const refreshedAt = (
+    (await (await refreshRead).json()) as { observedAt: number }
+  ).observedAt;
+  await files.locator(".file-change-notice").waitFor();
+  assert.equal(
+    await line.innerText(),
+    `keep.txt · text/plain · 16 bytes · ${clock(refreshedAt)}`,
+  );
+  await disclosure.locator("summary").click();
+  assert.equal(
+    (await values()).hash,
+    createHash("sha256").update("changed on disk\n").digest("hex"),
+  );
+
+  // Raster and PDF headers carry their type and size; only the raster adds its pixels.
+  await open(/^pixel\.png,/);
+  await line
+    .getByText(
+      /^pixel\.png · image\/png · [\d,]+ bytes · 3 × 2 px · \d{2}:\d{2}$/,
+    )
+    .waitFor();
+  await open(/^paper\.pdf,/);
+  await line
+    .getByText(/^paper\.pdf · application\/pdf · [\d,]+ bytes · \d{2}:\d{2}$/)
+    .waitFor();
+  assert.deepEqual(s.consoleErrors, []);
 });

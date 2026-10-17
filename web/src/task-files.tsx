@@ -656,6 +656,55 @@ function RasterDocumentView({
   );
 }
 
+/**
+ * One line for the open file (path · type · size · time) and, collapsed below it, the hash and
+ * read times. Shared by current Files and retained evidence; `rows` are the caller's own facts.
+ */
+export function FileHeader({
+  path,
+  data,
+  observedAt,
+  rows,
+  resetKey,
+}: {
+  path: string;
+  data: NonNullable<NonNullable<TaskFileTabState["preview"]>["preview"]> | null;
+  observedAt: number | null;
+  rows: ReadonlyArray<readonly [label: string, value: string]>;
+  /** The disclosure starts collapsed again when this changes: another tab or other bytes. */
+  resetKey: string;
+}) {
+  const facts = [path];
+  if (data) {
+    facts.push(
+      data.mime.split(";")[0]?.trim() ?? data.mime,
+      `${data.size.toLocaleString()} bytes`,
+    );
+    if (data.kind === "base64" && data.width && data.height)
+      facts.push(`${data.width} × ${data.height} px`);
+  }
+  if (observedAt !== null) facts.push(clockLabel(observedAt));
+  const all = [...rows, ...(data ? [["SHA-256", data.sha256] as const] : [])];
+  return (
+    <div className="file-header">
+      <p className="file-header-line">{facts.join(" · ")}</p>
+      {all.length > 0 && (
+        <details key={resetKey} className="file-provenance">
+          <summary>Provenance &amp; limits</summary>
+          <dl>
+            {all.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd className="identifier">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** Renders ready preview bytes; shared by current Files and retained evidence. */
 export function FilePreviewBody({
   data,
@@ -687,10 +736,6 @@ export function FilePreviewBody({
     <>
       {data.kind === "text" && (
         <>
-          <p className="identifier">
-            {data.mime} · {data.size.toLocaleString()} bytes · SHA-256{" "}
-            {data.sha256}
-          </p>
           {isMarkdown && (
             <div
               className="task-actions file-preview-controls"
@@ -741,9 +786,6 @@ export function FilePreviewBody({
             <MarkdownPreview text={data.text} />
           ) : (
             <>
-              {data.mime !== "text/markdown" && !isMarkdown && (
-                <p className="muted">Source view · selectable lines</p>
-              )}
               <SourceLines
                 text={data.text}
                 tab={tab}
@@ -780,10 +822,6 @@ export function FilePreviewBody({
       )}
       {data.kind === "base64" && data.mime !== "application/pdf" && (
         <>
-          <p className="identifier">
-            Bounded raster preview · {data.width} × {data.height} pixels ·
-            SHA-256 {data.sha256}
-          </p>
           <RasterDocumentView
             key={tab.key}
             preview={data}
@@ -794,9 +832,6 @@ export function FilePreviewBody({
       )}
       {data.kind === "base64" && data.mime === "application/pdf" && (
         <>
-          <p className="identifier">
-            PDF · {data.size.toLocaleString()} bytes · SHA-256 {data.sha256}
-          </p>
           {data.maxDisplayedPages !== undefined &&
           data.maxCanvasPixels !== undefined ? (
             <PdfDocumentView
@@ -1470,23 +1505,30 @@ export function TaskFiles({
               }}
             >
               <div className="file-preview" aria-live="polite">
-                <h4>{activeTab.path.at(-1)}</h4>
-                <details>
-                  <summary>Full path</summary>
-                  <code>{selectedLabel}</code>
-                </details>
-                {directoryObservedAt !== null && (
-                  <p className="file-observation">
-                    Current workspace · as of{" "}
-                    {new Date(directoryObservedAt).toLocaleTimeString()}
-                  </p>
-                )}
-                {previewObservedAt !== null && (
-                  <p className="file-observation">
-                    Selected bytes · as of{" "}
-                    {new Date(previewObservedAt).toLocaleTimeString()}
-                  </p>
-                )}
+                <FileHeader
+                  path={activeTab.path.join("/")}
+                  data={
+                    preview?.state === "ready"
+                      ? (preview.preview ?? null)
+                      : null
+                  }
+                  observedAt={previewObservedAt}
+                  resetKey={`${activeTab.key}:${preview?.state === "ready" ? preview.preview?.sha256 : ""}`}
+                  rows={[
+                    ["Location", selectedLabel ?? ""],
+                    ...(directoryObservedAt !== null
+                      ? [
+                          [
+                            "Listing observed",
+                            clockLabel(directoryObservedAt),
+                          ] as const,
+                        ]
+                      : []),
+                    ...(previewObservedAt !== null
+                      ? [["File read", clockLabel(previewObservedAt)] as const]
+                      : []),
+                  ]}
+                />
                 {activeTab.changeNotice && (
                   <>
                     <p role="status" className="file-change-notice">

@@ -1507,8 +1507,24 @@ nav {
   color: var(--muted-foreground);
   font-size: var(--type-xs);
 }
-.file-preview h4 {
-  margin: 0 0 12px;
+.file-header-line {
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  overflow-wrap: anywhere;
+}
+.file-provenance dl {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.file-provenance dt {
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+}
+.file-provenance dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .file-preview details {
   margin-block: 8px 16px;
