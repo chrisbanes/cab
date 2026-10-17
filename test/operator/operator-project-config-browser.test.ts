@@ -770,6 +770,96 @@ test("readiness matching with no condition is no edit, and the adopted note goes
   await assertClean(page, "Save changes");
 });
 
+test("an edit that another writer saved identically is dropped, and later reads apply", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const save = async (instructions: string) =>
+    d.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: ids.atlas,
+      expectedVersion: Number(d.project(ids.atlas).version),
+      instructions,
+    });
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("SAME TEXT");
+  await changes(page)
+    .getByText("Instructions edited", { exact: true })
+    .waitFor();
+  await save("SAME TEXT");
+  await refresh(page);
+  // The saved text caught up with the draft: no edit, no Discard, Save not held, nothing sent.
+  await assertClean(page, "Save project");
+  await assertOffHold(page, "Save project");
+  // A later change elsewhere shows the new saved text, never the obsolete local value.
+  await save("NEXT TEXT");
+  await refresh(page);
+  await assertClean(page, "Save project");
+  await revealButton(page, "instructions").waitFor();
+  await revealButton(page, "instructions").click();
+  assert.equal(await instructionsField(page).inputValue(), "NEXT TEXT");
+  await noChanges(page);
+});
+
+test("a query or path that another writer saved identically is dropped, and later reads apply", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const query = page.getByLabel("Search query", { exact: true });
+  const path = page.getByLabel("Local repository path", { exact: true });
+  await query.waitFor();
+  const checkout = await realpath(
+    await createCheckout(f.directory, "identical-checkout"),
+  );
+  await query.fill("SAME QUERY");
+  await path.fill(checkout);
+  const writer = (text: string, repositoryPath?: string) =>
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId: ids.atlas,
+      expectedVersion: d.githubConfiguration(ids.atlas).version,
+      selections: [
+        { id: "S-1", keep: true },
+        { id: "S-2", kind: "search", query: text },
+        { id: "S-3", keep: true },
+      ],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [
+        repositoryPath
+          ? { repositoryId: "acme/atlas", path: repositoryPath, ref: "main" }
+          : { repositoryId: "acme/atlas", ref: "main" },
+      ],
+    } as Parameters<OperatorApi["execute"]>[0]);
+  await writer("SAME QUERY", checkout);
+  await refresh(page);
+  await assertClean(page, "Save changes");
+  await assertOffHold(page, "Save changes");
+  // Later changes elsewhere are shown, not the obsolete local values.
+  await writer("NEXT QUERY");
+  await refresh(page);
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(
+          'input[aria-label="Search query"]',
+        ) as HTMLInputElement | null
+      )?.value === "NEXT QUERY",
+  );
+  await assertClean(page, "Save changes");
+  assert.equal(await path.inputValue(), checkout);
+});
+
 test("Save waits for the saved text to be read again after Review changes", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,

@@ -17,7 +17,7 @@ import {
   type ConfigurationDraft,
   type ConfigurationDrafts,
 } from "./settings-state.js";
-import type { Values } from "./settings-changes.js";
+import { sameText, type Values } from "./settings-changes.js";
 import { Button } from "./components.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -256,6 +256,27 @@ export function PrivateTextField({
     open = edited || revealed !== undefined,
     loading = state.pending,
     failed = !loading && state.error !== null;
+  // An edit exists only while it differs from the text saved now. When a current read shows
+  // the same text (another writer saved it), the edit and its baseline are dropped, so the
+  // form is clean and later reads apply.
+  const value = edited ? String(draft.values[field]) : undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: act when the read or the edit changes.
+  useEffect(() => {
+    if (
+      value !== undefined &&
+      revealed !== undefined &&
+      sameText(value, revealed) &&
+      (draft.phase === "editing" ||
+        draft.phase === "conflict" ||
+        draft.phase === "rejected")
+    )
+      draft.setPrivate(
+        field,
+        value,
+        String(draft.values[`${field}Base`] ?? ""),
+        revealed,
+      );
+  }, [value, revealed, draft.phase]);
   // Focus moves to the field once, after a Reveal the operator asked for has rendered it.
   useEffect(() => {
     if (failed) focusNext.current = false;

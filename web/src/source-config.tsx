@@ -132,6 +132,34 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     priv.state.pending,
     priv.refresh,
   );
+  // An edit that now equals the saved value (another writer saved the same) is no edit: drop it
+  // so the form is clean and later reads apply.
+  const equalsSaved = (r: SourceRow, name: "query" | "path") => {
+    const saved =
+      name === "query"
+        ? known?.searches.find((x) => x.id === r.id)?.query
+        : known?.repositories.find((x) => x.repositoryId === r.repositoryId)
+            ?.path;
+    return r.keep && typeof r[name] === "string" && saved === r[name];
+  };
+  const matchedSaved =
+    (d.phase === "editing" ||
+      d.phase === "conflict" ||
+      d.phase === "rejected") &&
+    ([...selections].some((r) => equalsSaved(r, "query")) ||
+      [...repositories].some((r) => equalsSaved(r, "path")));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: act when a read makes an edit equal.
+  useEffect(() => {
+    if (!matchedSaved) return;
+    const strip = (rows: SourceRow[], name: "query" | "path") =>
+      rows.map((r) => {
+        if (!equalsSaved(r, name)) return r;
+        const { [name]: _v, [`${name}Base`]: _b, ...rest } = r;
+        return rest;
+      });
+    d.set("selections", JSON.stringify(strip(selections, "query")));
+    d.set("repositories", JSON.stringify(strip(repositories, "path")));
+  }, [matchedSaved, known]);
   const lines = sourceChanges(data.source, v, known),
     removesAll = removesAllAccess(data.source, v),
     stale = staleSourceRows(data.source, v),
