@@ -28,7 +28,7 @@ export const DEFAULT_FIX: Record<string, string> = {
   "connection-not-found": `Run 'ensemble auth login --connection NAME --url ORIGIN'; ${LIST}.`,
   "not-found":
     "Check the ID against the matching list command, for example 'ensemble task list'.",
-  "credential-invalid": `Check the token, or ${LOGIN}.`,
+  "credential-invalid": `The service refused the credential (expired or revoked); ${LOGIN}.`,
   "credential-not-found":
     "Run 'ensemble auth login' to store a credential for this connection.",
   "insufficient-scope":
@@ -93,8 +93,6 @@ export function remedyFor(error: CliError, category: string): string {
   );
 }
 
-/** A path to paste into a shell command: double-quoted unless that would expand it. */
-export const shellQuote = (path: string) =>
-  /[$`\\"!]/.test(path)
-    ? `'${path.replaceAll("'", "'\\''")}'`
-    : JSON.stringify(path);
+/** One shell word: bare when it is plain, else single-quoted so nothing in it expands. */
+export const shellWord = (word: string) =>
+  /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;

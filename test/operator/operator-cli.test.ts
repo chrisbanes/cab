@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import type { BrowseContext } from "../../src/cli/browse.js";
+import { type BrowseContext, cursorQuery } from "../../src/cli/browse.js";
 import {
   CliError,
   KeychainCredentialStore,
@@ -805,7 +805,7 @@ test("a rejected token file names the fix", async (t) => {
   assert.equal(r.code, 2);
   assert.match(r.err, /\(invalid-token-file\)/);
   assert.match(r.err, /Token file rejected: its mode is 0644; it must be 0600/);
-  assert.deepEqual(fixLines(r.err), [`Fix: chmod 600 "${real}"`]);
+  assert.deepEqual(fixLines(r.err), [`Fix: chmod 600 ${real}`]);
 
   const missing = join(h.dir, "missing.token");
   r = await login(missing);
@@ -844,4 +844,93 @@ test("a rejected token file names the fix", async (t) => {
   writeFileSync(odd, `${syntheticToken()}\n`, { mode: 0o644 });
   r = await login(odd);
   assert.deepEqual(fixLines(r.err), [`Fix: chmod 600 '${odd}'`]);
+});
+
+test("defaults name a runnable command for auth and cursor failures", async (t) => {
+  const s = await startCliService(t);
+  const h = harness(t);
+  const fix = (err: string) => fixLines(err)[0] ?? "";
+
+  // No saved connection at all.
+  let r = await h.run(["task", "get", s.taskId]);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /\(connection-not-found\)/);
+  assert.match(
+    fix(r.err),
+    /ensemble auth login --connection NAME --url ORIGIN/,
+  );
+
+  // A revoked credential.
+  const revoked = await s.issue("read", "revoked");
+  const login = (name: string) =>
+    h.run([
+      "auth",
+      "login",
+      "--connection",
+      name,
+      "--url",
+      s.origin,
+      "--token-file",
+      h.tokenFile(revoked.token),
+    ]);
+  assert.equal((await login("gone")).code, 0);
+  s.f.service.operatorCredentials().revoke(revoked.credential.id);
+  r = await h.run(["task", "get", s.taskId, "--connection", "gone"]);
+  assert.equal(r.code, 3);
+  assert.match(r.err, /\(credential-invalid[,)]/);
+  assert.match(fix(r.err), /ensemble auth login/);
+
+  // A connection that was logged out names the exact login to repeat.
+  r = await h.run(["auth", "logout", "--connection", "gone"]);
+  assert.equal(r.code, 0, r.err);
+  r = await h.run(["task", "get", s.taskId, "--connection", "gone"]);
+  assert.equal(r.code, 3);
+  assert.match(r.err, /\(credential-not-found\)/);
+  assert.equal(
+    fix(r.err),
+    `Fix: Run 'ensemble auth login --connection gone --url ${s.origin}' to store a credential.`,
+  );
+
+  // An unknown connection name.
+  r = await h.run(["task", "get", s.taskId, "--connection", "nowhere"]);
+  assert.equal(r.code, 2);
+  assert.match(fix(r.err), /ensemble connection list/);
+
+  // A cursor the service refuses restarts without --cursor.
+  const cursor = Buffer.from(
+    JSON.stringify({
+      v: 1,
+      k: "task list",
+      q: cursorQuery({}),
+      c: randomUUID(),
+    }),
+  ).toString("base64url");
+  const read = await s.issue("read", "paging");
+  assert.equal(
+    (
+      await h.run([
+        "auth",
+        "login",
+        "--connection",
+        "paging",
+        "--url",
+        s.origin,
+        "--token-file",
+        h.tokenFile(read.token),
+      ])
+    ).code,
+    0,
+  );
+  r = await h.run([
+    "task",
+    "list",
+    "--cursor",
+    cursor,
+    "--connection",
+    "paging",
+  ]);
+  assert.equal(r.code, 4);
+  assert.match(r.err, /\(cursor-stale[,)]/);
+  assert.match(fix(r.err), /without --cursor/);
+  assert.equal(fixLines(r.err).length, 1);
 });

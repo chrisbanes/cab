@@ -4,7 +4,7 @@ import { open } from "node:fs/promises";
 import { z } from "zod";
 import { writeOut } from "./browse-evidence.js";
 import { CliError } from "./connections.js";
-import { shellQuote } from "./remedy.js";
+import { shellWord } from "./remedy.js";
 
 export const CHANGE_SCHEMA = "ensemble.cli.change/v1";
 export const MAX_DOCUMENT_BYTES = 512 * 1024;
@@ -107,7 +107,7 @@ export function openFailure(
     return { why: "it is a directory", fix: "Pass a file, not a directory." };
   return {
     why: `it cannot be read${code ? ` (${code})` : ""}`,
-    fix: `Check that you can read ${shellQuote(path)}.`,
+    fix: `Check that you can read ${shellWord(path)}.`,
   };
 }
 
@@ -143,7 +143,7 @@ export async function readOwnerOnlyFile(
     if ((stat.mode & 0o077) !== 0)
       throw invalid(
         `its mode is ${(stat.mode & 0o777).toString(8).padStart(4, "0")}; it must be 0600 or stricter`,
-        `chmod 600 ${shellQuote(path)}`,
+        `chmod 600 ${shellWord(path)}`,
       );
     if (stat.size > MAX_DOCUMENT_BYTES)
       throw invalid("it is larger than 512 KiB", "Use a smaller file.");

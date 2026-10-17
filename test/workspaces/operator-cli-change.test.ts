@@ -692,6 +692,6 @@ test("a missing change document says it is missing and sends nothing", async (t)
   const mode = await h.run(["capacity", "apply", "--file", open]);
   assert.equal(mode.code, 2);
   assert.match(mode.err, /its mode is 0644; it must be 0600 or stricter/);
-  assert.match(mode.err, new RegExp(`^Fix: chmod 600 "${open}"$`, "m"));
+  assert.match(mode.err, new RegExp(`^Fix: chmod 600 ${open}$`, "m"));
   assert.deepEqual(h.fetches, []);
 });

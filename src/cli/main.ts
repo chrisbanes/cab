@@ -277,7 +277,9 @@ export async function main(
             "code" in raw &&
             String(raw.code).startsWith("ERR_PARSE_ARGS")
           ? new CliError("usage", `${raw.message}\n\n${USAGE}`)
-          : new CliError("unavailable", "Unexpected CLI failure.");
+          : new CliError("unavailable", "Unexpected CLI failure.", {
+              fix: "Retry the command; if it keeps failing, report it with the command you ran.",
+            });
     const [exit, category] =
       EXIT[error.code] ??
       (error.extra.status === 409
@@ -505,8 +507,11 @@ function operatorConnection(
   return {
     async origin() {
       rejectManaged(deps.env);
-      const { connection } = config.select(await config.read(), requested);
-      await loadToken(connection, deps);
+      const { name, connection } = config.select(
+        await config.read(),
+        requested,
+      );
+      await loadToken(name, connection, deps);
       return connection.url;
     },
     async readiness(signal) {
@@ -539,7 +544,7 @@ async function connect(
   capabilities: readonly string[],
 ) {
   const { name, connection } = config.select(await config.read(), requested);
-  const token = await loadToken(connection, deps);
+  const token = await loadToken(name, connection, deps);
   const client = new ServiceClient(
     connectionOrigin(connection.url),
     token,
@@ -550,6 +555,9 @@ async function connect(
     throw new CliError(
       "service-identity-changed",
       `The service at ${connection.url} is a different installation than when ${name} logged in. Run 'ensemble auth login' again if this is expected.`,
+      {
+        fix: `If the reinstall is expected, run 'ensemble auth login --connection ${name} --url ${connection.url}'; otherwise check the URL with 'ensemble connection list'.`,
+      },
     );
   return {
     name,
@@ -566,12 +574,15 @@ async function connect(
   };
 }
 
-async function loadToken(connection: Connection, deps: CliDeps) {
+async function loadToken(name: string, connection: Connection, deps: CliDeps) {
   const credential = connection.credential;
   if (!credential)
     throw new CliError(
       "credential-not-found",
       "This connection is logged out. Run 'ensemble auth login'.",
+      {
+        fix: `Run 'ensemble auth login --connection ${name} --url ${connection.url}' to store a credential.`,
+      },
     );
   if (credential.kind === "token-file") return readTokenFile(credential.path);
   if (deps.platform !== "darwin")

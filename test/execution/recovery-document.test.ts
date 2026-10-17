@@ -79,5 +79,5 @@ test("a missing or open recovery document names the prepare command or the chmod
   chmodSync(open, 0o640);
   const mode = await refusal(open);
   assert.match(mode.message, /its mode is 0640; it must be 0600/);
-  assert.equal(mode.extra.fix, `chmod 600 "${open}"`);
+  assert.equal(mode.extra.fix, `chmod 600 ${open}`);
 });

@@ -131,7 +131,9 @@ export class ConnectionConfig {
     }
     const connection = config.connections[name];
     if (!connection)
-      throw new CliError("connection-not-found", `Unknown connection ${name}`);
+      throw new CliError("connection-not-found", `Unknown connection ${name}`, {
+        fix: "Run 'ensemble connection list' for the saved names, or log in with 'ensemble auth login --connection NAME --url ORIGIN'.",
+      });
     return { name, connection };
   }
 }
