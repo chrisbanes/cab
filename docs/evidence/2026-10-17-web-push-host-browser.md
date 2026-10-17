@@ -24,22 +24,22 @@ crashed runtime.
   temporary data and auth directories, removed after the run. The real `fetchPushTransport`
   sent every push. The installed Ensemble service, its port, state and auth file, the
   user's own browser profile and every credential were not touched.
-- Code: branch `cb/issue-1145-web-push` on `main` at `23efe402`.
+- Code: branch `cb/issue-1145-web-push` at commit `50116190` (`main` at `7eb44177` merged in), the commit before this record.
 
 ## Steps and results
 
-Timings are from the final run, in milliseconds.
+Timings are from the final run (the fourth; the earlier three found the harness problems listed under Findings), in milliseconds.
 
 | Step | Result |
 | --- | --- |
 | Sign in | Passed through the context's request API (see Findings). |
-| 1 Real subscribe | Passed in 30,674 ms (Chrome's first registration with its push service in a fresh profile took 25–31 s in every run). Push service host `fcm.googleapis.com`, in the allowlist. |
-| 2 Test notification | The push service answered `201`; the notification was listed by `registration.getNotifications()` 8 ms later. |
-| 3 One question | After one tick the push service answered `201` and the notification was listed after 12 ms (tick to shown, 112 ms). Its title read "Question in <project>: 1 waiting" and did not contain the question text. |
+| 1 Real subscribe | Passed in 49,818 ms (Chrome's first registration with its push service in a fresh profile took 25–50 s in every run). Push service host `fcm.googleapis.com`, in the allowlist. |
+| 2 Test notification | The push service answered `201`; the notification was listed by `registration.getNotifications()` 7 ms later. |
+| 3 One question | After one tick the push service answered `201` and the notification was listed after 507 ms (tick to shown, 579 ms). Its title read "Question in <project>: 1 waiting" and did not contain the question text. |
 | 4 Second tick | No push request and still one notification with that tag. |
 | 5 Click | Not proven end to end. In Chrome's own worker, `clients.matchAll` found the controlled `/app` window and `navigate()` took it to the exact `/app/inbox?task=…&request=…` link. `focus()` was refused (`InvalidAccessError`) and `openWindow` cannot run without a real click, so focus, `openWindow` and the operating system's delivery of a click are untested here. The handler's branches are covered by `operator-push-service-worker.test.ts` against a fake scope. |
 | 6 Answer the question | No further push (request count unchanged). After a page reload the Inbox read closed the notification (`getNotifications()` no longer listed its tag). |
-| 7 Runtime exhaustion | A fake runtime that fails every start, on an injected restart clock, exhausted: one push (`201`), one "Codex runtime unavailable" notification listed after 3 ms, no duplicate on the next tick. Re-enabling the runtime closed the notification after the next Inbox read. |
+| 7 Runtime exhaustion | A fake runtime that fails every start, on an injected restart clock, exhausted: one push (`201`), one "Codex runtime unavailable" notification listed within a few milliseconds, no duplicate on the next tick. Re-enabling the runtime closed the notification after the next Inbox read. |
 | 8 Unsubscribe, then test | After `PushSubscription.unsubscribe()` in the browser alone, the first test still answered `201`; the second, 5 s later, answered `410`, the outcome was "gone" and the row read revoked as removed by the push service. The push service forgets an unsubscribed registration a few seconds late, so the harness repeats the test up to 24 times at 5 s intervals. |
 | 9 Secrets | The harness transcript and result contain neither the private key nor the question text. The private key appears in no file except `operator-push-vapid.json`, and the `operator_push_*` tables hold no private key, no question text and, after the revocation, no endpoint. |
 
