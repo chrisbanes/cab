@@ -2051,7 +2051,7 @@ test("daemon mode install renders, lints and records without touching launchd", 
   for (const step of output.steps) assert.ok(result.stderr.includes(step));
   assert.ok(
     result.stderr.includes(
-      `Then run the same install command again, with the same options and no TARBALL, to verify: ${quoted(join(f.stateDir, "versions", "0.1.0", "bin", "ensemble"))} service install --mode daemon`,
+      `Then run the same install command again, with the same options and no TARBALL, to verify: ${quoted(join(f.stateDir, "versions", "0.1.0", "bin", "ensemble"))} service install --mode daemon --state-dir ${quoted(f.stateDir)} --label ${f.options.label} --port ${f.options.port}`,
     ),
     result.stderr,
   );

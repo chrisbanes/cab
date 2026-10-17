@@ -233,7 +233,7 @@ soon after install and first check that `shasum -a 256` of the staged file equal
 `plistSha256` in the install record; anything that can write `STATE` as you could
 change the file. Then run the same install command again to verify, with the same
 options and no TARBALL, from the installed release (`"$STATE/versions/<version>/bin/ensemble"
-service install --mode daemon`; install prints the exact line). Use the same
+service install --mode daemon` plus the `--state-dir`, `--label` and `--port` you used; install prints the exact line). Use the same
 `--state-dir` and label in both modes: the exclusion between modes checks the
 record and `/Library`, and a record in another state directory is invisible to it.
 If the copy ran but the job is not loaded, the re-run prints only the `launchctl

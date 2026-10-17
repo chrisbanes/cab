@@ -764,7 +764,9 @@ class Service {
 
   /** The command that verifies a daemon install: the installed release's own CLI, no TARBALL. */
   verifyCommand(version: string): string {
-    return `${shellWord(join(this.options.stateDir, "versions", version, "bin", "ensemble"))} service install --mode daemon`;
+    const { stateDir, label, port } = this.options;
+    const cli = join(stateDir, "versions", version, "bin", "ensemble");
+    return `${shellWord(cli)} service install --mode daemon --state-dir ${shellWord(stateDir)} --label ${label} --port ${port}`;
   }
 
   /** The commands the operator runs with sudo to install and start the staged daemon plist. */
