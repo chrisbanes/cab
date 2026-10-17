@@ -33,9 +33,7 @@ import {
   useDraft,
   sourceHold,
   useLoadedDraft,
-  useNewerPrivateRead,
   usePrivateValues,
-  useRereadForEdit,
 } from "./settings.js";
 import { ghLoginCopy } from "./discovery-credential.js";
 import {
@@ -69,22 +67,16 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     p.session,
     `/api/operator/projects/${projectId}/private-values`,
     projectPrivateValuesSchema,
-    true,
+    {
+      autoLoad: true,
+      loaded: data.source.version,
+      version: (r) => r.data.source.version,
+      refreshLoaded: p.refreshConfiguration,
+    },
   );
   const privateData = priv.state.data?.data.source;
   const known =
     privateData?.version === data.source.version ? privateData : undefined;
-  const staleKnown = privateData !== undefined && known === undefined;
-  useNewerPrivateRead(
-    data.source.version,
-    privateData?.version,
-    priv.state.fetchedAt,
-    p.refreshConfiguration,
-  );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read once per source version.
-  useEffect(() => {
-    if (staleKnown && !priv.state.pending) priv.refresh();
-  }, [data.source.version]);
   // The panel renders after the configuration read, so the browser cannot scroll to it.
   useEffect(() => {
     if (location.hash === `#${readinessAnchor}`)
@@ -118,20 +110,6 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         !r.removed &&
         (typeof r.query === "string" || typeof r.path === "string"),
     );
-  // Retained edits are compared with the saved values; read again if the first read missed.
-  useRereadForEdit(
-    data.source.version,
-    [...selections, ...repositories].some(
-      (r) =>
-        r.keep && (typeof r.query === "string" || typeof r.path === "string"),
-    ) &&
-      (d.phase === "editing" ||
-        d.phase === "conflict" ||
-        d.phase === "rejected"),
-    privateData?.version,
-    priv.state.pending,
-    priv.refresh,
-  );
   // An edit that now equals the saved value (another writer saved the same) is no edit: drop it
   // so the form is clean and later reads apply.
   const equalsSaved = (r: SourceRow, name: "query" | "path") => {

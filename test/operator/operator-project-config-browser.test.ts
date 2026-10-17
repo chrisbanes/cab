@@ -770,6 +770,212 @@ test("readiness matching with no condition is no edit, and the adopted note goes
   await assertClean(page, "Save changes");
 });
 
+/**
+ * Serve private-values reads from a script. `plan` decides, per request number (from 1), to
+ * hold until released, answer with a captured older body, fail, or pass through.
+ */
+const scriptReads = async (
+  page: Page,
+  plan: (n: number) => "hold-stale" | "stale" | "fail" | "real",
+  stale: string,
+) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const reads = { count: 0 };
+  await page.route("**/private-values", async (route) => {
+    const n = ++reads.count;
+    const how = plan(n);
+    if (how === "hold-stale") await gate;
+    if (how === "hold-stale" || how === "stale")
+      await route
+        .fulfill({ status: 200, contentType: "application/json", body: stale })
+        .catch(() => {});
+    else if (how === "fail")
+      await route
+        .fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "unavailable" } }),
+        })
+        .catch(() => {});
+    else await route.continue().catch(() => {});
+  });
+  return { reads, release };
+};
+const privateBody = (page: Page, path: string) =>
+  page.evaluate(async (p) => (await fetch(p)).text(), path);
+
+test("the source tab reads again by itself when the first read settles older than the version", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const stale = await privateBody(
+    page,
+    `/api/operator/projects/${ids.atlas}/private-values`,
+  );
+  const external = (text: string) =>
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId: ids.atlas,
+      expectedVersion: d.githubConfiguration(ids.atlas).version,
+      selections: [
+        { id: "S-1", keep: true },
+        { id: "S-2", kind: "search", query: text },
+        { id: "S-3", keep: true },
+      ],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+    } as Parameters<OperatorApi["execute"]>[0]);
+  const { reads, release } = await scriptReads(
+    page,
+    (n) => (n === 1 ? "hold-stale" : "real"),
+    stale,
+  );
+  // The first read is out when a refresh advances the loaded version; it settles older.
+  await projectTabs(page).getByRole("link", { name: "GitHub source" }).click();
+  await page.getByText("Loading search query", { exact: false }).waitFor();
+  await external("NEWER QUERY");
+  await refresh(page);
+  release();
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(
+          'input[aria-label="Search query"]',
+        ) as HTMLInputElement | null
+      )?.value === "NEWER QUERY",
+  );
+  assert.equal(reads.count, 2, "one automatic re-read, no manual Try again");
+  assert.equal(await page.getByText("Query unavailable").count(), 0);
+  await settled(page);
+  assert.equal(reads.count, 2, "no loop");
+});
+
+test("an older read is retried at most twice per version, and a failure waits for a new version", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const stale = await privateBody(
+    page,
+    `/api/operator/projects/${ids.atlas}/private-values`,
+  );
+  const external = (text: string) =>
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId: ids.atlas,
+      expectedVersion: d.githubConfiguration(ids.atlas).version,
+      selections: [
+        { id: "S-1", keep: true },
+        { id: "S-2", kind: "search", query: text },
+        { id: "S-3", keep: true },
+      ],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+    } as Parameters<OperatorApi["execute"]>[0]);
+  await external("MOVED ON");
+  await refresh(page);
+  // Every read is older than the loaded version: the first plus two retries, then it stops.
+  const older = await scriptReads(page, () => "stale", stale);
+  await projectTabs(page).getByRole("link", { name: "GitHub source" }).click();
+  const retry = page.getByRole("button", {
+    name: /^Try again to load the search query/,
+  });
+  await retry.waitFor();
+  await settled(page);
+  assert.equal(older.reads.count, 3);
+  // Try again is the operator's, and asks once more.
+  await retry.click();
+  await retry.waitFor();
+  assert.equal(older.reads.count, 4);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  // A failed read waits for the version to move before it is read again by itself.
+  await projectTabs(page).getByRole("link", { name: "General" }).click();
+  await page.getByLabel("Project name", { exact: true }).waitFor();
+  const failing = await scriptReads(
+    page,
+    (n) => (n === 1 ? "fail" : "real"),
+    stale,
+  );
+  await projectTabs(page).getByRole("link", { name: "GitHub source" }).click();
+  await page.getByText("Query unavailable", { exact: true }).waitFor();
+  await settled(page);
+  assert.equal(
+    failing.reads.count,
+    1,
+    "a failure is not retried at the same version",
+  );
+  await external("AFTER THE FAILURE");
+  await refresh(page);
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(
+          'input[aria-label="Search query"]',
+        ) as HTMLInputElement | null
+      )?.value === "AFTER THE FAILURE",
+  );
+  assert.equal(failing.reads.count, 2);
+});
+
+test("a Reveal that settles older than the form is read again by itself, and leaving cancels it", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const stale = await privateBody(
+    page,
+    `/api/operator/projects/${ids.atlas}/private-values`,
+  );
+  const { reads, release } = await scriptReads(
+    page,
+    (n) => (n === 1 ? "hold-stale" : "real"),
+    stale,
+  );
+  await revealButton(page, "instructions").click();
+  await page.getByLabel("Project name", { exact: true }).waitFor();
+  bumpProject(f, ids.atlas, "Atlas moved on");
+  await refresh(page);
+  release();
+  // The read settled older than the loaded version; the form reads again and opens the field.
+  await instructionsField(page).waitFor();
+  assert.equal(await instructionsField(page).inputValue(), SENTINEL);
+  assert.equal(reads.count, 2);
+  await settled(page);
+  assert.equal(reads.count, 2, "no loop");
+
+  // Leaving the page mid-read cancels the retry.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.goto(page.url());
+  await page.getByLabel("Project name", { exact: true }).waitFor();
+  const second = await scriptReads(
+    page,
+    (n) => (n === 1 ? "hold-stale" : "real"),
+    stale,
+  );
+  await revealButton(page, "instructions").click();
+  await projectTabs(page).getByRole("link", { name: "Routing" }).click();
+  second.release();
+  await settled(page);
+  assert.equal(second.reads.count, 1);
+});
+
 test("an edit that another writer saved identically is dropped, and later reads apply", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,

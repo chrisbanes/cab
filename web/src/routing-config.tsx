@@ -24,10 +24,9 @@ import {
   submitDraft,
   useDraft,
   useLoadedDraft,
+  editable,
   textHold,
-  useNewerPrivateRead,
   usePrivateValues,
-  useRereadForEdit,
 } from "./settings.js";
 
 const profileLabel = (r: ProjectConfigurationData["profiles"][number]) =>
@@ -100,27 +99,17 @@ export function RoutingTab(p: TabProps) {
     p.session,
     `/api/operator/projects/${projectId}/private-values`,
     projectPrivateValuesSchema,
+    {
+      loaded: data.routing.version,
+      version: (r) => r.data.routing.version,
+      edit: typeof d.values.guidance === "string" && editable(d.phase),
+      refreshLoaded: p.refreshConfiguration,
+    },
   );
   const revealed = revealedText(
     priv.state,
     (r) => ({ version: r.data.routing.version, text: r.data.routing.guidance }),
     data.routing.version,
-  );
-  useNewerPrivateRead(
-    data.routing.version,
-    priv.state.data?.data.routing.version,
-    priv.state.fetchedAt,
-    p.refreshConfiguration,
-  );
-  useRereadForEdit(
-    data.routing.version,
-    typeof d.values.guidance === "string" &&
-      (d.phase === "editing" ||
-        d.phase === "conflict" ||
-        d.phase === "rejected"),
-    priv.state.data?.data.routing.version,
-    priv.state.pending,
-    priv.refresh,
   );
   const lines = routingChanges(data, d.values, revealed);
   const holdSave =
@@ -169,7 +158,7 @@ export function RoutingTab(p: TabProps) {
               noun="routing guidance"
               revealed={revealed}
               state={priv.state}
-              onReveal={priv.refresh}
+              onReveal={priv.reveal}
             >
               <p className="metadata muted">
                 Private to this signed-in session; revealing is not recorded.

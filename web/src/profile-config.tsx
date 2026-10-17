@@ -44,10 +44,9 @@ import {
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
+  editable,
   textHold,
-  useNewerPrivateRead,
   usePrivateValues,
-  useRereadForEdit,
   type SettingsProps,
 } from "./settings.js";
 import type { ConfigurationDraft } from "./settings-state.js";
@@ -311,6 +310,12 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
     p.session,
     `/api/operator/profiles/${profileId}/private-values`,
     profilePrivateValuesSchema,
+    {
+      loaded: data?.profile.version,
+      version: (r) => r.data.profile.version,
+      edit: typeof d.values.instructions === "string" && editable(d.phase),
+      refreshLoaded: resource.refresh,
+    },
   );
   const revealed = data
     ? revealedText(
@@ -322,22 +327,6 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
         data.profile.version,
       )
     : undefined;
-  useNewerPrivateRead(
-    data?.profile.version,
-    priv.state.data?.data.profile.version,
-    priv.state.fetchedAt,
-    resource.refresh,
-  );
-  useRereadForEdit(
-    data?.profile.version,
-    typeof d.values.instructions === "string" &&
-      (d.phase === "editing" ||
-        d.phase === "conflict" ||
-        d.phase === "rejected"),
-    priv.state.data?.data.profile.version,
-    priv.state.pending,
-    priv.refresh,
-  );
   const lines = data ? profileChanges(data, d.values, revealed) : [];
   const holdSave =
     typeof d.values.instructions === "string" && revealed === undefined;
@@ -457,7 +446,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     noun="instructions"
                     revealed={revealed}
                     state={priv.state}
-                    onReveal={priv.refresh}
+                    onReveal={priv.reveal}
                   >
                     <p className="metadata muted">
                       Private to this signed-in session; revealing is not

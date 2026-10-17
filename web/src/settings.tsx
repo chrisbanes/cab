@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useState,
   useReducer,
   useRef,
   useId,
@@ -136,23 +137,107 @@ export function DraftField({
   );
 }
 /**
+ * Run `act` while `due` holds, at most `cap` times for one `key`. The decision is derived from
+ * state on every render: the effect depends on the key and on `due` itself, so any change that
+ * makes it due again (a read settling stale, failing, or the version moving) re-evaluates it.
+ */
+function useBoundedRetry(key: unknown, due: boolean, act: () => void, cap = 2) {
+  const latest = useRef(act);
+  latest.current = act;
+  const tries = useRef({ key, count: 0 });
+  useEffect(() => {
+    if (!Object.is(tries.current.key, key)) tries.current = { key, count: 0 };
+    if (due && tries.current.count < cap) {
+      tries.current.count++;
+      latest.current();
+    }
+  }, [key, due, cap]);
+}
+/** Whether a draft still holds input that a read could be compared with. */
+export const editable = (phase: ConfigurationDraft["phase"]) =>
+  phase === "editing" || phase === "conflict" || phase === "rejected";
+/**
  * One owner's private values, read only for this signed-in session. The result lives in
  * component state alone: the scope (session token and owner) clears it on sign-out and
  * owner change, and unmounting aborts a read in flight. Nothing here is stored or logged.
+ *
+ * The read is kept in step with the loaded configuration. It is read again, at most twice per
+ * loaded version, when it is wanted (autoLoad, a Reveal the operator asked for, or an edit that
+ * must be compared with the saved text) and no read at the loaded version is available, none is
+ * in flight and the last one did not fail at this version. A read that is newer than the loaded
+ * configuration instead re-reads the configuration.
  */
 export function usePrivateValues<T>(
   client: OperatorClient,
   session: Session,
   path: string,
   schema: z.ZodType<T>,
-  autoLoad = false,
+  options: {
+    autoLoad?: boolean;
+    /** The section version of the configuration now loaded. */
+    loaded?: number | undefined;
+    /** The section version a private read was made at. */
+    version?: (data: T) => number;
+    /** The form holds an edit that has to be compared with the saved text. */
+    edit?: boolean;
+    /** Re-read the configuration (used when a private read is newer than it). */
+    refreshLoaded?: () => void;
+  } = {},
 ) {
+  const { autoLoad = false, loaded, version, edit = false } = options;
   // The loader must stay stable: a new one would clear the revealed state.
   const loader = useCallback(
     (signal: AbortSignal) => client.read(path, schema, signal),
     [client, path, schema],
   );
-  return useOperatorResource(`${session.csrfToken}:${path}`, loader, autoLoad);
+  const resource = useOperatorResource(
+    `${session.csrfToken}:${path}`,
+    loader,
+    autoLoad,
+  );
+  const { state } = resource;
+  const [requested, setRequested] = useState(autoLoad);
+  const read = state.data && version ? version(state.data) : undefined;
+  const inFlight = state.pending || (autoLoad && state.status === "empty");
+  // A current read settles a Reveal the operator asked for.
+  useEffect(() => {
+    if (!autoLoad && read !== undefined && read === loaded) setRequested(false);
+  }, [autoLoad, read, loaded]);
+  // A failure is the operator's to retry, unless the version moved on since it happened. The
+  // version it happened at is noted the first time the failure is seen (idempotent per state).
+  const failure = useRef<{ failed: boolean; at: number | undefined }>({
+    failed: false,
+    at: undefined,
+  });
+  if (state.error === null) failure.current = { failed: false, at: undefined };
+  else if (!failure.current.failed)
+    failure.current = { failed: true, at: loaded };
+  useBoundedRetry(
+    loaded,
+    (requested || edit) &&
+      loaded !== undefined &&
+      !inFlight &&
+      (read === undefined || read < loaded) &&
+      (state.error === null || failure.current.at !== loaded),
+    resource.refresh,
+  );
+  useBoundedRetry(
+    read,
+    loaded !== undefined &&
+      read !== undefined &&
+      read > loaded &&
+      !inFlight &&
+      options.refreshLoaded !== undefined,
+    () => options.refreshLoaded?.(),
+  );
+  return {
+    ...resource,
+    /** The operator asked for the text: read it, and again if the version moves meanwhile. */
+    reveal: () => {
+      setRequested(true);
+      void resource.refresh();
+    },
+  };
 }
 /** The revealed text, only while it was read at the section version now loaded. */
 export function revealedText<T>(
@@ -163,62 +248,10 @@ export function revealedText<T>(
   const value = state.data ? pick(state.data) : undefined;
   return value && value.version === version ? value.text : undefined;
 }
-/**
- * A private read at a newer section version than the loaded configuration means another
- * writer saved since it loaded. Re-read the configuration once so Reveal opens the field
- * instead of stalling on a version that never matches.
- */
-export function useNewerPrivateRead(
-  loaded: number | undefined,
-  read: number | undefined,
-  readAt: number | null,
-  refresh: () => void,
-) {
-  const latest = useRef(refresh);
-  latest.current = refresh;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: act once per completed private read.
-  useEffect(() => {
-    if (loaded !== undefined && read !== undefined && read > loaded)
-      latest.current();
-  }, [readAt]);
-}
 export const textHold =
   "Save is on hold until the saved text is read again to compare it with your edit.";
 export const sourceHold =
   "Save is on hold until the saved queries and paths are read again to compare them with your edits.";
-/**
- * An edited private text must be compared with what is saved now, so read it again when the
- * loaded version moved past the last private read (for example after reviewing another
- * writer's save). Runs when the loaded version or the edit state changes, not per render.
- */
-export function useRereadForEdit(
-  loaded: number | undefined,
-  edited: boolean,
-  read: number | undefined,
-  pending: boolean,
-  refresh: () => void,
-) {
-  const latest = useRef(refresh);
-  latest.current = refresh;
-  // A read that was already in flight when the version moved may return the older version,
-  // so try again when it settles, but never more than twice for one loaded version.
-  const attempts = useRef({ loaded, count: 0 });
-  // biome-ignore lint/correctness/useExhaustiveDependencies: act per loaded version, edit state and settled read only.
-  useEffect(() => {
-    if (attempts.current.loaded !== loaded)
-      attempts.current = { loaded, count: 0 };
-    if (
-      edited &&
-      loaded !== undefined &&
-      read !== loaded &&
-      !pending &&
-      attempts.current.count < 2
-    ) {
-      attempts.current.count++;
-      latest.current();
-    }
-  }, [loaded, edited, pending]);
-}
 /**
  * "Kept · Reveal" until the signed-in operator reveals a private text, then the same
  * multiline field. Revealed text is shown from `revealed` and enters the draft only once

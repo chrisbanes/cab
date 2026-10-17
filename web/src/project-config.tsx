@@ -38,10 +38,9 @@ import {
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
+  editable,
   textHold,
-  useNewerPrivateRead,
   usePrivateValues,
-  useRereadForEdit,
   type SettingsProps,
 } from "./settings.js";
 import { SourceTab } from "./source-config.js";
@@ -265,6 +264,12 @@ function GeneralTab(p: TabProps) {
     p.session,
     `/api/operator/projects/${projectId}/private-values`,
     projectPrivateValuesSchema,
+    {
+      loaded: data.project.version,
+      version: (r) => r.data.project.version,
+      edit: typeof d.values.instructions === "string" && editable(d.phase),
+      refreshLoaded: p.refreshConfiguration,
+    },
   );
   const revealed = revealedText(
     priv.state,
@@ -273,22 +278,6 @@ function GeneralTab(p: TabProps) {
       text: r.data.project.instructions,
     }),
     data.project.version,
-  );
-  useNewerPrivateRead(
-    data.project.version,
-    priv.state.data?.data.project.version,
-    priv.state.fetchedAt,
-    p.refreshConfiguration,
-  );
-  useRereadForEdit(
-    data.project.version,
-    typeof d.values.instructions === "string" &&
-      (d.phase === "editing" ||
-        d.phase === "conflict" ||
-        d.phase === "rejected"),
-    priv.state.data?.data.project.version,
-    priv.state.pending,
-    priv.refresh,
   );
   const lines = projectChanges(data, d.values, revealed);
   // An edit is compared with the saved text before it is sent; until that read is current, wait.
@@ -356,7 +345,7 @@ function GeneralTab(p: TabProps) {
               noun="instructions"
               revealed={revealed}
               state={priv.state}
-              onReveal={priv.refresh}
+              onReveal={priv.reveal}
             >
               <p className="metadata muted">
                 Private to this signed-in session; revealing is not recorded.
