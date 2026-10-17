@@ -193,10 +193,28 @@ test("executionFacts counts running assignments and states delivery", () => {
   assert.equal(
     facts({
       mode: "through-merge",
-      binding: { repositoryName: "acme/app", number: 7, state: "OPEN" },
+      binding: {
+        repositoryName: "acme/app",
+        url: "https://github.com/acme/app/pull/7",
+        number: 7,
+        state: "OPEN",
+      },
     }).delivery,
     "Through merge · acme/app#7 · open",
   );
+  // Without a verified link the name is the provider's opaque repository id, which is never shown.
+  for (const url of [
+    undefined,
+    "javascript:alert(1)",
+    "http://github.com/a/b/pull/7",
+  ])
+    assert.equal(
+      facts({
+        mode: "through-merge",
+        binding: { repositoryName: "R_kgDOabc", url, number: 7, state: "OPEN" },
+      }).delivery,
+      "Through merge · PR #7 · open",
+    );
   assert.equal(facts().delivery, "Delivery not recorded");
   assert.equal(
     executionFacts({

@@ -46,6 +46,7 @@ import {
 import {
   checkStatusWord,
   deliveryBlockerSentence,
+  pullRequestReference,
   pullRequestStateLabel,
   safePullRequestUrl,
 } from "./delivery-presentation.js";
@@ -2671,11 +2672,11 @@ function PullRequestLine({
     <p>
       {href ? (
         <a href={href} target="_blank" rel="noopener noreferrer">
-          {binding.repositoryName}#{binding.number}
+          {pullRequestReference(binding)}
           <span className="sr-only"> (opens GitHub)</span>
         </a>
       ) : (
-        <>PR #{binding.number}</>
+        <>{pullRequestReference(binding)}</>
       )}{" "}
       <StatusBadge tone={tone[binding.state]}>
         {pullRequestStateLabel(binding.state, binding.draft)}

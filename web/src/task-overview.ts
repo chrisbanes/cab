@@ -2,6 +2,7 @@ import type { TaskRead } from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
+import { pullRequestReference } from "./delivery-presentation.js";
 import { shortId } from "./presentation.js";
 import { nextActor, reasonLabels, type TaskColumn } from "./tasks.js";
 
@@ -239,7 +240,7 @@ export function executionFacts(
     delivery: !delivery
       ? "Delivery not recorded"
       : binding
-        ? `${deliveryModes[delivery.mode]} · ${binding.repositoryName}#${binding.number} · ${binding.state.toLowerCase()}`
+        ? `${deliveryModes[delivery.mode]} · ${pullRequestReference(binding)} · ${binding.state.toLowerCase()}`
         : `${deliveryModes[delivery.mode]} · no PR yet`,
   };
 }

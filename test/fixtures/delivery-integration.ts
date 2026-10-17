@@ -504,6 +504,19 @@ export async function createReleaseDeliveryFixture(
         "terminal settlement",
       );
     },
+    /** Records the bound PR as belonging to another repository than its imported source; reopen to read it. */
+    moveBoundPullRequestToRepository(repositoryId: string) {
+      f.seedPersistedState((db) => {
+        const row = db
+          .prepare("SELECT recordJson FROM delivery_pr_bindings WHERE taskId=?")
+          .get(taskId) as { recordJson: string };
+        const record = JSON.parse(row.recordJson);
+        record.observation.repositoryId = repositoryId;
+        db.prepare(
+          "UPDATE delivery_pr_bindings SET recordJson=? WHERE taskId=?",
+        ).run(JSON.stringify(record), taskId);
+      });
+    },
     readDb<T>(read: (db: DatabaseSync) => T): T {
       const db = new DatabaseSync(
         join(f.directory, "data", "standalone.sqlite"),

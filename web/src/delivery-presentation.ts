@@ -51,3 +51,24 @@ export function safePullRequestUrl(url: string | undefined) {
     return null;
   }
 }
+
+type PullRequestBinding = {
+  number: number;
+  repositoryName: string;
+  url?: string | undefined;
+};
+
+/**
+ * The repository name a human may read: only when the server built a verified link for it,
+ * because without one `repositoryName` is the provider's opaque repository id.
+ */
+export const pullRequestRepository = (binding: PullRequestBinding) =>
+  safePullRequestUrl(binding.url) ? binding.repositoryName : null;
+
+/** "acme/app#12", or "PR #12" when the repository name is not verified. */
+export function pullRequestReference(binding: PullRequestBinding) {
+  const repository = pullRequestRepository(binding);
+  return repository
+    ? `${repository}#${binding.number}`
+    : `PR #${binding.number}`;
+}

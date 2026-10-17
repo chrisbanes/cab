@@ -4,6 +4,10 @@ import type { TaskRead } from "../../src/operator/contracts.js";
 import { isPlainClick, ShortId } from "./components.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
+  pullRequestReference,
+  pullRequestRepository,
+} from "./delivery-presentation.js";
+import {
   deliveryApplies,
   executionFacts,
   sourceFacts,
@@ -193,8 +197,10 @@ export function TaskInspector({
               ))}
             {data.delivery?.binding && (
               <li>
-                Pull request {data.delivery.binding.repositoryName}#
-                {data.delivery.binding.number} ·{" "}
+                {pullRequestRepository(data.delivery.binding)
+                  ? "Pull request "
+                  : ""}
+                {pullRequestReference(data.delivery.binding)} ·{" "}
                 {data.delivery.binding.state.toLowerCase()}
               </li>
             )}

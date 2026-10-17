@@ -112,6 +112,23 @@ test("the delivery read links an imported task's pull request in its own reposit
   }
 });
 
+test("the delivery read gives no link and no source repository name for a pull request in another repository", async () => {
+  const f = await createReleaseDeliveryFixture("reviewable-pr");
+  try {
+    await f.register();
+    await f.terminal(1);
+    f.moveBoundPullRequestToRepository("R_kgDOcross");
+    await f.reopen();
+    const binding = (
+      await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+    ).data.delivery?.binding;
+    assert.equal(binding?.url, undefined);
+    assert.equal(binding?.repositoryName, "R_kgDOcross");
+  } finally {
+    await f.close();
+  }
+});
+
 test("connected feedback is literal and deduplicated; changed settlement, outage and task Stop remain conservative across restart", async () => {
   const f = await createReleaseDeliveryFixture();
   try {

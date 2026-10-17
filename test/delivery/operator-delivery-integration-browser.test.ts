@@ -425,3 +425,57 @@ test("uncertain effect and independent Stop remain visible after restart; expire
   assert.equal(f.service.domain().task(f.taskId).state, "open");
   await captureBrowserEvidence(page, "desktop-restarted-stop-uncertainty");
 });
+
+test("a pull request in another repository is named by number only, never by the provider's repository id, on every surface", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createReleaseDeliveryFixture("reviewable-pr", j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  await f.register();
+  await f.terminal(1);
+  const providerId = "R_kgDOcross";
+  f.moveBoundPullRequestToRepository(providerId);
+  await f.reopen();
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(`${web.origin}/app/tasks/${f.taskId}`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "Release delivery", exact: true })
+    .waitFor();
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  await inspector
+    .getByText("Reviewable PR · PR #7 · open", { exact: true })
+    .waitFor();
+  await inspector.getByText("PR #7 · open", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("link", { name: /#7/ }).count(), 0);
+  await openTaskTab(page, "Changes");
+  const changes = page.locator("#changes");
+  await changes
+    .getByText("No GitHub link: this PR's repository name was not observed.", {
+      exact: false,
+    })
+    .waitFor();
+  assert.equal(await changes.locator('a[href*="/pull/"]').count(), 0);
+  // No surface of the task page names the repository: neither the id nor the source's name.
+  for (const tab of ["Overview", "Changes"] as const) {
+    await openTaskTab(page, tab);
+    const text = await page.locator("body").innerText();
+    assert.doesNotMatch(
+      text,
+      /R_kgDO|org\/repo#7/,
+      `${tab} shows a repository name`,
+    );
+  }
+});

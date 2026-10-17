@@ -3,6 +3,8 @@ import { test } from "node:test";
 import {
   checkStatusWord,
   deliveryBlockerSentence,
+  pullRequestReference,
+  pullRequestRepository,
   pullRequestStateLabel,
   safePullRequestUrl,
 } from "../../web/src/delivery-presentation.js";
@@ -56,4 +58,24 @@ test("only an https github.com pull request URL is linkable", () => {
     undefined,
   ])
     assert.equal(safePullRequestUrl(url), null, String(url));
+});
+
+test("a pull request is named by its repository only when the server verified the link", () => {
+  const url = "https://github.com/acme/app/pull/12";
+  const verified = { repositoryName: "acme/app", number: 12, url };
+  assert.equal(pullRequestRepository(verified), "acme/app");
+  assert.equal(pullRequestReference(verified), "acme/app#12");
+  for (const unverified of [
+    undefined,
+    "javascript:alert(1)",
+    "http://github.com/acme/app/pull/12",
+  ]) {
+    const binding = {
+      repositoryName: "R_kgDOabc",
+      number: 12,
+      url: unverified,
+    };
+    assert.equal(pullRequestRepository(binding), null);
+    assert.equal(pullRequestReference(binding), "PR #12");
+  }
 });
