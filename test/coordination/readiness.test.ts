@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -145,8 +146,12 @@ function installClaude(f: Fixture, body: string) {
     mode: 0o755,
   });
 }
+// A probe that should succeed must not race the clock when the machine is slow to start a
+// process, so only the tests of the timeout itself pass a short one.
+const readIfPresent = (path: string) =>
+  existsSync(path) ? readFileSync(path, "utf8") : "";
 const claudeExecutable = (f: Fixture, over: Partial<ReadinessDeps> = {}) =>
-  check(f, "claude-executable", { versionTimeoutMs: 1000, ...over });
+  check(f, "claude-executable", { versionTimeoutMs: 30000, ...over });
 const MISSING = {
   reason: "`claude` not found on PATH",
   fix: "Install Claude Code into the fixed PATH, then turn Claude off and on in Settings → Runtime",
@@ -351,8 +356,19 @@ test("a claude that ignores SIGTERM is killed, and the check settles only after 
   const pidFile = join(f.root, "pid");
   // Ignored signals stay ignored across exec, so the long sleep is the process that traps SIGTERM.
   installClaude(f, `trap '' TERM\necho $$ > "${pidFile}"\nexec /bin/sleep 30`);
-  const result = await claudeExecutable(f, { versionTimeoutMs: 1000 });
-  const pid = Number(readFileSync(pidFile, "utf8"));
+  // The probe's clock is held until the script has trapped TERM and written its pid, so a slow
+  // process start cannot fire the timeout first.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const probe = claudeExecutable(f, { versionTimeoutMs: 1000 });
+  let pid = 0;
+  while (!pid) {
+    pid = Number(readIfPresent(pidFile).trim());
+    if (!pid) await new Promise((resolve) => setImmediate(resolve));
+  }
+  t.mock.timers.tick(1000); // The timeout: SIGTERM, which the script ignores.
+  t.mock.timers.tick(1000); // The grace period: SIGKILL.
+  const result = await probe;
+  t.mock.timers.reset();
   assert.ok(pid > 1);
   try {
     assert.equal(result.status, "fail");

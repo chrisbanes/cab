@@ -1427,9 +1427,18 @@ test("the request pane shows kind, position, identities and a sticky response ba
     )
       taskReads.push(request.url());
   });
+  // The first workspace read can land after the first Inbox read and make the Inbox reread once
+  // more, so which side of the click that reread falls on depends on load. Each Inbox read that
+  // completes from the click on may bring one task reread, and nothing else may.
+  let inboxReads = 0;
+  page.on("response", (r) => {
+    if (new URL(r.url()).pathname === "/api/operator/inbox" && r.ok())
+      inboxReads++;
+  });
   const rows = page.locator(".inbox-row"),
     detail = page.getByRole("region", { name: "Selected request" });
   await rows.nth(3).waitFor();
+  const inboxReadsBeforeClick = inboxReads;
   await page.locator('.inbox-row[data-kind="approval"]').click();
   await detail
     .getByText("Execution blocked by dependency", { exact: true })
@@ -1494,12 +1503,11 @@ test("the request pane shows kind, position, identities and a sticky response ba
   // One task read per selection, and at most one more per Inbox read (a poll, or a reread
   // after the workspace changes), however many parts of the page show the task.
   await settle(page);
-  assert.equal(taskReads.length, 1, taskReads.join());
-  let inboxReads = 0;
-  page.on("response", (r) => {
-    if (new URL(r.url()).pathname === "/api/operator/inbox" && r.ok())
-      inboxReads++;
-  });
+  assert.ok(
+    taskReads.length >= 1 &&
+      taskReads.length - 1 <= inboxReads - inboxReadsBeforeClick,
+    `${taskReads.length} task reads for ${inboxReads - inboxReadsBeforeClick} Inbox reads`,
+  );
   const reread = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname === `/api/operator/tasks/${approval.taskId}`,
@@ -1508,8 +1516,9 @@ test("the request pane shows kind, position, identities and a sticky response ba
   await reread;
   await settle(page);
   assert.ok(
-    taskReads.length - 1 >= 1 && taskReads.length - 1 <= inboxReads,
-    `${taskReads.length - 1} task rereads for ${inboxReads} Inbox reads`,
+    taskReads.length - 1 >= 1 &&
+      taskReads.length - 1 <= inboxReads - inboxReadsBeforeClick,
+    `${taskReads.length - 1} task rereads for ${inboxReads - inboxReadsBeforeClick} Inbox reads`,
   );
 
   // Previous/Next move through the filtered queue as a row click does.
