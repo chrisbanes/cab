@@ -208,6 +208,11 @@ or run `node dist/src/cli/main.js` directly.
      (`wrong-service`), then sends exactly the stored command. It never prompts,
      rebases or overwrites: a stale revision or capacity value is `conflict` (exit
      4); prepare again.
+   - Profile instructions are `--instructions TEXT|-` (`-` reads standard input,
+     text only, as for `task create --outcome -`) or `--instructions-file PATH` on
+     `profile prepare-create` and `profile prepare`; give one, and neither with
+     `--restore-revision`. Project commands still take `--instructions-file` only. An
+     empty `profile list` ends with a `Next:` line naming `profile prepare-create`.
    - `--restore-revision N` proposes revision N's exact instructions as a new
      revision, and refuses redacted or omitted text. `--revoked`, `--paused`,
      `--enabled`, `--candidates`, `--credential-ref env:NAME|none` and

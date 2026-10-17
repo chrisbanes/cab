@@ -192,6 +192,7 @@ export async function main(
         "expected-version": { type: "string" },
         name: { type: "string" },
         summary: { type: "string" },
+        instructions: { type: "string" },
         "instructions-file": { type: "string" },
         "capabilities-file": { type: "string" },
         "restore-revision": { type: "string" },

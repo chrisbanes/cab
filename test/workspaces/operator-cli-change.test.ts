@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { harness } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
@@ -230,6 +231,200 @@ test("profile changes prepare read-only, apply once and keep revisions immutable
       );
   }
   assert.equal(Number(d.profile(seed.profileId).version), 8);
+});
+
+const stdinOf = (text: string) => {
+  const stream = new PassThrough();
+  stream.end(text);
+  return stream as unknown as NodeJS.ReadStream;
+};
+
+test("profile instructions can be given inline or on stdin", async (t) => {
+  const { seed, d, file, out, cli, h } = await setup(t);
+  const create = (name: string, ...rest: string[]) => [
+    "profile",
+    "prepare-create",
+    "--name",
+    name,
+    ...rest,
+  ];
+  const created = async (args: string[], extra = {}) => {
+    const doc = out();
+    const prepared = await cli("ro", [...args, "--out", doc], extra);
+    assert.equal(prepared.code, 0, prepared.err + prepared.out);
+    const applied = await cli("rw", ["profile", "apply", "--file", doc]);
+    assert.equal(applied.code, 0, applied.err + applied.out);
+    return JSON.parse(readFileSync(doc, "utf8")).command.profileId as string;
+  };
+
+  // 1. Inline text becomes the first revision.
+  const inline = await created(
+    create("Inline", "--instructions", "Be brief\n'$(x)'"),
+  );
+  assert.equal(d.profileRevision(inline, 1).instructions, "Be brief\n'$(x)'");
+  // 2. `-` reads standard input verbatim.
+  const piped = await created(create("Piped", "--instructions", "-"), {
+    stdin: stdinOf("From stdin\n"),
+  });
+  assert.equal(d.profileRevision(piped, 1).instructions, "From stdin\n");
+  // The file form still works, and `--instructions-file -` is a literal path.
+  const filed = await created(
+    create("Filed", "--instructions-file", file("i.md", "From a file")),
+  );
+  assert.equal(d.profileRevision(filed, 1).instructions, "From a file");
+
+  // 3-5. Refusals write no document and send nothing.
+  const sent = h.fetches.length;
+  const refuse = async (
+    name: string,
+    args: string[],
+    code: string,
+    message: RegExp,
+    extra = {},
+  ) => {
+    const doc = out();
+    const r = await cli("ro", [...args, "--out", doc], extra);
+    assert.equal(r.code, 2, `${name}: ${r.out}`);
+    assert.equal(r.json().error.code, code, name);
+    assert.match(r.json().error.message, message, name);
+    assert.equal(existsSync(doc), false, name);
+  };
+  await refuse(
+    "both flags",
+    create(
+      "Both",
+      "--instructions",
+      "X",
+      "--instructions-file",
+      file("b.md", "B"),
+    ),
+    "usage",
+    /either --instructions or --instructions-file, not both/,
+  );
+  await refuse("neither flag", create("None"), "usage", /--instructions TEXT/);
+  await refuse(
+    "no name",
+    ["profile", "prepare-create", "--instructions", "X"],
+    "usage",
+    /--name/,
+  );
+  await refuse(
+    "empty stdin",
+    create("Empty", "--instructions", "-"),
+    "invalid-input",
+    /was empty/,
+    { stdin: stdinOf("") },
+  );
+  await refuse(
+    "prepare with restore",
+    [
+      "profile",
+      "prepare",
+      seed.profileId,
+      "--instructions",
+      "X",
+      "--restore-revision",
+      "1",
+    ],
+    "usage",
+    /--restore-revision, not both/,
+  );
+  await refuse(
+    "prepare with file and restore",
+    [
+      "profile",
+      "prepare",
+      seed.profileId,
+      "--instructions-file",
+      file("r.md", "R"),
+      "--restore-revision",
+      "1",
+    ],
+    "usage",
+    /--restore-revision, not both/,
+  );
+  assert.equal(
+    h.fetches.length,
+    sent,
+    "refusals are decided before connecting",
+  );
+
+  // 6. profile prepare takes inline and stdin text, and diffs it.
+  const doc = out();
+  let r = await cli("ro", [
+    "profile",
+    "prepare",
+    seed.profileId,
+    "--instructions",
+    "New guidance",
+    "--out",
+    doc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(
+    JSON.parse(readFileSync(doc, "utf8")).command.instructions,
+    "New guidance",
+  );
+  const human = await h.run(
+    [
+      "profile",
+      "prepare",
+      seed.profileId,
+      "--instructions",
+      "-",
+      "--out",
+      out(),
+      "--connection",
+      "ro",
+    ],
+    { stdin: stdinOf("Piped guidance\n") },
+  );
+  assert.equal(human.code, 0, human.err);
+  assert.match(human.out, /\+ Piped guidance/);
+
+  // Standard input is read once even when the target changes during the read and the
+  // read is repeated.
+  let bumped = false;
+  const racing: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init);
+    if (
+      !bumped &&
+      String(input).endsWith(`/profiles/${seed.profileId}/configuration`)
+    ) {
+      bumped = true;
+      d.execute({
+        type: "profile.configure",
+        actor: "operator",
+        key: randomUUID(),
+        profileId: seed.profileId,
+        expectedVersion: Number(d.profile(seed.profileId).version),
+        summary: "Changed meanwhile",
+      } as never);
+    }
+    return response;
+  };
+  const retried = out();
+  r = await cli(
+    "ro",
+    [
+      "profile",
+      "prepare",
+      seed.profileId,
+      "--instructions",
+      "-",
+      "--out",
+      retried,
+    ],
+    { stdin: stdinOf("Read once\n"), fetch: racing },
+  );
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(bumped, true);
+  const doc2 = JSON.parse(readFileSync(retried, "utf8"));
+  assert.equal(doc2.command.instructions, "Read once\n");
+  assert.equal(
+    doc2.command.expectedVersion,
+    Number(d.profile(seed.profileId).version),
+  );
 });
 
 test("project changes and creation apply exactly once", async (t) => {
