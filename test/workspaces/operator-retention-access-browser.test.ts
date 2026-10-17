@@ -11,6 +11,7 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedRetainedReviewWindow } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { searchRecords } from "../fixtures/shell-search.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 // Retained-history seeding shares the startup deadline with web/browser launch.
 // These journeys assert no deadline of their own, so every budget is wide
@@ -195,16 +196,10 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   await page.goto(`${web.origin}/app/search`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page
-    .getByLabel("Search retained task, decision and result records")
-    .fill("Ancient decision");
-  await page.getByLabel("Include historical records").check();
-  await page
-    .getByLabel("Record type", { exact: true })
-    .selectOption("decision");
-  await page
-    .getByRole("button", { name: "Search records", exact: true })
-    .click();
+  await searchRecords(page, "Ancient decision", {
+    historical: true,
+    type: "decision",
+  });
   await page
     .locator(`[data-search-record="${a.old.resultId}:decision:0"] a`)
     .click();

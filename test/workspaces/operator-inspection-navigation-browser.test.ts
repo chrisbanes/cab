@@ -11,7 +11,10 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
-import { openSearchFromSidebar } from "../fixtures/shell-search.js";
+import {
+  openSearchFromSidebar,
+  searchRecords,
+} from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-inspection-navigation-browser");
 
@@ -65,13 +68,9 @@ test("inspection sections are reached from task origins and exact direct links w
 
   // Search origin → exact historical result → Files → back keeps the query.
   await openSearchFromSidebar(page);
-  await page
-    .getByLabel("Search retained task, decision and result records")
-    .fill("Navigable inspection result");
-  await page.getByLabel("Include historical records").check();
-  await page
-    .getByRole("button", { name: "Search records", exact: true })
-    .click();
+  await searchRecords(page, "Navigable inspection result", {
+    historical: true,
+  });
   await page.locator(`[data-search-record="${result.resultId}"]`).waitFor();
   const searchURL = page.url();
   await page.locator(`[data-search-record="${result.resultId}"] a`).click();

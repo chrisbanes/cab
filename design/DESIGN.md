@@ -941,13 +941,16 @@ selected match and position.
   navigation drawer keeps a Search row. Phone Inbox exposes a labelled 44px Search
   action in its reusable header; the phone Board uses the same labelled action.
   The phone search header identifies the current Search view and offers Workspace
-  return. No keyboard shortcut is required to discover it.
+  return only from a task or Inbox item. No keyboard shortcut is required to discover it.
 - **Connected journey:** desktop `01-attention-overview` → Search `73-search` → selected AT-142
   result `57-task-revised-result` → Back to `73-search`; phone `09-phone-inbox-queue` or `25-phone-board-waiting` → `74-phone-search` →
   `65-phone-revised-result` → Back to `74-phone-search`. Opening selects the exact matching requirement,
   decision or result section. Returning restores `focus`, All projects, All types,
   Any date, history included, match 2 of 4 and its reading position. Return to
-  Workspace restores the originating queue/board selection, filters and position.
+  Workspace is offered only when Search was opened from a task or an Inbox item and
+  returns to that exact item, including after filter changes and an opened match. From
+  Overview, a list, the board, a project, the Inbox list or a direct visit there is no
+  such control; the browser's Back or the navigation returns.
   Existing task context, delivery, comparison and feedback disclosures retain
   their anchors, disclosure choices and drafts. These are static interaction
   annotations, not working routes.
@@ -959,7 +962,9 @@ selected match and position.
   identifies Mira/A-104, D1/S1 and historical status. Matching excerpts lead;
   metadata is compact and remains within the owning row, even with All projects
   selected. Historical R2 in the state specimens has the same complete ownership.
-- **States belong to flows:** search filters edit the current query scope; Refresh
+- **States belong to flows:** search filters edit the current query scope. They sit in
+  the results header beside the count once there is a query, and apply on change
+  (From and Through on blur or Enter); Refresh
   provider status retries the read in the current delivery view. Existing checks,
   findings, comparison and recovery controls remain. `75-search-states`, `76-phone-search-states`, `71-delivery-alternatives`
   and `72-phone-delivery-alternatives` are canvas review specimens with no product navigation into them.
@@ -1929,8 +1934,9 @@ Production Overview, List and Board
 ### Search
 
 Production Search (`web/src/search.tsx`, `web/src/search.css`) follows `73-search`
-and `75-search-states`: the query field with its search icon, one compact inline
-filter row, then one bordered results panel whose header carries the count. Each
+and `75-search-states`: the query field with its search icon leads the page, one
+coverage line sits under it, then one bordered results panel whose header carries the
+count, Refresh results and the filters. Each
 match shows its type chip, task title, Selected and Historical badges, the quoted
 excerpt with the query marked, a 12px mono provenance line and an "Open task →
 matching requirement / decision / result" link; the restored selection is the
@@ -1940,8 +1946,19 @@ the frames as follows:
 
 - The route title stays "Search" in the page header rather than the frame's
   "Search work" heading.
-- "Back to originating workspace", "Refresh results" and "Search records" are
-  secondary buttons the frames do not draw; Enter in the field also searches.
+- "Refresh results" and "Search records" are secondary buttons the frames do not
+  draw; Enter in the field also searches. "Back to originating workspace" is a
+  secondary button shown only when Search was reached from a task or an Inbox item;
+  from any other origin, or a direct visit, there is no Back control and the
+  browser's Back or the navigation returns.
+- The filters (Project, Type, From and Through, Include historical records) are not
+  in a row under the field as in `73-search`. They sit in the results header with
+  the count, Refresh results on the count's row and the filters on the row beneath,
+  and show only once there is a query, including while the first read loads or has
+  failed. Project, Type and the history checkbox apply on change; From and Through
+  apply on blur or Enter, and only when the value changed. Every applied filter is
+  a new Search entry that drops the cursor, and Back/Forward restores each entry's
+  values.
 - Date is From and Through date fields rather than one "Any date" select, and
   history is the "Include historical records" checkbox.
 - Provenance is "project · current/historical · time". The search read model
@@ -1950,17 +1967,19 @@ the frames as follows:
 - Excerpts drop Markdown list, checklist and heading markers, join lines with
   " · " and show about 240 characters around the first literal match.
 - The header reads "N matches · retained records only · N omitted or
-  inaccessible", and the coverage note sits under the filters, rather than "across
-  Atlas and Relay" and "Saved excerpts, not full conversations".
+  inaccessible", rather than "across Atlas and Relay". The coverage note is one line,
+  "Searches saved excerpts, not full agent transcripts.", under the field; its
+  tooltip carries the limits (permitted retained excerpts up to 16,000 characters
+  each, partial long-source coverage, no generated summaries).
 - Loading, refresh failure with retained matches and no matches use the shared
   `ResourceStatus` alert and plain notes, not the `75-search-states` panels; there
   is no partial-coverage or destination-unavailable panel, Edit query or Clear
   filters action. There is no "Returned to match N of M" note; the restored
   selection is the Selected badge, the row highlight and focus on its link.
-- Phone (`74-phone-search`) keeps the inline Back and Refresh, places Search
-  records beside the field and shows the filters as a two-column grid with 44px
-  controls instead of the one summary filter button; results stay in the bordered
-  panel.
+- Phone (`74-phone-search`) places Search records beside the field and shows the
+  filters in the results header as a two-column grid with 44px controls instead of
+  the one summary filter button, with Refresh results full width beneath them;
+  results stay in the bordered panel.
 
 ### Task detail, composer and Stop
 
