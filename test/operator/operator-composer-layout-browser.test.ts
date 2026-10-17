@@ -373,10 +373,12 @@ test("phone composer header is Back and a centred New task with no Refresh or wr
     (await box(page, "Project")).y + (await box(page, "Project")).height <= 844,
   );
 
-  // (3) Desktop keeps the full title and subtitle.
-  await page.setViewportSize({ width: 1366, height: 900 });
-  assert.equal(await header.locator("h1").innerText(), "Create a task");
-  await page.getByText(subtitle).waitFor();
+  // (3) Tablet and desktop keep the full title and subtitle.
+  for (const width of [760, 1024, 1366]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.equal(await header.locator("h1").innerText(), "Create a task");
+    await page.getByText(subtitle).waitFor();
+  }
 
   // (4) Other detail headers are unchanged.
   await page.setViewportSize({ width: 390, height: 844 });

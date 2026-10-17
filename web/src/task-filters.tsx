@@ -80,14 +80,10 @@ export function TaskToolbar({
       </span>
     </>
   );
-  const countLine = (
-    <>
-      {!overview && (
-        <p className="metadata muted work-count">
-          {count} task{count === 1 ? "" : "s"}
-        </p>
-      )}
-    </>
+  const countLine = !overview && (
+    <p className="metadata muted work-count">
+      {count} task{count === 1 ? "" : "s"}
+    </p>
   );
   const refreshButton = (
     <Button
@@ -99,7 +95,7 @@ export function TaskToolbar({
       Refresh tasks
     </Button>
   );
-  const slot = columnsSlot && filters.view === "board" && (
+  const slot = columnsSlot && (
     <div className="work-columns" ref={columnsSlot} />
   );
   // A filter set from the URL opens the disclosure; the component never closes it.

@@ -931,6 +931,39 @@ nav {
     font-size: var(--type-xs);
   }
 
+  .drawer .nav-link {
+    padding-inline: var(--space-12);
+  }
+
+  .drawer .nav-chevron {
+    display: block;
+    flex: none;
+    width: 16px;
+    height: 16px;
+    color: var(--muted-foreground);
+  }
+
+  .drawer-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+  }
+
+  .drawer .account-rows {
+    margin-top: var(--space-8);
+  }
+}
+
+@media (max-width: 759px) {
+  .page,
+  .page-inbox {
+    padding: var(--space-20);
+  }
+
+  .page-header {
+    flex-wrap: wrap;
+  }
+
   /* Compact detail header: Back at the start, the title centred between equal side columns. */
   .page-header[data-variant="detail"][data-compact-phone] {
     display: grid;
@@ -965,39 +998,6 @@ nav {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .drawer .nav-link {
-    padding-inline: var(--space-12);
-  }
-
-  .drawer .nav-chevron {
-    display: block;
-    flex: none;
-    width: 16px;
-    height: 16px;
-    color: var(--muted-foreground);
-  }
-
-  .drawer-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-  }
-
-  .drawer .account-rows {
-    margin-top: var(--space-8);
-  }
-}
-
-@media (max-width: 759px) {
-  .page,
-  .page-inbox {
-    padding: var(--space-20);
-  }
-
-  .page-header {
-    flex-wrap: wrap;
   }
 
   .legacy-operator {

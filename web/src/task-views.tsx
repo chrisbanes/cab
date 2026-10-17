@@ -275,16 +275,25 @@ export function TaskBoard({
     else if (c.left < a.left) area.scrollLeft -= a.left - c.left;
   }, [tasks.length, initial, columns, selected]);
   // Keep the pressed chip fully inside the phone row. Assigning scrollLeft is instant and
-  // derives from the selection, so it needs no history restore.
+  // derives from the selection, so it needs no history restore. The chips change width when
+  // a web font loads or a count changes, so the fit repeats whenever their box resizes.
   useLayoutEffect(() => {
-    const row = columnsTarget?.parentElement,
-      chip =
-        columnsTarget?.querySelectorAll<HTMLElement>(".column-tab")[selected];
-    if (!row || !chip) return;
-    const r = row.getBoundingClientRect(),
-      c = chip.getBoundingClientRect();
-    if (c.right > r.right) row.scrollLeft += c.right - r.right;
-    else if (c.left < r.left) row.scrollLeft -= r.left - c.left;
+    const row = columnsTarget?.parentElement;
+    if (!columnsTarget || !row) return;
+    const fit = () => {
+      const chip =
+        columnsTarget.querySelectorAll<HTMLElement>(".column-tab")[selected];
+      if (!chip) return;
+      const r = row.getBoundingClientRect(),
+        c = chip.getBoundingClientRect();
+      if (c.right > r.right) row.scrollLeft += c.right - r.right;
+      else if (c.left < r.left) row.scrollLeft -= r.left - c.left;
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(columnsTarget);
+    return () => observer.disconnect();
   }, [columnsTarget, selected]);
   const before = columns[selected - 1],
     after = columns[selected + 1];

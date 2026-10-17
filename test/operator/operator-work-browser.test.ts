@@ -2206,10 +2206,19 @@ test("the board column chips render only below the shell breakpoint", async (_t,
 });
 
 test("phone board keeps filters and column chips in one horizontal row with the first card on screen", async (_t, journey) => {
-  const { ids, web, page, commands } = await start(
+  const { f, ids, web, page, commands } = await start(
     journey,
     "/app/tasks?view=board&state=all",
   );
+  // A long project name must truncate in the Project select, not widen the row.
+  f.service.domain().execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: randomUUID(),
+    name: "Customer onboarding and billing reconciliation platform 2026",
+    leadProfileId: ids.profileId,
+  });
   await page.setViewportSize(phone);
   await page.goto(`${web.origin}/app/tasks?view=board&state=all`);
   const bar = page.getByRole("toolbar", { name: "Board columns" }),
@@ -2236,6 +2245,14 @@ test("phone board keeps filters and column chips in one horizontal row with the 
   ).then((groups) => groups.flat());
   assert.ok(tops.length >= 9, `selects and chips: ${tops.length}`);
   assert.ok(Math.max(...tops) - Math.min(...tops) <= 1, `one row: ${tops}`);
+  // Left to right: Project, State, then the chips, which is also the Tab order.
+  const [pr, sr, cr] = await Promise.all(
+    [project, state, bar.getByRole("button").first()].map((l) =>
+      l.evaluate((e) => e.getBoundingClientRect().toJSON()),
+    ),
+  );
+  assert.ok(pr.right <= sr.left + 1 && sr.right <= cr.left + 1, "order");
+  assert.ok(pr.width <= 200, `Project select truncates: ${pr.width}`);
   const scroller = await row.evaluate((e) => ({
     overflowX: getComputedStyle(e).overflowX,
     scrolls: e.scrollWidth > e.clientWidth,
@@ -2270,8 +2287,8 @@ test("phone board keeps filters and column chips in one horizontal row with the 
 
   // (4) The last chip can be chosen and stays fully visible.
   await bar.getByRole("button", { name: "Cancelled · 1", exact: true }).click();
-  const uncertain = bar.getByRole("button", { name: "Cancelled · 1" });
-  assert.equal(await uncertain.getAttribute("aria-pressed"), "true");
+  const last = bar.getByRole("button", { name: "Cancelled · 1" });
+  assert.equal(await last.getAttribute("aria-pressed"), "true");
   assert.ok(await inRow("Cancelled · 1"));
   assert.ok(await noPageOverflow(page));
   assert.equal(
@@ -2282,7 +2299,6 @@ test("phone board keeps filters and column chips in one horizontal row with the 
   );
 
   // (5) Crossing the 759/760 boundary moves the chips, never duplicates them or loses the column.
-  await bar.getByRole("button", { name: "Cancelled · 1" }).click();
   for (const [width, inToolbar] of [
     [760, false],
     [759, true],
@@ -2332,6 +2348,18 @@ test("phone board keeps filters and column chips in one horizontal row with the 
   );
   assert.ok(await inRow(/^Paused · /));
   assert.equal(await bar.count(), 1);
+
+  // A fresh load that opens a later column fits its chip once the fonts have settled.
+  await page.goto(`${web.origin}/app/tasks?view=board&state=Paused`);
+  await bar.waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForFunction(() => {
+    const chip = document.querySelector('.column-tab[aria-pressed="true"]')!,
+      row = document.querySelector(".work-filters")!;
+    const c = chip.getBoundingClientRect(),
+      r = row.getBoundingClientRect();
+    return c.left >= r.left - 1 && c.right <= r.right + 1;
+  });
 
   // (7) Refresh tasks is the one refresh and still rereads the workspace.
   const read = page.waitForRequest(

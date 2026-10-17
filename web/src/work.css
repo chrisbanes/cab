@@ -853,7 +853,9 @@
 }
 
 @media (max-width: 759px) {
-  .work-heading {
+  /* The phone Board's chips carry each column's count, so its total is read aloud only. */
+  .work-heading,
+  .work-toolbar[data-view="board"] .work-count {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -862,11 +864,7 @@
     white-space: nowrap;
   }
 
-  /* Phone: dropdowns and count first, the switch below them. */
-  .work-toolbar .work-select {
-    order: 1;
-  }
-
+  /* Phone: the dropdowns come first in the DOM, then the count, the switch and Refresh. */
   .work-toolbar .work-count {
     order: 2;
   }
@@ -901,6 +899,11 @@
     flex: none;
   }
 
+  .work-filters .work-select [data-slot="native-select"] {
+    max-width: 12rem;
+    text-overflow: ellipsis;
+  }
+
   .work-columns {
     display: flex;
     margin-left: var(--space-4);
@@ -918,14 +921,6 @@
   }
 
   /* The chips carry each column's count, so the total is read aloud only. */
-  .work-toolbar[data-view="board"] .work-count {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
 
   .overview-stats {
     display: grid;
