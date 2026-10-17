@@ -196,7 +196,8 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
 
   await page.goto(`${web.origin}/app/inbox`);
   await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
-  assert.deepEqual(await options(page, "Project"), [
+  // The Inbox lists projects in the order its requests appear, so compare by id.
+  assert.deepEqual((await options(page, "Project")).sort(), [
     ...[first.projectId, second.projectId]
       .sort()
       .map((projectId) => [projectId, `Atlas · ${short(projectId)} · 1`]),
