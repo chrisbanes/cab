@@ -1961,9 +1961,9 @@ the frames as follows:
   control commits next (Project, Type, the checkbox, Search records, Enter in the
   field, or Refresh results, which applies them as a new search instead of re-reading).
   Typed dates stay visible in their fields with the line "Dates not applied yet. Press
-  Enter to apply them." until then. A From after Through is applied as typed and reads
+  Enter or Refresh results to apply them." until then (a phone date picker has no Enter). A From after Through is applied as typed and reads
   as no match. Every commit is one new Search entry that drops the cursor and reads
-  the whole form; Back/Forward restores each entry's values. Clicking a result link
+  the whole form (repeating the same search re-reads instead of adding an entry); Back/Forward restores each entry's values. Clicking a result link
   with a date pending opens the task and commits nothing. Focus stays on the control
   that committed, and Tab order is the reading order: field, Search records, Refresh
   results, then Project, Type, From, Through and the history checkbox.

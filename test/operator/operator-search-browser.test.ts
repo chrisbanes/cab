@@ -1286,6 +1286,20 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
   );
   await waitActive("search-records");
 
+  // Repeating the same search re-reads without stacking identical entries.
+  const applied = await page.evaluate(() => history.state?.entryIndex ?? 0);
+  await Promise.all([
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/operator/search",
+    ),
+    page.keyboard.press("Enter"),
+  ]);
+  assert.equal(
+    await page.evaluate(() => history.state?.entryIndex ?? 0),
+    applied,
+  );
+  assert.equal(await activeId(), "search-records");
+
   // A dirty date is not applied when focus goes to a result link, and the click is not lost.
   const searchURL = page.url();
   await page.locator("[data-search-record] a").first().waitFor();

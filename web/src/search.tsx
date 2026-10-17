@@ -190,8 +190,6 @@ export function Search({
       before,
       ...over,
     };
-    state.data = null;
-    state.scrollY = 0;
     const p = new URLSearchParams({
       query: input.trim() ? input : query,
       historical: String(f.historical),
@@ -202,7 +200,16 @@ export function Search({
       p.set("after", String(new Date(`${f.after}T00:00:00`).getTime()));
     if (f.before)
       p.set("before", String(new Date(`${f.before}T23:59:59.999`).getTime()));
-    navigate(`/app/search?${p}`);
+    const next = `/app/search?${p}`;
+    // The same search again (a repeated Enter or click) re-reads instead of stacking identical entries.
+    if (next === path) {
+      resource.refresh();
+      onRefresh?.();
+      return;
+    }
+    state.data = null;
+    state.scrollY = 0;
+    navigate(next);
     restoreFocus = focusId
       ? { navKey: history.state?.navKey, id: focusId }
       : null;
@@ -382,7 +389,8 @@ export function Search({
               </label>
               {datesPending && (
                 <p className="metadata search-pending" role="status">
-                  Dates not applied yet. Press Enter to apply them.
+                  Dates not applied yet. Press Enter or Refresh results to apply
+                  them.
                 </p>
               )}
             </div>
