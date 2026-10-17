@@ -10,15 +10,22 @@ import {
 import { deliveryWorld } from "../fixtures/operator-cli.js";
 
 type World = Awaited<ReturnType<typeof deliveryWorld>>;
+type After = Parameters<typeof deliveryWorld>[0];
 const credentialName = "FIXTURE_COMMENT_POLICY_CREDENTIAL";
 
 /** Rewrites the delivery policy; a non-empty unique value keeps `activationAllowed` open. */
 function configure(
+  t: After,
   w: World,
   credentialRef: string | null,
   comment: "allow" | "approval" | null,
 ) {
-  if (credentialRef) process.env[credentialName] = `fixture-${randomUUID()}`;
+  if (credentialRef) {
+    process.env[credentialName] = `fixture-${randomUUID()}`;
+    t.after(() => {
+      delete process.env[credentialName];
+    });
+  }
   w.f.service.domain().execute({
     type: "delivery.configure",
     actor: "operator",
@@ -68,7 +75,7 @@ test("comment policy: an imported task without a grant reports the grant", async
 
 test("comment policy: a paused project holds comments", async (t) => {
   const w = await deliveryWorld(t, "allow");
-  configure(w, credential, "allow");
+  configure(t, w, credential, "allow");
   w.f.service.domain().execute({
     type: "project.configure",
     actor: "operator",
@@ -99,7 +106,7 @@ test("comment policy: a grant without a delivery credential stays available but 
 
 test("comment policy: a grant with a delivery credential has no reason code", async (t) => {
   const w = await deliveryWorld(t, "allow");
-  configure(w, credential, "approval");
+  configure(t, w, credential, "approval");
   assert.deepEqual(await policy(w), {
     available: true,
     mode: "approval",

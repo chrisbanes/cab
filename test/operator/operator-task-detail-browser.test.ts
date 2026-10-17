@@ -2461,6 +2461,7 @@ test("A project without a lead says so above the reply box", async (_t, j) => {
 test("The GitHub reply says what posting does in one sentence and keeps its draft when the policy changes", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedImportedCommentTask(fixture.f, "approval");
+  _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
   await page.getByRole("button", { name: "Post GitHub comment" }).click();
@@ -2516,8 +2517,22 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
     true,
   );
 
-  // No delivery credential: `available` stays true on the server but the web offers no send.
+  // No delivery credential: `available` stays true on the server but the web offers no send,
+  // even in allow mode with GitHub selected.
   const noCredential = "This project has no GitHub delivery credential set.";
+  a.setGrant("allow", false);
+  await refreshTask(page, a.taskId);
+  await page.getByText(noCredential, { exact: true }).first().waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post comment", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Exact comment body",
+  );
   a.setGrant("approval", false);
   await refreshTask(page, a.taskId);
   await page.getByText(noCredential, { exact: true }).first().waitFor();
@@ -2560,6 +2575,7 @@ const unavailableComment = async (page: Page, sentence: string) => {
 test("An unavailable GitHub comment gives its reason in the inspector and on a focusable tab that does nothing", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedImportedCommentTask(fixture.f, "allow");
+  _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
   const lead = page.getByRole("button", { name: "Message task lead" });
@@ -2629,6 +2645,7 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
 test("An older task read without a reason code falls back to its reason text", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedImportedCommentTask(fixture.f, null);
+  _t.after(a.restoreCredential);
   let reason: string | null = "No project grant for issue comments";
   const { web, page } = await fixture.launch();
   await page.route(
@@ -3336,6 +3353,7 @@ test("An unconfirmed delivery refresh stays checkable after delivery stops apply
 test("A task that loses its GitHub source mid-edit moves to the lead with the lead's own draft and keeps its GitHub approval apart", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedImportedCommentTask(fixture.f, "approval");
+  _t.after(a.restoreCredential);
   const sourceId = fixture.f.service
     .taskReview()
     .sources(a.taskId)

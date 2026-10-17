@@ -177,7 +177,14 @@ export async function seedImportedCommentTask(
   d.ensureLeadAssignment(taskId);
   await f.service.provisionTask(taskId);
   // A unique non-empty value, so the credential is neither unset nor shared with another turn's env.
+  const previousCredential = process.env.FIXTURE_COMMENT_DELIVERY_CREDENTIAL;
   process.env.FIXTURE_COMMENT_DELIVERY_CREDENTIAL = `fixture-${randomUUID()}`;
+  /** Restores the env var; register it with the test's `after`. */
+  const restoreCredential = () => {
+    if (previousCredential === undefined)
+      delete process.env.FIXTURE_COMMENT_DELIVERY_CREDENTIAL;
+    else process.env.FIXTURE_COMMENT_DELIVERY_CREDENTIAL = previousCredential;
+  };
   const setGrant = (
     next: "allow" | "approval" | null,
     credentialConfigured = true,
@@ -198,7 +205,7 @@ export async function seedImportedCommentTask(
       requiredChecks: [],
     });
   setGrant(mode);
-  return { projectId, taskId, setGrant };
+  return { projectId, taskId, setGrant, restoreCredential };
 }
 export async function seedReviewTask(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,
