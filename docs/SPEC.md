@@ -719,9 +719,13 @@ owner; the [current terms](https://code.claude.com/docs/en/legal-and-compliance)
 are rechecked when self-hosting by others is considered.
 
 Configuration forms edit current values in place rather than requiring a complete
-replacement. Private values (instructions, routing guidance, search queries and
-local paths) are never loaded; they show as kept and change only through an
-explicit replacement. Before saving, list every change, including access added or
+replacement. The signed-in operator may reveal and edit instructions, routing guidance
+and saved search queries in place, and local paths display plainly: the web session is
+the operator's own private origin. Reveal is a dedicated read that requires that
+session; no CLI credential can make it, whatever its scope. Reveals are not recorded.
+Private values stay excluded from lists, exports, CLI coverage output, history and
+agent environments, which are the surfaces the exclusions protect. GitHub Project
+filters stay kept. Before saving, list every change, including access added or
 removed and sources added inactive. Removing all repository access needs explicit
 confirmation. A save is keyed against the loaded version: a conflict keeps the
 input and shows the newer version, and an unknown outcome blocks further edits

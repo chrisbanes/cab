@@ -352,7 +352,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
 | 07 Tasks, composer & tablet | `24-all-projects-list`, `23-atlas-project-board`, `23b-atlas-project-paused`, `02-composer-optional-expanded`, `800a-tablet-overview-list`, `800b-tablet-inbox-question`, `800c-tablet-task-evidence`, `800d-tablet-search-result`, `800e-tablet-composer-validation`, `800f-tablet-all-projects-board`, `25-phone-board-waiting`, `25b-phone-board-uncertain`, `34-phone-composer-collapsed`, `35-phone-optional-settings-error`, `35b-phone-collapsed-validation`, `800h-phone-composer-short` |
-| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `131-project-setup-choose-folder`, `118-project-config-general`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
+| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `123b-profile-instructions-revealed`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `131-project-setup-choose-folder`, `118-project-config-general`, `118b-project-instructions-revealed`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
 | 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
 | 10 Action feedback | `154-project-configuration-saved`, `154b-project-configuration-details-expanded`, `155-routing-saved`, `156-project-configuration-field-error`, `157-project-configuration-changed-elsewhere`, `158-project-configuration-unknown-outcome`, `159-change-list-remove-last-repository`, `160-discovery-credential-saved`, `161-composer-created-project-paused`, `162-grouped-questions-answered`, `162b-grouped-questions-send-failed`, `163-task-reply-sent`, `164-stop-confirmation`, `165-cli-credential-revoked`, `ds-action-feedback`, `166a-phone-project-configuration-saved`, `166b-phone-unknown-outcome-locked`, `166c-phone-task-created-project-paused` |
 | 11 Settings, recovery & responsive states | `167-profile-field-error`, `168-routing-field-error`, `169-runtime-capacity-field-error`, `178-profile-revoke-available`, `170-source-config-changed-elsewhere`, `170b-source-config-latest-loaded`, `171-source-config-unknown-outcome`, `172-routing-typesafe-unavailable`, `173-recovery-evidence-unavailable`, `174-recovery-no-admitted-generation`, `175-recovery-pre-turn-witness`, `176-recovery-no-turn-witness`, `177-project-setup-ref-open`, `180a-tablet-settings-index`, `180b-tablet-project-setup`, `180c-tablet-profile`, `180d-tablet-routing`, `180e-tablet-runtime`, `179a-phone-settings-index`, `179b-phone-project-setup`, `179c-phone-profile`, `179d-phone-routing`, `179e-phone-runtime` |
@@ -1660,9 +1660,20 @@ Presentation and interaction rules that the canvas does not show on its own.
   per-project summary.
 - Project configuration has General, Routing, GitHub source, and Sync & placement
   tabs. Each section saves separately against its own version.
-- Settings edit values in place. Private values are replace-only.
+- Settings edit values in place. Instructions, routing guidance and saved search
+  queries open as "Kept · Reveal" in the project General, profile and Routing forms
+  (`118-project-config-general`, `123-profile-revoked`,
+  `124-routing-relay-unsaved`). Reveal loads the exact text into the same multiline
+  field for the signed-in operator only, and Reveal itself is not recorded
+  (`118b-project-instructions-revealed`, `123b-profile-instructions-revealed`). An
+  edit shows one value-free line under "Changes to save" ("Instructions edited",
+  "Instructions cleared", "Routing guidance edited", "Routing guidance cleared",
+  "Search query edited for S-2", "Local path changed for acme/atlas") and saves as an
+  ordinary versioned change. Leaving the page, signing out or a newer saved version
+  returns an unedited reveal to "Kept · Reveal"; an edit stays like any other unsaved
+  input. Local paths show plainly. GitHub Project filters stay "Filter kept · private".
 - After routing saves, the form reloads the saved version. Guidance returns to
-  replace-only, and Save stays disabled until something changes
+  "Kept · Reveal", and Save stays disabled until something changes
   (`125-routing-relay-saved`).
 - Sign-in has two bootstrap states: "Loading sign-in…" and "Sign-in service
   unavailable." with Try again.
@@ -2212,10 +2223,13 @@ frames 114 and 118–128 as follows:
 - No configuration timestamp is stored, so a section header shows its version
   ("General version 3") and, only after a save in this browser session, "General
   saved 10:52" from that save's receipt. A reload shows the version again.
-- Existing GitHub sources are shown read-only and can be removed; a changed
-  definition is a removal plus a new source with a fresh `S-<n>` id, added
-  inactive. Search queries and Project filters stay private: a row reads "Private
-  query kept" or "<node id> · Filter kept · private" instead of the drawn filter.
+- Existing GitHub sources can be removed. A saved search query is edited in place
+  under its own `S-<n>` id (`119-project-config-github-source`); any other changed
+  definition is a removal plus a new source with a fresh id, added inactive. Local
+  repository paths and search queries are loaded when the tab opens and show plainly;
+  if that read fails the row says "Local path unavailable" or "Query unavailable" with
+  Try again and saves without it. Project filters stay private: a row reads "<node id>
+  · Filter kept · private" instead of the drawn filter.
   Readiness Project-field conditions pick the Project, field and option by name from
   discovery and fall back to typed node IDs when discovery is unavailable or truncated.
   A GitHub source save deletes the stored activation of each
@@ -2251,8 +2265,8 @@ frames 114 and 118–128 as follows:
   repository access" checkbox inside "Changes to save" (no frame draws it).
 - Profile Revoke and Restore are one draft field saved by Save profile, so the
   button reads "Revoke profile", "Restore profile" or "Undo …" while unsaved.
-- Routing guidance is replace-only behind "Replace routing guidance"; frame 124's
-  loaded guidance text is never shown. Revoked profiles are listed disabled and
+- Routing guidance opens as "Kept · Reveal" and edits in place once revealed (frame
+  124 draws the revealed, edited state). Revoked profiles are listed disabled and
   are dropped from the candidates by the next routing save.
 - No short identifiers (RL-31, A-203, AT-151) are shown, and recovery omits "last
   observed" and "requested by", which the recovery read does not carry. Its
