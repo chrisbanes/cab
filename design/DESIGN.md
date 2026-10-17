@@ -1496,7 +1496,7 @@ Presentation and interaction rules that the canvas does not show on its own.
   code reads as a sentence in the web UI, with the code in Details. Where an unknown
   is the message itself (ownership uncertain), the headline states it once.
 - A label written to start a sentence ("GitHub dependencies unconfirmed") keeps its
-  proper nouns (GitHub, Claude, Codex, Ensemble) when it is composed mid-sentence
+  proper nouns (GitHub, Claude, Ensemble) when it is composed mid-sentence
   ("Ready · GitHub dependencies unconfirmed"); every other label lowercases its first
   letter ("Ready · project paused"). One helper, `midSentence`, does this.
 - Identifiers are short mono metadata (R1, A-9bd4, an 8-character SHA), never part
