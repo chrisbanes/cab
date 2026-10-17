@@ -230,8 +230,16 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
 5. Configuration changes, with a read/write credential to apply:
    - `profile prepare PROFILE_ID`, `profile prepare-create`, `project prepare
      PROJECT_ID`, `project prepare-create`, `project prepare-routing PROJECT_ID` and
-     `capacity prepare` read the current state and write a change document to a new
-     `--out` file (mode `0600`). Nothing is sent. A document holds one command, the
+     `capacity prepare` read the current state and write a change document with mode
+     `0600`, to `--out FILE` or by default to `./ensemble-<kind>-<id8>.json` (kind
+     such as `project-configure`, id8 the first eight characters of the target's ID;
+     `ensemble-capacity-configure.json` for capacity). A default name that is taken
+     becomes `-2` to `-99`, chosen by creating the file exclusively, so a prepare
+     never overwrites a document and two at once never share one; when all 99 are
+     taken the prepare is refused (`output-exists`). An explicit `--out` still
+     refuses an existing path, and `--out -` and an empty `--out` are refused
+     (`usage`). The `Apply with:` line quotes the path as one shell word. Nothing is
+     sent. A document holds one command, the
      service installation, the target and expected revision (capacity: the limits it
      was prepared against), a diff and a preparation-time affected-assignment list.
      That list is informational: assignments created later may also become stale,
@@ -433,7 +441,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      task's unmet conditions. Queries, filters, paths and reference names are never shown. A
      partial observation is gap `evidence-gap`, an unavailable one
      `redaction-unavailable`, and an unreadable saved value `content-unavailable`.
-   - `project prepare-source PROJECT_ID --out FILE --edit-file FILE
+   - `project prepare-source PROJECT_ID [--out FILE] --edit-file FILE
      [--expected-version N]` writes a `github.configure` change document; apply it
      with `project apply --file FILE`. The edit file (at most 64 KiB, not a symlink)
      is strict JSON with any of `addSelections` (selection definitions without

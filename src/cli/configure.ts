@@ -256,6 +256,16 @@ export function requireOut(ctx: WriteContext): string {
   return out;
 }
 
+/** Refuses an `--out` that cannot name a change document, before anything connects. */
+export function checkOut(ctx: WriteContext) {
+  const { out } = ctx.values;
+  if (out === "" || out === "-")
+    throw new CliError(
+      "usage",
+      "A change document must be a file; omit --out to use ./ensemble-<kind>-<id8>.json.",
+    );
+}
+
 /** Reads until the target version is stable across the other reads, retrying once. */
 export async function consistentRead<T>(
   read: () => Promise<T>,
@@ -353,24 +363,27 @@ export async function writePrepared(
     ...prepared.gaps,
     ...(diff.truncated ? (["item-omitted"] as const) : []),
   ];
-  const { path, document } = await writeChangeDocument(requireOut(ctx), {
-    schema: CHANGE_SCHEMA,
-    kind: prepared.kind,
-    preparedAt: ctx.deps.now(),
-    service: {
-      installationId: session.identity.service.installationId,
-      origin: session.identity.service.origin,
+  const { path, document } = await writeChangeDocument(
+    { out: ctx.values.out, cwd: ctx.deps.cwd ?? process.cwd() },
+    {
+      schema: CHANGE_SCHEMA,
+      kind: prepared.kind,
+      preparedAt: ctx.deps.now(),
+      service: {
+        installationId: session.identity.service.installationId,
+        origin: session.identity.service.origin,
+      },
+      target: targetOf(command),
+      expected: expectedOf(command),
+      command,
+      preview: {
+        changes: prepared.changes,
+        diff,
+        impact: prepared.impact ?? null,
+        notes: prepared.notes,
+      },
     },
-    target: targetOf(command),
-    expected: expectedOf(command),
-    command,
-    preview: {
-      changes: prepared.changes,
-      diff,
-      impact: prepared.impact ?? null,
-      notes: prepared.notes,
-    },
-  });
+  );
   const shown = boundLines(diff.lines, 200);
   return {
     data: { file: path, document },
@@ -390,7 +403,7 @@ export async function writePrepared(
       ...prepared.notes.map((n) => `Note: ${n}`),
       ...gaps.map((g) => `Gap: ${g}`),
       "",
-      `Apply with: ensemble ${AREA[document.kind]} apply --file ${path}`,
+      `Apply with: ensemble ${AREA[document.kind]} apply --file ${shellWord(path)}`,
     ].join("\n"),
   };
 }

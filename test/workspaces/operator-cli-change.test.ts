@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   symlinkSync,
@@ -922,8 +924,6 @@ test("stale revisions, tampering, wrong services and denials send nothing", asyn
     out(),
   ]);
   assert.equal(r.code, 2);
-  r = await cli("ro", ["profile", "prepare", seed.profileId]);
-  assert.equal(r.code, 2);
   r = await cli("rw", ["profile", "apply"]);
   assert.equal(r.code, 2);
   assert.equal(h.fetches.length, count);
@@ -983,4 +983,221 @@ test("a missing change document says it is missing and sends nothing", async (t)
   assert.match(mode.err, /its mode is 0644; it must be 0600 or stricter/);
   assert.match(mode.err, new RegExp(`^Fix: chmod 600 ${open}$`, "m"));
   assert.deepEqual(h.fetches, []);
+});
+
+test("prepare writes a change document to a default path that never overwrites", async (t) => {
+  const { seed, h, cli } = await setup(t);
+  const stem = `ensemble-project-configure-${seed.projectA.slice(0, 8)}`;
+  const cwdOf = (prefix = "cwd-") => mkdtempSync(join(h.dir, prefix));
+  const names = (cwd: string) => readdirSync(cwd).sort();
+  let n = 0;
+  const prepare = (cwd: string, extra: string[] = []) =>
+    cli(
+      "ro",
+      [
+        "project",
+        "prepare",
+        seed.projectA,
+        "--name",
+        `Renamed ${++n}`,
+        ...extra,
+      ],
+      { cwd },
+    );
+  const fetched = () => h.fetches.length;
+
+  // 1. No --out: the base name in the working directory, owner-only, and runnable.
+  const cwd1 = cwdOf();
+  let r = await prepare(cwd1);
+  assert.equal(r.code, 0, r.err + r.out);
+  const base = join(cwd1, `${stem}.json`);
+  assert.equal(r.json().data.file, base);
+  assert.equal(statSync(base).mode & 0o777, 0o600);
+  assert.equal(
+    JSON.parse(readFileSync(base, "utf8")).digest,
+    r.json().data.document.digest,
+  );
+  const humanCwd = cwdOf();
+  const human = await h.run(
+    [
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      "Human",
+      "--connection",
+      "ro",
+    ],
+    { cwd: humanCwd },
+  );
+  assert.equal(human.code, 0, human.err);
+  const humanFile = join(humanCwd, `${stem}.json`);
+  assert.equal(
+    human.out.trimEnd().split("\n").at(-1),
+    `Apply with: ensemble project apply --file ${humanFile}`,
+  );
+  r = await cli("rw", ["project", "apply", "--file", humanFile]);
+  assert.equal(r.code, 0, r.err + r.out);
+
+  // 2. A taken name gets the next free suffix; nothing existing is touched.
+  const cwd2 = cwdOf();
+  await prepare(cwd2);
+  const first = readFileSync(join(cwd2, `${stem}.json`), "utf8");
+  writeFileSync(join(cwd2, `${stem}-2.json`), "sentinel", { mode: 0o600 });
+  r = await prepare(cwd2);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.file, join(cwd2, `${stem}-3.json`));
+  assert.equal(readFileSync(join(cwd2, `${stem}.json`), "utf8"), first);
+  assert.equal(readFileSync(join(cwd2, `${stem}-2.json`), "utf8"), "sentinel");
+
+  // 3. Two prepares at once never share a file, whichever gets the base name.
+  const cwd3 = cwdOf();
+  const both = await Promise.all([prepare(cwd3), prepare(cwd3)]);
+  for (const result of both)
+    assert.equal(result.code, 0, result.err + result.out);
+  assert.deepEqual(both.map((x) => x.json().data.file).sort(), [
+    join(cwd3, `${stem}-2.json`),
+    join(cwd3, `${stem}.json`),
+  ]);
+  for (const result of both)
+    assert.equal(
+      JSON.parse(readFileSync(result.json().data.file, "utf8")).digest,
+      result.json().data.document.digest,
+    );
+
+  // 4. An explicit --out still refuses an existing file and never takes a suffix.
+  const explicit = join(cwd3, "explicit.json");
+  writeFileSync(explicit, "mine", { mode: 0o600 });
+  r = await prepare(cwd3, ["--out", explicit]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "output-exists");
+  assert.equal(readFileSync(explicit, "utf8"), "mine");
+  assert.deepEqual(
+    names(cwd3),
+    [`${stem}-2.json`, `${stem}.json`, "explicit.json"].sort(),
+  );
+
+  // 5. `-` and an empty --out are refused before anything connects.
+  const cwd5 = cwdOf();
+  const sent = fetched();
+  for (const out of ["-", ""]) {
+    r = await prepare(cwd5, ["--out", out]);
+    assert.equal(r.code, 2, out);
+    assert.equal(r.json().error.code, "usage", out);
+    assert.match(r.json().error.message, /ensemble-<kind>-<id8>\.json/);
+  }
+  assert.deepEqual(names(cwd5), []);
+  assert.equal(fetched(), sent);
+
+  // 6. A directory that cannot be written is output-failed with one Fix line.
+  if (process.getuid?.() !== 0) {
+    const locked = cwdOf();
+    chmodSync(locked, 0o500);
+    try {
+      const failed = await h.run(
+        [
+          "project",
+          "prepare",
+          seed.projectA,
+          "--name",
+          "Locked",
+          "--connection",
+          "ro",
+        ],
+        { cwd: locked },
+      );
+      assert.equal(failed.code, 2);
+      assert.deepEqual(
+        failed.err.split("\n").filter((l) => l.startsWith("Fix: ")),
+        ["Fix: Pass --out FILE in a directory you can write."],
+      );
+      assert.deepEqual(names(locked), []);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  }
+
+  // 7. All 99 names taken: output-exists, nothing created.
+  const full = cwdOf();
+  for (let i = 1; i <= 99; i++)
+    writeFileSync(join(full, `${stem}${i === 1 ? "" : `-${i}`}.json`), "x", {
+      mode: 0o600,
+    });
+  const refused = await h.run(
+    [
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      "Full",
+      "--connection",
+      "ro",
+    ],
+    { cwd: full },
+  );
+  assert.equal(refused.code, 2);
+  assert.match(refused.err, /\(output-exists\)/);
+  assert.deepEqual(
+    refused.err.split("\n").filter((l) => l.startsWith("Fix: ")),
+    [
+      `Fix: Remove or apply the older ${stem}*.json files here, or pass --out FILE.`,
+    ],
+  );
+  assert.equal(names(full).length, 99);
+
+  // 8. After `--`, `--out` is a positional, so the command is refused unread.
+  const cwd8 = cwdOf();
+  const before8 = fetched();
+  const terminated = await h.run(
+    [
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      "Term",
+      "--connection",
+      "ro",
+      "--",
+      "--out",
+      "x.json",
+    ],
+    { cwd: cwd8 },
+  );
+  assert.equal(terminated.code, 2);
+  assert.deepEqual(names(cwd8), []);
+  assert.equal(fetched(), before8);
+
+  // 9. Capacity has no target id, so its name has none.
+  const cwd9 = cwdOf();
+  r = await cli("ro", ["capacity", "prepare", "--global-limit", "6"], {
+    cwd: cwd9,
+  });
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(
+    r.json().data.file,
+    join(cwd9, "ensemble-capacity-configure.json"),
+  );
+
+  // 10. A path with a space and a quote is printed as one runnable shell word.
+  const odd = cwdOf("it's a dir-");
+  const printed = await h.run(
+    [
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      "Odd",
+      "--connection",
+      "ro",
+    ],
+    { cwd: odd },
+  );
+  assert.equal(printed.code, 0, printed.err);
+  const line = printed.out.trimEnd().split("\n").at(-1) ?? "";
+  const word = line.slice("Apply with: ensemble project apply --file ".length);
+  assert.ok(word.startsWith("'") && word.endsWith("'"), word);
+  const unquoted = word.slice(1, -1).replaceAll("'\\''", "'");
+  assert.equal(unquoted, join(odd, `${stem}.json`));
+  r = await cli("rw", ["project", "apply", "--file", unquoted]);
+  assert.equal(r.code, 0, r.err + r.out);
 });

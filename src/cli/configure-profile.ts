@@ -13,7 +13,7 @@ import {
   inlineText,
   readImpact,
   readTextFile,
-  requireOut,
+  checkOut,
   positiveIntFlag,
   writePrepared,
 } from "./configure.js";
@@ -140,7 +140,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
     "profile prepare",
     {
       usage:
-        "profile prepare PROFILE_ID --out FILE [--expected-version N] [--name S] [--summary S] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N] [--capabilities-file PATH] [--revoked true|false]",
+        "profile prepare PROFILE_ID [--out FILE] [--expected-version N] [--name S] [--summary S] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N] [--capabilities-file PATH] [--revoked true|false]",
       positionals: 1,
       flags: [
         "out",
@@ -155,7 +155,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
       ],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROFILE_ID");
-        requireOut(ctx);
+        checkOut(ctx);
         const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",
@@ -254,7 +254,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
     "profile prepare-create",
     {
       usage:
-        "profile prepare-create --out FILE --name S (--instructions TEXT|- | --instructions-file PATH) [--summary S] [--capabilities-file PATH] [--id UUID]",
+        "profile prepare-create [--out FILE] --name S (--instructions TEXT|- | --instructions-file PATH) [--summary S] [--capabilities-file PATH] [--id UUID]",
       positionals: 0,
       flags: [
         "out",
@@ -266,7 +266,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
         "id",
       ],
       async run(ctx) {
-        requireOut(ctx);
+        checkOut(ctx);
         const usage = new CliError(
           "usage",
           "--name and --instructions TEXT (or - for standard input, or --instructions-file PATH) are required.",

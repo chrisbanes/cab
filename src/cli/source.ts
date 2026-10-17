@@ -32,7 +32,7 @@ import {
   type Change,
   checkExpected,
   positiveIntFlag,
-  requireOut,
+  checkOut,
   writePrepared,
 } from "./configure.js";
 import { openFailure } from "./change-document.js";
@@ -558,12 +558,12 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
     "project prepare-source",
     {
       usage:
-        "project prepare-source PROJECT_ID --out FILE --edit-file FILE [--expected-version N]",
+        "project prepare-source PROJECT_ID [--out FILE] --edit-file FILE [--expected-version N]",
       positionals: 1,
       flags: ["out", "edit-file", "expected-version"],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
-        requireOut(ctx);
+        checkOut(ctx);
         const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",

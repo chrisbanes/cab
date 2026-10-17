@@ -2,7 +2,7 @@ import { runtimeSettingsSchema } from "../operator/contracts.js";
 import { uuidArg } from "./browse.js";
 import {
   applyFile,
-  requireOut,
+  checkOut,
   type Change,
   positiveIntFlag,
   writePrepared,
@@ -15,11 +15,11 @@ export const capacityWriteCommands = new Map<string, WriteCommand>([
     "capacity prepare",
     {
       usage:
-        "capacity prepare --out FILE [--global-limit N] [--project-limit PROJECT_ID=N|default]...",
+        "capacity prepare [--out FILE] [--global-limit N] [--project-limit PROJECT_ID=N|default]...",
       positionals: 0,
       flags: ["out", "global-limit", "project-limit"],
       async run(ctx) {
-        requireOut(ctx);
+        checkOut(ctx);
         const global = positiveIntFlag(
           ctx.values["global-limit"],
           "global-limit",

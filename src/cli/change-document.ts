@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
+import { join } from "node:path";
 import { z } from "zod";
 import { writeOut } from "./browse-evidence.js";
 import { CliError } from "./connections.js";
@@ -71,8 +72,20 @@ export function canonicalJson(value: unknown): string {
 export const digestOf = (document: Omit<ChangeDocument, "digest">): string =>
   createHash("sha256").update(canonicalJson(document)).digest("hex");
 
+/** `ensemble-<kind>-<id8>`: the default document name, without its suffix or extension. */
+export function defaultStem(kind: ChangeKind, targetId: string) {
+  const id8 = z.uuid().safeParse(targetId).success ? targetId.slice(0, 8) : "";
+  return `ensemble-${kind.replace(".", "-")}${id8 && `-${id8}`}`;
+}
+const DEFAULT_ATTEMPTS = 99;
+
+/**
+ * Writes the document to `out` (never over an existing file), or with no `out` to the
+ * first free `<stem>.json`, `<stem>-2.json` .. `<stem>-99.json` in `cwd`. Every attempt
+ * is one create-exclusive open, so concurrent prepares never share a name.
+ */
 export async function writeChangeDocument(
-  path: string,
+  target: { out?: string | undefined; cwd: string },
   document: Omit<ChangeDocument, "digest">,
 ): Promise<{ path: string; document: ChangeDocument }> {
   const complete = { ...document, digest: digestOf(document) };
@@ -82,7 +95,31 @@ export async function writeChangeDocument(
       "invalid-input",
       "The change document would exceed 512 KiB.",
     );
-  return { path: await writeOut(path, body), document: complete };
+  if (target.out !== undefined)
+    return { path: await writeOut(target.out, body), document: complete };
+  const stem = defaultStem(document.kind, document.target.id);
+  const fix = "Pass --out FILE in a directory you can write.";
+  for (let n = 1; n <= DEFAULT_ATTEMPTS; n++) {
+    const name = `${stem}${n === 1 ? "" : `-${n}`}.json`;
+    try {
+      return {
+        path: await writeOut(join(target.cwd, name), body),
+        document: complete,
+      };
+    } catch (error) {
+      if (!(error instanceof CliError) || error.code !== "output-exists")
+        throw error instanceof CliError
+          ? new CliError(error.code, error.message, { fix })
+          : error;
+    }
+  }
+  throw new CliError(
+    "output-exists",
+    `Every name from ${join(target.cwd, stem)}.json to ${join(target.cwd, stem)}-${DEFAULT_ATTEMPTS}.json already exists.`,
+    {
+      fix: `Remove or apply the older ${stem}*.json files here, or pass --out FILE.`,
+    },
+  );
 }
 
 const invalid = (why: string, fix?: string) =>

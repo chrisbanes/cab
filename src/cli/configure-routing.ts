@@ -4,7 +4,7 @@ import {
   type Change,
   checkExpected,
   readTextFile,
-  requireOut,
+  checkOut,
   positiveIntFlag,
   writePrepared,
 } from "./configure.js";
@@ -20,7 +20,7 @@ export const routingWriteCommands = new Map<string, WriteCommand>([
     "project prepare-routing",
     {
       usage:
-        "project prepare-routing PROJECT_ID --out FILE [--expected-version N] [--enabled true|false] [--candidates ID,ID|none] [--guidance-file PATH] [--credential-ref env:NAME|none]",
+        "project prepare-routing PROJECT_ID [--out FILE] [--expected-version N] [--enabled true|false] [--candidates ID,ID|none] [--guidance-file PATH] [--credential-ref env:NAME|none]",
       positionals: 1,
       flags: [
         "out",
@@ -32,7 +32,7 @@ export const routingWriteCommands = new Map<string, WriteCommand>([
       ],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
-        requireOut(ctx);
+        checkOut(ctx);
         const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",
