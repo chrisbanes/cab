@@ -849,7 +849,7 @@ test("overview cards read the Inbox and cover its failure and partial states", a
     await intervention
       .getByRole("link", { name: "Inspect execution" })
       .getAttribute("href"),
-    `/app/tasks/${ids.uncertainStop.id}`,
+    `/app/tasks/${ids.uncertainStop.id}?section=decisions`,
   );
   assert.equal(await attention.locator(".overview-overflow").count(), 0);
   await shot(page, "1366-overview-attention");

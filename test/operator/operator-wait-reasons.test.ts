@@ -582,6 +582,10 @@ test("hold lines state what clears each hold, list Stop once and follow the reco
     holdLines(none, { reason: "Held already." })[0]?.clears,
     "Held already. Recovery stays blocked while it remains.",
   );
+  assert.equal(
+    holdLines(none, { reason: "Awaiting review…" })[0]?.clears,
+    "Awaiting review… Recovery stays blocked while it remains.",
+  );
   // A Stop-only task has no task hold and so exactly one line.
   assert.deepEqual(
     holdLines({ ...none, stop: true }, null).map((line) => line.kind),

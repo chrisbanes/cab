@@ -292,7 +292,8 @@ export interface HoldLine {
   name: string;
 }
 
-const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
+const sentence = (text: string) =>
+  /[.!?…)"'”]$/.test(text) ? text : `${text}.`;
 const knownEnded = "Clears when we know the execution ended.";
 
 /**
