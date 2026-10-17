@@ -164,6 +164,13 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     rows[index] = patch ? { ...rows[index], ...patch } : (reverted ?? {});
     setRows(field, rows);
   };
+  /** Undoing a removal drops the marker, so the row reads exactly as it was loaded. */
+  const toggleRemoved = (field: string, index: number) => {
+    const rows = parseRows(v[field]);
+    const { removed, ...rest } = rows[index] ?? {};
+    rows[index] = removed ? rest : { ...rest, removed: true };
+    setRows(field, rows);
+  };
   const drop = (field: string, index: number) =>
     setRows(
       field,
@@ -373,9 +380,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={() =>
-                          update("selections", i, { removed: !r.removed })
-                        }
+                        onClick={() => toggleRemoved("selections", i)}
                       >
                         {r.removed ? `Undo remove ${r.id}` : `Remove ${r.id}`}
                       </Button>
@@ -523,9 +528,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                         <Button
                           type="button"
                           variant="secondary"
-                          onClick={() =>
-                            update("repositories", i, { removed: !r.removed })
-                          }
+                          onClick={() => toggleRemoved("repositories", i)}
                         >
                           {r.removed
                             ? `Undo remove repository ${name}`

@@ -127,6 +127,37 @@ function fieldFix(issue: z.core.$ZodIssue, input: unknown) {
   return "Check this field.";
 }
 
+/** Fields that change with every operation and are not input. */
+const housekeeping = new Set(["key", "expectedVersion"]);
+/**
+ * A comparable form of a draft value: lists of ids are sets, and JSON rows ignore their
+ * per-render `rowKey` and the order of their properties.
+ */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return JSON.stringify([...value].sort());
+  if (typeof value === "string" && /^[[{]/.test(value))
+    try {
+      return JSON.stringify(
+        JSON.parse(value, (k, v: unknown) =>
+          k === "rowKey"
+            ? undefined
+            : v && typeof v === "object" && !Array.isArray(v)
+              ? Object.fromEntries(
+                  Object.entries(v as object).sort(([a], [b]) =>
+                    a < b ? -1 : 1,
+                  ),
+                )
+              : v,
+        ),
+      );
+    } catch {
+      return `s:${value}`;
+    }
+  return typeof value === "string"
+    ? `s:${value}`
+    : JSON.stringify(value ?? null);
+}
+
 export class ConfigurationDraft {
   values: Record<string, string | boolean | string[]> = {};
   phase:
@@ -136,7 +167,6 @@ export class ConfigurationDraft {
     | "rejected"
     | "conflict"
     | "unknown" = "editing";
-  dirty = false;
   notice = "";
   /** Set while the last save is confirmed; the next edit or new operation clears it. */
   savedAt: number | null = null;
@@ -197,7 +227,6 @@ export class ConfigurationDraft {
     )
       return false;
     this.values = { ...this.values, [field]: value };
-    this.dirty = true;
     this.savedAt = null;
     this.changed();
     return true;
@@ -218,13 +247,29 @@ export class ConfigurationDraft {
     this.values = sameText(value, baseline)
       ? rest
       : { ...rest, [field]: value, [`${field}Base`]: baseline };
-    this.dirty = true;
     this.savedAt = null;
     this.changed();
     return true;
   }
   /** The loaded values the current input started from; adoption compares against it. */
   private base: Record<string, string | boolean | string[]> = {};
+  /**
+   * Whether any field differs from the loaded values it started from. Derived from the
+   * contents every time, never stored: an edit that is reverted leaves the form clean, so a
+   * later read is picked up and Discard is offered only while something differs.
+   */
+  get dirty() {
+    for (const field of new Set([
+      ...Object.keys(this.values),
+      ...Object.keys(this.base),
+    ]))
+      if (
+        !housekeeping.has(field) &&
+        canonical(this.values[field]) !== canonical(this.base[field])
+      )
+        return true;
+    return false;
+  }
   initialize(values: Record<string, string | boolean | string[]>) {
     if (!this.dirty && !this.frozen) {
       // A read at another version was saved by someone else, so the confirmation of this
@@ -313,7 +358,6 @@ export class ConfigurationDraft {
     this.lifecycle.reset();
     this.errors = {};
     this.phase = "editing";
-    this.dirty = false;
     this.notice = "";
     this.savedAt = null;
     this.details = {};

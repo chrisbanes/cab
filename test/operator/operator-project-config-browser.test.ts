@@ -500,6 +500,163 @@ const leaveAndReturn = async (page: Page, tab: string, other: string) => {
 const noChanges = async (page: Page) =>
   assert.equal(await changes(page).getByRole("listitem").count(), 0);
 
+/** The form is clean: nothing listed, no Discard, and Save is off. */
+const assertClean = async (page: Page, save: string) => {
+  await changes(page).getByText("No changes yet.", { exact: false }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Discard changes" }).count(),
+    0,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: save, exact: true }).isDisabled(),
+    true,
+  );
+};
+
+test("a form whose edits were all reverted is clean and picks up a later read", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const name = page.getByLabel("Project name", { exact: true });
+  const pause = page.getByRole("switch", { name: "Pause project" });
+  await name.waitFor();
+  const discard = page.getByRole("button", { name: "Discard changes" });
+
+  // A private edit that is reverted leaves the form clean.
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("CHANGED");
+  await discard.waitFor();
+  await instructionsField(page).fill(SENTINEL);
+  await assertClean(page, "Save project");
+  bumpProject(f, ids.atlas, "Atlas external one");
+  await refresh(page);
+  assert.equal(await name.inputValue(), "Atlas external one");
+  await assertClean(page, "Save project");
+
+  // The same for an ordinary field and for a switch.
+  await name.fill("Typed");
+  await name.fill("Atlas external one");
+  await pause.click();
+  await pause.click();
+  await assertClean(page, "Save project");
+  bumpProject(f, ids.atlas, "Atlas external two");
+  await refresh(page);
+  assert.equal(await name.inputValue(), "Atlas external two");
+
+  // Another edit keeps the form dirty: a read does not overwrite it, and Discard is offered.
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("CHANGED");
+  await instructionsField(page).fill(SENTINEL);
+  await name.fill("Typed again");
+  bumpProject(f, ids.atlas, "Atlas external three");
+  await refresh(page);
+  assert.equal(await name.inputValue(), "Typed again");
+  await discard.waitFor();
+  // The edit survives leaving the tab; Discard then reloads the newer values and leaves it clean.
+  await leaveAndReturn(page, "General", "Routing");
+  assert.equal(await name.inputValue(), "Typed again");
+  await discard.click();
+  assert.equal(await name.inputValue(), "Atlas external three");
+  await assertClean(page, "Save project");
+  bumpProject(f, ids.atlas, "Atlas external four");
+  await refresh(page);
+  assert.equal(await name.inputValue(), "Atlas external four");
+});
+
+test("a reverted routing edit leaves the form clean and picks up a later read", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  const d = f.service.domain();
+  const candidate = (n: string) =>
+    page.getByRole("checkbox", { name: new RegExp(`^${n} ·`) });
+  await candidate("Eli").waitFor();
+  await candidate("Mira").check();
+  await candidate("Mira").uncheck();
+  await revealButton(page, "routing guidance").click();
+  const field = page.getByRole("textbox", {
+    name: "Routing guidance",
+    exact: true,
+  });
+  await field.fill("CHANGED");
+  await field.fill("PRIVATE ROUTING GUIDANCE");
+  await assertClean(page, "Save routing");
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    candidateProfileIds: [ids.profiles.Mira as string],
+  });
+  await refresh(page);
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("input[type=checkbox]")].some(
+      (e) =>
+        (e as HTMLInputElement).checked &&
+        e.closest("label")?.textContent?.startsWith("Mira"),
+    ),
+  );
+  assert.equal(await candidate("Eli").isChecked(), false);
+  await assertClean(page, "Save routing");
+});
+
+test("a reverted source edit leaves the form clean and picks up a later read", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const query = page.getByLabel("Search query", { exact: true });
+  const path = page.getByLabel("Local repository path", { exact: true });
+  const ref = page.getByLabel("Linked repository ref", { exact: true });
+  await query.waitFor();
+  const storedPath = await path.inputValue();
+  await query.fill("CHANGED");
+  await query.fill("PRIVATE SAVED QUERY");
+  await path.fill("/changed");
+  await path.fill(storedPath);
+  await ref.fill("HEAD");
+  await ref.fill("main");
+  await page.getByRole("button", { name: "Remove S-3" }).click();
+  await page.getByRole("button", { name: "Undo remove S-3" }).click();
+  await assertClean(page, "Save changes");
+  const external = (mode: "all" | "any") =>
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId: ids.atlas,
+      expectedVersion: d.githubConfiguration(ids.atlas).version,
+      selections: [
+        { id: "S-1", keep: true },
+        { id: "S-2", keep: true },
+        { id: "S-3", keep: true },
+      ],
+      readiness: { mode, conditions: [{ kind: "label", name: "ready" }] },
+      repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+    } as Parameters<OperatorApi["execute"]>[0]);
+  await external("any");
+  await refresh(page);
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("select")].some(
+      (e) =>
+        (e as HTMLSelectElement).selectedOptions[0]?.textContent ===
+        "Any condition",
+    ),
+  );
+  await assertClean(page, "Save changes");
+  // An edit that stays keeps the form dirty and a later read does not overwrite it.
+  await query.fill("KEPT EDIT");
+  await external("all");
+  await refresh(page);
+  assert.equal(await query.inputValue(), "KEPT EDIT");
+  await page.getByRole("button", { name: "Discard changes" }).waitFor();
+});
+
 test("a reverted private edit is no edit after leaving the page or adopting a newer version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,

@@ -181,6 +181,54 @@ test("Reviewer profile edits in place, restores and revokes, and edits revealed 
   assert.equal(await showsText(page, "PRIVATE"), false);
 });
 
+test("a profile form whose edits were reverted is clean and picks up a later read", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/profiles/:reviewer/settings",
+  );
+  const reviewer = ids.profiles.Reviewer as string;
+  const summary = page.getByLabel("Summary", { exact: true });
+  const capabilities = page.getByLabel("Capabilities", { exact: true });
+  const changes = page.getByRole("region", { name: "Changes to save" });
+  await summary.waitFor();
+  await page.getByRole("button", { name: "Reveal instructions" }).click();
+  const field = page.getByRole("textbox", {
+    name: "Instructions",
+    exact: true,
+  });
+  await field.fill("CHANGED");
+  await field.fill("PRIVATE REVIEWER INSTRUCTIONS");
+  await summary.fill("Typed");
+  await summary.fill("Review");
+  await changes.getByText("No changes yet.", { exact: false }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Discard changes" }).count(),
+    0,
+  );
+  f.service.domain().execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: reviewer,
+    expectedVersion: Number(f.service.domain().profile(reviewer).version),
+    capabilities: "Changed elsewhere",
+  });
+  const read = page.waitForResponse(
+    (r) => r.request().method() === "GET" && /configuration$/.test(r.url()),
+  );
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await read;
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(
+          'textarea[aria-label="Capabilities"]',
+        ) as HTMLTextAreaElement | null
+      )?.value === "Changed elsewhere",
+  );
+  assert.equal(await capabilities.inputValue(), "Changed elsewhere");
+});
+
 test("profile instructions reverted or edited keep their state after leaving the page", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
