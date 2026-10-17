@@ -181,6 +181,15 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    `--connection NAME` when that login is not the one a bare command selects).
 3. `ensemble auth status`, `ensemble task get TASK_ID [--output json]`,
    `ensemble connection list|use NAME|remove NAME` and `ensemble auth logout`.
+   `task get` prints the task's State as the web UI's column (Ready, Running, Waiting,
+   Paused, Stopping, Uncertain, Draft, Done or Cancelled), then `Version:`, `Lead:`
+   (the lead's name and, once it has one, its assignment id, the `--to` of `task
+   message`; no line without a lead), `Execution:` (the execution state, with the holds
+   in the UI's words after `held:`) and `Next:` (who acts next, by the List's rule; an
+   operator action also names `ensemble inbox list --project ID`). The three ownership
+   holds (writer, capacity and uncertainty) read as one `Ownership held`; `Stop
+   requested` and `Task hold` are the others. The separate flags stay in JSON and
+   in `recovery get`.
    Logout and removal delete only local state; the server credential stays active
    until revoked or expired.
 4. Read-only browsing, with either credential scope:
@@ -379,7 +388,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    - `task stop TASK_ID [--expected-version N]` is best-effort cancellation: new
      turns are held, and effects may continue until termination is verified. It
      reads nothing first. `task resume TASK_ID [--expected-version N]` clears only
-     the operator Stop and lists the holds that remain. Both are receipted
+     the operator Stop and lists the holds that remain by those names. Both are receipted
      `task.stop`/`task.resume` commands; the web UI's Stop and the retained forms
      use the same hold.
 

@@ -103,7 +103,7 @@ test("task resume clears only the operator Stop and reports what remains", async
   r = await o.h.run(["task", "resume", s.taskId, "--connection", "rw"]);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /Resume cleared only the operator Stop/);
-  assert.match(r.out, /No work started: still held by/);
+  assert.match(r.out, /No work started; still held: Task hold\./);
   assert.equal(stopped(o, s.taskId), false);
   assert.equal(s.f.service.taskHold(s.taskId), "Fixture ambiguity");
   // A fresh Stop alongside another hold is reported as in effect.
@@ -297,6 +297,73 @@ const waitBlock = (text: string) => {
 };
 const lastLine = (text: string) => text.trimEnd().split("\n").at(-1);
 
+/** A task read whose execution also reports the ownership holds, as a held generation would. */
+const withOwnershipHolds: typeof fetch = async (input, init) => {
+  const response = await fetch(input, init);
+  if (
+    (init?.method ?? "GET") !== "GET" ||
+    !/\/api\/operator\/tasks\/[0-9a-f-]{36}$/.test(String(input))
+  )
+    return response;
+  const body = (await response.json()) as {
+    data: { execution: { holds: Record<string, boolean> } };
+  };
+  Object.assign(body.data.execution.holds, {
+    writer: true,
+    capacity: true,
+    uncertainty: true,
+  });
+  return new Response(JSON.stringify(body), {
+    status: response.status,
+    headers: { "content-type": "application/json" },
+  });
+};
+const cells = (line: string | undefined) => (line ?? "").trim().split(/ {2,}/);
+
+test("task stop and resume print hold labels, not hold codes", async (t) => {
+  const o = await startCliOperator(t);
+  const { s } = o;
+  const line = (out: string, label: string) =>
+    out.split("\n").find((l) => l.startsWith(`${label}:`));
+  let r = await o.h.run(["task", "stop", s.taskId, "--connection", "rw"]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(cells(line(r.out, "Holds")), ["Holds:", "Stop requested"]);
+  const data = (await o.cli("ro", ["task", "get", s.taskId])).json().data;
+  assert.equal(data.execution.holds.stop, true);
+
+  s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "INSERT INTO task_writer_ambiguity_holds (taskId, reason) VALUES (?, 'Fixture ambiguity')",
+      )
+      .run(s.taskId),
+  );
+  r = await o.h.run(["task", "resume", s.taskId, "--connection", "rw"], {
+    fetch: withOwnershipHolds,
+  });
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(cells(line(r.out, "Holds")), [
+    "Holds:",
+    "Task hold, Ownership held",
+  ]);
+  assert.ok(
+    r.out.includes("No work started; still held: Task hold, Ownership held.\n"),
+    r.out,
+  );
+  assert.doesNotMatch(r.out, /\b(writer|capacity|uncertainty)\b/i);
+  // JSON keeps the three separate flags.
+  const json = await o.cli("ro", ["task", "get", s.taskId], {
+    fetch: withOwnershipHolds,
+  });
+  assert.deepEqual(json.json().data.execution.holds, {
+    stop: false,
+    writer: true,
+    capacity: true,
+    uncertainty: true,
+    task: true,
+  });
+});
+
 test("task resume with remaining holds prints the task's wait lines or Next", async (t) => {
   const o = await startCliOperator(t);
   const { s } = o;
@@ -316,7 +383,7 @@ test("task resume with remaining holds prints the task's wait lines or Next", as
     "rw",
   ]);
   assert.equal(resumed.code, 0, resumed.err);
-  assert.match(resumed.out, /No work started: still held by/);
+  assert.match(resumed.out, /No work started; still held: Task hold\./);
   const got = await o.h.run(["task", "get", s.taskId, "--connection", "ro"]);
   const expected = waitBlock(got.out);
   assert.ok(expected.length >= 4, got.out);

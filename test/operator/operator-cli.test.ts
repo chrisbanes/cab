@@ -22,7 +22,13 @@ import {
   readTokenFile,
 } from "../../src/cli/connections.js";
 import { type CliDeps, EXIT } from "../../src/cli/main.js";
-import { CATEGORY_FIX, DEFAULT_FIX, remedyFor } from "../../src/cli/remedy.js";
+import {
+  CATEGORY_FIX,
+  DEFAULT_FIX,
+  heldLabels,
+  nextText,
+  remedyFor,
+} from "../../src/cli/remedy.js";
 import { logsCommand } from "../../src/cli/logs-follow.js";
 import {
   fakeServer,
@@ -33,6 +39,48 @@ import { startCliOperator, startCliService } from "../fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+
+test("hold labels and the Next text use the UI's words", () => {
+  const keys = ["stop", "task", "writer", "capacity", "uncertainty"] as const;
+  for (let mask = 0; mask < 32; mask++) {
+    const holds = Object.fromEntries(
+      keys.map((key, i) => [key, Boolean(mask & (1 << i))]),
+    ) as Record<(typeof keys)[number], boolean>;
+    const expected = [
+      ...(holds.stop ? ["Stop requested"] : []),
+      ...(holds.task ? ["Task hold"] : []),
+      ...(holds.writer || holds.capacity || holds.uncertainty
+        ? ["Ownership held"]
+        : []),
+    ];
+    const labels = heldLabels(holds);
+    assert.deepEqual(labels, expected, JSON.stringify(holds));
+    assert.ok(
+      !/writer|capacity|uncertainty/i.test(labels.join(" ")),
+      JSON.stringify(holds),
+    );
+  }
+  assert.deepEqual(nextText(["question"], "Waiting"), {
+    text: "you · answer question",
+    operator: true,
+  });
+  assert.deepEqual(nextText(["question-delivery"], "Running"), {
+    text: "Ensemble · delivering answer",
+    operator: false,
+  });
+  assert.deepEqual(nextText([], "Done"), {
+    text: "none · no decision",
+    operator: false,
+  });
+  assert.deepEqual(nextText([], "Ready"), {
+    text: "No operator decision",
+    operator: false,
+  });
+  assert.deepEqual(nextText([], "Uncertain"), {
+    text: "you · inspect execution",
+    operator: true,
+  });
+});
 
 test("--version prints the package version", async (t) => {
   const r = await harness(t).run(["--version"]);

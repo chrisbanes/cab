@@ -36,12 +36,15 @@ import {
   DEFAULT_FIX,
   fixLine,
   nextLine,
+  nextText,
   remedyFor,
   shellWord,
+  taskHeldLabels,
 } from "./remedy.js";
 import { RequestJournal } from "./request-journal.js";
 import { closureSuffix, waitLines } from "./task-write.js";
 import { unmetReason } from "../operator/readiness-text.js";
+import { taskColumnOf } from "../operator/task-presentation.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
@@ -616,6 +619,10 @@ async function run(
     );
     const { task } = read.data;
     const readiness = unmetReason(read.data.source?.readiness);
+    const column = taskColumnOf(read.data);
+    const held = taskHeldLabels(read.data);
+    const next = nextText(read.data.attention.codes, column);
+    const { lead, leadAssignmentId } = read.data;
     return {
       ...session.result,
       data: read.data,
@@ -627,8 +634,15 @@ async function run(
         `${task.title ?? "(untitled)"}`,
         `Task:    ${task.id}`,
         `Project: ${task.projectId}`,
-        `State:   ${task.state}${closureSuffix(read.data.source?.closure)}${task.ready ? " (ready)" : ""}`,
+        `State:   ${column}${closureSuffix(read.data.source?.closure)}`,
         `Version: ${task.version}`,
+        ...(lead
+          ? [
+              `Lead:    ${lead.name}${leadAssignmentId ? ` (assignment ${leadAssignmentId})` : ""}`,
+            ]
+          : []),
+        `Execution: ${read.data.execution.state}${held.length ? `; held: ${held.join(", ")}` : ""}`,
+        `Next:    ${next.text}${next.operator ? ` (ensemble inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
         ...(task.outcome ? ["", task.outcome] : []),

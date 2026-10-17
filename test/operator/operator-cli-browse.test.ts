@@ -5,6 +5,8 @@ import { COVERAGE_GAPS, cursorQuery } from "../../src/cli/browse.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliService } from "../fixtures/operator-cli.js";
+import { taskColumnOf } from "../../src/operator/task-presentation.js";
+import { seedOwnQuestion } from "../fixtures/questions.js";
 import { seedBrowseWorkspace } from "../fixtures/operator-cli-browse.js";
 
 type After = { after(fn: () => unknown): void };
@@ -582,6 +584,59 @@ test("task messages page and task get reports coverage", async (t) => {
   assert.equal(got.pagination, undefined);
   const text = await h.run(["task", "get", s.taskId]);
   assert.match(text.out, /^Inspect me\nTask: +/);
+});
+
+const cells = (line: string) => line.trim().split(/ {2,}/);
+
+test("task get names the lead assignment, execution and who acts next", async (t) => {
+  const { s, seed, h, ok, api } = await setup(t);
+  const line = (out: string, label: string) =>
+    out.split("\n").find((l) => l.startsWith(`${label}:`));
+  const id = seed.betaSharedTaskId;
+  const json = await ok(["task", "get", id]);
+  assert.deepEqual(json.data, await api(`/api/operator/tasks/${id}`));
+  const leadAssignmentId = json.data.leadAssignmentId as string;
+  assert.match(leadAssignmentId, /^[0-9a-f-]{36}$/);
+  const human = (await h.run(["task", "get", id])).out;
+  assert.deepEqual(cells(line(human, "Lead") ?? ""), [
+    `Lead:`,
+    `Task lead (assignment ${leadAssignmentId})`,
+  ]);
+  assert.match(line(human, "Execution") ?? "", /^Execution: +\S+/);
+  assert.match(line(human, "Next") ?? "", /^Next: +\S/);
+  assert.doesNotMatch(line(human, "State") ?? "", /\bopen\b/);
+  assert.match(
+    line(human, "State") ?? "",
+    /^State: +(Ready|Running|Waiting|Paused|Stopping|Uncertain|Draft|Done|Cancelled)\b/,
+  );
+
+  // A project with no lead has no Lead line; its Waiting line says so.
+  const bare = (await h.run(["task", "get", s.taskId])).out;
+  assert.equal(line(bare, "Lead"), undefined);
+  assert.match(bare, /^Waiting: .*lead/im);
+  // State is the UI's column word, never the raw task state.
+  for (const [taskId, column] of [
+    [seed.doneTaskId, "Done"],
+    [seed.cancelledTaskId, "Cancelled"],
+    [
+      seed.alphaSharedTaskId,
+      taskColumnOf((await ok(["task", "get", seed.alphaSharedTaskId])).data),
+    ],
+  ] as const)
+    assert.equal(
+      line((await h.run(["task", "get", taskId])).out, "State"),
+      `State:   ${column}`,
+    );
+  // An operator-owned question reads "you" and names the Inbox command.
+  const q = await seedOwnQuestion(s.f);
+  const asked = (await h.run(["task", "get", q.taskId])).out;
+  const projectId = (await ok(["task", "get", q.taskId])).data.task.projectId;
+  assert.deepEqual(cells(line(asked, "Next") ?? ""), [
+    "Next:",
+    `you · answer question (ensemble inbox list --project ${projectId})`,
+  ]);
+  // A task nobody needs to act on does not name the Inbox.
+  assert.ok(!(line(bare, "Next") ?? "").includes("ensemble inbox"));
 });
 
 test("list data equals the direct API data without paging internals", async (t) => {
