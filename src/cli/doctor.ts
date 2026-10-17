@@ -17,6 +17,19 @@ export const doctorCommand: BrowseCommand = {
     const client = await ctx.connect();
     const read = await client.get("/api/operator/readiness", readinessSchema);
     const { checks } = read.data;
+    // A daemon host reads gh before anyone logs in; warn (stderr only) when its login
+    // is in the keychain. Service modules load on demand, and a probe failure is ignored.
+    try {
+      const { daemonGhWarning } = await import("./service.js");
+      const warning = await daemonGhWarning(
+        ctx.deps.env,
+        ctx.deps.uid ?? process.getuid?.(),
+        ctx.deps.ghExecutable,
+      );
+      if (warning) ctx.deps.stderr.write(`${warning}\n`);
+    } catch {
+      // A warning only.
+    }
     return browseOutput(ctx, {
       data: read.data,
       observedAt: read.observedAt,

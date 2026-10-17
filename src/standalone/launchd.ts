@@ -30,7 +30,20 @@ export type LaunchAgentConfiguration = {
   /** Written only when set; the service's own defaults apply otherwise. */
   diagnosticRetentionDays?: number | undefined;
   diagnosticStorageMib?: number | undefined;
+  /** LaunchDaemon only: the account the job runs as and its HOME. Set both or neither. */
+  userName?: string | undefined;
+  home?: string | undefined;
 };
+
+export const ROOT_REFUSAL =
+  "Ensemble does not run as root; run it as the account that owns the service";
+
+/** Ensemble never runs as root, in any mode; a fixed message so no path or cause leaks. */
+export function assertNotRoot(uid: number | undefined): void {
+  if (uid === 0) throw new Error(ROOT_REFUSAL);
+}
+
+const USER_NAME = /^[a-z_][a-z0-9_.-]{0,254}$/i;
 
 const LABEL =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
@@ -118,6 +131,22 @@ function validateConfiguration(configuration: LaunchAgentConfiguration): void {
   )
     throw new Error("Operator port is invalid");
   validateOrigin(configuration.origin);
+  if (
+    (configuration.userName === undefined) !==
+    (configuration.home === undefined)
+  )
+    throw new Error("LaunchDaemon account and home must be set together");
+  if (configuration.userName !== undefined) {
+    if (
+      !USER_NAME.test(configuration.userName) ||
+      configuration.userName.toLowerCase() === "root"
+    )
+      throw new Error("LaunchDaemon user name is invalid");
+    // Canonical, but not private: HOME is the account's own directory.
+    const home = canonicalExistingPath(configuration.home as string, "HOME");
+    if (!lstatSync(home).isDirectory())
+      throw new Error("HOME must be a real directory");
+  }
   for (const [value, bound, label] of [
     [
       configuration.diagnosticRetentionDays,
@@ -171,17 +200,42 @@ function stringElement(value: string): string {
   return `<string>${xml(value)}</string>`;
 }
 
-function diagnosticEntries(configuration: LaunchAgentConfiguration): string {
-  return [
-    [diagnosticRetentionDays.name, configuration.diagnosticRetentionDays],
-    [diagnosticStorageMib.name, configuration.diagnosticStorageMib],
-  ]
-    .filter(([, value]) => value !== undefined)
-    .map(
-      ([name, value]) =>
-        `\n    <key>${name}</key>\n    ${stringElement(String(value))}`,
-    )
-    .join("");
+/**
+ * The environment launchd gives the job, and the only one: the fixed PATH, the daemon
+ * account's HOME (daemon only), the auth file and origin, and the diagnostic limits when
+ * set. The plist renders exactly this, and anything that predicts how the job behaves
+ * (such as where its GitHub CLI login is read from) must run in exactly this.
+ */
+export function launchdEnvironment(
+  configuration: Pick<
+    LaunchAgentConfiguration,
+    | "authFile"
+    | "origin"
+    | "home"
+    | "diagnosticRetentionDays"
+    | "diagnosticStorageMib"
+  >,
+): Record<string, string> {
+  return {
+    PATH: LAUNCHD_PATH,
+    ...(configuration.home === undefined ? {} : { HOME: configuration.home }),
+    ENSEMBLE_OPERATOR_AUTH_FILE: configuration.authFile,
+    ENSEMBLE_OPERATOR_ORIGIN: configuration.origin,
+    ...(configuration.diagnosticRetentionDays === undefined
+      ? {}
+      : {
+          [diagnosticRetentionDays.name]: String(
+            configuration.diagnosticRetentionDays,
+          ),
+        }),
+    ...(configuration.diagnosticStorageMib === undefined
+      ? {}
+      : {
+          [diagnosticStorageMib.name]: String(
+            configuration.diagnosticStorageMib,
+          ),
+        }),
+  };
 }
 
 export function renderLaunchAgent(
@@ -200,19 +254,20 @@ export function renderLaunchAgent(
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  ${stringElement(configuration.label)}
+  ${stringElement(configuration.label)}${
+    configuration.userName === undefined
+      ? ""
+      : `\n  <key>UserName</key>\n  ${stringElement(configuration.userName)}`
+  }
   <key>ProgramArguments</key>
   <array>
 ${argumentsList.map((argument) => `    ${stringElement(argument)}`).join("\n")}
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>
-    ${stringElement(LAUNCHD_PATH)}
-    <key>ENSEMBLE_OPERATOR_AUTH_FILE</key>
-    ${stringElement(configuration.authFile)}
-    <key>ENSEMBLE_OPERATOR_ORIGIN</key>
-    ${stringElement(configuration.origin)}${diagnosticEntries(configuration)}
+${Object.entries(launchdEnvironment(configuration))
+  .map(([name, value]) => `    <key>${name}</key>\n    ${stringElement(value)}`)
+  .join("\n")}
   </dict>
   <key>StandardOutPath</key>
   ${stringElement(configuration.stdoutPath)}

@@ -3,7 +3,9 @@
 This procedure applies to the standalone Ensemble service only. It does not
 read or migrate the installed Haze prototype or authorize production deployment
 or cutover. `ensemble service install` installs the service as a per-user
-LaunchAgent; nothing installs it implicitly.
+LaunchAgent; nothing installs it implicitly. `--mode daemon` instead prepares a
+[LaunchDaemon](#launchdaemon-mode) that starts at boot; it is opt-in and the
+LaunchAgent stays the default.
 
 ## Install, upgrade and uninstall
 
@@ -21,12 +23,13 @@ directory. The defaults are:
 | Releases | `STATE/versions/<version>` |
 | Logs | `~/Library/Logs/Ensemble/<label>.<version>.<UTC time>.{out,err}.log` |
 | LaunchAgent | `~/Library/LaunchAgents/<label>.plist` |
+| LaunchDaemon (`--mode daemon`) | staged as `STATE/launchd/<label>.plist`, installed by you as `/Library/LaunchDaemons/<label>.plist` |
 
 Commands below use `STATE="$HOME/Library/Application Support/Ensemble"`.
 The label defaults to `local.ensemble.service` and the port to `8787`
 (`http://127.0.0.1:8787`). `--state-dir`, `--log-dir`, `--launch-agents-dir`,
-`--label` and, at install only, `--port` override them; upgrade keeps the
-installed port. `--diagnostic-retention-days` and `--diagnostic-storage-mib`
+`--label` and, at install only, `--port` and `--mode agent|daemon` override
+them; upgrade keeps the installed port. `--diagnostic-retention-days` and `--diagnostic-storage-mib`
 (install and upgrade) set the [diagnostic retention](#execution-diagnostic-retention)
 limits. Pass the same directory and label options to `upgrade` and
 `uninstall` as to `install`. The state and LaunchAgents directories must
@@ -61,8 +64,9 @@ already sit in `STATE/versions` (for example one you unpacked there with
 
 Install refuses, changing nothing beyond creating an empty `STATE` (mode `0700`), unless the tarball is a readable file (or the
 release sits directly in `STATE/versions` with a `manifest.json` naming the same
-version), the label is not loaded, no install record or LaunchAgent for the label
-exists, and the port is free. With `--token-file`, the path must not exist and its
+version), the label is not loaded, no install record, LaunchAgent or LaunchDaemon
+artifact for the label exists (an install in the other mode is refused until you
+uninstall it), and the port is free. With `--token-file`, the path must not exist and its
 directory must. A missing auth file also refuses outside an
 interactive terminal; run install in one, or run `ensemble service init-auth`
 first. It then asks once, on a hidden prompt, for the operator password (a new
@@ -160,13 +164,16 @@ the same one once the cause is fixed, or restore the reported snapshot (see
 refuses a newer database schema, so going back to an older release needs that
 restore.
 
+Upgrade refuses a [LaunchDaemon](#launchdaemon-mode) install at its first check,
+before it stops anything; that section gives the switch-back procedure.
+
 ### Uninstall
 
 ```sh
 "$STATE/versions/0.2.0/bin/ensemble" service uninstall
 ```
 
-Uninstall boots out the job, confirms its process exited, and removes the
+Uninstall of a LaunchAgent boots out the job, confirms its process exited, and removes the
 LaunchAgent and the install record. It keeps the data, auth file, snapshots,
 release versions and logs, so a later install reuses them. It refuses, changing
 nothing, when the loaded job or the LaunchAgent file is not the one the record
@@ -190,6 +197,227 @@ is unreadable, `upgrade` and `uninstall` refuse rather than guess. Recover by
 hand: boot out the label only after `launchctl print` shows the expected
 `~/Library/LaunchAgents/<label>.plist` path, confirm its process exited, then
 remove that plist and `STATE/launchd/<label>.json` and install again.
+
+### LaunchDaemon mode
+
+The LaunchAgent starts when you log in to the Mac's GUI session. To have the
+service running after a reboot with nobody logged in, install it as a
+LaunchDaemon, which launchd starts at boot. This is opt-in:
+
+```sh
+ensemble service install --mode daemon
+```
+
+Ensemble never runs as root, in either mode, and the commands above refuse to run
+as root (`Ensemble does not run as root; run it as the account that owns the
+service`). Run them as the account that owns the service. Daemon mode runs the
+service as that account too: the plist sets `UserName` to it and `HOME` to its
+home directory, so the data, auth, logs and credentials stay yours. What needs
+root is only copying the plist into `/Library/LaunchDaemons` and loading it, and
+Ensemble does not do that for you. Install does the same preflight, unpack,
+password prompt (only when the auth file is missing), render and `plutil -lint` as
+the LaunchAgent, records the install, and then prints two commands for you to run
+with `sudo`:
+
+```sh
+sudo /usr/bin/install -m 0644 -o root -g wheel "$STATE/launchd/local.ensemble.service.plist" /Library/LaunchDaemons/local.ensemble.service.plist
+sudo /bin/launchctl bootstrap system /Library/LaunchDaemons/local.ensemble.service.plist
+```
+
+The printed commands quote paths that need it. Install exits 0 with `"mode":"daemon"`,
+`"started":false` and the two commands in `"steps"`. In daemon mode it only ever calls
+`launchctl print`; it never writes under `/Library`, never runs `bootstrap` or
+`bootout`, and does not sign in or run `doctor`. A first install creates, when absent,
+`STATE/data`, `STATE/launchd` and the log directory (default `~/Library/Logs/Ensemble`,
+outside `STATE`, with any missing parents), and writes the staged plist and the install
+record in `STATE/launchd`; it also creates `STATE/auth/operator-auth.json` when that file
+is missing (after the password prompt) and, with a TARBALL, `STATE` itself (mode `0700`,
+with any missing parents) and the unpacked `STATE/versions/<version>`. It creates no
+`STATE/snapshots` (a daemon takes no snapshot, and the LaunchAgent flow creates that
+directory when it needs it). Transient files (`STATE/.<label>.lock`, a staging directory in
+`STATE/launchd`, the record's temporary file) are removed again. It creates no
+LaunchAgents directory and writes nothing under `/Library` or `/Library/LaunchDaemons`.
+launchd, not Ensemble, creates the log files, as the daemon account; that ownership is
+untested here and left to [#1149](https://github.com/chrisbanes/ensemble/issues/1149). A
+test asserts this set, from a home that has only the release and the auth file, and from
+one that has only a tarball. The first
+command copies the staged file as it is at that moment (and follows a symbolic
+link at that path), and launchd then runs what the copied plist says, so run it
+soon after install and first check that `shasum -a 256` of the staged file equals
+`plistSha256` in the install record; anything that can write `STATE` as you could
+change the file. Then run the same install command again to verify, with the same
+options and no TARBALL, from the installed release (`"$STATE/versions/<version>/bin/ensemble" service install`
+with `--state-dir`, `--log-dir`, `--launch-agents-dir`, `--label`, `--port`, `--connection`
+and `--mode daemon` as you gave them; the TARBALL is dropped, `--token-file` is refused in
+daemon mode, and `--diagnostic-*` and `--no-open` mean nothing to a re-run; install prints
+the exact line). Use the same
+`--state-dir` and label in both modes: the exclusion between modes checks the
+record and `/Library`, and a record in another state directory is invisible to it.
+If the copy ran but the job is not loaded, the re-run prints only the `launchctl
+bootstrap` step. The re-run compares `system/<label>` and
+`/Library/LaunchDaemons/<label>.plist` with the install record: the plist must be a
+regular file (not a symbolic link) owned by root that others cannot write, with
+the recorded sha256, and the loaded job's path must be that plist. It reports
+`"started":true` (exit 0, no steps) only when `launchctl print` shows the loaded job with a
+process, that process's identity can be read, and the process listening on the port
+(read with `lsof -nP -iTCP:PORT -sTCP:LISTEN`) is that same pid and no other, and
+`/app` answers 200 from it, and after that last wait the job's pid and every listener on the port are read again and are in full (pid, start time and boot session) the process that was first observed. A reused pid or a new boot is another process, and an identity that can no longer be read never matches. `"started":true` describes the moment of that last read. A loaded job with no
+process, an unreadable identity, another or an unknown listener on the port, or a
+process that never serves, exits 1 with a message that keeps the record and gives the
+read-only checks. It never trusts a 200 from whatever else holds the port. After it reports
+started it prints the
+manual `ensemble auth login` line, `ensemble doctor` and the app URL (it never opens
+the browser), as the LaunchAgent install does when it could not sign in. When the job is not loaded it
+prints the steps again with `"started":false`. When the plist or job differs from
+the record it refuses and changes nothing; so does a different release, a tarball
+or a different port. The re-run never writes under `/Library`, never changes launchd
+and never signals a process. Its only write is to the install record: when it finds the
+daemon loaded it stores the running process (see the
+uninstall paragraphs below), and only when that differs from what the
+record holds, atomically with a temporary file and rename in the same directory. If the
+record cannot be written, the re-run fails with a fixed message and leaves the record as
+it was. Repeating it is safe.
+
+The daemon plist is the LaunchAgent's plus `UserName` and `HOME`: the same
+`ProgramArguments`, the fixed `PATH`, the auth-file path and origin, the optional
+diagnostic values, `RunAtLoad=true` and `KeepAlive=false`, and no other
+environment variable and no secret. It is world-readable in `/Library/LaunchDaemons`.
+Logs stay in the log directory, `<label>.<version>.<UTC time>.{out,err}.log`.
+Install and the service refuse `root` as the account.
+
+There is one install record per label (`STATE/launchd/<label>.json`), which
+carries `"mode"`: `agent` or `daemon`. The modes are never both active. Install in
+one mode refuses, changing nothing, while a record, loaded job or plist of the other
+exists, and tells you to uninstall first. A record without `mode` is read as a
+LaunchAgent. A CLI that predates `mode` refuses a record that carries `mode`
+as invalid and changes nothing, so do not manage a daemon (or a newer LaunchAgent)
+install with an older release's CLI.
+
+`service upgrade` refuses a daemon install before it stops anything, because
+upgrading stops the job and Ensemble cannot do that without sudo. To upgrade, switch back:
+
+```sh
+ensemble service uninstall            # prints the sudo steps; run them, then run it again
+ensemble service install              # the LaunchAgent
+ensemble service upgrade "$STATE/versions/0.2.0" --connection local
+ensemble service uninstall
+ensemble service install --mode daemon  # then the sudo steps and the verify re-run
+```
+
+`service uninstall` reads the mode from the record. For a daemon it verifies that
+the loaded job and the plist are the recorded ones, prints the matching commands
+for whatever is still present, and exits 0 with `"complete":false`:
+
+```sh
+sudo /bin/launchctl bootout system/local.ensemble.service
+sudo /bin/rm -f /Library/LaunchDaemons/local.ensemble.service.plist
+```
+
+It keeps the record and staged plist; run `service uninstall` again after the
+commands. Removing the job does not stop its process at once, so the record also
+keeps what Ensemble has seen of the service (`observed`). `service install --mode daemon`
+re-runs, and `service uninstall` while the job is loaded, read `launchctl print` and
+fold it in: the pid, start time and boot session of each process seen, and whether a
+loaded job had no process yet or one whose identity could not be read. What is
+recorded only moves up. A job seen with no pid is treated as maybe-started, never as
+never-started, because launchd may start it a moment later; a recorded identity is
+dropped only once its exit is confirmed, so a restarted job keeps the earlier process
+until that is confirmed too; an unreadable identity is kept for good (only removing the
+record by hand clears it). That is the only thing either command writes, and only
+when it changes: under `STATE/launchd`, never under `/Library`, and uninstall does it
+before it prints the steps, so a record that cannot be written fails the command
+(exit 1, fixed message, record unchanged) and no steps are printed. Nothing is ever
+signalled. The confirmation covers only the main service processes seen, not their
+descendants, so run the printed commands right after the `uninstall` that printed
+them; if the host rebooted or the job restarted in between, run `service uninstall`
+again first so that it observes the running process.
+
+When the job and the plist are gone, uninstall clears the record only if all of these
+hold, and otherwise exits 1 and keeps it:
+
+- every recorded process is confirmed gone: its pid is absent, belongs to a process
+  with another start time, or predates this boot;
+- no process was left unidentified;
+- `127.0.0.1:PORT` is free;
+- if no process was ever identified (the job was never seen, or only seen without a
+  pid), neither log file exists. A job that was installed but never started has no log, so
+  uninstall completes at once. That inference needs launchd to create the log files when
+  it starts the job, which [#1149](https://github.com/chrisbanes/ensemble/issues/1149)
+  checks.
+
+The message names the unmet condition and the read-only checks (`launchctl print
+system/<label>` exits 113, `lsof -nP -iTCP:PORT -sTCP:LISTEN` prints nothing,
+`ps -axo pid,lstart,command` shows no release `cli.js` process). Run uninstall again
+once the process has exited, or, after confirming nothing runs, delete the record and
+the staged plist by hand. When it completes it removes the staged plist and the record and
+exits 0 with `"complete":true`; that is also the point from which `service install`
+restores the LaunchAgent, and until then install in the other mode, and upgrade, stay
+refused. It refuses, changing nothing, when a daemon job or plist exists without a
+record, or differs from it. Data, auth, snapshots, releases and logs are kept as with
+the LaunchAgent.
+
+The JSON results include `"mode"` on install and uninstall; daemon install adds
+`"started"` and `"steps"`, and daemon uninstall adds `"complete"` and, while it is
+false, `"steps"`.
+
+**Credentials on a daemon host.** A daemon starts before anyone logs in, so it
+cannot read the login keychain. The Codex login is file-based
+(`~/.codex/auth.json`) and works. A Claude token configured as a
+[`file:` reference](#claude-subscription-token) stays readable; a Claude or Codex
+login that lives only in the keychain does not. For GitHub, use a file-based
+`gh` login: run `gh auth login --insecure-storage` on the Mac. That keeps the token
+in plaintext in `~/.config/gh/hosts.yml` (mode `0600`) instead of the keychain, and
+it serves discovery, source reads and agents' `git push` through the existing
+`gh:github.com` reference and gh's git-credential helper. The plaintext token at
+rest is the cost; anything running as you can read it. Install in daemon mode,
+and `ensemble doctor` on a host with a daemon install record under the default
+state directory, warn on stderr (exit status and stdout unchanged) when
+`gh auth status --json hosts` reports the keychain as the token source, without
+reading the token. The probe runs `gh` in exactly the environment the plist gives the
+job (its fixed `PATH`, so `gh` must be in `/opt/homebrew/bin` or `/usr/local/bin`, and the
+daemon account's `HOME`), not your shell's: `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `GH_TOKEN`
+and the rest do not apply, because launchd passes none of them, so the daemon reads
+`~/.config/gh/hosts.yml` of its own account. Run `gh auth login --insecure-storage` as
+that account with those variables unset, and the warning names the HOME it checked. A host that installed with a custom `--state-dir` gets only
+the install-time warning. The delivery credential is `env:` only and neither plist
+carries an environment variable, so delivery cannot be configured under either mode
+yet. This is a known gap.
+
+**Reboots.** With FileVault on, the disk stays locked after a power cut or an
+ordinary restart until someone enters the password at the console, so nothing,
+daemon included, starts. A planned restart or an OS update that must come back
+unattended uses `sudo fdesetup authrestart`, which unlocks once for the next
+boot. After a power cut the service stays down until someone unlocks the disk;
+Ensemble does not recover that case.
+
+#### Real-host qualification procedure (#1149)
+
+Nothing in the automated tests or the bounded evidence installs a real
+LaunchDaemon, uses `sudo`, reboots, or reads before a GUI login. The
+[evidence record](../evidence/1144-launchdaemon-mode-2026-10-17.md) marks those
+untested. [#1149](https://github.com/chrisbanes/ensemble/issues/1149) runs them on the
+maintainer's Mac:
+
+1. Switch the gh login to file storage (`gh auth login --insecure-storage`) and
+   confirm `gh auth status --json hosts --jq '.hosts["github.com"][]|.tokenSource'`
+   prints a path, not `keyring`.
+2. If the LaunchAgent is installed, run `ensemble service uninstall`. Then run
+   `ensemble service install --mode daemon`, the two printed `sudo` commands, and
+   the install command again from the installed release's `bin/ensemble` with no
+   TARBALL; it must report `"started":true`.
+3. Run `sudo fdesetup authrestart`. Without logging in, collect from another
+   machine or after the later login: `sudo launchctl print system/local.ensemble.service`
+   state and pid; `ps -o lstart= -p <pid>` against the login time from `last -1 $USER`
+   taken after you log in; the owner of the new files in `~/Library/Logs/Ensemble`
+   (launchd creates them, so this checks they belong to the account); the service
+   log; and the first GitHub discovery or source-sync time, which must be before the
+   login time.
+4. After logging in, run `ensemble doctor`, and push a branch to a disposable
+   repository with `git push` using `gh auth git-credential`.
+5. Switch back: `ensemble service uninstall` with its steps, then
+   `ensemble service install`.
+
+Paste the commands and sanitized outputs back on the issue; never paste a token.
 
 ### Restart and host restarts
 
@@ -217,8 +445,11 @@ CLI's local time elsewhere. A browser subscribed to
 run out, and none again for the same episode.
 
 The LaunchAgent in `~/Library/LaunchAgents` is meant to start the service when
-the user logs into the GUI session; the procedure does not claim unattended
-pre-login startup. If the label is absent after a login, run
+the user logs into the GUI session; it does not start before login. The
+[LaunchDaemon](#launchdaemon-mode) is the opt-in route to pre-login startup, whose
+real-host behavior is not yet proven. Restart a daemon with
+`sudo /bin/launchctl kickstart -k system/local.ensemble.service`; Ensemble does not
+run it. If the label is absent after a login, run
 `launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/local.ensemble.service.plist`
 and check `/app`.
 
@@ -232,6 +463,10 @@ throwaway label and temporary directories. These still need the maintainer:
   `~/Library/LaunchAgents` and `~/Library/Application Support/Ensemble`, beside
   the earlier pipeline files;
 - launchd starting the job at login from the LaunchAgent after a logout or reboot;
+- the LaunchDaemon on a real host: the `sudo` install, a start before any GUI login,
+  GitHub discovery and an agent push using the file-based gh login at that point,
+  the owner of the log files launchd creates under `UserName`, and
+  `sudo fdesetup authrestart` ([#1149](https://github.com/chrisbanes/ensemble/issues/1149));
 - an upgrade over a real data directory with projects, workspaces or a running
   turn, where the bootout interrupts work and recovery holds apply;
 - installing from a CI-built tagged release, or from a browser-downloaded tarball
@@ -277,7 +512,10 @@ from the LaunchAgent's fixed `PATH`, without prompts, for each discovery read.
 
 A launchd job in the user's GUI domain reads the keychain-backed gh login without
 prompting
-([evidence](../evidence/942-gh-discovery-credential-2026-10-12.md)). If Settings
+([evidence](../evidence/942-gh-discovery-credential-2026-10-12.md)). A
+[LaunchDaemon](#launchdaemon-mode) cannot read the login keychain before login;
+there, run `gh auth login --insecure-storage` so the login is file-based (a
+plaintext token in `~/.config/gh/hosts.yml`, mode `0600`). If Settings
 shows "gh login unreadable from the service", check `gh auth status` as the service
 user. Alternatively, use an environment variable reference that names a token in
 the service environment.
@@ -289,7 +527,9 @@ from the Codex runtime after the next restart.
 ### GitHub source credential
 
 Each project's GitHub source configuration chooses its own `gh:github.com` or
-`env:NAME` reference. Discovery configuration does not select a source credential
+`env:NAME` reference. On a [LaunchDaemon](#launchdaemon-mode) host, `gh:github.com`
+works through a file-based gh login, which also serves agents' `git push` through
+gh's git-credential helper; there is no `file:` GitHub reference. Discovery configuration does not select a source credential
 or provide a fallback. When guided setup detects a signed-in GitHub CLI account in
 the source's candidate environment and the new project has a repository, it shows
 the account and records `gh:github.com` for the new project's source; otherwise the
