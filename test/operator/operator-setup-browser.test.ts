@@ -322,7 +322,7 @@ test("Setup falls back to typed entry without discovery and on first run", async
     await page
       .getByRole("link", { name: "Set discovery credential" })
       .getAttribute("href"),
-    "/app/settings",
+    "/app/settings#github-discovery",
   );
   // With no profiles the lead is chosen by creating one in place, never by leaving setup.
   await page.getByRole("group", { name: "New lead profile" }).waitFor();
