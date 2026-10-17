@@ -156,8 +156,10 @@ or run `node dist/src/cli/main.js` directly.
 2. `ensemble auth login --url ORIGIN` stores connection `local` (the name `service
    install` uses) unless `--connection NAME` or `ENSEMBLE_CONNECTION` names another.
    A name nobody chose refuses (exit 2, nothing prompted, sent or changed) to re-point
-   an existing `local` at a different origin, or to add `local` for an origin another
-   connection already has; the `Fix:` line names that connection. Pass
+   an existing `local` at a different origin, to add `local` for an origin another
+   connection already has, or to add `local` beside saved connections when none is the
+   default (every bare command would then be ambiguous); the `Fix:` line names the
+   connections. It never changes the default: `ensemble connection use NAME` does. Pass
    `--connection NAME` to log in to a second service, to replace a named connection, or
    to add a second one for the same service. It says where the token comes from, then
    prompts for it with masked input and stores it in the macOS Keychain (service

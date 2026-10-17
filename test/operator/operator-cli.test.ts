@@ -364,9 +364,110 @@ test("auth login defaults to the local connection and says where the token comes
     `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' or 'ensemble auth login --url ${first.origin} --connection work' to replace the token, or pass --connection OTHER to add a second connection (then run 'ensemble connection use NAME' to pick the default).`,
   ]);
   assert.deepEqual(names(), ["home", "work"]);
+  // 8. Several connections and no default: a defaulted login to a new origin would leave
+  // every bare command ambiguous, so it is refused before anything happens.
+  const unchanged = readFileSync(configG, "utf8");
+  const fetches8 = g.fetches.length;
+  const prompts8 = new PassThrough();
+  let prompted8 = "";
+  prompts8.on("data", (c) => {
+    prompted8 += c;
+  });
+  const refused8 = async (label: string) => {
+    for (const [tokenFile, extra] of [
+      [true, {}],
+      [
+        false,
+        {
+          stdin: Object.assign(new PassThrough(), {
+            isTTY: true,
+            isRaw: false,
+          }) as unknown as NodeJS.ReadStream,
+          stderr: Object.assign(prompts8, {
+            isTTY: true,
+          }) as unknown as NodeJS.WriteStream,
+        },
+      ],
+    ] as [boolean, Partial<CliDeps>][]) {
+      r = await g.run(
+        [
+          "auth",
+          "login",
+          "--url",
+          second.origin,
+          ...(tokenFile ? ["--token-file", g.tokenFile(second.token)] : []),
+        ],
+        extra,
+      );
+      assert.equal(r.code, 2, `${label}: ${r.err}`);
+      assert.match(
+        r.err,
+        /Connections home, work are saved and no default/,
+        label,
+      );
+      assert.deepEqual(fixLines(r.err), [
+        `Fix: Choose a default with 'ensemble connection use NAME' (home, work) and run this again, or pass --connection NAME to add ${second.origin}, then choose a default with 'ensemble connection use NAME'.`,
+      ]);
+    }
+    assert.doesNotMatch(prompted8, /Ensemble CLI token|Create a token/);
+    assert.equal(readFileSync(configG, "utf8"), unchanged, label);
+    assert.equal(g.fetches.length, fetches8, label);
+    assert.equal(g.keychain.items.size, 0, label);
+  };
+  await refused8("no default");
+  // The common older state: one saved connection and no default.
+  const solo = harness(t);
+  const soloLogin = (service: typeof first, ...extra: string[]) =>
+    solo.run([
+      "auth",
+      "login",
+      "--url",
+      service.origin,
+      "--token-file",
+      solo.tokenFile(service.token),
+      ...extra,
+    ]);
+  assert.equal((await soloLogin(first, "--connection", "home")).code, 0);
+  const soloBytes = readFileSync(
+    join(solo.configDir, "connections.json"),
+    "utf8",
+  );
+  r = await soloLogin(second);
+  assert.equal(r.code, 2, r.err);
+  assert.match(
+    r.err,
+    /Connection home is saved and no default connection is set/,
+  );
+  assert.equal(fixLines(r.err).length, 1);
+  assert.equal(
+    readFileSync(join(solo.configDir, "connections.json"), "utf8"),
+    soloBytes,
+  );
+  // A default that names no saved connection does not count.
+  const dangling = JSON.parse(unchanged);
+  dangling.default = "gone";
+  writeFileSync(configG, `${JSON.stringify(dangling, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  const danglingBytes = readFileSync(configG, "utf8");
+  r = await loginG(second);
+  assert.equal(r.code, 2, r.err);
+  assert.match(r.err, /no default connection is set/);
+  assert.equal(readFileSync(configG, "utf8"), danglingBytes);
+  writeFileSync(configG, unchanged, { mode: 0o600 });
+  // An explicit name is allowed and sets no default; choosing one is a separate step.
+  r = await loginG(second, "--connection", "away");
+  assert.equal(r.code, 0, r.err);
+  assert.equal(JSON.parse(readFileSync(configG, "utf8")).default, undefined);
+  r = await g.run(["connection", "remove", "away"]);
+  assert.equal(r.code, 0, r.err);
+  // With a default chosen, the login adds local and leaves the default alone.
+  r = await g.run(["connection", "use", "home"]);
+  assert.equal(r.code, 0, r.err);
   r = await loginG(second);
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(names(), ["home", "local", "work"], "a new origin is local");
+  assert.equal(JSON.parse(readFileSync(configG, "utf8")).default, "home");
   // With local at this origin, a bare login replaces it as before.
   r = await loginG(second);
   assert.equal(r.code, 0, r.err);

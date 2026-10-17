@@ -733,11 +733,12 @@ async function login(
   if (!values.url) throw new CliError("usage", tokenSource(DEFAULT_ORIGIN));
   const name = nameResult.data;
   const origin = connectionOrigin(values.url);
-  // A name nobody chose must not quietly re-point a connection that exists, or add a
-  // second connection for a service that already has one (every later command would then
-  // fail `connection-ambiguous`).
+  // A name nobody chose must not quietly re-point a connection that exists, add a second
+  // connection for a service that already has one, or leave several connections with no
+  // default (every later command would then fail `connection-ambiguous`). It never
+  // changes the default itself.
   if (requested === undefined) {
-    const { connections } = await config.read();
+    const { connections, default: chosen } = await config.read();
     const existing = connections[name];
     const same = Object.keys(connections)
       .filter((other) => connections[other]?.url === origin)
@@ -759,6 +760,15 @@ async function login(
         "usage",
         `${same.length === 1 ? "Connection" : "Connections"} ${same.join(", ")} already ${same.length === 1 ? "points" : "point"} at ${origin}.`,
         { fix: sameFix },
+      );
+    const saved = Object.keys(connections).sort();
+    if (!existing && saved.length && !(chosen && connections[chosen]))
+      throw new CliError(
+        "usage",
+        `${saved.length === 1 ? "Connection" : "Connections"} ${saved.join(", ")} ${saved.length === 1 ? "is" : "are"} saved and no default connection is set, so adding ${name} would make every command ask for --connection.`,
+        {
+          fix: `Choose a default with 'ensemble connection use NAME' (${saved.join(", ")}) and run this again, or pass --connection NAME to add ${origin}, then choose a default with 'ensemble connection use NAME'.`,
+        },
       );
   }
   const tokenFile = values["token-file"] && resolve(values["token-file"]);
