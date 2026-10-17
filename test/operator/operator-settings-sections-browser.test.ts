@@ -458,6 +458,128 @@ test("Back or Forward into an add-claude anchor on the Runtime page skips the re
   ]);
 });
 
+/** Records every heading that takes focus, so a stale or double landing shows. */
+const trackFocus = (page: Page) =>
+  page.evaluate(() => {
+    const log: string[] = [];
+    Object.assign(window, { focusLog: log });
+    document.addEventListener("focusin", (e) => {
+      const t = e.target as HTMLElement;
+      if (/^H[23]$/.test(t.tagName)) log.push(t.textContent ?? "");
+    });
+  });
+const focusLog = (page: Page) =>
+  page.evaluate(() => (window as unknown as { focusLog: string[] }).focusLog);
+const setHash = (page: Page, hash: string) =>
+  page.evaluate((h) => {
+    location.hash = h;
+  }, hash);
+
+test("native hash-only navigation lands, switches targets and leaves unsupported fragments alone", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  await trackFocus(page);
+  // A script assigning the hash, then another while the first landing is still settling.
+  await setHash(page, "profiles");
+  onScreen(await landed(page, "H2", "Profiles"));
+  await setHash(page, "routing");
+  onScreen(await landed(page, "H2", "Routing"));
+  assert.deepEqual(await focusLog(page), ["Profiles", "Routing"]);
+  // Supported to unsupported: nothing scrolls and nothing takes focus.
+  await page.evaluate(() => {
+    const calls: unknown[] = [];
+    const into = Element.prototype.scrollIntoView;
+    Object.assign(window, { intoCalls: calls });
+    Element.prototype.scrollIntoView = function (...a: []) {
+      calls.push(this.id);
+      return into.apply(this, a);
+    };
+  });
+  await setHash(page, "bogus");
+  await nextFrames(page);
+  await nextFrames(page);
+  assert.deepEqual(
+    await page.evaluate(
+      () => (window as unknown as { intoCalls: unknown[] }).intoCalls,
+    ),
+    [],
+  );
+  assert.deepEqual(await focusLog(page), ["Profiles", "Routing"]);
+  // Unsupported to supported lands.
+  await setHash(page, "profiles");
+  onScreen(await landed(page, "H2", "Profiles"));
+  // A link the shell does not intercept (a bare fragment) is the same navigation.
+  await page.evaluate(() => {
+    const a = document.createElement("a");
+    a.id = "bare";
+    a.href = "#cli-credentials";
+    a.textContent = "bare fragment";
+    document.querySelector("main")?.prepend(a);
+  });
+  await page.locator("#bare").click();
+  onScreen(await landed(page, "H2", "CLI credentials"));
+  // Back and Forward between these hash-only entries land each one again.
+  await page.goBack();
+  onScreen(await landed(page, "H2", "Profiles"));
+  await page.goForward();
+  onScreen(await landed(page, "H2", "CLI credentials"));
+});
+
+test("traversal between entries that share one entry key lands each fragment", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  // pushState copies the state, as a browser that copies it for a fragment navigation would.
+  await page.evaluate(() => {
+    const { scrollY, ...state } = history.state ?? {};
+    history.pushState(state, "", "#profiles");
+    history.pushState(state, "", "#routing");
+  });
+  await page.goBack();
+  onScreen(await landed(page, "H2", "Profiles"));
+  await page.goBack();
+  await page.waitForURL(/\/app\/settings$/);
+  await page.goForward();
+  onScreen(await landed(page, "H2", "Profiles"));
+  await page.goForward();
+  onScreen(await landed(page, "H2", "Routing"));
+});
+
+test("leaving Settings and coming back to the same entry lands again, and a re-render does not", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/tasks");
+  await page.locator("main.page h1").waitFor();
+  await page.evaluate(() => {
+    const { scrollY, ...state } = history.state;
+    history.pushState(
+      { ...state, navKey: crypto.randomUUID() },
+      "",
+      "/app/settings#profiles",
+    );
+    history.back();
+  });
+  await page.waitForURL(/\/app\/tasks$/);
+  await page.goForward();
+  onScreen(await landed(page, "H2", "Profiles"));
+  await page.goBack();
+  await page.waitForURL(/\/app\/tasks$/);
+  await page.goForward();
+  onScreen(await landed(page, "H2", "Profiles"));
+  // A re-render of the same landing leaves the reader's focus where they put it.
+  await page.getByRole("link", { name: "Create profile" }).focus();
+  await page.evaluate(() =>
+    [...document.querySelectorAll("button")]
+      .find((b) => b.textContent?.trim() === "Refresh")
+      ?.click(),
+  );
+  await nextFrames(page);
+  await nextFrames(page);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Create profile",
+  );
+});
+
 for (const fragment of ["bogus", "readiness-unknown"])
   test(`an unknown Settings fragment #${fragment} leaves the page at the top`, async (_t, journey) => {
     const { page, web } = await startSettings(journey, "/app/settings");

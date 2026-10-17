@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { readinessCheckIds } from "../../src/operator/readiness.js";
 
 /** The Settings index sections, in the designed order (frame 114), with their stable fragments. */
@@ -122,26 +122,48 @@ function land(target: HTMLElement) {
   return stop;
 }
 
-/** The history entry that has been landed on; every hook of a page shares it. */
-let landedEntry: string | null = null;
+/** The landing that was last done; every hook of a page shares it. */
+let landedIdentity: string | null = null;
 
 /**
- * Land on the element `landingElement` finds for the URL, once per history entry and only
- * when that entry has no saved scroll position (a Back or Forward restore keeps the app's
- * own scroll and focus restore). `ready` holds the landing until the page can no longer
- * reorder or grow its target. Several hooks on one page may call this: the first whose
- * target is on the page lands, and a target that appears later (a check's article after
- * its read) is landed on by whichever hook sees it.
+ * A landing is a history entry and the fragment it names, not the entry alone: native
+ * hash-only navigation (address bar, script, a link the shell does not intercept) and
+ * traversal between such entries can keep one entry key while the fragment changes.
+ */
+const landingIdentity = () =>
+  `${(history.state as { navKey?: string } | null)?.navKey ?? ""}|${location.pathname}${location.hash}`;
+
+/**
+ * Land on the element `landingElement` finds for the URL, once per landing identity and
+ * only when that entry has no saved scroll position (a Back or Forward restore keeps the
+ * app's own scroll and focus restore). `ready` holds the landing until the page can no
+ * longer reorder or grow its target. Several hooks on one page may call this: the first
+ * whose target is on the page lands, and a target that appears later (a check's article
+ * after its read) is landed on by whichever hook sees it. The identity is read on every
+ * render, the shell re-renders on each popstate, and a changed identity ends the previous
+ * landing (its settle observer and refocus) before the next begins.
  */
 export function useFragmentLanding(ready: boolean) {
-  const state = history.state as { navKey?: string; scrollY?: number } | null;
-  const entry = state?.navKey ?? "";
+  const identity = landingIdentity();
+  const landedHere = useRef(false);
+  // Leaving the page forgets its landing, so coming back to the same entry lands again.
+  useEffect(
+    () => () => {
+      if (landedHere.current) landedIdentity = null;
+    },
+    [],
+  );
   useEffect(() => {
-    if (!ready || landedEntry === entry) return;
+    if (!ready || landedIdentity === identity) return;
     const target = landingElement(location.pathname, location.hash);
     if (!target) return;
-    landedEntry = entry;
-    if (typeof state?.scrollY === "number") return;
+    landedIdentity = identity;
+    landedHere.current = true;
+    if (
+      typeof (history.state as { scrollY?: number } | null)?.scrollY ===
+      "number"
+    )
+      return;
     return land(target);
-  }, [entry, ready]);
+  }, [identity, ready]);
 }
