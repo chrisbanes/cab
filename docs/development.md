@@ -155,9 +155,11 @@ or run `node dist/src/cli/main.js` directly.
    Revocation is irreversible.
 2. `ensemble auth login --url ORIGIN` stores connection `local` (the name `service
    install` uses) unless `--connection NAME` or `ENSEMBLE_CONNECTION` names another.
-   A name nobody chose refuses to re-point an existing `local` at a different origin
-   (exit 2, nothing changed); pass `--connection NAME` to log in to a second service,
-   or `--connection local` to replace it. It says where the token comes from, then
+   A name nobody chose refuses (exit 2, nothing prompted, sent or changed) to re-point
+   an existing `local` at a different origin, or to add `local` for an origin another
+   connection already has; the `Fix:` line names that connection. Pass
+   `--connection NAME` to log in to a second service, to replace a named connection, or
+   to add a second one for the same service. It says where the token comes from, then
    prompts for it with masked input and stores it in the macOS Keychain (service
    `ensemble-cli`, account = connection name). For unattended callers, pass `--token-file PATH` instead: a
    regular, non-symlink file owned by you with mode `0600` or stricter, holding one

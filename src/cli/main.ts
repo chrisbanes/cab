@@ -733,15 +733,29 @@ async function login(
   if (!values.url) throw new CliError("usage", tokenSource(DEFAULT_ORIGIN));
   const name = nameResult.data;
   const origin = connectionOrigin(values.url);
-  // A name nobody chose must not quietly re-point a connection that exists.
+  // A name nobody chose must not quietly re-point a connection that exists, or add a
+  // second connection for a service that already has one (every later command would then
+  // fail `connection-ambiguous`).
   if (requested === undefined) {
-    const existing = (await config.read()).connections[name];
+    const { connections } = await config.read();
+    const existing = connections[name];
     if (existing && existing.url !== origin)
       throw new CliError(
         "usage",
         `Connection ${name} already points at ${existing.url}.`,
         {
           fix: `Pass --connection NAME to log in to ${origin}, or --connection ${name} to replace it.`,
+        },
+      );
+    const same = Object.keys(connections)
+      .filter((other) => connections[other]?.url === origin)
+      .sort();
+    if (!existing && same.length)
+      throw new CliError(
+        "usage",
+        `${same.length === 1 ? "Connection" : "Connections"} ${same.join(", ")} already ${same.length === 1 ? "points" : "point"} at ${origin}.`,
+        {
+          fix: `Run ${same.map((other) => `'ensemble auth login --url ${origin} --connection ${other}'`).join(" or ")} to replace the token, or pass --connection ${DEFAULT_CONNECTION} (or another name) to add a second connection.`,
         },
       );
   }

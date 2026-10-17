@@ -291,6 +291,92 @@ test("auth login defaults to the local connection and says where the token comes
   r = await loginFile(first, "--connection", "work");
   assert.equal(r.code, 0, r.err);
 
+  // 7. A defaulted name never adds a second connection for a service that already has
+  // one under another name: nothing is prompted, fetched, written or stored, and the
+  // single Fix line names the real connections.
+  const g = harness(t);
+  const configG = join(g.configDir, "connections.json");
+  const loginG = (service: typeof first, ...extra: string[]) =>
+    g.run([
+      "auth",
+      "login",
+      "--url",
+      service.origin,
+      "--token-file",
+      g.tokenFile(service.token),
+      ...extra,
+    ]);
+  const names = () =>
+    Object.keys(JSON.parse(readFileSync(configG, "utf8")).connections).sort();
+  r = await loginG(first, "--connection", "home");
+  assert.equal(r.code, 0, r.err);
+  const homeOnly = readFileSync(configG, "utf8");
+  const fetchesG = g.fetches.length;
+  const promptsG = new PassThrough();
+  let promptedG = "";
+  promptsG.on("data", (c) => {
+    promptedG += c;
+  });
+  for (const [tokenFile, extra] of [
+    [true, {}],
+    [
+      false,
+      {
+        stdin: Object.assign(new PassThrough(), {
+          isTTY: true,
+          isRaw: false,
+        }) as unknown as NodeJS.ReadStream,
+        stderr: Object.assign(promptsG, {
+          isTTY: true,
+        }) as unknown as NodeJS.WriteStream,
+      },
+    ],
+  ] as [boolean, Partial<CliDeps>][]) {
+    r = await g.run(
+      [
+        "auth",
+        "login",
+        "--url",
+        first.origin,
+        ...(tokenFile ? ["--token-file", g.tokenFile(first.token)] : []),
+      ],
+      extra,
+    );
+    assert.equal(r.code, 2, r.err);
+    assert.match(r.err, /Connection home already points at /);
+    assert.match(r.err, /\(usage\)/);
+    assert.deepEqual(fixLines(r.err), [
+      `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' to replace the token, or pass --connection local (or another name) to add a second connection.`,
+    ]);
+  }
+  assert.doesNotMatch(promptedG, /Ensemble CLI token|Create a token/);
+  assert.equal(readFileSync(configG, "utf8"), homeOnly);
+  assert.equal(g.fetches.length, fetchesG);
+  assert.equal(g.keychain.items.size, 0);
+  // A name given on purpose is always allowed, and so is a different origin.
+  r = await loginG(first, "--connection", "work");
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(names(), ["home", "work"]);
+  r = await loginG(first);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /Connections home, work already point at /);
+  assert.deepEqual(fixLines(r.err), [
+    `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' or 'ensemble auth login --url ${first.origin} --connection work' to replace the token, or pass --connection local (or another name) to add a second connection.`,
+  ]);
+  assert.deepEqual(names(), ["home", "work"]);
+  r = await loginG(second);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(names(), ["home", "local", "work"], "a new origin is local");
+  // With local at this origin, a bare login replaces it as before.
+  r = await loginG(second);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(names(), ["home", "local", "work"]);
+  r = await loginG(first, "--connection", "local");
+  assert.equal(r.code, 0, r.err);
+  r = await loginG(first);
+  assert.equal(r.code, 0, "local is at this origin, so it is replaced");
+  assert.deepEqual(names(), ["home", "local", "work"]);
+
   // 6. ENSEMBLE_CONNECTION names the connection; an empty value is a bad name, as it is
   // for every other command; a bad name is a usage error that changes nothing.
   const e = harness(t);
