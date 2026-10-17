@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type SyntheticEvent,
 } from "react";
 import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
@@ -34,6 +35,7 @@ import {
 } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import type {
+  OverviewCard,
   ReplyOutcome,
   TaskWorkspaceState,
 } from "./task-workspace-state.js";
@@ -65,7 +67,7 @@ import {
   leadResumeNotice,
 } from "./lead-feedback.js";
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
-import { AssignmentRows, EntryLinks, showSection } from "./task-detail.js";
+import { AssignmentRows, openDisclosures, showSection } from "./task-detail.js";
 import { TaskInspector } from "./task-inspector.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
@@ -81,6 +83,7 @@ import {
   tabIds,
 } from "./task-tabs.js";
 import {
+  assignmentRow,
   briefParts,
   criterionRows,
   deliveryApplies,
@@ -96,6 +99,8 @@ const sectionIds = [
   "brief",
   "files",
   "review",
+  "result-evidence",
+  "assignments",
   "context",
   "changes",
   "local-review",
@@ -104,7 +109,7 @@ const sectionIds = [
 ];
 /** The section a tab opens at when a link names no section. */
 const tabSections: Record<TaskTab, string> = {
-  overview: "brief",
+  overview: "decisions",
   files: "files",
   changes: "changes",
   review: "local-review",
@@ -112,6 +117,17 @@ const tabSections: Record<TaskTab, string> = {
 };
 const sourceGap =
   "Retained source body and checklist coverage are unavailable. Source fields are retained only up to 16,000 characters; private or missing material may also be unavailable. Consult the external source or ask the lead.";
+/** The Overview card a `source`, `result` or `evidence` link names when it names no section. */
+const linkedCard = (p: URLSearchParams) =>
+  p.has("evidence")
+    ? "result-evidence"
+    : p.has("result")
+      ? "review"
+      : p.has("source")
+        ? "brief"
+        : null;
+const overviewCards = ["brief", "result-evidence", "assignments"];
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** One tab's panel: always mounted, hidden unless its tab is open. */
 function TabPanel({
   tab,
@@ -354,6 +370,23 @@ export function TaskWorkspace({
       if (state.selectedResult && evidenceItem)
         state.retained(state.selectedResult).selectedItemId = evidenceItem;
       state.selectedSource = params.get("source");
+      // A link to a retained source or to evidence opens the card that shows it; a link that
+      // names a result, record or section already has its target.
+      if (
+        state.selectedSource &&
+        !state.selectedResult &&
+        !params.has("record") &&
+        !params.has("section")
+      )
+        state.overview.add("brief");
+      if (state.selectedResult && evidenceItem) state.overview.add("evidence");
+      // A section or fragment naming a card opens it once, here; a Back to this entry
+      // remounts the page with the operator's own choice kept.
+      const named =
+        params.get("section") ?? (path.split("#")[1] || location.hash.slice(1));
+      if (named === "brief" || named === "assignments")
+        state.overview.add(named);
+      if (named === "result-evidence") state.overview.add("evidence");
       if (params.has("assignment"))
         state.expanded.add(params.get("assignment") ?? "");
       // Exact inspection links; the service still enforces scope and exclusions.
@@ -692,9 +725,7 @@ export function TaskWorkspace({
           p.get("section") ??
           (path.split("#")[1] ||
             (tab === "overview"
-              ? p.has("result")
-                ? "review"
-                : "brief"
+              ? (linkedCard(p) ?? tabSections.overview)
               : tabSections[tab]));
         selectTab(tab);
         const target = document.getElementById(id);
@@ -734,14 +765,28 @@ export function TaskWorkspace({
       const p = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]),
         record = p.get("record") ?? p.get("request"),
         section = p.get("section");
-      const target = record
-        ? [...document.querySelectorAll<HTMLElement>("[data-record-id]")].find(
-            (e) => e.dataset.recordId === record,
-          )
-        : section && sectionIds.includes(section)
-          ? document.getElementById(section)
-          : null;
+      const fragment = path.split("#")[1] || location.hash.slice(1),
+        linked =
+          record || section
+            ? null
+            : (linkedCard(p) ??
+              (overviewCards.includes(fragment) ? fragment : null)),
+        target = record
+          ? [
+              ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
+            ].find((e) => e.dataset.recordId === record)
+          : section && sectionIds.includes(section)
+            ? document.getElementById(section)
+            : linked
+              ? document.getElementById(linked)
+              : null;
       if (target && state.scrollY === 0) {
+        // A Search record can sit in a closed card; only its first arrival opens it, so a
+        // Back or Forward keeps the operator's choice.
+        if (record && !state.recordRevealed) {
+          state.recordRevealed = true;
+          openDisclosures(target);
+        }
         // A linked record or section opens on the tab whose panel holds it, unless the link
         // names its tab (`?request=…#history` is that request's History).
         const tab = target.closest<HTMLElement>(".task-panel")?.dataset.tab,
@@ -1341,6 +1386,46 @@ export function TaskWorkspace({
   const changes = review?.viewed
     ? `${newestViewed >= 0 ? `${data.results.length - newestViewed - 1} new result(s)` : "Newer results unknown; no retained viewed result ordering"}; ${sourceObservation === "pending" ? "source comparison pending" : sourceObservation === "unknown" ? "source comparison unknown; current source state unavailable" : review.viewed.sourceId !== latestSource?.sourceId ? "source requirements changed" : "source unchanged"}`
     : "No viewing baseline. Comparison with previously viewed material is unknown.";
+  // Each collapsed Overview card keeps its content mounted; its toggle is the one writer of
+  // `state.overview`, so a poll, a refresh or "Collapse all history" never opens or closes one.
+  const overviewCard = (id: OverviewCard) => ({
+    open: state.overview.has(id),
+    onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => {
+      if (event.currentTarget.open === state.overview.has(id)) return;
+      if (event.currentTarget.open) state.overview.add(id);
+      else state.overview.delete(id);
+      changed();
+    },
+  });
+  const briefSummary = `Requirements · ${source?.kind === "github" || data.source ? "GitHub" : "Local"} · ${(() => {
+    if (!source) return "Retained source unavailable";
+    const { criteria, known } = briefParts(source),
+      n = criteria.length;
+    return n
+      ? `${n} supplied ${n === 1 ? "criterion" : "criteria"}`
+      : known
+        ? "None supplied"
+        : "Coverage unknown";
+  })()}`;
+  const evidenceSummary = selected
+    ? [
+        `R${data.results.indexOf(selected) + 1}`,
+        ...(meta
+          ? [
+              count(meta.metadata.validations.length, "validation record"),
+              count(meta.metadata.artifacts.length, "artifact"),
+            ]
+          : []),
+      ].join(" · ")
+    : "";
+  const assignmentsSummary = data.assignments.length
+    ? data.assignments
+        .map((a) => {
+          const row = assignmentRow(a, data.assignments);
+          return `${row.id} ${row.state}`;
+        })
+        .join(" · ")
+    : "None yet";
   // An unknown reply outcome stays until it is checked; otherwise the latest message wins.
   // Delivery's outcome shows on Changes, beside its control; the rest stay with the reply.
   const deliveryOutcome = aux?.from === "delivery.refresh" ? aux : null;
@@ -1732,98 +1817,6 @@ export function TaskWorkspace({
                   executionHref={`/runtime/task/${taskId}`}
                 />
               </section>
-              <section id="brief">
-                <h3 className="section-heading">Shared brief</h3>
-                <p className="metadata muted task-provenance">
-                  Requirements ·{" "}
-                  {source?.kind === "github" || data.source
-                    ? "GitHub"
-                    : "Local"}
-                </p>
-                {state.selectedSource && !source && (
-                  <p role="alert">
-                    Selected source revision is unavailable. Current
-                    requirements are not substituted.
-                  </p>
-                )}
-                {source &&
-                  (() => {
-                    const brief = briefParts(source);
-                    return (
-                      <>
-                        {brief.prose && (
-                          <div className="brief-prose">
-                            <MarkdownPreview text={brief.prose} />
-                          </div>
-                        )}
-                        <h4 className="small-heading">
-                          Supplied acceptance criteria
-                        </h4>
-                        {brief.criteria.length ? (
-                          <ol className="brief-criteria">
-                            {brief.criteria.map((c) => (
-                              <li key={c.criterionId}>
-                                <span className="criterion-label">
-                                  {c.label}
-                                </span>
-                                <span>{c.text}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        ) : (
-                          brief.known && <p>None supplied</p>
-                        )}
-                        <p className="metadata muted">
-                          {source.kind === "github" ? "GitHub" : "Local"} source
-                          · revision {source.revision} ·{" "}
-                          <ShortId value={source.sourceId} />
-                        </p>
-                        <Disclosure
-                          id={source.sourceId}
-                          title={`${source.title ?? "Brief"} — read supplied text`}
-                          text={source.body}
-                          state={state}
-                          changed={changed}
-                        />
-                        <ChecklistCoverage source={source} />
-                        <Button
-                          variant="secondary"
-                          onClick={() =>
-                            ask(
-                              { sourceId: source.sourceId },
-                              `source revision ${source.revision}`,
-                            )
-                          }
-                        >
-                          Ask lead about brief
-                        </Button>
-                      </>
-                    );
-                  })()}
-                {!source && <p>{sourceGap}</p>}
-                {!source && !state.selectedSource && (
-                  <Literal text={data.task.outcome} />
-                )}
-                <label htmlFor="retained-source-revision">
-                  Retained source revision{" "}
-                  <NativeSelect
-                    id="retained-source-revision"
-                    className="control"
-                    value={state.selectedSource ?? ""}
-                    onChange={(e) => {
-                      state.selectedSource = e.target.value || null;
-                      changed();
-                    }}
-                  >
-                    <option value="">Latest</option>
-                    {sources.map((s) => (
-                      <option key={s.sourceId} value={s.sourceId}>
-                        Revision {s.revision}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </label>
-              </section>
               <section id="review">
                 <h3 className="section-heading">Latest result</h3>
                 {state.selectedResult && !selected && (
@@ -1875,7 +1868,6 @@ export function TaskWorkspace({
                 ) : (
                   !state.selectedResult && <p>No result recorded.</p>
                 )}
-                <EntryLinks reveal={reveal} />
                 {/* A viewing reference needs a result to view; a lost response stays checkable. */}
                 {data.results.length > 0 && (
                   <>
@@ -1932,46 +1924,165 @@ export function TaskWorkspace({
                     ))}
                   </NativeSelect>
                 </label>
-                {selected && (
-                  <div>
-                    {meta && (
-                      <ReviewEvidence
-                        data={data}
-                        resultId={selected.resultId}
-                        sourceId={meta.metadata.sourceId}
-                        ask={ask}
-                      />
-                    )}
-                    <RetainedResultEvidence
-                      key={selected.resultId}
-                      client={client}
-                      session={session}
-                      taskId={taskId}
-                      resultId={selected.resultId}
-                      state={state.retained(selected.resultId)}
-                      changed={changed}
-                      openCurrent={(scope, filePath) => {
-                        state.files.openCurrentFile(scope, filePath);
-                        changed();
-                        requestAnimationFrame(() => reveal("files"));
-                      }}
-                    />
-                  </div>
-                )}
-              </section>
-              <section id="assignments">
-                <h3 className="section-heading">Assignments</h3>
-                <AssignmentRows
-                  assignments={data.assignments}
-                  reveal={reveal}
-                  open={(id) => {
-                    state.chronological = false;
-                    state.expanded.add(id);
-                    changed();
-                  }}
-                />
               </section>
               {reply}
+              <section id="brief">
+                <details
+                  className="overview-disclosure"
+                  {...overviewCard("brief")}
+                >
+                  <summary>
+                    <h3 className="section-heading">Shared brief</h3>
+                    <span className="metadata muted">{briefSummary}</span>
+                  </summary>
+                  {state.selectedSource && !source && (
+                    <p role="alert">
+                      Selected source revision is unavailable. Current
+                      requirements are not substituted.
+                    </p>
+                  )}
+                  {source &&
+                    (() => {
+                      const brief = briefParts(source);
+                      return (
+                        <>
+                          {brief.prose && (
+                            <div className="brief-prose">
+                              <MarkdownPreview text={brief.prose} />
+                            </div>
+                          )}
+                          <h4 className="small-heading">
+                            Supplied acceptance criteria
+                          </h4>
+                          {brief.criteria.length ? (
+                            <ol className="brief-criteria">
+                              {brief.criteria.map((c) => (
+                                <li key={c.criterionId}>
+                                  <span className="criterion-label">
+                                    {c.label}
+                                  </span>
+                                  <span>{c.text}</span>
+                                </li>
+                              ))}
+                            </ol>
+                          ) : (
+                            brief.known && <p>None supplied</p>
+                          )}
+                          <p className="metadata muted">
+                            {source.kind === "github" ? "GitHub" : "Local"}{" "}
+                            source · revision {source.revision} ·{" "}
+                            <ShortId value={source.sourceId} />
+                          </p>
+                          <Disclosure
+                            id={source.sourceId}
+                            title={`${source.title ?? "Brief"} — read supplied text`}
+                            text={source.body}
+                            state={state}
+                            changed={changed}
+                          />
+                          <ChecklistCoverage source={source} />
+                          <Button
+                            variant="secondary"
+                            onClick={() =>
+                              ask(
+                                { sourceId: source.sourceId },
+                                `source revision ${source.revision}`,
+                              )
+                            }
+                          >
+                            Ask lead about brief
+                          </Button>
+                        </>
+                      );
+                    })()}
+                  {!source && <p>{sourceGap}</p>}
+                  {!source && !state.selectedSource && (
+                    <Literal text={data.task.outcome} />
+                  )}
+                  <label htmlFor="retained-source-revision">
+                    Retained source revision{" "}
+                    <NativeSelect
+                      id="retained-source-revision"
+                      className="control"
+                      value={state.selectedSource ?? ""}
+                      onChange={(e) => {
+                        state.selectedSource = e.target.value || null;
+                        changed();
+                      }}
+                    >
+                      <option value="">Latest</option>
+                      {sources.map((s) => (
+                        <option key={s.sourceId} value={s.sourceId}>
+                          Revision {s.revision}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                </details>
+              </section>
+              {selected && (
+                <section id="result-evidence">
+                  <details
+                    className="overview-disclosure"
+                    {...overviewCard("evidence")}
+                  >
+                    <summary>
+                      <h3 className="section-heading">Evidence</h3>
+                      <span className="metadata muted">{evidenceSummary}</span>
+                    </summary>
+                    <div>
+                      {meta && (
+                        <ReviewEvidence
+                          data={data}
+                          resultId={selected.resultId}
+                          sourceId={meta.metadata.sourceId}
+                          ask={ask}
+                        />
+                      )}
+                      <RetainedResultEvidence
+                        key={selected.resultId}
+                        client={client}
+                        session={session}
+                        taskId={taskId}
+                        resultId={selected.resultId}
+                        state={state.retained(selected.resultId)}
+                        changed={changed}
+                        openCurrent={(scope, filePath) => {
+                          state.files.openCurrentFile(scope, filePath);
+                          changed();
+                          requestAnimationFrame(() => reveal("files"));
+                        }}
+                      />
+                    </div>
+                  </details>
+                </section>
+              )}
+              <section id="assignments">
+                <details
+                  className="overview-disclosure"
+                  {...overviewCard("assignments")}
+                >
+                  <summary>
+                    <h3 className="section-heading">
+                      Assignments · {data.assignments.length}
+                    </h3>
+                    <span className="metadata muted">{assignmentsSummary}</span>
+                  </summary>
+                  <AssignmentRows
+                    assignments={data.assignments}
+                    reveal={reveal}
+                    open={(id) => {
+                      state.chronological = false;
+                      state.expanded.add(id);
+                      changed();
+                    }}
+                  />
+                </details>
+              </section>
+              <p className="metadata muted task-pointer">
+                Captured conversations, earlier results and delivery evidence
+                are in History, Changes and Review.
+              </p>
             </div>
             <TaskInspector
               data={data}

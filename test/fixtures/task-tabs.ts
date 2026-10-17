@@ -18,3 +18,19 @@ export async function openTaskTab(page: Page, name: TaskTabName) {
   if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
   await page.locator(`#${await tab.getAttribute("aria-controls")}`).waitFor();
 }
+
+export type OverviewCardName = "brief" | "evidence" | "assignments";
+
+/** The collapsed Overview card's `details` element. */
+export const overviewCard = (page: Page, name: OverviewCardName) =>
+  page.locator(
+    `#${name === "evidence" ? "result-evidence" : name} > details.overview-disclosure`,
+  );
+
+/** Opens a collapsed Overview card through its summary, as an operator does; an open one is left alone. */
+export async function openOverviewCard(page: Page, name: OverviewCardName) {
+  const card = overviewCard(page, name);
+  if ((await card.getAttribute("open")) === null)
+    await card.locator("> summary").click();
+  await card.and(page.locator("[open]")).waitFor();
+}

@@ -27,6 +27,8 @@ type ServeOptions = {
   authOrigin?: string;
   controlPaths?: string[];
   previewReader?: ConstructorParameters<typeof OperatorApi>[3];
+  /** A controllable session clock and idle timeout, to expire a signed-in session. */
+  auth?: { now: () => number; idleTimeoutMs: number };
 };
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 
@@ -97,7 +99,11 @@ export async function serveCli<F extends Fixture>(
   const authFile = join(f.directory, "auth");
   await OperatorAuth.initialize(authFile, "fixture-password");
   const authOrigin = options.authOrigin ?? "http://127.0.0.1:8787";
-  const auth = await OperatorAuth.open({ authFile, origin: authOrigin });
+  const auth = await OperatorAuth.open({
+    authFile,
+    origin: authOrigin,
+    ...options.auth,
+  });
   t.after(() => auth.close());
   const bundle = await OperatorWebBundle.open(bundlePath);
   const build = () => {

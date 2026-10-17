@@ -1,20 +1,24 @@
 import {
+  useCallback,
   useEffect,
+  useState,
   useReducer,
   useRef,
   useId,
   type FormEvent,
   type ReactNode,
 } from "react";
+import type { z } from "zod";
 import type { Workspace, Session } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { useOperatorResource, type ResourceState } from "./resource.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
 import {
   outcomeCopy,
   type ConfigurationDraft,
   type ConfigurationDrafts,
 } from "./settings-state.js";
-import type { Values } from "./settings-changes.js";
+import { sameText, type Values } from "./settings-changes.js";
 import { Button } from "./components.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -57,6 +61,18 @@ export function useLoadedDraft(
     if (d.phase === "recorded") d.startOperation(fresh(values), true);
     else d.initialize(fresh(values));
   }, [d, serialized, loadedAt]);
+  // A read that arrived while the form had edits was left alone. When every edit is undone
+  // the form is clean again, so it takes the latest read at once.
+  const clean = !d.dirty;
+  const wasClean = useRef({ d, clean });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the form turning clean matters.
+  useEffect(() => {
+    // Another draft (the page now edits something else) starts from its own state.
+    const was = wasClean.current.d === d ? wasClean.current.clean : clean;
+    if (values && clean && !was && d.phase !== "recorded")
+      d.initialize(fresh(values), true);
+    wasClean.current = { d, clean };
+  }, [d, clean]);
 }
 const fresh = (values: Values) => ({ ...values, key: crypto.randomUUID() });
 /** Discard unsaved input: start a new operation from the loaded values. */
@@ -118,6 +134,278 @@ export function DraftField({
         </span>
       )}
     </label>
+  );
+}
+/**
+ * Run `act` while `due` holds, at most `cap` times for one `key`. The decision is derived from
+ * state on every render: the effect depends on the key and on `due` itself, so any change that
+ * makes it due again (a read settling stale, failing, or the version moving) re-evaluates it.
+ */
+function useBoundedRetry(key: unknown, due: boolean, act: () => void, cap = 2) {
+  const latest = useRef(act);
+  latest.current = act;
+  const tries = useRef({ key, count: 0 });
+  useEffect(() => {
+    if (!Object.is(tries.current.key, key)) tries.current = { key, count: 0 };
+    if (due && tries.current.count < cap) {
+      tries.current.count++;
+      latest.current();
+    }
+  }, [key, due, cap]);
+}
+/** Whether a draft still holds input that a read could be compared with. */
+export const editable = (phase: ConfigurationDraft["phase"]) =>
+  phase === "editing" || phase === "conflict" || phase === "rejected";
+/**
+ * One owner's private values, read only for this signed-in session. The result lives in
+ * component state alone: the scope (session token and owner) clears it on sign-out and
+ * owner change, and unmounting aborts a read in flight. Nothing here is stored or logged.
+ *
+ * The read is kept in step with the loaded configuration. It is read again, at most twice per
+ * loaded version, when it is wanted (autoLoad, a Reveal the operator asked for, or an edit that
+ * must be compared with the saved text) and no read at the loaded version is available, none is
+ * in flight and the last one did not fail at this version. A read that is newer than the loaded
+ * configuration instead re-reads the configuration.
+ */
+export function usePrivateValues<T>(
+  client: OperatorClient,
+  session: Session,
+  path: string,
+  schema: z.ZodType<T>,
+  options: {
+    autoLoad?: boolean;
+    /** The section version of the configuration now loaded. */
+    loaded?: number | undefined;
+    /** The section version a private read was made at. */
+    version?: (data: T) => number;
+    /** The form holds an edit that has to be compared with the saved text. */
+    edit?: boolean;
+    /** Re-read the configuration (used when a private read is newer than it). */
+    refreshLoaded?: () => void;
+  } = {},
+) {
+  const { autoLoad = false, loaded, version, edit = false } = options;
+  // The version a read begins at is stamped when the request starts and travels with its
+  // failure, so a failure is judged against the version it was made at, not whatever is loaded
+  // when it is rendered.
+  const loadedNow = useRef(loaded);
+  loadedNow.current = loaded;
+  const requests = useRef({
+    seq: 0,
+    failedAt: undefined as number | undefined,
+  });
+  // The loader must stay stable: a new one would clear the revealed state.
+  const loader = useCallback(
+    async (signal: AbortSignal) => {
+      const seq = ++requests.current.seq;
+      const startedAt = loadedNow.current;
+      try {
+        return await client.read(path, schema, signal);
+      } catch (error) {
+        // Only the latest, uncancelled request's failure is the one that is shown.
+        if (!signal.aborted && seq === requests.current.seq)
+          requests.current.failedAt = startedAt;
+        throw error;
+      }
+    },
+    [client, path, schema],
+  );
+  const resource = useOperatorResource(
+    `${session.csrfToken}:${path}`,
+    loader,
+    autoLoad,
+  );
+  const { state } = resource;
+  const [requested, setRequested] = useState(autoLoad);
+  const read = state.data && version ? version(state.data) : undefined;
+  const inFlight = state.pending || (autoLoad && state.status === "empty");
+  // A current read settles a Reveal the operator asked for.
+  useEffect(() => {
+    if (!autoLoad && read !== undefined && read === loaded) setRequested(false);
+  }, [autoLoad, read, loaded]);
+  // A Reveal that failed is the operator's to retry; it is not remembered and acted on later.
+  useEffect(() => {
+    if (!autoLoad && state.error !== null) setRequested(false);
+  }, [autoLoad, state.error]);
+  // A failure is the operator's to retry, unless the version moved on since the request began.
+  useBoundedRetry(
+    loaded,
+    (requested || edit) &&
+      loaded !== undefined &&
+      !inFlight &&
+      (read === undefined || read < loaded) &&
+      (state.error === null || requests.current.failedAt !== loaded),
+    resource.refresh,
+  );
+  useBoundedRetry(
+    read,
+    loaded !== undefined &&
+      read !== undefined &&
+      read > loaded &&
+      !inFlight &&
+      options.refreshLoaded !== undefined,
+    () => options.refreshLoaded?.(),
+  );
+  return {
+    ...resource,
+    /** The operator asked for the text: read it, and again if the version moves meanwhile. */
+    reveal: () => {
+      setRequested(true);
+      void resource.refresh();
+    },
+  };
+}
+/** The revealed text, only while it was read at the section version now loaded. */
+export function revealedText<T>(
+  state: ResourceState<T>,
+  pick: (data: T) => { version: number; text: string },
+  version: number,
+): string | undefined {
+  const value = state.data ? pick(state.data) : undefined;
+  return value && value.version === version ? value.text : undefined;
+}
+export const textHold =
+  "Save is on hold until the saved text is read again to compare it with your edit.";
+export const sourceHold =
+  "Save is on hold until the saved queries and paths are read again to compare them with your edits.";
+/**
+ * "Kept · Reveal" until the signed-in operator reveals a private text, then the same
+ * multiline field. Revealed text is shown from `revealed` and enters the draft only once
+ * the operator edits it, so an unedited reveal is never sent or kept across pages.
+ */
+export function PrivateTextField({
+  draft,
+  field,
+  label,
+  noun,
+  revealed,
+  state,
+  onReveal,
+  children,
+}: {
+  draft: ConfigurationDraft;
+  field: string;
+  label: string;
+  /** Lower-case name used in the button and error copy, such as "instructions". */
+  noun: string;
+  revealed: string | undefined;
+  state: ResourceState<unknown>;
+  onReveal: () => void;
+  /** Guidance shown under the control in both states. */
+  children?: ReactNode;
+}) {
+  const id = useId(),
+    error = draft.errors[field],
+    area = useRef<HTMLTextAreaElement>(null),
+    focusNext = useRef(false),
+    edited = typeof draft.values[field] === "string",
+    // The text the edit started from; typing it back removes the edit.
+    base = edited ? String(draft.values[`${field}Base`] ?? "") : revealed,
+    changedElsewhere = edited && revealed !== undefined && revealed !== base,
+    open = edited || revealed !== undefined,
+    loading = state.pending,
+    failed = !loading && state.error !== null;
+  // An edit exists only while it differs from the text saved now. When a current read shows
+  // the same text (another writer saved it), the edit and its baseline are dropped, so the
+  // form is clean and later reads apply.
+  const value = edited ? String(draft.values[field]) : undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: act when the read or the edit changes.
+  useEffect(() => {
+    if (
+      value !== undefined &&
+      revealed !== undefined &&
+      sameText(value, revealed) &&
+      (draft.phase === "editing" ||
+        draft.phase === "conflict" ||
+        draft.phase === "rejected")
+    )
+      draft.setPrivate(
+        field,
+        value,
+        String(draft.values[`${field}Base`] ?? ""),
+        revealed,
+      );
+  }, [value, revealed, draft.phase]);
+  // Focus moves to the field once, after a Reveal the operator asked for has rendered it.
+  useEffect(() => {
+    if (failed) focusNext.current = false;
+    else if (open && focusNext.current) {
+      focusNext.current = false;
+      area.current?.focus();
+    }
+  });
+  if (open)
+    return (
+      <div className="field body">
+        <label className="field body" htmlFor={id}>
+          {label}
+          <Textarea
+            ref={area}
+            id={id}
+            rows={4}
+            aria-label={label}
+            disabled={locked(draft)}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className="control"
+            value={edited ? String(draft.values[field]) : (revealed ?? "")}
+            onChange={(e) =>
+              draft.setPrivate(field, e.target.value, base ?? "", revealed)
+            }
+          />
+          {error && (
+            <span id={`${id}-error`} className="error-text" role="alert">
+              {error}
+            </span>
+          )}
+        </label>
+        {changedElsewhere && (
+          <p className="metadata muted" role="status">
+            This was changed elsewhere since you started editing. Saving
+            replaces it.
+          </p>
+        )}
+        {edited &&
+          revealed === undefined &&
+          !loading &&
+          (failed || state.data !== null) && (
+            <p className="body error-text" role="alert">
+              Couldn't check whether this changed elsewhere.{" "}
+              <Button type="button" variant="secondary" onClick={onReveal}>
+                Try again
+              </Button>
+            </p>
+          )}
+        {children}
+      </div>
+    );
+  return (
+    <fieldset className="field body private-field">
+      <legend>{label}</legend>
+      <p className="body">
+        Kept <span aria-hidden="true">·</span>{" "}
+        <Button
+          type="button"
+          variant="secondary"
+          aria-label={failed ? `Try again to reveal ${noun}` : `Reveal ${noun}`}
+          aria-busy={loading || undefined}
+          aria-disabled={loading || locked(draft) || undefined}
+          onClick={() => {
+            if (loading || locked(draft)) return;
+            focusNext.current = true;
+            onReveal();
+          }}
+        >
+          {failed ? "Try again" : "Reveal"}
+        </Button>
+      </p>
+      {failed && (
+        <span className="error-text" role="alert">
+          Couldn't load the {noun}.
+        </span>
+      )}
+      {children}
+    </fieldset>
   );
 }
 export function DraftCheck({
@@ -263,6 +551,7 @@ export function DraftOutcome({
   session,
   label,
   saveDisabled = false,
+  hold,
   discard,
   refresh,
   review,
@@ -275,6 +564,12 @@ export function DraftOutcome({
   label: string;
   /** Save stays disabled until the change list is non-empty. */
   saveDisabled?: boolean;
+  /**
+   * Why Save waits: an edit of private text cannot be sent until the saved text has been
+   * read again to compare with it. Save stays focusable (`aria-disabled`) and the reason is
+   * shown and announced.
+   */
+  hold?: string | undefined;
   /** Restores the loaded values; shown while there is unsaved input. */
   discard?: () => void;
   /**
@@ -291,6 +586,8 @@ export function DraftOutcome({
   children?: ReactNode;
 }) {
   const idle = draft.phase !== "unknown";
+  const holdId = useId();
+  const held = Boolean(hold) && idle && draft.phase !== "recorded";
   return (
     <>
       {idle && (
@@ -302,6 +599,11 @@ export function DraftOutcome({
               draft.phase === "recorded" ||
               saveDisabled
             }
+            aria-disabled={held || undefined}
+            aria-describedby={held ? holdId : undefined}
+            onClick={(e) => {
+              if (held) e.preventDefault();
+            }}
           >
             {draft.phase === "pending" ? "Saving…" : label}
           </Button>
@@ -314,6 +616,11 @@ export function DraftOutcome({
               </Button>
             )}
         </div>
+      )}
+      {held && (
+        <p id={holdId} className="metadata muted" role="status">
+          {hold}
+        </p>
       )}
       <DraftMessage
         draft={draft}
@@ -409,8 +716,11 @@ export async function submitDraft(
   refresh: () => void,
   /** Pre-submit field errors: when any is present nothing is sent. */
   errors: Record<string, string> = {},
+  /** Save is on hold (see `DraftOutcome`): nothing is sent, however it was triggered. */
+  held = false,
 ) {
   e.preventDefault();
+  if (held) return;
   await sendDraft(
     e.currentTarget,
     d,

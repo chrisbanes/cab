@@ -157,9 +157,11 @@ dimensions.
   imported tasks, title, desired outcome, actions (Execution, and Stop… while the
   task is open; there is no task pause), a status strip (state badge, readiness and holds, next actor, lead,
   updated) and tabs (Overview, Files, Changes, Review, History). Overview leads with
-  any decision card, then the shared brief (requirements with provenance, approach
-  and decisions, the supplied-criteria table with evidence outcomes), the latest
-  result, the assignments table and Message lead. The inspector holds source sync,
+  any decision card, then the latest result (its criterion rows with evidence
+  outcomes), the reply to the lead, and the shared brief (requirements with
+  provenance, approach and decisions, the supplied-criteria table), evidence and the
+  assignments table as collapsed disclosures (`46a-task-overview-laptop`;
+  `03-task-detail` shows them open). The inspector holds source sync,
   holds, dependencies, execution facts and results and artifacts; the holds a
   decision does not clear also appear as lines in the decision card; with no
   approval selected, the open approvals are not repeated as a hold. Requests remain
@@ -347,12 +349,12 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | --- | --- |
 | 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
 | 02 Inbox & questions | `06-inbox-question-audience`, `08-inbox-empty`, `19-inbox-grouped-questions`, `20-task-answering-grouped-request`, `32-inbox-approved-dependency-held`, `22-question-states-specimen`, `17-imported-source-overview-inbox`, `21-phone-grouped-questions`, `21b-phone-grouped-questions-scrolled`, `27-phone-question-evidence`, `28-phone-question-failed-answer`, `29-phone-question-stale-read`, `30-phone-question-answer-sent`, `31-phone-inbox-anchored-return`, `33-phone-exact-approval-source-hold`, `800g-phone-grouped-question-short` |
-| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
+| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `47b-phone-task-actions-open`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
 | 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
 | 07 Tasks, composer & tablet | `24-all-projects-list`, `23-atlas-project-board`, `23b-atlas-project-paused`, `02-composer-optional-expanded`, `800a-tablet-overview-list`, `800b-tablet-inbox-question`, `800c-tablet-task-evidence`, `800d-tablet-search-result`, `800e-tablet-composer-validation`, `800f-tablet-all-projects-board`, `25-phone-board-waiting`, `25b-phone-board-uncertain`, `34-phone-composer-collapsed`, `35-phone-optional-settings-error`, `35b-phone-collapsed-validation`, `800h-phone-composer-short` |
-| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `117c-first-setup-add-repository`, `131-project-setup-choose-folder`, `118-project-config-general`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
+| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `123b-profile-instructions-revealed`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `117c-first-setup-add-repository`, `131-project-setup-choose-folder`, `118-project-config-general`, `118b-project-instructions-revealed`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
 | 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
 | 10 Action feedback | `154-project-configuration-saved`, `154b-project-configuration-details-expanded`, `155-routing-saved`, `156-project-configuration-field-error`, `157-project-configuration-changed-elsewhere`, `158-project-configuration-unknown-outcome`, `159-change-list-remove-last-repository`, `160-discovery-credential-saved`, `161-composer-created-project-paused`, `162-grouped-questions-answered`, `162b-grouped-questions-send-failed`, `163-task-reply-sent`, `164-stop-confirmation`, `165-cli-credential-revoked`, `ds-action-feedback`, `166a-phone-project-configuration-saved`, `166b-phone-unknown-outcome-locked`, `166c-phone-task-created-project-paused` |
 | 11 Settings, recovery & responsive states | `167-profile-field-error`, `168-routing-field-error`, `169-runtime-capacity-field-error`, `178-profile-revoke-available`, `170-source-config-changed-elsewhere`, `170b-source-config-latest-loaded`, `171-source-config-unknown-outcome`, `172-routing-typesafe-unavailable`, `173-recovery-evidence-unavailable`, `174-recovery-no-admitted-generation`, `175-recovery-pre-turn-witness`, `176-recovery-no-turn-witness`, `177-project-setup-ref-open`, `180a-tablet-settings-index`, `180b-tablet-project-setup`, `180c-tablet-profile`, `180d-tablet-routing`, `180e-tablet-runtime`, `179a-phone-settings-index`, `179b-phone-project-setup`, `179c-phone-profile`, `179d-phone-routing`, `179e-phone-runtime` |
@@ -745,6 +747,7 @@ journey.
 | Desktop task, 1366 × 900 | `46a-task-overview-laptop` |
 | Full-content task inventory | `03-task-detail` |
 | Phone task, 390 × 844 | `47-phone-task-overview` |
+| Phone Task actions open | `47b-phone-task-actions-open` |
 | Phone evidence and earlier results | `48-phone-evidence-earlier-results` |
 | Empty, dependency, refresh and uncertainty specimens | `49-state-comparisons` |
 | Expanded local brief, question, history and retained draft | `50-local-task-brief-history-expanded` |
@@ -1543,15 +1546,17 @@ Presentation and interaction rules that the canvas does not show on its own.
   conversations open through disclosure (`03-task-detail`).
 - The Overview tab reads in this order: pending decisions, holds and wait reasons;
   the latest result with its criterion evidence; the reply to the lead; then the
-  shared brief and assignments as collapsed disclosures with a one-line summary
-  (`46a-task-overview-laptop`; `03-task-detail` shows them open). Captured
+  shared brief, evidence and assignments as collapsed disclosures with a one-line
+  summary (`46a-task-overview-laptop`; `03-task-detail` shows them open). Captured
   conversations, earlier results and delivery evidence live in History, Changes and
   Review, and the Overview tab does not repeat those tabs as sections.
+- A link to a section or record inside a closed disclosure opens it; polls,
+  refreshes and a returning Back never open or close one.
 - The task header keeps Execution and Stop… only. On a phone (`47-phone-task-overview`)
   the detail header has Back, the task title, a mono subtitle (the source, such as
-  `acme/atlas#142`, or Local task) and one outline overflow action holding
-  Execution and Stop…; the decision card sits in the first viewport, and Message
-  lead is the bottom action.
+  `acme/atlas#142`, or Local task) and one outline "Task actions" disclosure holding
+  Execution and Stop… (open in `47b-phone-task-actions-open`); the decision card sits
+  in the first viewport, and the reply follows the latest result.
 - A task's legacy page (`/coordination/task/:id`) is linked once, as Approval and
   delivery forms, from its History tab; that page links `/task/:id` (Edit task and
   review source). The project page keeps Project settings and links to no legacy
@@ -1686,9 +1691,21 @@ Presentation and interaction rules that the canvas does not show on its own.
   per-project summary.
 - Project configuration has General, Routing, GitHub source, and Sync & placement
   tabs. Each section saves separately against its own version.
-- Settings edit values in place. Private values are replace-only.
+- Settings edit values in place. Instructions and routing guidance open as "Kept ·
+  Reveal" in the project General, profile and Routing forms
+  (`118-project-config-general`, `123-profile-revoked`,
+  `124-routing-relay-unsaved`). Reveal loads the exact text into the same multiline
+  field for the signed-in operator only, and Reveal itself is not recorded
+  (`118b-project-instructions-revealed`, `123b-profile-instructions-revealed`). An
+  edit shows one value-free line under "Changes to save" ("Instructions edited",
+  "Instructions cleared", "Routing guidance edited", "Routing guidance cleared") and
+  saves as an ordinary versioned change. Leaving the page, signing out or a newer
+  saved version returns an unedited reveal to "Kept · Reveal"; an edit stays like any
+  other unsaved input. On the GitHub source tab, local paths and saved search queries
+  show plainly and edit in place ("Search query edited for S-2", "Local path changed
+  for acme/atlas"); GitHub Project filters stay "Filter kept · private".
 - After routing saves, the form reloads the saved version. Guidance returns to
-  replace-only, and Save stays disabled until something changes
+  "Kept · Reveal", and Save stays disabled until something changes
   (`125-routing-relay-saved`).
 - Sign-in has two bootstrap states: "Loading sign-in…" and "Sign-in service
   unavailable." with Try again.
@@ -2040,9 +2057,19 @@ as follows:
   subtitle (plain text with heading, list and checklist markers removed, clamped to
   three lines; when more follows, a closed "Full desired outcome" disclosure in the
   status strip renders the whole outcome as Markdown and stays open across a
-  refresh; a redacted outcome shows neither; the brief keeps the full text) and
-  Execution plus, while
-  the task is open, Stop…, at every width. A finished task offers no Stop…; an
+  refresh; a redacted outcome shows neither; the brief keeps the full text) and,
+  from 760px, Execution plus, while the task is open, Stop…. Below 760px
+  (`47-phone-task-overview`) the header is one row: an icon-only Back (named as
+  below), the one-line title over a mono subtitle (`repository#N`, or "Local task"),
+  and one outline "Task actions" control holding Execution and Stop… (open in
+  `47b-phone-task-actions-open`). The control is a native disclosure with a 44px
+  summary, not an ARIA menu:
+  it is the same element at every width and held open from 760px, so resizing never
+  remounts the Stop confirmation; Escape closes the confirmation first, then the
+  disclosure, and a tap outside closes it. The phone drops the outcome line and the
+  strip's ID slot (the subtitle carries the identity), so the strip's "Full desired
+  outcome" disclosure also shows a one-line outcome there. A finished task offers no
+  Stop…; an
   existing Stop stays as a disabled "Stop requested". Back is the only back
   control: with an in-session origin it reads the origin view ("Board",
   "Overview", "Inbox", "Search", "Tasks"; named "Back to originating view") and
@@ -2075,13 +2102,15 @@ as follows:
   mounted and only the selected one shows, so drafts, expansions, selections and
   unconfirmed checks survive a switch; each tab keeps its own scroll. A switch
   sends nothing and adds no history entry; Back and Forward restore the tab with
-  the reading position. Links choose the first tab: `?section=` (brief, review,
-  reply → Overview; files; changes; local-review → Review; context, history →
-  History), then the fragment, then `path` (Files), `target`/`base` (Changes),
+  the reading position. Links choose the first tab: `?section=` (decisions, brief,
+  review, result-evidence, assignments, reply → Overview; files; changes;
+  local-review → Review; context, history → History), then the fragment, then `path` (Files), `target`/`base` (Changes),
   `review` (Review), `result`/`source` (Overview) and `assignment` (History); a
   `record` or `request` target opens the tab that holds it unless the link names a
   section or fragment (`?request=…#history` opens History). A link followed in
-  place maps the same way. The full header shows
+  place maps the same way. A link to a section or record inside a closed Overview
+  disclosure opens it first (`?section=brief`, `?source=`, `?evidence=` and a Search
+  hit for the brief or a recorded decision). The full header shows
   on every tab, not `06-workspace-changes-review`'s compact header. The tabs scroll
   with the page.
 - A request is never hidden by a tab: the strip's "Next: you · …" is a button that
@@ -2092,8 +2121,19 @@ as follows:
   shows on Changes beside its control. "New updates — jump to latest" opens
   History at its end.
 - Overview is one column of cards beside the inspector (280–320px, from 1024px;
-  below the reply on narrower screens): the decision card, the shared brief, the
-  latest result, the assignments table and the reply. The decision card leads
+  below the last card on narrower screens): the decision card, the latest result,
+  the reply, then Shared brief, Evidence and Assignments · N as closed native
+  disclosures (`46a-task-overview-laptop`, `03-task-detail` open, and
+  `47-phone-task-overview` draw all three; the "Earlier results" and "Changes since
+  viewed" links beside them stay unbuilt). Each summary is one clamped line of recorded
+  facts: "Requirements · GitHub · 2 supplied criteria", "R2 · 1 validation record ·
+  2 artifacts", and each assignment's short id and known state. A pointer line
+  closes the tab: "Captured conversations, earlier results and delivery evidence
+  are in History, Changes and Review." The latest-result card keeps its summary,
+  criterion rows, the viewing reference and the Result revision select visible; the
+  disclosures hold their content mounted, so closing one loses no read, selection or
+  focus target. Open cards belong to the history entry, are written only by their
+  own toggles and links, and a task opened fresh starts with all three closed. The decision card leads
   with any request ("Your decision · approval pending", exact action, target,
   revision and material hash, and "Review material & decide" to the coordination
   view; the page never approves), then pending completion and unresolved result
@@ -2188,12 +2228,13 @@ as follows:
   view." or "Retained evidence for this result can't be shown right now." (anything
   else: "…can't be shown."), with the code inside a closed Details. There is no
   "Approach" block (no recorded approach field), no "Compare screenshots" control
-  (recorded pairs render under the latest result), no clock times, and no
+  (recorded pairs render in the Evidence card), no clock times, and no
   "Earlier results (2)" button (the Result revision select and the inspector keep
   earlier results).
-- Frame 57's entries under the latest result stay: Files, Changes, Review,
-  "Assignment context & identifiers", "Assignment history" and "Message lead"
-  open their tab in place and move to the section, without a history entry.
+- Overview has no in-page entries to other tabs: the tab list, the inspector's
+  result links and the assignment buttons ("Assignment history" in place, without a
+  history entry) are the ways in; frame 57's Files, Changes, Review and context
+  entries are not built.
 - The viewing-reference block under the latest result (the "No viewing baseline …"
   or changes line, "Set viewing reference" and its disclaimer) shows only once the
   task has a result. A check for a viewing write whose response was lost stays
@@ -2205,7 +2246,7 @@ as follows:
   criterion" keeps its exact-reference draft, which names the criterion by its
   line in the brief ("criterion 3 in source revision 1"), not by its C label.
 - The phone keeps one reading column with the same tabs; the drill-in screens of
-  frames 47, 48, 51 and 55, a sticky bottom bar and the GitHub source / Ensemble
+  frames 48, 51 and 55, a sticky bottom bar and the GitHub source / Ensemble
   tab pair of phone frames 14 and 15 are not built, so reading position,
   expansions and unsent replies are not split across history entries. The tab
   list fits at 390px and scrolls inside itself only when narrower.
@@ -2272,10 +2313,13 @@ frames 114 and 118–128 as follows:
 - No configuration timestamp is stored, so a section header shows its version
   ("General version 3") and, only after a save in this browser session, "General
   saved 10:52" from that save's receipt. A reload shows the version again.
-- Existing GitHub sources are shown read-only and can be removed; a changed
-  definition is a removal plus a new source with a fresh `S-<n>` id, added
-  inactive. Search queries and Project filters stay private: a row reads "Private
-  query kept" or "<node id> · Filter kept · private" instead of the drawn filter.
+- Existing GitHub sources can be removed. A saved search query is edited in place
+  under its own `S-<n>` id (`119-project-config-github-source`); any other changed
+  definition is a removal plus a new source with a fresh id, added inactive. Local
+  repository paths and search queries are loaded when the tab opens and show plainly;
+  if that read fails the row says "Local path unavailable" or "Query unavailable" with
+  Try again and saves without it. Project filters stay private: a row reads "<node id>
+  · Filter kept · private" instead of the drawn filter.
   Readiness Project-field conditions pick the Project, field and option by name from
   discovery and fall back to typed node IDs when discovery is unavailable or truncated.
   A GitHub source save deletes the stored activation of each
@@ -2311,8 +2355,8 @@ frames 114 and 118–128 as follows:
   repository access" checkbox inside "Changes to save" (no frame draws it).
 - Profile Revoke and Restore are one draft field saved by Save profile, so the
   button reads "Revoke profile", "Restore profile" or "Undo …" while unsaved.
-- Routing guidance is replace-only behind "Replace routing guidance"; frame 124's
-  loaded guidance text is never shown. Revoked profiles are listed disabled and
+- Routing guidance opens as "Kept · Reveal" and edits in place once revealed (frame
+  124 draws the revealed, edited state). Revoked profiles are listed disabled and
   are dropped from the candidates by the next routing save.
 - No short identifiers (RL-31, A-203, AT-151) are shown, and recovery omits "last
   observed" and "requested by", which the recovery read does not carry. Its

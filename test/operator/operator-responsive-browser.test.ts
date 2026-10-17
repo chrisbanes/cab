@@ -9,7 +9,7 @@ const test = browserSuite("operator-responsive-browser");
 import { chromium, webkit, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { choiceForm } from "../fixtures/question-data.js";
-import { seedOwnQuestion } from "../fixtures/questions.js";
+import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
 
 const longTitle =
   "Reconcile the deliberately long operator task title that must stay readable in compact rows";
@@ -59,6 +59,30 @@ function layoutProblems(page: Page) {
 
 /** At 390 × 844 the first card, request or composer field must start on the first screen. */
 async function firstViewportProblems(page: Page, route: string) {
+  await page.evaluate(() => document.fonts.ready);
+  // The decision itself starts on the first screen: the approval's link is whole inside it,
+  // and the question's exact response begins above its fold.
+  if (route === "approval" || route === "question") {
+    const decision =
+      route === "approval"
+        ? page
+            .locator(".decision-card .decision")
+            .first()
+            .getByRole("link", { name: "Review material & decide" })
+        : page.getByRole("region", { name: "Exact question response" });
+    const rect = await decision.evaluate((e) =>
+      e.getBoundingClientRect().toJSON(),
+    );
+    const inside =
+      route === "approval"
+        ? rect.top >= 0 && rect.bottom <= 844
+        : rect.top >= 0 && rect.top < 844;
+    return inside
+      ? []
+      : [
+          `${route} decision outside the first viewport: ${JSON.stringify(rect)}`,
+        ];
+  }
   const target = {
     boardpaused: page.locator(
       ".board-columns .selected-column [data-task-id] .task-title",
@@ -67,7 +91,6 @@ async function firstViewportProblems(page: Page, route: string) {
     composer: page.getByLabel("Project", { exact: true }),
   }[route as "boardpaused" | "inbox" | "composer"];
   if (!target) return [];
-  await page.evaluate(() => document.fonts.ready);
   const rects = await target.evaluateAll((es) =>
     es.map((e) => e.getBoundingClientRect().toJSON()),
   );
@@ -98,6 +121,7 @@ async function runResponsiveBrowserJourney(
   const question = await seedOwnQuestion(f, undefined, longTitle);
   // A single-choice question is answered in its Overview card.
   await seedOwnQuestion(f, choiceForm, "Overview choice", "Overview project");
+  const approval = await seedOwnApproval(f);
   const d = f.service.domain();
   for (let index = 0; index < 4; index++)
     d.execute({
@@ -120,6 +144,7 @@ async function runResponsiveBrowserJourney(
     project: `/app/projects/${question.projectId}`,
     inbox: "/app/inbox",
     question: `/app/tasks/${question.taskId}?request=${question.interactionId}`,
+    approval: `/app/tasks/${approval.taskId}`,
     composer: `/app/tasks/new?project=${question.projectId}`,
     search: "/app/search?query=Reconcile",
     settings: "/app/settings",
@@ -129,21 +154,22 @@ async function runResponsiveBrowserJourney(
   );
   const matrix: [number, number, (keyof typeof routes)[]][] = [
     [390, 844, [...all, "boardpaused"]],
-    [390, 480, ["inbox", "question", "composer"]],
+    [390, 480, ["inbox", "question", "approval", "composer"]],
     [759, 768, ["overview", "tasks"]],
     [760, 768, ["overview", "tasks", "inbox"]],
-    [800, 768, ["tasks", "project", "inbox", "question"]],
+    [800, 768, ["tasks", "project", "inbox", "question", "approval"]],
     [1024, 768, all],
     [1121, 768, ["overview", "tasks"]],
     [1366, 900, all],
     // 200% zoom of a 1366×900 laptop, expressed in CSS pixels.
-    [683, 450, ["tasks", "question", "composer"]],
+    [683, 450, ["tasks", "question", "approval", "composer"]],
   ];
   const evidence = new Set([
     "390x844:overview",
     "390x844:tasks",
     "390x844:boardpaused",
     "390x844:inbox",
+    "390x844:approval",
     "390x480:question",
     "800x768:inbox",
     "1024x768:composer",
@@ -198,6 +224,8 @@ async function runResponsiveBrowserJourney(
         await page
           .getByRole("region", { name: "Exact question response" })
           .waitFor();
+      if (route === "approval")
+        await page.locator(".decision-card .decision a").first().waitFor();
       for (const problem of await layoutProblems(page))
         failures.push(`${engineName} ${width}x${height} ${route}: ${problem}`);
       if (width === 390 && height === 844)

@@ -10,7 +10,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedRetainedReviewWindow } from "../fixtures/task-review.js";
-import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import { searchRecords } from "../fixtures/shell-search.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 // Retained-history seeding shares the startup deadline with web/browser launch.
@@ -544,8 +544,9 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   assert.ok(snapshot.top !== undefined && Math.abs(snapshot.top - y) < 4);
   assert.equal(snapshot.focused, true);
   stage("validation-scroll-begin");
+  await openOverviewCard(page, "evidence");
   await page
-    .locator("#review")
+    .locator("#result-evidence")
     .getByText("Historical check:", { exact: false })
     .scrollIntoViewIfNeeded();
   stage("validation-scroll-complete");
@@ -622,7 +623,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     await headHistoryArrival;
     // The result is on Overview, behind the open History tab.
     await page
-      .locator("#review")
+      .locator("#result-evidence")
       .getByText(/Historical check:.*Head comparison unknown/)
       .waitFor({ state: "attached" });
     const gap = await page.evaluate(
