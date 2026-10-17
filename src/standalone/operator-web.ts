@@ -238,6 +238,21 @@ export class OperatorWebBoundary {
       if ([...query].length) throw new OperatorApiError(400, "invalid-input");
       return this.api.readLocalReviewDraft(reviewDraft[1] ?? "", reviewSession);
     }
+    const privateValues = path.match(
+      /^\/api\/operator\/(projects|profiles)\/([^/]+)\/private-values$/,
+    );
+    if (privateValues) {
+      if ([...query].length) throw new OperatorApiError(400, "invalid-input");
+      return privateValues[1] === "projects"
+        ? this.api.readProjectPrivateValues(
+            privateValues[2] ?? "",
+            reviewSession,
+          )
+        : this.api.readProfilePrivateValues(
+            privateValues[2] ?? "",
+            reviewSession,
+          );
+    }
     const localReviews = path.match(
       /^\/api\/operator\/tasks\/([^/]+)\/local-reviews$/,
     );

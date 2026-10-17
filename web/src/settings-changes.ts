@@ -24,7 +24,28 @@ export type ProfileConfigurationData = z.infer<
 >["data"];
 export type RuntimeSettingsData = z.infer<typeof runtimeSettingsSchema>["data"];
 
-const PRIVATE_REPLACED = "(private, not shown after saving)";
+/** Text compared as a textarea returns it: line breaks are LF whatever they were saved as. */
+export const sameText = (a: string, b: string | undefined) =>
+  b !== undefined && a.replace(/\r\n?/g, "\n") === b.replace(/\r\n?/g, "\n");
+/**
+ * How a private text field differs from the text the operator revealed: `null` when it
+ * was never edited or equals the revealed text. A field edited while its revealed
+ * baseline is unknown counts as edited, so the save carries it and the version fence
+ * decides.
+ */
+export function privateEdit(
+  value: Values[string] | undefined,
+  revealed: string | undefined,
+) {
+  if (typeof value !== "string" || sameText(value, revealed)) return null;
+  return value === "" ? "cleared" : "edited";
+}
+/** The command field for an edited private text; empty when it was not edited. */
+export const privateField = (
+  name: "instructions" | "guidance",
+  value: Values[string] | undefined,
+  revealed: string | undefined,
+) => (privateEdit(value, revealed) ? { [name]: String(value) } : {});
 const nameOf = (
   profiles: { id: string; name: string | null }[],
   id: string | null | undefined,
@@ -42,7 +63,11 @@ function referenceChange(v: Values) {
       : [];
 }
 
-export function projectChanges(data: ProjectConfigurationData, v: Values) {
+export function projectChanges(
+  data: ProjectConfigurationData,
+  v: Values,
+  revealed?: string,
+) {
   const lines: string[] = [];
   const name = data.project.name ?? "";
   if (v.name !== undefined && v.name !== name)
@@ -54,12 +79,16 @@ export function projectChanges(data: ProjectConfigurationData, v: Values) {
     );
   if (v.paused !== undefined && Boolean(v.paused) !== data.project.paused)
     lines.push(v.paused ? "Pause project" : "Unpause project");
-  if (v.replaceInstructions)
-    lines.push(`Instructions replaced ${PRIVATE_REPLACED}`);
+  const instructions = privateEdit(v.instructions, revealed);
+  if (instructions) lines.push(`Instructions ${instructions}`);
   return lines;
 }
 
-export function profileChanges(data: ProfileConfigurationData, v: Values) {
+export function profileChanges(
+  data: ProfileConfigurationData,
+  v: Values,
+  revealed?: string,
+) {
   const lines: string[] = [];
   const name = data.profile.name ?? "";
   if (v.name !== undefined && v.name !== name)
@@ -72,8 +101,8 @@ export function profileChanges(data: ProfileConfigurationData, v: Values) {
       : v.capabilities !== undefined && v.capabilities !== data.capabilities
   )
     lines.push("Capabilities edited");
-  if (v.replaceInstructions)
-    lines.push(`Instructions replaced ${PRIVATE_REPLACED}`);
+  const instructions = privateEdit(v.instructions, revealed);
+  if (instructions) lines.push(`Instructions ${instructions}`);
   if (v.revoked !== undefined && Boolean(v.revoked) !== data.profile.revoked)
     lines.push(`${v.revoked ? "Revoke" : "Restore"} ${name || "profile"}`);
   if (v.runtimeHarness !== undefined && runtimeChanged(data.runtime, v))
@@ -91,7 +120,11 @@ const selectable = (data: ProjectConfigurationData, ids: string[]) =>
 export const savedCandidates = (data: ProjectConfigurationData) =>
   selectable(data, data.routing.candidateProfileIds);
 
-export function routingChanges(data: ProjectConfigurationData, v: Values) {
+export function routingChanges(
+  data: ProjectConfigurationData,
+  v: Values,
+  revealed?: string,
+) {
   const lines: string[] = [];
   if (v.enabled !== undefined && Boolean(v.enabled) !== data.routing.enabled)
     lines.push(v.enabled ? "Routing enabled" : "Routing disabled");
@@ -104,7 +137,8 @@ export function routingChanges(data: ProjectConfigurationData, v: Values) {
   for (const id of saved)
     if (!next.includes(id))
       lines.push(`Candidate removed: ${nameOf(data.profiles, id)}`);
-  if (v.replaceGuidance) lines.push(`Guidance replaced ${PRIVATE_REPLACED}`);
+  const guidance = privateEdit(v.guidance, revealed);
+  if (guidance) lines.push(`Routing guidance ${guidance}`);
   return [...lines, ...referenceChange(v)];
 }
 
@@ -112,6 +146,7 @@ export function routingCommand(
   projectId: string,
   v: Values,
   data: ProjectConfigurationData,
+  revealed?: string,
 ) {
   return {
     type: "routing.configure",
@@ -120,7 +155,7 @@ export function routingCommand(
     expectedVersion: Number(v.expectedVersion),
     enabled: Boolean(v.enabled),
     candidateProfileIds: selectable(data, list(v.candidateProfileIds)),
-    ...(v.replaceGuidance ? { guidance: v.guidance } : {}),
+    ...privateField("guidance", v.guidance, revealed),
     ...reference(v),
   };
 }
@@ -133,9 +168,28 @@ export function reference(v: Values) {
       : {};
 }
 
-/** One row of the GitHub source form. Saved rows carry no private definition. */
+/**
+ * One row of the GitHub source form. A saved row carries no private definition until the
+ * operator edits it: `query` (search) and `path` (repository link) then hold the edit.
+ */
 export type SourceRow = Record<string, string | boolean>;
 type Source = ProjectConfigurationData["source"];
+/** What the session-only read returned for this source version: the baseline of any edit. */
+export interface SourcePrivate {
+  searches: { id: string; query: string }[];
+  repositories: { repositoryId: string; path: string }[];
+}
+/** A saved search row whose query the operator changed from the loaded one. */
+const queryEdited = (r: SourceRow, known?: SourcePrivate) =>
+  Boolean(r.keep) &&
+  typeof r.query === "string" &&
+  r.query !== known?.searches.find((s) => s.id === r.id)?.query;
+/** A saved repository link whose local path the operator changed from the loaded one. */
+const pathEdited = (r: SourceRow, known?: SourcePrivate) =>
+  Boolean(r.keep) &&
+  typeof r.path === "string" &&
+  r.path !==
+    known?.repositories.find((x) => x.repositoryId === r.repositoryId)?.path;
 
 export function parseRows(value: Values[string] | undefined): SourceRow[] {
   try {
@@ -209,7 +263,7 @@ function newSelectionLine(r: SourceRow) {
       ? `Repository ${r.owner}/${r.name}`
       : r.kind === "project"
         ? `GitHub Project ${r.projectNodeId} · filter private`
-        : "Search (query private)";
+        : "Search";
   return `+ ${r.id} · ${what} · added inactive`;
 }
 
@@ -219,7 +273,11 @@ const draftedRule = (v: Values) => {
   return conditions.length ? { mode: v.mode, conditions } : null;
 };
 
-export function sourceChanges(source: Source, v: Values) {
+export function sourceChanges(
+  source: Source,
+  v: Values,
+  known?: SourcePrivate,
+) {
   const lines: string[] = [];
   const selections = parseRows(v.selections),
     repositories = parseRows(v.repositories),
@@ -230,6 +288,8 @@ export function sourceChanges(source: Source, v: Values) {
         `− ${r.id} · ${kindLabel(r.kind)}${r.descriptor ? ` ${r.descriptor}` : ""}`,
       );
     else if (!r.keep && !r.removed) lines.push(newSelectionLine(r));
+    else if (!r.removed && queryEdited(r, known))
+      lines.push(`Search query edited for ${r.id}`);
   // Saved rows the form does not hold (saved elsewhere since it loaded) are removed by a save.
   for (const s of source.selections)
     if (s.id !== null && !selections.some((r) => r.id === s.id))
@@ -264,8 +324,8 @@ export function sourceChanges(source: Source, v: Values) {
       );
       if (saved && saved.ref !== r.ref)
         lines.push(`Ref for ${r.repositoryId}: ${saved.ref} → ${r.ref}`);
-      if (r.replacePath)
-        lines.push(`Local path replaced for ${r.repositoryId} (private)`);
+      if (pathEdited(r, known))
+        lines.push(`Local path changed for ${r.repositoryId}`);
     }
   }
   for (const s of source.repositories)
@@ -341,22 +401,42 @@ export function adoptSourceRows(source: Source, v: Values) {
       (r) =>
         r.keep &&
         !r.removed &&
-        (r.ref !== r.savedRef || r.replacePath) &&
+        (r.ref !== r.savedRef || typeof r.path === "string") &&
         !loaded.repositories.some((s) => s.repositoryId === r.repositoryId),
     )
     .map((r) => String(r.repositoryId));
+  // Saved sources the operator edited or marked for removal that were removed elsewhere, or
+  // replaced by a source of another kind under the same id: the edit does not fit the new
+  // source, so it is dropped rather than carried onto it.
+  const droppedSelections = parseRows(v.selections)
+    .filter((r) => {
+      if (!r.keep) return false;
+      const latest = loaded.selections.find((s) => s.id === r.id);
+      return latest
+        ? (latest.kind !== r.kind || latest.descriptor !== r.descriptor) &&
+            (Boolean(r.removed) || typeof r.query === "string")
+        : !r.removed && typeof r.query === "string";
+    })
+    .map((r) => String(r.id));
   return {
-    dropped,
+    dropped: [...droppedSelections, ...dropped],
     selections: JSON.stringify(
       merge(
         selections,
         loaded.selections,
         (r) => r.id,
-        (r, latest) => ({
-          ...latest,
-          rowKey: r.rowKey ?? crypto.randomUUID(),
-          ...(r.removed ? { removed: true } : {}),
-        }),
+        (r, latest) =>
+          latest.kind !== r.kind || latest.descriptor !== r.descriptor
+            ? { ...latest, rowKey: r.rowKey ?? crypto.randomUUID() }
+            : {
+                ...latest,
+                rowKey: r.rowKey ?? crypto.randomUUID(),
+                ...(r.removed ? { removed: true } : {}),
+                // An edited query stays until the operator saves or discards it, with its baseline.
+                ...(typeof r.query === "string"
+                  ? { query: r.query, queryBase: String(r.queryBase ?? "") }
+                  : {}),
+              },
       ),
     ),
     repositories: JSON.stringify(
@@ -401,14 +481,21 @@ export const closedIssueLabels: Record<string, string> = {
   done: "Treat closure as Done",
 };
 
-export function sourceCommand(projectId: string, v: Values) {
+export function sourceCommand(
+  projectId: string,
+  v: Values,
+  known?: SourcePrivate,
+) {
   return {
     type: "github.configure",
     key: v.key,
     projectId,
     expectedVersion: Number(v.expectedVersion),
     selections: live(parseRows(v.selections)).map((r) => {
-      if (r.keep) return { id: r.id, keep: true };
+      if (r.keep)
+        return queryEdited(r, known)
+          ? { id: r.id, kind: "search", query: r.query }
+          : { id: r.id, keep: true };
       const { rowKey: _k, ...row } = r;
       return row;
     }),
@@ -419,7 +506,7 @@ export function sourceCommand(projectId: string, v: Values) {
         ? {
             repositoryId: r.repositoryId,
             ref: r.ref,
-            ...(r.replacePath ? { path: r.path } : {}),
+            ...(pathEdited(r, known) ? { path: r.path } : {}),
           }
         : { repositoryId: r.repositoryId, path: r.path, ref: r.ref },
     ),

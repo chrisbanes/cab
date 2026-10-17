@@ -5,10 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  browserSuite,
-  captureBrowserEvidence,
-} from "../fixtures/browser-diagnostics.js";
+import { browserSuite } from "../fixtures/browser-diagnostics.js";
 const sourceFixtureValue = process.env.FIXTURE_GITHUB;
 before(() => {
   process.env.FIXTURE_GITHUB = "offline-settings-source-value";
@@ -25,6 +22,7 @@ import {
 } from "../fixtures/operator-account.js";
 import { chromium, type Browser, type Page } from "playwright";
 import {
+  captureSettingsEvidence,
   outcomeMessages,
   savedOutcome,
   seedImportedConflict,
@@ -102,8 +100,30 @@ async function openSync(page: Page, project: string) {
     .click();
   await page.getByRole("heading", { name: "Preview and activation" }).waitFor();
 }
+/**
+ * Reveal the project instructions and replace them with `text`, so only the typed text is
+ * on screen afterwards (no evidence capture runs while revealed text is shown).
+ */
+async function typeInstructions(page: Page, text: string) {
+  await page
+    .getByRole("button", { name: "Reveal instructions", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Instructions", exact: true })
+    .fill(text);
+}
+/** The project instructions are kept: a Reveal control and no field. */
+async function instructionsKept(page: Page) {
+  await page
+    .getByRole("button", { name: "Reveal instructions", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("textbox", { name: "Instructions" }).count(),
+    0,
+  );
+}
 async function capture(page: Page, name: string) {
-  return captureBrowserEvidence(page, name);
+  return captureSettingsEvidence(page, name);
 }
 async function signIn(
   page: Page,
@@ -311,7 +331,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
       `${width}px page has no overflow`,
     );
     if (width === 320)
-      await captureBrowserEvidence(page, "320-long-source-observations-button");
+      await capture(page, "320-long-source-observations-button");
   }
   assert.equal(f.runtime.turns, 0);
 });
@@ -335,17 +355,21 @@ test("unknown configuration survives scope navigation and exact reconciliation w
   page.setDefaultTimeout(5000);
   const posts: string[] = [];
   const readBodies: string[] = [];
+  const reveals: string[] = [];
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("response", async (r) => {
-    if (r.url().includes("/api/operator/") && r.request().method() === "GET")
+    if (r.url().endsWith("/private-values")) reveals.push(r.url());
+    else if (
+      r.url().includes("/api/operator/") &&
+      r.request().method() === "GET"
+    )
       readBodies.push(await r.text().catch(() => ""));
   });
   await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
-  await page.getByLabel("Replace instructions", { exact: true }).check();
-  await page
-    .getByLabel("New instructions", { exact: true })
-    .fill("PRIVATE WRITE ONLY DRAFT");
+  assert.equal(reveals.length, 0, "nothing is read before Reveal");
+  await typeInstructions(page, "PRIVATE WRITE ONLY DRAFT");
+  assert.equal(reveals.length, 1);
   await page.route("**/api/operator/commands", async (route) => {
     posts.push(route.request().postData() ?? "");
     await route.fetch();
@@ -370,7 +394,9 @@ test("unknown configuration survives scope navigation and exact reconciliation w
     .waitFor();
   assert.equal(posts.length, 1);
   assert.equal(
-    await page.getByLabel("New instructions", { exact: true }).inputValue(),
+    await page
+      .getByRole("textbox", { name: "Instructions", exact: true })
+      .inputValue(),
     "PRIVATE WRITE ONLY DRAFT",
   );
   assert.equal(
@@ -429,15 +455,8 @@ test("unknown configuration survives scope navigation and exact reconciliation w
     ),
     false,
   );
-  const replacement = page.getByLabel("Replace instructions", { exact: true });
-  const loadedDeadline = Date.now() + 5000;
-  while ((await replacement.isDisabled()) && Date.now() < loadedDeadline)
-    await page.waitForTimeout(10);
-  assert.equal(await replacement.isEnabled(), true);
-  await page.getByLabel("Replace instructions", { exact: true }).check();
-  await page
-    .getByLabel("New instructions", { exact: true })
-    .fill("PRIVATE EXPIRES");
+  await instructionsKept(page);
+  await typeInstructions(page, "PRIVATE EXPIRES");
   f.advanceClock(61_000);
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await page.getByLabel("Password", { exact: true }).waitFor();
@@ -446,10 +465,7 @@ test("unknown configuration survives scope navigation and exact reconciliation w
   await page
     .getByRole("navigation", { name: "Project configuration sections" })
     .waitFor();
-  assert.equal(
-    await page.getByLabel("Replace instructions", { exact: true }).isChecked(),
-    false,
-  );
+  await instructionsKept(page);
   assert.equal(posts.length, 3);
   assert.deepEqual(errors, []);
 });
@@ -2132,14 +2148,15 @@ test("new private input survives a detached receipt and old-session 401 after sa
       errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("response", async (r) => {
-      if (r.url().includes("/api/operator/") && r.request().method() === "GET")
+      if (
+        r.url().includes("/api/operator/") &&
+        !r.url().endsWith("/private-values") &&
+        r.request().method() === "GET"
+      )
         publicBodies.push(await r.text().catch(() => ""));
     });
     await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
-    await page.getByLabel("Replace instructions", { exact: true }).check();
-    await page
-      .getByLabel("New instructions", { exact: true })
-      .fill("PRIVATE OLD DELAYED INPUT");
+    await typeInstructions(page, "PRIVATE OLD DELAYED INPUT");
     let release!: () => void, committed!: () => void;
     const held = new Promise<void>((done) => {
       committed = done;
@@ -2196,16 +2213,8 @@ test("new private input survives a detached receipt and old-session 401 after sa
     await page
       .getByRole("navigation", { name: "Project configuration sections" })
       .waitFor();
-    assert.equal(
-      await page
-        .getByLabel("Replace instructions", { exact: true })
-        .isChecked(),
-      false,
-    );
-    await page.getByLabel("Replace instructions", { exact: true }).check();
-    await page
-      .getByLabel("New instructions", { exact: true })
-      .fill("PRIVATE NEW SESSION INPUT");
+    await instructionsKept(page);
+    await typeInstructions(page, "PRIVATE NEW SESSION INPUT");
     assert.equal(posts.length, 1);
     const delivered = page.waitForResponse((r) =>
       r.url().endsWith("/api/operator/commands"),
@@ -2226,11 +2235,15 @@ test("new private input survives a detached receipt and old-session 401 after sa
         true,
       );
     assert.equal(
-      await page.getByLabel("New instructions", { exact: true }).inputValue(),
+      await page
+        .getByRole("textbox", { name: "Instructions", exact: true })
+        .inputValue(),
       "PRIVATE NEW SESSION INPUT",
     );
     assert.equal(
-      await page.getByLabel("New instructions", { exact: true }).isDisabled(),
+      await page
+        .getByRole("textbox", { name: "Instructions", exact: true })
+        .isDisabled(),
       false,
     );
     assert.equal(
@@ -2271,12 +2284,7 @@ test("new private input survives a detached receipt and old-session 401 after sa
     await page
       .getByRole("navigation", { name: "Project configuration sections" })
       .waitFor();
-    assert.equal(
-      await page
-        .getByLabel("Replace instructions", { exact: true })
-        .isChecked(),
-      false,
-    );
+    await instructionsKept(page);
     assert.equal(posts.length, 1);
     assert.equal(f.runtime.turns, 0);
     assert.deepEqual(errors, []);
@@ -2375,15 +2383,14 @@ test("aborted old configuration read preserves new input and a current logout 40
       .isEnabled(),
     true,
   );
-  await page.getByLabel("Replace instructions", { exact: true }).check();
-  await page
-    .getByLabel("New instructions", { exact: true })
-    .fill("PRIVATE NEW READ OWNER");
+  await typeInstructions(page, "PRIVATE NEW READ OWNER");
   assert.match((await oldReadFailure).failure()?.errorText ?? "", /ABORTED/i);
   release();
   await handled;
   assert.equal(
-    await page.getByLabel("New instructions", { exact: true }).inputValue(),
+    await page
+      .getByRole("textbox", { name: "Instructions", exact: true })
+      .inputValue(),
     "PRIVATE NEW READ OWNER",
   );
   assert.equal(await page.getByLabel("Password", { exact: true }).count(), 0);

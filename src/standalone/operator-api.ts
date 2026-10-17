@@ -79,8 +79,10 @@ import {
   operationTypeSchema,
   operatorCommandSchema,
   profileConfigurationSchema,
+  profilePrivateValuesSchema,
   profileInstructionsSchema,
   projectConfigurationSchema,
+  projectPrivateValuesSchema,
   projectInstructionsSchema,
   projectSchema,
   questionReadSchema,
@@ -4977,6 +4979,61 @@ export class OperatorApi {
         instructionRevision: Number(row.version),
         capabilities: this.safe(row.capabilities, excluded),
         runtime,
+      },
+      observedAt: Date.now(),
+    });
+  }
+  /** Exact private text for a signed-in web session only; nothing here is logged, recorded or redacted. */
+  readProjectPrivateValues(
+    projectId: string,
+    context?: OperatorReviewSessionContext,
+  ) {
+    this.requireReviewSession(context);
+    const p = this.requireProject(projectId),
+      d = this.domain(),
+      r = d.routing(projectId),
+      g = d.githubConfiguration(projectId);
+    return projectPrivateValuesSchema.parse({
+      data: {
+        project: {
+          version: Number(p.version),
+          instructionsRevision: Number(p.instructionsRevision),
+          instructions: String(p.instructions),
+        },
+        routing: { version: Number(r.version), guidance: String(r.guidance) },
+        source: {
+          version: g.version,
+          searches: g.selections.flatMap((s) =>
+            s.kind === "search" ? [{ id: s.id, query: s.query }] : [],
+          ),
+          repositories: g.repositories.map((x) => ({
+            repositoryId: x.repositoryId,
+            path: x.path,
+          })),
+        },
+      },
+      observedAt: Date.now(),
+    });
+  }
+  readProfilePrivateValues(
+    profileId: string,
+    context?: OperatorReviewSessionContext,
+  ) {
+    this.requireReviewSession(context);
+    uuid.parse(profileId);
+    const row = this.domain()
+      .profiles()
+      .find((p) => p.id === profileId);
+    if (!row) throw new OperatorApiError(404, "not-found");
+    return profilePrivateValuesSchema.parse({
+      data: {
+        profile: {
+          version: Number(row.version),
+          instructions: String(
+            this.domain().profileRevision(profileId, Number(row.version))
+              .instructions,
+          ),
+        },
       },
       observedAt: Date.now(),
     });

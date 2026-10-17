@@ -97,3 +97,42 @@ test("an unauthenticated background read clears the resource", async () => {
   assert.equal(controller.state.status, "empty");
   assert.equal(controller.state.data, null);
 });
+
+test("replies that arrive out of order publish only the latest read, whether it succeeds or fails", async () => {
+  const { controller } = await freshController("first");
+  const older = deferred<string>();
+  const newer = deferred<string>();
+  const first = controller.load(() => older.promise);
+  const second = controller.load(() => newer.promise);
+  // The newer read answers first, then the older one: the older never replaces it.
+  newer.resolve("newer");
+  await second;
+  older.resolve("older");
+  await first;
+  assert.equal(controller.state.data, "newer");
+  assert.equal(controller.state.status, "fresh");
+
+  // An older read that fails after a newer one succeeded does not turn it into an error.
+  const failing = deferred<string>();
+  const latest = deferred<string>();
+  const doomed = controller.load(() => failing.promise);
+  const current = controller.load(() => latest.promise);
+  latest.resolve("latest");
+  await current;
+  failing.reject(new Error("unavailable"));
+  await doomed;
+  assert.equal(controller.state.data, "latest");
+  assert.equal(controller.state.error, null);
+
+  // And the latest read failing is the failure that shows.
+  const last = deferred<string>();
+  const superseded = deferred<string>();
+  const early = controller.load(() => superseded.promise);
+  const final = controller.load(() => last.promise);
+  last.reject(new Error("unavailable"));
+  await final;
+  superseded.resolve("ignored");
+  await early;
+  assert.equal(controller.state.error, "unavailable");
+  assert.equal(controller.state.data, "latest");
+});
