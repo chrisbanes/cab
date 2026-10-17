@@ -587,6 +587,14 @@ test("every CLI error code has a one-line Fix remedy", () => {
     ),
     "site remedy.",
   );
+  // Text inside a fix cannot start a second Fix line.
+  assert.equal(
+    remedyFor(
+      new CliError("conflict", "x", { fix: "a\nFix: b\r\nc" }),
+      "conflict",
+    ),
+    "a Fix: b c",
+  );
   for (const fix of [
     ...Object.values(DEFAULT_FIX),
     ...Object.values(CATEGORY_FIX),

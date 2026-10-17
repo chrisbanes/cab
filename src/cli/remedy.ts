@@ -81,7 +81,7 @@ export const CATEGORY_FIX: Record<string, string> = {
 /** The one-line remedy for a human error: the site's own, else by code, else by category. */
 export function remedyFor(error: CliError, category: string): string {
   const key = error.extra.request?.key;
-  return (
+  const fix =
     error.extra.fix ??
     (error.code === "command-outcome-unknown" && key
       ? `Do not assume either outcome: repeat the same command with --request-id ${key} to settle it.`
@@ -89,8 +89,9 @@ export function remedyFor(error: CliError, category: string): string {
     DEFAULT_FIX[error.code] ??
     CATEGORY_FIX[category] ??
     CATEGORY_FIX.unavailable ??
-    "Run 'ensemble --help'."
-  );
+    "Run 'ensemble --help'.";
+  // A path or ID inside a fix must not be able to start a second line.
+  return fix.replace(/\s*[\r\n]+\s*/g, " ");
 }
 
 /** One shell word: bare when it is plain, else single-quoted so nothing in it expands. */
