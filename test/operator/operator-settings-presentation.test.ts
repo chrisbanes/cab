@@ -8,6 +8,7 @@ import {
   adoptSourceRows,
   capacityChanges,
   nextSelectionId,
+  parseRows,
   profileChanges,
   profilePrivateFields,
   projectChanges,
@@ -295,7 +296,7 @@ test("routing lines and command keep guidance out unless edited", () => {
   assert.equal((edited as Record<string, unknown>).guidance, "NEW");
 });
 
-test("source rows, change lines and command use keep markers and never paths", () => {
+test("source rows, change lines and command use keep markers and never put a value in a line", () => {
   const c = config();
   const rows = sourceRowsFrom(c.source);
   assert.equal(rows.incomplete, false);
@@ -316,7 +317,6 @@ test("source rows, change lines and command use keep markers and never paths", (
       {
         ...rows.repositories[0],
         ref: "dev",
-        replacePath: true,
         path: "/PRIVATE",
       },
     ]),
@@ -328,7 +328,7 @@ test("source rows, change lines and command use keep markers and never paths", (
     "+ S-4 · Search (query private) · added inactive",
     "Readiness: any of 1 condition",
     "Ref for acme/atlas: main → dev",
-    "Local path replaced for acme/atlas (private)",
+    "Local path changed for acme/atlas",
     "Credential reference: cleared",
   ]);
   assert.equal(lines.join(" ").includes("PRIVATE"), false);
@@ -416,6 +416,113 @@ test("source rows, change lines and command use keep markers and never paths", (
     }).incomplete,
     true,
   );
+});
+
+test("saved search queries and local paths edit in place and unchanged ones stay kept", () => {
+  const c = config();
+  c.source.selections.splice(1, 0, {
+    id: "S-2",
+    kind: "search",
+    descriptor: null,
+    active: false,
+  });
+  const known = {
+    searches: [{ id: "S-2", query: "PRIVATE QUERY" }],
+    repositories: [{ repositoryId: "acme/atlas", path: "/PRIVATE/PATH" }],
+  };
+  const rows = sourceRowsFrom(c.source);
+  const values = (edit: { query?: string; path?: string } = {}) => ({
+    key: "k",
+    expectedVersion: "4",
+    mode: "all",
+    conditions: JSON.stringify(rows.conditions),
+    selections: JSON.stringify(
+      rows.selections.map((r) =>
+        r.id === "S-2" && edit.query !== undefined
+          ? { ...r, query: edit.query }
+          : r,
+      ),
+    ),
+    repositories: JSON.stringify(
+      rows.repositories.map((r) =>
+        edit.path !== undefined ? { ...r, path: edit.path } : r,
+      ),
+    ),
+    referenceMode: "preserve",
+  });
+  const kept = [
+    { id: "S-1", keep: true },
+    { id: "S-2", keep: true },
+    { id: "S-3", keep: true },
+  ];
+  // Untouched rows, with the values read or not, are kept and nothing is listed.
+  for (const read of [known, undefined]) {
+    assert.deepEqual(sourceChanges(c.source, values(), read), []);
+    const command = sourceCommand(projectId, values(), read);
+    assert.deepEqual(command.selections, kept);
+    assert.deepEqual(command.repositories, [
+      { repositoryId: "acme/atlas", ref: "main" },
+    ]);
+  }
+  // Typing the revealed value back is not a change.
+  const same = values({ query: "PRIVATE QUERY", path: "/PRIVATE/PATH" });
+  assert.deepEqual(sourceChanges(c.source, same, known), []);
+  assert.deepEqual(sourceCommand(projectId, same, known).selections, kept);
+  assert.deepEqual(sourceCommand(projectId, same, known).repositories, [
+    { repositoryId: "acme/atlas", ref: "main" },
+  ]);
+  // An edit keeps the id, sends the whole search and names no value.
+  const edited = values({ query: "NEW QUERY", path: "/NEW/PATH" });
+  const lines = sourceChanges(c.source, edited, known);
+  assert.deepEqual(lines, [
+    "Search query edited for S-2",
+    "Local path changed for acme/atlas",
+  ]);
+  assert.equal(/QUERY|PATH/.test(lines.join(" ")), false);
+  const command = sourceCommand(projectId, edited, known);
+  assert.deepEqual(command.selections, [
+    { id: "S-1", keep: true },
+    { id: "S-2", kind: "search", query: "NEW QUERY" },
+    { id: "S-3", keep: true },
+  ]);
+  assert.deepEqual(command.repositories, [
+    { repositoryId: "acme/atlas", ref: "main", path: "/NEW/PATH" },
+  ]);
+  // An edit made while the loaded value is unknown still counts, so the version fence decides.
+  assert.deepEqual(sourceChanges(c.source, edited), lines);
+  // A removed row lists its removal, not an edit.
+  assert.deepEqual(
+    sourceChanges(
+      c.source,
+      {
+        ...edited,
+        selections: JSON.stringify(
+          parseRows(edited.selections).map((r) =>
+            r.id === "S-2" ? { ...r, removed: true } : r,
+          ),
+        ),
+      },
+      known,
+    ).filter((l) => l.includes("S-2")),
+    ["− S-2 · Search"],
+  );
+  // Adopting a newer version keeps an edit, and drops one whose row was removed elsewhere.
+  const adopted = adoptSourceRows(c.source, edited);
+  assert.equal(
+    parseRows(adopted.selections).find((r) => r.id === "S-2")?.query,
+    "NEW QUERY",
+  );
+  assert.equal(parseRows(adopted.repositories)[0]?.path, "/NEW/PATH");
+  assert.deepEqual(adopted.dropped, []);
+  const without = {
+    ...c.source,
+    selections: c.source.selections.filter((s) => s.id !== "S-2"),
+    repositories: [],
+  };
+  assert.deepEqual(adoptSourceRows(without, edited).dropped, [
+    "S-2",
+    "acme/atlas",
+  ]);
 });
 
 test("no readiness rule loads no condition, saves null and never clears an unavailable rule silently", () => {

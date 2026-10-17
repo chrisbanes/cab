@@ -170,9 +170,28 @@ export function reference(v: Values) {
       : {};
 }
 
-/** One row of the GitHub source form. Saved rows carry no private definition. */
+/**
+ * One row of the GitHub source form. A saved row carries no private definition until the
+ * operator edits it: `query` (search) and `path` (repository link) then hold the edit.
+ */
 export type SourceRow = Record<string, string | boolean>;
 type Source = ProjectConfigurationData["source"];
+/** What the session-only read returned for this source version: the baseline of any edit. */
+export interface SourcePrivate {
+  searches: { id: string; query: string }[];
+  repositories: { repositoryId: string; path: string }[];
+}
+/** A saved search row whose query the operator changed from the loaded one. */
+const queryEdited = (r: SourceRow, known?: SourcePrivate) =>
+  Boolean(r.keep) &&
+  typeof r.query === "string" &&
+  r.query !== known?.searches.find((s) => s.id === r.id)?.query;
+/** A saved repository link whose local path the operator changed from the loaded one. */
+const pathEdited = (r: SourceRow, known?: SourcePrivate) =>
+  Boolean(r.keep) &&
+  typeof r.path === "string" &&
+  r.path !==
+    known?.repositories.find((x) => x.repositoryId === r.repositoryId)?.path;
 
 export function parseRows(value: Values[string] | undefined): SourceRow[] {
   try {
@@ -256,7 +275,11 @@ const draftedRule = (v: Values) => {
   return conditions.length ? { mode: v.mode, conditions } : null;
 };
 
-export function sourceChanges(source: Source, v: Values) {
+export function sourceChanges(
+  source: Source,
+  v: Values,
+  known?: SourcePrivate,
+) {
   const lines: string[] = [];
   const selections = parseRows(v.selections),
     repositories = parseRows(v.repositories),
@@ -267,6 +290,8 @@ export function sourceChanges(source: Source, v: Values) {
         `− ${r.id} · ${kindLabel(r.kind)}${r.descriptor ? ` ${r.descriptor}` : ""}`,
       );
     else if (!r.keep && !r.removed) lines.push(newSelectionLine(r));
+    else if (!r.removed && queryEdited(r, known))
+      lines.push(`Search query edited for ${r.id}`);
   // Saved rows the form does not hold (saved elsewhere since it loaded) are removed by a save.
   for (const s of source.selections)
     if (s.id !== null && !selections.some((r) => r.id === s.id))
@@ -301,8 +326,8 @@ export function sourceChanges(source: Source, v: Values) {
       );
       if (saved && saved.ref !== r.ref)
         lines.push(`Ref for ${r.repositoryId}: ${saved.ref} → ${r.ref}`);
-      if (r.replacePath)
-        lines.push(`Local path replaced for ${r.repositoryId} (private)`);
+      if (pathEdited(r, known))
+        lines.push(`Local path changed for ${r.repositoryId}`);
     }
   }
   for (const s of source.repositories)
@@ -378,12 +403,22 @@ export function adoptSourceRows(source: Source, v: Values) {
       (r) =>
         r.keep &&
         !r.removed &&
-        (r.ref !== r.savedRef || r.replacePath) &&
+        (r.ref !== r.savedRef || typeof r.path === "string") &&
         !loaded.repositories.some((s) => s.repositoryId === r.repositoryId),
     )
     .map((r) => String(r.repositoryId));
+  // Saved search queries the operator edited but that were removed elsewhere.
+  const droppedQueries = parseRows(v.selections)
+    .filter(
+      (r) =>
+        r.keep &&
+        !r.removed &&
+        typeof r.query === "string" &&
+        !loaded.selections.some((s) => s.id === r.id),
+    )
+    .map((r) => String(r.id));
   return {
-    dropped,
+    dropped: [...droppedQueries, ...dropped],
     selections: JSON.stringify(
       merge(
         selections,
@@ -393,6 +428,8 @@ export function adoptSourceRows(source: Source, v: Values) {
           ...latest,
           rowKey: r.rowKey ?? crypto.randomUUID(),
           ...(r.removed ? { removed: true } : {}),
+          // An edited query stays until the operator saves or discards it.
+          ...(typeof r.query === "string" ? { query: r.query } : {}),
         }),
       ),
     ),
@@ -438,14 +475,21 @@ export const closedIssueLabels: Record<string, string> = {
   done: "Treat closure as Done",
 };
 
-export function sourceCommand(projectId: string, v: Values) {
+export function sourceCommand(
+  projectId: string,
+  v: Values,
+  known?: SourcePrivate,
+) {
   return {
     type: "github.configure",
     key: v.key,
     projectId,
     expectedVersion: Number(v.expectedVersion),
     selections: live(parseRows(v.selections)).map((r) => {
-      if (r.keep) return { id: r.id, keep: true };
+      if (r.keep)
+        return queryEdited(r, known)
+          ? { id: r.id, kind: "search", query: r.query }
+          : { id: r.id, keep: true };
       const { rowKey: _k, ...row } = r;
       return row;
     }),
@@ -456,7 +500,7 @@ export function sourceCommand(projectId: string, v: Values) {
         ? {
             repositoryId: r.repositoryId,
             ref: r.ref,
-            ...(r.replacePath ? { path: r.path } : {}),
+            ...(pathEdited(r, known) ? { path: r.path } : {}),
           }
         : { repositoryId: r.repositoryId, path: r.path, ref: r.ref },
     ),

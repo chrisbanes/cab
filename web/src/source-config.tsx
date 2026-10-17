@@ -1,3 +1,4 @@
+import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
 import { noRuleText } from "../../src/operator/readiness-text.js";
 import { useEffect, useState, type ReactNode } from "react";
 import { CircleCheck } from "lucide-react";
@@ -31,6 +32,7 @@ import {
   submitDraft,
   useDraft,
   useLoadedDraft,
+  usePrivateValues,
 } from "./settings.js";
 import { ghLoginCopy } from "./discovery-credential.js";
 import {
@@ -57,6 +59,23 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const observed = p.observations.state.data?.data.projects.find(
     (r) => r.projectId === projectId,
   );
+  // Saved search queries and local paths load with the tab; they show only while read at
+  // the source version now loaded, and otherwise read as unavailable until read again.
+  const priv = usePrivateValues(
+    p.client,
+    p.session,
+    `/api/operator/projects/${projectId}/private-values`,
+    projectPrivateValuesSchema,
+    true,
+  );
+  const privateData = priv.state.data?.data.source;
+  const known =
+    privateData?.version === data.source.version ? privateData : undefined;
+  const staleKnown = privateData !== undefined && known === undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read once per source version.
+  useEffect(() => {
+    if (staleKnown && !priv.state.pending) priv.refresh();
+  }, [data.source.version]);
   // The panel renders after the configuration read, so the browser cannot scroll to it.
   useEffect(() => {
     if (location.hash === `#${readinessAnchor}`)
@@ -81,7 +100,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     conditions = parseRows(v.conditions),
     repositories = parseRows(v.repositories),
     isLocked = locked(d);
-  const lines = sourceChanges(data.source, v),
+  const lines = sourceChanges(data.source, v, known),
     removesAll = removesAllAccess(data.source, v),
     stale = staleSourceRows(data.source, v),
     duplicates = duplicateSourceIds(v),
@@ -147,7 +166,14 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
       d.errors[`${path}.${name}`]
     );
   };
-  const input = (field: string, index: number, name: string, label: string) => (
+  const input = (
+    field: string,
+    index: number,
+    name: string,
+    label: string,
+    /** What shows until the operator edits the field. */
+    fallback = "",
+  ) => (
     <label className="field body" htmlFor={`source-${field}-${index}-${name}`}>
       {label}
       <Input
@@ -158,11 +184,39 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         aria-describedby={
           rowError(field, index, name) ? `source-${field}-error` : undefined
         }
-        value={String(parseRows(v[field])[index]?.[name] ?? "")}
+        value={String(parseRows(v[field])[index]?.[name] ?? fallback)}
         onChange={(e) => update(field, index, { [name]: e.target.value })}
       />
     </label>
   );
+  /** A saved private value, editable once read; otherwise unavailable with a way to read it again. */
+  const savedValue = (
+    field: string,
+    index: number,
+    name: "query" | "path",
+    label: string,
+    unavailable: string,
+    baseline: string | undefined,
+  ) => {
+    const edited = typeof parseRows(v[field])[index]?.[name] === "string";
+    if (baseline !== undefined || edited)
+      return input(field, index, name, label, baseline ?? "");
+    return (
+      <div className="field body">
+        <span>{label}</span>
+        <p className="metadata muted">
+          {priv.state.pending ? `Loading ${label.toLowerCase()}…` : unavailable}
+        </p>
+        {!priv.state.pending && (
+          <div>
+            <Button type="button" variant="secondary" onClick={priv.refresh}>
+              Try again
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
   const errorText = (prefix: string, id: string, text: string): ReactNode =>
     Object.keys(d.errors).some((k) => k.startsWith(prefix)) && (
       <p id={id} className="body error-text" role="alert">
@@ -177,7 +231,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
           d,
           p.client,
           p.session,
-          sourceCommand(projectId, v),
+          sourceCommand(projectId, v, known),
           p.refreshConfiguration,
         )
       }
@@ -212,7 +266,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
           <SourceCredential draft={d} source={data.source} />
           <Panel
             title="1 · Discovery sources"
-            description="Private search queries and filters stay hidden; remove a source and add a new one to change it. New sources are added inactive."
+            description="Search queries and local paths show here for you to edit; GitHub Project filters stay hidden. New sources are added inactive."
           >
             <fieldset disabled={isLocked} className="settings-rows">
               <legend className="sr-only">Discovery sources</legend>
@@ -229,13 +283,13 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                         <h3 className="small-heading">
                           {String(r.id)} · {kindLabel(r.kind)}
                         </h3>
-                        <p className="metadata muted">
-                          {r.kind === "search"
-                            ? "Private query kept"
-                            : r.kind === "project"
+                        {r.kind !== "search" && (
+                          <p className="metadata muted">
+                            {r.kind === "project"
                               ? `${r.descriptor} · Filter kept · private`
                               : String(r.descriptor)}
-                        </p>
+                          </p>
+                        )}
                       </div>
                       <StatusBadge
                         tone={r.removed ? "warning" : "idle"}
@@ -257,6 +311,18 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                         {r.removed ? `Undo remove ${r.id}` : `Remove ${r.id}`}
                       </Button>
                     </div>
+                    {r.kind === "search" && !r.removed && (
+                      <div className="settings-fields">
+                        {savedValue(
+                          "selections",
+                          i,
+                          "query",
+                          "Search query",
+                          "Query unavailable",
+                          known?.searches.find((x) => x.id === r.id)?.query,
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="settings-row" key={String(r.rowKey)}>
@@ -379,10 +445,6 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                       <div className="settings-row-heading">
                         <div>
                           <h3 className="small-heading">{name}</h3>
-                          <p className="metadata muted">
-                            Local path:{" "}
-                            {r.replacePath ? "replacing" : "Kept · private"}
-                          </p>
                         </div>
                         {r.removed && (
                           <StatusBadge tone="warning">
@@ -428,33 +490,23 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                           "ref",
                           "Linked repository ref",
                         )}
-                        {r.keep && (
-                          <label
-                            className="body check-field"
-                            htmlFor={`replace-path-${i}`}
-                          >
-                            <Input
-                              id={`replace-path-${i}`}
-                              type="checkbox"
-                              className="native-check size-5 shrink-0 p-0 accent-foreground"
-                              checked={Boolean(r.replacePath)}
-                              onChange={(e) =>
-                                update("repositories", i, {
-                                  replacePath: e.target.checked,
-                                  path: "",
-                                })
-                              }
-                            />
-                            Replace path for {name}
-                          </label>
-                        )}
-                        {(!r.keep || r.replacePath) &&
-                          input(
-                            "repositories",
-                            i,
-                            "path",
-                            "New local repository path",
-                          )}
+                        {r.keep
+                          ? savedValue(
+                              "repositories",
+                              i,
+                              "path",
+                              "Local repository path",
+                              "Local path unavailable",
+                              known?.repositories.find(
+                                (x) => x.repositoryId === r.repositoryId,
+                              )?.path,
+                            )
+                          : input(
+                              "repositories",
+                              i,
+                              "path",
+                              "New local repository path",
+                            )}
                       </div>
                     )}
                   </div>
@@ -679,7 +731,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
             items={[
               "Saving replaces configuration only. It imports no tasks, activates no selection and resumes no work.",
               "Activation is a separate preview step in Sync & placement.",
-              "Private values stay hidden; replacing one is explicit.",
+              "GitHub Project filters stay hidden; remove a source and add a new one to change them.",
               <a key="advanced" href={`/project/${projectId}`}>
                 Open advanced source editor
               </a>,

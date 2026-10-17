@@ -1016,7 +1016,7 @@ test("Routing conflict keeps the checked candidates and a revealed guidance edit
   assert.equal(d.routing(ids.relay).guidance, "EDITED BEFORE A CONFLICT");
 });
 
-test("GitHub source keeps saved rows private and sends keep markers for in-place edits", async (_t, journey) => {
+test("GitHub source shows local paths and search queries plainly and edits them in place", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/projects/:atlas/settings?tab=github",
@@ -1024,17 +1024,25 @@ test("GitHub source keeps saved rows private and sends keep markers for in-place
   const d = f.service.domain();
   await page.getByRole("heading", { name: "1 · Discovery sources" }).waitFor();
   await page.getByText("S-1 · Repository").waitFor();
-  await page.getByText("Private query kept").waitFor();
   await page.getByText("PVT_atlas · Filter kept · private").waitFor();
-  await page.getByText("Local path: Kept · private").waitFor();
+  const path = page.getByLabel("Local repository path", { exact: true });
+  const query = page.getByLabel("Search query", { exact: true });
+  await query.waitFor();
+  const stored = d.githubConfiguration(ids.atlas).repositories[0]?.path ?? "";
+  assert.ok(stored.includes("atlas-checkout"));
+  assert.equal(await path.inputValue(), stored);
+  assert.equal(await query.inputValue(), "PRIVATE SAVED QUERY");
+  assert.equal(await revealReads(page), 1, "loaded once with the tab");
   assert.deepEqual(await unpairedBadges(page.locator("main")), []);
-  const html = await page.content();
-  for (const secret of ["PRIVATE", "atlas-checkout", "FIXTURE_GITHUB"])
-    assert.equal(html.includes(secret), false, secret);
+  // Project filters and credential values stay hidden.
+  for (const secret of ["PRIVATE FILTER", "FIXTURE_GITHUB"])
+    assert.equal(await showsText(page, secret), false, secret);
   const read = await page.request.get(
     `${web.origin}/api/operator/projects/${ids.atlas}/configuration`,
   );
-  assert.equal((await read.text()).includes("PRIVATE"), false);
+  const config = await read.text();
+  for (const secret of ["PRIVATE", "atlas-checkout"])
+    assert.equal(config.includes(secret), false, secret);
   assert.equal(
     await page.getByLabel("Source credential choice", { exact: true }).count(),
     0,
@@ -1043,7 +1051,7 @@ test("GitHub source keeps saved rows private and sends keep markers for in-place
     .getByRole("button", { name: "Change source credential" })
     .waitFor();
   const save = page.getByRole("button", { name: "Save changes", exact: true });
-  assert.equal(await save.isDisabled(), true);
+  assert.equal(await save.isDisabled(), true, "showing values is no change");
   await page.getByRole("button", { name: "Remove S-3" }).click();
   await page.getByText("Will be removed").waitFor();
   await changes(page).getByText("− S-3 · GitHub Project PVT_atlas").waitFor();
@@ -1051,26 +1059,32 @@ test("GitHub source keeps saved rows private and sends keep markers for in-place
   await page
     .getByLabel("Selection kind", { exact: true })
     .selectOption({ label: "Search" });
-  await page
-    .getByLabel("Search query", { exact: true })
-    .fill("PRIVATE NEW QUERY");
+  await query.last().fill("PRIVATE NEW QUERY");
   await page.getByText("New · inactive").waitFor();
   await changes(page)
     .getByText("+ S-4 · Search (query private) · added inactive")
     .waitFor();
-  assert.equal((await changes(page).innerText()).includes("PRIVATE"), false);
-  await captureBrowserEvidence(page, "1366-source");
-  const pathBefore = d.githubConfiguration(ids.atlas).repositories[0]?.path;
+  const checkout = await createCheckout(f.directory, "atlas-checkout-2");
+  await query.first().fill("PRIVATE EDITED QUERY");
+  await path.fill(checkout);
+  const lines = await changes(page).getByRole("listitem").allInnerTexts();
+  assert.deepEqual(lines, [
+    "Search query edited for S-2",
+    "− S-3 · GitHub Project PVT_atlas",
+    "+ S-4 · Search (query private) · added inactive",
+    "Local path changed for acme/atlas",
+  ]);
+  assert.equal(lines.join(" ").includes("PRIVATE"), false);
   const body = commandBody(page);
   await save.click();
   const sent = await body;
   assert.deepEqual(sent.selections, [
     { id: "S-1", keep: true },
-    { id: "S-2", keep: true },
+    { id: "S-2", kind: "search", query: "PRIVATE EDITED QUERY" },
     { id: "S-4", kind: "search", query: "PRIVATE NEW QUERY" },
   ]);
   assert.deepEqual(sent.repositories, [
-    { repositoryId: "acme/atlas", ref: "main" },
+    { repositoryId: "acme/atlas", ref: "main", path: checkout },
   ]);
   await page
     .locator(".settings-status")
@@ -1081,12 +1095,85 @@ test("GitHub source keeps saved rows private and sends keep markers for in-place
     saved.selections.map((s) => s.id),
     ["S-1", "S-2", "S-4"],
   );
+  const search = saved.selections.find((s) => s.id === "S-2");
   assert.equal(
-    saved.selections.find((s) => s.id === "S-2" && s.kind === "search")?.kind,
-    "search",
+    search?.kind === "search" && search.query,
+    "PRIVATE EDITED QUERY",
   );
-  assert.equal(saved.repositories[0]?.path, pathBefore);
+  assert.equal(
+    await realpath(saved.repositories[0]?.path ?? ""),
+    await realpath(checkout),
+  );
+  // The edited source reads inactive until it is previewed again, and the new values show.
   await page.getByText("S-4 · Search").waitFor();
+  const row = page.locator(".settings-row", { hasText: "S-2 · Search" });
+  await row.getByText("Inactive", { exact: true }).waitFor();
+  await page.waitForFunction(
+    (value) =>
+      [...document.querySelectorAll("input")].some((e) => e.value === value),
+    "PRIVATE EDITED QUERY",
+  );
+  assert.equal(
+    await path.inputValue(),
+    saved.repositories[0]?.path,
+    "the saved path is read again at the new version",
+  );
+  assert.equal(await save.isDisabled(), true);
+});
+
+test("GitHub source private values unavailable keeps rows kept and saveable", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  await page.route("**/private-values", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable" } }),
+    }),
+  );
+  await page.reload();
+  await page.getByText("Local path unavailable", { exact: true }).waitFor();
+  await page.getByText("Query unavailable", { exact: true }).waitFor();
+  const retry = page.getByRole("button", { name: "Try again", exact: true });
+  assert.equal(await retry.count(), 2);
+  assert.equal(await showsText(page, "PRIVATE"), false);
+  assert.equal(await page.getByLabel("Local repository path").count(), 0);
+  // Other edits are not blocked, and nothing is sent for the unread values.
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  assert.equal(await save.isDisabled(), true);
+  await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
+  await changes(page).getByText("Ref for acme/atlas: main → HEAD").waitFor();
+  const body = commandBody(page);
+  await save.click();
+  const sent = await body;
+  assert.deepEqual(sent.selections, [
+    { id: "S-1", keep: true },
+    { id: "S-2", keep: true },
+    { id: "S-3", keep: true },
+  ]);
+  assert.deepEqual(sent.repositories, [
+    { repositoryId: "acme/atlas", ref: "HEAD" },
+  ]);
+  await savedOutcome(page);
+  const saved = f.service.domain().githubConfiguration(ids.atlas);
+  assert.equal(saved.repositories[0]?.ref, "HEAD");
+  assert.equal(
+    saved.selections.some(
+      (s) => s.kind === "search" && s.query === "PRIVATE SAVED QUERY",
+    ),
+    true,
+  );
+  // Reading again brings both values back.
+  await page.unroute("**/private-values");
+  await retry.first().click();
+  await page.getByLabel("Search query", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Search query", { exact: true }).inputValue(),
+    "PRIVATE SAVED QUERY",
+  );
+  assert.equal(await page.getByText("Query unavailable").count(), 0);
 });
 
 test("removing all repository access needs confirmation and Discard restores the row", async (_t, journey) => {
@@ -1112,7 +1199,7 @@ test("removing all repository access needs confirmation and Discard restores the
   assert.equal(await save.isEnabled(), true);
   await captureBrowserEvidence(page, "1366-source-remove-all");
   await page.getByRole("button", { name: "Discard changes" }).click();
-  await page.getByText("Local path: Kept · private").waitFor();
+  await page.getByLabel("Local repository path", { exact: true }).waitFor();
   assert.equal(await confirm.count(), 0);
   await page
     .getByRole("button", { name: "Remove repository acme/atlas" })
@@ -1487,6 +1574,72 @@ test("GitHub source conflict keeps rows and an unknown save is checked once", as
   );
 });
 
+test("an edited query and local path survive adopting a newer source version unless the row was removed elsewhere", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const writer = (selections: { id: string; keep: true }[]) =>
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId: ids.atlas,
+      expectedVersion: d.githubConfiguration(ids.atlas).version,
+      selections,
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+    } as Parameters<OperatorApi["execute"]>[0]);
+  const query = page.getByLabel("Search query", { exact: true });
+  const path = page.getByLabel("Local repository path", { exact: true });
+  const checkout = await createCheckout(f.directory, "adopted-checkout");
+  await query.fill("EDITED QUERY");
+  await path.fill(checkout);
+  await writer([
+    { id: "S-1", keep: true },
+    { id: "S-2", keep: true },
+    { id: "S-3", keep: true },
+  ]);
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  assert.equal(await query.inputValue(), "EDITED QUERY");
+  assert.equal(await path.inputValue(), checkout);
+  assert.deepEqual(await changes(page).getByRole("listitem").allInnerTexts(), [
+    "Search query edited for S-2",
+    "Local path changed for acme/atlas",
+  ]);
+  // The query row is removed elsewhere: its edit is discarded with a plain note.
+  await writer([
+    { id: "S-1", keep: true },
+    { id: "S-3", keep: true },
+  ]);
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByText(
+      "Loaded the latest version. S-2 was removed elsewhere, so your edits to it were discarded.",
+    )
+    .waitFor();
+  assert.equal(await query.count(), 0);
+  assert.equal(await path.inputValue(), checkout, "the path edit stays");
+  assert.deepEqual(await changes(page).getByRole("listitem").allInnerTexts(), [
+    "Local path changed for acme/atlas",
+  ]);
+});
+
 test("an unknown source save with rows removed elsewhere keeps its one action and message", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
@@ -1690,7 +1843,13 @@ test("a repository link saved elsewhere under the same id needs an explicit choi
     saved.find((r) => r.repositoryId === "acme/new")?.path,
     await realpath(theirs),
   );
-  assert.equal((await page.content()).includes("theirs-checkout"), false);
+  // The saved link shows the other writer's path plainly, and the removed new row left nothing.
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("input")].some((e) =>
+      e.value.includes("theirs-checkout"),
+    ),
+  );
+  assert.equal(await showsText(page, "mine-checkout"), false);
 });
 
 test("Sync and GitHub source show stored readiness counts and a zero-match warning that opens the Readiness panel", async (t, journey) => {
