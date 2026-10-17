@@ -514,6 +514,7 @@ test("a write command's status row carries the power hold's reason", () => {
       task: { id: projectId, state: "open", ready: true, version: 3 },
       waits,
       execution: { state: "queued", holds: {} },
+      admission: { eligible: true, reasons: [] },
     } as never).find(([name]) => name === "Waiting")?.[1];
   assert.equal(
     status(

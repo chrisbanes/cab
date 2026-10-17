@@ -3,6 +3,7 @@ import {
   type TaskRead,
   taskSchema,
 } from "../operator/contracts.js";
+import { taskColumnOf } from "../operator/task-presentation.js";
 import { cliFix, type Wait, waitLabels } from "../operator/wait-reasons.js";
 import { uuidArg } from "./browse.js";
 import {
@@ -13,7 +14,7 @@ import {
   readTextFile,
 } from "./configure.js";
 import { CliError } from "./connections.js";
-import { fixLine, nextLine } from "./remedy.js";
+import { fixLine, nextLine, taskHeldLabels } from "./remedy.js";
 import { keyValues } from "./render.js";
 import type { RequestIdentity } from "./types.js";
 import {
@@ -85,14 +86,12 @@ export function closureSuffix(
 
 /** Task state, admission and the holds that still decide whether work runs. */
 export function taskStatusLines(task: TaskData): [string, string][] {
-  const holds = Object.entries(task.execution.holds)
-    .filter(([, held]) => held)
-    .map(([name]) => name);
+  const holds = taskHeldLabels(task);
   return [
     ["Task", task.task.id],
     [
       "State",
-      `${task.task.state}${closureSuffix(task.source?.closure)}${task.task.ready ? " (ready)" : " (not ready)"}, version ${task.task.version}`,
+      `${taskColumnOf(task)}${closureSuffix(task.source?.closure)}, version ${task.task.version}`,
     ],
     [
       "Waiting",

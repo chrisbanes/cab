@@ -22,7 +22,13 @@ import {
   readTokenFile,
 } from "../../src/cli/connections.js";
 import { type CliDeps, EXIT } from "../../src/cli/main.js";
-import { CATEGORY_FIX, DEFAULT_FIX, remedyFor } from "../../src/cli/remedy.js";
+import {
+  CATEGORY_FIX,
+  DEFAULT_FIX,
+  heldLabels,
+  nextText,
+  remedyFor,
+} from "../../src/cli/remedy.js";
 import { logsCommand } from "../../src/cli/logs-follow.js";
 import {
   fakeServer,
@@ -33,6 +39,77 @@ import { startCliOperator, startCliService } from "../fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+
+test("hold labels and the Next text use the UI's words", () => {
+  const keys = ["stop", "task", "writer", "capacity", "uncertainty"] as const;
+  for (let mask = 0; mask < 32; mask++) {
+    const holds = Object.fromEntries(
+      keys.map((key, i) => [key, Boolean(mask & (1 << i))]),
+    ) as Record<(typeof keys)[number], boolean>;
+    const expected = [
+      ...(holds.stop ? ["Stop requested"] : []),
+      ...(holds.task ? ["Task hold"] : []),
+      ...(holds.writer || holds.capacity || holds.uncertainty
+        ? ["Ownership held"]
+        : []),
+    ];
+    const labels = heldLabels(holds);
+    assert.deepEqual(labels, expected, JSON.stringify(holds));
+    assert.ok(
+      !/writer|capacity|uncertainty/i.test(labels.join(" ")),
+      JSON.stringify(holds),
+    );
+  }
+  assert.deepEqual(nextText(["question"], "Waiting"), {
+    text: "you · answer question",
+    operator: true,
+  });
+  assert.deepEqual(nextText(["question-delivery"], "Running"), {
+    text: "Ensemble · delivering answer",
+    operator: false,
+  });
+  assert.deepEqual(nextText([], "Done"), {
+    text: "none · no decision",
+    operator: false,
+  });
+  assert.deepEqual(nextText([], "Ready"), {
+    text: "No operator decision",
+    operator: false,
+  });
+  assert.deepEqual(nextText([], "Uncertain"), {
+    text: "you · inspect execution",
+    operator: true,
+  });
+});
+
+test("auth status prints the connection URL and leaves capabilities to JSON", async (t) => {
+  const s = await startCliService(t);
+  assert.notEqual(s.origin, s.authOrigin);
+  const h = harness(t);
+  const read = await s.issue("read", "status-ro");
+  const login = await h.run([
+    "auth",
+    "login",
+    "--url",
+    s.origin,
+    "--token-file",
+    h.tokenFile(read.token),
+  ]);
+  assert.equal(login.code, 0, login.err);
+  const human = await h.run(["auth", "status"]);
+  assert.equal(human.code, 0, human.err);
+  const lines = human.out.trimEnd().split("\n");
+  assert.ok(lines.includes(`URL:          ${s.origin}`), human.out);
+  assert.ok(lines.includes("API:          version 1"), human.out);
+  assert.ok(!lines.some((l) => l.startsWith("Service:")), human.out);
+  assert.doesNotMatch(human.out, /cli\.identity|task\.read/);
+  assert.ok(!human.out.includes(s.authOrigin));
+  // The machine form keeps the capability list and the service's own origin.
+  const json = (await h.run(["auth", "status", "--output", "json"])).json();
+  assert.ok(json.data.capabilities.includes("cli.identity"));
+  assert.equal(json.data.service.origin, s.authOrigin);
+  assert.equal(json.service.origin, s.authOrigin);
+});
 
 test("--version prints the package version", async (t) => {
   const r = await harness(t).run(["--version"]);
@@ -60,7 +137,7 @@ test("login, status and task get through a token file against the live service",
   r = await h.run(["auth", "status"]);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /Credential: +laptop-ro \(read\)/);
-  assert.match(r.out, /version 1; cli\.identity, task\.read/);
+  assert.match(r.out, /^API: +version 1$/m);
   r = await h.run(["task", "get", s.taskId]);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /^Inspect me\n/);
