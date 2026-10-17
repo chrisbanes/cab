@@ -498,6 +498,7 @@ web-disabled diagnostic fallback is not qualified for production visual parity.
 The daily operator flows each state their entry points, steps and an interaction
 budget the interface must meet: [first run to first task](user-flows/first-run.md),
 [create a task](user-flows/create-task.md),
+[import issues from GitHub](user-flows/import-issues.md),
 [answer a question](user-flows/answer-question.md),
 [approve an exact action](user-flows/approve-action.md),
 [inspect changes and reply](user-flows/inspect-changes.md),
