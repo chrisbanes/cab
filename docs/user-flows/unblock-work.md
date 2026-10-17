@@ -46,6 +46,9 @@ The operator CLI is outside the budget: it has no screens.
 ## Recovery
 
 - A Fix never clears holds or grants access by implication.
+- Holds a Fix leaves in place are listed beneath it with what clears each and an
+  Execution details link to the task's Execution view; the Resume project
+  confirmation names them.
 - An unknown outcome blocks a second send until Check whether it saved replays the
   exact request.
 - Pause remains the counterpart in project configuration.

@@ -511,12 +511,11 @@ function RecoveryRecord({ r }: { r: RecoveryRecordData }) {
         {`Generation ${r.generation.workRevision ?? "unavailable"}; request ${r.generation.requestSequence}`}
       </h3>
       <p className="body">
-        Intent {r.intentState}; request {r.requestState ?? "unavailable"};
-        binding{" "}
-        {r.binding
-          ? `assignment version ${r.binding.assignmentVersion}, instructions ${r.binding.instructionsRevision}, profile ${r.binding.profileRevision}`
-          : "unavailable"}
-        .
+        {`Intent ${r.intentState}; request ${r.requestState ?? "unavailable"}; binding ${
+          r.binding
+            ? `assignment version ${r.binding.assignmentVersion}, instructions ${r.binding.instructionsRevision}, profile ${r.binding.profileRevision}`
+            : "unavailable"
+        }.`}
       </p>
       <p className="body">
         Observations: {r.observations.join(", ") || "unavailable"}. Pending
