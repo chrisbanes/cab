@@ -486,6 +486,7 @@ test("the home path stays out of the URL, requests and browser storage", async (
   const urls: string[] = [];
   const posts: string[] = [];
   const bodies: string[] = [];
+  const reading: Promise<unknown>[] = [];
   page.on("request", (r) => {
     urls.push(r.url());
     if (!r.url().endsWith("/api/operator/commands") && r.postData())
@@ -494,9 +495,11 @@ test("the home path stays out of the URL, requests and browser storage", async (
   page.on("response", (r) => {
     const path = new URL(r.url()).pathname;
     if (path.startsWith("/api/") && path !== "/api/operator/setup/home")
-      void r.text().then(
-        (b) => bodies.push(`${path} ${b}`),
-        () => {},
+      reading.push(
+        r.text().then(
+          (b) => bodies.push(`${path} ${b}`),
+          () => {},
+        ),
       );
   });
   await reloadAfterSetupHome(page);
@@ -514,6 +517,8 @@ test("the home path stays out of the URL, requests and browser storage", async (
   await row.getByRole("button", { name: SAVE }).click();
   await request;
   await row.getByText(/reference configured/).waitFor();
+  await Promise.all(reading);
+  assert.ok(bodies.some((b) => b.startsWith("/api/operator/claude-token ")));
   const forms = [home, encodeURIComponent(home), encodeURI(home)];
   for (const form of forms) {
     assert.equal(page.url().includes(form), false);
