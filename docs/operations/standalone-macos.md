@@ -501,8 +501,8 @@ Opening it shows that request after sign-in. It never answers or approves anythi
   send) and the record of alerts already sent, not the key file. Restored on a host
   without the key file, the service creates a new key and revokes the restored
   subscriptions as key changed.
-- **Qualification.** The [host browser check](../evidence/) covers Chrome on the host
-  only. Phone delivery and other-device delivery are not qualified
+- **Qualification.** The [host browser check](../evidence/2026-10-17-web-push-host-browser.md)
+  covers Chrome on the host only. Phone delivery and other-device delivery are not qualified
   ([#1150](https://github.com/chrisbanes/ensemble/issues/1150)).
 
 ## Execution diagnostic retention

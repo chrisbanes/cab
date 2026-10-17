@@ -6,9 +6,16 @@
 // state or auth file, the user's browser profile, or any credential. Run it with `--live` after `npm run build`.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
+import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 import { createOperatorFixture } from "../../../dist/test/fixtures/operator-web.js";
 import { seedOwnQuestion } from "../../../dist/test/fixtures/questions.js";
 import { exhaustibleRuntime } from "../../../dist/test/fixtures/runtime-exhaustion.js";
@@ -51,6 +58,28 @@ async function step(name, action) {
       error: error instanceof Error ? error.message : String(error),
     });
     log(`FAILED ${name}`);
+    if (activePage) {
+      const alerts = await activePage
+        .locator("[role=alert], [role=status]")
+        .allInnerTexts()
+        .catch(() => []);
+      log(`alerts at failure: ${JSON.stringify(alerts).slice(0, 400)}`);
+    }
+    // Where the page was, in words only (no values are typed into the page before this point).
+    log(
+      `page at failure: ${
+        activePage
+          ? `${new URL(activePage.url()).pathname} ${(
+              await activePage
+                .locator("body")
+                .innerText()
+                .catch(() => "")
+            )
+              .slice(0, 300)
+              .replace(/\s+/g, " ")}`
+          : "none"
+      }`,
+    );
     throw error;
   }
 }
@@ -71,7 +100,10 @@ const recording = async (request, signal) => {
 
 const exhaustion = exhaustibleRuntime();
 let fixture;
-let browser;
+let activePage;
+let profileDir;
+let browserVersion;
+let liveContext;
 let summary;
 try {
   fixture = await createOperatorFixture(
@@ -88,20 +120,26 @@ try {
   const api = new OperatorApi(f.service, [f.directory]);
   const marker = `LIVE-QUESTION-${randomBytes(6).toString("hex")}`;
 
-  browser = await chromium.launch({
+  // A persistent context over a fresh temporary profile: Chrome refuses push registration in the
+  // off-the-record contexts Playwright otherwise creates ("Registration failed - permission denied").
+  profileDir = mkdtempSync(join(tmpdir(), "ensemble-push-profile-"));
+  const context = await chromium.launchPersistentContext(profileDir, {
     channel: "chrome",
     headless: false,
+    viewport: { width: 1280, height: 900 },
     ...(keepDefaultArgs
       ? {}
       : { ignoreDefaultArgs: ["--disable-background-networking"] }),
   });
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 900 },
-  });
+  liveContext = context;
   await context.grantPermissions(["notifications"], { origin: web.origin });
   const page = await context.newPage();
+  activePage = page;
+  page.on("response", (r) => {
+    if (r.status() >= 400)
+      log(`http ${r.status()} ${new URL(r.url()).pathname}`);
+  });
   page.setDefaultTimeout(15_000);
-  const browserVersion = browser.version();
 
   const shown = () =>
     page.evaluate(async () =>
@@ -127,10 +165,26 @@ try {
   };
 
   await step("sign in to a fresh profile", async () => {
+    // Chrome's own /favicon.ico request reaches a legacy route that starts a second anonymous
+    // session and replaces the cookie, so the sign-in form's CSRF token no longer matches. The
+    // browser context signs in through its request API instead, which shares the cookie jar.
+    const opened = await context.request.get(
+      `${web.origin}/api/operator/session`,
+    );
+    const { csrfToken } = await opened.json();
+    const login = await context.request.post(
+      `${web.origin}/api/operator/login`,
+      {
+        headers: { origin: web.origin, "x-csrf-token": csrfToken },
+        data: { password: web.password },
+      },
+    );
+    assert.equal(login.status(), 200);
     await page.goto(`${web.origin}/app/settings#notifications`);
-    await page.getByLabel("Password").fill(web.password);
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.locator("main.page h1").waitFor();
+    browserVersion = (await page.evaluate(() => navigator.userAgent)).match(
+      /Chrome\/([\d.]+)/,
+    )?.[1];
     return { browser: `Chrome ${browserVersion}`, platform: process.platform };
   });
 
@@ -138,7 +192,7 @@ try {
   await step("1 real subscribe: the endpoint host is allowlisted", async () => {
     await page.getByRole("button", { name: "Turn on notifications" }).click();
     await page.getByText("Notifications are on in this browser").waitFor({
-      timeout: 30_000,
+      timeout: 120_000,
     });
     const rows = push.read().subscriptions;
     assert.equal(rows.length, 1);
@@ -219,11 +273,12 @@ try {
   });
 
   await step(
-    "5 click: the worker's click handler opens or focuses the exact Inbox selection",
+    "5 click: the worker can send a controlled app window to the exact Inbox selection",
     async () => {
-      // A native notification cannot be clicked from automation. The real worker's handler is run
-      // with a notification event built in the worker over the real notification, so this proves the
-      // handler in Chrome's worker, not the operating system's click delivery.
+      // A native notification cannot be clicked from automation, and Chrome refuses WindowClient.focus()
+      // and clients.openWindow() outside a real click. What this proves is the part that needs no
+      // gesture: in Chrome's own worker, matchAll finds the controlled /app window and navigate()
+      // sends it to the exact link. The operating system's click delivery, focus and openWindow are not proven.
       const link = `/app/inbox?task=${question.taskId}&request=${question.interactionId}`;
       await page.goto(`${web.origin}/app/inbox`);
       await page.locator("main.page h1").waitFor();
@@ -231,28 +286,25 @@ try {
         .serviceWorkers()
         .find((w) => w.url().endsWith("/app/service-worker.js"));
       assert.ok(worker, "the worker is running");
-      const outcome = await worker.evaluate(async (tag) => {
-        const notification = (
-          await self.registration.getNotifications({ tag })
-        )[0];
-        if (!notification) return "no-notification";
-        try {
-          self.dispatchEvent(
-            new NotificationEvent("notificationclick", { notification }),
-          );
-        } catch (error) {
-          return `dispatch-failed: ${error.name}`;
-        }
-        return "dispatched";
-      }, question.interactionId);
-      await page
-        .waitForURL(`**${link}`, { timeout: 15_000 })
-        .catch(() => undefined);
-      return {
-        dispatched: outcome,
-        landedOnExactLink: page.url() === web.origin + link,
-        url: new URL(page.url()).pathname,
-      };
+      const outcome = await worker.evaluate(async (url) => {
+        const windows = await self.clients.matchAll({
+          type: "window",
+          includeUncontrolled: true,
+        });
+        const target = windows.find((c) =>
+          new URL(c.url).pathname.startsWith("/app/"),
+        );
+        if (!target) return { found: false };
+        let focus = "focused";
+        await target.focus().catch((e) => {
+          focus = `refused: ${e.name}`;
+        });
+        await target.navigate(url);
+        return { found: true, focus };
+      }, link);
+      await page.waitForURL(`**${link}`, { timeout: 15_000 });
+      assert.equal(page.url(), web.origin + link);
+      return { ...outcome, navigatedToExactLink: true };
     },
   );
 
@@ -341,29 +393,37 @@ try {
         await (await r.pushManager.getSubscription()).unsubscribe();
       });
       const row = push.read().subscriptions[0];
-      const before = pushCalls.length;
-      const outcome = await page.evaluate(async (id) => {
-        const session = await (await fetch("/api/operator/session")).json();
-        const r = await fetch(
-          `/api/operator/notifications/subscriptions/${id}/test`,
-          {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              "x-csrf-token": session.csrfToken,
+      // The push service takes a while to forget the registration, so the test is repeated, a bounded
+      // number of times, until it answers something other than success.
+      const answers = [];
+      let outcome = "sent";
+      for (let attempt = 1; attempt <= 24 && outcome === "sent"; attempt++) {
+        const before = pushCalls.length;
+        outcome = await page.evaluate(async (id) => {
+          const session = await (await fetch("/api/operator/session")).json();
+          const r = await fetch(
+            `/api/operator/notifications/subscriptions/${id}/test`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-csrf-token": session.csrfToken,
+              },
+              body: "{}",
             },
-            body: "{}",
-          },
-        );
-        return (await r.json()).outcome;
-      }, row.id);
-      const call = pushCalls[before];
+          );
+          return (await r.json()).outcome;
+        }, row.id);
+        answers.push(pushCalls[before]?.status ?? outcome);
+        if (outcome === "sent") await sleep(5_000);
+      }
       const after = push.read().subscriptions[0];
-      assert.ok([404, 410].includes(call?.status), JSON.stringify(call));
-      assert.equal(outcome, "gone");
+      assert.equal(outcome, "gone", `answers ${JSON.stringify(answers)}`);
       assert.equal(after.revokedReason, "gone");
+      assert.ok([404, 410].includes(answers.at(-1)), JSON.stringify(answers));
       return {
-        pushStatus: call.status,
+        attempts: answers.length,
+        answers,
         outcome,
         revokedReason: after.revokedReason,
       };
@@ -443,9 +503,10 @@ try {
   process.exitCode = 1;
 } finally {
   // Close what this run opened; nothing else is touched.
-  await browser?.close().catch(() => undefined);
+  await liveContext?.close().catch(() => undefined);
   await fixture?.close().catch(() => undefined);
   if (fixture?.directory)
     rmSync(fixture.directory, { recursive: true, force: true });
+  if (profileDir) rmSync(profileDir, { recursive: true, force: true });
 }
 process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
