@@ -43,7 +43,8 @@ export type Seen = "no-process" | "unreadable" | ProcessIdentity;
 
 export const MAX_OBSERVED_PROCESSES = 8;
 
-const same = (a: ProcessIdentity, b: ProcessIdentity) =>
+/** The one test of "the same process": pid, start time and boot session all equal. */
+export const sameIdentity = (a: ProcessIdentity, b: ProcessIdentity) =>
   a.processId === b.processId &&
   a.processStartedAt === b.processStartedAt &&
   a.bootId === b.bootId;
@@ -60,7 +61,7 @@ export function refineObserved(
   };
   if (seen === "no-process") return base;
   if (seen === "unreadable") return { ...base, unidentified: true };
-  if (base.processes.some((process) => same(process, seen)))
+  if (base.processes.some((process) => sameIdentity(process, seen)))
     return { ...base, identified: true };
   if (base.processes.length >= MAX_OBSERVED_PROCESSES)
     return { ...base, unidentified: true };

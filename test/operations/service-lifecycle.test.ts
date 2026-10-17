@@ -82,6 +82,8 @@ class FakeLaunchd {
   alive = new Set<number>();
   /** Start time of a pid that is not the default, to model pid reuse. */
   pidStarts = new Map<number, string>();
+  /** The boot session; a reboot changes it. */
+  bootId = "boot-1";
   linted: string[] = [];
   fetched: string[] = [];
   clock = Date.UTC(2026, 9, 14, 12);
@@ -167,7 +169,7 @@ class FakeLaunchd {
           : {
               processId: String(pid),
               processStartedAt: this.pidStarts.get(pid) ?? "start-0",
-              bootId: "boot-1",
+              bootId: this.bootId,
             },
       // As the real verifier: absent, reused (another start time) or a new boot is gone.
       exited: async (identity) => {
@@ -180,7 +182,7 @@ class FakeLaunchd {
         const exited =
           !this.alive.has(pid) ||
           (this.pidStarts.get(pid) ?? "start-0") !== processStartedAt ||
-          bootId !== "boot-1";
+          bootId !== this.bootId;
         if (exited) this.events.push("exited");
         return exited;
       },
@@ -3673,4 +3675,98 @@ test("daemon mode gh probe runs in the daemon's own environment, never the insta
       assert.equal(result.stderr.includes(KEYCHAIN_WARNING), false);
     },
   );
+});
+
+test("daemon mode verify re-reads the full identity after the last wait and never accepts a replacement", async (t) => {
+  type Change = (f: Fixture) => void;
+  const cases: [string, Change][] = [
+    [
+      "the pid is reused: another start time",
+      (f) => f.launchd.pidStarts.set(5000, "start-9"),
+    ],
+    [
+      "the host rebooted: another boot session",
+      (f) => {
+        f.launchd.bootId = "boot-2";
+      },
+    ],
+    [
+      "the identity can no longer be read",
+      (f) => {
+        f.launchd.identityUnavailable = true;
+      },
+    ],
+  ];
+  for (const [name, change] of cases) {
+    const f = await setup(t);
+    assert.equal((await f.installDaemon()).code, 0, name);
+    runSudoSteps(f);
+    // The change happens while /app is being read, after the identity was first observed.
+    f.launchd.overrides = {
+      fetch: async () => {
+        change(f);
+        return new Response(null, { status: 200 });
+      },
+    };
+    const result = await f.installDaemon();
+    assert.equal(result.code, 1, name);
+    assert.equal(result.stdout, "", `${name}: never reported started`);
+    assert.match(
+      JSON.parse(result.stderr).error,
+      /its process changed while verifying/,
+      name,
+    );
+    assert.equal(existsSync(f.recordPath), true, name);
+  }
+
+  // The same pid under another start time is a foreign listener from the first probe on.
+  const early = await setup(t);
+  assert.equal((await early.installDaemon()).code, 0);
+  runSudoSteps(early);
+  early.launchd.overrides = {
+    portOwner: async () => {
+      early.launchd.pidStarts.set(5000, "start-9");
+      return [5000];
+    },
+  };
+  const foreign = await early.installDaemon();
+  assert.equal(foreign.code, 1);
+  assert.match(
+    JSON.parse(foreign.stderr).error,
+    /another process answers on the port/,
+  );
+  assert.deepEqual(
+    early.launchd.fetched,
+    [],
+    "the replacement was never asked for /app",
+  );
+
+  // A reused pid is recorded as the process the job runs now; the original, whose exit the
+  // new start time confirms, is no longer owed.
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  f.launchd.overrides = {
+    fetch: async () => {
+      f.launchd.pidStarts.set(5000, "start-9");
+      return new Response(null, { status: 200 });
+    },
+  };
+  assert.equal((await f.installDaemon()).code, 1);
+  assert.deepEqual(
+    f
+      .record()
+      .observed.processes.map(
+        (p: { processStartedAt: string }) => p.processStartedAt,
+      ),
+    ["start-9"],
+  );
+
+  // The same pid with the same start time and boot session still verifies.
+  const ok = await setup(t);
+  assert.equal((await ok.installDaemon()).code, 0);
+  runSudoSteps(ok);
+  const verified = await ok.installDaemon();
+  assert.equal(verified.code, 0, verified.stderr);
+  assert.equal(JSON.parse(verified.stdout).started, true);
 });

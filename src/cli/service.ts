@@ -51,6 +51,8 @@ import {
   daemonDecision,
   MAX_OBSERVED_PROCESSES,
   refineObserved,
+  type ProcessIdentity as ObservedIdentity,
+  sameIdentity,
   type Seen,
 } from "./daemon-ownership.js";
 import { DEFAULT_FIX, fixLine, shellWord } from "./remedy.js";
@@ -823,6 +825,33 @@ class Service {
     return { record: next, seen };
   }
 
+  /**
+   * Whether `pid` is, in full, the process observed: pid, start time and boot session, each
+   * read now through the same `captureIdentity` seam. An unreadable identity never matches.
+   */
+  async matchesIdentity(
+    pid: number,
+    expected: ObservedIdentity,
+  ): Promise<boolean> {
+    const parsed = processIdentitySchema.safeParse(
+      await this.host.captureIdentity(pid),
+    );
+    return parsed.success && sameIdentity(parsed.data, expected);
+  }
+
+  /** The port's listeners, all of them the observed process in full; none, or an unknown one, is not. */
+  async listenersAre(
+    expected: ObservedIdentity,
+    port: number,
+  ): Promise<Listener> {
+    const owners = await this.host.portOwner(port);
+    if (owners === null) return "unknown";
+    if (owners.length === 0) return "free";
+    for (const owner of owners)
+      if (!(await this.matchesIdentity(owner, expected))) return "foreign";
+    return "ours";
+  }
+
   /** The recorded processes whose exit is not confirmed. */
   async unconfirmed(processes: Observed["processes"]) {
     const gone = await Promise.all(
@@ -980,7 +1009,7 @@ class Service {
    * usual health failure when the job's process listens but does not serve.
    */
   async waitForListener(
-    pid: number,
+    expected: ObservedIdentity,
     configuration: Pick<Configuration, "port" | "origin">,
   ): Promise<Listener> {
     let listener = "free" as Listener;
@@ -989,15 +1018,7 @@ class Service {
         "The service did not serve /app within 120 s",
         HEALTH_PROBE_MS,
         async (signal) => {
-          const owners = await this.host.portOwner(configuration.port);
-          listener =
-            owners === null
-              ? "unknown"
-              : owners.length === 0
-                ? "free"
-                : owners.every((owner) => owner === pid)
-                  ? "ours"
-                  : "foreign";
+          listener = await this.listenersAre(expected, configuration.port);
           if (listener !== "ours") return undefined;
           const response = await this.host.fetch(
             `${configuration.origin}/app`,
@@ -1579,10 +1600,10 @@ async function verifyDaemon(
     const { record: observed, seen } = await service.observeDaemon(record, job);
     setStage("health");
     // Started means this job's own process serves the port, not merely that something does.
-    const listener: Listener =
-      job.pid !== undefined && seen !== "unreadable"
-        ? await service.waitForListener(job.pid, observed.configuration)
-        : "free";
+    const expected = typeof seen === "object" ? seen : undefined;
+    const listener: Listener = expected
+      ? await service.waitForListener(expected, observed.configuration)
+      : "free";
     const decision = daemonDecision(
       await service.daemonFacts(
         "verify",
@@ -1594,8 +1615,18 @@ async function verifyDaemon(
     );
     if (decision.kind === "hold")
       throw refuse(service.holdMessage("running", decision.reason, observed));
-    // It must still be the same process after the wait.
-    if ((await service.loadedJob(service.systemTarget))?.pid !== job.pid)
+    // After the last wait it must still be, in full, the process that was observed: the job's
+    // pid and every listener on the port, each re-read now (a reused pid is another process).
+    const now = await service.loadedJob(service.systemTarget);
+    const same =
+      expected !== undefined &&
+      now?.pid === job.pid &&
+      (await service.matchesIdentity(job.pid as number, expected)) &&
+      (await service.listenersAre(expected, observed.configuration.port)) ===
+        "ours";
+    if (!same) {
+      // Whatever runs now is recorded too, so nothing the job started is left unowned.
+      if (now !== null) await service.observeDaemon(observed, now);
       throw refuse(
         service.holdMessage(
           "running",
@@ -1603,6 +1634,7 @@ async function verifyDaemon(
           observed,
         ),
       );
+    }
     await finishDaemonInstall(service, record, logs, true, true, first);
     return 0;
   }

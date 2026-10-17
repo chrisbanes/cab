@@ -260,7 +260,7 @@ the recorded sha256, and the loaded job's path must be that plist. It reports
 `"started":true` (exit 0, no steps) only when `launchctl print` shows the loaded job with a
 process, that process's identity can be read, and the process listening on the port
 (read with `lsof -nP -iTCP:PORT -sTCP:LISTEN`) is that same pid and no other, and
-`/app` answers 200 from it, still under the same pid afterwards. A loaded job with no
+`/app` answers 200 from it, and after that last wait the job's pid and every listener on the port are read again and are in full (pid, start time and boot session) the process that was first observed. A reused pid or a new boot is another process, and an identity that can no longer be read never matches. A loaded job with no
 process, an unreadable identity, another or an unknown listener on the port, or a
 process that never serves, exits 1 with a message that keeps the record and gives the
 read-only checks. It never trusts a 200 from whatever else holds the port. After it reports
