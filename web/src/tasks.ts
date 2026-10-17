@@ -209,13 +209,28 @@ export function taskReasons(task: TaskListSummary) {
     task.execution.reasonCodes.includes("runtime-unconfirmed")
   )
     reasons.unshift(attentionNext["execution-uncertain"].reason);
-  if (
-    !terminal &&
-    (task.capacity.globalUsage >= task.capacity.globalLimit ||
-      task.capacity.projectUsage >= task.capacity.projectLimit)
-  )
-    reasons.push("Capacity is full; it rechecks as turns finish");
   return [...new Set(reasons)];
+}
+/**
+ * Capacity is stated once for the visible work, not on every task it holds: a sentence when an open
+ * task waits on the global limit, or else on a project's, otherwise null.
+ */
+export function capacityNotice(tasks: readonly TaskListSummary[]) {
+  const held = tasks.filter(
+    (t) =>
+      t.state !== "done" &&
+      t.state !== "cancelled" &&
+      (t.capacity.globalUsage >= t.capacity.globalLimit ||
+        t.capacity.projectUsage >= t.capacity.projectLimit),
+  );
+  if (!held.length) return null;
+  const rechecks = "it rechecks as turns finish.";
+  if (held.some((t) => t.capacity.globalUsage >= t.capacity.globalLimit))
+    return `Capacity is full; ${rechecks}`;
+  const names = new Set(
+    held.map((t) => t.project.name ?? "Project name unavailable"),
+  );
+  return `Capacity is full for ${[...names].join(", ")}; ${rechecks}`;
 }
 /** One rule for "ownership uncertain", shared by the row, the card and the attention bar. */
 export const isUncertain = (task: TaskListSummary) =>

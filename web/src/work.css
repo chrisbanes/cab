@@ -611,6 +611,13 @@
   background: var(--surface);
 }
 
+/* From the shell breakpoint the headings carry each column's name and count. */
+@media (min-width: 1121px) {
+  .column-navigation {
+    display: none;
+  }
+}
+
 .column-tab {
   min-width: 0;
   color: var(--fg-2);

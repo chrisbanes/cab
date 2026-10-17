@@ -708,6 +708,11 @@ test("a routing fallback row names Ensemble as the next actor without the operat
     .getByText("Next: Ensemble · recording routing fallback", { exact: true });
   await next.waitFor();
   assert.equal(await next.getAttribute("data-operator"), null);
+  // Ensemble acting is not the amber "you act" tone.
+  assert.notEqual(
+    await next.evaluate((e) => getComputedStyle(e).color),
+    await resolved(page, "color", "var(--attn)"),
+  );
 });
 
 test("task rows show state, next actor and lead from recorded facts without raw identifiers", async (_t, journey) => {
@@ -736,15 +741,14 @@ test("task rows show state, next actor and lead from recorded facts without raw 
   await question
     .getByText("Next: you · answer question", { exact: true })
     .waitFor();
-  await row(ids.running.id)
-    .getByText("No operator decision", { exact: true })
-    .waitFor();
-  await row(ids.done)
-    .getByText("Next: none · no decision", { exact: true })
-    .waitFor();
-  await row(ids.cancelled)
-    .getByText("Next: none · history retained", { exact: true })
-    .waitFor();
+  // Nobody must act on these: no Next line at all, not a "none" fallback.
+  for (const id of [ids.running.id, ids.done, ids.cancelled]) {
+    assert.equal(await row(id).locator(".task-next").count(), 0, id);
+    assert.doesNotMatch(
+      await row(id).innerText(),
+      /No operator decision|Next: none/,
+    );
+  }
   assert.doesNotMatch(await mainText(page), uuidText);
   // The whole row is the title link's target.
   await row(ids.running.id).scrollIntoViewIfNeeded();
@@ -1386,7 +1390,6 @@ test("overview work sits in a panel beside Projects and Completed work and stack
     return value;
   });
   assert.equal(await colour('.task-next[data-operator="true"]'), attn);
-  assert.notEqual(await colour(".task-next:not([data-operator])"), attn);
 
   const projects = page.getByRole("region", { name: "Projects", exact: true });
   const links = projects.getByRole("link");
@@ -1498,28 +1501,35 @@ test("overview without requests or completed work says so and omits the complete
   );
 });
 
-test("board shows a link bar with every count, collapsed empty columns and drawn cards", async (_t, journey) => {
+/** The column sits inside the board's own scroll area. */
+const inBoard = (page: Page, column: string) =>
+  page.waitForFunction((id) => {
+    const board = document
+        .querySelector(".board-columns")!
+        .getBoundingClientRect(),
+      area = document.getElementById(id)!.getBoundingClientRect();
+    return area.left >= board.left - 1 && area.right <= board.right + 1;
+  }, `column-${column}`);
+
+test("board headings show every count, with collapsed empty columns and drawn cards", async (_t, journey) => {
   const { ids, web, page, commands } = await start(
     journey,
     "/app/tasks?view=board&state=all",
   );
   const bar = page.getByRole("toolbar", { name: "Board columns" });
-  await bar.waitFor();
+  await page.locator(".board-column").first().waitFor();
   const counts = new Map<string, number>();
-  for (const button of await bar.getByRole("button").all()) {
-    const [, column, count] =
-      /^(\w+) · (\d+)$/.exec((await button.innerText()).trim()) ?? [];
-    assert.ok(column, "tab label");
-    const section = page.getByRole("region", {
-      name: `${column} tasks`,
-      exact: true,
-    });
+  for (const section of await page.locator(".board-column").all()) {
+    const column = (await section.getAttribute("id"))!.slice("column-".length);
+    const count = Number(
+      await section.locator(".board-column-count").innerText(),
+    );
     assert.equal(
       await section.locator("[data-task-id]").count(),
-      Number(count),
+      count,
       column,
     );
-    counts.set(column!, Number(count));
+    counts.set(column, count);
   }
   assert.deepEqual(
     [...counts.keys()],
@@ -1555,22 +1565,9 @@ test("board shows a link bar with every count, collapsed empty columns and drawn
   assert.ok(Math.max(...populated) - Math.min(...populated) <= 1, "equal");
   await shot(page, "1366-board");
 
-  await bar.getByRole("button", { name: /^Uncertain · 1$/ }).click();
-  assert.equal(
-    await bar
-      .getByRole("button", { name: /^Uncertain · 1$/ })
-      .getAttribute("aria-pressed"),
-    "true",
-  );
-  await page.waitForFunction(() => {
-    const board = document
-        .querySelector(".board-columns")!
-        .getBoundingClientRect(),
-      column = document
-        .querySelector("#column-Uncertain")!
-        .getBoundingClientRect();
-    return column.left >= board.left - 1 && column.right <= board.right + 1;
-  });
+  // Tab reaches a card in an off-screen column and scrolls only the board to it.
+  await page.locator("#column-Uncertain").getByRole("link").first().focus();
+  await inBoard(page, "Uncertain");
   await shot(page, "1366-board-later");
 
   const card = page.locator(`[data-task-id="${ids.question.id}"]`);
@@ -1619,12 +1616,7 @@ test("board shows a link bar with every count, collapsed empty columns and drawn
   await page.keyboard.press("Enter");
   await page.waitForURL((u) => u.pathname === `/app/tasks/${ids.question.id}`);
   await page.goBack();
-  assert.equal(
-    await bar
-      .getByRole("button", { name: /^Uncertain · 1$/ })
-      .getAttribute("aria-pressed"),
-    "true",
-  );
+  await inBoard(page, "Uncertain");
 
   // A failed Inbox read keeps the reasons and drops the action link.
   await page.route("**/api/operator/inbox**", (route) =>
@@ -1648,11 +1640,11 @@ test("board shows a link bar with every count, collapsed empty columns and drawn
 
   // Active tasks with only Done added shows the terminal column the filter names.
   await page.goto(`${web.origin}/app/tasks?view=board&state=Done`);
-  await bar.waitFor();
-  assert.equal(await bar.getByRole("button").count(), 8);
+  await page.locator(".board-column").first().waitFor();
+  assert.equal(await page.locator(".board-column").count(), 8);
   assert.equal(
-    await bar.getByRole("button", { name: /^Done · 1$/ }).count(),
-    1,
+    await page.locator("#column-Done .board-column-count").innerText(),
+    "1",
   );
   // The filtered column is on screen without a tab click, and the page itself did not scroll.
   await page.waitForFunction(() => {
@@ -1814,11 +1806,17 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     "Question requiring action",
     "Service integration · Local task",
     "Question needs an answer",
-    "Capacity is full; it rechecks as turns finish",
     "Next: you · answer question",
     "Accountable lead · accountable lead",
     "Answer question →",
   ]);
+  // Capacity is stated once for the board; a card nobody must act on has no Next line.
+  assert.equal(await page.getByText(/Capacity is full/).count(), 1);
+  assert.equal(await page.locator(".work-capacity").count(), 1);
+  assert.equal(
+    await page.locator(`${card(ids.running.id)} .task-next`).count(),
+    0,
+  );
   const [lead, response] = await Promise.all(
     [".task-card-footer .task-lead", ".task-card-footer .task-request"].map(
       (s) => page.locator(`${card(ids.question.id)} ${s}`).boundingBox(),
@@ -1971,7 +1969,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
 
   // (b) Nine columns overflow into the board, never the page; Back restores its scroll.
   await page.goto(`${web.origin}/app/tasks?view=board&state=all`);
-  await bar.waitFor();
+  await page.locator(".board-column").first().waitFor();
   const all = await layout();
   assert.equal(all.columns.length, 9);
   assert.ok(all.scrollWidth > all.clientWidth);
@@ -1992,7 +1990,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
   await title.click();
   await page.waitForURL((u) => u.pathname.startsWith("/app/tasks/"));
   await page.goBack();
-  await bar.waitFor();
+  await page.locator(".board-column").first().waitFor();
   await page.waitForFunction(
     (left) => document.querySelector(".board-columns")?.scrollLeft === left,
     scrolled,
@@ -2003,7 +2001,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
 
   // (c) Every empty column is a labelled vertical rail that does not clip its text.
   await page.goto(`${web.origin}/app/tasks?view=board&state=Done`);
-  await bar.waitFor();
+  await page.locator(".board-column").first().waitFor();
   const rails = await page.locator(".board-column").evaluateAll((es) =>
     es.map((e) => ({
       id: e.id,
@@ -2108,6 +2106,84 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
   await page.goto(`${web.origin}/app`);
   await page.locator(".overview-panel .task-row").first().waitFor();
   assert.deepEqual(await taskIds(page, ".overview-panel .task-list"), board);
+  assert.equal(commands(), 0);
+});
+
+test("the board column chips render only below the shell breakpoint", async (_t, journey) => {
+  const { web, page, commands } = await start(
+    journey,
+    "/app/tasks?view=board&state=all",
+  );
+  const bar = page.getByRole("toolbar", { name: "Board columns" });
+  const cardCount = () => page.locator(".board-columns [data-task-id]").count();
+  await page.goto(`${web.origin}/app/tasks?view=board&state=all`);
+  await page.locator(".board-column").first().waitFor();
+  const cards = await cardCount();
+
+  // (a) From 1121px the chips are out of the accessibility tree and the Tab order, while
+  // Tab still reaches a card in an off-screen column and only the board scrolls to it.
+  assert.equal(page.viewportSize()?.width, 1366);
+  assert.equal(await bar.count(), 0);
+  assert.equal(await style(page, ".column-navigation", "display"), "none");
+  const reached: string[] = [];
+  for (let presses = 0; presses < 150; presses++) {
+    await page.keyboard.press("Tab");
+    const at = await page.evaluate(() => ({
+      chip: !!document.activeElement?.closest(".column-navigation"),
+      text: document.activeElement?.textContent ?? "",
+    }));
+    assert.equal(at.chip, false, "Tab never lands on a column chip");
+    reached.push(at.text);
+    if (at.text === "Cancelled work") break;
+  }
+  assert.equal(reached.at(-1), "Cancelled work", "Tab reaches the last column");
+  await inBoard(page, "Cancelled");
+  assert.ok(await noPageOverflow(page));
+  assert.equal(await page.evaluate(() => scrollX), 0);
+
+  // (b) Below the breakpoint the chips are back, with every column's count.
+  await page.setViewportSize({ width: 1120, height: 800 });
+  await bar.waitFor({ state: "visible" });
+  const headings = await page
+    .locator(".board-column")
+    .evaluateAll((es) =>
+      es.map(
+        (e) =>
+          `${e.querySelector(".board-column-name")?.textContent?.trim()} · ${e.querySelector(".board-column-count")?.textContent?.trim()}`,
+      ),
+    );
+  assert.equal(headings.length, 9);
+  assert.deepEqual(
+    (await bar.getByRole("button").allInnerTexts()).map((t) =>
+      t.replace(/\s+/g, " ").trim(),
+    ),
+    headings,
+  );
+  await bar.getByRole("button", { name: "Uncertain · 1", exact: true }).click();
+  const uncertain = bar.getByRole("button", { name: "Uncertain · 1" });
+  assert.equal(await uncertain.getAttribute("aria-pressed"), "true");
+
+  // (c) Widening to the breakpoint hides them again without losing the board.
+  for (const width of [1121, 1366]) {
+    await page.setViewportSize({ width, height: 900 });
+    await bar.waitFor({ state: "detached" });
+    assert.equal(await cardCount(), cards, `${width}px`);
+  }
+
+  // (d) Narrowing to the phone restores the operator's selection.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await bar.waitFor({ state: "visible" });
+  assert.equal(await uncertain.getAttribute("aria-pressed"), "true");
+  assert.deepEqual(
+    await page
+      .locator(".board-column")
+      .evaluateAll((es) =>
+        es
+          .filter((e) => getComputedStyle(e).display !== "none")
+          .map((e) => e.id),
+      ),
+    ["column-Uncertain"],
+  );
   assert.equal(commands(), 0);
 });
 

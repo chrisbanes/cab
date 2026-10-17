@@ -377,8 +377,6 @@ test("Nova primitives keep 32px controls, the documented radii and tinted destru
       const style = getComputedStyle(element);
       return { height: style.height, radius: style.borderRadius };
     };
-    const primary = document.querySelector('.column-tab[aria-pressed="true"]');
-    const outline = document.querySelector('.column-tab[aria-pressed="false"]');
     const tinted = (className: string) => {
       const probe = document.createElement("span");
       probe.className = className;
@@ -393,21 +391,28 @@ test("Nova primitives keep 32px controls, the documented radii and tinted destru
       badge: tinted(variants.badge),
     };
     return {
-      primary: primary && {
-        height: getComputedStyle(primary).height,
-        radius: getComputedStyle(primary).borderRadius,
-      },
-      outline: outline && {
-        height: getComputedStyle(outline).height,
-        radius: getComputedStyle(outline).borderRadius,
-      },
       input: measure('[data-slot="input"]'),
       card: measure('[data-slot="card"]'),
       destructive,
     };
   }, variants);
-  assert.deepEqual(geometry.primary, { height: "32px", radius: "6px" });
-  assert.deepEqual(geometry.outline, { height: "32px", radius: "6px" });
+  await captureBrowserEvidence(page, "1366-nova-primitives");
+  // The board's column chips only render below the 1121px shell breakpoint.
+  await page.setViewportSize({ width: 1120, height: 900 });
+  const tabs = await page.evaluate(() => {
+    const measure = (selector: string) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return { height: style.height, radius: style.borderRadius };
+    };
+    return {
+      primary: measure('.column-tab[aria-pressed="true"]'),
+      outline: measure('.column-tab[aria-pressed="false"]'),
+    };
+  });
+  assert.deepEqual(tabs.primary, { height: "32px", radius: "6px" });
+  assert.deepEqual(tabs.outline, { height: "32px", radius: "6px" });
   assert.deepEqual(geometry.input, { height: "32px", radius: "6px" });
   assert.equal(geometry.card?.radius, "8px");
   const alpha = (value: string) =>
@@ -419,5 +424,4 @@ test("Nova primitives keep 32px controls, the documented radii and tinted destru
     );
     assert.notEqual(tint.color, tint.background);
   }
-  await captureBrowserEvidence(page, "1366-nova-primitives");
 });

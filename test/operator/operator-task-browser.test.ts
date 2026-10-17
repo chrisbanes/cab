@@ -124,6 +124,8 @@ test("List and Board preserve identical filtered task IDs and never submit comma
   assert.equal(beforeSwitch[0]?.pressed, "true");
   assert.equal(beforeSwitch[1]?.pressed, "false");
   assert.notEqual(beforeSwitch[0]?.background, beforeSwitch[1]?.background);
+  // The column chips this journey drives exist only below the 1121px shell breakpoint.
+  await page.setViewportSize({ width: 1120, height: 820 });
   await page.getByRole("button", { name: "Board", exact: true }).click();
   assert.deepEqual(await links(), list);
   assert.ok(page.url().includes("q=Literal"));
@@ -1270,14 +1272,13 @@ for (const viewport of [
         .count(),
       1,
     );
-    assert.equal(
-      await work
-        .locator(`[data-task-id="${ids.running.id}"]`)
-        .getByText(/Capacity is full/)
-        .count(),
-      1,
+    // The occupied project limit is stated once for the whole view, on no card or row.
+    assert.match(
+      await work.locator(".work-capacity").innerText(),
+      /^Capacity is full for .+; it rechecks as turns finish\.$/,
       "occupied project limit preserves eligible Ready work in its real capacity queue",
     );
+    assert.equal(await page.getByText(/Capacity is full/).count(), 1);
     await screenshot(page, `${viewport.width}-overview-attention-work`);
     let commandPosts = 0;
     page.on("request", (r) => {
@@ -1321,15 +1322,37 @@ for (const viewport of [
       Ready: "Ready selected",
     };
     for (const [column, title] of Object.entries(samples)) {
-      const tab = page.getByRole("button", {
-        name: new RegExp(`^${column} · `),
-      });
-      await tab.focus();
-      await page.keyboard.press("Enter");
-      await page
+      const reach = page
         .getByRole("region", { name: `${column} tasks`, exact: true })
-        .getByRole("link", { name: title, exact: true })
-        .waitFor({ state: "visible" });
+        .getByRole("link", { name: title, exact: true });
+      if (viewport.width < 1121) {
+        const tab = page.getByRole("button", {
+          name: new RegExp(`^${column} · `),
+        });
+        await tab.focus();
+        await page.keyboard.press("Enter");
+      } else {
+        // From 1121px there are no column chips; focusing a card scrolls its column into view.
+        assert.equal(
+          await page.getByRole("toolbar", { name: "Board columns" }).count(),
+          0,
+        );
+        await reach.focus();
+      }
+      await reach.waitFor({ state: "visible" });
+      if (viewport.width >= 1121) {
+        // The focused card starts inside the board; the browser may leave its far edge clipped.
+        const focused = await reach.evaluate((link) => {
+          const board = link.closest(".board-columns")!.getBoundingClientRect();
+          const box = link.getBoundingClientRect();
+          return (
+            link === document.activeElement &&
+            box.left >= board.left - 1 &&
+            box.left < board.right
+          );
+        });
+        assert.equal(focused, true, `${column} card is focused in the board`);
+      }
       if (column === "Running")
         await page
           .locator(`[data-task-id="${ids.question.id}"]`)
@@ -1366,21 +1389,18 @@ for (const viewport of [
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
       .click();
-    await page.getByRole("button", { name: /^Running · / }).click();
-    await page
-      .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText("Capacity is full; it rechecks as turns finish", {
-        exact: true,
-      })
-      .waitFor({ state: "visible" });
+    const notice = page.locator(".work-capacity"),
+      stated = page.getByText(/Capacity is full/);
+    await notice.waitFor({ state: "visible" });
+    assert.equal(await stated.count(), 1);
     await screenshot(page, `${viewport.width}-board-actual-capacity-full`);
     await page.getByRole("button", { name: "List", exact: true }).click();
     await page
-      .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText("Capacity is full; it rechecks as turns finish", {
-        exact: true,
-      })
+      .locator(".task-list [data-task-id]")
+      .first()
       .waitFor({ state: "visible" });
+    assert.equal(await notice.count(), 1);
+    assert.equal(await stated.count(), 1);
     await screenshot(page, `${viewport.width}-list-actual-capacity-full`);
     f.service.domain().execute({
       type: "capacity.configure",
@@ -1392,12 +1412,34 @@ for (const viewport of [
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
       .click();
+    await stated.first().waitFor({ state: "hidden" });
+    assert.equal(await stated.count(), 0);
+    f.service.domain().execute({
+      type: "capacity.configure",
+      key: randomUUID(),
+      actor: "operator",
+      globalLimit: 10,
+      projectOverrides: { [ids.projectId]: 1 },
+    });
     await page
-      .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText(/Capacity is full/)
-      .waitFor({ state: "hidden" });
+      .getByRole("button", { name: "Refresh tasks", exact: true })
+      .click();
+    await notice.waitFor({ state: "visible" });
+    assert.equal(await stated.count(), 1);
+    f.service.domain().execute({
+      type: "capacity.configure",
+      key: randomUUID(),
+      actor: "operator",
+      globalLimit: 10,
+      projectOverrides: { [ids.projectId]: 10 },
+    });
+    await page
+      .getByRole("button", { name: "Refresh tasks", exact: true })
+      .click();
+    await stated.first().waitFor({ state: "hidden" });
     await page.getByRole("button", { name: "Board", exact: true }).click();
-    await page.getByRole("button", { name: /^Waiting · / }).click();
+    if (viewport.width < 1121)
+      await page.getByRole("button", { name: /^Waiting · / }).click();
     if (viewport.width < 760) {
       await visibleControl(page, "Previous column: Running");
       await page
