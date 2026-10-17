@@ -11,6 +11,8 @@ import {
 test("clock label is two-digit local hours and minutes", () => {
   assert.equal(clockLabel(new Date(2026, 9, 16, 9, 5).getTime()), "09:05");
   assert.equal(clockLabel(new Date(2026, 9, 16, 17, 50).getTime()), "17:50");
+  assert.equal(clockLabel(new Date(2026, 9, 16, 23, 59).getTime()), "23:59");
+  assert.equal(clockLabel(new Date(2026, 9, 17, 0, 0).getTime()), "00:00");
 });
 
 test("the updated label shows one time unless the reads show different clock labels", () => {

@@ -2077,7 +2077,8 @@ as follows:
   id and the history button), Requested by → result to and Known state columns,
   and reflows to stacked rows on a phone.
 - The inspector shows, for an imported task, a "GitHub source · read-only" group
-  (identity link, issue state, latest successful sync and any sync failure or
+  (identity link, issue state, latest successful sync as the app's clock label
+  — "synced 17:50" — and any sync failure or
   incomplete observation — "sync unavailable", "partial sync" or "sync
   incomplete" — "GitHub owns the issue.
   Ensemble coordinates the work.", the native blockers as "Dependencies · managed
@@ -2085,7 +2086,9 @@ as follows:
   one sentence for the reason follows as a muted line), then "Ensemble
   execution"; then for every task Holds (each open request and each hold title,
   counted; the other open approvals when one is selected, none when no
-  approval is selected), Dependencies (local dependencies as links, or "None"), Execution
+  approval is selected), Dependencies (local dependencies as links, or "None", for a
+  task without a GitHub source; an imported task has only the GitHub-managed block above, since
+  GitHub owns its dependencies), Execution
   (state, running assignments, the lead's runtime and, only for a task with a
   GitHub source, a linked repository or a bound pull request, the delivery mode
   and bound pull request) and Results & artifacts (each recorded result, newest first, opening

@@ -2012,7 +2012,22 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   );
   const source = (await github.textContent()) ?? "";
   assert.match(source, /fixture\/source#42/);
-  assert.match(source, /Issue open · (synced \S+|no successful sync)/);
+  // The sync time reads as the app's clock label, computed in the page's own timezone.
+  const syncedAt = read.data.source.memberships
+    .map(
+      (m: { sync: { lastSuccessfulAt: string | null } }) =>
+        m.sync.lastSuccessfulAt,
+    )
+    .filter((t: string | null): t is string => t !== null)
+    .sort()
+    .at(-1);
+  assert.ok(syncedAt, "the fixture records a successful sync");
+  const clock = await page.evaluate((iso) => {
+    const date = new Date(iso);
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }, syncedAt);
+  assert.match(source, new RegExp(`Issue open · synced ${clock}(?!\\d|:)`));
+  assert.doesNotMatch(source, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
   assert.match(
     source,
     /GitHub owns the issue\. Ensemble coordinates the work\./,
@@ -2020,6 +2035,17 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   assert.match(source, /Dependencies · managed in GitHub/);
   assert.match(source, /outside\/repo#7\s*Open blocker/);
   assert.match(source, /GitHub commenting (permitted|unavailable)/);
+  // One Dependencies block, the GitHub-managed one: Ensemble's own group is for local tasks.
+  assert.deepEqual(
+    await inspector
+      .locator(".inspector-label")
+      .evaluateAll((els) =>
+        els
+          .map((e) => e.textContent ?? "")
+          .filter((t) => t.startsWith("Dependencies")),
+      ),
+    ["Dependencies · managed in GitHub"],
+  );
   // Nothing in the GitHub group can write.
   assert.equal(
     await github.locator("button, form, input, textarea").count(),
@@ -2049,6 +2075,20 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   );
   await page.reload();
   await github.getByText(/· partial sync$/).waitFor();
+  await page.unrouteAll({ behavior: "wait" });
+  // No successful sync reads as words, never a blank time.
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${ids.importedId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      for (const m of json.data.source.memberships)
+        m.sync = { ...m.sync, lastSuccessfulAt: null };
+      await route.fulfill({ response, json });
+    },
+  );
+  await page.reload();
+  await github.getByText(/^Issue open · no successful sync/).waitFor();
   await page.unrouteAll({ behavior: "wait" });
   await page.reload();
   await github.getByText(/^Issue open/).waitFor();
@@ -2259,6 +2299,17 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
   assert.equal(await github.count(), 0);
   assert.equal(await delivery.count(), 0);
   assert.equal(await inspector.getByText(/GitHub commenting/).count(), 0);
+  // A local task owns Ensemble's one Dependencies block, never a GitHub-managed one.
+  assert.deepEqual(
+    await inspector
+      .locator(".inspector-label")
+      .evaluateAll((els) =>
+        els
+          .map((e) => e.textContent ?? "")
+          .filter((t) => t.startsWith("Dependencies")),
+      ),
+    ["Dependencies"],
+  );
   await openTaskTab(page, "Changes");
   assert.equal(await refreshDelivery.count(), 0);
   assert.equal(await page.locator("#changes h3").innerText(), "Changes");
