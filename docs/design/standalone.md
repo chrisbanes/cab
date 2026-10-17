@@ -411,7 +411,8 @@ HTTPS origin. The renderer sets `KeepAlive=false`; launchctl owns start,
 restart and stop. Its environment is limited to the separate auth-file path,
 operator origin and the reviewed fixed PATH needed to resolve the installed
 Codex CLI and native host commands. Passwords and shell wrappers are absent
-from the plist.
+from the plist. The opt-in LaunchDaemon form adds only `UserName` and `HOME`
+([ADR-1011](../adr/1011-packaging-and-distribution.md)).
 
 A deterministic restored-service fixture proves wrong/exact recovery
 receipt handling, independent Stop/Resume behavior and exactly one admitted

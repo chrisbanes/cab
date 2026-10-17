@@ -102,7 +102,8 @@ owns delivery scope and status.
 - **Operations.** `ensemble service install`, `upgrade` and `uninstall` manage a
   per-user macOS LaunchAgent bound to an unpacked release; upgrade stops the job,
   takes a verified snapshot and checks readiness, and a failure leaves the job
-  stopped. `ensemble snapshot create|verify|restore` provides offline database
+  stopped. `service install --mode daemon` is an opt-in LaunchDaemon that starts at
+  boot and prints the `sudo` steps to install it; its real-host behavior is unproved. `ensemble snapshot create|verify|restore` provides offline database
   backup, verification and restore
   ([standalone operations](docs/operations/standalone-macos.md)).
 - **Operator CLI (authentication, browsing, configuration, diagnostics, task operation, sources, delivery and recovery).** A packaged `ensemble`

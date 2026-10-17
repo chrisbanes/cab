@@ -48,10 +48,25 @@ snapshots live beside `versions/`, logs in `~/Library/Logs/Ensemble/`, separate 
 development builds. The LaunchAgent binds the exact versioned executable, never a
 `current` symlink, so the plist states the running version.
 
-`ensemble service install | upgrade | uninstall` owns the LaunchAgent. Upgrade stops
+`ensemble service install | upgrade | uninstall` owns the LaunchAgent (and, in daemon mode, its record). Upgrade stops
 the exact job, takes and verifies an offline snapshot, renders the plist for the new
 version and starts it, then runs the readiness checks. Uninstall removes the job and
 keeps data, auth, snapshots and version directories. There is no self-update.
+
+`service install --mode daemon` is the opt-in alternative that starts the service at
+boot, before any login. Ensemble never runs as root: the command runs as the service
+account, renders the same plist plus `UserName` and `HOME`, records it
+(`mode` in the one install record per label), and prints the `sudo` commands that
+copy it to `/Library/LaunchDaemons` and load it; it only ever calls `launchctl print`.
+The modes are never both installed. Upgrade refuses a daemon install, so upgrading
+means switching to the LaunchAgent, upgrading, and switching back. A daemon cannot read the login
+keychain, so GitHub credentials there use a file-based `gh` login
+(`gh auth login --insecure-storage`, a plaintext token at rest) through the existing
+`gh:github.com` reference; there is no `file:` GitHub reference and no credential code.
+With FileVault on, a power cut leaves the disk locked until someone unlocks it; planned
+restarts use `sudo fdesetup authrestart`. The pre-login start is qualified on a real
+host by [#1149](https://github.com/chrisbanes/ensemble/issues/1149). See the
+[operations procedure](../operations/standalone-macos.md#launchdaemon-mode).
 
 There is no rollback between Ensemble versions. Migrations are forward-only and run
 on start, so upgrades fix forward. A failed upgrade leaves the job stopped and

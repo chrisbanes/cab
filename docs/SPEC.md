@@ -411,7 +411,14 @@ is promised exactly-once effects.
 verification and restore. `ensemble service install|upgrade|uninstall` manages a
 per-user LaunchAgent bound to an unpacked release: upgrade stops the job, takes and
 verifies a snapshot, then starts the new release and checks readiness; a failed
-upgrade leaves the job stopped with no automatic rollback. These preserve database state and
+upgrade leaves the job stopped with no automatic rollback. `service install --mode daemon`
+is the opt-in route to starting at boot before login: it prepares a LaunchDaemon that
+runs as the service account, never as root, and prints the `sudo` commands that install
+and start it; the two modes are never both installed, upgrade refuses a daemon install
+and uninstall prints the matching `sudo` commands. A daemon cannot read the login
+keychain, so GitHub access there needs a file-based `gh` login (a plaintext token at
+rest), and a power cut with FileVault on leaves the disk locked until someone unlocks
+it; a planned restart uses `sudo fdesetup authrestart`. These preserve database state and
 use ordinary service-start reconciliation; they do not include workspace contents,
 settle external effects, or qualify a final operational cutover. See the
 [macOS operations procedure](operations/standalone-macos.md) and its
@@ -665,7 +672,11 @@ they are never reused for reads or persisted. Each value is bounded to 512 bytes
 while distinct rotations grow this retained set until restart. Existing Codex spawn
 environments need a service restart to apply changed exclusions. Runtime permissions
 may still let agents reach the host gh login or keychain. Delivery and routing remain
-env-only; Ensemble supplies no separate host sandbox.
+env-only, so a LaunchDaemon (whose plist carries no environment variable) cannot supply
+a delivery credential yet; Ensemble supplies no separate host sandbox. On a daemon host
+the `gh:github.com` source credential works through a file-based `gh` login;
+there is no `file:` GitHub reference. See the
+[macOS operations procedure](operations/standalone-macos.md#launchdaemon-mode).
 
 Settings present each project's repository access and GitHub discovery sources
 together, labelled separately, rather than as two unrelated lists.
