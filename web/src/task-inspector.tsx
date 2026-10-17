@@ -2,6 +2,7 @@ import { CircleCheck, Clock, Diamond } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { isPlainClick, ShortId } from "./components.js";
+import { commentAvailability } from "../../src/operator/github-reasons.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
   pullRequestReference,
@@ -44,6 +45,7 @@ export function TaskInspector({
   selectResult: (resultId: string) => void;
 }) {
   const source = data.source,
+    comment = commentAvailability(data.commentPolicy),
     facts = executionFacts(data),
     requests = [...data.approvals, ...data.questions].filter(
       (q) => q.status === "open",
@@ -107,9 +109,9 @@ export function TaskInspector({
               <p className="muted">None</p>
             )}
             <p>
-              GitHub commenting{" "}
-              {data.commentPolicy?.available ? "permitted" : "unavailable"}
+              GitHub commenting {comment.postable ? "permitted" : "unavailable"}
             </p>
+            {comment.sentence && <p className="muted">{comment.sentence}</p>}
           </Group>
           <p className="inspector-divider">Ensemble execution</p>
         </>

@@ -86,7 +86,10 @@ export function seedTaskResult(
   });
   return { resultId, workId };
 }
-/** An imported GitHub task with a lead, and an `issue.comment` grant that `setGrant` can change. */
+/**
+ * An imported GitHub task with a lead, and an `issue.comment` grant that `setGrant` can change.
+ * `setGrant` sets a delivery credential unless told otherwise, so the grant is postable.
+ */
 export async function seedImportedCommentTask(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,
   mode: "allow" | "approval" | null,
@@ -173,7 +176,12 @@ export async function seedImportedCommentTask(
   const taskId = String(d.tasks(projectId).find((t) => t.title === title)?.id);
   d.ensureLeadAssignment(taskId);
   await f.service.provisionTask(taskId);
-  const setGrant = (next: "allow" | "approval" | null) =>
+  // A unique non-empty value, so the credential is neither unset nor shared with another turn's env.
+  process.env.FIXTURE_COMMENT_DELIVERY_CREDENTIAL = `fixture-${randomUUID()}`;
+  const setGrant = (
+    next: "allow" | "approval" | null,
+    credentialConfigured = true,
+  ) =>
     d.execute({
       type: "delivery.configure",
       actor: "operator",
@@ -181,7 +189,9 @@ export async function seedImportedCommentTask(
       projectId,
       expectedVersion: f.service.delivery().configuration(projectId).version,
       mode: "reviewable-pr",
-      credentialRef: null,
+      credentialRef: credentialConfigured
+        ? "env:FIXTURE_COMMENT_DELIVERY_CREDENTIAL"
+        : null,
       grants: next
         ? [{ action: "issue.comment", repositoryId: "R-COMMENT", mode: next }]
         : [],

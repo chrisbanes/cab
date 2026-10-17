@@ -2081,7 +2081,8 @@ as follows:
   incomplete observation — "sync unavailable", "partial sync" or "sync
   incomplete" — "GitHub owns the issue.
   Ensemble coordinates the work.", the native blockers as "Dependencies · managed
-  in GitHub" and whether GitHub commenting is permitted), then "Ensemble
+  in GitHub" and whether GitHub commenting is permitted; when it is unavailable, the
+  one sentence for the reason follows as a muted line), then "Ensemble
   execution"; then for every task Holds (each open request and each hold title,
   counted; the other open approvals when one is selected, none when no
   approval is selected), Dependencies (local dependencies as links, or "None"), Execution
@@ -2102,8 +2103,15 @@ as follows:
   controls; the "Check whether it saved" for a refresh whose response was lost
   stays until it is resolved, then goes. Exactly one sentence sits above the reply box,
   for the selected destination: the lead's resume, receive or unavailable line, "This
-  project has no lead to message yet.", or the comment policy (a reason from the
-  server, or what posting does). The "Immutable reference" line sits below the box.
+  project has no lead to message yet.", or the comment policy (the reason sentence for
+  the task read's `commentPolicy.reasonCode`, or what posting does). The reasons are no GitHub
+  issue, no comment grant, a hold, and no delivery credential; each has one sentence in
+  `src/operator/github-reasons.ts`, shown identically in the inspector, above the box and
+  on the tab. A read without `reasonCode` falls back to its `reason` text. While comments
+  are unavailable the "Post GitHub comment" tab stays focusable with `aria-disabled`,
+  does nothing on click, Enter or Space, and is described by that sentence; the draft and
+  destination are kept, and the tab works again when the reason clears. The "Immutable
+  reference" line sits below the box.
   A task without a GitHub source always sends a lead message: its reply moves to the
   lead with the lead's own draft and reference, and the GitHub draft and its approval are
   kept apart (editing that draft withdraws the approval) for when the source returns.

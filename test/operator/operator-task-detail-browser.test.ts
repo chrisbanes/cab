@@ -2258,6 +2258,7 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
   });
   assert.equal(await github.count(), 0);
   assert.equal(await delivery.count(), 0);
+  assert.equal(await inspector.getByText(/GitHub commenting/).count(), 0);
   await openTaskTab(page, "Changes");
   assert.equal(await refreshDelivery.count(), 0);
   assert.equal(await page.locator("#changes h3").innerText(), "Changes");
@@ -2427,14 +2428,49 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   ]);
 
   // The grant goes away after GitHub was selected: the reason replaces the sentence.
+  const noGrant = "This project doesn't permit GitHub issue comments.";
   a.setGrant(null);
   await refreshTask(page, a.taskId);
+  await page.getByText(noGrant, { exact: true }).first().waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${noGrant}`]);
+  const tab = page.getByRole("button", { name: "Post GitHub comment" });
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post comment", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(await tab.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Exact comment body",
+  );
+  assert.deepEqual(commands, []);
+
+  // The grant returns: the tab works again, still on GitHub, with the draft kept.
+  a.setGrant("allow");
+  await refreshTask(page, a.taskId);
   await page
-    .getByText("No project grant for issue comments.", { exact: true })
+    .getByText("Posts a comment on the GitHub issue.", { exact: true })
     .waitFor();
-  assert.deepEqual(await sentencesAboveReply(page), [
-    "P:No project grant for issue comments.",
-  ]);
+  assert.equal(await tab.getAttribute("aria-disabled"), null);
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Exact comment body",
+  );
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post comment", exact: true })
+      .isEnabled(),
+    true,
+  );
+
+  // No delivery credential: `available` stays true on the server but the web offers no send.
+  const noCredential = "This project has no GitHub delivery credential set.";
+  a.setGrant("approval", false);
+  await refreshTask(page, a.taskId);
+  await page.getByText(noCredential, { exact: true }).first().waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${noCredential}`]);
   assert.equal(
     await page
       .getByRole("button", { name: "Post comment", exact: true })
@@ -2443,15 +2479,126 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   );
   assert.equal(
     await page
-      .getByRole("button", { name: "Post GitHub comment" })
+      .getByRole("button", { name: "Review exact GitHub comment" })
       .isDisabled(),
     true,
   );
-  assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
-    "Exact comment body",
-  );
   assert.deepEqual(commands, []);
+});
+
+/** The inspector's GitHub group text and the tab's accessible reason, for one sentence. */
+const unavailableComment = async (page: Page, sentence: string) => {
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  await inspector.getByText(sentence, { exact: true }).waitFor();
+  assert.match(
+    (await inspector.innerText()).replace(/\s+/g, " "),
+    /GitHub commenting unavailable/,
+  );
+  const tab = page.getByRole("button", { name: "Post GitHub comment" });
+  assert.equal(await tab.getAttribute("aria-disabled"), "true");
+  assert.equal(await tab.getAttribute("title"), sentence);
+  const described = await tab.getAttribute("aria-describedby");
+  assert.ok(described);
+  assert.equal(
+    await page.locator(`[id="${described}"]`).textContent(),
+    sentence,
+  );
+  return tab;
+};
+
+test("An unavailable GitHub comment gives its reason in the inspector and on a focusable tab that does nothing", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedImportedCommentTask(fixture.f, "allow");
+  const { web, page, commands } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const lead = page.getByRole("button", { name: "Message task lead" });
+  await lead.waitFor();
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  await inspector.getByText("GitHub commenting permitted").waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post GitHub comment" })
+      .getAttribute("aria-disabled"),
+    null,
+  );
+  assert.equal(await page.locator("#github-comment-reason").count(), 0);
+
+  const cases: [string, () => void][] = [
+    [
+      "This project doesn't permit GitHub issue comments.",
+      () => a.setGrant(null),
+    ],
+    [
+      "This project has no GitHub delivery credential set.",
+      () => a.setGrant("allow", false),
+    ],
+    [
+      "Comments wait while the task's admission or delivery is held.",
+      () => {
+        a.setGrant("allow");
+        const d = fixture.f.service.domain();
+        d.execute({
+          type: "project.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId: a.projectId,
+          expectedVersion: Number(d.project(a.projectId).version),
+          paused: true,
+        });
+      },
+    ],
+  ];
+  for (const [sentence, arrange] of cases) {
+    arrange();
+    await refreshTask(page, a.taskId);
+    const tab = await unavailableComment(page, sentence);
+    // Tab from the sibling destination reaches it, so the reason is readable by keyboard.
+    await lead.focus();
+    await page.keyboard.press("Tab");
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.textContent),
+      "Post GitHub comment",
+    );
+    // Neither Enter, Space nor a click selects it: the lead's sentence stays above the box.
+    const before = await sentencesAboveReply(page);
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
+    await tab.click({ force: true });
+    assert.deepEqual(await sentencesAboveReply(page), before);
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Post comment", exact: true })
+        .count(),
+      0,
+    );
+  }
+  assert.deepEqual(commands, []);
+});
+
+test("An older task read without a reason code falls back to its reason text", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedImportedCommentTask(fixture.f, null);
+  let reason: string | null = "No project grant for issue comments";
+  const { web, page } = await fixture.launch();
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      delete json.data.commentPolicy.reasonCode;
+      json.data.commentPolicy.reason = reason;
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await unavailableComment(page, "No project grant for issue comments.");
+  // Neither a reason nor a code: one generic sentence, never a blank.
+  reason = null;
+  await refreshTask(page, a.taskId);
+  await unavailableComment(
+    page,
+    "GitHub comments aren't available for this task.",
+  );
 });
 
 test("The viewing reference appears only once a result exists", async (_t, j) => {

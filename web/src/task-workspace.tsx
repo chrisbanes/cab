@@ -50,6 +50,7 @@ import {
   pullRequestStateLabel,
   safePullRequestUrl,
 } from "./delivery-presentation.js";
+import { commentAvailability } from "../../src/operator/github-reasons.js";
 import { clockLabel } from "./presentation.js";
 import { failureCause } from "./outcome-copy.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -268,6 +269,9 @@ const unconfirmedOf = (
 });
 const changedMessage =
   "This task changed since you opened it. Your draft is kept.";
+/** The reply tab's description when GitHub comments are unavailable. */
+const githubReasonId = "github-comment-reason";
+
 export function TaskWorkspace({
   client,
   session,
@@ -1364,6 +1368,7 @@ export function TaskWorkspace({
         }}
       />
     );
+  const comment = commentAvailability(data.commentPolicy);
   // Exactly one sentence sits above the box: what this destination does now.
   const replyNote =
     destination === "lead"
@@ -1374,13 +1379,10 @@ export function TaskWorkspace({
           : leadMode === "receives"
             ? leadReceivesNotice(leadName)
             : leadUnavailableNotice(leadName)
-      : !data.commentPolicy?.available
-        ? data.commentPolicy?.reason
-          ? `${data.commentPolicy.reason}.`
-          : "GitHub comments aren't available for this task."
-        : data.commentPolicy.mode === "approval"
+      : (comment.sentence ??
+        (data.commentPolicy?.mode === "approval"
           ? "You review the exact comment before it posts to the GitHub issue."
-          : "Posts a comment on the GitHub issue.";
+          : "Posts a comment on the GitHub issue."));
   const reply = (
     <section id="reply" className="reply-card">
       <h3 className="section-heading">Reply</h3>
@@ -1398,16 +1400,26 @@ export function TaskWorkspace({
         {data.source && (
           <Button
             variant={destination === "github" ? "primary" : "secondary"}
-            disabled={
-              pending || state.uncertain || !data.commentPolicy?.available
-            }
+            // Native `disabled` is out of the tab order; an unavailable tab stays focusable so
+            // its reason is read.
+            disabled={pending || state.uncertain}
+            aria-disabled={!comment.postable || undefined}
+            aria-describedby={comment.postable ? undefined : githubReasonId}
+            title={comment.sentence ?? undefined}
+            className="aria-disabled:opacity-50"
             onClick={() => {
+              if (!comment.postable) return;
               state.destination = "github";
               changed();
             }}
           >
             Post GitHub comment
           </Button>
+        )}
+        {data.source && comment.sentence && (
+          <span id={githubReasonId} className="sr-only">
+            {comment.sentence}
+          </span>
         )}
       </div>
       {destination === "lead" && lead && leadMode === "resumes" ? (
@@ -1434,7 +1446,12 @@ export function TaskWorkspace({
       {destination === "github" && data.commentPolicy?.mode === "approval" && (
         <>
           <Button
-            disabled={pending || state.uncertain || !state.draft.trim()}
+            disabled={
+              pending ||
+              state.uncertain ||
+              !state.draft.trim() ||
+              !comment.postable
+            }
             onClick={() =>
               void command({
                 type: "comment.review",
@@ -1478,8 +1495,8 @@ export function TaskWorkspace({
               (!lead || leadMode === "unavailable") &&
               !state.uncertain) ||
             (destination === "github" &&
-              (!data.commentPolicy?.available ||
-                (data.commentPolicy.mode === "approval" &&
+              (!comment.postable ||
+                (data.commentPolicy?.mode === "approval" &&
                   state.commentReview?.decision !== "approved")) &&
               !state.uncertain)
           }
