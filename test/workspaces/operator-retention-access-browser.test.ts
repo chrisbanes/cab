@@ -216,9 +216,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   assert.ok(page.url().includes(`result=${a.old.resultId}`));
   assert.ok(page.url().includes(`source=${a.source.sourceId}`));
   await page
-    .getByText(`Recorded against the current bound head ${headA}`, {
-      exact: false,
-    })
+    .getByText("Matches the current pull request head", { exact: false })
     .waitFor();
   assert.equal(
     await page
@@ -539,10 +537,9 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   stage("validation-label-begin");
   await openTaskTab(page, "Overview");
   await page
-    .getByText(
-      `Stale validation; checked head ${headA}, current bound head ${headB}`,
-      { exact: false },
-    )
+    .getByText("Checked an earlier head than the current pull request head", {
+      exact: false,
+    })
     .waitFor();
   stage("validation-label-complete");
   assert.equal(snapshot.items, 1);
@@ -631,9 +628,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     // The result is on Overview, behind the open History tab.
     await page
       .locator("#review")
-      .getByText(
-        /Historical check:.*Head comparison unknown; current bound head unavailable/,
-      )
+      .getByText(/Historical check:.*Head comparison unknown/)
       .waitFor({ state: "attached" });
     const gap = await page.evaluate(
       ({ itemId }) => ({

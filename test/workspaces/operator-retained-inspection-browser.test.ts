@@ -157,7 +157,10 @@ test("production retained result evidence keeps original bytes and opens current
     .waitFor();
   await retained.getByText("callback first", { exact: true }).waitFor();
   assert.equal(await retained.getByText("later workspace bytes").count(), 0);
-  assert.match(await retained.innerText(), new RegExp(result.resultId));
+  // The header carries the short result id; the full one is its title.
+  const resultMark = retained.locator(".file-observation abbr.identifier");
+  assert.equal(await resultMark.getAttribute("title"), result.resultId);
+  assert.equal(await resultMark.textContent(), result.resultId.slice(0, 8));
   await retained.getByText("Capture provenance", { exact: true }).click();
   const provenance = await retained.locator(".retained-provenance").innerText();
   assert.match(provenance, new RegExp(work.turnId));

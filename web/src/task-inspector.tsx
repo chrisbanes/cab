@@ -1,7 +1,7 @@
 import { CircleCheck, Clock, Diamond } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
-import { isPlainClick } from "./components.js";
+import { isPlainClick, ShortId } from "./components.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
   deliveryApplies,
@@ -187,7 +187,7 @@ export function TaskInspector({
                     href={`?result=${r.resultId}#review`}
                     onClick={show(r.resultId)}
                   >
-                    Result {i + 1} · {r.workId}
+                    R{i + 1} · <ShortId value={r.resultId} focusable={false} />
                   </a>
                 </li>
               ))}

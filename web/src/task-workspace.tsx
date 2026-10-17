@@ -25,7 +25,7 @@ import {
 } from "../../src/operator/contracts.js";
 import { holdLines } from "../../src/operator/wait-reasons.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, Button, ResourceStatus } from "./components.js";
+import { ActionLink, Button, ResourceStatus, ShortId } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import type {
   ReplyOutcome,
@@ -1730,8 +1730,9 @@ export function TaskWorkspace({
                           brief.known && <p>None supplied</p>
                         )}
                         <p className="metadata muted">
-                          {source.kind} source revision {source.revision} ·{" "}
-                          {source.sourceId}
+                          {source.kind === "github" ? "GitHub" : "Local"} source
+                          · revision {source.revision} ·{" "}
+                          <ShortId value={source.sourceId} />
                         </p>
                         <Disclosure
                           id={source.sourceId}
@@ -1790,8 +1791,9 @@ export function TaskWorkspace({
                 {selected ? (
                   <div data-record-id={selected.resultId}>
                     <p className="metadata muted">
-                      Result {selected.resultId} · assignment{" "}
-                      {selected.assignmentId} · work revision{" "}
+                      R{data.results.indexOf(selected) + 1} ·{" "}
+                      <ShortId value={selected.resultId} /> · assignment{" "}
+                      <ShortId value={selected.assignmentId} /> · work revision{" "}
                       {selected.workRevision} · {date(selected.createdAt)}
                     </p>
                     <Literal text={selected.summary} />
@@ -1881,7 +1883,7 @@ export function TaskWorkspace({
                     <option value="">Latest result</option>
                     {data.results.map((r, i) => (
                       <option key={r.resultId} value={r.resultId}>
-                        Result {i + 1} · {r.workId}
+                        R{i + 1}
                       </option>
                     ))}
                   </NativeSelect>
@@ -2376,18 +2378,23 @@ function CriteriaRows({
           </p>
           <p>{row.text}</p>
           <p className="metadata muted">
-            Source revision {row.revision} ·{" "}
-            {row.record?.scope ?? "No supporting scope supplied"} · provenance{" "}
-            {row.record?.provenance ?? "Unavailable"}
+            {[
+              `Source revision ${row.revision}`,
+              row.record?.scope,
+              row.record?.provenance,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
           {row.records.length > 1 && (
             <div>
               <p>Duplicate criterion identity; overall outcome unknown.</p>
               <Literal
                 text={row.records
-                  .map(
-                    (record) =>
-                      `${record.outcome} · ${record.scope} · provenance ${record.provenance}`,
+                  .map((record) =>
+                    [record.outcome, record.scope, record.provenance]
+                      .filter(Boolean)
+                      .join(" · "),
                   )
                   .join("\n")}
               />
@@ -2459,19 +2466,26 @@ function ReviewEvidence({
         ))}
       <h4>Validation records</h4>
       {metadata.validations.length ? (
-        metadata.validations.map((v) => (
-          <p key={`${v.label}:${v.scope}:${v.provenance}`}>
-            {v.label}: {v.outcome} · {v.scope} · {v.provenance} · checked head{" "}
-            {v.checkedHead ?? "not supplied"} · {(() => {
-              const binding = data.delivery?.binding;
-              if (!v.checkedHead || !binding?.headSha || binding.readError)
-                return "Head comparison unknown; current bound head unavailable";
-              return v.checkedHead === binding.headSha
-                ? `Recorded against the current bound head ${binding.headSha}`
-                : `Stale validation; checked head ${v.checkedHead}, current bound head ${binding.headSha}`;
-            })()}
-          </p>
-        ))
+        metadata.validations.map((v) => {
+          const head = data.delivery?.binding?.headSha,
+            unknown =
+              !v.checkedHead || !head || data.delivery?.binding?.readError;
+          return (
+            <p key={`${v.label}:${v.scope}:${v.provenance}`}>
+              {v.label}: {v.outcome} · {v.scope} · {v.provenance} ·{" "}
+              {v.checkedHead && (
+                <>
+                  checked head <ShortId value={v.checkedHead} /> ·{" "}
+                </>
+              )}
+              {unknown
+                ? "Head comparison unknown"
+                : v.checkedHead === head
+                  ? "Matches the current pull request head"
+                  : "Checked an earlier head than the current pull request head"}
+            </p>
+          );
+        })
       ) : (
         <p>No supplied validation record. No overall pass is inferred.</p>
       )}

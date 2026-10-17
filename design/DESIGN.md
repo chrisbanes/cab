@@ -2057,9 +2057,20 @@ as follows:
   the overlay keep it. While Stop is recorded the header shows a disabled "Stop
   requested" and the status line "Stopping; effects may continue". There is no
   in-app Resume (a new write path).
-- No short identifiers (AT-142, A-104, R2, V-22, C-104): no read carries them.
-  Assignment rows show the profile name, a brief excerpt and the first eight
-  characters of the assignment id; results keep their recorded ids. There is no
+- No drawn short identifiers (AT-142, A-104, V-22, C-104): no read carries them.
+  Recorded ids show as the first eight characters in mono metadata (a shared
+  `ShortId`, never inside a sentence), with the full value as its title and
+  focusable; no full id is visible on Overview. Assignment rows show the profile
+  name, a brief excerpt and the short assignment id. Results are labelled `R<n>`,
+  oldest first (the number the Result revision select and the inspector use), with
+  the short result id beside it. Token wording: a criterion's metadata reads
+  "Source revision 1 · scope · provenance" and omits what was not supplied; a
+  validation row shows the checked head short and reads "Matches the current pull
+  request head", "Checked an earlier head than the current pull request head" or
+  "Head comparison unknown"; an unavailable retained-evidence result reads "Evidence
+  was not retained for this result.", "Evidence for this result is excluded from
+  view." or "Retained evidence for this result can't be shown right now." (anything
+  else: "…can't be shown."), with the code inside a closed Details. There is no
   "Approach" block (no recorded approach field), no "Compare screenshots" control
   (recorded pairs render under the latest result), no clock times, and no
   "Earlier results (2)" button (the Result revision select and the inspector keep

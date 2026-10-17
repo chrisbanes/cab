@@ -698,9 +698,10 @@ for (const [limitCase, sourceBody] of [
       .getByRole("button", { name: "Refresh task", exact: true })
       .click();
     await brief
-      .getByText(`github source revision ${next.revision} · ${next.sourceId}`, {
-        exact: true,
-      })
+      .getByText(
+        `GitHub source · revision ${next.revision} · ${next.sourceId.slice(0, 8)}`,
+        { exact: true },
+      )
       .waitFor();
     await brief.getByText(gap).waitFor();
     assert.equal(

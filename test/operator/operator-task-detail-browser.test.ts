@@ -1761,10 +1761,10 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
     a.taskId,
   );
   const inspector = page.locator('aside[aria-label="Task context"]');
-  const links = inspector.getByRole("link", { name: /^Result \d/ });
+  const links = inspector.getByRole("link", { name: /^R\d/ });
   assert.deepEqual(
     (await links.allTextContents()).map((t) => t.split(" · ")[0]),
-    ["Result 2", "Result 1"],
+    ["R2", "R1"],
   );
   const before = await page.evaluate(() => history.length);
   await links.last().click();
@@ -2547,5 +2547,228 @@ test("A redacted outcome shows no subtitle and no disclosure", async (_t, j) => 
   await page.locator("[data-task-strip]").waitFor();
   assert.equal(await page.locator(".page-header-title p").count(), 0);
   assert.equal(await page.locator("details.task-outcome").count(), 0);
+  await page.unrouteAll({ behavior: "wait" });
+});
+
+test("Task detail identifiers are short mono metadata and tokens read as sentences", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Atlas",
+    "Ship an accessible command menu",
+    body,
+  );
+  a.delegatedResult("Earlier finished work");
+  const [c1] = a.source.criteria;
+  const head = "a".repeat(40);
+  const r2 = a.delegatedResult("Keyboard support ready for review", {
+    sourceId: a.source.sourceId,
+    criteria: [
+      {
+        criterionId: c1!.criterionId,
+        outcome: "supported",
+        scope: "Keyboard opening",
+        provenance: "Focus check",
+      },
+    ],
+    validations: [
+      {
+        label: "Unit tests",
+        outcome: "passed",
+        scope: "Whole suite",
+        provenance: "CI run",
+        checkedHead: head,
+      },
+      {
+        label: "Lint",
+        outcome: "unverified",
+        scope: "Repository",
+        provenance: "Local run",
+      },
+    ],
+  });
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const result = page.locator(`#review [data-record-id="${r2.resultId}"]`);
+  await result.waitFor();
+  const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-/;
+
+  // Metadata shows 8 mono characters; the full value is the title; no full id is visible.
+  const brief = page.locator("#brief .metadata").filter({ hasText: "source" });
+  assert.match(
+    await brief.innerText(),
+    /^Local source · revision 1 · [0-9a-f]{8}$/,
+  );
+  const meta = result.locator("p.metadata").first();
+  assert.match(
+    await meta.innerText(),
+    /^R2 · [0-9a-f]{8} · assignment [0-9a-f]{8} · work revision \d+ · /,
+  );
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  const results = inspector.locator(".inspector-group", {
+    has: page.getByRole("heading", { name: "Results & artifacts" }),
+  });
+  for (const region of [brief, meta, results])
+    assert.doesNotMatch(await region.innerText(), uuid);
+  assert.deepEqual(
+    await page.evaluate(
+      ([selectors]) =>
+        selectors!.flatMap((selector) =>
+          [
+            ...document.querySelectorAll<HTMLElement>(
+              `${selector} abbr.identifier`,
+            ),
+          ].map((el) => [el.title, el.textContent, el.tabIndex]),
+        ),
+      [
+        [
+          "#brief .metadata",
+          `#review [data-record-id="${r2.resultId}"] p.metadata`,
+        ],
+      ],
+    ),
+    [
+      [a.source.sourceId, a.source.sourceId.slice(0, 8), 0],
+      [r2.resultId, r2.resultId.slice(0, 8), 0],
+      [r2.assignmentId, r2.assignmentId.slice(0, 8), 0],
+    ],
+  );
+  const links = inspector.getByRole("link", { name: /^R\d/ });
+  assert.deepEqual(await links.allInnerTexts(), [
+    `R2 · ${r2.resultId.slice(0, 8)}`,
+    `R1 · ${(await links.nth(1).locator("abbr").getAttribute("title"))!.slice(0, 8)}`,
+  ]);
+  assert.equal(
+    await links.first().locator("abbr").getAttribute("title"),
+    r2.resultId,
+  );
+  assert.equal(
+    await links.first().locator("abbr").getAttribute("tabindex"),
+    null,
+  );
+  assert.deepEqual(
+    await page.locator("#retained-result-revision option").allInnerTexts(),
+    ["Latest result", "R1", "R2"],
+  );
+
+  // A criterion with no record says only what is known.
+  const rows = page.locator(".criterion-row");
+  const metadata = await rows.locator("p.metadata").allInnerTexts();
+  assert.deepEqual(metadata, [
+    "Source revision 1 · Keyboard opening · Focus check",
+    "Source revision 1",
+    "Source revision 1",
+  ]);
+  const review = page.locator("#review");
+  for (const word of [
+    "No supporting scope supplied",
+    "provenance",
+    "Unavailable",
+    "not supplied",
+  ])
+    assert.equal(await review.getByText(word).count(), 0, word);
+
+  // Validation rows: short head, and a comparison that never invents a head.
+  const validation = (label: string) =>
+    review.locator("p", { hasText: new RegExp(`^${label}:`) });
+  assert.equal(
+    await validation("Unit tests").innerText(),
+    "Unit tests: passed · Whole suite · CI run · checked head aaaaaaaa · Head comparison unknown",
+  );
+  assert.equal(
+    await validation("Unit tests").locator("abbr").getAttribute("title"),
+    head,
+  );
+  assert.equal(
+    await validation("Lint").innerText(),
+    "Lint: unverified · Repository · Local run · Head comparison unknown",
+  );
+  let bound = head;
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.delivery = {
+        mode: "reviewable-pr",
+        policyVersion: 1,
+        blockers: [],
+        omittedBlockerCount: 0,
+        omittedActionCount: 0,
+        binding: {
+          revision: 1,
+          number: 12,
+          repositoryName: "acme/app",
+          headSha: bound,
+          state: "OPEN",
+          observedAt: Date.now(),
+          readError: null,
+          omittedCheckCount: 0,
+          omittedFeedbackCount: 0,
+          checks: [],
+          feedback: [],
+        },
+        actions: [],
+      };
+      await route.fulfill({ response, json });
+    },
+  );
+  await refreshTask(page, a.taskId);
+  await validation("Unit tests")
+    .getByText("Matches the current pull request head")
+    .waitFor();
+  bound = "b".repeat(40);
+  await refreshTask(page, a.taskId);
+  await validation("Unit tests")
+    .getByText("Checked an earlier head than the current pull request head")
+    .waitFor();
+  await page.unrouteAll({ behavior: "wait" });
+
+  // Each retained-evidence reason reads as its sentence; the code is only in Details.
+  const evidence = page.locator(".retained-evidence");
+  await evidence
+    .getByText(
+      "Evidence was not retained for this result. Current files are not used instead.",
+      { exact: true },
+    )
+    .waitFor();
+  const code = evidence.getByText("not-retained", { exact: true });
+  assert.equal(await code.isVisible(), false);
+  await evidence.getByText("Details", { exact: true }).click();
+  assert.equal(await code.isVisible(), true);
+  let reason = "excluded";
+  await page.route(
+    (url) =>
+      url.pathname ===
+      `/api/operator/tasks/${a.taskId}/results/${r2.resultId}/evidence`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data = { ...json.data, state: "unavailable", reason };
+      await route.fulfill({ response, json });
+    },
+  );
+  for (const [code, sentence] of [
+    ["excluded", "Evidence for this result is excluded from view."],
+    [
+      "unavailable",
+      "Retained evidence for this result can't be shown right now.",
+    ],
+  ] as const) {
+    reason = code;
+    await page.reload();
+    await page
+      .locator(".retained-evidence")
+      .getByText(`${sentence} Current files are not used instead.`, {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(
+      await page
+        .locator(".retained-evidence details")
+        .evaluate((el: HTMLDetailsElement) => el.open),
+      false,
+    );
+  }
   await page.unrouteAll({ behavior: "wait" });
 });
