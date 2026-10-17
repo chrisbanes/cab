@@ -754,7 +754,7 @@ test("task search puts the title first and drops the project under --project", a
 });
 
 test("project and profile lists show the lead by name and the runtime only when unavailable", async (t) => {
-  const { s, seed, h, ok, api } = await setup(t);
+  const { s, seed, h, api } = await setup(t);
   const projects = await h.run(["project", "list"]);
   assert.equal(projects.code, 0, projects.err);
   const rows = tableCells(projects.out, 3);

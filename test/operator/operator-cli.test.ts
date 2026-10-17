@@ -82,6 +82,35 @@ test("hold labels and the Next text use the UI's words", () => {
   });
 });
 
+test("auth status prints the connection URL and leaves capabilities to JSON", async (t) => {
+  const s = await startCliService(t);
+  assert.notEqual(s.origin, s.authOrigin);
+  const h = harness(t);
+  const read = await s.issue("read", "status-ro");
+  const login = await h.run([
+    "auth",
+    "login",
+    "--url",
+    s.origin,
+    "--token-file",
+    h.tokenFile(read.token),
+  ]);
+  assert.equal(login.code, 0, login.err);
+  const human = await h.run(["auth", "status"]);
+  assert.equal(human.code, 0, human.err);
+  const lines = human.out.trimEnd().split("\n");
+  assert.ok(lines.includes(`URL:          ${s.origin}`), human.out);
+  assert.ok(lines.includes("API:          version 1"), human.out);
+  assert.ok(!lines.some((l) => l.startsWith("Service:")), human.out);
+  assert.doesNotMatch(human.out, /cli\.identity|task\.read/);
+  assert.ok(!human.out.includes(s.authOrigin));
+  // The machine form keeps the capability list and the service's own origin.
+  const json = (await h.run(["auth", "status", "--output", "json"])).json();
+  assert.ok(json.data.capabilities.includes("cli.identity"));
+  assert.equal(json.data.service.origin, s.authOrigin);
+  assert.equal(json.service.origin, s.authOrigin);
+});
+
 test("--version prints the package version", async (t) => {
   const r = await harness(t).run(["--version"]);
   assert.equal(r.code, 0);
@@ -108,7 +137,7 @@ test("login, status and task get through a token file against the live service",
   r = await h.run(["auth", "status"]);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /Credential: +laptop-ro \(read\)/);
-  assert.match(r.out, /version 1; cli\.identity, task\.read/);
+  assert.match(r.out, /^API: +version 1$/m);
   r = await h.run(["task", "get", s.taskId]);
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /^Inspect me\n/);

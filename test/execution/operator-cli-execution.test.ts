@@ -115,7 +115,7 @@ test("execution and logs reads match the API and label their provenance", async 
   const absent = await h.run(["execution", "inputs", seed.absent]);
   assert.match(absent.out, /No captured submission/);
   assert.match(absent.out, /Reconstructed from retained revision records/);
-  const detail = await h.run(["execution", "get", seed.captured]);
+  const detail = await h.run(["execution", "get", seed.captured, "--verbose"]);
   assert.match(detail.out, /model\s+gpt-seeded\s+runtime-reported/);
   assert.match(detail.out, /Note: Tool observation is incomplete\./);
   assert.match(detail.out, /Note: Reasoning is not collected\./);
@@ -231,6 +231,95 @@ test("execution and logs reads match the API and label their provenance", async 
   assert.equal(r.code, 3);
   assert.equal(h.fetches.length, unmanaged);
   assert.equal(databaseDigest(s.f), before);
+});
+
+test("execution notes print once and only with --verbose", async (t) => {
+  const { s, seed, h, ok } = await setup(t);
+  const notes = [
+    "Tool observation is incomplete.",
+    "Reasoning is not collected.",
+  ];
+  const commands = [
+    ["execution", "list", "--task", seed.taskA],
+    ["execution", "get", seed.captured],
+    ["logs", "--execution", seed.captured],
+    ["logs", "--execution", seed.captured, "--follow", "--max-duration", "1"],
+  ];
+  const noteLines = (out: string) =>
+    out.split("\n").filter((line) => line.startsWith("Note: "));
+  for (const args of commands) {
+    const quiet = await h.run(args);
+    assert.equal(quiet.code, 0, `${args.join(" ")}: ${quiet.err}`);
+    assert.deepEqual(noteLines(quiet.out), [], args.join(" "));
+    const loud = await h.run([...args, "--verbose"]);
+    assert.equal(loud.code, 0, `${args.join(" ")}: ${loud.err}`);
+    assert.deepEqual(
+      noteLines(loud.out),
+      notes.map((n) => `Note: ${n}`),
+      args.join(" "),
+    );
+  }
+  // JSON is the same with and without the flag, and still carries the notes.
+  for (const args of commands.slice(0, 3)) {
+    const quiet = await ok(args);
+    const loud = await ok([...args, "--verbose"]);
+    const { observedAt: _a, ...loudCoverage } = loud.coverage;
+    const { observedAt: _b, ...quietCoverage } = quiet.coverage;
+    assert.deepEqual(loudCoverage, quietCoverage, args.join(" "));
+    assert.deepEqual(quiet.coverage.notes, notes, args.join(" "));
+    assert.deepEqual(loud.data, quiet.data, args.join(" "));
+  }
+  // The next page keeps the flag, so its notes do not vanish.
+  const paged = await h.run([
+    "logs",
+    "--execution",
+    seed.captured,
+    "--limit",
+    "1",
+    "--verbose",
+  ]);
+  assert.match(paged.out, /^More: ensemble logs .* --verbose .*--cursor \S+$/m);
+  // Past `--` it is an argument, not a flag.
+  const after = await h.run([
+    "execution",
+    "get",
+    seed.captured,
+    "--",
+    "--verbose",
+  ]);
+  assert.equal(after.code, 2);
+  assert.deepEqual(noteLines(after.out), []);
+  // Writes do not take it: refused before anything is sent.
+  const write = await s.issue("read-write", "execution-rw");
+  assert.equal(
+    (
+      await h.run([
+        "auth",
+        "login",
+        "--connection",
+        "rw",
+        "--url",
+        s.origin,
+        "--token-file",
+        h.tokenFile(write.token),
+      ])
+    ).code,
+    0,
+  );
+  const sent = h.fetches.length;
+  const stop = await h.run([
+    "task",
+    "stop",
+    seed.taskA,
+    "--verbose",
+    "--connection",
+    "rw",
+    "--output",
+    "json",
+  ]);
+  assert.equal(stop.code, 2);
+  assert.equal(stop.json().error.code, "usage");
+  assert.equal(h.fetches.length, sent);
 });
 
 test("a service without execution capabilities is unsupported after identity only", async (t) => {

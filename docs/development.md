@@ -179,8 +179,12 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    plaintext fallback; without the Keychain or a token file, login fails with
    `credential-store-unavailable`. Success ends with `Next: ensemble doctor` (with
    `--connection NAME` when that login is not the one a bare command selects).
-3. `ensemble auth status`, `ensemble task get TASK_ID [--output json]`,
+3. `ensemble auth status` (the connection, its saved `URL:`, the installation, the
+   credential and `API: version N`; the capability list and the service's own origin
+   are in `--output json`), `ensemble task get TASK_ID [--output json]`,
    `ensemble connection list|use NAME|remove NAME` and `ensemble auth logout`.
+   Logout and removal delete only local state; the server credential stays active
+   until revoked or expired.
    `task get` prints the task's State as the web UI's column (Ready, Running, Waiting,
    Paused, Stopping, Uncertain, Draft, Done or Cancelled), then `Version:`, `Lead:`
    (the lead's name and, once it has one, its assignment id, the `--to` of `task
@@ -190,8 +194,6 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    holds (writer, capacity and uncertainty) read as one `Ownership held`; `Stop
    requested` and `Task hold` are the others. The separate flags stay in JSON and
    in `recovery get`.
-   Logout and removal delete only local state; the server credential stays active
-   until revoked or expired.
 4. Read-only browsing, with either credential scope:
    - `project list|get ID|instructions ID [--revision N]|revisions ID` and the same
      for `profile`;
@@ -316,6 +318,11 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      per problem. It needs `diagnostics.read`, changes nothing, never prints token
      values or paths, and exits 0 whenever the read succeeds, whatever the checks
      report. `--output json` returns the unmodified service `data`.
+
+   `execution list`, `execution get` and `logs` print their two capture notes (tool
+   observation is incomplete; reasoning is not collected) only with `--verbose`, once
+   each, and a `More:` or `Resume:` line keeps the flag. `coverage.notes` in JSON
+   carries them either way. Write commands refuse `--verbose` (`usage`, exit 2).
 
    Capture is on by default (`enhanced`) for task-bound executions; `project.configure`
    with `diagnosticCapture: "baseline"` (shown by `project get`) reduces later

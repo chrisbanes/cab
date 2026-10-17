@@ -141,6 +141,7 @@ const OPTIONS_HELP = `Options:
                         for at most --max-duration S (default 900, max 86400)
   --help                Show this help
   --all                 With --help: list every command and option
+  --verbose             Also print execution capture notes (read commands)
   --version             Show the Ensemble version
 `;
 
@@ -260,6 +261,7 @@ export const OPTIONS = {
   output: { type: "string" },
   help: { type: "boolean" },
   all: { type: "boolean" },
+  verbose: { type: "boolean" },
   version: { type: "boolean" },
   limit: { type: "string" },
   cursor: { type: "string" },
@@ -529,10 +531,10 @@ async function run(
       data: identity,
       human: [
         `Connection:   ${session.name}`,
-        `Service:      ${identity.service.origin}`,
+        `URL:          ${session.url}`,
         `Installation: ${identity.service.installationId}`,
         `Credential:   ${identity.credential.name} (${identity.credential.scope}), expires ${expires}`,
-        `API:          version ${identity.apiVersion}; ${identity.capabilities.join(", ")}`,
+        `API:          version ${identity.apiVersion}`,
       ].join("\n"),
     };
   }
@@ -746,6 +748,7 @@ async function connect(
     );
   return {
     name,
+    url: connection.url,
     client,
     identity,
     result: {
