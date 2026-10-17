@@ -1,8 +1,10 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
+  type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -90,6 +92,14 @@ type Filters = {
   after: string;
   before: string;
 };
+/**
+ * Every applied query or filter pushes an entry, and each entry remounts the page. The control
+ * that had focus is named here, with the entry it belongs to, so the next page focuses it again.
+ */
+let restoreFocus: { navKey: unknown; id: string } | null = null;
+/** The controls a date blur can hand focus to without losing the person's next action. */
+const keepsFocus =
+  "[class~='search-query-row'], [class~='search-results-head']";
 export class SearchState {
   dataPath = "";
   data: z.infer<typeof searchReadSchema> | null = null;
@@ -130,6 +140,12 @@ export function Search({
   const backToItem = returnsToItem(origin);
   // The date values the URL already holds, so a blur or Enter that changes nothing pushes no entry.
   const applied = useRef({ after, before });
+  useLayoutEffect(() => {
+    const id =
+      restoreFocus?.navKey === history.state?.navKey ? restoreFocus?.id : null;
+    restoreFocus = null;
+    if (id) document.getElementById(id)?.focus({ preventScroll: true });
+  }, []);
   const loader = useCallback(
     (signal: AbortSignal) =>
       client.read(
@@ -165,7 +181,10 @@ export function Search({
     [state],
   );
   /** Runs the search for the field's text (or the URL's, when blank) with the filters, `over` taking precedence. */
-  function submit(over: Partial<Filters> = {}) {
+  function submit(
+    over: Partial<Filters> = {},
+    focusId = document.activeElement?.id,
+  ) {
     const f: Filters = {
       project: projectInput,
       type: typeInput,
@@ -188,15 +207,30 @@ export function Search({
     if (f.before)
       p.set("before", String(new Date(`${f.before}T23:59:59.999`).getTime()));
     navigate(`/app/search?${p}`);
+    restoreFocus = focusId
+      ? { navKey: history.state?.navKey, id: focusId }
+      : null;
   }
-  const commitDates = () => {
-    if (after !== applied.current.after || before !== applied.current.before)
-      submit();
-  };
+  const datesChanged = () =>
+    after !== applied.current.after || before !== applied.current.before;
   const dateEnter = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    commitDates();
+    if (datesChanged()) submit({}, e.currentTarget.id);
+  };
+  /**
+   * Applies the dates when focus moves to another Search control or to nothing, and hands focus
+   * to that control on the next page. Moving to a result link or out of the page leaves the
+   * value uncommitted: replacing the page under that click would lose it.
+   */
+  const dateBlur = (e: FocusEvent<HTMLInputElement>) => {
+    const next = e.relatedTarget;
+    const target =
+      next instanceof HTMLElement && next.id && next.closest(keepsFocus)
+        ? next.id
+        : "";
+    if ((next ? target : document.hasFocus()) && datesChanged())
+      submit({}, target);
   };
   return (
     <section className="search-workspace" aria-label="Retained record search">
@@ -236,7 +270,11 @@ export function Search({
               maxLength={256}
             />
           </label>
-          <Button variant="secondary" disabled={!input.trim()}>
+          <Button
+            id="search-records"
+            variant="secondary"
+            disabled={!input.trim()}
+          >
             Search records
           </Button>
         </div>
@@ -274,6 +312,16 @@ export function Search({
                 </span>
               </h2>
             )}
+            <Button
+              id="search-refresh"
+              variant="secondary"
+              onClick={() => {
+                resource.refresh();
+                onRefresh?.();
+              }}
+            >
+              Refresh results
+            </Button>
             <div className="search-filters">
               <label htmlFor="search-project">
                 Project
@@ -322,7 +370,7 @@ export function Search({
                   type="date"
                   value={after}
                   onChange={(e) => setAfter(e.target.value)}
-                  onBlur={commitDates}
+                  onBlur={dateBlur}
                   onKeyDown={dateEnter}
                 />
               </label>
@@ -335,12 +383,13 @@ export function Search({
                   type="date"
                   value={before}
                   onChange={(e) => setBefore(e.target.value)}
-                  onBlur={commitDates}
+                  onBlur={dateBlur}
                   onKeyDown={dateEnter}
                 />
               </label>
               <label className="search-history">
                 <input
+                  id="search-historical"
                   type="checkbox"
                   checked={historyInput}
                   onChange={(e) => {
@@ -351,15 +400,6 @@ export function Search({
                 Include historical records
               </label>
             </div>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                resource.refresh();
-                onRefresh?.();
-              }}
-            >
-              Refresh results
-            </Button>
           </div>
           {data && (
             <>

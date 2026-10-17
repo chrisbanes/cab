@@ -1114,3 +1114,171 @@ test("Search leads with the field and shows filters beside the result count once
   );
   await captureBrowserEvidence(page, "390-search-header-filters");
 });
+
+test("Search keeps keyboard focus through every filter commit and reads in DOM order", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(
+    f,
+    "Focus alpha",
+    "Focus alpha",
+    "- [ ] Focus requirement alpha",
+  );
+  a.result("Focus result alpha");
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const field = (name: string) => page.getByLabel(name, { exact: true });
+  const activeId = () => page.evaluate(() => document.activeElement?.id ?? "");
+  const waitActive = (id: string) =>
+    page.waitForFunction((id) => document.activeElement?.id === id, id);
+  const day = (offset: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  /** Presses `key` until focus leaves the date input; its segments each take a press. */
+  const leave = async (id: string, key: "Tab" | "Shift+Tab") => {
+    for (let press = 0; press < 6; press++) {
+      await page.keyboard.press(key);
+      if ((await activeId()) !== id) return;
+    }
+    assert.fail(`Focus never left #${id}`);
+  };
+  /** Controls whose reading order (row, then column) differs from their DOM order. */
+  const outOfOrder = () =>
+    page.locator(".search-workspace").evaluate((root) => {
+      const controls = [
+        ...root.querySelectorAll<HTMLElement>("input, select, button, a[href]"),
+      ].filter((el) => el.getClientRects().length > 0);
+      const rects = controls.map((el) => el.getBoundingClientRect());
+      return controls.flatMap((el, i) => {
+        const prev = rects[i - 1],
+          rect = rects[i];
+        if (!prev || !rect) return [];
+        const sameRow = rect.top < prev.bottom - 1;
+        const ordered = sameRow ? rect.left >= prev.left : rect.top >= prev.top;
+        return ordered ? [] : [el.id || el.textContent];
+      });
+    });
+
+  await page.goto(`${web.origin}/app/search`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel(searchFieldLabel).waitFor();
+  await searchRecords(page, "Focus");
+
+  // Reading order is DOM order at desktop and phone, and Tab walks it.
+  assert.deepEqual(await outOfOrder(), []);
+  await page.locator("#retained-query").focus();
+  const walked = ["retained-query"];
+  for (let press = 0; press < 20; press++) {
+    await page.keyboard.press("Tab");
+    const id = await activeId();
+    if (id !== walked.at(-1)) walked.push(id);
+    if (id === "search-historical") break;
+  }
+  assert.deepEqual(walked, [
+    "retained-query",
+    "search-records",
+    "search-refresh",
+    "search-project",
+    "search-type",
+    "search-from-date",
+    "search-through-date",
+    "search-historical",
+  ]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.deepEqual(await outOfOrder(), []);
+  await page.setViewportSize({ width: 1366, height: 900 });
+
+  // A select keeps focus when its change applies.
+  await field("Record type").focus();
+  await field("Record type").selectOption("result");
+  await page.waitForURL((url) => url.searchParams.get("type") === "result");
+  await waitActive("search-type");
+
+  // The checkbox keeps focus when Space applies it.
+  await field("Include historical records").focus();
+  await page.keyboard.press("Space");
+  await page.waitForURL((url) => url.searchParams.get("historical") === "true");
+  await waitActive("search-historical");
+
+  // Tab out of From applies it and lands on Through.
+  await field("From date").fill(day(-2));
+  await leave("search-from-date", "Tab");
+  await page.waitForURL(
+    (url) => url.searchParams.get("after") === searchDayStart(day(-2)),
+  );
+  await waitActive("search-through-date");
+  assert.equal(await field("From date").inputValue(), day(-2));
+
+  // Shift+Tab out of From applies it and lands on Type.
+  await field("From date").fill(day(-1));
+  await leave("search-from-date", "Shift+Tab");
+  await page.waitForURL(
+    (url) => url.searchParams.get("after") === searchDayStart(day(-1)),
+  );
+  await waitActive("search-type");
+
+  // Enter in Through applies it and keeps focus there.
+  await field("Through date").fill(day(0));
+  await page.keyboard.press("Enter");
+  await page.waitForURL(
+    (url) => url.searchParams.get("before") === searchDayEnd(day(0)),
+  );
+  await waitActive("search-through-date");
+
+  // Refresh results keeps focus and does not replace the page.
+  await page
+    .locator(".search-workspace")
+    .evaluate((el) => el.setAttribute("data-replaced", ""));
+  await page.locator("#search-refresh").focus();
+  await Promise.all([
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/operator/search",
+    ),
+    page.keyboard.press("Enter"),
+  ]);
+  assert.equal(await activeId(), "search-refresh");
+  assert.equal(
+    await page.locator(".search-workspace[data-replaced]").count(),
+    1,
+  );
+
+  // Searching again keeps focus on the field that was used, or on the button.
+  await page.locator("#retained-query").fill("Focus alpha");
+  await page.keyboard.press("Enter");
+  await page.waitForURL(
+    (url) => url.searchParams.get("query") === "Focus alpha",
+  );
+  await waitActive("retained-query");
+  await page.locator("#retained-query").fill("Focus result");
+  await page.locator("#search-records").focus();
+  await page.keyboard.press("Enter");
+  await page.waitForURL(
+    (url) => url.searchParams.get("query") === "Focus result",
+  );
+  await waitActive("search-records");
+
+  // A dirty date is not applied when focus goes to a result link, and the click is not lost.
+  const searchURL = page.url();
+  await page.locator("[data-search-record] a").first().waitFor();
+  await field("From date").fill(day(-3));
+  await page.locator("[data-search-record] a").first().click();
+  await page.waitForURL((url) => url.pathname.startsWith("/app/tasks/"));
+  await page.goBack();
+  await page.waitForURL(searchURL);
+  assert.equal(await field("From date").inputValue(), day(-1));
+});

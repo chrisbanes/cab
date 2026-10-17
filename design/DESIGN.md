@@ -1956,9 +1956,13 @@ the frames as follows:
   the count, Refresh results on the count's row and the filters on the row beneath,
   and show only once there is a query, including while the first read loads or has
   failed. Project, Type and the history checkbox apply on change; From and Through
-  apply on blur or Enter, and only when the value changed. Every applied filter is
-  a new Search entry that drops the cursor, and Back/Forward restores each entry's
-  values.
+  apply on blur or Enter, and only when the value changed; a date left for a result
+  link or outside the page stays uncommitted so that click is not lost. Every applied
+  filter is a new Search entry that drops the cursor, and Back/Forward restores each
+  entry's values. Focus stays on the control that applied the filter (or goes to the
+  control Tab or Shift+Tab was heading for), and Tab order is the reading order:
+  field, Search records, Refresh results, then Project, Type, From, Through and the
+  history checkbox.
 - Date is From and Through date fields rather than one "Any date" select, and
   history is the "Include historical records" checkbox.
 - Provenance is "project · current/historical · time". The search read model
@@ -1978,7 +1982,7 @@ the frames as follows:
   selection is the Selected badge, the row highlight and focus on its link.
 - Phone (`74-phone-search`) places Search records beside the field and shows the
   filters in the results header as a two-column grid with 44px controls instead of
-  the one summary filter button, with Refresh results full width beneath them;
+  the one summary filter button, with Refresh results full width above them;
   results stay in the bordered panel.
 
 ### Task detail, composer and Stop

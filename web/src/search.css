@@ -75,9 +75,9 @@
   gap: var(--space-8) 16px;
   padding: 10px 16px;
 }
-/* Count and Refresh share the first row; the filters take the full row beneath them. */
+/* Count and Refresh share the first row; the filters take the full row beneath them. The DOM
+   order is the visual order, so no `order` rule moves a control away from its Tab position. */
 .search-results-head .search-filters {
-  order: 1;
   flex: 1 1 100%;
 }
 .search-results-head > button {
@@ -172,9 +172,6 @@
   .search-results-head {
     flex-direction: column;
     align-items: stretch;
-  }
-  .search-results-head .search-filters {
-    order: 0;
   }
   .search-results-head > button {
     min-height: 44px;
