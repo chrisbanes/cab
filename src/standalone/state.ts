@@ -3414,8 +3414,9 @@ export class ExecutionState {
         .prepare(
           `SELECT 1 FROM execution_intents e
           LEFT JOIN task_execution_bindings b ON b.workId = e.workId
+          LEFT JOIN drafting_runs d ON 'drafting:' || d.runId = e.workId
           WHERE e.state IN ('submitting','running','held')
-            AND COALESCE(b.harness, 'codex') = ? LIMIT 1`,
+            AND COALESCE(b.harness, d.harness, 'codex') = ? LIMIT 1`,
         )
         .get(harness) !== undefined
     );

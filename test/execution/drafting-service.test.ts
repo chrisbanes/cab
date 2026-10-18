@@ -501,7 +501,12 @@ for (const harness of harnesses) {
     const watch = w.tracked(service);
     const before = watch.counts();
     let inside:
-      | { readme: string; head: string; usage: number | undefined }
+      | {
+          readme: string;
+          head: string;
+          usage: number | undefined;
+          owner: string[];
+        }
       | undefined;
     script(w, harness, opened, async (api) => {
       const turn = firstTurn(harness, opened);
@@ -513,6 +518,9 @@ for (const harness of harnesses) {
           encoding: "utf8",
         }).trim(),
         usage: watch.usage(projectId).global,
+        owner: (["codex", "claude"] as const).filter((name) =>
+          startedOf(service).state.hasRuntimeOwnedExecution(name),
+        ),
       };
       const outcome = await api.callTool(draftProposalToolName, proposal);
       assert.equal(outcome.success, true);
@@ -527,6 +535,7 @@ for (const harness of harnesses) {
     assert.equal(inside?.readme, "# Atlas\nA keyboard-driven tool.\n");
     assert.equal(inside?.head, w.source.commit);
     assert.equal(inside?.usage, 1, "the run held capacity while it ran");
+    assert.deepEqual(inside?.owner, [harness], "its own runtime owns it");
     assert.equal(watch.usage(projectId).global, 0);
     assert.deepEqual(watch.counts(), before);
     const turn = firstTurn(harness, opened);
