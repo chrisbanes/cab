@@ -285,6 +285,43 @@ environment variable and no secret. It is world-readable in `/Library/LaunchDaem
 Logs stay in the log directory, `<label>.<version>.<UTC time>.{out,err}.log`.
 Install and the service refuse `root` as the account.
 
+**What the logs contain.** The service logs only at its process edges; SQLite state
+and the execution diagnostics stay the debugging record, and per-request, per-poll
+and access activity is not logged. `<label>…out.log` holds the operator URL line
+that `operator` prints once it is listening. `<label>…err.log` holds one JSON object
+per line:
+
+- `{"event":"service-start","version","mode","port","serviceId"}` once the service is
+  serving (`port` is `null` for `serve`).
+- A background-failure diagnostic when a background loop (`github-poll`,
+  `power-poll`, `domain-wake`, `post-turn-wake`, `scheduler-drain`) fails
+  unexpectedly, and a `safe-shutdown` diagnostic when the service cannot stop
+  cleanly. Both carry `error`, the failure's `name`, `code` when it has one, its
+  `message`, up to 10 stack frames and its `cause` chain, redacted as described below.
+- `{"event":"service-failure","stage":"service-shutdown"|"listener-shutdown","error"}`
+  when the service or the operator listener fails to shut down.
+- `{"event":"service-exit","reason"}`, exactly once at the end. `reason` is `signal`
+  (with `signal`), `background-failure` (with `operation`), `shutdown-failure`, or
+  `crash` (with `error`) for a startup failure such as a port already in use, an
+  uncaught exception or an unhandled rejection; a crash exits unsuccessfully
+  without Node's default stack print. A line from a crash during startup can
+  appear without a `service-start` line.
+- `{"errorCode":"diagnostic-writer-failed"}` when the diagnostic sink stalls or
+  fails, and the fixed root-refusal message when the service is started as root.
+
+Every `error` is redacted before it is written: the data directory, the operator
+auth file, GitHub, Claude, routing and delivery credentials, credential-named
+environment values and repository paths become `[redacted]`, as do values after
+`token=`, `password=`, `secret=` or `api_key=`, `Authorization:` header values,
+`Bearer` values and credentials inside URLs. A secret outside these forms that is
+not a configured credential is not recognised.
+The message is cut at 2 KiB, each stack frame at 512 bytes and the `cause` chain at
+three levels (`messageTruncated`, `causeOmitted`). `"redaction":"unavailable"` marks
+a failure from before the redaction inputs were available: only `name` and `code`
+are shown, never the message or stack. In every record, a `name` or `code` that is
+not identifier-shaped, holds an excluded value or matches a redaction form above is
+replaced by `Error` or left out.
+
 There is one install record per label (`STATE/launchd/<label>.json`), which
 carries `"mode"`: `agent` or `daemon`. The modes are never both active. Install in
 one mode refuses, changing nothing, while a record, loaded job or plist of the other

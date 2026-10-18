@@ -98,7 +98,9 @@ Both `serve` and `operator` also stop with an unsuccessful exit status after an
 unexpected service-owned background failure. Provider failures already recorded
 as incomplete source observations or power-admission holds remain visible through
 those existing states; they do not trigger this fatal exit. Normal signal-driven
-shutdown remains successful.
+shutdown remains successful. Each also writes a start and an exit line to stderr, and
+a failure writes its sanitised error there; see
+[the macOS guide](operations/standalone-macos.md) for the log contents.
 Reusing a work ID never resubmits it. A held result requires independent
 reconciliation; there is no force unlock. Automatic retry is limited to an exact
 terminal `serverOverloaded` or `rateLimitExceeded` failure with known retry
