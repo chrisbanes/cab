@@ -15,6 +15,8 @@ export const actionKinds = [
   "pr.ready",
   "pr.merge",
   "issue.close",
+  "pr.thread.reply",
+  "pr.thread.resolve",
 ] as const;
 export const deliveryPolicySchema = z
   .object({
@@ -66,6 +68,9 @@ const prTargetSchema = targetSchema
     headRef: identity,
     expectedHeadSha: z.string().regex(/^[0-9a-f]{40}$/),
   })
+  .strict();
+const threadTargetSchema = targetSchema
+  .extend({ threadNodeId: identity })
   .strict();
 const textFields = {
   title: z.string().trim().min(1).max(512).optional(),
@@ -148,6 +153,20 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("issue.close"),
       target: targetSchema,
       reviewedResultIds: z.array(z.string().uuid()),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("pr.thread.reply"),
+      target: threadTargetSchema,
+      body: z.string().min(1).max(64000),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("pr.thread.resolve"),
+      target: threadTargetSchema,
+      expectedLatestCommentNodeId: identity,
     })
     .strict(),
 ]);
@@ -296,6 +315,19 @@ export const prObservationSchema = z
             state: identity,
             body: z.string().max(2000),
             commitSha: z.string().nullable(),
+          })
+          .strict(),
+      )
+      .optional(),
+    /** Absent on observations persisted before thread actions existed. */
+    reviewThreads: z
+      .array(
+        z
+          .object({
+            nodeId: identity,
+            isResolved: z.boolean(),
+            firstCommentNodeId: identity.nullable(),
+            latestCommentNodeId: identity.nullable(),
           })
           .strict(),
       )
@@ -532,6 +564,22 @@ export class DeliveryStore {
       throw new Error("Exact material approval required");
     if (action.kind === "pr.merge" && policy.mode !== "through-merge")
       throw new Error("Project delivery mode forbids merge");
+    if (
+      action.kind === "pr.thread.reply" ||
+      action.kind === "pr.thread.resolve"
+    ) {
+      const observed = this.delivery(binding.taskId)?.observation;
+      if (
+        !observed ||
+        observed.repositoryId !== action.target.repositoryId ||
+        observed.nodeId !== action.target.nodeId ||
+        observed.number !== action.target.number ||
+        !observed.reviewThreads?.some(
+          (t) => t.nodeId === action.target.threadNodeId,
+        )
+      )
+        throw new Error("Review thread is not on the task's bound PR");
+    }
     const source = this.db
       .prepare("SELECT readiness FROM project_github_sources WHERE projectId=?")
       .get(binding.projectId) as { readiness: string } | undefined;
