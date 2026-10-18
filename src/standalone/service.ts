@@ -577,6 +577,8 @@ export class StandaloneService {
   /** Per harness, so an unidentified anomaly can only retract its own work. */
   private readonly lastCompletedWorkId = new Map<ExecutionHarness, string>();
   private canonicalDataDir: string | undefined;
+  /** Exclusion-only: grows with distinct token-file rotations, never persisted or returned. */
+  private readonly claudeTokensHandedOut = new Set<string>();
   /** Taken in `stop()`: `stopOwned()` clears the domain that the exclusions come from. */
   private stoppedExclusions: readonly string[] | undefined;
   private readonly active = new Set<Promise<ExecutionIntent>>();
@@ -1013,6 +1015,8 @@ export class StandaloneService {
                 "Claude token is also in the service environment the running runtimes inherited; restart the service",
                 "restart-required",
               );
+            // A rotated file must not drop a value a running runtime still holds.
+            this.claudeTokensHandedOut.add(read.value);
             return {
               env: credentialFreeEnvironment(
                 snapshot,
@@ -1945,6 +1949,7 @@ export class StandaloneService {
         ...secretEnvironmentValues(),
         ...gitHubCredentialExclusions(domain).redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
+        ...this.claudeTokensHandedOut,
         ...domain.projects().flatMap((project) => {
           const id = String(project.id);
           return [

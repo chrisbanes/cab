@@ -238,6 +238,22 @@ test("a file-sourced Claude token reaches only the Claude turn, never Codex, hel
   assert.equal(turn.env.ENSEMBLE_MANAGED_ASSIGNMENT, "1");
 });
 
+test("a rotated token file keeps the previous value in the failure exclusions", async (t) => {
+  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
+  const path = tokenFile(t);
+  const f = harnessFixture(t);
+  await f.service.start();
+  f.configure(`file:${path}`);
+  await f.service.stop();
+  await f.service.start();
+  const turn = f.claude().turnEnvironment();
+  assert.ok("env" in turn);
+  writeFileSync(path, "rotated-claude-token-1185\n", { mode: 0o600 });
+  const exclusions = f.service.failureExclusions();
+  assert.ok(exclusions?.includes("rotated-claude-token-1185"));
+  assert.ok(exclusions?.includes(FILE_TOKEN));
+});
+
 test("a file token also inherited by the running runtimes waits until restart", async (t) => {
   withEnvironment(t, { [NAME]: undefined, [ALIAS]: FILE_TOKEN });
   const path = tokenFile(t);

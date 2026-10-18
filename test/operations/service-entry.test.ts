@@ -14,7 +14,12 @@ import { test } from "node:test";
 const entry = resolve("dist/test/fixtures/service-entry.js");
 const secret = "fixture-entry-secret-1185";
 
-async function run(mode: string, signal?: NodeJS.Signals) {
+/** `signalOn`: send `signal` once stderr shows the start line or stdout shows startup began. */
+async function run(
+  mode: string,
+  signal?: NodeJS.Signals,
+  signalOn: "start-line" | "starting" = "start-line",
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-entry-")));
   const data = join(root, "data");
   mkdirSync(data, { mode: 0o700 });
@@ -26,15 +31,20 @@ async function run(mode: string, signal?: NodeJS.Signals) {
     let stdout = "";
     let stderr = "";
     let signalled = false;
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-      if (signal && !signalled && stderr.includes('"service-start"')) {
+    const send = () => {
+      if (signal && !signalled) {
         signalled = true;
         child.kill(signal);
       }
+    };
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (signalOn === "starting" && stdout.includes("starting")) send();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      if (signalOn === "start-line" && stderr.includes('"service-start"'))
+        send();
     });
     const code = await new Promise<number | null>((resolveExit, reject) => {
       const timer = setTimeout(() => {
@@ -113,4 +123,53 @@ test("a crash exits even when cleanup leaves a referenced handle open", async ()
   const { code, records } = await run("open-handle");
   assert.equal(code, 1);
   assert.equal(records.at(-1).reason, "crash");
+});
+
+test("a signal during startup waits for startup, then exits cleanly with one start and one exit line", async () => {
+  const { code, records } = await run("slow-start", "SIGTERM", "starting");
+  assert.equal(code, 0);
+  assert.deepEqual(
+    records.map((record) => record.event),
+    ["service-start", "service-exit"],
+  );
+  assert.equal(records[1].reason, "signal");
+  assert.equal(records[1].signal, "SIGTERM");
+});
+
+test("a second signal during a stalled startup ends the process", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-entry-")));
+  const data = join(root, "data");
+  mkdirSync(data, { mode: 0o700 });
+  try {
+    const child = spawn(
+      process.execPath,
+      [entry, "slow-start", "serve", data],
+      {
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+    let sent = 0;
+    child.stdout.on("data", () => {
+      if (sent++ === 0) {
+        child.kill("SIGTERM");
+        // Apart from the first: signals pending together would coalesce into one.
+        setTimeout(() => child.kill("SIGTERM"), 150);
+      }
+    });
+    const [code, signal] = await new Promise<[number | null, string | null]>(
+      (resolveExit, reject) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error("stalled startup ignored the second signal"));
+        }, 20000);
+        child.once("exit", (status, name) => {
+          clearTimeout(timer);
+          resolveExit([status, name]);
+        });
+      },
+    );
+    assert.ok(code !== 0, `exit ${code} ${signal}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

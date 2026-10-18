@@ -20,6 +20,27 @@ import { runtimeOperatorRoutes } from "./operator-runtime.js";
 
 export type ServiceExitReason = "signal" | "background-failure";
 
+/**
+ * Keeps a SIGINT or SIGTERM during asynchronous startup from taking Node's default exit,
+ * which would write no exit line. The first one is carried to `waitForServiceExit`.
+ */
+export function captureStartupSignals() {
+  let first: NodeJS.Signals | undefined;
+  const release = () => {
+    process.removeListener("SIGINT", record);
+    process.removeListener("SIGTERM", record);
+  };
+  // Only the first signal is held: a second one, or a hung startup, takes the default exit.
+  const record = (signal: NodeJS.Signals) => {
+    first ??= signal;
+    release();
+  };
+  process.on("SIGINT", record);
+  process.on("SIGTERM", record);
+  return { received: () => first, release };
+}
+export type StartupSignals = ReturnType<typeof captureStartupSignals>;
+
 /** Wait for one operator signal or this exact service generation's fatal signal. */
 export async function waitForServiceExit(
   service: Pick<
@@ -28,6 +49,8 @@ export async function waitForServiceExit(
   >,
   failureNotification?: Promise<BackgroundFailureDiagnostic>,
   hooks: {
+    /** Signals caught during startup; released once this wait's own handlers are installed. */
+    startup?: StartupSignals | undefined;
     /** Runs once the signal handlers are installed: a start line then means a signal exits cleanly. */
     onListening?: () => void;
     onSignal?: (signal: NodeJS.Signals) => void;
@@ -54,7 +77,10 @@ export async function waitForServiceExit(
     process.once("SIGINT", onSignalReceived);
     process.once("SIGTERM", onSignalReceived);
     void notification.then(() => finish("background-failure"));
+    const early = hooks.startup?.received();
+    hooks.startup?.release();
     hooks.onListening?.();
+    if (early) onSignalReceived(early);
   });
   if (reason === "background-failure") {
     process.exitCode = 1;
@@ -86,6 +112,7 @@ export async function main(
   serviceFactory: (dataDir: string) => StandaloneService = productionService,
   /** Only `serve` and `operator` pass one: it adds their start and exit lines. */
   log?: ServiceLog,
+  startup?: StartupSignals,
 ): Promise<void> {
   const [command, dataDir, ...args] = commandLine;
   if (!command || !dataDir)
@@ -157,6 +184,7 @@ export async function main(
     } else if (command === "serve") {
       fatalBackgroundFailure =
         (await waitForServiceExit(service, failureNotification, {
+          startup,
           onListening: () =>
             log?.started({
               version: packageVersion(),
@@ -217,6 +245,7 @@ export async function main(
       try {
         fatalBackgroundFailure =
           (await waitForServiceExit(service, failureNotification, {
+            startup,
             onListening: () =>
               log?.started({
                 version: packageVersion(),
@@ -289,12 +318,14 @@ export async function runServiceEntry(
   };
   process.on("uncaughtException", crash);
   process.on("unhandledRejection", crash);
+  const startup = captureStartupSignals();
   try {
-    await main(argv, factory, log);
+    await main(argv, factory, log, startup);
   } catch (error) {
     // Like a default uncaught error, never wait on handles that cleanup left open.
     crash(error);
   } finally {
+    startup.release();
     process.removeListener("uncaughtException", crash);
     process.removeListener("unhandledRejection", crash);
   }

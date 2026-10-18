@@ -28,6 +28,11 @@ await runServiceEntry(argv, (dataDir) => {
   );
   const start = service.start.bind(service);
   service.start = async () => {
+    if (mode === "slow-start") {
+      // Handlers are installed before startup: this line says the process is starting.
+      process.stdout.write("starting\n");
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
     if (mode === "open-handle") setInterval(() => {}, 60_000);
     if (mode === "start-failure" || mode === "open-handle") throw failure();
     await start();
