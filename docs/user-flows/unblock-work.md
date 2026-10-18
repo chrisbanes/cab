@@ -6,7 +6,7 @@ offer Resume, which confirms once and sends only the project resume. The Inbox s
 holds without a Fix and is outside the budget. The budget is asserted only for a
 paused project (Resume project, the one Fix with a confirmation) at 1366 x 900 and
 390 x 844 by `test/operator/operator-unblock-work-browser.test.ts` ("unblock waiting
-work budget"), on task detail, the Home Project row, the project page and the
+work budget"), on task detail, the getting-started Project row on Home, the project page and the
 composer. It does not cover the created-task receipt or the Project row at
 `/app/getting-started`.
 

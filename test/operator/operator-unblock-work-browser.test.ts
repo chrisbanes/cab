@@ -39,10 +39,16 @@ const waits = (page: Page) => page.locator(".wait-reasons"),
     page
       .getByRole("status")
       .filter({ hasText: "Project paused · New turns are held." }),
+  verdict = (page: Page) =>
+    page.getByRole("region", { name: "If you create it now" }),
   started = (page: Page) =>
-    page
-      .getByRole("region", { name: "If you create it now" })
-      .getByText("Starts now", { exact: true }),
+    verdict(page).getByText("Starts now", { exact: true }),
+  // The first reason is the numbered list's primary item.
+  primaryFix = (page: Page) =>
+    verdict(page)
+      .locator('.wait-numbered > li[data-primary="true"]')
+      .filter({ hasText: "Project paused" })
+      .getByRole("button", { name: "Fix: Resume project" }),
   checklist = (page: Page) =>
     page.getByRole("region", { name: "Get Ensemble running" });
 
@@ -136,27 +142,12 @@ const entries: Record<string, Entry> = {
   },
   composer: {
     path: ({ projectId }) => `/app/tasks/new?project=${projectId}`,
-    first: (page) => {
-      const verdict = page.getByRole("region", {
-        name: "If you create it now",
-      });
-      return [
-        verdict,
-        verdict.getByText("Will wait", { exact: true }),
-        verdict
-          .locator(".wait-numbered li")
-          .filter({ hasText: "Project paused" })
-          .first()
-          .getByRole("button", { name: "Fix: Resume project" }),
-      ];
-    },
-    fix: (page) =>
-      page
-        .getByRole("region", { name: "If you create it now" })
-        .locator(".wait-numbered li")
-        .filter({ hasText: "Project paused" })
-        .first()
-        .getByRole("button", { name: "Fix: Resume project" }),
+    first: (page) => [
+      verdict(page),
+      verdict(page).getByText("Will wait", { exact: true }),
+      primaryFix(page),
+    ],
+    fix: primaryFix,
     async result(page) {
       await started(page).waitFor();
       return [started(page)];
@@ -260,6 +251,13 @@ for (const [label, viewport] of [
         },
         { type: "project.configure", projectId: ids.projectId, paused: false },
       );
+      assert.deepEqual(Object.keys(commands[0] ?? {}).sort(), [
+        "expectedVersion",
+        "key",
+        "paused",
+        "projectId",
+        "type",
+      ]);
       assert.ok(!d.project(ids.projectId).paused, "the project is resumed");
       assert.equal(interactions, 2);
       await noPageOverflow(page);
