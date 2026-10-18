@@ -11,7 +11,7 @@ export function timingInputDigest() {
         !file.includes("/__pycache__/") &&
         !file.endsWith(".pyc"),
     ),
-    ".node-version",
+    ".nvmrc",
     "package-lock.json",
     "package.json",
     "tsconfig.json",

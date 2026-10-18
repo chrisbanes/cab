@@ -103,7 +103,7 @@ Register browser-dependent cases through `browserSuite` or `browserTest`, with a
 explicit engine for WebKit. Keep non-browser cases independently runnable in mixed
 files; Node 26 service CI deliberately has no browser executables.
 
-Use Node.js from `.node-version` and the package manager pinned in `package.json`.
+Use Node.js from `.nvmrc` and the package manager pinned in `package.json`.
 Run `npm ci` then `npm run check` (type checking, lint, formatting, build, tests).
 CI runs the static checks and build once, then the runtime profiles documented in
 `docs/development.md`. Existing tests use real SQLite and a fake host.
