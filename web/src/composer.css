@@ -149,3 +149,100 @@
     min-height: 44px;
   }
 }
+
+/* Draft with lead (186-197): the panel above the fields and the proposal beside typed text. */
+.composer-draft {
+  margin-bottom: var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+
+.composer-draft-body {
+  display: grid;
+  gap: var(--space-12);
+  padding: 0 var(--space-16) var(--space-16);
+}
+
+.composer-draft-heading {
+  margin: 0;
+}
+
+button.composer-draft-head {
+  width: 100%;
+  padding: 0 var(--space-16);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-draft p,
+.composer-draft h2 {
+  margin: 0;
+}
+
+.composer-draft-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  min-height: 44px;
+}
+
+.composer-draft-head:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.composer-draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.composer-draft-progress,
+.composer-draft-outcome {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.composer-draft-strong {
+  font-weight: 500;
+}
+
+.composer-title-cell {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.composer-draft-choice {
+  display: grid;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-edge) 14%, transparent);
+  min-width: 0;
+}
+
+.composer-draft-choice-label {
+  color: var(--accent-text);
+}
+
+.composer-draft-choice-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 759px) {
+  .composer-draft-actions [data-slot="button"] {
+    min-height: 44px;
+  }
+}

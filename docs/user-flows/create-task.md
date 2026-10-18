@@ -23,7 +23,13 @@ it in one submission.
 3. "If you create it now" states Starts now or Will wait with the reasons, and the
    caveat that created is not running only with Will wait; the bar beside Create
    and start and Save draft only explains that Save draft keeps it without starting.
-4. Create and start shows "Task created" with Open task and any wait, with its
+4. Draft with lead, a closed panel above the fields, takes a rough idea and has the
+   project lead propose a title and outcome from the linked repositories
+   ([Drafting runs](../SPEC.md#drafting-runs)). Empty fields are filled; a field
+   already written shows the proposal beside it with Replace or Keep mine. Nothing is
+   saved until Save draft or Create and start. The panel is outside the budget below:
+   it adds no step to a task written by hand.
+5. Create and start shows "Task created" with Open task and any wait, with its
    Fix where the specification gives one and otherwise the link to what blocks it.
 
 ## Budget
@@ -42,3 +48,5 @@ Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
 - Save draft keeps the task without starting it; drafts are not Ready.
 - A refused creation keeps the input and names the field.
 - An unknown outcome offers Check whether it saved, which replays the exact request.
+- A stopped or failed draft shows Retry and Dismiss and keeps the idea, title and
+  outcome. Reloading or locking a phone reattaches to a draft in progress.

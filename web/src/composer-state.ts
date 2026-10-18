@@ -22,6 +22,10 @@ export const composerInputSchema = z
     links: z.array(z.string()),
     profileId: z.union([uuid, z.literal("")]),
     blockerTaskIds: z.array(uuid),
+    /** The rough idea handed to the project lead; absent until written. */
+    idea: z.string().optional(),
+    /** The drafting run this composer reattaches to after a reload. */
+    draftingRunId: uuid.optional(),
   })
   .strict();
 export type ComposerInput = z.infer<typeof composerInputSchema>;

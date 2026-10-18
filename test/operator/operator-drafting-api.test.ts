@@ -1,30 +1,14 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { test } from "node:test";
 import { draftProposalToolName } from "../../src/standalone/drafting.js";
+import { seedDraftingProject } from "../fixtures/drafting.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 
 const proposal = {
   title: "Publish a keyboard guide",
   outcome: "Publish the guide.\nDone: reviewed and checked examples.",
 };
-
-function sourceRepository(root: string) {
-  const path = join(root, "drafting-source");
-  mkdirSync(path, { recursive: true });
-  const git = (...args: string[]) =>
-    execFileSync("git", ["-C", path, ...args], { stdio: "ignore" });
-  execFileSync("git", ["init", "--quiet", "-b", "main", path]);
-  git("config", "user.name", "Drafting API Test");
-  git("config", "user.email", "drafting-api@example.invalid");
-  writeFileSync(join(path, "README.md"), "# Atlas\n");
-  git("add", "README.md");
-  git("commit", "--quiet", "-m", "initial");
-  return path;
-}
 
 async function until(check: () => boolean, description: string) {
   const deadline = Date.now() + 8000;
@@ -61,58 +45,7 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const domain = f.service.domain();
-  const lead = randomUUID();
-  const projectId = randomUUID();
-  domain.execute({
-    type: "profile.create",
-    actor: "operator",
-    key: randomUUID(),
-    profileId: lead,
-    name: "Lead",
-    instructions: "Prefer small tasks.",
-    capabilities: "plan",
-  });
-  domain.execute({
-    type: "project.create",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    name: "Atlas",
-    leadProfileId: lead,
-  });
-  domain.execute({
-    type: "project.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    expectedVersion: 1,
-    paused: false,
-  });
-  await domain.configureGitHub({
-    type: "github.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    expectedVersion: Number(domain.githubConfiguration(projectId).version),
-    credentialRef: null,
-    selections: [
-      {
-        id: "repo",
-        kind: "repository",
-        repositoryId: "R_1",
-        owner: "acme",
-        name: "atlas",
-      },
-    ],
-    repositories: [
-      {
-        repositoryId: "repo-alpha",
-        path: sourceRepository(f.directory),
-        ref: "main",
-      },
-    ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-  });
+  const { projectId } = await seedDraftingProject(f);
   const web = await f.startWeb([f.directory]);
   const { cookie, csrf } = await session(web.origin, web.password);
   const post = (command: Record<string, unknown>, token = csrf) =>
