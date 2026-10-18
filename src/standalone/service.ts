@@ -400,6 +400,8 @@ export interface StandaloneServiceOptions {
   workspaceManager?: WorkspaceManagerOptions;
   /** Test-only; production uses the fixed 10 minute cap. */
   draftingTimeLimitMs?: number;
+  /** Test-only; production retries a failed interrupt after 5 seconds. */
+  draftingInterruptRetryMs?: number;
   power?: {
     enabled?: boolean;
     eventSource?: PowerEventSource;
@@ -624,7 +626,12 @@ export class StandaloneService {
   /** A running drafting run's bound turn and pending Stop, which may arrive before the turn binds. */
   private readonly draftingControls = new Map<
     string,
-    { threadId?: string; turnId?: string; stopReason?: string }
+    {
+      threadId?: string;
+      turnId?: string;
+      stopReason?: string;
+      interrupts?: number;
+    }
   >();
   private readonly routingCoordinators = new Map<string, RoutingCoordinator>();
   private readonly retryNow: () => number;
@@ -4514,7 +4521,21 @@ export class StandaloneService {
       runtime,
       runtime.interruptTurn(threadId, turnId),
       runtimeFailedError,
-    ).catch(() => {});
+    ).catch(() => this.retryDraftingInterrupt(runId));
+  }
+
+  /** A failed interrupt is tried again while the run is still stopping, a few times. */
+  private retryDraftingInterrupt(runId: string): void {
+    const control = this.draftingControls.get(runId);
+    if (!control || (control.interrupts = (control.interrupts ?? 0) + 1) > 5)
+      return;
+    setTimeout(() => {
+      if (
+        this.draftingControls.get(runId) === control &&
+        this.current?.drafting.get(runId)?.state === "stopping"
+      )
+        this.interruptDrafting(runId);
+    }, this.options.draftingInterruptRetryMs ?? 5000).unref();
   }
 
   private handleDraftProposal(call: RuntimeToolCall): RuntimeToolResult {
@@ -4610,9 +4631,13 @@ export class StandaloneService {
     supervisor: ExecutionSupervisor;
   }): Promise<void> {
     c.drafting.sweepExpired();
-    for (const run of c.drafting.unfinished()) {
-      if (run.state === "queued") continue;
+    for (let run of c.drafting.unfinished()) {
       const workId = StandaloneService.draftingWorkId(run.runId);
+      if (run.state === "queued") {
+        // Admitted but the crash came before it was marked running: treat it as running.
+        if (!c.state.recoveryIdentity(workId)) continue;
+        run = c.drafting.transition(run.runId, "running");
+      }
       // Never admitted, so nothing ran: only its copy was waiting to go.
       if (run.state === "stopping" && !c.state.recoveryIdentity(workId)) {
         if (
@@ -4795,20 +4820,29 @@ export class StandaloneService {
         drafting.transition(runId, "stopping", draftingCleanupReason);
       return;
     }
-    state.complete(intent.id, threadId, turnId);
     const run = drafting.require(runId);
     const stopReason = this.draftingControls.get(runId)?.stopReason;
-    if (stopReason !== undefined || run.state === "stopping")
-      drafting.transition(
-        runId,
-        "interrupted",
-        stopReason ?? run.reason ?? draftingStoppedReason,
-      );
-    else if (outcome === "completed" && drafting.hasCandidate(runId))
-      drafting.transition(runId, "proposed");
-    else if (outcome === "completed")
-      drafting.transition(runId, "failed", "The lead returned no draft");
-    else drafting.transition(runId, "failed", "The lead's turn failed");
+    const settle: () => void =
+      stopReason !== undefined || run.state === "stopping"
+        ? () =>
+            drafting.transition(
+              runId,
+              "interrupted",
+              stopReason ?? run.reason ?? draftingStoppedReason,
+            )
+        : outcome === "completed" && drafting.hasCandidate(runId)
+          ? () => drafting.transition(runId, "proposed")
+          : outcome === "completed"
+            ? () =>
+                drafting.transition(
+                  runId,
+                  "failed",
+                  "The lead returned no draft",
+                )
+            : () =>
+                drafting.transition(runId, "failed", "The lead's turn failed");
+    // Release and settlement commit together, so a crash cannot split them.
+    state.complete(intent.id, threadId, turnId, settle);
   }
 
   private async dispatchAndRead(workId: string): Promise<ExecutionIntent> {
@@ -6186,6 +6220,8 @@ export class StandaloneService {
       if (exactBinding) conversationCapture?.bind(exactBinding);
       else conversationCapture?.discard();
       const outcome = await guard(runtime.waitForTurn(threadId, turnId));
+      // The turn has ended: a late limit must not turn its result into an interruption.
+      if (draftingTimer) clearTimeout(draftingTimer);
       diagnostics?.add(serviceItem("terminal-observed", "info", { outcome }));
       conversationCapture?.finish();
       if (conversationCapture)

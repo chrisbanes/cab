@@ -5254,7 +5254,13 @@ export class ExecutionState {
     return row?.inspectionKind ?? null;
   }
 
-  complete(id: string, threadId: string, turnId: string): void {
+  /** `alongside` runs in the same transaction, so a caller's own record commits with it. */
+  complete(
+    id: string,
+    threadId: string,
+    turnId: string,
+    alongside?: () => void,
+  ): void {
     transaction(this.db, () => {
       const row = this.db
         .prepare(
@@ -5274,6 +5280,7 @@ export class ExecutionState {
             "UPDATE turn_requests SET state = 'completed', reason = NULL WHERE workId = ?",
           )
           .run(row.workId);
+      alongside?.();
     });
   }
 }

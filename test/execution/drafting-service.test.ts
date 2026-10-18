@@ -69,6 +69,8 @@ class DraftRuntime implements Runtime {
   holdOnInterrupt = false;
   /** Holds `startThread`, so a Stop can land before the turn exists. */
   threadDelayMs = 0;
+  /** This many interrupt calls fail before one is accepted. */
+  failInterrupts = 0;
   private readonly behaviors: Behavior[] = [];
   private tool:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
@@ -139,6 +141,10 @@ class DraftRuntime implements Runtime {
   }
   async interruptTurn(_threadId: string, turnId: string) {
     this.interrupts.push(turnId);
+    if (this.failInterrupts > 0) {
+      this.failInterrupts--;
+      throw new Error("interrupt failed");
+    }
     const turn = this.turns.get(turnId);
     turn?.interrupt();
     if (!this.holdOnInterrupt) turn?.settle("failed");
@@ -176,6 +182,7 @@ interface Options {
   /** Verification of a restarted run's process: ended, or unknown. */
   verified?: boolean;
   draftingTimeLimitMs?: number;
+  draftingInterruptRetryMs?: number;
   /** A `git` that may refuse `worktree remove`, to make cleanup fail. */
   gitExecutable?: string;
 }
@@ -315,6 +322,9 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
         terminationVerifier: verifier,
         ...(options.draftingTimeLimitMs
           ? { draftingTimeLimitMs: options.draftingTimeLimitMs }
+          : {}),
+        ...(options.draftingInterruptRetryMs
+          ? { draftingInterruptRetryMs: options.draftingInterruptRetryMs }
           : {}),
         ...(options.gitExecutable
           ? { workspaceManager: { gitExecutable: options.gitExecutable } }
@@ -964,6 +974,126 @@ test("a run that failed to prepare still settles as failed once its copy is fina
   const settled = await service.stopDrafting(runId);
   assert.equal(settled.state, "failed");
   assert.equal(settled.reason, "The working copy could not be prepared");
+});
+
+test("a failed interrupt is tried again while the run is stopping", async (t) => {
+  const w = world(t);
+  const { service, codex } = w.open({ draftingInterruptRetryMs: 50 });
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  codex.failInterrupts = 1;
+  script(w, "codex", { service, codex } as never, async (api) => {
+    await api.interrupted();
+    throw new Error("interrupted");
+  });
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () =>
+      service.readDrafting(runId)?.state === "running" &&
+      codex.threads.length > 0,
+    () => w.tracked(service).runs(),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await service.stopDrafting(runId);
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "interrupted",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(
+    codex.interrupts.length,
+    2,
+    "the first failed and the second was accepted",
+  );
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
+});
+
+test("a limit that fires after the turn ended does not turn its proposal into an interruption", async (t) => {
+  const w = world(t);
+  const slow = join(w.root, "git-shim");
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  // Removing the copy takes longer than the limit.
+  writeFileSync(
+    slow,
+    `#!/bin/sh\ncase "$*" in *"worktree remove"*) sleep 0.8;; esac\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  const { service, codex } = w.open({
+    gitExecutable: slow,
+    draftingTimeLimitMs: 300,
+  });
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  codex.script(proposing(proposal));
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "proposed",
+    () => w.tracked(service).runs(),
+  );
+  assert.deepEqual(service.readDrafting(runId)?.proposal, proposal);
+});
+
+test("releasing capacity and settling the run commit together", async (t) => {
+  const w = world(t);
+  const { service, codex } = w.open();
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  codex.script(proposing(proposal));
+  const drafting = startedOf(service).drafting;
+  const transition = drafting.transition.bind(drafting);
+  let failing = true;
+  drafting.transition = (id, to, reason) => {
+    if (failing && to === "proposed") throw new Error("settle failed");
+    return transition(id, to, reason);
+  };
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "stopping",
+    () => w.tracked(service).runs(),
+  );
+  failing = false;
+  // The release rolled back with the failed settlement: nothing is half done.
+  assert.equal(w.tracked(service).usage(projectId).global, 1);
+  assert.equal(
+    service.list().find((item) => item.workId === `drafting:${runId}`)?.state,
+    "held",
+  );
+});
+
+test("a run admitted just before a crash is treated as running on the next start", async (t) => {
+  const w = world(t);
+  const first = w.open({ verified: true });
+  await w.start(first.service, "codex");
+  const { projectId } = await w.project(first.service, "codex");
+  const drafting = startedOf(first.service).drafting;
+  const transition = drafting.transition.bind(drafting);
+  // The crash lands between admission and the move to running.
+  drafting.transition = (id, to, reason) => {
+    if (to === "running") throw new Error("crashed before running");
+    return transition(id, to, reason);
+  };
+  const runId = randomUUID();
+  await first.service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () =>
+      first.service
+        .list()
+        .some(
+          (item) =>
+            item.workId === `drafting:${runId}` && item.state === "held",
+        ),
+    () => w.tracked(first.service).runs(),
+  );
+  assert.equal(first.service.readDrafting(runId)?.state, "queued");
+  assert.equal(w.tracked(first.service).usage(projectId).global, 1);
+  await first.service.stop();
+  const second = w.open({ verified: true });
+  await second.service.start();
+  assert.equal(second.service.readDrafting(runId)?.state, "interrupted");
+  assert.equal(w.tracked(second.service).usage(projectId).global, 0);
+  await second.service.stop();
 });
 
 test("a Stop during thread start is applied once the turn binds", async (t) => {
