@@ -27,7 +27,11 @@ export async function waitForServiceExit(
     "waitForBackgroundFailure" | "waitForBackgroundShutdown"
   >,
   failureNotification?: Promise<BackgroundFailureDiagnostic>,
-  onSignal?: (signal: NodeJS.Signals) => void,
+  hooks: {
+    /** Runs once the signal handlers are installed: a start line then means a signal exits cleanly. */
+    onListening?: () => void;
+    onSignal?: (signal: NodeJS.Signals) => void;
+  } = {},
 ): Promise<ServiceExitReason> {
   const notification =
     failureNotification ?? service.waitForBackgroundFailure();
@@ -44,12 +48,13 @@ export async function waitForServiceExit(
       resolve(value);
     };
     const onSignalReceived = (signal: NodeJS.Signals) => {
-      if (!settled) onSignal?.(signal);
+      if (!settled) hooks.onSignal?.(signal);
       finish("signal");
     };
     process.once("SIGINT", onSignalReceived);
     process.once("SIGTERM", onSignalReceived);
     void notification.then(() => finish("background-failure"));
+    hooks.onListening?.();
   });
   if (reason === "background-failure") {
     process.exitCode = 1;
@@ -134,13 +139,6 @@ export async function main(
   try {
     await service.start();
     failureNotification = service.waitForBackgroundFailure();
-    if (log && command === "serve")
-      log.started({
-        version: packageVersion(),
-        mode: "serve",
-        port: null,
-        serviceId: service.serviceId(),
-      });
     if (command === "operator" && (await consumeFatalFailure())) return;
     if (command === "run") {
       const [workId, prompt, workspace, previousWorkId] = args;
@@ -158,8 +156,17 @@ export async function main(
       process.stdout.write(`${JSON.stringify(service.list())}\n`);
     } else if (command === "serve") {
       fatalBackgroundFailure =
-        (await waitForServiceExit(service, failureNotification, (signal) => {
-          receivedSignal = signal;
+        (await waitForServiceExit(service, failureNotification, {
+          onListening: () =>
+            log?.started({
+              version: packageVersion(),
+              mode: "serve",
+              port: null,
+              serviceId: service.serviceId(),
+            }),
+          onSignal: (signal) => {
+            receivedSignal = signal;
+          },
         })) === "background-failure";
     } else if (command === "operator") {
       if (!operatorAuth)
@@ -207,16 +214,19 @@ export async function main(
       );
       const port = await ui.start(args[0] ? Number(args[0]) : 8787);
       process.stdout.write(`${operatorAuth.origin}/app\n`);
-      log?.started({
-        version: packageVersion(),
-        mode: "operator",
-        port,
-        serviceId: service.serviceId(),
-      });
       try {
         fatalBackgroundFailure =
-          (await waitForServiceExit(service, failureNotification, (signal) => {
-            receivedSignal = signal;
+          (await waitForServiceExit(service, failureNotification, {
+            onListening: () =>
+              log?.started({
+                version: packageVersion(),
+                mode: "operator",
+                port,
+                serviceId: service.serviceId(),
+              }),
+            onSignal: (signal) => {
+              receivedSignal = signal;
+            },
           })) === "background-failure";
       } finally {
         try {
