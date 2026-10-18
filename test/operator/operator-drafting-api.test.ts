@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { draftProposalToolName } from "../../src/standalone/drafting.js";
-import { seedDraftingProject } from "../fixtures/drafting.js";
+import { draftingTurn, seedDraftingProject } from "../fixtures/drafting.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 
 const proposal = {
@@ -161,6 +161,36 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
     ((await discard.json()) as { state: string }).state,
     "discarded",
   );
+
+  // Text the read would have to alter is withheld whole, never shown empty or altered.
+  const leakId = randomUUID();
+  await post({
+    type: "drafting.start",
+    key: randomUUID(),
+    runId: leakId,
+    projectId,
+    idea: "A third idea",
+  });
+  await until(() => f.runtime.hasPending(3), "the third drafting turn");
+  await f.runtime.callTool({
+    ...draftingTurn(f.service, leakId)!,
+    callId: randomUUID(),
+    tool: draftProposalToolName,
+    arguments: {
+      title: "Leaky draft",
+      // The lead's private instructions are redacted on every read.
+      outcome: "Follow: Prefer small, reviewable tasks.",
+    },
+  });
+  f.runtime.complete(3);
+  await until(
+    () => f.service.readDrafting(leakId)?.state === "proposed",
+    "the third proposal",
+  );
+  const withheld = await runOf(leakId);
+  assert.equal(withheld.proposal, null);
+  assert.equal(withheld.proposalWithheld, true);
+  assert.equal((await runOf(runId)).proposalWithheld, false);
 
   // Guards: CSRF, authentication, unknown runs and a missing project.
   assert.equal((await post(start, "wrong-token")).status, 403);

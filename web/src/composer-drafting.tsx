@@ -431,7 +431,9 @@ export function DraftWithLead({
         {view === "proposed" && (
           <>
             <p className="body" role="status">
-              {draftingCopy.proposed}
+              {run?.proposalWithheld
+                ? draftingCopy.withheld
+                : draftingCopy.proposed}
             </p>
             <div className="composer-draft-actions">
               <Button

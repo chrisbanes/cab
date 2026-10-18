@@ -1015,6 +1015,8 @@ export const draftingRunReadSchema = envelope(
         .object({ title: z.string().max(512), outcome: text })
         .strict()
         .nullable(),
+      /** The run has a proposal that cannot be shown: it holds text the service withholds. */
+      proposalWithheld: z.boolean(),
       createdAt: time,
       expiresAt: time.nullable(),
     })

@@ -91,6 +91,7 @@ import {
   ConversationHistoryCapture,
   ConversationHistoryStore,
   prepareExclusions,
+  sanitizeConversationText,
 } from "./conversation-history.js";
 import { type SanitizedError, sanitizeError } from "./service-log.js";
 import {
@@ -4559,6 +4560,16 @@ export class StandaloneService {
             )
             .join("; ")
             .slice(0, 1000),
+        };
+      // The operator could not be shown text the exclusions would change, so it is refused now.
+      const excluded = this.failureExclusions();
+      const shown = (text: string) =>
+        excluded !== undefined &&
+        sanitizeConversationText(text, excluded) === text;
+      if (!shown(parsed.data.title) || !shown(parsed.data.outcome))
+        return {
+          success: false,
+          text: "The draft holds text that cannot be shown to the operator, such as a private path or credential. Remove it and call the tool again.",
         };
       drafting.recordProposal(runId, parsed.data);
       return { success: true, text: "Draft recorded. You can finish now." };

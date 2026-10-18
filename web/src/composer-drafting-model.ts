@@ -52,6 +52,8 @@ export const draftingCopy = {
     "Nothing was saved and the working copy was deleted. Your idea, title and outcome are unchanged.",
   expired: "The draft expired before it was used. Your text is unchanged.",
   gone: "That draft is no longer available. Your text is unchanged.",
+  withheld:
+    "The draft holds text that cannot be shown, such as a private path or credential. Discard it and draft again.",
   proposed:
     "Keep or replace the text you already wrote. Empty fields are filled. The draft is kept for 24 hours.",
   unconfirmed:

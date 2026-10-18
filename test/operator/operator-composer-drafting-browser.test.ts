@@ -343,6 +343,28 @@ for (const [name, viewport] of viewports) {
     );
   });
 
+  test(`${name}: a proposal the service withholds is never filled or accepted`, async (_t, j) => {
+    const { f, page, open } = await launch(j, viewport);
+    await open();
+    await openPanel(page);
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    await answerDraft(f, runId, {
+      title: "Withheld draft",
+      // The lead's private instructions are redacted on every read.
+      outcome: "Follow: Prefer small, reviewable tasks.",
+    });
+    await panel(page)
+      .getByText(/holds text that cannot be shown/)
+      .waitFor();
+    assert.equal(await page.getByLabel("Task title").inputValue(), "");
+    assert.equal(await page.getByLabel("Desired outcome").inputValue(), "");
+    assert.equal(f.service.readDrafting(runId)?.state, "proposed");
+    await panel(page).getByRole("button", { name: "Discard draft" }).click();
+    await until(() => f.service.readDrafting(runId)?.state === "discarded");
+  });
+
   test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport, {
       lead: false,

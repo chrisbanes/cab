@@ -1096,6 +1096,35 @@ test("a run admitted just before a crash is treated as running on the next start
   await second.service.stop();
 });
 
+test("a proposal holding text that cannot be shown is refused so the lead can retry", async (t) => {
+  const w = world(t);
+  const opened = w.open();
+  const { service, codex } = opened;
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  const results: boolean[] = [];
+  codex.script(async (api) => {
+    // A private path (the data directory) must not reach the operator.
+    results.push(
+      (
+        await api.callTool(draftProposalToolName, {
+          title: "Leaky",
+          outcome: `Look in ${w.dataDir}`,
+        })
+      ).success,
+      (await api.callTool(draftProposalToolName, proposal)).success,
+    );
+  });
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "proposed",
+    () => w.tracked(service).runs(),
+  );
+  assert.deepEqual(results, [false, true]);
+  assert.deepEqual(service.readDrafting(runId)?.proposal, proposal);
+});
+
 test("a Stop during thread start is applied once the turn binds", async (t) => {
   const w = world(t);
   const opened = w.open();
