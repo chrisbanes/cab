@@ -22,6 +22,20 @@
  *   uninstall both gone, otherwise                            -> complete
  */
 
+/**
+ * The pids in `lsof -nP -iTCP:PORT -sTCP:LISTEN -Fp` output, from its exit status and stdout.
+ * lsof exits 1 with no output when nothing listens; any other failure, or a status that is not
+ * 0, is unknown (null). Only whole `p<digits>` lines are pids.
+ */
+export function parseLsofListeners(result: {
+  status: number;
+  stdout: string;
+}): number[] | null {
+  if (result.status === 1 && result.stdout.trim() === "") return [];
+  if (result.status !== 0) return null;
+  return [...result.stdout.matchAll(/^p(\d+)$/gm)].map((m) => Number(m[1]));
+}
+
 export type ProcessIdentity = {
   processId: string;
   processStartedAt: string;

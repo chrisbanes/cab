@@ -54,6 +54,7 @@ import {
   type ProcessIdentity as ObservedIdentity,
   sameIdentity,
   type Seen,
+  parseLsofListeners,
 } from "./daemon-ownership.js";
 import { DEFAULT_FIX, fixLine, shellWord } from "./remedy.js";
 import type { CliDeps } from "./types.js";
@@ -2150,10 +2151,7 @@ export function defaultServiceHost(): ServiceHost {
         "-sTCP:LISTEN",
         "-Fp",
       ]);
-      // lsof exits 1 with no output when nothing listens; any other failure is unknown.
-      if (result.status === 1 && result.stdout.trim() === "") return [];
-      if (result.status !== 0) return null;
-      return [...result.stdout.matchAll(/^p(\d+)$/gm)].map((m) => Number(m[1]));
+      return parseLsofListeners(result);
     },
     daemonsDir: () => DAEMONS_DIR,
     launchctl: (args) => run("/bin/launchctl", args),

@@ -939,7 +939,8 @@ repeats the package checks. It then uses a temporary `HOME` and a `PATH` of only
 system directories plus a generated fake `codex`, with no `node`. In that
 environment it runs `bin/ensemble --version`, initializes operator auth, starts the
 service against a fresh data directory, and expects the operator UI and one of its
-assets within 120 seconds before stopping that service. It does not exercise a real
+assets within 120 seconds, then `/app/service-worker.js` as uncached JavaScript with a
+push handler and no scope wider than `/app/`, before stopping that service. It does not exercise a real
 Codex login.
 
 To run a release as the service, use [`ensemble service install`](#install) with its
