@@ -706,7 +706,7 @@ test("Stop keeps capacity reserved and the copy in place until the runtime is se
   assert.equal(existsSync(workspace), false);
 });
 
-test("a Stop that lands before the turn exists is applied once it binds", async (t) => {
+test("a Stop during thread start is applied once the turn binds", async (t) => {
   const w = world(t);
   const opened = w.open();
   const { service, codex } = opened;
