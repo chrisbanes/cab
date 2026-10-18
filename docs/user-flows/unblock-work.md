@@ -1,9 +1,14 @@
 # Unblock waiting work
 
-**Status:** planned. Wait reasons with a Fix are implemented on the task and the
-composer, and the project page's paused banner offers Resume project; the Inbox
-shows holds without a Fix, and the Inbox path and the budget below are not
-implemented.
+**Status:** implemented. Wait reasons with a Fix appear on the task and the
+composer, and the project page's paused banner and the getting-started Project row
+offer Resume, which confirms once and sends only the project resume. The Inbox shows
+holds without a Fix and is outside the budget. The budget is asserted only for a
+paused project (Resume project, the one Fix with a confirmation) at 1366 x 900 and
+390 x 844 by `test/operator/operator-unblock-work-browser.test.ts` ("unblock waiting
+work budget"), on task detail, the Home Project row, the project page and the
+composer. It does not cover the created-task receipt or the Project row at
+`/app/getting-started`.
 
 ## Goal
 
