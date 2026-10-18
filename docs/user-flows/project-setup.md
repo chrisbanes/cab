@@ -9,6 +9,8 @@
 One uninterrupted pass from "new project" to a project ready for its first task.
 The operator never leaves setup to create a prerequisite.
 
+Frames: see [First run and onboarding](../../design/DESIGN.md#first-run-and-onboarding).
+
 ## Entry points
 
 - [Getting started](getting-started.md) Project row.

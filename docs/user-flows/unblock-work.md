@@ -43,6 +43,8 @@ approval, source, capacity, power-supervision, held-assignment or recovery wait
 shows its blocking link or explanation instead, and no Fix is invented for it.
 The operator CLI is outside the budget: it has no screens.
 
+Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
+
 ## Recovery
 
 - A Fix never clears holds or grants access by implication.

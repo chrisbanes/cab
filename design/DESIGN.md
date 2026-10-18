@@ -362,6 +362,50 @@ keyboard operation, safe-area handling, persistence and command reconciliation. 
 disclosure/state inventory; representative initial screens prioritise evidence
 above history.
 
+### Daily flow frames
+
+Each daily flow in [docs/user-flows](../docs/user-flows/) starts and ends on a frame
+of the design canvas. A row per budgeted entry point names the first screen the
+flow shows and the last screen it draws; `no frame` marks a screen the canvas does
+not draw.
+
+| Flow | Entry point | Start frame | End frame |
+| --- | --- | --- | --- |
+| Answer a question | Home card, single choice | `01-attention-overview` | no frame |
+| Answer a question | Inbox row | `06-inbox-question-audience` | `162-grouped-questions-answered` |
+| Answer a question | Task decision card | `20-task-answering-grouped-request` | no frame |
+| Approve an exact action | Home card | no frame | no frame |
+| Approve an exact action | Inbox row | `02-inbox-approval` | `32-inbox-approved-dependency-held` |
+| Approve an exact action | Task decision card | `03-task-detail` | no frame |
+| Inspect changes and reply | Task header | `03-task-detail` | `104-review-sent-original-comments` |
+| Inspect changes and reply | Latest result | `03-task-detail` | `104-review-sent-original-comments` |
+| Inspect changes and reply | Inbox evidence link | `02-inbox-approval` | `104-review-sent-original-comments` |
+| Triage an uncertain execution | Home card | `01-attention-overview` | `127-assignment-recovery-relay` |
+| Triage an uncertain execution | Inbox row | `06-inbox-question-audience` | `127-assignment-recovery-relay` |
+| Triage an uncertain execution | Task detail | `53-phone-failed-refresh-uncertain` | `128-phone-assignment-recovery` |
+| Unblock waiting work | Task detail | `149-task-waiting-project-paused` | no frame |
+| Unblock waiting work | Getting-started Project row | `143b-home-checklist-runtime-regressed` | no frame |
+| Unblock waiting work | Project page | `23b-atlas-project-paused` | no frame |
+| Unblock waiting work | Composer | `148-composer-project-paused` | no frame |
+| Create a task | Any | `05-composer` | `161-composer-created-project-paused` |
+| First run to first task | Install command | `108-signin-desktop` | no frame |
+| First run to first task | Fresh sign-in, no project | `143-home-getting-started` | no frame |
+| Review a result | Task detail | `03-task-detail` | `59-inspect-criterion-feedback` |
+| Review a result | Home recent results | `01-attention-overview` | `59-inspect-criterion-feedback` |
+| Review a result | Inbox evidence link | `02-inbox-approval` | `59-inspect-criterion-feedback` |
+| Import issues from GitHub | Unsaved source on the GitHub source tab | `119d-github-source-import-ready` | `119e-github-source-imported` |
+
+The `no frame` cells are the Home or task-card answer confirmation (only the Inbox
+`162-grouped-questions-answered` and phone `30-phone-question-answer-sent` draw "Answer sent"), the Home
+approval card (`01-attention-overview` lists the approval only in its "3 more" row) and the
+recorded decision after the Home or task entry (only the
+Inbox `32-inbox-approved-dependency-held` draws it, and phone `33-phone-exact-approval-source-hold` stops at
+Review material & decide), the state after an Unblock fix is sent (`149b-task-fix-resume-confirm`
+draws only the confirmation step) and the first-run running-task end (only the paused
+waiting variant `149-task-waiting-project-paused` is drawn). The desktop task-detail uncertain hold is not drawn, so
+that row uses the phone pair. The diff behind Inspect changes is
+`06-workspace-changes-review`.
+
 ## Canvas map
 
 Each canvas page groups one area. Desktop artboards come first on a page, then
@@ -593,8 +637,9 @@ header; phone states without an artboard use the desktop copy.
 
 ### First run and onboarding
 
-Frames 143–152b draw the flows in [docs/user-flows](../docs/user-flows/); each flow
-document states what is implemented. Fixtures are fixture-app, `fixture-org/fixture-app`,
+Frames 143–152b draw the first-run screens, and [Daily flow frames](#daily-flow-frames)
+maps each flow in [docs/user-flows](../docs/user-flows/) to its start and end frames;
+each flow document states what is implemented. Fixtures are fixture-app, `fixture-org/fixture-app`,
 @fixture-user, lead Ada and task FA-1.
 
 - **Getting started (143, 143b, 144):** Home shows only the "Get Ensemble running"

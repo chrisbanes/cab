@@ -7,6 +7,8 @@
 After the first sign-in, the operator always knows the next step to a running task,
 and each step opens the screen that completes it.
 
+Frames: see [First run and onboarding](../../design/DESIGN.md#first-run-and-onboarding).
+
 ## Entry points
 
 - Home (`/app`) until a task starts a turn; the card is then the only content

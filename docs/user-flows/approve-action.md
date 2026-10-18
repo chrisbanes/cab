@@ -43,6 +43,8 @@ material invalidates approval".
 
 The operator CLI is outside the budget: it has no screens.
 
+Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
+
 ## Recovery
 
 - Material that changed since the request was read shows "Version n is out of date"

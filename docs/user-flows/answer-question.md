@@ -37,6 +37,8 @@ they are, and gets one confirmation that the answer was recorded.
 
 The operator CLI is outside the budget: it has no screens.
 
+Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
+
 ## Recovery
 
 - A failed submission keeps the input and names the cause; a stale or already

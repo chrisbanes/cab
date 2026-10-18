@@ -15,6 +15,8 @@ vocabulary. Planned: approvals.
 Every operator action produces one message, sized to its outcome, in plain language
 that says what happened and what, if anything, to do next.
 
+Frames: see [Action feedback](../../design/DESIGN.md#action-feedback).
+
 ## Applies to
 
 Every write in the operator UI: configuration saves (projects, profiles, routing,

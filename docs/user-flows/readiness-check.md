@@ -10,6 +10,8 @@ are planned.
 After install, and whenever something stops working, one check tells the operator
 what the service can and cannot use, with one fix line per problem.
 
+Frames: see [First run and onboarding](../../design/DESIGN.md#first-run-and-onboarding).
+
 ## Entry points
 
 - `ensemble doctor` in the operator CLI (any read credential; the service must advertise `diagnostics.read`).
