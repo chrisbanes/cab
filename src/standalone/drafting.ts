@@ -4,6 +4,7 @@ import {
   type DraftProposal,
   draftProposalSchema,
 } from "../operator/contracts.js";
+import type { RuntimeToolDefinition } from "./codex.js";
 
 /** A drafting run is cut off this long after admission. */
 export const draftingTimeLimitMs = 600_000;
@@ -41,6 +42,9 @@ const runSchema = z.object({
   projectId: z.string().uuid(),
   idea: z.string().min(1),
   harness: z.string().min(1).max(64),
+  profileId: z.string().uuid(),
+  profileRevision: z.number().int().positive(),
+  instructionsRevision: z.number().int().positive(),
   state: z.enum(draftingStates),
   reason: z.string().nullable(),
   proposal: draftProposalSchema.nullable(),
@@ -53,17 +57,16 @@ export type DraftingRun = z.infer<typeof runSchema> & {
   expiresAt: number | null;
 };
 
-/** Durable drafting-run lifecycle; owns no workspace, capacity or runtime state. */
-export class DraftingRunStore {
-  constructor(
-    private readonly db: Database,
-    private readonly now: () => number = Date.now,
-  ) {
-    this.db.exec(`CREATE TABLE IF NOT EXISTS drafting_runs (
+/** Idempotent; also created by ExecutionState, whose harness lookups join it. */
+export function createDraftingTable(db: Database): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS drafting_runs (
       runId TEXT PRIMARY KEY,
       projectId TEXT NOT NULL,
       idea TEXT NOT NULL,
       harness TEXT NOT NULL,
+      profileId TEXT NOT NULL,
+      profileRevision INTEGER NOT NULL,
+      instructionsRevision INTEGER NOT NULL,
       state TEXT NOT NULL CHECK(state IN (${draftingStates.map((state) => `'${state}'`).join(",")})),
       reason TEXT,
       title TEXT,
@@ -71,21 +74,32 @@ export class DraftingRunStore {
       createdAt INTEGER NOT NULL,
       proposedAt INTEGER
     )`);
+}
+
+/** Durable drafting-run lifecycle; owns no workspace, capacity or runtime state. */
+export class DraftingRunStore {
+  constructor(
+    private readonly db: Database,
+    private readonly now: () => number = Date.now,
+  ) {
+    createDraftingTable(db);
   }
 
-  /** Idempotent for an identical request; a reused run id with other content conflicts. */
+  /** Idempotent for the same project and idea; a reused run id with other content conflicts. */
   create(input: {
     runId: string;
     projectId: string;
     idea: string;
     harness: string;
+    profileId: string;
+    profileRevision: number;
+    instructionsRevision: number;
   }): DraftingRun {
     const existing = this.get(input.runId);
     if (existing) {
       if (
         existing.projectId !== input.projectId ||
-        existing.idea !== input.idea ||
-        existing.harness !== input.harness
+        existing.idea !== input.idea
       )
         throw new Error(
           "Drafting run identity already used with other content",
@@ -94,9 +108,19 @@ export class DraftingRunStore {
     }
     this.db
       .prepare(`INSERT INTO drafting_runs
-        (runId, projectId, idea, harness, state, createdAt)
-        VALUES (?, ?, ?, ?, 'queued', ?)`)
-      .run(input.runId, input.projectId, input.idea, input.harness, this.now());
+        (runId, projectId, idea, harness, profileId, profileRevision,
+          instructionsRevision, state, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)`)
+      .run(
+        input.runId,
+        input.projectId,
+        input.idea,
+        input.harness,
+        input.profileId,
+        input.profileRevision,
+        input.instructionsRevision,
+        this.now(),
+      );
     return this.require(input.runId);
   }
 
@@ -130,6 +154,14 @@ export class DraftingRunStore {
       )
       .all()
       .map((row) => this.parse(row));
+  }
+
+  /** Whether a valid proposal was recorded, though the run has not yet ended. */
+  hasCandidate(runId: string): boolean {
+    const row = this.db
+      .prepare("SELECT title FROM drafting_runs WHERE runId = ?")
+      .get(runId) as { title: string | null } | undefined;
+    return row?.title != null;
   }
 
   /** Settles every overdue proposal; run at service start. */
@@ -224,3 +256,21 @@ export class DraftingRunStore {
     };
   }
 }
+
+export const draftProposalToolName = "ensemble_propose_draft";
+
+export const draftProposalTool: RuntimeToolDefinition = {
+  type: "function",
+  name: draftProposalToolName,
+  description:
+    "Propose the task brief. Call once with a concise title and the desired outcome, including context and acceptance criteria. This creates nothing; the operator reviews it.",
+  inputSchema: z.toJSONSchema(draftProposalSchema),
+};
+
+/** Added to the lead's own instructions for every drafting run. */
+export const draftingInstruction = [
+  "You are drafting a task brief for the operator from a rough idea.",
+  "Inspect the repositories in your working directory to ground the brief in the code as it is.",
+  "You only propose. Do not change files you intend to keep, and do not create tasks, issues, branches or pull requests.",
+  `When you are done, call ${draftProposalToolName} once with a concise title and a desired outcome that states the context, the result wanted and acceptance criteria, then stop.`,
+].join("\n");

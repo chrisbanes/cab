@@ -202,6 +202,48 @@ export class ExecutionSupervisor {
     }
   }
 
+  /**
+   * Whether a work item's runtime is known to have ended: an exact terminal
+   * inspection, or verified termination of its recorded process. Anything else,
+   * including an unreadable verifier, answers false and releases nothing.
+   */
+  async verifyEnded(workId: string): Promise<boolean> {
+    const stored = this.state.recoveryIdentity(workId);
+    if (!stored) return false;
+    if (this.state.recoveryInspectionKind(workId)?.startsWith("exact-terminal"))
+      return true;
+    if (!stored.processIdentity) return false;
+    let verification: TerminationVerification;
+    try {
+      verification = await this.terminationVerifier.verify(
+        stored.processIdentity,
+      );
+    } catch {
+      this.recordObservation(workId, "termination-unknown");
+      return false;
+    }
+    if (verification.kind !== "verified") {
+      this.recordObservation(
+        workId,
+        verification.kind === "conflict"
+          ? "termination-conflict"
+          : "termination-unknown",
+      );
+      return false;
+    }
+    if (
+      !exactProcessIdentity(
+        stored.processIdentity,
+        verification.processIdentity,
+      )
+    ) {
+      this.recordObservation(workId, "termination-conflict");
+      return false;
+    }
+    this.recordObservation(workId, "termination-verified");
+    return true;
+  }
+
   recordObservation(
     workId: string,
     kind: string,

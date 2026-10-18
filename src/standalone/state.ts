@@ -13,6 +13,7 @@ import {
   type HistoricalNoTurnAdoption,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
+import { createDraftingTable } from "./drafting.js";
 import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import { randomUUID } from "node:crypto";
@@ -443,6 +444,8 @@ export class ExecutionState {
   private readonly hasTurnRequests: boolean;
 
   constructor(private readonly db: Database) {
+    // Harness lookups join it, so it exists even before the drafting store opens.
+    createDraftingTable(this.db);
     this.db.exec(`CREATE TABLE IF NOT EXISTS assignment_conversations (
       assignmentId TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision > 0)
     );
@@ -1312,6 +1315,20 @@ export class ExecutionState {
     );
   }
 
+  /** The harness a work item runs on: its task binding, else its drafting run, else the default. */
+  workHarness(workId: string): ExecutionHarness {
+    const bound = this.taskBinding(workId)?.harness;
+    if (bound) return bound;
+    const drafting = this.db
+      .prepare(
+        "SELECT harness FROM drafting_runs WHERE 'drafting:' || runId = ?",
+      )
+      .get(workId) as { harness: unknown } | undefined;
+    return drafting
+      ? executionHarnessSchema.parse(drafting.harness)
+      : defaultExecutionHarness;
+  }
+
   taskBinding(workId: string): TaskExecutionBindingRecord | undefined {
     const row = this.db
       .prepare("SELECT * FROM task_execution_bindings WHERE workId = ?")
@@ -1826,10 +1843,7 @@ export class ExecutionState {
     if (evidence === undefined) return;
     const parsed = parseRuntimeTerminalEvidence(evidence);
     // Another harness's evidence never marks this work; it stays conflicted.
-    if (
-      parsed.harness !==
-      (this.taskBinding(row.workId)?.harness ?? defaultExecutionHarness)
-    ) {
+    if (parsed.harness !== this.workHarness(row.workId)) {
       this.db
         .prepare(
           "UPDATE runtime_terminal_evidence SET conflicted = 1 WHERE threadId = ? AND turnId = ?",
@@ -3329,10 +3343,12 @@ export class ExecutionState {
   runtimeIdentityHarnesses(threadId: string): ExecutionHarness[] {
     return (
       this.db
-        .prepare(`SELECT DISTINCT COALESCE(binding.harness, ?) AS harness
+        .prepare(`SELECT DISTINCT COALESCE(binding.harness, drafting.harness, ?) AS harness
         FROM execution_intents intent
         LEFT JOIN task_execution_bindings binding
           ON binding.workId = intent.workId
+        LEFT JOIN drafting_runs drafting
+          ON 'drafting:' || drafting.runId = intent.workId
         WHERE intent.threadId = ?`)
         .all(
           defaultExecutionHarness,
@@ -3712,8 +3728,14 @@ export class ExecutionState {
     });
   }
 
+  /** Every recoverable execution; a drafting run has no recovery page, so it is left out. */
   recoveryView(): RecoveryRecord[] {
     return this.recoveryRecords(`SELECT workId FROM execution_recovery_identities
+      ${
+        this.hasTurnRequests
+          ? "WHERE workId NOT IN (SELECT workId FROM turn_requests WHERE kind = 'drafting')"
+          : ""
+      }
       ORDER BY rowid`);
   }
 
@@ -5191,34 +5213,41 @@ export class ExecutionState {
   }
 
   /**
-   * Releases a drafting run's capacity once its process is known to have ended
-   * (restart verification). Task executions never pass through here: their
-   * release goes through completion or a recovery receipt.
+   * Ends a drafting run's request once its runtime is known to have ended (or,
+   * for a queued run, never started), releasing any capacity it held. Task
+   * executions never pass through here: their release goes through completion
+   * or a recovery receipt.
    */
   releaseDraftingExecution(workId: string): boolean {
     return transaction(this.db, () => {
-      const settled = this.db
+      const request = this.db
+        .prepare(`UPDATE turn_requests SET state = 'completed', reason = NULL
+          WHERE workId = ? AND kind = 'drafting' AND state != 'completed' RETURNING workId`)
+        .get(workId);
+      if (!request) return false;
+      this.db
         .prepare(`UPDATE execution_intents SET state = 'resolved-failed',
           reason = 'Drafting run ended' WHERE workId = ?
-          AND state IN ('submitting','running','held')
-          AND EXISTS (SELECT 1 FROM turn_requests request
-            WHERE request.workId = execution_intents.workId AND request.kind = 'drafting')
-          RETURNING workId`)
-        .get(workId);
-      if (!settled) return false;
+          AND state IN ('ready','capacity-waiting','submitting','running','held')`)
+        .run(workId);
       this.db
         .prepare("DELETE FROM execution_capacity_reservations WHERE workId = ?")
         .run(workId);
       this.db
         .prepare("DELETE FROM task_writer_admissions WHERE workId = ?")
         .run(workId);
-      this.db
-        .prepare(
-          "UPDATE turn_requests SET state = 'completed', reason = NULL WHERE workId = ?",
-        )
-        .run(workId);
       return true;
     });
+  }
+
+  /** The recorded inspection of a work item's runtime, if any. */
+  recoveryInspectionKind(workId: string): string | null {
+    const row = this.db
+      .prepare(
+        "SELECT inspectionKind FROM execution_recovery_identities WHERE workId = ?",
+      )
+      .get(workId) as { inspectionKind: string | null } | undefined;
+    return row?.inspectionKind ?? null;
   }
 
   complete(id: string, threadId: string, turnId: string): void {

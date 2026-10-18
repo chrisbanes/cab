@@ -119,6 +119,9 @@ function newRun(store: DraftingRunStore) {
     projectId: randomUUID(),
     idea: "rough idea",
     harness: "codex",
+    profileId: randomUUID(),
+    profileRevision: 1,
+    instructionsRevision: 1,
   });
 }
 

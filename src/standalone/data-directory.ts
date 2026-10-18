@@ -139,6 +139,8 @@ export class StandaloneDataDirectory {
   readonly root: string;
   readonly databasePath: string;
   readonly workspacePath: string;
+  /** Disposable worktrees of drafting runs; apart from task workspaces. */
+  readonly draftingWorkspacePath: string;
 
   private constructor(
     root: string,
@@ -147,6 +149,7 @@ export class StandaloneDataDirectory {
     this.root = root;
     this.databasePath = join(root, "standalone.sqlite");
     this.workspacePath = join(root, "workspaces");
+    this.draftingWorkspacePath = join(root, "drafting-workspaces");
   }
 
   static openExclusive(
