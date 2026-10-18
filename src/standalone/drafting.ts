@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
+import { DomainConflictError } from "../core/domain-errors.js";
 import { type Database, transaction } from "../core/store.js";
 import {
   type DraftProposal,
@@ -74,7 +76,16 @@ export function createDraftingTable(db: Database): void {
       createdAt INTEGER NOT NULL,
       proposedAt INTEGER
     )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS drafting_command_receipts (
+      key TEXT PRIMARY KEY,
+      payloadHash TEXT NOT NULL,
+      receiptJson TEXT NOT NULL,
+      createdAt INTEGER NOT NULL
+    )`);
 }
+
+/** How long a command receipt answers a replay of its key. */
+const receiptRetentionMs = 30 * 24 * 60 * 60 * 1000;
 
 /** Durable drafting-run lifecycle; owns no workspace, capacity or runtime state. */
 export class DraftingRunStore {
@@ -101,7 +112,7 @@ export class DraftingRunStore {
         existing.projectId !== input.projectId ||
         existing.idea !== input.idea
       )
-        throw new Error(
+        throw new DomainConflictError(
           "Drafting run identity already used with other content",
         );
       return existing;
@@ -164,8 +175,40 @@ export class DraftingRunStore {
     return row?.title != null;
   }
 
-  /** Settles every overdue proposal; run at service start. */
+  /** The recorded receipt for a key; the same key with other content conflicts. */
+  receipt<T>(key: string, content: unknown): T | undefined {
+    const payloadHash = createHash("sha256")
+      .update(JSON.stringify(content))
+      .digest("hex");
+    const stored = this.db
+      .prepare(
+        "SELECT payloadHash, receiptJson FROM drafting_command_receipts WHERE key = ?",
+      )
+      .get(key) as { payloadHash: string; receiptJson: string } | undefined;
+    if (!stored) return undefined;
+    if (stored.payloadHash !== payloadHash)
+      throw new DomainConflictError("Request key reused for other content");
+    return JSON.parse(stored.receiptJson) as T;
+  }
+
+  recordReceipt(key: string, content: unknown, receipt: unknown): void {
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO drafting_command_receipts (key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?)",
+      )
+      .run(
+        key,
+        createHash("sha256").update(JSON.stringify(content)).digest("hex"),
+        JSON.stringify(receipt),
+        this.now(),
+      );
+  }
+
+  /** Settles every overdue proposal and drops old receipts; run at service start. */
   sweepExpired(): void {
+    this.db
+      .prepare("DELETE FROM drafting_command_receipts WHERE createdAt < ?")
+      .run(this.now() - receiptRetentionMs);
     const overdue = this.db
       .prepare(
         "SELECT runId FROM drafting_runs WHERE state = 'proposed' AND proposedAt <= ?",

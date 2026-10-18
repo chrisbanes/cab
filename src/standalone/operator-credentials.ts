@@ -274,6 +274,7 @@ export function operatorRouteAuthority(
       path,
     ) ||
     /^\/api\/operator\/projects\/[^/]+\/composer-options$/.test(path) ||
+    /^\/api\/operator\/drafting-runs\/[^/]+$/.test(path) ||
     /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|recovery-options|instructions))?$/.test(
       path,
     ) ||

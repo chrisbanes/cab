@@ -462,6 +462,8 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/projects\/([^/]+)\/composer-options$/,
     );
     if (options) return this.api.readComposerOptions(options[1] ?? "");
+    const draftingRun = path.match(/^\/api\/operator\/drafting-runs\/([^/]+)$/);
+    if (draftingRun) return this.api.readDraftingRun(draftingRun[1] ?? "");
     if (path === "/api/operator/source-observations")
       return this.api.readSourceObservations();
     if (path === "/api/operator/workspace") return this.api.readWorkspace();

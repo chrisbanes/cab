@@ -48,9 +48,13 @@ import {
 import { GitHubSourceStore } from "../core/github-source.js";
 import { Store } from "../core/store.js";
 import {
+  type CommandReceipt,
   type DraftProposal,
   draftProposalSchema,
+  type OperatorCommand,
 } from "../operator/contracts.js";
+
+type DraftingReceipt = Extract<CommandReceipt, { kind: "drafting" }>;
 import { reviewMetadataSchema } from "../core/task-review.js";
 import type {
   HarnessStatus,
@@ -4385,6 +4389,53 @@ export class StandaloneService {
     } else if (run.state === "running" || run.state === "stopping")
       this.requestDraftingStop(runId, draftingStoppedReason);
     return drafting.require(runId);
+  }
+
+  /**
+   * Applies a drafting command once per key: a replay returns its receipt and
+   * the same key with other content conflicts.
+   */
+  async draftingCommand(
+    command: Extract<
+      OperatorCommand,
+      { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
+    >,
+  ): Promise<DraftingReceipt> {
+    const { drafting } = this.started();
+    const { key, ...content } = command;
+    const prior = drafting.receipt<DraftingReceipt>(key, content);
+    if (prior) return prior;
+    let operation: DraftingReceipt["operation"];
+    let run: DraftingRun;
+    let proposal: DraftProposal | null = null;
+    if (command.type === "drafting.start") {
+      operation = "start";
+      run = await this.startDrafting({
+        runId: command.runId,
+        projectId: command.projectId,
+        idea: command.idea,
+      });
+    } else if (command.type === "drafting.stop") {
+      operation = "stop";
+      run = await this.stopDrafting(command.runId);
+    } else {
+      operation = command.disposition;
+      ({ run, proposal } = this.settleDrafting(
+        command.runId,
+        command.disposition,
+      ));
+    }
+    const receipt: DraftingReceipt = {
+      kind: "drafting",
+      key,
+      recorded: true,
+      operation,
+      runId: run.runId,
+      state: run.state,
+      proposal,
+    };
+    drafting.recordReceipt(key, content, receipt);
+    return receipt;
   }
 
   /** Accepting hands over the proposal once; the composer then owns its text. */

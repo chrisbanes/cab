@@ -68,6 +68,17 @@ const text = z.string().max(textMaxLength);
 /** Whether `value` fits a text field, by the same check the service applies. */
 export const fitsTextField = (value: string) => text.safeParse(value).success;
 const safeText = text.nullable();
+const draftingStateSchema = z.enum([
+  "queued",
+  "running",
+  "stopping",
+  "proposed",
+  "interrupted",
+  "failed",
+  "accepted",
+  "discarded",
+  "expired",
+]);
 const attentionCodesSchema = z
   .array(attentionCodeSchema)
   .max(attentionCodes.length);
@@ -993,6 +1004,23 @@ export const composerOptionsSchema = envelope(
 export type TaskListPage = z.infer<typeof taskListPageSchema>;
 export type TaskListSummary = z.infer<typeof taskListSummarySchema>;
 export type ComposerOptions = z.infer<typeof composerOptionsSchema>;
+export const draftingRunReadSchema = envelope(
+  z
+    .object({
+      runId: uuid,
+      projectId: uuid,
+      state: draftingStateSchema,
+      reason: safeText,
+      proposal: z
+        .object({ title: z.string().max(512), outcome: text })
+        .strict()
+        .nullable(),
+      createdAt: time,
+      expiresAt: time.nullable(),
+    })
+    .strict(),
+);
+export type DraftingRunRead = z.infer<typeof draftingRunReadSchema>;
 const generation = z
   .object({
     workId: z.string().min(1),
@@ -2102,6 +2130,25 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       ...replaceConversationBodySchema.shape,
     })
     .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("drafting.start"),
+      runId: uuid,
+      projectId: uuid,
+      /** The composer's brief limit. */
+      idea: z.string().min(1).max(16000),
+    })
+    .strict(),
+  z.object({ ...base, type: z.literal("drafting.stop"), runId: uuid }).strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("drafting.settle"),
+      runId: uuid,
+      disposition: z.enum(["accept", "discard"]),
+    })
+    .strict(),
 ]);
 export const configurationReceiptSchema = z
   .object({
@@ -2709,6 +2756,18 @@ export const questionCommandRawLimit =
   2;
 
 export const commandReceiptSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("drafting"),
+      key: uuid,
+      recorded: z.literal(true),
+      operation: z.enum(["start", "stop", "accept", "discard"]),
+      runId: uuid,
+      state: draftingStateSchema,
+      /** Only an accepted draft carries its proposal, once. */
+      proposal: draftProposalSchema.nullable(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("local-review-draft"),
