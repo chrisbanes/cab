@@ -179,6 +179,7 @@ export function useDrafting({
     run?.state === "expired" ||
     run?.state === "accepted" ||
     run?.state === "discarded";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: releases once when the run is lost; the handlers are rebuilt every render.
   useEffect(() => {
     if (!lost || !runId) return;
     clearRun(
@@ -187,6 +188,7 @@ export function useDrafting({
   }, [lost, runId]);
 
   // A ready proposal fills empty fields at once; typed text waits for a choice.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: applies each ready proposal once, from the input as it stands then.
   useEffect(() => {
     if (run?.state !== "proposed" || !run.proposal) return;
     if (applied.current === run.runId) return;
@@ -482,14 +484,10 @@ export function DraftChoice({ d, field }: { d: Drafting; field: DraftField }) {
   const choice = d.choices.find((item) => item.field === field);
   if (!choice) return null;
   return (
-    <div
-      className="composer-draft-choice"
-      role="group"
-      aria-label={`Proposed ${field}`}
-    >
-      <span className="metadata composer-draft-choice-label">
+    <fieldset className="composer-draft-choice">
+      <legend className="metadata composer-draft-choice-label">
         Proposed {field}
-      </span>
+      </legend>
       <span className="body composer-draft-choice-text">{choice.proposed}</span>
       <span className="composer-draft-actions">
         <Button
@@ -509,6 +507,6 @@ export function DraftChoice({ d, field }: { d: Drafting; field: DraftField }) {
           Keep mine
         </Button>
       </span>
-    </div>
+    </fieldset>
   );
 }

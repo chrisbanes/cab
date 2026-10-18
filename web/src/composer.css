@@ -223,6 +223,7 @@ button.composer-draft-head {
 }
 
 .composer-draft-choice {
+  margin: 0;
   display: grid;
   gap: var(--space-8);
   padding: var(--space-8) var(--space-12);
