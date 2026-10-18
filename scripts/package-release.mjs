@@ -175,7 +175,10 @@ async function build(commit, out) {
     throw new Error(`Release builds need a ${PLATFORM} host`);
   const sha = await git("rev-parse", "--verify", `${commit}^{commit}`);
   const pkg = JSON.parse(await git("show", `${sha}:package.json`));
-  const nodeVersion = (await git("show", `${sha}:.node-version`)).trim();
+  // Commits before the .nvmrc rename pin Node in .node-version.
+  const nodeVersion = await git("show", `${sha}:.nvmrc`).catch(() =>
+    git("show", `${sha}:.node-version`),
+  );
   const root = join(homedir(), ".config/ensemble-dev");
   const output = resolve(out ?? join(root, "builds", sha));
   const partial = `${output}.partial`;

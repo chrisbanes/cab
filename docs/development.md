@@ -3,7 +3,7 @@
 For the product overview, see the [README](../README.md). For macOS service
 operations and backup/restore, see the [operations procedure](operations/standalone-macos.md).
 
-Use the Node version in [`.node-version`](../.node-version) and the npm version in
+Use the Node version in [`.nvmrc`](../.nvmrc) and the npm version in
 `packageManager` (`package.json`).
 Node 26 compatibility jobs use the latest 26.x: `node26-service-*` covers PRs and
 main pushes; `node26-full-compatibility` covers the complete build and browser suite

@@ -888,7 +888,7 @@ node scripts/package-release.mjs build COMMIT
 ```
 
 The script archives exactly `COMMIT` and downloads the official
-`node-v<.node-version>-darwin-arm64.tar.gz` from `nodejs.org`. It refuses that Node
+`node-v<.nvmrc>-darwin-arm64.tar.gz` from `nodejs.org`. It refuses that Node
 unless the tarball's SHA-256 matches the single entry for that file in the release's
 `SHASUMS256.txt`. Verification happens before extraction, and there is no way to skip
 it. With that Node and the pinned npm, it runs `npm ci`, `npm run build` and
@@ -969,7 +969,7 @@ before.
 
 ### Build and authenticate from a checkout
 
-Use the Node.js version in `.node-version` and the npm version in `packageManager`
+Use the Node.js version in `.nvmrc` and the npm version in `packageManager`
 (`package.json`). Node.js `26.9.0` has passed the checks
 and the fixture service/operator journey
 ([evidence](../evidence/node-26-compatibility-2026-10-09.md)) but is not the

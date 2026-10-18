@@ -10,7 +10,7 @@ on:
       - .github/workflows/release.yml
       - package.json
       - package-lock.json
-      - .node-version
+      - .nvmrc
 permissions:
   contents: read
   actions: read
@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version-file: .node-version
+          node-version-file: .nvmrc
       - if: startsWith(github.ref, 'refs/tags/')
         run: node scripts/package-release.mjs check-tag "$GITHUB_REF_NAME"
       - run: node scripts/package-release.mjs build HEAD --out "$RUNNER_TEMP/release"

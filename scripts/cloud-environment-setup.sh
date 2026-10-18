@@ -1,7 +1,7 @@
 #!/bin/bash
 # Setup script for the Ensemble Claude Code cloud environment. Paste this file into the
 # environment's Setup script field; the cache rebuilds only when that pasted text changes.
-# Keep the versions in step with .node-version, package.json packageManager and playwright.
+# Keep the versions in step with .nvmrc, package.json packageManager and playwright.
 set -euo pipefail
 NODE=24.21.0 NPM=12.2.0 PLAYWRIGHT=1.64.0
 

@@ -15,7 +15,7 @@ blocking a later public release.
   operator auth and the operator CLI are its subcommands; the operator CLI remains an
   HTTP client of the service (ADR-1010), so a separate CLI package can follow later.
 - A release is a `darwin-arm64` tarball containing the built service and operator UI,
-  production dependencies and the exact Node runtime from `.node-version`, verified
+  production dependencies and the exact Node runtime from `.nvmrc`, verified
   against its published checksum at build time. Other platforms stay deferred
   (ADR-1004); the platform is part of the artifact name.
 - A tag push builds the release in CI and attaches it with `SHA256SUMS` and a
