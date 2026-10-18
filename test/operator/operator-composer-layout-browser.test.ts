@@ -11,6 +11,13 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import {
+  desktop,
+  inFirstViewport,
+  noPageOverflow,
+  phone,
+  startSettings,
+} from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { until } from "../fixtures/operator-work.js";
 import {
@@ -1053,3 +1060,61 @@ test("Composer shows the brief-limit note only within 10% of the limit or over i
   assert.equal(await note.count(), 1);
   assert.equal(commands, 0);
 });
+
+for (const [label, viewport] of [
+  ["1366 x 900", desktop],
+  ["390 x 844", phone],
+] as const)
+  test(`create a task budget: three interactions from New task (${label})`, async (_t, journey) => {
+    const { page, ids } = await startSettings(
+      journey,
+      "/app/projects/:atlas",
+      viewport,
+    );
+    let interactions = 0;
+    // Open: New task on a project page names that project, so no choice is counted.
+    await page
+      .getByRole("link", { name: "New task", exact: true })
+      .filter({ visible: true })
+      .first()
+      .click();
+    interactions++;
+    const project = page.getByLabel("Project", { exact: true }),
+      title = page.getByLabel("Task title", { exact: true }),
+      outcome = page.getByLabel("Desired outcome", { exact: true }),
+      verdict = page.getByRole("region", { name: "If you create it now" });
+    await verdict.getByText(/^(Will wait|Starts now)$/).waitFor();
+    assert.equal(await project.inputValue(), ids.atlas);
+    for (const target of [
+      project,
+      title,
+      outcome,
+      verdict,
+      verdict.getByText(/^(Will wait|Starts now)$/),
+    ])
+      assert.equal(
+        await inFirstViewport(page, target),
+        true,
+        `the composer is in the first view ${JSON.stringify(await target.boundingBox())}`,
+      );
+    await noPageOverflow(page);
+    // Fill: the form counts as one interaction, as in docs/user-flows/create-task.md.
+    await title.fill("Budget task");
+    await outcome.fill("The budget task is created.");
+    interactions++;
+    await page
+      .getByRole("button", { name: "Create and start", exact: true })
+      .click();
+    interactions++;
+    const created = page.getByRole("region", { name: "Task created" });
+    await created.waitFor();
+    const open = created.getByRole("link", { name: "Open task" });
+    for (const target of [created, open])
+      assert.equal(
+        await inFirstViewport(page, target),
+        true,
+        `the result is in view ${JSON.stringify(await target.boundingBox())}`,
+      );
+    assert.equal(interactions, 3);
+    await noPageOverflow(page);
+  });

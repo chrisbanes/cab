@@ -1,7 +1,7 @@
 import { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import type { Locator, Page, Route } from "playwright";
+import type { Page, Route } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
@@ -9,6 +9,7 @@ import { fakeDiscovery } from "../fixtures/setup-home.js";
 import {
   captureSettingsEvidence,
   desktop,
+  inFirstViewport,
   noPageOverflow,
   outcomeMessages,
   phone,
@@ -872,18 +873,6 @@ test("Sync rows print no raw values", async (_t, journey) => {
 
 // ---- T5: the budget -----------------------------------------------------------------------
 
-const inside = async (page: Page, target: Locator) => {
-  const box = await target.boundingBox();
-  const size = page.viewportSize();
-  assert.ok(box && size, "the element has a box");
-  return (
-    box.y >= 0 &&
-    box.x >= 0 &&
-    box.y + box.height <= size.height &&
-    box.x + box.width <= size.width
-  );
-};
-
 for (const [label, viewport] of [
   ["1366 x 900", desktop],
   ["390 x 844", phone],
@@ -904,7 +893,7 @@ for (const [label, viewport] of [
     await panel.waitFor();
     await importButton(page).waitFor();
     assert.equal(
-      await inside(page, panel),
+      await inFirstViewport(page, panel),
       true,
       "Import issues is in the first view",
     );
@@ -918,7 +907,7 @@ for (const [label, viewport] of [
     await link.waitFor();
     for (const target of [activation, read, link])
       assert.equal(
-        await inside(page, target),
+        await inFirstViewport(page, target),
         true,
         `the outcome is in view ${JSON.stringify(await target.boundingBox())}`,
       );

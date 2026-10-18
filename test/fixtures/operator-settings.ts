@@ -311,6 +311,18 @@ export const noPageOverflow = (page: Page) =>
       document.documentElement.scrollWidth <=
       document.documentElement.clientWidth,
   );
+/** Whether `target` lies wholly inside the current viewport (its first screen). */
+export const inFirstViewport = async (page: Page, target: Locator) => {
+  const box = await target.boundingBox();
+  const size = page.viewportSize();
+  assert.ok(box && size, "the element has a box");
+  return (
+    box.y >= 0 &&
+    box.x >= 0 &&
+    box.y + box.height <= size.height &&
+    box.x + box.width <= size.width
+  );
+};
 /**
  * Text of every badge within `scope` that shows a word without a symbol. Count and label
  * badges are not states, so they are allowed to stay symbol-less.
