@@ -1716,6 +1716,11 @@ phone frames 390 × 844. Each draws the same six states; the page is
 
 Interaction notes:
 
+- The panel is a closed disclosure row while idle, so Project, Title, Outcome and the
+  verdict stay in the first view (the create budget). It opens when activated and
+  whenever a run exists; the idle frames above show it open. Each field with typed
+  text gets its own proposal block beside it, named Replace title or Replace outcome,
+  with Keep mine.
 - Replace and Keep mine are both 44px high on phone. Draft with lead, Stop, Retry
   and Dismiss are 44px on phone and 32px on desktop.
 - Status changes (drafting, ready, interrupted, failed) are announced as a status
