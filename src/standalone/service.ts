@@ -4396,10 +4396,14 @@ export class StandaloneService {
       run.state === "stopping" &&
       !this.draftingControls.has(runId) &&
       !state.recoveryIdentity(workId)
-    )
+    ) {
       // Never admitted and waiting only for its copy to go: Stop retries the removal.
-      await this.settleUnadmitted(runId, "interrupted", draftingStoppedReason);
-    else if (run.state === "running" || run.state === "stopping")
+      state.releaseDraftingExecution(workId);
+      await this.settleUnadmitted(
+        runId,
+        ...StandaloneService.unadmittedOutcome(run, draftingStoppedReason),
+      );
+    } else if (run.state === "running" || run.state === "stopping")
       this.requestDraftingStop(runId, draftingStoppedReason);
     return drafting.require(runId);
   }
@@ -4619,11 +4623,11 @@ export class StandaloneService {
           )
         ) {
           c.state.releaseDraftingExecution(workId);
-          c.drafting.transition(
-            run.runId,
-            "interrupted",
+          const [settled, reason] = StandaloneService.unadmittedOutcome(
+            run,
             draftingRestartedReason,
           );
+          c.drafting.transition(run.runId, settled, reason);
         }
         continue;
       }
@@ -4697,11 +4701,16 @@ export class StandaloneService {
           ref: match.ref,
         });
       }
+      // A Stop during verification has settled the run: build nothing for it.
+      if (drafting.get(runId)?.state !== "queued") return undefined;
       const binding = await draftingWorkspaces.provision(runId, repositories);
       if (binding.state !== "ready")
         throw new Error(binding.reason ?? "Working copy is not ready");
-      // A Stop during provisioning has already settled the run.
-      if (drafting.get(runId)?.state !== "queued") return undefined;
+      // A Stop during provisioning settled the run, so the copy it just got is not wanted.
+      if (drafting.get(runId)?.state !== "queued") {
+        await this.discardDraftingWorkspace(runId);
+        return undefined;
+      }
       // Access may have changed while Git ran: a copy of the old grant is never used.
       if (this.draftingGrantChanged(runId, run.projectId))
         throw new Error("Linked repository access changed");
@@ -4730,10 +4739,25 @@ export class StandaloneService {
     const { drafting, state } = this.started();
     const runId = this.draftingRunIdOf(request);
     this.draftingGrants.delete(runId);
-    if (drafting.get(runId)?.state !== "queued") return;
-    drafting.transition(runId, "stopping", draftingCleanupReason);
+    if (drafting.get(runId)?.state !== "queued") {
+      // Stopped meanwhile: a copy built after that Stop is removed here.
+      await this.discardDraftingWorkspace(runId);
+      return;
+    }
+    // The cause stays on the run, so a retried removal still settles it as failed.
+    drafting.transition(runId, "stopping", draftingWorkspaceFailedReason);
     state.releaseDraftingExecution(request.workId);
     await this.settleUnadmitted(runId, "failed", draftingWorkspaceFailedReason);
+  }
+
+  /** How a never-admitted run settles once its copy is gone: failed if that was its cause. */
+  private static unadmittedOutcome(
+    run: DraftingRun,
+    otherwise: string,
+  ): ["interrupted" | "failed", string] {
+    return run.reason === draftingWorkspaceFailedReason
+      ? ["failed", draftingWorkspaceFailedReason]
+      : ["interrupted", otherwise];
   }
 
   /**

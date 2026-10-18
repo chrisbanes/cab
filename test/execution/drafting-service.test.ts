@@ -881,6 +881,91 @@ test("a repository grant that changes while the copy is built is never used", as
   assert.deepEqual(existsSync(copies) ? readdirSync(copies) : [], []);
 });
 
+test("a Stop that lands before the copy is built leaves no copy behind", async (t) => {
+  const w = world(t);
+  const { service, codex } = w.open();
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  codex.script(proposing(proposal));
+  // The Stop lands after verification and before the copy exists.
+  const workspaces = startedOf(service).draftingWorkspaces;
+  const provision = workspaces.provision.bind(workspaces);
+  workspaces.provision = async (id, repositories) => {
+    await service.stopDrafting(id);
+    return provision(id, repositories);
+  };
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "interrupted",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(codex.threads.length, 0);
+  const copies = join(w.dataDir, "drafting-workspaces");
+  await waitUntil(
+    () => !existsSync(copies) || readdirSync(copies).length === 0,
+    () => readdirSync(copies),
+  );
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
+});
+
+test("a run that failed to prepare still settles as failed once its copy is finally removed", async (t) => {
+  const w = world(t);
+  const block = join(w.root, "block-add");
+  const adding = join(w.root, "adding");
+  const refuse = join(w.root, "refuse-remove");
+  const git = join(w.root, "git-shim");
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    git,
+    `#!/bin/sh\ncase "$*" in *"worktree add"*) : > '${adding}'; while [ -e '${block}' ]; do sleep 0.05; done;; esac\ncase "$*" in *"worktree remove"*) [ -e '${refuse}' ] && exit 1;; esac\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  const { service, codex } = w.open({ gitExecutable: git });
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  codex.script(proposing(proposal));
+  writeFileSync(block, "");
+  writeFileSync(refuse, "");
+  const runId = randomUUID();
+  const started = service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => existsSync(adding),
+    () => w.tracked(service).runs(),
+  );
+  const domain = service.domain();
+  await domain.configureGitHub({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(domain.githubConfiguration(projectId).version),
+    credentialRef: null,
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R_1",
+        owner: "acme",
+        name: "atlas",
+      },
+    ],
+    repositories: [],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+  });
+  rmSync(block);
+  await started;
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "stopping",
+    () => w.tracked(service).runs(),
+  );
+  rmSync(refuse);
+  // Stop retries the removal; the cause, not the Stop, decides how it settles.
+  const settled = await service.stopDrafting(runId);
+  assert.equal(settled.state, "failed");
+  assert.equal(settled.reason, "The working copy could not be prepared");
+});
+
 test("a Stop during thread start is applied once the turn binds", async (t) => {
   const w = world(t);
   const opened = w.open();
