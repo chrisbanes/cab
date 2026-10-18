@@ -69,10 +69,22 @@ The operator creating an external item from a local task, so that the same task
 takes the item's external reference and becomes imported.
 _Avoid_: Export or sync when referring to creating the external item
 
+**Status mapping**:
+A project's rules for which external status option Ensemble writes when its own
+work reaches a given point. It reflects Ensemble work back to the external system
+and never makes a task Ready.
+_Avoid_: Board sync or column mapping
+
 **Drafting run**:
 A run belonging to a project rather than a task, in which the project lead
 proposes a task title and outcome from the operator's rough idea.
 _Avoid_: Draft task, which is an unready task
+
+**Draft turn**:
+A project-lead turn the operator starts on a task that is not Ready, limited to
+investigating and talking with the operator. It grants no readiness and carries
+out no implementation.
+_Avoid_: Triage turn
 
 **Project lead**:
 The agent accountable for task outcomes across a project, including coordination,
