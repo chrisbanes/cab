@@ -1820,7 +1820,6 @@ test("serve and operator CLIs record shutdown failures as sanitised structured l
     const priorOrigin = process.env.ENSEMBLE_OPERATOR_ORIGIN;
     const root = mkdtempSync(join(tmpdir(), "ensemble-background-cli-stop-"));
     chmodSync(root, 0o700);
-    const secret = "fixture-shutdown-secret-1185";
     const prototype = LocalOperatorHttp.prototype;
     const stopDescriptor = Object.getOwnPropertyDescriptor(prototype, "stop");
     const originalStop = prototype.stop;
@@ -1843,7 +1842,7 @@ test("serve and operator CLIs record shutdown failures as sanitised structured l
           access.stopOwned = () => {
             if (failed) return stop();
             failed = true;
-            return Promise.reject(new Error(`serve stop failed ${secret}`));
+            return Promise.reject(new Error(`serve stop failed`));
           };
           return service;
         },
@@ -1876,7 +1875,7 @@ test("serve and operator CLIs record shutdown failures as sanitised structured l
         configurable: true,
         value: async function (this: LocalOperatorHttp) {
           await originalStop.call(this);
-          throw new Error(`listener stop failed ${secret}`);
+          throw new Error(`listener stop failed`);
         },
       });
       baseline = process.listenerCount("SIGTERM");

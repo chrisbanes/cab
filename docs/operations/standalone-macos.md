@@ -311,7 +311,10 @@ per line:
 
 Every `error` is redacted before it is written: the data directory, the operator
 auth file, GitHub, Claude, routing and delivery credentials, credential-named
-environment values, repository paths and token-shaped text become `[redacted]`.
+environment values and repository paths become `[redacted]`, as do values after
+`token=`, `password=`, `secret=` or `api_key=`, `Authorization:` header values,
+`Bearer` values and credentials inside URLs. A secret outside these forms that is
+not a configured credential is not recognised.
 The message is cut at 2 KiB, each stack frame at 512 bytes and the `cause` chain at
 three levels (`messageTruncated`, `causeOmitted`). `"redaction":"unavailable"` marks
 a failure from before the redaction inputs were available: only `name` and `code`

@@ -36,7 +36,7 @@ test("an error's message, stack and causes lose exclusion values and private pat
   assert.equal(record.cause?.cause?.redaction, "applied");
 });
 
-test("token-shaped values are redacted even without an exclusion entry", () => {
+test("a token= assignment is redacted even without an exclusion entry", () => {
   const record = sanitizeError(
     new Error(`poll failed token=ghp_${"a1".repeat(18)}`),
     [],
