@@ -11,6 +11,13 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import {
+  desktop,
+  inFirstViewport,
+  noPageOverflow,
+  phone,
+  startSettings,
+} from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { until } from "../fixtures/operator-work.js";
 import {
@@ -1053,3 +1060,61 @@ test("Composer shows the brief-limit note only within 10% of the limit or over i
   assert.equal(await note.count(), 1);
   assert.equal(commands, 0);
 });
+
+// Getting started and Project setup open /app/tasks/new?project=<id>, the same shape as a
+// project page; the top bar on a page without a project is the one entry that must pick it.
+for (const [entry, path, scoped] of [
+  ["a project page", "/app/projects/:atlas", true],
+  ["the tasks overview", "/app", false],
+] as const)
+  for (const [label, viewport] of [
+    ["1366 x 900", desktop],
+    ["390 x 844", phone],
+  ] as const)
+    test(`create a task budget: three interactions from New task on ${entry} (${label})`, async (_t, journey) => {
+      const { page, ids } = await startSettings(journey, path, viewport);
+      let interactions = 0;
+      await page
+        .getByRole("link", { name: "New task", exact: true })
+        .filter({ visible: true })
+        .click();
+      interactions++;
+      const project = page.getByLabel("Project", { exact: true }),
+        title = page.getByLabel("Task title", { exact: true }),
+        outcome = page.getByLabel("Desired outcome", { exact: true }),
+        verdict = page.getByRole("region", { name: "If you create it now" }),
+        badge = verdict.getByText(/^(Will wait|Starts now)$/);
+      await title.waitFor();
+      // The form fill is one interaction, as in docs/user-flows/create-task.md, and
+      // includes choosing the project when the entry point did not name one.
+      if (!scoped) await project.selectOption(ids.atlas);
+      assert.equal(await project.inputValue(), ids.atlas);
+      await title.fill("Budget task");
+      await outcome.fill("The budget task is created.");
+      interactions++;
+      await badge.waitFor();
+      // Project, title, outcome and verdict together, once the fill and prediction settle.
+      for (const target of [project, title, outcome, verdict, badge])
+        assert.equal(
+          await inFirstViewport(page, target),
+          true,
+          `the composer is in the first view ${JSON.stringify(await target.boundingBox())}`,
+        );
+      assert.equal(await page.evaluate(() => scrollY), 0, "nothing scrolled");
+      await noPageOverflow(page);
+      await page
+        .getByRole("button", { name: "Create and start", exact: true })
+        .click();
+      interactions++;
+      const created = page.getByRole("region", { name: "Task created" });
+      await created.waitFor();
+      const open = created.getByRole("link", { name: "Open task" });
+      for (const target of [created, open])
+        assert.equal(
+          await inFirstViewport(page, target),
+          true,
+          `the result is in view ${JSON.stringify(await target.boundingBox())}`,
+        );
+      assert.equal(interactions, 3);
+      await noPageOverflow(page);
+    });
