@@ -1657,6 +1657,12 @@ export const localReviewOperationReadSchema = envelope(
     })
     .strict(),
 );
+/** A drafted task brief: the same limits as `task.create` title and outcome. */
+export const draftProposalSchema = z
+  .object({ title: z.string().trim().min(1).max(512), outcome: text })
+  .strict();
+export type DraftProposal = z.infer<typeof draftProposalSchema>;
+
 export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({

@@ -1,10 +1,10 @@
 import { z } from "zod";
-import type { Database } from "../core/store.js";
+import { type Database, transaction } from "../core/store.js";
 
 const requestSchema = z.object({
   requestKey: z.string().min(1),
   workId: z.string().min(1),
-  kind: z.enum(["direct", "assignment"]),
+  kind: z.enum(["direct", "assignment", "drafting"]),
   taskId: z.string().uuid().nullable(),
   projectId: z.string().uuid().nullable(),
   assignmentId: z.string().uuid().nullable(),
@@ -32,7 +32,7 @@ export class SchedulerStore {
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,
       requestKey TEXT NOT NULL UNIQUE,
       workId TEXT NOT NULL UNIQUE,
-      kind TEXT NOT NULL CHECK(kind IN ('direct','assignment')),
+      kind TEXT NOT NULL CHECK(kind IN ('direct','assignment','drafting')),
       taskId TEXT,
       projectId TEXT,
       assignmentId TEXT,
@@ -47,6 +47,7 @@ export class SchedulerStore {
       reason TEXT,
       nextEligibleAt INTEGER
     )`);
+    this.allowDraftingKind();
     // Execution list reads page by scope without scanning history.
     for (const column of ["taskId", "assignmentId", "projectId"])
       this.db.exec(
@@ -59,6 +60,56 @@ export class SchedulerStore {
       this.db.exec(
         "ALTER TABLE turn_requests ADD COLUMN nextEligibleAt INTEGER",
       );
+  }
+
+  /**
+   * Databases created before drafting runs carry a CHECK that rejects the
+   * `drafting` kind. SQLite cannot alter a CHECK, so rebuild the table in place,
+   * keeping every row, its sequence and the AUTOINCREMENT high-water mark.
+   */
+  private allowDraftingKind(): void {
+    const stored = this.db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='turn_requests'",
+      )
+      .get() as { sql: string };
+    if (stored.sql.includes("'drafting'")) return;
+    const legacyCheck = "CHECK(kind IN ('direct','assignment'))";
+    if (!stored.sql.includes(legacyCheck))
+      throw new Error("Unrecognized turn request schema; migration refused");
+    const rebuilt = stored.sql
+      .replace(legacyCheck, "CHECK(kind IN ('direct','assignment','drafting'))")
+      .replace(
+        /CREATE TABLE\s+"?turn_requests"?/,
+        "CREATE TABLE turn_requests_rebuild",
+      );
+    const foreignKeys = (
+      this.db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }
+    ).foreign_keys;
+    this.db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      transaction(this.db, () => {
+        const highWater = this.db
+          .prepare(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'turn_requests'",
+          )
+          .get() as { seq: number } | undefined;
+        this.db.exec(`${rebuilt};
+          INSERT INTO turn_requests_rebuild SELECT * FROM turn_requests;
+          DROP TABLE turn_requests;
+          ALTER TABLE turn_requests_rebuild RENAME TO turn_requests;`);
+        if (highWater)
+          this.db
+            .prepare(
+              "UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'turn_requests'",
+            )
+            .run(highWater.seq);
+        if (this.db.prepare("PRAGMA foreign_key_check").all().length)
+          throw new Error("Turn request migration broke a foreign key");
+      });
+    } finally {
+      this.db.exec(`PRAGMA foreign_keys = ${foreignKeys}`);
+    }
   }
 
   ensure(input: TurnRequestInput): TurnRequest {

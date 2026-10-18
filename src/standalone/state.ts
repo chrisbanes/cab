@@ -5190,6 +5190,37 @@ export class ExecutionState {
     });
   }
 
+  /**
+   * Releases a drafting run's capacity once its process is known to have ended
+   * (restart verification). Task executions never pass through here: their
+   * release goes through completion or a recovery receipt.
+   */
+  releaseDraftingExecution(workId: string): boolean {
+    return transaction(this.db, () => {
+      const settled = this.db
+        .prepare(`UPDATE execution_intents SET state = 'resolved-failed',
+          reason = 'Drafting run ended' WHERE workId = ?
+          AND state IN ('submitting','running','held')
+          AND EXISTS (SELECT 1 FROM turn_requests request
+            WHERE request.workId = execution_intents.workId AND request.kind = 'drafting')
+          RETURNING workId`)
+        .get(workId);
+      if (!settled) return false;
+      this.db
+        .prepare("DELETE FROM execution_capacity_reservations WHERE workId = ?")
+        .run(workId);
+      this.db
+        .prepare("DELETE FROM task_writer_admissions WHERE workId = ?")
+        .run(workId);
+      this.db
+        .prepare(
+          "UPDATE turn_requests SET state = 'completed', reason = NULL WHERE workId = ?",
+        )
+        .run(workId);
+      return true;
+    });
+  }
+
   complete(id: string, threadId: string, turnId: string): void {
     transaction(this.db, () => {
       const row = this.db

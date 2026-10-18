@@ -183,8 +183,13 @@ class WorkspaceManagerCancelledError extends Error {
 
 /** Call after Store.ensureHost; owns only the workspace-binding table. */
 export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
-  constructor(private readonly db: Database) {
-    this.db.exec(`CREATE TABLE IF NOT EXISTS task_workspace_bindings (
+  /** `table` lets disposable drafting worktrees use their own bindings. */
+  constructor(
+    private readonly db: Database,
+    private readonly table = "task_workspace_bindings",
+  ) {
+    if (!/^[a-z_]+$/.test(table)) throw new Error("Invalid workspace table");
+    this.db.exec(`CREATE TABLE IF NOT EXISTS ${table} (
       taskId TEXT PRIMARY KEY,
       workspaceId TEXT NOT NULL UNIQUE,
       path TEXT NOT NULL UNIQUE,
@@ -196,10 +201,10 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       updatedAt TEXT NOT NULL
     )`);
     const columns = this.db
-      .prepare("PRAGMA table_info(task_workspace_bindings)")
+      .prepare(`PRAGMA table_info(${this.table})`)
       .all() as Array<{ name: string }>;
     if (!columns.some(({ name }) => name === "gitUncertain"))
-      this.db.exec(`ALTER TABLE task_workspace_bindings
+      this.db.exec(`ALTER TABLE ${this.table}
         ADD COLUMN gitUncertain INTEGER NOT NULL DEFAULT 0
         CHECK(gitUncertain IN (0,1))`);
   }
@@ -213,7 +218,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO task_workspace_bindings
+        `INSERT OR IGNORE INTO ${this.table}
           (taskId, workspaceId, path, repositories, state, reason, gitUncertain, createdAt, updatedAt)
          VALUES (?, ?, ?, ?, 'provisioning', NULL, 0, ?, ?)`,
       )
@@ -223,16 +228,14 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
 
   get(taskId: string): TaskWorkspaceBinding | undefined {
     const row = this.db
-      .prepare("SELECT * FROM task_workspace_bindings WHERE taskId = ?")
+      .prepare(`SELECT * FROM ${this.table} WHERE taskId = ?`)
       .get(taskId);
     return row === undefined ? undefined : this.parseRow(row);
   }
 
   list(): TaskWorkspaceBinding[] {
     return this.db
-      .prepare(
-        "SELECT * FROM task_workspace_bindings ORDER BY createdAt, taskId",
-      )
+      .prepare(`SELECT * FROM ${this.table} ORDER BY createdAt, taskId`)
       .all()
       .map((row) => this.parseRow(row));
   }
@@ -261,7 +264,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       repositories[index] = { ...current, gitCommonDir, commit };
       this.db
         .prepare(
-          "UPDATE task_workspace_bindings SET repositories = ?, updatedAt = ? WHERE taskId = ?",
+          `UPDATE ${this.table} SET repositories = ?, updatedAt = ? WHERE taskId = ?`,
         )
         .run(JSON.stringify(repositories), new Date().toISOString(), taskId);
       return this.get(taskId) ?? this.invalidRow();
@@ -275,7 +278,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
   ): TaskWorkspaceBinding {
     this.db
       .prepare(
-        "UPDATE task_workspace_bindings SET state = ?, reason = ?, updatedAt = ? WHERE taskId = ?",
+        `UPDATE ${this.table} SET state = ?, reason = ?, updatedAt = ? WHERE taskId = ?`,
       )
       .run(state, reason, new Date().toISOString(), taskId);
     return this.get(taskId) ?? this.invalidRow();
@@ -284,7 +287,7 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
   markGitUncertain(taskId: string, reason: string): TaskWorkspaceBinding {
     this.db
       .prepare(
-        "UPDATE task_workspace_bindings SET state = 'held', reason = ?, gitUncertain = 1, updatedAt = ? WHERE taskId = ?",
+        `UPDATE ${this.table} SET state = 'held', reason = ?, gitUncertain = 1, updatedAt = ? WHERE taskId = ?`,
       )
       .run(reason, new Date().toISOString(), taskId);
     return this.get(taskId) ?? this.invalidRow();
@@ -539,6 +542,42 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           held,
           held.reason ?? "Workspace cleanup interrupted",
         );
+      }
+    });
+  }
+
+  /**
+   * Removes a disposable worktree even when its files were written. Task
+   * workspaces never use this: they are cleaned with evidence by
+   * `archiveAndCleanup`. A failure leaves the binding held for a retry.
+   */
+  discard(id: string): Promise<TaskWorkspaceBinding | undefined> {
+    return this.withTaskLock(id, async () => {
+      const binding = this.store.get(id);
+      if (!binding || binding.state === "archived") return binding;
+      this.store.update(id, "archiving", "Workspace discard in progress");
+      try {
+        if (!(await lstatIfExists(binding.path)))
+          return this.store.update(id, "archived", null);
+        await this.assertManagedRoot(binding);
+        for (const repository of binding.repositories) {
+          if (!(await lstatIfExists(repository.workspacePath))) continue;
+          await this.git(
+            repository.sourcePath,
+            "worktree-remove",
+            "worktree",
+            "remove",
+            "--force",
+            repository.workspacePath,
+          );
+        }
+        await rm(binding.path, { recursive: true, force: true });
+        return this.store.update(id, "archived", null);
+      } catch (error) {
+        const reason = `Workspace discard interrupted: ${messageOf(error)}`;
+        return isUncertainGitError(error)
+          ? this.store.markGitUncertain(id, error.message)
+          : this.store.update(id, "held", reason);
       }
     });
   }
