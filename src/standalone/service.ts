@@ -4407,7 +4407,6 @@ export class StandaloneService {
     if (prior) return prior;
     let operation: DraftingReceipt["operation"];
     let run: DraftingRun;
-    let proposal: DraftProposal | null = null;
     if (command.type === "drafting.start") {
       operation = "start";
       run = await this.startDrafting({
@@ -4420,10 +4419,7 @@ export class StandaloneService {
       run = await this.stopDrafting(command.runId);
     } else {
       operation = command.disposition;
-      ({ run, proposal } = this.settleDrafting(
-        command.runId,
-        command.disposition,
-      ));
+      run = this.settleDrafting(command.runId, command.disposition).run;
     }
     const receipt: DraftingReceipt = {
       kind: "drafting",
@@ -4432,7 +4428,6 @@ export class StandaloneService {
       operation,
       runId: run.runId,
       state: run.state,
-      proposal,
     };
     drafting.recordReceipt(key, content, receipt);
     return receipt;
@@ -5792,7 +5787,14 @@ export class StandaloneService {
       request.kind === "drafting" ? this.draftingRunIdOf(request) : undefined;
     let draftingTimer: NodeJS.Timeout | undefined;
     if (draftingRunId) {
-      this.draftingControls.set(draftingRunId, {});
+      // A Stop that landed before the turn existed is applied once it binds.
+      const earlier = this.started().drafting.get(draftingRunId);
+      this.draftingControls.set(
+        draftingRunId,
+        earlier?.state === "stopping"
+          ? { stopReason: earlier.reason ?? draftingStoppedReason }
+          : {},
+      );
       draftingTimer = setTimeout(
         () => this.requestDraftingStop(draftingRunId, draftingTimeLimitReason),
         this.options.draftingTimeLimitMs ?? draftingTimeLimitMs,

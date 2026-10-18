@@ -213,35 +213,47 @@ export class ExecutionSupervisor {
     if (this.state.recoveryInspectionKind(workId)?.startsWith("exact-terminal"))
       return true;
     if (!stored.processIdentity) return false;
+    return (
+      "verification" in
+      (await this.confirmTermination(workId, stored.processIdentity))
+    );
+  }
+
+  /** Checks the stored process exit once and records what was observed; refusals carry the reason. */
+  private async confirmTermination(
+    workId: string,
+    processIdentity: RuntimeProcessIdentity,
+  ): Promise<
+    | { verification: Extract<TerminationVerification, { kind: "verified" }> }
+    | { refusal: string }
+  > {
     let verification: TerminationVerification;
     try {
-      verification = await this.terminationVerifier.verify(
-        stored.processIdentity,
-      );
+      verification = await this.terminationVerifier.verify(processIdentity);
     } catch {
       this.recordObservation(workId, "termination-unknown");
-      return false;
+      return { refusal: "Original process termination could not be verified" };
     }
     if (verification.kind !== "verified") {
+      const conflict = verification.kind === "conflict";
       this.recordObservation(
         workId,
-        verification.kind === "conflict"
-          ? "termination-conflict"
-          : "termination-unknown",
+        conflict ? "termination-conflict" : "termination-unknown",
       );
-      return false;
+      return {
+        refusal: conflict
+          ? "Process termination evidence conflicts with the stored identity"
+          : "Original process termination could not be verified",
+      };
     }
-    if (
-      !exactProcessIdentity(
-        stored.processIdentity,
-        verification.processIdentity,
-      )
-    ) {
+    if (!exactProcessIdentity(processIdentity, verification.processIdentity)) {
       this.recordObservation(workId, "termination-conflict");
-      return false;
+      return {
+        refusal: "Verified termination proof has a different process identity",
+      };
     }
     this.recordObservation(workId, "termination-verified");
-    return true;
+    return { verification };
   }
 
   recordObservation(
@@ -270,42 +282,13 @@ export class ExecutionSupervisor {
         "Recovery receipt generation or execution identity does not match",
       );
 
-    let verification: TerminationVerification;
-    try {
-      verification = await this.terminationVerifier.verify(
-        stored.processIdentity,
-      );
-    } catch {
-      this.recordObservation(value.workId, "termination-unknown");
-      throw new RecoveryRejectedError(
-        "Original process termination could not be verified",
-      );
-    }
-    if (verification.kind !== "verified") {
-      this.recordObservation(
-        value.workId,
-        verification.kind === "conflict"
-          ? "termination-conflict"
-          : "termination-unknown",
-      );
-      throw new RecoveryRejectedError(
-        verification.kind === "conflict"
-          ? "Process termination evidence conflicts with the stored identity"
-          : "Original process termination could not be verified",
-      );
-    }
-    if (
-      !exactProcessIdentity(
-        stored.processIdentity,
-        verification.processIdentity,
-      )
-    ) {
-      this.recordObservation(value.workId, "termination-conflict");
-      throw new RecoveryRejectedError(
-        "Verified termination proof has a different process identity",
-      );
-    }
-    this.recordObservation(value.workId, "termination-verified");
+    const confirmed = await this.confirmTermination(
+      value.workId,
+      stored.processIdentity,
+    );
+    if ("refusal" in confirmed)
+      throw new RecoveryRejectedError(confirmed.refusal);
+    const { verification } = confirmed;
     return this.state.resolveHeldExecution(value, verification, command);
   }
 

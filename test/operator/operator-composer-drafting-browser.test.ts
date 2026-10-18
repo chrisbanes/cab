@@ -239,7 +239,9 @@ for (const [name, viewport] of viewports) {
     assert.equal(f.service.readDrafting(runId)?.state, "stopping");
     f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
     await panel(page).getByText("Draft interrupted", { exact: true }).waitFor();
-    await panel(page).getByText("You stopped the draft.").waitFor();
+    await panel(page)
+      .getByText("You stopped the draft", { exact: true })
+      .waitFor();
     assert.equal(
       await page.getByLabel("Task title").inputValue(),
       "Typed title",

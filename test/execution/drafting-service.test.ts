@@ -67,6 +67,8 @@ class DraftRuntime implements Runtime {
   readonly interrupts: string[] = [];
   /** Interrupts are acknowledged but the turn keeps running until `release`. */
   holdOnInterrupt = false;
+  /** Holds `startThread`, so a Stop can land before the turn exists. */
+  threadDelayMs = 0;
   private readonly behaviors: Behavior[] = [];
   private tool:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
@@ -93,6 +95,8 @@ class DraftRuntime implements Runtime {
     workspace: string,
     tools: readonly RuntimeToolDefinition[] = [],
   ) {
+    if (this.threadDelayMs)
+      await new Promise((resolve) => setTimeout(resolve, this.threadDelayMs));
     const id = `draft-thread-${++this.count}`;
     this.threads.push({ id, workspace, tools });
     return id;
@@ -700,6 +704,34 @@ test("Stop keeps capacity reserved and the copy in place until the runtime is se
   );
   assert.equal(w.tracked(service).usage(projectId).global, 0);
   assert.equal(existsSync(workspace), false);
+});
+
+test("a Stop that lands before the turn exists is applied once it binds", async (t) => {
+  const w = world(t);
+  const opened = w.open();
+  const { service, codex } = opened;
+  codex.threadDelayMs = 400;
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  script(w, "codex", opened, async (api) => {
+    await api.interrupted();
+    throw new Error("interrupted");
+  });
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "running",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(codex.threads.length, 0, "the thread is still starting");
+  await service.stopDrafting(runId);
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "interrupted",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(codex.interrupts.length, 1);
+  assert.equal(service.readDrafting(runId)?.reason, "You stopped the draft");
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
 });
 
 test("capacity: a drafting run waits on the global and project limits and runs after the blocker ends", async (t) => {

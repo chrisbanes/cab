@@ -2764,8 +2764,6 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       operation: z.enum(["start", "stop", "accept", "discard"]),
       runId: uuid,
       state: draftingStateSchema,
-      /** Only an accepted draft carries its proposal, once. */
-      proposal: draftProposalSchema.nullable(),
     })
     .strict(),
   z

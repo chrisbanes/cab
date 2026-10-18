@@ -143,6 +143,8 @@ export function useDrafting({
     applied.current = null;
     setMessage("");
     setStarting(true);
+    // The button that started it is replaced, so focus stays with the idea.
+    document.getElementById("composer-idea")?.focus();
     const result = await send({
       type: "drafting.start",
       key: crypto.randomUUID(),
@@ -154,8 +156,11 @@ export function useDrafting({
     if (result.state === "recorded") void refresh.current();
     setStarting(false);
     if (result.state === "recorded") return;
-    if (result.state === "unknown") setMessage(draftingCopy.unconfirmed);
-    else {
+    if (result.state === "unknown") {
+      // Read again so a start that did land is found rather than dropped.
+      void refresh.current();
+      setMessage(draftingCopy.unconfirmed);
+    } else {
       clearRun(
         result.code === "conflict" || result.state === "conflict"
           ? "Couldn't start the draft: the project lead is unavailable."
@@ -385,9 +390,8 @@ export function DraftWithLead({
               </span>
               {view === "running" && (
                 <span className="metadata muted">
-                  {formatElapsed(elapsed)} of{" "}
-                  {formatElapsed(draftingLimitSeconds)} · stops by itself at the
-                  limit
+                  Requested {formatElapsed(elapsed)} ago · stops by itself after{" "}
+                  {formatElapsed(draftingLimitSeconds)} of running
                 </span>
               )}
             </span>
@@ -438,9 +442,10 @@ export function DraftWithLead({
           <>
             <div className="composer-draft-outcome" role="alert">
               <span className="body composer-draft-strong">
-                {view === "failed"
-                  ? (run?.reason ?? "The draft failed")
-                  : "You stopped the draft."}
+                {run?.reason ??
+                  (view === "failed"
+                    ? "The draft failed"
+                    : "The draft was interrupted")}
               </span>
               <span className="body muted">
                 {view === "failed"

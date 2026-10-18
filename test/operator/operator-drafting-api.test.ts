@@ -80,7 +80,7 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
   assert.equal(receipt.kind, "drafting");
   assert.equal(receipt.operation, "start");
   assert.equal(receipt.runId, runId);
-  assert.equal(receipt.proposal, null);
+  assert.equal("proposal" in receipt, false, "a receipt never carries text");
   const replay = await post(start);
   assert.equal(replay.status, 200);
   assert.deepEqual(await replay.json(), receipt);
@@ -107,7 +107,7 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
   assert.deepEqual(proposed.proposal, proposal);
   assert.equal(typeof proposed.expiresAt, "number");
 
-  // Accepting hands over the proposal; the read no longer carries it.
+  // Accepting settles the run; neither the receipt nor a later read carries the text.
   const accept = {
     type: "drafting.settle",
     key: randomUUID(),
@@ -118,7 +118,8 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
   assert.equal(accepted.status, 200);
   const acceptReceipt = (await accepted.json()) as Record<string, unknown>;
   assert.equal(acceptReceipt.operation, "accept");
-  assert.deepEqual(acceptReceipt.proposal, proposal);
+  assert.equal(acceptReceipt.state, "accepted");
+  assert.equal("proposal" in acceptReceipt, false);
   assert.equal((await runOf(runId)).proposal, null);
   assert.equal((await post({ ...accept, key: randomUUID() })).status, 409);
 

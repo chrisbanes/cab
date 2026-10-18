@@ -1319,11 +1319,13 @@ export class ExecutionState {
   workHarness(workId: string): ExecutionHarness {
     const bound = this.taskBinding(workId)?.harness;
     if (bound) return bound;
-    const drafting = this.db
-      .prepare(
-        "SELECT harness FROM drafting_runs WHERE 'drafting:' || runId = ?",
-      )
-      .get(workId) as { harness: unknown } | undefined;
+    const drafting = workId.startsWith("drafting:")
+      ? (this.db
+          .prepare("SELECT harness FROM drafting_runs WHERE runId = ?")
+          .get(workId.slice("drafting:".length)) as
+          | { harness: unknown }
+          | undefined)
+      : undefined;
     return drafting
       ? executionHarnessSchema.parse(drafting.harness)
       : defaultExecutionHarness;
@@ -3348,7 +3350,7 @@ export class ExecutionState {
         LEFT JOIN task_execution_bindings binding
           ON binding.workId = intent.workId
         LEFT JOIN drafting_runs drafting
-          ON 'drafting:' || drafting.runId = intent.workId
+          ON intent.workId LIKE 'drafting:%' AND drafting.runId = substr(intent.workId, 10)
         WHERE intent.threadId = ?`)
         .all(
           defaultExecutionHarness,
@@ -3414,7 +3416,8 @@ export class ExecutionState {
         .prepare(
           `SELECT 1 FROM execution_intents e
           LEFT JOIN task_execution_bindings b ON b.workId = e.workId
-          LEFT JOIN drafting_runs d ON 'drafting:' || d.runId = e.workId
+          LEFT JOIN drafting_runs d
+            ON e.workId LIKE 'drafting:%' AND d.runId = substr(e.workId, 10)
           WHERE e.state IN ('submitting','running','held')
             AND COALESCE(b.harness, d.harness, 'codex') = ? LIMIT 1`,
         )
