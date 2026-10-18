@@ -209,7 +209,9 @@ task), open items and open items matching the readiness rule, and warns when a c
 read matches none; an imported open Draft task names the conditions it does not meet.
 These explanations are read-only projections of stored observations: they make no
 provider read and grant no readiness, and matching the rule is neither Ready nor
-admission. Ready authorizes work within scope, without a universal per-task plan approval. Material ambiguity,
+admission. Ready authorizes work within scope, without a universal per-task plan approval.
+(A [drafting run](#drafting-runs) is not task work: it needs no Ready task but counts
+against the same global and project capacity.) Material ambiguity,
 scope expansion or ungranted actions require operator input.
 
 Dependencies gate execution separately from Ready. A blocked task remains visible
@@ -473,6 +475,9 @@ OS/deployment controls govern shell, filesystem, network and ambient credentials
 disclose their actual limits and do not claim an independent sandbox. External
 content is data, never authority. Runtime choice must establish caller identity
 without trusting agent-supplied project or assignment IDs.
+
+A [drafting run](#drafting-runs) works in a disposable worktree of the project's
+linked repositories. The host-read disclosure above applies to it unchanged.
 
 ## Operator interface and human requests
 
@@ -799,6 +804,56 @@ a conflict does not undo the recorded provider operation or authorize a resend.
 Phone layouts support checking progress, creating tasks, messaging, answering
 questions and reviewing approvals. Complex configuration and recovery are
 desktop-first; narrow screens must still explain the current state and next step.
+
+#### Drafting runs
+
+In the composer, **Draft with lead** hands a rough idea to the project lead. A
+**Drafting run** belongs to its project, not to a task: it creates no task,
+assignment, task workspace, result, delivery or GitHub write. It is not a Draft task
+whose first assignment writes its own brief: Draft tasks still never run and Ready
+keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
+
+- **Profile.** The run uses the project lead's profile and runtime, Codex or Claude,
+  with a fixed drafting instruction added to the lead's own instructions. A project
+  with no active lead cannot draft: the composer says so without starting a run and
+  the service refuses the start.
+- **Access.** The lead works in a disposable detached worktree of exactly the
+  project's linked repositories at their configured refs, each identity-checked like a
+  task workspace, with command network access off. It is offered one result tool and
+  no coordination, delivery or GitHub tools. A draft never widens repository access.
+  This is not a read-only sandbox: reads keep the runtime's normal host access (see
+  [Workspaces and execution access](#workspaces-and-execution-access)), and writes
+  land only in the throwaway copy. The composer and docs say so.
+- **Capacity.** A drafting run counts against the global and project active-turn
+  limits and waits, with the same wait reason as any turn, when either is full. A
+  paused project holds it like any other turn. Stop is available while it waits.
+- **Result.** The lead returns a title and an outcome through the result tool. The
+  service validates them against the composer's field limits and lets the lead retry
+  an invalid call; the last valid proposal wins. A turn that ends without one fails
+  the run with Retry.
+- **Stop, the time cap and restart.** The operator can Stop a run, and the service
+  stops it after a fixed 10 minutes from admission (a constant, not a setting). A
+  service restart also ends it. In every case the run is held until the runtime is
+  seen to end: terminal status, or verified termination of the recorded process after
+  a runtime loss or restart. Acknowledging Stop, the cap expiring or a restart never
+  releases capacity by itself. Only then is capacity released, the worktree deleted
+  and the run settled as interrupted, with no recovery page or Inbox alert. If
+  termination cannot be verified, the run keeps its capacity and the composer keeps
+  showing it as stopping; drafting has no operator recovery. A queued run that has
+  not been admitted has nothing to wait for and is interrupted at once.
+- **Fill.** Nothing is saved or created until Save draft or Create. An empty title or
+  outcome field is filled. A field the operator already typed in shows the proposal
+  beside it with Replace or Keep, so typed text is never overwritten silently. An
+  interrupted or failed run shows "Draft interrupted" or the failure with Retry, and
+  keeps the operator's idea, title and outcome. The operator can cancel instead.
+- **Reattach.** The composer's local draft stores the run id, so leaving, reloading
+  or locking a phone reattaches to the run. The service keeps a proposal until the
+  operator accepts or discards it, or it expires 24 hours after it arrived.
+- **Operator CLI.** The CLI does not offer drafting; see
+  [Operator CLI](design/operator-cli.md).
+
+Status: planned. The composer states and the run lifecycle are specified here and in
+the design; the service, API and composer do not implement them yet.
 
 ### Imported issues and source ownership
 
