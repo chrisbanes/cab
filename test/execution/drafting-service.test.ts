@@ -799,7 +799,15 @@ test("a queued run whose copy cannot be removed stays stopping, and Stop retries
   assert.equal(readdirSync(copies).length, 2);
   assert.equal(w.tracked(service).usage(projectId).global, 1);
   rmSync(flag);
-  assert.equal((await service.stopDrafting(queued)).state, "interrupted");
+  // Two Stops at once, as the composer's release and the panel's Stop can be.
+  const both = await Promise.all([
+    service.stopDrafting(queued),
+    service.stopDrafting(queued),
+  ]);
+  assert.deepEqual(
+    both.map((run) => run.state),
+    ["interrupted", "interrupted"],
+  );
   assert.equal(readdirSync(copies).length, 1);
   // It is never admitted afterwards.
   await service.stopDrafting(running);

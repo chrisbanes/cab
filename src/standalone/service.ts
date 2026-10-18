@@ -4541,8 +4541,11 @@ export class StandaloneService {
     state: "interrupted" | "failed",
     reason: string,
   ): Promise<void> {
-    if (await this.discardDraftingWorkspace(runId))
-      this.started().drafting.transition(runId, state, reason);
+    if (!(await this.discardDraftingWorkspace(runId))) return;
+    // A concurrent Stop or retry may have settled it while the removal waited.
+    const { drafting } = this.started();
+    if (drafting.get(runId)?.state === "stopping")
+      drafting.transition(runId, state, reason);
   }
 
   /**
