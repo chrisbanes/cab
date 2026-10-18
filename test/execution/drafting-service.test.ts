@@ -1112,6 +1112,13 @@ test("a proposal holding text that cannot be shown is refused so the lead can re
           outcome: `Look in ${w.dataDir}`,
         })
       ).success,
+      // The lead's own instructions are as private as a path.
+      (
+        await api.callTool(draftProposalToolName, {
+          title: "Echo",
+          outcome: "Lead instructions: prefer small, reviewable tasks.",
+        })
+      ).success,
       (await api.callTool(draftProposalToolName, proposal)).success,
     );
   });
@@ -1121,7 +1128,7 @@ test("a proposal holding text that cannot be shown is refused so the lead can re
     () => service.readDrafting(runId)?.state === "proposed",
     () => w.tracked(service).runs(),
   );
-  assert.deepEqual(results, [false, true]);
+  assert.deepEqual(results, [false, false, true]);
   assert.deepEqual(service.readDrafting(runId)?.proposal, proposal);
 });
 

@@ -4562,7 +4562,22 @@ export class StandaloneService {
             .slice(0, 1000),
         };
       // The operator could not be shown text the exclusions would change, so it is refused now.
-      const excluded = this.failureExclusions();
+      const run = drafting.require(runId);
+      const domain = this.domain();
+      const failure = this.failureExclusions();
+      // Including the instructions this run was given, which the operator's reads also redact.
+      const excluded =
+        failure &&
+        prepareExclusions([
+          ...failure,
+          ...[
+            String(
+              domain.profileRevision(run.profileId, run.profileRevision)
+                .instructions,
+            ),
+            domain.instructionRevision(run.projectId, run.instructionsRevision),
+          ].filter((text) => text.length > 0),
+        ]);
       const shown = (text: string) =>
         excluded !== undefined &&
         sanitizeConversationText(text, excluded) === text;

@@ -350,10 +350,19 @@ for (const [name, viewport] of viewports) {
     await panel(page).getByLabel("Rough idea").fill(idea);
     await draftButton(page).click();
     const runId = await runningRun(f);
+    // Another profile's instructions pass the tool but are redacted on every read.
+    f.service.domain().execute({
+      type: "profile.create",
+      actor: "operator",
+      key: crypto.randomUUID(),
+      profileId: crypto.randomUUID(),
+      name: "Other",
+      instructions: "Private second profile instructions.",
+      capabilities: "review",
+    });
     await answerDraft(f, runId, {
       title: "Withheld draft",
-      // The lead's private instructions are redacted on every read.
-      outcome: "Follow: Prefer small, reviewable tasks.",
+      outcome: "Follow: Private second profile instructions.",
     });
     await panel(page)
       .getByText(/holds text that cannot be shown/)

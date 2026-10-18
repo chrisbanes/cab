@@ -172,14 +172,24 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
     idea: "A third idea",
   });
   await until(() => f.runtime.hasPending(3), "the third drafting turn");
+  // Another profile's instructions pass the tool, which knows only this run's, but are
+  // redacted on every read.
+  domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: randomUUID(),
+    name: "Other",
+    instructions: "Private second profile instructions.",
+    capabilities: "review",
+  });
   await f.runtime.callTool({
     ...draftingTurn(f.service, leakId)!,
     callId: randomUUID(),
     tool: draftProposalToolName,
     arguments: {
       title: "Leaky draft",
-      // The lead's private instructions are redacted on every read.
-      outcome: "Follow: Prefer small, reviewable tasks.",
+      outcome: "Follow: Private second profile instructions.",
     },
   });
   f.runtime.complete(3);
