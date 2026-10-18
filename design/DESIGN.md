@@ -388,8 +388,8 @@ not draw.
 | Unblock waiting work | Project page | `23b-atlas-project-paused` | no frame |
 | Unblock waiting work | Composer | `148-composer-project-paused` | no frame |
 | Create a task | Any | `05-composer` | `161-composer-created-project-paused` |
-| First run to first task | Install command | `108-signin-desktop` | `149-task-waiting-project-paused` |
-| First run to first task | Fresh sign-in, no project | `143-home-getting-started` | `149-task-waiting-project-paused` |
+| First run to first task | Install command | `108-signin-desktop` | no frame |
+| First run to first task | Fresh sign-in, no project | `143-home-getting-started` | no frame |
 | Review a result | Task detail | `03-task-detail` | `59-inspect-criterion-feedback` |
 | Review a result | Home recent results | `01-attention-overview` | `59-inspect-criterion-feedback` |
 | Review a result | Inbox evidence link | `02-inbox-approval` | `59-inspect-criterion-feedback` |
@@ -397,10 +397,11 @@ not draw.
 
 The `no frame` cells are the Home or task-card answer confirmation (only the Inbox
 `162-grouped-questions-answered` and phone `30-phone-question-answer-sent` draw "Answer sent"), the Home
-approval card and the recorded decision after the Home or task entry (only the
+approval card (`01-attention-overview` lists the approval only in its "3 more" row) and the
+recorded decision after the Home or task entry (only the
 Inbox `32-inbox-approved-dependency-held` draws it, and phone `33-phone-exact-approval-source-hold` stops at
 Review material & decide), the state after an Unblock fix is sent (`149b-task-fix-resume-confirm`
-draws only the confirmation step) and the first-run running-turn end (only the
+draws only the confirmation step) and the first-run running-task end (only the paused
 waiting variant `149-task-waiting-project-paused` is drawn). The desktop task-detail uncertain hold is not drawn, so
 that row uses the phone pair. The diff behind Inspect changes is
 `06-workspace-changes-review`.
