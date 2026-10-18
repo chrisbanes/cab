@@ -1687,7 +1687,11 @@ export const localReviewOperationReadSchema = envelope(
 );
 /** A drafted task brief: the same limits as `task.create` title and outcome. */
 export const draftProposalSchema = z
-  .object({ title: z.string().trim().min(1).max(512), outcome: text })
+  .object({
+    title: z.string().trim().min(1).max(512),
+    // As the composer requires of a typed outcome; a pattern, so it reaches the tool's JSON schema.
+    outcome: text.regex(/\S/, "Enter a desired outcome"),
+  })
   .strict();
 export type DraftProposal = z.infer<typeof draftProposalSchema>;
 

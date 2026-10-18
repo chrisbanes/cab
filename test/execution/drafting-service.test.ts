@@ -577,6 +577,13 @@ for (const harness of harnesses) {
       outcomes.push(
         (await api.callTool(draftProposalToolName, { title: "", outcome: "x" }))
           .success,
+        // A blank outcome could never be saved, so it is refused like any invalid call.
+        (
+          await api.callTool(draftProposalToolName, {
+            title: "Blank",
+            outcome: "  \n ",
+          })
+        ).success,
         (
           await api.callTool(draftProposalToolName, {
             title: "Only",
@@ -594,7 +601,7 @@ for (const harness of harnesses) {
     );
     // The malformed call never reaches the tool for Claude, whose shape check refuses it.
     assert.equal(outcomes.at(-1), true);
-    assert.equal(outcomes[0], false);
+    assert.deepEqual(outcomes.slice(0, 2), [false, false]);
     assert.deepEqual(service.readDrafting(first)?.proposal, proposal);
 
     script(w, harness, opened, async () => {});
