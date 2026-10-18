@@ -131,3 +131,53 @@ test("delivery refresh is a receipted write that reports partial outcomes", asyn
   });
   assert.equal(((await session.json()) as Json).operation, "delivery.refresh");
 });
+
+test("delivery get lists thread reply and resolve actions with their outcomes", async (t) => {
+  const w = await deliveryWorld(t);
+  w.scripted.thread = {
+    resolved: false,
+    resolvedBy: null,
+    comments: [
+      { id: "C1", body: "Please fix", state: "SUBMITTED", author: "U_REV" },
+    ],
+  };
+  w.f.grant(
+    { action: "pr.thread.reply", mode: "allow" },
+    { action: "pr.thread.resolve", mode: "allow" },
+  );
+  await w.f.register();
+  assert.equal(
+    (await w.f.threadAction({ kind: "pr.thread.reply", body: "Fixed" }))
+      .success,
+    true,
+  );
+  assert.equal(
+    (
+      await w.f.threadAction({
+        kind: "pr.thread.resolve",
+        expectedLatestCommentNodeId: "C1",
+      })
+    ).success,
+    false,
+  );
+  const json = await w.ok("ro", ["delivery", "get", w.f.taskId]);
+  assert.deepEqual(
+    json.data.delivery.actions.map((a: Json) => [a.kind, a.state, a.reason]),
+    [
+      ["pr.thread.reply", "confirmed-success", null],
+      ["pr.thread.resolve", "confirmed-failure", "provider-preflight-held"],
+    ],
+  );
+  const human = await w.h.run([
+    "delivery",
+    "get",
+    w.f.taskId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /pr\.thread\.reply +confirmed-success/);
+  assert.match(
+    human.out,
+    /pr\.thread\.resolve +confirmed-failure +provider-preflight-held/,
+  );
+});

@@ -8,6 +8,7 @@ import {
   scriptedDeliveryProvider,
 } from "../fixtures/delivery-integration.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { canonicalMaterial } from "../../src/core/delivery.js";
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {
   test(`assembled ${mode} uses production HTTP parsing, own closure, terminal completion and durable reopen`, async () => {
@@ -747,3 +748,237 @@ for (const control of ["Ready off/on", "dependency add/remove"] as const) {
     }
   });
 }
+
+/** A registered PR with one unresolved thread whose only comment is the reviewer's C1. */
+async function threadWorld(mode: "allow" | "approval" | null = "allow") {
+  const f = await createReleaseDeliveryFixture();
+  f.scripted.state.thread = {
+    resolved: false,
+    resolvedBy: null,
+    comments: [
+      { id: "C1", body: "Please fix", state: "SUBMITTED", author: "U_REV" },
+    ],
+  };
+  if (mode)
+    f.grant(
+      { action: "pr.thread.reply", mode },
+      { action: "pr.thread.resolve", mode },
+    );
+  await f.register();
+  const reply = (body = "Fixed in abc") => ({
+    kind: "pr.thread.reply",
+    body,
+  });
+  const resolve = (expectedLatestCommentNodeId: string) => ({
+    kind: "pr.thread.resolve",
+    expectedLatestCommentNodeId,
+  });
+  const threadStates = () =>
+    f.service
+      .delivery()
+      .actions(f.taskId)
+      .map((a) => [a.request.action.kind, a.state, a.observation?.reason]);
+  return { f, reply, resolve, threadStates };
+}
+
+test("thread reply and resolve write once each, refuse stale or repeated resolves without writing, and reach the lead and task view", async () => {
+  const { f, reply, resolve, threadStates } = await threadWorld();
+  try {
+    const thread = f.scripted.state.thread;
+    assert.ok(thread);
+    assert.deepEqual(
+      f.service.delivery().delivery(f.taskId)?.observation.reviewThreads,
+      [
+        {
+          nodeId: "T1",
+          isResolved: false,
+          firstCommentNodeId: "C1",
+          latestCommentNodeId: "C1",
+        },
+      ],
+    );
+    const replied = await f.threadAction(reply());
+    assert.equal(replied.success, true, replied.text);
+    assert.equal(f.scripted.state.threadReplies, 1);
+    assert.equal(thread.comments.length, 2);
+    assert.equal(
+      thread.comments[1]?.body.match(/ensemble-operation:/g)?.length,
+      1,
+    );
+    // The post-success refresh shows the lead the thread's new latest comment.
+    assert.equal(
+      f.service.delivery().delivery(f.taskId)?.observation.reviewThreads?.[0]
+        ?.latestCommentNodeId,
+      "C2",
+    );
+    const feedback = f.readDb((db) =>
+      (
+        db
+          .prepare(
+            "SELECT payload FROM coordination_inbox_events WHERE eventType='pr-delivery' ORDER BY sequence",
+          )
+          .all() as { payload: string }[]
+      ).map((row) => String(JSON.parse(row.payload).reason)),
+    );
+    assert.match(feedback.at(-1) ?? "", /review-thread T1 latest C2/);
+
+    // Resolving against the comment seen before the reply is stale.
+    const stale = await f.threadAction(resolve("C1"));
+    assert.equal(stale.success, false);
+    assert.match(stale.text, /provider-preflight-held/);
+    assert.equal(f.scripted.state.threadResolves, 0);
+    const resolved = await f.threadAction(resolve("C2"));
+    assert.equal(resolved.success, true, resolved.text);
+    assert.equal(f.scripted.state.threadResolves, 1);
+    assert.equal(thread.resolved, true);
+    const again = await f.threadAction(resolve("C2"));
+    assert.equal(again.success, false);
+    assert.match(again.text, /provider-preflight-held/);
+    assert.equal(f.scripted.state.threadResolves, 1);
+
+    assert.deepEqual(threadStates(), [
+      ["pr.thread.reply", "confirmed-success", null],
+      ["pr.thread.resolve", "confirmed-failure", "provider-preflight-held"],
+      ["pr.thread.resolve", "confirmed-success", null],
+      ["pr.thread.resolve", "confirmed-failure", "provider-preflight-held"],
+    ]);
+    const shown = (
+      await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+    ).data.delivery?.actions.map((a) => [a.kind, a.state, a.reason]);
+    assert.deepEqual(shown, threadStates());
+  } finally {
+    await f.close();
+  }
+});
+
+test("thread actions are denied without a grant", async () => {
+  const { f, reply, resolve, threadStates } = await threadWorld(null);
+  try {
+    for (const action of [reply(), resolve("C1")]) {
+      const denied = await f.threadAction(action);
+      assert.equal(denied.success, false);
+      assert.match(denied.text, /denied \(delivery-authority-denied\)/);
+    }
+    assert.equal(
+      f.scripted.state.threadReplies + f.scripted.state.threadResolves,
+      0,
+    );
+    assert.deepEqual(
+      threadStates().map((s) => s[1]),
+      ["denied", "denied"],
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+for (const kind of ["reply", "resolve"] as const)
+  test(`a lost ${kind} response is held uncertain and never rewritten across restart`, async () => {
+    const { f, reply, resolve, threadStates } = await threadWorld();
+    try {
+      f.scripted.state[
+        kind === "reply" ? "lostThreadReply" : "lostThreadResolve"
+      ] = true;
+      const operationId = randomUUID();
+      const action = kind === "reply" ? reply() : resolve("C1");
+      const lost = await f.threadAction(action, operationId);
+      assert.equal(lost.success, false);
+      assert.deepEqual(threadStates(), [
+        [`pr.thread.${kind}`, "uncertain", "provider-effect-unproved"],
+      ]);
+      const writes = () =>
+        kind === "reply"
+          ? f.scripted.state.threadReplies
+          : f.scripted.state.threadResolves;
+      assert.equal(writes(), 1);
+      assert.equal((await f.threadAction(action, operationId)).success, false);
+      assert.equal(writes(), 1);
+      // The task stays held while the outcome is unproved.
+      assert.equal(
+        (await f.threadAction(reply("Another reply"))).success,
+        false,
+      );
+      assert.equal(f.scripted.state.threadReplies, kind === "reply" ? 1 : 0);
+      await f.service.stopTask(f.taskId);
+      await until(
+        () => !f.service.list().some((i) => i.state === "running"),
+        "uncertain Stop",
+      );
+      await f.reopen();
+      await f.service.coordinationView().refreshDelivery(f.taskId);
+      // Reconciliation reads the thread back; it never issues a second mutation.
+      assert.equal(writes(), 1);
+      assert.equal(f.scripted.state.threadReplies, kind === "reply" ? 1 : 0);
+      assert.deepEqual(
+        threadStates()
+          .slice(0, 1)
+          .map((s) => s[1]),
+        ["confirmed-success"],
+      );
+    } finally {
+      await f.close();
+    }
+  });
+
+test("approval mode refuses thread actions until the operator approves the exact material", async () => {
+  const { f, reply } = await threadWorld("approval");
+  try {
+    const action = {
+      ...reply(),
+      target: {
+        repositoryId: "R1",
+        nodeId: "P7",
+        number: 7,
+        threadNodeId: "T1",
+      },
+    };
+    assert.equal((await f.threadAction(reply())).success, false);
+    const requested = await f.call("ensemble_request_approval", {
+      action: action.kind,
+      target: canonicalMaterial(action.target),
+      material: action,
+    });
+    assert.equal(requested.success, true, requested.text);
+    const interaction = f.service.coordinationView().readTask(f.taskId)
+      .approvals[0];
+    assert.ok(interaction);
+    await f.terminal(1);
+    await f.service.coordinationView().decideApproval({
+      taskId: f.taskId,
+      key: randomUUID(),
+      interactionId: interaction.interactionId,
+      expectedRevision: 1,
+      decision: "approved",
+      action: action.kind,
+      target: canonicalMaterial(action.target),
+      material: action,
+    });
+    await f.waitTurn(2);
+    const approval = {
+      interactionId: interaction.interactionId,
+      expectedRevision: 2,
+    };
+    assert.equal(
+      (
+        await f.threadAction(
+          reply("Changed unapproved text"),
+          randomUUID(),
+          2,
+          approval,
+        )
+      ).success,
+      false,
+    );
+    assert.equal(f.scripted.state.threadReplies, 0);
+    const done = await f.threadAction(reply(), randomUUID(), 2, approval);
+    assert.equal(done.success, true, done.text);
+    assert.equal(f.scripted.state.threadReplies, 1);
+    assert.equal(
+      (await f.threadAction(reply(), randomUUID(), 2, approval)).success,
+      false,
+    );
+    assert.equal(f.scripted.state.threadReplies, 1);
+  } finally {
+    await f.close();
+  }
+});

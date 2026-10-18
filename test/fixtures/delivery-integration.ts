@@ -95,6 +95,22 @@ export function scriptedDeliveryProvider() {
       body: string;
     }>,
     requests: [] as string[],
+    /** One review thread on the bound PR; null leaves the PR without threads. */
+    thread: null as null | {
+      resolved: boolean;
+      resolvedBy: string | null;
+      comments: Array<{
+        id: string;
+        body: string;
+        state: string;
+        author: string;
+      }>;
+    },
+    threadReplies: 0,
+    threadResolves: 0,
+    /** The mutation takes effect but its response is lost. */
+    lostThreadReply: false,
+    lostThreadResolve: false,
   };
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -130,6 +146,47 @@ export function scriptedDeliveryProvider() {
       if (query.includes("EnsembleDeliveryRepository"))
         return Response.json({
           data: { node: { id: "R1", nameWithOwner: "org/repo" } },
+        });
+      const thread = state.thread;
+      if (thread && query.includes("EnsembleDeliveryThreadReply")) {
+        state.threadReplies++;
+        thread.comments.push({
+          id: `C${thread.comments.length + 1}`,
+          body: JSON.parse(String(init?.body)).variables.body,
+          state: "SUBMITTED",
+          author: "U1",
+        });
+        if (state.lostThreadReply) throw Error("scripted lost reply response");
+        return Response.json({ data: {} });
+      }
+      if (thread && query.includes("EnsembleDeliveryThreadResolve")) {
+        state.threadResolves++;
+        thread.resolved = true;
+        thread.resolvedBy = "U1";
+        if (state.lostThreadResolve)
+          throw Error("scripted lost resolve response");
+        return Response.json({ data: {} });
+      }
+      if (thread && query.includes("EnsembleDeliveryThread"))
+        return Response.json({
+          data: {
+            node: {
+              id: "T1",
+              isResolved: thread.resolved,
+              resolvedBy: thread.resolvedBy ? { id: thread.resolvedBy } : null,
+              pullRequest: { id: "P7", number: 7, repository: { id: "R1" } },
+              latestComment: { nodes: [{ id: thread.comments.at(-1)?.id }] },
+              comments: {
+                nodes: thread.comments.map((c) => ({
+                  id: c.id,
+                  body: c.body,
+                  state: c.state,
+                  author: { __typename: "User", id: c.author },
+                })),
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
         });
       if (query.includes("EnsembleDeliveryClosure"))
         return Response.json({
@@ -181,7 +238,20 @@ export function scriptedDeliveryProvider() {
                 branchProtectionRule: null,
               },
               reviewThreads: {
-                nodes: [],
+                nodes: state.thread
+                  ? [
+                      {
+                        id: "T1",
+                        isResolved: state.thread.resolved,
+                        firstComment: {
+                          nodes: [{ id: state.thread.comments[0]?.id }],
+                        },
+                        latestComment: {
+                          nodes: [{ id: state.thread.comments.at(-1)?.id }],
+                        },
+                      },
+                    ]
+                  : [],
                 pageInfo: { hasNextPage: false, endCursor: null },
               },
             },
@@ -472,6 +542,44 @@ export async function createReleaseDeliveryFixture(
           reviewedResultIds: [],
         },
       });
+    },
+    /** Replaces the project's delivery grants; the runtime keeps its bound lead turn. */
+    grant(...grants: Array<{ action: string; mode: "allow" | "approval" }>) {
+      d.execute({
+        type: "delivery.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: f.service.delivery().configuration(projectId).version,
+        mode,
+        credentialRef: null,
+        grants: grants.map((g) => ({ ...g, repositoryId: "R1" })) as never,
+        requiredChecks: [{ name: "build", appId: 17 }],
+      });
+    },
+    async threadAction(
+      action: Record<string, unknown>,
+      operationId = randomUUID(),
+      index = f.runtime.turns,
+      approval?: { interactionId: string; expectedRevision: number },
+    ) {
+      return call(
+        "ensemble_external_action",
+        {
+          operationId,
+          action: {
+            ...action,
+            target: {
+              repositoryId: "R1",
+              nodeId: "P7",
+              number: 7,
+              threadNodeId: "T1",
+            },
+          },
+          ...(approval ? { approval } : {}),
+        },
+        index,
+      );
     },
     settlement() {
       const b = f.service.delivery().delivery(taskId);
