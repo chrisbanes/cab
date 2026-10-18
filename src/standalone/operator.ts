@@ -1183,6 +1183,10 @@ function isSafeRedirect(location: string): boolean {
   );
 }
 
+// Pages of the server-rendered operator UI; only these may start a pre-login session.
+const LEGACY_PAGE =
+  /^\/(?:$|(?:runtime|coordination)(?:\/|$)|(?:project|task|profile|assignment)\/)/;
+
 /** Authenticated loopback HTTP server for the standalone operator surface. */
 export class LocalOperatorHttp {
   private server: Server | undefined;
@@ -1365,6 +1369,7 @@ export class LocalOperatorHttp {
             request,
             response,
             session,
+            url.pathname,
           );
           if (!authorized) return;
           writeHtml(response, 405, "<main><h1>Method not allowed</h1></main>");
@@ -1376,6 +1381,7 @@ export class LocalOperatorHttp {
             request,
             response,
             session,
+            url.pathname,
           );
           if (!authorized || !this.requireCurrentSession(response, authorized))
             return;
@@ -2002,9 +2008,16 @@ export class LocalOperatorHttp {
     request: IncomingMessage,
     response: ServerResponse,
     session: OperatorSession | undefined,
+    pathname: string,
   ): Promise<OperatorSession | undefined> {
     if (session?.authenticated) return session;
     request.resume();
+    // Only sign-in surfaces mint a session: a browser's own /favicon.ico or any unknown path
+    // must not replace the cookie the page just obtained from /api/operator/session.
+    if (!LEGACY_PAGE.test(pathname)) {
+      writeHtml(response, 404, "<main><h1>Not found</h1></main>");
+      return undefined;
+    }
     const preLogin = session ?? this.auth.createAnonymousSession();
     writeHtml(
       response,

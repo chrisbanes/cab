@@ -587,6 +587,41 @@ test("JSON login settles concurrent, duplicate, and stale attempts with generic 
   }
 });
 
+test("only sign-in surfaces start a session: favicon and unknown paths never mint or replace the cookie", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const web = await f.startWeb();
+  // Chrome fetches /favicon.ico while /api/operator/session is still in flight, so the
+  // request carries no cookie yet and arrives before the SPA's sign-in.
+  const opened = await fetch(`${web.origin}/api/operator/session`);
+  const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
+  const { csrfToken } = (await opened.json()) as { csrfToken: string };
+  for (const path of [
+    "/favicon.ico",
+    "/robots.txt",
+    "/logout",
+    "/no-such-page",
+    "/project",
+    "/projectx",
+  ]) {
+    const response = await fetch(`${web.origin}${path}`);
+    assert.equal(response.status, 404, path);
+    assert.equal(response.headers.get("set-cookie"), null, path);
+    await response.text();
+  }
+  const login = await fetch(`${web.origin}/api/operator/login`, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: web.origin,
+      "content-type": "application/json",
+      "x-csrf-token": csrfToken,
+    },
+    body: JSON.stringify({ password: web.password }),
+  });
+  assert.equal(login.status, 200);
+});
+
 async function webLogin(web: { origin: string; password: string }) {
   const anonymous = await fetch(`${web.origin}/api/operator/session`);
   const anon = (await anonymous.json()) as { csrfToken: string };
