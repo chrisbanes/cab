@@ -255,6 +255,7 @@ export function useDrafting({
     label,
     tone,
     busy,
+    starting,
     message,
     choices,
     choose,

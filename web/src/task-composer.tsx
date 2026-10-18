@@ -355,6 +355,8 @@ export function TaskComposer({
                 <NativeSelect
                   id="composer-projectId"
                   aria-label="Project"
+                  // A start still in flight cannot yet be released for another project.
+                  disabled={drafting.starting}
                   value={input.projectId}
                   onChange={(e) => {
                     // A draft read the old project's repositories, so it ends with the change.
@@ -368,7 +370,7 @@ export function TaskComposer({
                       draftingRunId: undefined,
                     });
                     state.notice = staleDraft
-                      ? "Project changed. Assignee and dependency selections were cleared, and the draft for the previous project was stopped."
+                      ? "Project changed. Assignee and dependency selections were cleared, and the draft for the previous project was ended."
                       : "Project changed. Assignee and dependency selections were cleared.";
                     setDependencyQuery("");
                   }}

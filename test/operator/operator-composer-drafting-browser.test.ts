@@ -273,7 +273,7 @@ for (const [name, viewport] of viewports) {
       .getByLabel("Project", { exact: true })
       .selectOption(other.projectId);
     await page
-      .getByText(/the draft for the previous project was stopped/)
+      .getByText(/the draft for the previous project was ended/)
       .waitFor();
     await until(() => commands("drafting.stop").length === 1);
     assert.equal(f.service.readDrafting(runId)?.state, "stopping");
