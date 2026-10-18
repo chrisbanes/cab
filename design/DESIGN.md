@@ -1727,6 +1727,9 @@ Interaction notes:
   or alert region without moving focus. Retry returns focus to the idea field.
 - The idea, title and outcome are saved with the composer's existing local draft,
   with the run id, so a reload or a locked phone reattaches to the run.
+- A proposal the service withholds shows "holds text that cannot be shown" with
+  Discard draft; nothing is filled from it. A waiting proposal is read again at its
+  expiry, and a choice on a draft that has moved on rereads it and shows why.
 - Changing the project, or discarding recovered input, stops the old project's
   draft and says so in the composer notice; nothing from it carries over.
 - Nothing here creates a task: only Save draft and Create and start do.

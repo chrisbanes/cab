@@ -828,9 +828,11 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   limits and waits, with the same wait reason as any turn, when either is full. A
   paused project holds it like any other turn. Stop is available while it waits.
 - **Result.** The lead returns a title and an outcome through the result tool. The
-  service validates them against the composer's field limits and lets the lead retry
-  an invalid call; the last valid proposal wins. A turn that ends without one fails
-  the run with Retry.
+  service validates them against the composer's field limits, with a non-blank outcome
+  as the composer requires, and lets the lead retry an invalid call; the last valid
+  proposal wins. A proposal holding text the service withholds from the operator, such
+  as a private path or credential, is refused the same way. A turn that ends without
+  one fails the run with Retry.
 - **Stop, the time cap and restart.** The operator can Stop a run, and the service
   stops it after a fixed 10 minutes from admission (a constant, not a setting). A
   service restart also ends it. In every case the run is held until the runtime is
@@ -850,7 +852,12 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   outcome field is filled. A field the operator already typed in shows the proposal
   beside it with Replace or Keep, so typed text is never overwritten silently. An
   interrupted or failed run shows "Draft interrupted" or the failure with Retry, and
-  keeps the operator's idea, title and outcome. The operator can cancel instead.
+  keeps the operator's idea, title and outcome. The operator can cancel instead. A
+  proposal that still cannot be shown when read, because the operator's exclusions
+  would change it, is withheld whole: it is never shown empty or altered, never filled
+  and never accepted automatically, and the operator can discard it. A run whose
+  working copy could not be prepared settles as failed, however late its copy is
+  finally removed.
 - **Reattach.** The composer's local draft stores the run id, so leaving, reloading
   or locking a phone reattaches to the run. The service keeps a proposal until the
   operator accepts or discards it, or it expires 24 hours after it arrived. A draft
