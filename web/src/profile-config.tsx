@@ -69,8 +69,13 @@ export const emptyProfile = (workspace?: SettingsProps["workspace"]) => ({
   key: key(),
 });
 
-export const claudeSettings = (workspace: SettingsProps["workspace"]) =>
-  workspace?.data.harnesses.find((h) => h.harness === "claude")?.settings;
+/** Supported values the selected runtime has reported, if any. */
+export const harnessSettings = (
+  workspace: SettingsProps["workspace"],
+  values: Values,
+) =>
+  workspace?.data.harnesses.find((h) => h.harness === values.runtimeHarness)
+    ?.settings;
 
 /** The one `profile.create` command, shared by the Settings form and guided setup. */
 export const profileCreateCommand = (v: Values) => ({
@@ -130,7 +135,7 @@ function SettingOptions({
   );
 }
 
-/** Runtime selector, plus model and effort for Claude (blank uses the harness default). */
+/** Runtime selector, plus model and effort (blank uses the harness default). */
 export function RuntimeFields({
   draft,
   workspace,
@@ -148,7 +153,7 @@ export function RuntimeFields({
         <option value="codex">{executionHarnessLabels.codex}</option>
         <option value="claude">{executionHarnessLabels.claude}</option>
       </DraftField>
-      {harness === "claude" && (
+      {(harness === "claude" || harness === "codex") && (
         <>
           <DraftField
             draft={draft}
@@ -177,7 +182,8 @@ export function RuntimeFields({
             )}
           </DraftField>
           <p className="metadata muted">
-            Leave model or effort blank to use the Claude default.
+            Leave model or effort blank to use the{" "}
+            {executionHarnessLabels[harness]} default.
           </p>
         </>
       )}
@@ -211,7 +217,7 @@ export function ProfileCreate(p: SettingsProps) {
                 p.session,
                 profileCreateCommand(d.values),
                 p.refresh,
-                runtimeErrors(d.values, claudeSettings(p.workspace)),
+                runtimeErrors(d.values, harnessSettings(p.workspace, d.values)),
               )
             }
           >
@@ -416,7 +422,10 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                       },
                       // An unchanged stored runtime is never re-validated.
                       runtimeChanged(data.runtime, d.values)
-                        ? runtimeErrors(d.values, claudeSettings(p.workspace))
+                        ? runtimeErrors(
+                            d.values,
+                            harnessSettings(p.workspace, d.values),
+                          )
                         : {},
                       holdSave,
                     )

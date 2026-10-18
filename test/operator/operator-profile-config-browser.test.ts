@@ -15,6 +15,7 @@ import {
 import { commandRequest } from "../fixtures/setup-browser.js";
 import {
   ClaudeShapedFixtureRuntime,
+  CodexShapedFixtureRuntime,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
 
@@ -387,7 +388,8 @@ test("Create profile chooses Claude with model and effort, rejecting invalid val
     await page.getByLabel("Runtime", { exact: true }).inputValue(),
     "codex",
   );
-  assert.equal(await page.getByLabel("Model", { exact: true }).count(), 0);
+  // Codex takes a model and effort too; blank leaves the runtime default.
+  assert.equal(await page.getByLabel("Model", { exact: true }).count(), 1);
   await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
   await page
     .getByText("The Claude runtime is not enabled on this service.", {
@@ -510,4 +512,120 @@ test("New profile starts on the first enabled runtime: Claude when Codex is disa
   const runtime = page.getByLabel("Runtime", { exact: true });
   await runtime.waitFor();
   assert.equal(await runtime.inputValue(), "claude");
+});
+
+const codexSettingsOptions = {
+  runtimeFactory: (
+    _context: unknown,
+    harness: string,
+  ): OperatorFixtureRuntime =>
+    harness === "codex"
+      ? new CodexShapedFixtureRuntime()
+      : new OperatorFixtureRuntime(),
+};
+
+test("Codex profile configuration sets, shows and clears model and effort", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/settings",
+    undefined,
+    undefined,
+    codexSettingsOptions,
+  );
+  const builder = ids.profiles.Builder as string;
+  const d = f.service.domain();
+  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await page
+    .getByText("Leave model or effort blank to use the Codex default.")
+    .waitFor();
+  const model = page.getByLabel("Model", { exact: true });
+  const effort = page.getByLabel("Reasoning effort", { exact: true });
+  assert.deepEqual(await model.locator("option").allTextContents(), [
+    "Default",
+    "m-default",
+    "m-alt",
+  ]);
+  // The efforts follow the chosen model.
+  assert.deepEqual(await effort.locator("option").allTextContents(), [
+    "Default",
+    "low",
+    "high",
+  ]);
+  await model.selectOption("m-alt");
+  assert.deepEqual(await effort.locator("option").allTextContents(), [
+    "Default",
+    "medium",
+  ]);
+  await effort.selectOption("medium");
+  const changes = page.getByRole("region", { name: "Changes to save" });
+  await changes.getByText("Runtime: Codex → Codex · m-alt · medium").waitFor();
+  const saved = commandRequest(page);
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  assert.deepEqual((await saved).postDataJSON().runtime, {
+    harness: "codex",
+    model: "m-alt",
+    reasoningEffort: "medium",
+  });
+  await page.getByText("Current revision 2.").waitFor();
+  assert.deepEqual(d.profileRuntime(builder), {
+    harness: "codex",
+    model: "m-alt",
+    reasoningEffort: "medium",
+  });
+  await page.goto(`${web.origin}/app/settings`);
+  await page
+    .locator(".settings-row", { hasText: "Builder" })
+    .getByText("Runtime: Codex · m-alt · medium")
+    .waitFor();
+
+  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await model.selectOption("");
+  await effort.selectOption("");
+  await changes.getByText("Runtime: Codex · m-alt · medium → Codex").waitFor();
+  const cleared = commandRequest(page);
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  assert.deepEqual((await cleared).postDataJSON().runtime, {
+    harness: "codex",
+  });
+  await page.getByText("Current revision 3.").waitFor();
+  assert.deepEqual(d.profileRuntime(builder), { harness: "codex" });
+  // The earlier revision keeps its settings.
+  assert.deepEqual(d.profileRuntime(builder, 2), {
+    harness: "codex",
+    model: "m-alt",
+    reasoningEffort: "medium",
+  });
+});
+
+test("Codex profile configuration rejects a stored effort the runtime no longer lists", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/settings",
+    undefined,
+    undefined,
+    codexSettingsOptions,
+  );
+  const builder = ids.profiles.Builder as string;
+  const d = f.service.domain();
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: builder,
+    expectedVersion: Number(d.profile(builder).version),
+    runtime: { harness: "codex", model: null, reasoningEffort: "gone" },
+  } as never);
+  let sent = 0;
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/operator/commands")) sent++;
+  });
+  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await page
+    .getByLabel("Reasoning effort", { exact: true })
+    .locator("option", { hasText: "gone (not supported)" })
+    .waitFor({ state: "attached" });
+  await page.getByLabel("Model", { exact: true }).selectOption("m-alt");
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByText("Reasoning effort must be one of: medium.").waitFor();
+  assert.equal(sent, 0);
 });

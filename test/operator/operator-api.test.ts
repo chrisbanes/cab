@@ -2564,11 +2564,28 @@ test("profile configuration reads and writes a validated execution runtime", asy
       key: randomUUID(),
       profileId: ids.profileId,
       expectedVersion: 1,
-      runtime: { harness: "codex", model: "opus" },
+      runtime: { harness: "codex", temperature: 1 },
     } as never),
     /Unrecognized key/,
   );
   assert.equal(f.service.domain().profile(ids.profileId).version, 1);
+  // Codex settings are accepted while the runtime has not reported its supported values.
+  const codex = {
+    harness: "codex" as const,
+    model: "m-alt",
+    reasoningEffort: "medium",
+  };
+  await api.execute({
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: ids.profileId,
+    expectedVersion: 1,
+    runtime: codex,
+  });
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.runtime,
+    codex,
+  );
   const runtime = {
     harness: "claude" as const,
     model: "opus",
@@ -2578,7 +2595,7 @@ test("profile configuration reads and writes a validated execution runtime", asy
     type: "profile.configure",
     key: randomUUID(),
     profileId: ids.profileId,
-    expectedVersion: 1,
+    expectedVersion: 2,
     runtime,
   });
   assert.deepEqual(

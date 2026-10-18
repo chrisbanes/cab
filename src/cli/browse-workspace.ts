@@ -49,11 +49,11 @@ const leadName = (
     : oneLine(unavailable(profiles.find((p) => p.id === profileId)?.name), 30);
 const harnessLine = (r: {
   harness: string;
-  model?: string | null;
-  reasoningEffort?: string | null;
+  model?: string | null | undefined;
+  reasoningEffort?: string | null | undefined;
 }) =>
-  r.harness === "claude"
-    ? `claude (model ${r.model ?? "default"}, effort ${r.reasoningEffort ?? "default"})`
+  r.harness === "claude" || r.model != null || r.reasoningEffort != null
+    ? `${r.harness} (model ${r.model ?? "default"}, effort ${r.reasoningEffort ?? "default"})`
     : r.harness;
 
 const projectList: BrowseCommand = {

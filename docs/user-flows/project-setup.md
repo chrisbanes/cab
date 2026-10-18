@@ -57,7 +57,7 @@ note, **Cancel** and then **Create paused project** at every width.
      repository: setup records the credential only then.
    - Lists any item that would make the lead's work wait, from the workspace and
      readiness reads: no lead profile, the lead's runtime unavailable or not enabled,
-     a Claude model or reasoning effort the runtime does not accept (Fix opens the
+     a model or reasoning effort the lead's runtime does not accept (Fix opens the
      lead profile), Codex executable or sign-in unavailable for a Codex lead, Claude
      executable not on the service `PATH` or Claude token unavailable for a Claude
      lead (the token's Fix opens [Add Claude](claude-runtime.md)).
