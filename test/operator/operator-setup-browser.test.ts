@@ -3,11 +3,6 @@ import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "playwright";
-import {
-  type ReadinessCheckId,
-  readinessCheckIds,
-  readinessSchema,
-} from "../../src/operator/readiness.js";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import {
   browserSuite,
@@ -16,8 +11,10 @@ import {
 import {
   chooseRepository,
   commandRequest,
+  readinessBody,
   settleGhRead,
   setupJourney,
+  stubReadiness,
 } from "../fixtures/setup-browser.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
 import { git } from "../fixtures/setup-home.js";
@@ -947,34 +944,6 @@ test("Setup warns before leaving only while it holds changed input", async (_t, 
   await becomes(false);
 });
 
-/** A schema-valid readiness read: everything passes except the named checks. */
-const readinessBody = (
-  failing: Partial<Record<ReadinessCheckId, "fail" | "not-configured">> = {},
-) =>
-  JSON.stringify(
-    readinessSchema.parse({
-      data: {
-        checks: readinessCheckIds.map((id) => ({
-          id,
-          label: id,
-          status: failing[id] ?? "pass",
-          reason: failing[id] ? `${id} reason` : null,
-          fix: failing[id] ? `${id} fix` : null,
-        })),
-      },
-      observedAt: Date.now(),
-    }),
-  );
-const stubReadiness = (
-  page: Page,
-  failing: Partial<Record<ReadinessCheckId, "fail" | "not-configured">> = {},
-) =>
-  page.route("**/api/operator/readiness", (route) =>
-    route.fulfill({
-      contentType: "application/json",
-      body: readinessBody(failing),
-    }),
-  );
 const resumeLabel = "Resume and create first task";
 /** Add the verified acme/atlas checkout as the project's repository. */
 async function addRepository(page: Page) {
