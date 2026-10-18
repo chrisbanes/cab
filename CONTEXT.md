@@ -64,6 +64,18 @@ _Avoid_: Project when referring to a source such as a GitHub Project
 The stable identity of a task's corresponding item in an external system, independent of which sources discover it.
 _Avoid_: Source configuration when referring to external task identity
 
+**Task publication**:
+The operator's one-way action that creates an external item from a never-started
+local task and gives that same task the item's external reference, so it becomes
+imported. Nothing reverses it; closing the external item is the only recovery.
+_Avoid_: Export or sync when referring to creating the external item
+
+**Drafting run**:
+A short run, belonging to a project rather than a task, in which the project lead
+turns the operator's rough idea into a proposed task title and outcome. It only
+proposes: the operator edits and creates the task, and the run creates nothing.
+_Avoid_: Draft task, which is an unready task
+
 **Project lead**:
 The agent accountable for task outcomes across a project, including coordination,
 planning and allocation exceptions. Delegating work does not transfer that accountability.
