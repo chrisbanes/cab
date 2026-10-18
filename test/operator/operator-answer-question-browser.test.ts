@@ -12,6 +12,7 @@ import {
   phone,
   signIn,
 } from "../fixtures/operator-settings.js";
+import { questionReadSchema } from "../../src/operator/contracts.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 
@@ -189,3 +190,42 @@ for (const [label, viewport] of [
     assert.equal(interactions, 3);
   });
 }
+
+test("the task decision card withdraws the question text when a refresh withholds or fails the exact read", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId }) => `/app/tasks/${taskId}`,
+  );
+  const decision = s.page.locator(
+      `#decisions .decision[data-record-id="${s.interactionId}"]`,
+    ),
+    label = decision.getByText(question, { exact: true }),
+    readUrl = `**/api/operator/tasks/${s.taskId}/questions/${s.interactionId}`,
+    refresh = s.page.getByRole("button", { name: "Refresh task", exact: true });
+  await label.waitFor();
+  // The read now withholds the form, as it does once privacy coverage changes.
+  await s.page.route(readUrl, async (route) => {
+    const body = questionReadSchema.parse(await (await route.fetch()).json());
+    body.data.status = "unavailable";
+    body.data.form = null;
+    await route.fulfill({ json: body });
+  });
+  await refresh.click();
+  await label.waitFor({ state: "detached" });
+  await decision.getByText("Structured question").waitFor();
+  // A refresh that finds it available shows the label again, and a failed one withdraws it.
+  await s.page.unroute(readUrl);
+  await refresh.click();
+  await label.waitFor();
+  await s.page.route(readUrl, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable" } }),
+    }),
+  );
+  await refresh.click();
+  await label.waitFor({ state: "detached" });
+  await decision.getByText("Structured question").waitFor();
+});

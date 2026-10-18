@@ -209,12 +209,15 @@ function RequestText({
   taskId,
   interactionId,
   prompt,
+  observedAt,
 }: {
   client: OperatorClient;
   session: Session;
   taskId: string;
   interactionId: string;
   prompt: string | null;
+  /** The task read's last success: each change rereads, so a withheld label is withdrawn as `prompt` is. */
+  observedAt: number | null | undefined;
 }) {
   // shortcut: one extra GET per open question; QuestionResponse repeats it once opened, as on the Home card.
   const loader = useCallback(
@@ -226,11 +229,24 @@ function RequestText({
         ),
       [client, taskId, interactionId],
     ),
-    read = useOperatorResource(
+    resource = useOperatorResource(
       `${session.csrfToken}:task-question:${taskId}:${interactionId}`,
       loader,
-    ).state.data?.data,
-    label = read?.source === "plain" ? null : read?.form?.questions[0]?.label;
+    ),
+    read = resource.state.data?.data,
+    // A failed reread keeps its last read, which may predate a privacy change.
+    label =
+      read?.source === "plain" || resource.state.error
+        ? null
+        : read?.form?.questions[0]?.label;
+  const seen = useRef(observedAt),
+    reread = useRef(resource.poll);
+  reread.current = resource.poll;
+  useEffect(() => {
+    if (seen.current === observedAt) return;
+    seen.current = observedAt;
+    void reread.current();
+  }, [observedAt]);
   return <Literal text={label ?? prompt} />;
 }
 function Disclosure({
@@ -1757,6 +1773,7 @@ export function TaskWorkspace({
                           taskId={taskId}
                           interactionId={q.interactionId}
                           prompt={q.prompt}
+                          observedAt={resource.state.fetchedAt}
                         />
                       ) : (
                         <Literal text={q.prompt} />
