@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { chromium, webkit, type Browser, type Page } from "playwright";
+import {
+  type ReadinessCheckId,
+  readinessCheckIds,
+  readinessSchema,
+} from "../../src/operator/readiness.js";
 import type { BrowserJourney } from "./browser-diagnostics.js";
 import {
   ClaudeShapedFixtureRuntime,
@@ -152,3 +157,32 @@ export async function settleGhRead(page: Page, action: () => Promise<unknown>) {
       ),
   );
 }
+
+/** A schema-valid readiness read: everything passes except the named checks. */
+export const readinessBody = (
+  failing: Partial<Record<ReadinessCheckId, "fail" | "not-configured">> = {},
+) =>
+  JSON.stringify(
+    readinessSchema.parse({
+      data: {
+        checks: readinessCheckIds.map((id) => ({
+          id,
+          label: id,
+          status: failing[id] ?? "pass",
+          reason: failing[id] ? `${id} reason` : null,
+          fix: failing[id] ? `${id} fix` : null,
+        })),
+      },
+      observedAt: Date.now(),
+    }),
+  );
+export const stubReadiness = (
+  page: Page,
+  failing: Partial<Record<ReadinessCheckId, "fail" | "not-configured">> = {},
+) =>
+  page.route("**/api/operator/readiness", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: readinessBody(failing),
+    }),
+  );
