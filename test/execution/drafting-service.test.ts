@@ -818,6 +818,62 @@ test("a queued run whose copy cannot be removed stays stopping, and Stop retries
   assert.equal(service.readDrafting(queued)?.state, "interrupted");
 });
 
+test("a repository grant that changes while the copy is built is never used", async (t) => {
+  const w = world(t);
+  const block = join(w.root, "block-add");
+  const adding = join(w.root, "adding");
+  const git = join(w.root, "git-shim");
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  // Creating a worktree pauses while the block file exists.
+  writeFileSync(
+    git,
+    `#!/bin/sh\ncase "$*" in *"worktree add"*) : > '${adding}'; while [ -e '${block}' ]; do sleep 0.05; done;; esac\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  const { service, codex } = w.open({ gitExecutable: git });
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  codex.script(proposing(proposal));
+  writeFileSync(block, "");
+  const runId = randomUUID();
+  const started = service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => existsSync(adding),
+    () => w.tracked(service).runs(),
+  );
+  // The operator unlinks the repository while the copy is still being made.
+  const domain = service.domain();
+  await domain.configureGitHub({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(domain.githubConfiguration(projectId).version),
+    credentialRef: null,
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R_1",
+        owner: "acme",
+        name: "atlas",
+      },
+    ],
+    repositories: [],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+  });
+  rmSync(block);
+  await started;
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "failed",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(codex.threads.length, 0, "the lead never ran in the stale copy");
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
+  const copies = join(w.dataDir, "drafting-workspaces");
+  assert.deepEqual(existsSync(copies) ? readdirSync(copies) : [], []);
+});
+
 test("a Stop during thread start is applied once the turn binds", async (t) => {
   const w = world(t);
   const opened = w.open();

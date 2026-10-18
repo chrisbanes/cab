@@ -619,6 +619,8 @@ export class StandaloneService {
     { workId: string; interactionId: string; resolve: () => void }
   >();
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
+  /** The linked repositories each queued draft's copy was built from, until it is admitted. */
+  private readonly draftingGrants = new Map<string, string>();
   /** A running drafting run's bound turn and pending Stop, which may arrive before the turn binds. */
   private readonly draftingControls = new Map<
     string,
@@ -4388,6 +4390,7 @@ export class StandaloneService {
       // Leaving `queued` first, synchronously, ends any admission in flight.
       drafting.transition(runId, "stopping", draftingCleanupReason);
       state.releaseDraftingExecution(workId);
+      this.draftingGrants.delete(runId);
       await this.settleUnadmitted(runId, "interrupted", draftingStoppedReason);
     } else if (
       run.state === "stopping" &&
@@ -4652,8 +4655,7 @@ export class StandaloneService {
   private async prepareDraftingWorkspace(
     request: TurnRequest,
   ): Promise<string | undefined> {
-    const { drafting, draftingWorkspaces, schedulerStore, state } =
-      this.started();
+    const { drafting, draftingWorkspaces, schedulerStore } = this.started();
     const runId = this.draftingRunIdOf(request);
     const run = drafting.get(runId);
     if (run?.state !== "queued") return undefined;
@@ -4666,9 +4668,10 @@ export class StandaloneService {
       return undefined;
     }
     try {
+      const config = this.domain().githubConfiguration(run.projectId);
+      this.draftingGrants.set(runId, StandaloneService.grantOf(config));
       const repositories = [];
-      for (const match of this.domain().githubConfiguration(run.projectId)
-        .repositories) {
+      for (const match of config.repositories) {
         const current = await verifiedRepository({
           repositoryId: match.repositoryId,
           path: match.path,
@@ -4690,19 +4693,40 @@ export class StandaloneService {
         throw new Error(binding.reason ?? "Working copy is not ready");
       // A Stop during provisioning has already settled the run.
       if (drafting.get(runId)?.state !== "queued") return undefined;
+      // Access may have changed while Git ran: a copy of the old grant is never used.
+      if (this.draftingGrantChanged(runId, run.projectId))
+        throw new Error("Linked repository access changed");
       return realpathSync(binding.path);
     } catch {
-      if (drafting.get(runId)?.state === "queued") {
-        drafting.transition(runId, "stopping", draftingCleanupReason);
-        state.releaseDraftingExecution(request.workId);
-        await this.settleUnadmitted(
-          runId,
-          "failed",
-          draftingWorkspaceFailedReason,
-        );
-      }
+      await this.failQueuedDrafting(request);
       return undefined;
     }
+  }
+
+  private static grantOf(config: {
+    version: unknown;
+    repositories: unknown;
+  }): string {
+    return JSON.stringify([config.version, config.repositories]);
+  }
+
+  /** Whether the project's linked repositories differ from those the copy was built from. */
+  private draftingGrantChanged(runId: string, projectId: string): boolean {
+    return (
+      this.draftingGrants.get(runId) !==
+      StandaloneService.grantOf(this.domain().githubConfiguration(projectId))
+    );
+  }
+
+  /** Ends a queued run that cannot start, once its copy is removed. */
+  private async failQueuedDrafting(request: TurnRequest): Promise<void> {
+    const { drafting, state } = this.started();
+    const runId = this.draftingRunIdOf(request);
+    this.draftingGrants.delete(runId);
+    if (drafting.get(runId)?.state !== "queued") return;
+    drafting.transition(runId, "stopping", draftingCleanupReason);
+    state.releaseDraftingExecution(request.workId);
+    await this.settleUnadmitted(runId, "failed", draftingWorkspaceFailedReason);
   }
 
   /**
@@ -5724,6 +5748,17 @@ export class StandaloneService {
       const drafts = this.started().drafting;
       if (draftingRunId && drafts.get(draftingRunId)?.state !== "queued")
         return;
+      // The grant may have changed since the copy was built; a stale copy never runs.
+      if (
+        draftingRunId &&
+        this.draftingGrantChanged(
+          draftingRunId,
+          drafts.require(draftingRunId).projectId,
+        )
+      ) {
+        await this.failQueuedDrafting(request);
+        return;
+      }
       const admitted = state.begin(intent.id, {
         projectId: request.projectId,
         requestSequence: store.sequence(request.workId),
@@ -5752,7 +5787,10 @@ export class StandaloneService {
         }
         return;
       }
-      if (draftingRunId) drafts.transition(draftingRunId, "running");
+      if (draftingRunId) {
+        this.draftingGrants.delete(draftingRunId);
+        drafts.transition(draftingRunId, "running");
+      }
     } catch (error) {
       state.hold(
         intent.id,
