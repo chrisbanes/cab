@@ -44,6 +44,8 @@ Settings → Runtime → Task recovery destinations is the fallback list and is
 outside the budget.
 The operator CLI is outside the budget: it has no screens.
 
+Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
+
 ## Recovery
 
 - A paused project keeps Resume project as the Fix for that reason, and its

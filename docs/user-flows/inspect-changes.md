@@ -39,6 +39,8 @@ The reply box is reachable from the diff without scrolling past the brief or
 retained evidence. An Inbox evidence link lands on the diff it names (1).
 The operator CLI is outside the budget: it has no screens.
 
+Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
+
 ## Recovery
 
 - A comparison that cannot be computed names the reason in a sentence and keeps the

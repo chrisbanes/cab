@@ -35,7 +35,8 @@ saved sources and reads them from GitHub, then says which were imported.
 
 The journey test asserts the count and that each first screen is in view at 1366 × 900
 and 390 × 844. Adding or editing the source is the edit being saved, not an interaction.
-Frames: `119d-github-source-import-ready` to `119e-github-source-imported`.
+Frames: `119d-github-source-import-ready` to `119e-github-source-imported`; see
+[Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
 
 ## Recovery
 

@@ -7,6 +7,8 @@
 From **Create and start**, the operator either sees the task running or sees why it
 waits, led by the reason to clear first and a link that fixes it.
 
+Frames: see [First run and onboarding](../../design/DESIGN.md#first-run-and-onboarding).
+
 ## Entry points
 
 - [Project setup](project-setup.md) ready check → **Resume and create first task**.

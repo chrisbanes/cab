@@ -9,6 +9,8 @@ profile-form and first-task entry points are planned.
 An operator who wants a Claude profile can make the token available and confirm it
 works without reading the operations guide.
 
+Frames: see [First run and onboarding](../../design/DESIGN.md#first-run-and-onboarding).
+
 ## Entry points
 
 - Settings → Runtime → Add Claude (implemented).
