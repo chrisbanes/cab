@@ -14,6 +14,7 @@ import {
   draftingPollMs,
   formatElapsed,
   planFill,
+  proposedReadDelay,
 } from "./composer-drafting-model.js";
 import { useOperatorResource } from "./resource.js";
 import { Badge } from "./ui/badge.js";
@@ -111,6 +112,16 @@ export function useDrafting({
     const timer = setInterval(() => poll.current(), draftingPollMs);
     return () => clearInterval(timer);
   }, [runId, settled]);
+  // An unsettled proposal is still read now and then, so its expiry shows when it comes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-armed after each read.
+  useEffect(() => {
+    if (run?.state !== "proposed") return;
+    const timer = setTimeout(
+      () => refresh.current(),
+      proposedReadDelay(run.expiresAt, Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [run?.state, run?.expiresAt, resource.state.fetchedAt]);
   useEffect(() => {
     if (run?.state !== "running") return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -124,7 +135,7 @@ export function useDrafting({
     return result;
   };
   const clearRun = (note = "") => {
-    state.edit({ draftingRunId: undefined });
+    state.edit({ draftingRunId: undefined, draftingKey: undefined });
     setChoices([]);
     applied.current = null;
     setMessage(note);
@@ -137,25 +148,40 @@ export function useDrafting({
       disposition,
     });
     if (result.state === "recorded") clearRun();
-    else setMessage("Couldn't finish with the draft. Try again.");
+    else {
+      // A refusal usually means the run moved on (expired, used elsewhere): read it again.
+      void refresh.current();
+      setMessage("Couldn't finish with the draft. Try again.");
+    }
   };
   const start = async () => {
     const idea = input.idea ?? "";
     if (!input.projectId || idea.trim() === "") return;
     const next = crypto.randomUUID();
-    // Stored before it is sent, so a reload reattaches to a run that did start.
-    state.edit({ draftingRunId: next });
+    const key = crypto.randomUUID();
+    // Stored with its key before it is sent, so a reload reattaches to a run that did
+    // start and can send the same start again if it never arrived.
+    state.edit({ draftingRunId: next, draftingKey: key });
     setChoices([]);
     applied.current = null;
     setMessage("");
-    setStarting(true);
     // The button that started it is replaced, so focus stays with the idea.
     document.getElementById("composer-idea")?.focus();
+    await sendStart(next, key, input.projectId, idea);
+  };
+  /** Sends a start; sending the same one again is safe, as it is keyed. */
+  const sendStart = async (
+    id: string,
+    key: string,
+    projectId: string,
+    idea: string,
+  ) => {
+    setStarting(true);
     const result = await send({
       type: "drafting.start",
-      key: crypto.randomUUID(),
-      runId: next,
-      projectId: input.projectId,
+      key,
+      runId: id,
+      projectId,
       idea,
     });
     // The reread clears the earlier not-found before the guard is lifted.
@@ -184,9 +210,20 @@ export function useDrafting({
     else setMessage("Couldn't stop the draft. Try again.");
   };
 
+  // A run the service does not know may be a start that never arrived: send it once more.
+  const replayed = useRef(new Set<string>());
+  const notFound = resource.state.error === "not-found" && !starting;
+  const replay =
+    notFound && Boolean(input.draftingKey) && !replayed.current.has(runId);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sends each stored start once.
+  useEffect(() => {
+    if (!replay || !input.draftingKey || !input.projectId) return;
+    replayed.current.add(runId);
+    void sendStart(runId, input.draftingKey, input.projectId, input.idea ?? "");
+  }, [replay, runId]);
   // A draft that is gone, expired or used elsewhere releases the composer.
   const lost =
-    (resource.state.error === "not-found" && !starting) ||
+    (notFound && !replay) ||
     run?.state === "expired" ||
     run?.state === "accepted" ||
     run?.state === "discarded";

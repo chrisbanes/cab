@@ -2,6 +2,8 @@ import type { DraftProposal } from "../../src/operator/contracts.js";
 import type { ComposerInput } from "./composer-state.js";
 
 export const draftingPollMs = 2000;
+/** A proposal nobody has settled is read this often, so its expiry is shown. */
+export const draftingProposedPollMs = 30_000;
 /** The service's fixed run limit, shown beside the elapsed time. */
 export const draftingLimitSeconds = 600;
 
@@ -30,6 +32,15 @@ export function planFill(
   }
   return { fill, choices };
 }
+
+/** When to read a waiting proposal again: at its expiry, or at the slow interval if sooner. */
+export const proposedReadDelay = (expiresAt: number | null, now: number) =>
+  Math.min(
+    draftingProposedPollMs,
+    expiresAt === null
+      ? draftingProposedPollMs
+      : Math.max(0, expiresAt - now) + 500,
+  );
 
 export const formatElapsed = (seconds: number) => {
   const whole = Math.max(0, Math.floor(seconds));

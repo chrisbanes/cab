@@ -368,6 +368,7 @@ export function TaskComposer({
                       profileId: "",
                       blockerTaskIds: [],
                       draftingRunId: undefined,
+                      draftingKey: undefined,
                     });
                     state.notice = staleDraft
                       ? "Project changed. Assignee and dependency selections were cleared, and the draft for the previous project was ended."

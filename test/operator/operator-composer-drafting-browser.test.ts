@@ -365,6 +365,51 @@ for (const [name, viewport] of viewports) {
     await until(() => f.service.readDrafting(runId)?.state === "discarded");
   });
 
+  test(`${name}: a start that never arrived is sent again under its own key`, async (_t, j) => {
+    const { f, page, commands, open } = await launch(j, viewport);
+    await open();
+    await openPanel(page);
+    // The first start is lost on the way: the service never sees it.
+    let lost = false;
+    await page.route("**/api/operator/commands", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      if (body.type === "drafting.start" && !lost) {
+        lost = true;
+        await route.abort();
+      } else await route.continue();
+    });
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    await panel(page).getByText("Drafting", { exact: true }).waitFor();
+    const starts = commands("drafting.start");
+    assert.equal(starts.length, 2);
+    assert.equal(starts[0]?.key, starts[1]?.key);
+    assert.equal(starts[0]?.runId, starts[1]?.runId);
+    const runId = await runningRun(f);
+    assert.equal(runId, starts[0]?.runId);
+  });
+
+  test(`${name}: a choice on a draft that moved on rereads it and says so`, async (_t, j) => {
+    const { f, page, open } = await launch(j, viewport);
+    await open();
+    await openPanel(page);
+    await page.getByLabel("Task title").fill("Typed title");
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    await answerDraft(f, runId, proposal);
+    const choice = page.getByRole("group", { name: "Proposed title" });
+    await choice.waitFor();
+    // The draft is discarded elsewhere (another tab): the choice then finds it gone.
+    f.service.settleDrafting(runId, "discard");
+    await choice.getByRole("button", { name: "Keep mine" }).click();
+    await panel(page).getByText("That draft is no longer available").waitFor();
+    assert.equal(
+      await page.getByLabel("Task title").inputValue(),
+      "Typed title",
+    );
+  });
+
   test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport, {
       lead: false,

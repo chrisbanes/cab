@@ -26,6 +26,8 @@ export const composerInputSchema = z
     idea: z.string().optional(),
     /** The drafting run this composer reattaches to after a reload. */
     draftingRunId: uuid.optional(),
+    /** The key its start was sent under, so a start that never arrived can be sent again. */
+    draftingKey: uuid.optional(),
   })
   .strict();
 export type ComposerInput = z.infer<typeof composerInputSchema>;

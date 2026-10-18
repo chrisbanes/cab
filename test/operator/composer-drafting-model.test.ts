@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  draftingProposedPollMs,
   formatElapsed,
   planFill,
+  proposedReadDelay,
 } from "../../web/src/composer-drafting-model.js";
 
 const proposal = { title: "Proposed title", outcome: "Proposed outcome" };
@@ -25,4 +27,11 @@ test("elapsed time reads as minutes and seconds", () => {
   assert.equal(formatElapsed(161.9), "2:41");
   assert.equal(formatElapsed(600), "10:00");
   assert.equal(formatElapsed(-3), "0:00");
+});
+
+test("a waiting proposal is read again at its expiry or the slow interval, whichever is first", () => {
+  assert.equal(proposedReadDelay(null, 0), draftingProposedPollMs);
+  assert.equal(proposedReadDelay(10_000, 0), 10_500);
+  assert.equal(proposedReadDelay(1_000_000, 0), draftingProposedPollMs);
+  assert.equal(proposedReadDelay(100, 5_000), 500);
 });
