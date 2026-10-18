@@ -126,3 +126,29 @@ test("a service log writes one exit line and survives a failing writer", () => {
   broken.failure("service-shutdown", new Error("x"));
   broken.exited({ reason: "shutdown-failure" });
 });
+
+test("a credential placed in name or code is dropped, with or without a usable list", () => {
+  const token = "ghp_fixtureTokenInNameOrCode1185";
+  const error = Object.assign(new Error("m"), { name: token, code: token });
+  const lists: [string, readonly string[] | undefined][] = [
+    ["applied", [token]],
+    // 129 values exceed the sanitiser's bound, so the list is unusable.
+    ["unusable", [token, ...Array.from({ length: 128 }, (_, i) => `v${i}`)]],
+    ["absent", undefined],
+  ];
+  for (const [label, exclusions] of lists) {
+    const record = sanitizeError(error, exclusions);
+    if (label === "absent") {
+      // Nothing is known to exclude: the identifier-shaped value stays.
+      assert.equal(record.code, token);
+      continue;
+    }
+    assert.doesNotMatch(JSON.stringify(record), /ghp_fixture/, label);
+    assert.equal(record.name, "Error", label);
+    assert.equal(record.code, undefined, label);
+  }
+  const numeric = Object.assign(new Error("m"), { code: 424242 });
+  assert.equal(sanitizeError(numeric, ["424242"]).code, undefined);
+  const anchored = Object.assign(new Error("m"), { code: "token:abc123" });
+  assert.equal(sanitizeError(anchored, undefined).code, undefined);
+});

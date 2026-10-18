@@ -318,7 +318,9 @@ not a configured credential is not recognised.
 The message is cut at 2 KiB, each stack frame at 512 bytes and the `cause` chain at
 three levels (`messageTruncated`, `causeOmitted`). `"redaction":"unavailable"` marks
 a failure from before the redaction inputs were available: only `name` and `code`
-are shown, never the message or stack.
+are shown, never the message or stack. In every record, a `name` or `code` that is
+not identifier-shaped, holds an excluded value or matches a redaction form above is
+replaced by `Error` or left out.
 
 There is one install record per label (`STATE/launchd/<label>.json`), which
 carries `"mode"`: `agent` or `daemon`. The modes are never both active. Install in

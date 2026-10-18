@@ -32,16 +32,34 @@ function truncate(text: string, maxBytes: number): [string, boolean] {
   return [cut, true];
 }
 
-function identity(error: unknown): Pick<SanitizedError, "name" | "code"> {
+/** Whether an identifier carries no excluded value or recognised credential form. */
+function disclosable(
+  text: string,
+  exclusions: readonly string[] | undefined,
+): boolean {
+  return (
+    !exclusions?.some((value) => value && text.includes(value)) &&
+    sanitizeConversationText(text, []) === text
+  );
+}
+
+function identity(
+  error: unknown,
+  exclusions: readonly string[] | undefined,
+): Pick<SanitizedError, "name" | "code"> {
   if (!(error instanceof Error)) return { name: "NonError" };
   const { name, code } = error as Error & { code?: unknown };
+  const safeName =
+    typeof name === "string" &&
+    identifier.test(name) &&
+    disclosable(name, exclusions);
+  const safeCode =
+    typeof code === "string"
+      ? codePattern.test(code) && disclosable(code, exclusions)
+      : Number.isSafeInteger(code) && disclosable(String(code), exclusions);
   return {
-    name: typeof name === "string" && identifier.test(name) ? name : "Error",
-    ...(typeof code === "string" && codePattern.test(code)
-      ? { code }
-      : Number.isSafeInteger(code)
-        ? { code: code as number }
-        : {}),
+    name: safeName ? (name as string) : "Error",
+    ...(safeCode ? { code: code as string | number } : {}),
   };
 }
 
@@ -50,7 +68,10 @@ function describe(
   exclusions: readonly string[],
   depth: number,
 ): SanitizedError {
-  const result: SanitizedError = { ...identity(error), redaction: "applied" };
+  const result: SanitizedError = {
+    ...identity(error, exclusions),
+    redaction: "applied",
+  };
   if (!(error instanceof Error)) return result;
   if (typeof error.message === "string") {
     const message = sanitizeConversationText(error.message, exclusions);
@@ -81,7 +102,8 @@ function describe(
 
 /**
  * Never throws and never returns unredacted text: without a usable exclusion list
- * only the identifier-shaped name and code remain.
+ * only the identifier-shaped name and code remain, and those too are dropped when they
+ * hold an excluded value or a recognised credential form.
  */
 export function sanitizeError(
   error: unknown,
@@ -98,7 +120,7 @@ export function sanitizeError(
     // Fall through to the identifier-only form.
   }
   try {
-    return { ...identity(error), redaction: "unavailable" };
+    return { ...identity(error, exclusions), redaction: "unavailable" };
   } catch {
     return { name: "Error", redaction: "unavailable" };
   }
