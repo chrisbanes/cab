@@ -27,6 +27,7 @@ import {
   productionService,
   waitForServiceExit,
 } from "../../src/standalone/cli.js";
+import { ServiceLog } from "../../src/standalone/service-log.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { startedOf } from "../fixtures/service-internals.js";
 
@@ -186,8 +187,10 @@ function makeService(
 function assertSafeDiagnostic(
   diagnostic: BackgroundFailureDiagnostic,
   operation: BackgroundFailureDiagnostic["operation"],
+  message: string,
 ): void {
   assert.deepEqual(Object.keys(diagnostic).sort(), [
+    "error",
     "errorCode",
     "incident",
     "operation",
@@ -197,10 +200,10 @@ function assertSafeDiagnostic(
   assert.equal(diagnostic.incident, 1);
   assert.equal(diagnostic.operation, operation);
   assert.equal(diagnostic.errorCode, "unexpected-background-failure");
-  assert.doesNotMatch(
-    JSON.stringify(diagnostic),
-    /private|secret|exception|stack/i,
-  );
+  assert.equal(diagnostic.error?.name, "Error");
+  assert.equal(diagnostic.error?.message, message);
+  assert.equal(diagnostic.error?.redaction, "applied");
+  assert.ok(diagnostic.error?.stack?.every((frame) => frame.startsWith("at ")));
 }
 
 function fireInterval(calls: IntervalCall[], delay: number): void {
@@ -289,7 +292,11 @@ test("unattended GitHub polling failures close admission and emit one fixed diag
       const notification = service.waitForBackgroundFailure();
       fireInterval(intervals, 1000);
       const diagnostic = await notification;
-      assertSafeDiagnostic(diagnostic, "github-poll");
+      assertSafeDiagnostic(
+        diagnostic,
+        "github-poll",
+        "private token and /Users/person/workspace",
+      );
       await service.waitForBackgroundShutdown(notification);
       assert.equal(runtime.starts, 0);
       assert.equal(diagnostics.length, 1);
@@ -322,7 +329,11 @@ test("power polling failures are fatal while known incomplete power history rema
       const notification = service.waitForBackgroundFailure();
       fireInterval(intervals, 5000);
       const diagnostic = await notification;
-      assertSafeDiagnostic(diagnostic, "power-poll");
+      assertSafeDiagnostic(
+        diagnostic,
+        "power-poll",
+        "private power reader failure",
+      );
       await service.waitForBackgroundShutdown(notification);
       assert.equal(diagnostics.length, 1);
     } finally {
@@ -388,7 +399,7 @@ test("domain wake failures use the generation latch", async () => {
         capabilities: "work",
       });
       const diagnostic = await notification;
-      assertSafeDiagnostic(diagnostic, "domain-wake");
+      assertSafeDiagnostic(diagnostic, "domain-wake", "domain wake secret");
       await service.waitForBackgroundShutdown(notification);
       assert.equal(runtime.starts, 0);
       assert.equal(diagnostics.length, 1);
@@ -424,7 +435,11 @@ test("admission closes across a gated process-identity await for queued and dire
       await identityEntered.promise;
       const notification = service.waitForBackgroundFailure();
       fireInterval(intervals, 1000);
-      assertSafeDiagnostic(await notification, "github-poll");
+      assertSafeDiagnostic(
+        await notification,
+        "github-poll",
+        "fatal during identity lookup",
+      );
       const secondSubmission = service.submit(
         "race-second",
         "second",
@@ -473,7 +488,7 @@ test("post-turn wake failure is observed after the turn without self-deadlocking
       waitGate.resolve();
       assert.equal((await submitted).state, "completed");
       const diagnostic = await notification;
-      assertSafeDiagnostic(diagnostic, "post-turn-wake");
+      assertSafeDiagnostic(diagnostic, "post-turn-wake", "post-turn secret");
       await service.waitForBackgroundShutdown(notification);
       assert.equal(runtime.turns, 1);
       assert.equal(diagnostics.length, 1);
@@ -564,7 +579,11 @@ test("replacement scheduler drain failures use the production service observer o
       assert.equal(await overlap, firstError);
       replacementGate.resolve();
       const diagnostic = await notification;
-      assertSafeDiagnostic(diagnostic, "scheduler-drain");
+      assertSafeDiagnostic(
+        diagnostic,
+        "scheduler-drain",
+        "replacement drain secret",
+      );
       await service.waitForBackgroundShutdown(notification);
       assert.equal(diagnostics.length, 1);
       assert.equal(diagnostic.operation, "scheduler-drain");
@@ -691,6 +710,65 @@ test("diagnostic sink throw, rejection, and hang use one bounded redacted stderr
   });
 });
 
+test("the default sink writes the sanitised failure to stderr without credentials or the data directory", async () => {
+  await withCapturedIntervals(async (intervals) => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      process.stderr,
+      "write",
+    );
+    const writes: string[] = [];
+    Object.defineProperty(process.stderr, "write", {
+      configurable: true,
+      value: (chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      },
+    });
+    const credential = "fixture-credential-1185-value";
+    process.env.FIXTURE_GITHUB = credential;
+    const root = mkdtempSync(join(tmpdir(), "ensemble-background-redaction-"));
+    const service = new StandaloneService(
+      root,
+      () => new FixtureRuntime(),
+      undefined,
+      {
+        github: { intervalMs: 1000 },
+      },
+    );
+    try {
+      await service.start();
+      configureGitHubSource(service);
+      serviceAccess(service).refreshGitHub = async () => {
+        const failure = new Error(
+          `gh failed with ${credential} under ${root}/workspace`,
+          { cause: new Error(`cause ${credential}`) },
+        );
+        failure.stack = `Error: ${failure.message}\n    at poll (${root}/poll.js:1:1)`;
+        throw failure;
+      };
+      const notification = service.waitForBackgroundFailure();
+      fireInterval(intervals, 1000);
+      await notification;
+      await service.waitForBackgroundShutdown(notification);
+      const output = writes.join("");
+      assert.doesNotMatch(output, new RegExp(credential));
+      assert.equal(output.includes(root), false);
+      const line = JSON.parse(output.trim().split("\n").at(-1) ?? "");
+      assert.equal(line.operation, "github-poll");
+      assert.equal(line.error.redaction, "applied");
+      assert.match(line.error.message, /\[redacted\]/);
+      assert.match(line.error.cause.message, /\[redacted\]/);
+    } finally {
+      delete process.env.FIXTURE_GITHUB;
+      if (originalDescriptor)
+        Object.defineProperty(process.stderr, "write", originalDescriptor);
+      else delete (process.stderr as unknown as { write?: unknown }).write;
+      await service.stop().catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 test("a failed fatal shutdown retains the SQLite owner, records shutdown failure, and retries cleanup", async () => {
   await withCapturedIntervals(async (intervals) => {
     const root = mkdtempSync(join(tmpdir(), "ensemble-background-stop-hold-"));
@@ -730,12 +808,23 @@ test("a failed fatal shutdown retains the SQLite owner, records shutdown failure
       const notification = service.waitForBackgroundFailure();
       fireInterval(intervals, 1000);
       const fatal = await notification;
-      assertSafeDiagnostic(fatal, "github-poll");
+      assertSafeDiagnostic(
+        fatal,
+        "github-poll",
+        "background failure with private path",
+      );
       await assert.rejects(service.waitForBackgroundShutdown(notification));
       assert.equal(db.isOpen, true);
-      assert.ok(
-        diagnostics.some((event) => event.errorCode === "shutdown-failed"),
+      const shutdownDiagnostic = diagnostics.find(
+        (event) => event.errorCode === "shutdown-failed",
       );
+      assert.ok(shutdownDiagnostic);
+      // The statement cache is closed by now, so this redaction used the snapshot taken in stop().
+      assert.equal(
+        shutdownDiagnostic.error?.message,
+        "private database close detail",
+      );
+      assert.equal(shutdownDiagnostic.error?.redaction, "applied");
       const blockedRestart = new StandaloneService(
         data,
         () => new FixtureRuntime(),
@@ -838,11 +927,13 @@ test("repeated synthetic timer-clear failures keep a late callback fatal signal 
       poll.reject(new Error("late private poll failure"));
       const fatal = await notification;
       assert.deepEqual(Object.keys(fatal).sort(), [
+        "error",
         "errorCode",
         "incident",
         "operation",
         "serviceId",
       ]);
+      assert.equal(fatal.error?.message, "late private poll failure");
       assert.match(fatal.serviceId, /^[0-9a-f-]{36}$/);
       assert.equal(fatal.incident, 2);
       assert.equal(fatal.operation, "github-poll");
@@ -859,7 +950,6 @@ test("repeated synthetic timer-clear failures keep a late callback fatal signal 
       assert.equal(diagnostics[1]?.incident, 2);
       assert.equal(diagnostics[1]?.operation, "github-poll");
       assert.equal(diagnostics[1]?.errorCode, "unexpected-background-failure");
-      assert.equal(JSON.stringify(diagnostics).includes("private"), false);
       assert.equal(runtime.starts, 0);
 
       restoreClearInterval();
@@ -1396,7 +1486,11 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
           assert.ok(service);
           assert.ok(notification);
           fireInterval(intervals, 1000);
-          assertSafeDiagnostic(await notification, "github-poll");
+          assertSafeDiagnostic(
+            await notification,
+            "github-poll",
+            "private fixture poll failure",
+          );
           await service.waitForBackgroundShutdown(notification);
           assert.equal(serviceAccess(service).db, undefined);
 
@@ -1417,7 +1511,11 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
         if (timing === "before-first-accessor") {
           assert.ok(service);
           assert.ok(notification);
-          assertSafeDiagnostic(await notification, "github-poll");
+          assertSafeDiagnostic(
+            await notification,
+            "github-poll",
+            "private fixture poll failure",
+          );
           await service.waitForBackgroundShutdown(notification);
           assert.equal(serviceAccess(service).db, undefined);
           restart = new StandaloneService(data, () => new FixtureRuntime());
@@ -1622,37 +1720,48 @@ test("production serve CLI sees a fatal service signal that predates its wait", 
     const runtime = new FixtureRuntime();
     let service: StandaloneService | undefined;
     let stopOwnedCalls = 0;
+    const lines: string[] = [];
     try {
       process.exitCode = 0;
-      await main(["serve", root], (directory) => {
-        service = makeService(directory, runtime, diagnostics, {
-          github: { intervalMs: 1000 },
-        });
-        const access = serviceAccess(service);
-        access.refreshGitHub = () => {
-          throw new Error("synchronous fatal before wait");
-        };
-        const stop = access.stopOwned.bind(service);
-        access.stopOwned = () => {
-          stopOwnedCalls++;
-          return stop();
-        };
-        const wait = service.waitForBackgroundFailure.bind(service);
-        let injected = false;
-        service.waitForBackgroundFailure = () => {
-          const notification = wait();
-          if (!injected) {
-            injected = true;
-            fireInterval(intervals, 1000);
-          }
-          return notification;
-        };
-        return service;
-      });
+      await main(
+        ["serve", root],
+        (directory) => {
+          service = makeService(directory, runtime, diagnostics, {
+            github: { intervalMs: 1000 },
+          });
+          const access = serviceAccess(service);
+          access.refreshGitHub = () => {
+            throw new Error("synchronous fatal before wait");
+          };
+          const stop = access.stopOwned.bind(service);
+          access.stopOwned = () => {
+            stopOwnedCalls++;
+            return stop();
+          };
+          const wait = service.waitForBackgroundFailure.bind(service);
+          let injected = false;
+          service.waitForBackgroundFailure = () => {
+            const notification = wait();
+            if (!injected) {
+              injected = true;
+              fireInterval(intervals, 1000);
+            }
+            return notification;
+          };
+          return service;
+        },
+        new ServiceLog((line) => void lines.push(line)),
+      );
       assert.equal(process.exitCode, 1);
       assert.equal(stopOwnedCalls, 1);
       assert.equal(diagnostics.length, 1);
       assert.equal(diagnostics[0]?.operation, "github-poll");
+      const exits = lines
+        .map((line) => JSON.parse(line))
+        .filter((entry) => entry.event === "service-exit");
+      assert.equal(exits.length, 1);
+      assert.equal(exits[0].reason, "background-failure");
+      assert.equal(exits[0].operation, "github-poll");
     } finally {
       if (service) await service.stop().catch(() => {});
       process.exitCode = priorExitCode;
@@ -1690,6 +1799,122 @@ test("production serve CLI exits successfully on a normal SIGTERM", async () => 
     } finally {
       if (service) await service.stop().catch(() => {});
       process.exitCode = priorExitCode;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+interface LogRecord {
+  event: string;
+  stage?: string;
+  reason?: string;
+  mode?: string;
+  port?: number | null;
+  error?: { message?: string };
+}
+
+test("serve and operator CLIs record shutdown failures as sanitised structured lines", async () => {
+  await withCapturedIntervals(async () => {
+    const priorExitCode = process.exitCode;
+    const priorAuthFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
+    const priorOrigin = process.env.ENSEMBLE_OPERATOR_ORIGIN;
+    const root = mkdtempSync(join(tmpdir(), "ensemble-background-cli-stop-"));
+    chmodSync(root, 0o700);
+    const secret = "fixture-shutdown-secret-1185";
+    const prototype = LocalOperatorHttp.prototype;
+    const stopDescriptor = Object.getOwnPropertyDescriptor(prototype, "stop");
+    const originalStop = prototype.stop;
+    const services: StandaloneService[] = [];
+    const record = (lines: string[]) =>
+      lines.map((line) => JSON.parse(line) as LogRecord);
+    try {
+      // serve: the service's own stop fails after SIGTERM.
+      let lines: string[] = [];
+      process.exitCode = 0;
+      let baseline = process.listenerCount("SIGTERM");
+      let command = main(
+        ["serve", join(root, "serve")],
+        (directory) => {
+          const service = makeService(directory, new FixtureRuntime(), []);
+          services.push(service);
+          const access = serviceAccess(service);
+          const stop = access.stopOwned.bind(service);
+          let failed = false;
+          access.stopOwned = () => {
+            if (failed) return stop();
+            failed = true;
+            return Promise.reject(new Error(`serve stop failed ${secret}`));
+          };
+          return service;
+        },
+        new ServiceLog((line) => void lines.push(line)),
+      );
+      await waitUntil(() => process.listenerCount("SIGTERM") > baseline);
+      process.emit("SIGTERM");
+      await command;
+      assert.equal(process.exitCode, 1);
+      let records = record(lines);
+      assert.deepEqual(
+        records.map((entry) => entry.event),
+        ["service-start", "service-failure", "service-exit"],
+      );
+      assert.equal(records[0]?.mode, "serve");
+      assert.equal(records[0]?.port, null);
+      assert.equal(records[1]?.stage, "service-shutdown");
+      assert.match(records[1]?.error?.message ?? "", /serve stop failed/);
+      assert.equal(records[2]?.reason, "shutdown-failure");
+      await services[0]?.stop();
+
+      // operator: the listener's stop fails after SIGTERM.
+      lines = [];
+      process.exitCode = 0;
+      const authFile = join(root, "operator-auth.json");
+      process.env.ENSEMBLE_OPERATOR_AUTH_FILE = authFile;
+      process.env.ENSEMBLE_OPERATOR_ORIGIN = "http://127.0.0.1:8792";
+      await OperatorAuth.initialize(authFile, "fixture password");
+      Object.defineProperty(prototype, "stop", {
+        configurable: true,
+        value: async function (this: LocalOperatorHttp) {
+          await originalStop.call(this);
+          throw new Error(`listener stop failed ${secret}`);
+        },
+      });
+      baseline = process.listenerCount("SIGTERM");
+      command = main(
+        ["operator", join(root, "operator"), "0"],
+        (directory) => {
+          const service = makeService(directory, new FixtureRuntime(), []);
+          services.push(service);
+          return service;
+        },
+        new ServiceLog((line) => void lines.push(line)),
+      );
+      await waitUntil(() => process.listenerCount("SIGTERM") > baseline);
+      process.emit("SIGTERM");
+      await command;
+      assert.equal(process.exitCode, 1);
+      records = record(lines);
+      assert.deepEqual(
+        records.map((entry) => entry.event),
+        ["service-start", "service-failure", "service-exit"],
+      );
+      assert.equal(records[0]?.mode, "operator");
+      assert.ok((records[0]?.port ?? 0) > 0);
+      assert.equal(records[1]?.stage, "listener-shutdown");
+      assert.match(records[1]?.error?.message ?? "", /listener stop failed/);
+      assert.equal(records[2]?.reason, "shutdown-failure");
+      assert.doesNotMatch(lines.join(""), /Ensemble (service|operator)/);
+    } finally {
+      if (stopDescriptor)
+        Object.defineProperty(prototype, "stop", stopDescriptor);
+      for (const service of services) await service.stop().catch(() => {});
+      process.exitCode = priorExitCode;
+      if (priorAuthFile === undefined)
+        delete process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
+      else process.env.ENSEMBLE_OPERATOR_AUTH_FILE = priorAuthFile;
+      if (priorOrigin === undefined)
+        delete process.env.ENSEMBLE_OPERATOR_ORIGIN;
+      else process.env.ENSEMBLE_OPERATOR_ORIGIN = priorOrigin;
       rmSync(root, { recursive: true, force: true });
     }
   });

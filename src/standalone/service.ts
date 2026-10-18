@@ -73,7 +73,9 @@ import type { ConversationHistoryAssignmentRead } from "./conversation-history.j
 import {
   ConversationHistoryCapture,
   ConversationHistoryStore,
+  prepareExclusions,
 } from "./conversation-history.js";
+import { type SanitizedError, sanitizeError } from "./service-log.js";
 import {
   coordinationTools,
   dispatchCoordinationTool,
@@ -388,6 +390,8 @@ export interface StandaloneServiceOptions {
     pruneIntervalMs?: number;
     now?: () => number;
   };
+  /** Private paths beyond the data directory that failure records redact, such as the operator auth file. */
+  failureRedactionPaths?: readonly string[];
   /** Controlled fixtures may replace the bounded, redacted service diagnostic sink. */
   backgroundDiagnosticSink?: (
     diagnostic: BackgroundFailureDiagnostic,
@@ -412,6 +416,8 @@ export interface BackgroundFailureDiagnostic {
   incident: number;
   operation: BackgroundFailureOperation;
   errorCode: BackgroundFailureCode;
+  /** Sanitised cause of the failure, when the throwing site is known. */
+  error?: SanitizedError;
 }
 
 interface ServiceGeneration {
@@ -496,6 +502,20 @@ function gitHubCredentialExclusions(domain: DomainStore) {
   };
 }
 
+/** Values of environment variables whose names mark them as credentials. */
+function secretEnvironmentValues(): string[] {
+  return Object.entries(process.env).flatMap(([name, value]) =>
+    /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(name) && value
+      ? [value]
+      : [],
+  );
+}
+
+/** An `env:NAME` credential reference, its variable name and the variable's value. */
+function credentialReferenceValues(ref: string | null | undefined): string[] {
+  return ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [];
+}
+
 const backgroundDiagnosticTimeoutMs = 50;
 const backgroundDiagnosticFallback =
   '{"errorCode":"diagnostic-writer-failed"}\n';
@@ -557,6 +577,8 @@ export class StandaloneService {
   /** Per harness, so an unidentified anomaly can only retract its own work. */
   private readonly lastCompletedWorkId = new Map<ExecutionHarness, string>();
   private canonicalDataDir: string | undefined;
+  /** Taken in `stop()`: `stopOwned()` clears the domain that the exclusions come from. */
+  private stoppedExclusions: readonly string[] | undefined;
   private readonly active = new Set<Promise<ExecutionIntent>>();
   private readonly activeByWorkId = new Map<string, Promise<ExecutionIntent>>();
   private readonly nativeWaiters = new Map<
@@ -629,6 +651,7 @@ export class StandaloneService {
       throw new Error("Service already started or shutdown is incomplete");
     this.lastCompletedWorkId.clear();
     this.canonicalDataDir = undefined;
+    this.stoppedExclusions = undefined;
     const dataDirectory = StandaloneDataDirectory.openExclusive(this.dataDir, {
       markerWriter: this.markerWriter,
     });
@@ -1898,6 +1921,55 @@ export class StandaloneService {
     return undefined;
   }
 
+  serviceId(): string {
+    if (!this.generation) throw new Error("Service is not started");
+    return this.generation.id;
+  }
+
+  /**
+   * Everything a failure record must not disclose, or undefined when the service never
+   * opened its domain and stopped without a snapshot: callers then emit identifiers only.
+   */
+  failureExclusions(): readonly string[] | undefined {
+    const domain = this.current?.domain;
+    if (!domain) return this.stoppedExclusions;
+    try {
+      const claudeRef = domain.claudeTokenReference();
+      this.canonicalDataDir ??= existsSync(this.dataDir)
+        ? realpathSync(this.dataDir)
+        : this.dataDir;
+      const values = [
+        this.dataDir,
+        this.canonicalDataDir,
+        ...(this.options.failureRedactionPaths ?? []),
+        ...secretEnvironmentValues(),
+        ...gitHubCredentialExclusions(domain).redactions,
+        ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
+        ...domain.projects().flatMap((project) => {
+          const id = String(project.id);
+          return [
+            ...[
+              domain.routingCredentialReference(id),
+              domain.deliveryCredentialReference(id),
+            ].flatMap((ref) => credentialReferenceValues(ref)),
+            ...domain
+              .githubConfiguration(id)
+              .repositories.flatMap((repo) => [
+                repo.path,
+                repo.gitCommonDirectory,
+              ]),
+          ];
+        }),
+      ];
+      return prepareExclusions([
+        ...new Set(values.filter((value) => value.length > 0)),
+      ]);
+    } catch {
+      // A domain whose shutdown has begun can fail to answer; the snapshot still applies.
+      return this.stoppedExclusions;
+    }
+  }
+
   waitForBackgroundFailure(): Promise<BackgroundFailureDiagnostic> {
     if (!this.generation) throw new Error("Service is not started");
     return this.generation.failureNotification;
@@ -1938,11 +2010,12 @@ export class StandaloneService {
     const generation = this.generation;
     if (generation) generation.accepting = false;
     if (this.stopPromise) return this.stopPromise;
+    this.stoppedExclusions = this.failureExclusions();
     const stopping = this.stopOwned();
     this.stopPromise = stopping;
     void stopping.then(
       () => {},
-      () => {
+      (error: unknown) => {
         if (this.stopPromise === stopping) this.stopPromise = undefined;
         const diagnostic =
           generation &&
@@ -1952,6 +2025,7 @@ export class StandaloneService {
                 generation,
                 "safe-shutdown",
                 "shutdown-failed",
+                sanitizeError(error, this.failureExclusions()),
               )
             : undefined;
         if (diagnostic && generation) {
@@ -2140,11 +2214,13 @@ export class StandaloneService {
   private handleBackgroundFailure(
     generation: ServiceGeneration,
     operation: Exclude<BackgroundFailureOperation, "safe-shutdown">,
-    _error: unknown,
+    error: unknown,
   ): void {
     if (this.generation !== generation || generation.fatal) return;
     generation.accepting = false;
     generation.fatal = true;
+    // Before stop(): it releases the domain that the redaction inputs come from.
+    const sanitized = sanitizeError(error, this.failureExclusions());
     const shutdown = this.stop();
     generation.shutdown = shutdown;
     void shutdown.catch(() => {});
@@ -2152,6 +2228,7 @@ export class StandaloneService {
       generation,
       operation,
       "unexpected-background-failure",
+      sanitized,
     );
     if (diagnostic)
       void this.writeBackgroundDiagnostic(generation, diagnostic).catch(
@@ -2164,6 +2241,7 @@ export class StandaloneService {
     generation: ServiceGeneration,
     operation: BackgroundFailureOperation,
     errorCode: BackgroundFailureCode,
+    error?: SanitizedError,
   ): BackgroundFailureDiagnostic {
     generation.incident = Math.min(generation.incident + 1, 2);
     return {
@@ -2171,6 +2249,7 @@ export class StandaloneService {
       incident: generation.incident,
       operation,
       errorCode,
+      ...(error && { error }),
     };
   }
 
@@ -6017,11 +6096,7 @@ export class StandaloneService {
         this.canonicalDataDir,
         ...managedPaths,
         ...additionalPaths,
-        ...Object.entries(process.env).flatMap(([name, value]) =>
-          /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(name) && value
-            ? [value]
-            : [],
-        ),
+        ...secretEnvironmentValues(),
         ...this.gitHubCredentialExclusions().redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...fixtureValues,
@@ -6030,9 +6105,7 @@ export class StandaloneService {
           return [
             domain.routingCredentialReference(id),
             this.current?.deliveryStore.configuration(id).credentialRef,
-          ].flatMap((ref) =>
-            ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [],
-          );
+          ].flatMap((ref) => credentialReferenceValues(ref));
         }),
       ];
       return values.filter((value) => value.length > 0);

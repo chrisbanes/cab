@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
 import { ROOT_REFUSAL } from "./launchd.js";
 import { OperatorApi } from "./operator-api.js";
 import { OperatorWebBundle, OperatorWebBoundary } from "./operator-web.js";
 import { serviceReadiness } from "./readiness.js";
+import { ServiceLog } from "./service-log.js";
 import {
   StandaloneService,
   type BackgroundFailureDiagnostic,
@@ -25,14 +27,15 @@ export async function waitForServiceExit(
     "waitForBackgroundFailure" | "waitForBackgroundShutdown"
   >,
   failureNotification?: Promise<BackgroundFailureDiagnostic>,
+  onSignal?: (signal: NodeJS.Signals) => void,
 ): Promise<ServiceExitReason> {
   const notification =
     failureNotification ?? service.waitForBackgroundFailure();
   const reason = await new Promise<ServiceExitReason>((resolve) => {
     let settled = false;
     const cleanup = () => {
-      process.removeListener("SIGINT", onSignal);
-      process.removeListener("SIGTERM", onSignal);
+      process.removeListener("SIGINT", onSignalReceived);
+      process.removeListener("SIGTERM", onSignalReceived);
     };
     const finish = (value: ServiceExitReason) => {
       if (settled) return;
@@ -40,9 +43,12 @@ export async function waitForServiceExit(
       cleanup();
       resolve(value);
     };
-    const onSignal = () => finish("signal");
-    process.once("SIGINT", onSignal);
-    process.once("SIGTERM", onSignal);
+    const onSignalReceived = (signal: NodeJS.Signals) => {
+      if (!settled) onSignal?.(signal);
+      finish("signal");
+    };
+    process.once("SIGINT", onSignalReceived);
+    process.once("SIGTERM", onSignalReceived);
     void notification.then(() => finish("background-failure"));
   });
   if (reason === "background-failure") {
@@ -64,11 +70,17 @@ export const productionService = (dataDir: string) =>
   new StandaloneService(dataDir, undefined, undefined, {
     diagnostics: { limits: diagnosticLimitsFromEnv(process.env) },
     runtimeHarnesses: productionRuntimeHarnesses,
+    // Control paths like OperatorApi's: failure records must not disclose them.
+    failureRedactionPaths: process.env.ENSEMBLE_OPERATOR_AUTH_FILE
+      ? [process.env.ENSEMBLE_OPERATOR_AUTH_FILE]
+      : [],
   });
 
 export async function main(
   commandLine = process.argv.slice(2),
   serviceFactory: (dataDir: string) => StandaloneService = productionService,
+  /** Only `serve` and `operator` pass one: it adds their start and exit lines. */
+  log?: ServiceLog,
 ): Promise<void> {
   const [command, dataDir, ...args] = commandLine;
   if (!command || !dataDir)
@@ -76,6 +88,10 @@ export async function main(
       "Usage: ensemble <serve|operator|run|list> ABSOLUTE_DATA_DIR [workId prompt workspace previousWorkId]",
     );
   const service = serviceFactory(dataDir);
+  const records = log ?? new ServiceLog();
+  records.attach(service);
+  let receivedSignal: NodeJS.Signals | undefined;
+  let shutdownFailed = false;
   const operatorAuth =
     command === "operator"
       ? await OperatorAuth.open({
@@ -83,6 +99,21 @@ export async function main(
           origin: process.env.ENSEMBLE_OPERATOR_ORIGIN ?? "",
         })
       : undefined;
+  // Called where main completes, never on a throw: that exit line is the entry point's.
+  const writeExit = async () => {
+    if (!log) return;
+    if (
+      failureNotification &&
+      service.backgroundFailureObserved(failureNotification)
+    )
+      log.exited({
+        reason: "background-failure",
+        operation: (await failureNotification).operation,
+      });
+    else if (shutdownFailed) log.exited({ reason: "shutdown-failure" });
+    else if (receivedSignal)
+      log.exited({ reason: "signal", signal: receivedSignal });
+  };
   let fatalBackgroundFailure = false;
   let failureNotification: Promise<BackgroundFailureDiagnostic> | undefined;
   const joinFatalBackgroundFailure = async (
@@ -99,11 +130,19 @@ export async function main(
   try {
     await service.start();
     failureNotification = service.waitForBackgroundFailure();
+    if (log && command === "serve")
+      log.started({
+        version: packageVersion(),
+        mode: "serve",
+        port: null,
+        serviceId: service.serviceId(),
+      });
     if (
       command === "operator" &&
       service.backgroundFailureObserved(failureNotification)
     ) {
       await joinFatalBackgroundFailure(failureNotification);
+      await writeExit();
       return;
     }
     if (command === "run") {
@@ -122,8 +161,9 @@ export async function main(
       process.stdout.write(`${JSON.stringify(service.list())}\n`);
     } else if (command === "serve") {
       fatalBackgroundFailure =
-        (await waitForServiceExit(service, failureNotification)) ===
-        "background-failure";
+        (await waitForServiceExit(service, failureNotification, (signal) => {
+          receivedSignal = signal;
+        })) === "background-failure";
     } else if (command === "operator") {
       if (!operatorAuth)
         throw new Error("Operator authentication is unavailable");
@@ -142,6 +182,7 @@ export async function main(
       );
       if (service.backgroundFailureObserved(failureNotification)) {
         await joinFatalBackgroundFailure(failureNotification);
+        await writeExit();
         return;
       }
       const authFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "";
@@ -169,37 +210,36 @@ export async function main(
           web: new OperatorWebBoundary(bundle, api, readiness),
         },
       );
-      await ui.start(args[0] ? Number(args[0]) : 8787);
+      const port = await ui.start(args[0] ? Number(args[0]) : 8787);
       process.stdout.write(`${operatorAuth.origin}/app\n`);
+      log?.started({
+        version: packageVersion(),
+        mode: "operator",
+        port,
+        serviceId: service.serviceId(),
+      });
       try {
         fatalBackgroundFailure =
-          (await waitForServiceExit(service, failureNotification)) ===
-          "background-failure";
+          (await waitForServiceExit(service, failureNotification, (signal) => {
+            receivedSignal = signal;
+          })) === "background-failure";
       } finally {
         try {
           await ui.stop();
-        } catch {
+        } catch (error) {
           process.exitCode = 1;
-          try {
-            process.stderr.write(
-              "Ensemble operator listener shutdown failed\n",
-            );
-          } catch {
-            // Listener teardown is best-effort after the service has failed.
-          }
+          shutdownFailed = true;
+          records.failure("listener-shutdown", error);
         }
       }
     } else throw new Error(`Unknown command ${command}`);
   } finally {
     try {
       if (!fatalBackgroundFailure) await service.stop();
-    } catch {
+    } catch (error) {
       process.exitCode = 1;
-      try {
-        process.stderr.write("Ensemble service shutdown failed\n");
-      } catch {
-        // The process still exits unsuccessfully when stderr is unavailable.
-      }
+      shutdownFailed = true;
+      records.failure("service-shutdown", error);
     } finally {
       if (failureNotification) {
         try {
@@ -213,6 +253,46 @@ export async function main(
       operatorAuth?.close();
     }
   }
+  await writeExit();
+}
+
+function packageVersion(): string {
+  // Resolves from dist/src/standalone/cli.js in a checkout, an npm install and a release.
+  return (
+    JSON.parse(
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
+    ) as { version: string }
+  ).version;
+}
+
+/**
+ * The process entry: `serve` and `operator` log one start and one exit line, and a crash
+ * (an error escaping main, an uncaught exception, an unhandled rejection) writes the
+ * sanitised record instead of Node's default stack. Other commands keep Node's behaviour.
+ */
+export async function runServiceEntry(
+  argv = process.argv.slice(2),
+  factory: (dataDir: string) => StandaloneService = productionService,
+): Promise<void> {
+  if (argv[0] !== "serve" && argv[0] !== "operator")
+    return await main(argv, factory);
+  const log = new ServiceLog();
+  // No graceful stop: process state is unknown, and the exit releases the data directory.
+  const crash = (error: unknown) => {
+    log.exited({ reason: "crash", error });
+    process.exit(1);
+  };
+  process.on("uncaughtException", crash);
+  process.on("unhandledRejection", crash);
+  try {
+    await main(argv, factory, log);
+  } catch (error) {
+    log.exited({ reason: "crash", error });
+    process.exitCode = 1;
+  } finally {
+    process.removeListener("uncaughtException", crash);
+    process.removeListener("unhandledRejection", crash);
+  }
 }
 
 if (
@@ -225,5 +305,5 @@ if (
     process.stderr.write(`${ROOT_REFUSAL}\n`);
     process.exit(1);
   }
-  await main();
+  await runServiceEntry();
 }
