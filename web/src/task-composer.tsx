@@ -204,6 +204,13 @@ export function TaskComposer({
           <Button
             variant="secondary"
             onClick={() => {
+              // The run would otherwise outlive the input that could reach it.
+              if (input.draftingRunId)
+                void releaseDraft(
+                  client,
+                  session.csrfToken,
+                  input.draftingRunId,
+                );
               state.discard();
               setLinkText("");
               setResumed(true);
@@ -350,13 +357,19 @@ export function TaskComposer({
                   aria-label="Project"
                   value={input.projectId}
                   onChange={(e) => {
+                    // A draft read the old project's repositories, so it ends with the change.
+                    const staleDraft = input.draftingRunId;
+                    if (staleDraft)
+                      void releaseDraft(client, session.csrfToken, staleDraft);
                     edit({
                       projectId: e.target.value,
                       profileId: "",
                       blockerTaskIds: [],
+                      draftingRunId: undefined,
                     });
-                    state.notice =
-                      "Project changed. Assignee and dependency selections were cleared.";
+                    state.notice = staleDraft
+                      ? "Project changed. Assignee and dependency selections were cleared, and the draft for the previous project was stopped."
+                      : "Project changed. Assignee and dependency selections were cleared.";
                     setDependencyQuery("");
                   }}
                 >

@@ -76,7 +76,10 @@ export async function seedDraftingProject(
       repositories: [
         {
           repositoryId: "repo-alpha",
-          path: sourceRepository(f.directory),
+          path: sourceRepository(
+            f.directory,
+            `drafting-source-${projectId.slice(0, 8)}`,
+          ),
           ref: "main",
         },
       ],

@@ -1727,6 +1727,8 @@ Interaction notes:
   or alert region without moving focus. Retry returns focus to the idea field.
 - The idea, title and outcome are saved with the composer's existing local draft,
   with the run id, so a reload or a locked phone reattaches to the run.
+- Changing the project, or discarding recovered input, stops the old project's
+  draft and says so in the composer notice; nothing from it carries over.
 - Nothing here creates a task: only Save draft and Create and start do.
 
 ### Task detail and updates

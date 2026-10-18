@@ -96,6 +96,12 @@ export function useDrafting({
   poll.current = resource.poll;
   const refresh = useRef(resource.refresh);
   refresh.current = resource.refresh;
+  // A run released elsewhere (a project change, discarded input) leaves no stale proposal.
+  useEffect(() => {
+    if (runId) return;
+    setChoices([]);
+    applied.current = null;
+  }, [runId]);
   const settled = Boolean(
     run && !["queued", "running", "stopping"].includes(run.state),
   );

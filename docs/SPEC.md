@@ -848,7 +848,9 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   keeps the operator's idea, title and outcome. The operator can cancel instead.
 - **Reattach.** The composer's local draft stores the run id, so leaving, reloading
   or locking a phone reattaches to the run. The service keeps a proposal until the
-  operator accepts or discards it, or it expires 24 hours after it arrived.
+  operator accepts or discards it, or it expires 24 hours after it arrived. A draft
+  belongs to the project it was started for: changing the composer's project, or
+  discarding recovered input, stops or discards it, and the composer says so.
 - **Operator CLI.** The CLI does not offer drafting; see
   [Operator CLI](design/operator-cli.md).
 

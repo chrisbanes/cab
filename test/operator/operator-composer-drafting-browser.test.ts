@@ -260,6 +260,56 @@ for (const [name, viewport] of viewports) {
     await page.getByRole("group", { name: "Proposed title" }).waitFor();
   });
 
+  test(`${name}: changing the project stops the old project's draft and drops its proposal`, async (_t, j) => {
+    const { f, page, commands, open } = await launch(j, viewport);
+    const other = await seedDraftingProject(f, { name: "Relay" });
+    await open();
+    await openPanel(page);
+    await page.getByLabel("Task title").fill("Typed title");
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    await page
+      .getByLabel("Project", { exact: true })
+      .selectOption(other.projectId);
+    await page
+      .getByText(/the draft for the previous project was stopped/)
+      .waitFor();
+    await until(() => commands("drafting.stop").length === 1);
+    assert.equal(f.service.readDrafting(runId)?.state, "stopping");
+    // The old run ends, and nothing of it reaches the new project's composer.
+    f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
+    await until(() => f.service.readDrafting(runId)?.state === "interrupted");
+    await page.waitForTimeout(2500);
+    assert.equal(
+      await page.getByLabel("Task title").inputValue(),
+      "Typed title",
+    );
+    assert.equal(await page.getByLabel("Desired outcome").inputValue(), "");
+    assert.equal(
+      await page.getByRole("group", { name: /^Proposed/ }).count(),
+      0,
+    );
+    assert.equal(commands("drafting.settle").length >= 1, true);
+  });
+
+  test(`${name}: discarding recovered input releases the draft it was waiting on`, async (_t, j) => {
+    const { f, page, commands, open } = await launch(j, viewport);
+    await open();
+    await openPanel(page);
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    await page.reload();
+    await page
+      .getByRole("button", { name: "Discard unfinished input" })
+      .click();
+    await until(() => commands("drafting.stop").length === 1);
+    assert.equal(f.service.readDrafting(runId)?.state, "stopping");
+    f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
+    await until(() => f.service.readDrafting(runId)?.state === "interrupted");
+  });
+
   test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport, {
       lead: false,
