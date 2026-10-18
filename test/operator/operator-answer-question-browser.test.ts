@@ -15,6 +15,7 @@ import {
 import { questionReadSchema } from "../../src/operator/contracts.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
+import { stubReadiness } from "../fixtures/setup-browser.js";
 
 // The budget is the table under "Budget" in docs/user-flows/answer-question.md.
 const test = browserSuite("answer-question-budget");
@@ -50,6 +51,8 @@ async function start(
     )
       posts.push(request.postDataJSON());
   });
+  // Home's getting-started rows follow this machine's runtime login; a failing row pushes the card down.
+  await stubReadiness(page);
   await signIn(page, web, path(seeded));
   return { f, page, posts, ...seeded };
 }
