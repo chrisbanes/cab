@@ -353,6 +353,7 @@ const draftingStoppedReason = "You stopped the draft";
 const draftingTimeLimitReason = "The 10 minute time limit was reached";
 const draftingRestartedReason = "The service restarted";
 const draftingUnverifiedReason = "Waiting to confirm the runtime stopped";
+const draftingCleanupReason = "Waiting to remove the working copy";
 const draftingWorkspaceFailedReason = "The working copy could not be prepared";
 
 /** Why `configureRuntime` refused before saving anything (ADR-1012). */
@@ -4522,10 +4523,13 @@ export class StandaloneService {
     };
   }
 
-  /** Removes a run's worktree and Claude sandbox base; a failure leaves the binding held for a retry. */
-  private async discardDraftingWorkspace(runId: string): Promise<void> {
+  /**
+   * Removes a run's worktree and Claude sandbox base. False when the copy is
+   * still there, so the caller keeps the run unsettled and a later start retries.
+   */
+  private discardDraftingWorkspace(runId: string): Promise<boolean> {
     const { draftingWorkspaces, draftingBindings } = this.started();
-    await StandaloneService.discardDrafting(
+    return StandaloneService.discardDrafting(
       draftingWorkspaces,
       draftingBindings,
       runId,
@@ -4536,17 +4540,19 @@ export class StandaloneService {
     workspaces: WorkspaceManager,
     bindings: SqliteWorkspaceBindingStore,
     runId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const binding = bindings.get(runId);
       const workspace = binding
         ? await realpath(binding.path).catch(() => binding.path)
         : undefined;
       const discarded = await workspaces.discard(runId);
-      if (workspace && discarded?.state === "archived")
+      if (discarded && discarded.state !== "archived") return false;
+      if (workspace)
         await releaseClaudeTemporaryBase(workspace).catch(() => {});
+      return true;
     } catch {
-      // Capacity does not depend on the copy; the next start retries the discard.
+      return false;
     }
   }
 
@@ -4567,17 +4573,22 @@ export class StandaloneService {
       if (run.state === "queued") continue;
       const workId = StandaloneService.draftingWorkId(run.runId);
       if (await c.supervisor.verifyEnded(workId)) {
-        c.state.releaseDraftingExecution(workId);
-        await StandaloneService.discardDrafting(
-          c.draftingWorkspaces,
-          c.draftingBindings,
-          run.runId,
-        );
-        c.drafting.transition(
-          run.runId,
-          "interrupted",
-          draftingRestartedReason,
-        );
+        // The copy goes first; a run whose copy stays is held with its capacity.
+        if (
+          await StandaloneService.discardDrafting(
+            c.draftingWorkspaces,
+            c.draftingBindings,
+            run.runId,
+          )
+        ) {
+          c.state.releaseDraftingExecution(workId);
+          c.drafting.transition(
+            run.runId,
+            "interrupted",
+            draftingRestartedReason,
+          );
+        } else if (run.state === "running")
+          c.drafting.transition(run.runId, "stopping", draftingCleanupReason);
       } else if (run.state === "running")
         c.drafting.transition(run.runId, "stopping", draftingUnverifiedReason);
     }
@@ -4674,8 +4685,15 @@ export class StandaloneService {
         drafting.transition(runId, "stopping", draftingUnverifiedReason);
       return;
     }
+    // The copy is removed before capacity is released and the run settles; a copy
+    // that stays keeps the run held, and the next start retries.
+    if (!(await this.discardDraftingWorkspace(runId))) {
+      state.hold(intent.id, "The drafting copy could not be removed");
+      if (drafting.get(runId)?.state === "running")
+        drafting.transition(runId, "stopping", draftingCleanupReason);
+      return;
+    }
     state.complete(intent.id, threadId, turnId);
-    await this.discardDraftingWorkspace(runId);
     const run = drafting.require(runId);
     const stopReason = this.draftingControls.get(runId)?.stopReason;
     if (stopReason !== undefined || run.state === "stopping")

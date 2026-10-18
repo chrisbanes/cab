@@ -838,8 +838,9 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   a runtime loss or restart. Acknowledging Stop, the cap expiring or a restart never
   releases capacity by itself. Only then is capacity released, the worktree deleted
   and the run settled as interrupted, with no recovery page or Inbox alert. If
-  termination cannot be verified, the run keeps its capacity and the composer keeps
-  showing it as stopping; drafting has no operator recovery. A queued run that has
+  termination cannot be verified, or the working copy cannot be removed, the run keeps
+  its capacity and the composer keeps showing it as stopping; the next service start
+  retries the removal. Drafting has no operator recovery. A queued run that has
   not been admitted has nothing to wait for and is interrupted at once.
 - **Fill.** Nothing is saved or created until Save draft or Create. An empty title or
   outcome field is filled. A field the operator already typed in shows the proposal

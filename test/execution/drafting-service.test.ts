@@ -176,6 +176,8 @@ interface Options {
   /** Verification of a restarted run's process: ended, or unknown. */
   verified?: boolean;
   draftingTimeLimitMs?: number;
+  /** A `git` that may refuse `worktree remove`, to make cleanup fail. */
+  gitExecutable?: string;
 }
 
 function sourceRepository(root: string): { path: string; commit: string } {
@@ -313,6 +315,9 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
         terminationVerifier: verifier,
         ...(options.draftingTimeLimitMs
           ? { draftingTimeLimitMs: options.draftingTimeLimitMs }
+          : {}),
+        ...(options.gitExecutable
+          ? { workspaceManager: { gitExecutable: options.gitExecutable } }
           : {}),
       },
     );
@@ -704,6 +709,55 @@ test("Stop keeps capacity reserved and the copy in place until the runtime is se
   );
   assert.equal(w.tracked(service).usage(projectId).global, 0);
   assert.equal(existsSync(workspace), false);
+});
+
+test("a copy that cannot be removed keeps the run held with its capacity until a later start removes it", async (t) => {
+  const w = world(t);
+  // Removing a worktree fails while this file exists; everything else is real Git.
+  const flag = join(w.root, "refuse-remove");
+  const git = join(w.root, "git-shim");
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    git,
+    `#!/bin/sh\ncase "$*" in *"worktree remove"*) [ -e '${flag}' ] && exit 1;; esac\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  const first = w.open({ gitExecutable: git, verified: true });
+  await w.start(first.service, "codex");
+  const { projectId } = await w.project(first.service, "codex");
+  first.codex.script(async (api) => {
+    writeFileSync(flag, "");
+    await api.callTool(draftProposalToolName, proposal);
+  });
+  const runId = randomUUID();
+  await first.service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () =>
+      first.service.readDrafting(runId)?.reason ===
+      "Waiting to remove the working copy",
+    () => w.tracked(first.service).runs(),
+  );
+  const workspace = first.codex.threads[0]?.workspace;
+  assert.ok(workspace && existsSync(workspace));
+  // Unsettled: no proposal is offered, and the capacity stays reserved.
+  assert.equal(first.service.readDrafting(runId)?.state, "stopping");
+  assert.equal(first.service.readDrafting(runId)?.proposal, null);
+  assert.equal(w.tracked(first.service).usage(projectId).global, 1);
+  assert.equal(
+    first.service.list().find((item) => item.workId === `drafting:${runId}`)
+      ?.state,
+    "held",
+  );
+
+  // Once removal works, the next start removes the copy, then releases and settles.
+  rmSync(flag);
+  await first.service.stop();
+  const second = w.open({ gitExecutable: git, verified: true });
+  await second.service.start();
+  assert.equal(second.service.readDrafting(runId)?.state, "interrupted");
+  assert.equal(w.tracked(second.service).usage(projectId).global, 0);
+  assert.equal(existsSync(workspace), false);
+  await second.service.stop();
 });
 
 test("a Stop during thread start is applied once the turn binds", async (t) => {
