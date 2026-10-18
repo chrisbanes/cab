@@ -1,6 +1,6 @@
 # Create a task
 
-**Status:** implemented. The budget is asserted at 1366 × 900 and 390 × 844 by `create a task budget: three interactions from New task` in `test/operator/operator-composer-layout-browser.test.ts`.
+**Status:** implemented. The budget is asserted at 1366 × 900 and 390 × 844 by `create a task budget: three interactions from New task` in `test/operator/operator-composer-layout-browser.test.ts`, from New task on a project page and on the tasks overview. Getting started, Project setup and the project page open the same project-scoped composer URL.
 
 ## Goal
 

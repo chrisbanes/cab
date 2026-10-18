@@ -1061,60 +1061,64 @@ test("Composer shows the brief-limit note only within 10% of the limit or over i
   assert.equal(commands, 0);
 });
 
-for (const [label, viewport] of [
-  ["1366 x 900", desktop],
-  ["390 x 844", phone],
+// Getting started and Project setup open /app/tasks/new?project=<id>, the same shape as a
+// project page; the top bar on a page without a project is the one entry that must pick it.
+for (const [entry, path, scoped] of [
+  ["a project page", "/app/projects/:atlas", true],
+  ["the tasks overview", "/app", false],
 ] as const)
-  test(`create a task budget: three interactions from New task (${label})`, async (_t, journey) => {
-    const { page, ids } = await startSettings(
-      journey,
-      "/app/projects/:atlas",
-      viewport,
-    );
-    let interactions = 0;
-    // Open: New task on a project page names that project, so no choice is counted.
-    await page
-      .getByRole("link", { name: "New task", exact: true })
-      .filter({ visible: true })
-      .first()
-      .click();
-    interactions++;
-    const project = page.getByLabel("Project", { exact: true }),
-      title = page.getByLabel("Task title", { exact: true }),
-      outcome = page.getByLabel("Desired outcome", { exact: true }),
-      verdict = page.getByRole("region", { name: "If you create it now" });
-    await verdict.getByText(/^(Will wait|Starts now)$/).waitFor();
-    assert.equal(await project.inputValue(), ids.atlas);
-    for (const target of [
-      project,
-      title,
-      outcome,
-      verdict,
-      verdict.getByText(/^(Will wait|Starts now)$/),
-    ])
-      assert.equal(
-        await inFirstViewport(page, target),
-        true,
-        `the composer is in the first view ${JSON.stringify(await target.boundingBox())}`,
-      );
-    await noPageOverflow(page);
-    // Fill: the form counts as one interaction, as in docs/user-flows/create-task.md.
-    await title.fill("Budget task");
-    await outcome.fill("The budget task is created.");
-    interactions++;
-    await page
-      .getByRole("button", { name: "Create and start", exact: true })
-      .click();
-    interactions++;
-    const created = page.getByRole("region", { name: "Task created" });
-    await created.waitFor();
-    const open = created.getByRole("link", { name: "Open task" });
-    for (const target of [created, open])
-      assert.equal(
-        await inFirstViewport(page, target),
-        true,
-        `the result is in view ${JSON.stringify(await target.boundingBox())}`,
-      );
-    assert.equal(interactions, 3);
-    await noPageOverflow(page);
-  });
+  for (const [label, viewport] of [
+    ["1366 x 900", desktop],
+    ["390 x 844", phone],
+  ] as const)
+    test(`create a task budget: three interactions from New task on ${entry} (${label})`, async (_t, journey) => {
+      const { page, ids } = await startSettings(journey, path, viewport);
+      let interactions = 0;
+      await page
+        .getByRole("link", { name: "New task", exact: true })
+        .filter({ visible: true })
+        .click();
+      interactions++;
+      const project = page.getByLabel("Project", { exact: true }),
+        title = page.getByLabel("Task title", { exact: true }),
+        outcome = page.getByLabel("Desired outcome", { exact: true }),
+        verdict = page.getByRole("region", { name: "If you create it now" }),
+        badge = verdict.getByText(/^(Will wait|Starts now)$/);
+      await title.waitFor();
+      for (const target of [project, title, outcome])
+        assert.equal(
+          await inFirstViewport(page, target),
+          true,
+          `the form is in the first view ${JSON.stringify(await target.boundingBox())}`,
+        );
+      // The form fill is one interaction, as in docs/user-flows/create-task.md, and
+      // includes choosing the project when the entry point did not name one.
+      if (!scoped) await project.selectOption(ids.atlas);
+      assert.equal(await project.inputValue(), ids.atlas);
+      await title.fill("Budget task");
+      await outcome.fill("The budget task is created.");
+      interactions++;
+      await badge.waitFor();
+      for (const target of [verdict, badge])
+        assert.equal(
+          await inFirstViewport(page, target),
+          true,
+          `the verdict is in the first view ${JSON.stringify(await target.boundingBox())}`,
+        );
+      await noPageOverflow(page);
+      await page
+        .getByRole("button", { name: "Create and start", exact: true })
+        .click();
+      interactions++;
+      const created = page.getByRole("region", { name: "Task created" });
+      await created.waitFor();
+      const open = created.getByRole("link", { name: "Open task" });
+      for (const target of [created, open])
+        assert.equal(
+          await inFirstViewport(page, target),
+          true,
+          `the result is in view ${JSON.stringify(await target.boundingBox())}`,
+        );
+      assert.equal(interactions, 3);
+      await noPageOverflow(page);
+    });
