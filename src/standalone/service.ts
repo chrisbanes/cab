@@ -4703,11 +4703,9 @@ export class StandaloneService {
     }
   }
 
-  private static grantOf(config: {
-    version: unknown;
-    repositories: unknown;
-  }): string {
-    return JSON.stringify([config.version, config.repositories]);
+  /** The access a copy was built from: the linked repositories, not unrelated source settings. */
+  private static grantOf(config: { repositories: unknown }): string {
+    return JSON.stringify(config.repositories);
   }
 
   /** Whether the project's linked repositories differ from those the copy was built from. */
