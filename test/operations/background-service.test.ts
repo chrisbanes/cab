@@ -15,6 +15,7 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
+import { OperatorPush } from "../../src/standalone/operator-push.js";
 import { OperatorWebBundle } from "../../src/standalone/operator-web.js";
 import {
   StandaloneService,
@@ -1341,11 +1342,12 @@ test("production operator CLI joins an already-fatal service and closes the live
   });
 });
 
-test("operator CLI consumes fatal failures before first accessor and after bundle loading", async () => {
+test("operator CLI consumes fatal failures before first accessor and across bundle and push loading", async () => {
   await withCapturedIntervals(async (intervals) => {
     for (const timing of [
       "before-first-accessor",
       "during-bundle-open",
+      "during-push-open",
     ] as const) {
       const priorExitCode = process.exitCode;
       const priorAuthFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
@@ -1359,8 +1361,9 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
       process.env.ENSEMBLE_OPERATOR_AUTH_FILE = authFile;
       process.env.ENSEMBLE_OPERATOR_ORIGIN = "http://127.0.0.1:8792";
       const diagnostics: BackgroundFailureDiagnostic[] = [];
-      const bundleEntered = deferred<void>();
-      const releaseBundle = deferred<void>();
+      const loadEntered = deferred<void>();
+      const releaseLoad = deferred<void>();
+      const lines: string[] = [];
       let service: StandaloneService | undefined;
       let restart: StandaloneService | undefined;
       let runtime: FixtureRuntime | undefined;
@@ -1383,8 +1386,13 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
         LocalOperatorHttp.prototype,
         "start",
       );
+      const pushOpenDescriptor = Object.getOwnPropertyDescriptor(
+        OperatorPush,
+        "open",
+      );
       const originalAuthOpen = OperatorAuth.open;
       const originalBundleOpen = OperatorWebBundle.open;
+      const originalPushOpen = OperatorPush.open;
       try {
         process.exitCode = 0;
         await OperatorAuth.initialize(authFile, "fixture password");
@@ -1405,10 +1413,20 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
           value: async (directory: string) => {
             bundleOpens++;
             if (timing === "during-bundle-open") {
-              bundleEntered.resolve();
-              await releaseBundle.promise;
+              loadEntered.resolve();
+              await releaseLoad.promise;
             }
             return originalBundleOpen.call(OperatorWebBundle, directory);
+          },
+        });
+        Object.defineProperty(OperatorPush, "open", {
+          configurable: true,
+          value: async (options: Parameters<typeof OperatorPush.open>[0]) => {
+            if (timing === "during-push-open") {
+              loadEntered.resolve();
+              await releaseLoad.promise;
+            }
+            return originalPushOpen.call(OperatorPush, options);
           },
         });
         Object.defineProperty(LocalOperatorHttp.prototype, "start", {
@@ -1419,70 +1437,77 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
           },
         });
 
-        const command = main(["operator", data, "0"], (directory) => {
-          runtime = new FixtureRuntime();
-          service = makeService(directory, runtime, diagnostics, {
-            github: { intervalMs: 1000 },
-          });
-          const actualStart = service.start.bind(service);
-          service.start = async () => {
-            await actualStart();
-            runtime!.waitFailure = new Error("fixture execution remains held");
-            try {
-              const held = await service!.submit(
-                "operator-held-work",
-                "fixture prompt",
-                workspace,
+        const command = main(
+          ["operator", data, "0"],
+          (directory) => {
+            runtime = new FixtureRuntime();
+            service = makeService(directory, runtime, diagnostics, {
+              github: { intervalMs: 1000 },
+            });
+            const actualStart = service.start.bind(service);
+            service.start = async () => {
+              await actualStart();
+              runtime!.waitFailure = new Error(
+                "fixture execution remains held",
               );
-              assert.equal(held.state, "held");
-            } finally {
-              runtime!.waitFailure = undefined;
-            }
-          };
-          const actualWait = service.waitForBackgroundFailure.bind(service);
-          service.waitForBackgroundFailure = () => {
-            notification = actualWait();
-            return notification;
-          };
-          const actualObserved =
-            service.backgroundFailureObserved.bind(service);
-          service.backgroundFailureObserved = (failureNotification) => {
-            if (timing === "before-first-accessor" && !pollInjected) {
-              pollInjected = true;
-              fireInterval(intervals, 1000);
-            }
-            return actualObserved(failureNotification);
-          };
-          const checkAfterFatal = () => {
-            if (
-              notification &&
-              service!.backgroundFailureObserved(notification)
-            )
-              accessorsAfterFatal++;
-          };
-          const actualDomain = service.domain.bind(service);
-          service.domain = () => {
-            checkAfterFatal();
-            return actualDomain();
-          };
-          const actualCoordinationView = service.coordinationView.bind(service);
-          service.coordinationView = () => {
-            checkAfterFatal();
-            return actualCoordinationView();
-          };
-          const actualGitHubSources = service.githubSources.bind(service);
-          service.githubSources = () => {
-            checkAfterFatal();
-            return actualGitHubSources();
-          };
-          serviceAccess(service).refreshGitHub = () => {
-            throw new Error("private fixture poll failure");
-          };
-          return service;
-        });
+              try {
+                const held = await service!.submit(
+                  "operator-held-work",
+                  "fixture prompt",
+                  workspace,
+                );
+                assert.equal(held.state, "held");
+              } finally {
+                runtime!.waitFailure = undefined;
+              }
+            };
+            const actualWait = service.waitForBackgroundFailure.bind(service);
+            service.waitForBackgroundFailure = () => {
+              notification = actualWait();
+              return notification;
+            };
+            const actualObserved =
+              service.backgroundFailureObserved.bind(service);
+            service.backgroundFailureObserved = (failureNotification) => {
+              if (timing === "before-first-accessor" && !pollInjected) {
+                pollInjected = true;
+                fireInterval(intervals, 1000);
+              }
+              return actualObserved(failureNotification);
+            };
+            const checkAfterFatal = () => {
+              if (
+                notification &&
+                service!.backgroundFailureObserved(notification)
+              )
+                accessorsAfterFatal++;
+            };
+            const actualDomain = service.domain.bind(service);
+            service.domain = () => {
+              checkAfterFatal();
+              return actualDomain();
+            };
+            const actualCoordinationView =
+              service.coordinationView.bind(service);
+            service.coordinationView = () => {
+              checkAfterFatal();
+              return actualCoordinationView();
+            };
+            const actualGitHubSources = service.githubSources.bind(service);
+            service.githubSources = () => {
+              checkAfterFatal();
+              return actualGitHubSources();
+            };
+            serviceAccess(service).refreshGitHub = () => {
+              throw new Error("private fixture poll failure");
+            };
+            return service;
+          },
+          new ServiceLog((line) => void lines.push(line)),
+        );
 
-        if (timing === "during-bundle-open") {
-          await bundleEntered.promise;
+        if (timing !== "before-first-accessor") {
+          await loadEntered.promise;
           assert.ok(service);
           assert.ok(notification);
           fireInterval(intervals, 1000);
@@ -1504,7 +1529,7 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
           );
           await restart.stop();
           restart = undefined;
-          releaseBundle.resolve();
+          releaseLoad.resolve();
         }
 
         await command;
@@ -1538,8 +1563,15 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
         assert.equal(pollInjected, timing === "before-first-accessor");
         assert.equal(diagnostics.length, 1);
         assert.equal(diagnostics[0]?.operation, "github-poll");
+        // The recorded reason stays the background failure, never a crash.
+        const exits = lines
+          .map((line) => JSON.parse(line))
+          .filter((entry) => entry.event === "service-exit");
+        assert.equal(exits.length, 1);
+        assert.equal(exits[0].reason, "background-failure");
+        assert.equal(exits[0].operation, "github-poll");
       } finally {
-        releaseBundle.resolve();
+        releaseLoad.resolve();
         if (restart) await restart.stop().catch(() => {});
         if (service) {
           if (notification && service.backgroundFailureObserved(notification))
@@ -1560,6 +1592,9 @@ test("operator CLI consumes fatal failures before first accessor and after bundl
           );
         else
           delete (OperatorWebBundle as unknown as Record<string, unknown>).open;
+        if (pushOpenDescriptor)
+          Object.defineProperty(OperatorPush, "open", pushOpenDescriptor);
+        else delete (OperatorPush as unknown as Record<string, unknown>).open;
         if (listenerStartDescriptor)
           Object.defineProperty(
             LocalOperatorHttp.prototype,

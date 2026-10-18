@@ -116,9 +116,11 @@ export async function main(
   };
   let fatalBackgroundFailure = false;
   let failureNotification: Promise<BackgroundFailureDiagnostic> | undefined;
-  const joinFatalBackgroundFailure = async (
-    notification: Promise<BackgroundFailureDiagnostic>,
-  ) => {
+  /** True after joining a background failure that predates the next startup step. */
+  const consumeFatalFailure = async () => {
+    const notification = failureNotification;
+    if (!notification || !service.backgroundFailureObserved(notification))
+      return false;
     fatalBackgroundFailure = true;
     process.exitCode = 1;
     try {
@@ -126,6 +128,8 @@ export async function main(
     } catch {
       // The service emitted its fixed safe-shutdown diagnostic; do not expose its error.
     }
+    await writeExit();
+    return true;
   };
   try {
     await service.start();
@@ -137,14 +141,7 @@ export async function main(
         port: null,
         serviceId: service.serviceId(),
       });
-    if (
-      command === "operator" &&
-      service.backgroundFailureObserved(failureNotification)
-    ) {
-      await joinFatalBackgroundFailure(failureNotification);
-      await writeExit();
-      return;
-    }
+    if (command === "operator" && (await consumeFatalFailure())) return;
     if (command === "run") {
       const [workId, prompt, workspace, previousWorkId] = args;
       if (!workId || !prompt || !workspace)
@@ -180,11 +177,7 @@ export async function main(
       const bundle = await OperatorWebBundle.open(
         fileURLToPath(new URL("../../operator", import.meta.url)),
       );
-      if (service.backgroundFailureObserved(failureNotification)) {
-        await joinFatalBackgroundFailure(failureNotification);
-        await writeExit();
-        return;
-      }
+      if (await consumeFatalFailure()) return;
       const authFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "";
       const api = new OperatorApi(service, [dataDir, authFile]);
       const readiness = serviceReadiness(service, api, { dataDir, authFile });
@@ -194,6 +187,8 @@ export async function main(
         keyFile: join(dirname(authFile), "operator-push-vapid.json"),
         readInbox: (query) => api.readInbox(query),
       });
+      // A failure while push loaded has already cleared the domain the UI needs.
+      if (await consumeFatalFailure()) return;
       const ui = new LocalOperatorHttp(
         new LocalOperatorUi(
           service.domain(),
@@ -287,8 +282,8 @@ export async function runServiceEntry(
   try {
     await main(argv, factory, log);
   } catch (error) {
-    log.exited({ reason: "crash", error });
-    process.exitCode = 1;
+    // Like a default uncaught error, never wait on handles that cleanup left open.
+    crash(error);
   } finally {
     process.removeListener("uncaughtException", crash);
     process.removeListener("unhandledRejection", crash);

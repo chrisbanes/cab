@@ -28,7 +28,8 @@ await runServiceEntry(argv, (dataDir) => {
   );
   const start = service.start.bind(service);
   service.start = async () => {
-    if (mode === "start-failure") throw failure();
+    if (mode === "open-handle") setInterval(() => {}, 60_000);
+    if (mode === "start-failure" || mode === "open-handle") throw failure();
     await start();
     // After the start line: the failure lands in a running service.
     if (mode === "uncaught")

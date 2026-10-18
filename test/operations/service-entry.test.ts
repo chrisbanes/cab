@@ -108,3 +108,9 @@ test("an error escaping the entry point writes the identifier-only crash line", 
   assert.equal(records[0].error.redaction, "unavailable");
   assert.equal(stderr.includes(secret), false);
 });
+
+test("a crash exits even when cleanup leaves a referenced handle open", async () => {
+  const { code, records } = await run("open-handle");
+  assert.equal(code, 1);
+  assert.equal(records.at(-1).reason, "crash");
+});
