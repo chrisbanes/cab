@@ -733,6 +733,45 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   assert.match(both.fix ?? "", /^Restart the service/);
 });
 
+test("readiness checks Codex profile settings against the runtime catalogue", async (t) => {
+  const f = fixture(t);
+  const codexSettings = {
+    models: [
+      { model: "default", efforts: ["low", "high"] },
+      { model: "m-alt", efforts: ["medium"] },
+    ],
+  };
+  const codexWith = (model: string | null, effort: string | null = null) => ({
+    revoked: false,
+    runtime: { harness: "codex", model, reasoningEffort: effort } as const,
+  });
+  const harness = (known: boolean, ...p: ReadinessProfile[]) =>
+    check(f, "runtime-harness", {
+      ...profiles(...p),
+      harnessSettings: (h) => (h === "codex" && known ? codexSettings : null),
+    });
+  assert.equal(
+    (await harness(true, codexWith("m-alt", "medium"))).status,
+    "pass",
+  );
+  assert.equal((await harness(true, codexWith(null, "high"))).status, "pass");
+  const bad = await harness(true, codexWith("x"));
+  assert.equal(bad.status, "fail");
+  assert.equal(bad.reason, REJECTED(1));
+  assert.match(bad.fix ?? "", /edit the profile's model or reasoning effort/);
+  assert.equal(
+    (await harness(true, codexWith("m-alt", "high"))).reason,
+    REJECTED(1),
+  );
+  // A profile without settings runs on the runtime default whether or not the catalogue is known.
+  assert.equal((await harness(false, codexProfile())).status, "pass");
+  assert.equal((await harness(false, codexWith(null, null))).status, "pass");
+  const unknown = await harness(false, codexWith("m-alt"));
+  assert.equal(unknown.status, "fail");
+  assert.equal(unknown.reason, "Codex's supported models are not known yet");
+  assert.match(unknown.fix ?? "", /^Run the check again/);
+});
+
 test("readiness names the automatic restart while pending and the toggle once exhausted", async (t) => {
   const f = fixture(t);
   const nextAt = Date.UTC(2026, 9, 17, 14, 30, 0);

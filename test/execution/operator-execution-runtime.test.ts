@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import {
+  profileRuntimeSchema,
+  unsupportedRuntimeField,
+} from "../../src/core/execution-runtime.js";
 import { claudePolicyDisclosure } from "../../src/standalone/execution-policy.js";
 import {
   executionSummary,
@@ -32,10 +36,27 @@ test("runtime errors name the field and accept blank or token values", () => {
   });
   assert.deepEqual(runtimeErrors(claude("", "")), {});
   assert.deepEqual(runtimeErrors(claude("sonnet", "high")), {});
-  assert.deepEqual(
-    runtimeErrors({ ...claude("a b", "c d"), runtimeHarness: "codex" }),
-    {},
-  );
+  const codex = (model: string, effort: string) => ({
+    ...claude(model, effort),
+    runtimeHarness: "codex",
+  });
+  assert.deepEqual(runtimeErrors(codex("a b", "")), {
+    "runtime.model": "Model cannot contain spaces.",
+  });
+  assert.deepEqual(runtimeErrors(codex("m-alt", "medium")), {});
+  const supported = {
+    models: [
+      { model: "default", efforts: ["low", "high"] },
+      { model: "m-alt", efforts: ["medium"] },
+    ],
+  };
+  assert.deepEqual(runtimeErrors(codex("x", ""), supported), {
+    "runtime.model": "Model must be one of: m-alt.",
+  });
+  assert.deepEqual(runtimeErrors(codex("m-alt", "high"), supported), {
+    "runtime.reasoningEffort": "Reasoning effort must be one of: medium.",
+  });
+  assert.deepEqual(runtimeErrors(codex("", ""), supported), {});
 });
 
 test("runtime summaries and commands", () => {
@@ -60,11 +81,38 @@ test("runtime summaries and commands", () => {
     }),
     "Claude · sonnet · default effort",
   );
-  assert.deepEqual(
-    runtimeCommand({ ...claude("x", "y"), runtimeHarness: "codex" }),
-    {
+  assert.equal(runtimeSummary({ harness: "codex", model: null }), "Codex");
+  assert.equal(
+    runtimeSummary({
       harness: "codex",
-    },
+      model: "m-alt",
+      reasoningEffort: "medium",
+    }),
+    "Codex · m-alt · medium",
+  );
+  assert.equal(
+    runtimeSummary({ harness: "codex", reasoningEffort: "high" }),
+    "Codex · default model · high",
+  );
+  // A Codex profile without settings keeps the bare stored form.
+  assert.deepEqual(profileRuntimeSchema.parse({ harness: "codex" }), {
+    harness: "codex",
+  });
+  assert.deepEqual(
+    runtimeCommand({ ...claude("", " "), runtimeHarness: "codex" }),
+    { harness: "codex" },
+  );
+  assert.deepEqual(
+    runtimeCommand({ ...claude("m-alt", ""), runtimeHarness: "codex" }),
+    { harness: "codex", model: "m-alt", reasoningEffort: null },
+  );
+  assert.deepEqual(
+    runtimeValues({
+      harness: "codex",
+      model: "m-alt",
+      reasoningEffort: "medium",
+    }),
+    { runtimeHarness: "codex", runtimeModel: "m-alt", runtimeEffort: "medium" },
   );
   assert.deepEqual(runtimeCommand(claude(" sonnet ", "")), {
     harness: "claude",
@@ -96,11 +144,7 @@ test("profile changes name a runtime change once", () => {
     runtime: { harness: "claude", model: "sonnet", reasoningEffort: null },
   } as ProfileConfigurationData;
   assert.deepEqual(
-    profileChanges(back, {
-      ...base,
-      ...claude("sonnet", ""),
-      runtimeHarness: "codex",
-    }),
+    profileChanges(back, { ...base, ...runtimeValues({ harness: "codex" }) }),
     ["Runtime: Claude · sonnet · default effort → Codex"],
   );
 });
@@ -371,5 +415,30 @@ test("no runtime wait or failure route opens bare Settings", () => {
   assert.deepEqual(
     hrefs.filter((h) => h === "/app/settings"),
     [],
+  );
+});
+
+test("unsupported Codex settings are judged against the runtime catalogue", () => {
+  const supported = {
+    models: [
+      { model: "default", efforts: ["low", "high"] },
+      { model: "m-alt", efforts: ["medium"] },
+    ],
+  };
+  const unsupported = (model: string | null, reasoningEffort: string | null) =>
+    unsupportedRuntimeField(
+      { harness: "codex", model, reasoningEffort },
+      supported,
+    );
+  assert.equal(unsupportedRuntimeField({ harness: "codex" }, supported), null);
+  assert.equal(unsupported(null, null), null);
+  assert.equal(unsupported(null, "high"), null);
+  assert.equal(unsupported("m-alt", "medium"), null);
+  assert.equal(unsupported("x", null), "runtime.model");
+  assert.equal(unsupported("m-alt", "high"), "runtime.reasoningEffort");
+  // Settings the runtime has not reported cannot refuse a profile without them.
+  assert.equal(
+    unsupportedRuntimeField({ harness: "codex" }, { models: [] }),
+    null,
   );
 });

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { mock, test } from "node:test";
 import {
   CodexRuntime,
+  executionPolicy,
   type RuntimeConversationEvent,
   type RuntimeDiagnosticEvent,
 } from "../../src/standalone/codex.js";
@@ -113,8 +114,8 @@ function newTestRuntime(
   (runtime as unknown as { nativeGeneration: string }).nativeGeneration =
     "runtime-test-generation";
   const startTurn = runtime.startTurn.bind(runtime);
-  runtime.startTurn = async (threadId, workspace, prompt) => {
-    const turnId = await startTurn(threadId, workspace, prompt);
+  runtime.startTurn = async (threadId, workspace, prompt, settings) => {
+    const turnId = await startTurn(threadId, workspace, prompt, settings);
     const generation = (runtime as unknown as { nativeGeneration?: string })
       .nativeGeneration;
     if (!generation) throw new Error("Runtime test generation unavailable");
@@ -3183,5 +3184,207 @@ test("diagnostic events carry tool metadata and observed settings only", async (
   } finally {
     await runtime.stop();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** A fake App Server whose `model/list` has two pages and which echoes the configured settings. */
+function settingsFakeRuntime(options: { failFirstList?: boolean } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "codex-settings-"));
+  const executable = join(root, "fake-codex.mjs");
+  const log = join(root, "requests.jsonl");
+  const source = [
+    `#!${process.execPath}`,
+    "import { appendFileSync } from 'node:fs';",
+    "import { createInterface } from 'node:readline';",
+    `const log = ${JSON.stringify(log)};`,
+    `const failFirstList = ${JSON.stringify(options.failFirstList ?? false)};`,
+    "const efforts = (...names) => names.map((reasoningEffort) => ({ reasoningEffort }));",
+    "const pages = [",
+    "  { data: [{ model: 'm-default', isDefault: true, supportedReasoningEfforts: efforts('low', 'high') }], nextCursor: 'page-2' },",
+    "  { data: [{ model: 'm-alt', isDefault: false, supportedReasoningEfforts: efforts('medium') }], nextCursor: null },",
+    "];",
+    "let lists = 0;",
+    "const write = (message) => process.stdout.write(JSON.stringify(message) + '\\n');",
+    "const reported = (params) => ({ thread: { id: 'thread-1' }, approvalPolicy: 'never', sandbox: { type: 'workspaceWrite' }, model: params.model ?? 'm-default', modelProvider: 'fake', reasoningEffort: params.config?.model_reasoning_effort ?? 'low', serviceTier: null });",
+    "for await (const line of createInterface({ input: process.stdin })) {",
+    "  const message = JSON.parse(line);",
+    "  if (message.id !== undefined) appendFileSync(log, JSON.stringify({ method: message.method, params: message.params }) + '\\n');",
+    "  if (message.method === 'initialize') write({ id: message.id, result: {} });",
+    "  else if (message.method === 'account/read') write({ id: message.id, result: { account: { type: 'chatgpt' } } });",
+    "  else if (message.method === 'config/read') write({ id: message.id, result: { config: { approval_policy: 'never', sandbox_mode: 'workspace-write' } } });",
+    "  else if (message.method === 'model/list') {",
+    "    lists += 1;",
+    "    if (failFirstList && lists === 1) write({ id: message.id, error: { code: -32000, message: 'unavailable' } });",
+    "    else write({ id: message.id, result: pages[message.params?.cursor ? 1 : 0] });",
+    "  }",
+    "  else if (message.method === 'thread/start') write({ id: message.id, result: reported(message.params) });",
+    "  else if (message.method === 'turn/start') write({ id: message.id, result: { turn: { id: 'turn-1' } } });",
+    "}",
+  ].join("\n");
+  writeFileSync(executable, source);
+  chmodSync(executable, 0o700);
+  const runtime = newTestRuntime(executable, { settingsRetryMs: 5 });
+  const requests = (method: string) =>
+    readFileSync(log, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { method: string; params: unknown })
+      .filter((request) => request.method === method)
+      .map((request) => request.params);
+  const cleanup = async () => {
+    await runtime.stop();
+    rmSync(root, { recursive: true, force: true });
+  };
+  return { root, runtime, requests, cleanup };
+}
+
+async function eventually(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("condition not reached");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+test("configured settings are read from model/list and sent on thread and turn start", async () => {
+  const { root, runtime, requests, cleanup } = settingsFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await eventually(() => runtime.supportedSettings() !== undefined);
+    assert.deepEqual(runtime.supportedSettings(), {
+      default: ["low", "high"],
+      "m-default": ["low", "high"],
+      "m-alt": ["medium"],
+    });
+    assert.equal(requests("model/list").length, 2);
+    const settings = { model: "m-alt", reasoningEffort: "medium" };
+    assert.equal(
+      await bounded(runtime.startThread(root, [], settings), 3000),
+      "thread-1",
+    );
+    await bounded(runtime.startTurn("thread-1", root, "go", settings), 3000);
+    assert.deepEqual(requests("thread/start"), [
+      {
+        cwd: root,
+        approvalPolicy: "never",
+        sandbox: "workspace-write",
+        ephemeral: false,
+        model: "m-alt",
+        config: { model_reasoning_effort: "medium" },
+      },
+    ]);
+    const [turnStart] = requests("turn/start") as Record<string, unknown>[];
+    assert.equal(turnStart?.model, "m-alt");
+    assert.equal(turnStart?.effort, "medium");
+    assert.deepEqual(runtime.observedSettings("thread-1"), {
+      model: "m-alt",
+      modelProvider: "fake",
+      reasoningEffort: "medium",
+      serviceTier: null,
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a profile without settings sends the same thread and turn start parameters", async () => {
+  const { root, runtime, requests, cleanup } = settingsFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(runtime.startTurn("thread-1", root, "go"), 3000);
+    assert.deepEqual(requests("thread/start"), [
+      {
+        cwd: root,
+        approvalPolicy: "never",
+        sandbox: "workspace-write",
+        ephemeral: false,
+      },
+    ]);
+    assert.deepEqual(requests("turn/start"), [
+      {
+        threadId: "thread-1",
+        cwd: root,
+        input: [{ type: "text", text: "go" }],
+        approvalPolicy: "never",
+        sandboxPolicy: executionPolicy(root),
+      },
+    ]);
+    // Settings with both values null are the same as none.
+    await bounded(
+      runtime.startTurn("thread-1", root, "again", {
+        model: null,
+        reasoningEffort: null,
+      }),
+      3000,
+    );
+    const turns = requests("turn/start") as Record<string, unknown>[];
+    assert.equal("model" in (turns[1] ?? {}), false);
+    assert.equal("effort" in (turns[1] ?? {}), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("preflight refuses values outside the runtime catalogue and never waits without settings", async () => {
+  const { root, runtime, cleanup } = settingsFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    assert.equal(await runtime.preflightTurn({ workspace: root }), undefined);
+    await eventually(() => runtime.supportedSettings() !== undefined);
+    const preflight = (model: string | null, reasoningEffort: string | null) =>
+      runtime.preflightTurn({
+        workspace: root,
+        settings: { model, reasoningEffort },
+      });
+    assert.equal(await preflight(null, null), undefined);
+    assert.equal(await preflight("m-alt", "medium"), undefined);
+    assert.equal(await preflight(null, "high"), undefined);
+    assert.equal(
+      await preflight("x", null),
+      "Codex runtime unavailable: model x is not supported",
+    );
+    assert.equal(
+      await preflight("m-alt", "high"),
+      "Codex runtime unavailable: effort high is not supported for m-alt",
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("an unreadable catalogue waits with a reason, then retries once and wakes admission", async () => {
+  const { root, runtime, requests, cleanup } = settingsFakeRuntime({
+    failFirstList: true,
+  });
+  let wakes = 0;
+  runtime.onAdmissionChange(() => {
+    wakes += 1;
+  });
+  try {
+    // A failed read does not fail start, and a profile without settings is never held.
+    await bounded(runtime.start(), 3000);
+    assert.equal(await runtime.preflightTurn({ workspace: root }), undefined);
+    await eventually(() => wakes === 1);
+    assert.equal(runtime.supportedSettings(), undefined);
+    const settings = { model: "m-alt", reasoningEffort: "medium" };
+    const reason = "Codex runtime unavailable: supported models are unknown";
+    assert.equal(
+      await runtime.preflightTurn({ workspace: root, settings }),
+      reason,
+    );
+    // Single-flight: a second preflight while the retry runs starts no further read.
+    assert.equal(
+      await runtime.preflightTurn({ workspace: root, settings }),
+      reason,
+    );
+    await eventually(() => wakes === 2);
+    assert.equal(
+      await runtime.preflightTurn({ workspace: root, settings }),
+      undefined,
+    );
+    assert.equal(requests("model/list").length, 3);
+  } finally {
+    await cleanup();
   }
 });

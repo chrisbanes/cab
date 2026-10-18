@@ -27,6 +27,7 @@ import {
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
 import { z } from "zod";
+import { supportedRuntimeSettingsSchema } from "../core/execution-runtime.js";
 import type { ExecutionHarness } from "./execution-harness.js";
 import type {
   ExactExecutionIdentity,
@@ -67,6 +68,21 @@ const thread = z.object({
   sandbox: z.object({ type: z.literal("workspaceWrite") }),
 });
 const turn = z.object({ turn: z.object({ id: z.string() }) });
+/** App Server `model/list`: the runtime's own catalogue of models and their reasoning efforts. */
+const modelList = z.object({
+  data: z.array(
+    z.object({
+      model: z.string(),
+      isDefault: z.boolean(),
+      supportedReasoningEfforts: z.array(
+        z.object({ reasoningEffort: z.string() }),
+      ),
+    }),
+  ),
+  nextCursor: z.string().nullable().optional(),
+});
+const maxModelListPages = 8;
+const defaultSettingsRetryMs = 30_000;
 const qualifiedCodexVersion = "codex-cli 0.159.0";
 /** Native input is qualified only for the pinned Codex CLI. */
 export const codexNativeInputQualificationSchema =
@@ -552,7 +568,7 @@ export function unexpectedRequest(
   return { method };
 }
 
-/** Per-turn model settings from the bound profile revision (Claude only). */
+/** Model settings of the bound profile revision, passed only when it sets a value. */
 export interface RuntimeTurnSettings {
   model: string | null;
   reasoningEffort: string | null;
@@ -586,6 +602,7 @@ export interface Runtime {
   startThread(
     workspace: string,
     tools?: readonly RuntimeToolDefinition[],
+    settings?: RuntimeTurnSettings,
   ): Promise<string>;
   resumeThread(
     threadId: string,
@@ -1524,8 +1541,104 @@ export class CodexRuntime implements Runtime {
       captureProcessIdentity?: (
         pid: number | undefined,
       ) => Promise<RuntimeProcessIdentity | null>;
+      /** Delay before a failed `model/list` read is retried; default 30s. */
+      settingsRetryMs?: number;
     },
   ) {}
+
+  private supported: Map<string, readonly string[]> | undefined;
+  private settingsRead: Promise<void> | undefined;
+  private admissionChanged?: () => void;
+
+  /** Undefined until `model/list` has been read; `default` is the default model's entry. */
+  supportedSettings(): Record<string, readonly string[]> | undefined {
+    return this.supported && Object.fromEntries(this.supported);
+  }
+
+  onAdmissionChange(listener: () => void): void {
+    this.admissionChanged = listener;
+  }
+
+  /** Refuses configured values the runtime's own catalogue lacks; no settings is never a wait. */
+  async preflightTurn(input: {
+    workspace: string;
+    settings?: RuntimeTurnSettings;
+  }): Promise<string | undefined> {
+    const { settings } = input;
+    if (
+      !settings ||
+      (settings.model === null && settings.reasoningEffort === null)
+    )
+      return undefined;
+    const unavailable = (reason: string) =>
+      `Codex runtime unavailable: ${reason}`;
+    const supported = this.supported;
+    if (!supported) {
+      this.readSupportedSettings();
+      return unavailable("supported models are unknown");
+    }
+    const model = settings.model ?? "default";
+    const efforts = supported.get(model);
+    if (!efforts) return unavailable(`model ${model} is not supported`);
+    if (
+      settings.reasoningEffort !== null &&
+      !efforts.includes(settings.reasoningEffort)
+    )
+      return unavailable(
+        `effort ${settings.reasoningEffort} is not supported for ${model}`,
+      );
+    return undefined;
+  }
+
+  /** Single-flight and never awaited by a caller; a failure retries after a delay. */
+  private readSupportedSettings(): void {
+    const child = this.child;
+    if (!child || this.settingsRead) return;
+    const notify = (afterMs: number) =>
+      setTimeout(() => {
+        if (this.child === child) this.admissionChanged?.();
+      }, afterMs).unref();
+    this.settingsRead = this.listSupportedSettings().then(
+      (supported) => {
+        if (this.child !== child) return;
+        this.supported = supported;
+        this.settingsRead = undefined;
+        notify(0);
+      },
+      () => {
+        if (this.child !== child) return;
+        this.settingsRead = undefined;
+        notify(this.options.settingsRetryMs ?? defaultSettingsRetryMs);
+      },
+    );
+  }
+
+  private async listSupportedSettings(): Promise<
+    Map<string, readonly string[]>
+  > {
+    const entries: { model: string; efforts: string[] }[] = [];
+    let defaultEfforts: string[] | undefined;
+    let cursor: string | null = null;
+    for (let page = 0; page < maxModelListPages; page += 1) {
+      const listed: z.infer<typeof modelList> = modelList.parse(
+        await this.request("model/list", cursor ? { cursor } : {}),
+      );
+      for (const entry of listed.data) {
+        const efforts = entry.supportedReasoningEfforts.map(
+          (effort) => effort.reasoningEffort,
+        );
+        entries.push({ model: entry.model, efforts });
+        if (entry.isDefault) defaultEfforts = efforts;
+      }
+      cursor = listed.nextCursor ?? null;
+      if (!cursor) break;
+    }
+    // An unfinished listing or one without a default marker cannot vouch for `default`.
+    if (cursor || !defaultEfforts) throw new Error("model/list is incomplete");
+    const models = [{ model: "default", efforts: defaultEfforts }, ...entries];
+    supportedRuntimeSettingsSchema.parse({ models });
+    return new Map(models.map((entry) => [entry.model, entry.efforts]));
+  }
 
   onUnexpectedRequest(listener: (request: UnexpectedRequest) => void): void {
     this.unexpected = listener;
@@ -1576,6 +1689,8 @@ export class CodexRuntime implements Runtime {
     this.failure = undefined;
     this.clearConversationCaptures();
     this.nativeGeneration = randomUUID();
+    this.supported = undefined;
+    this.settingsRead = undefined;
     this.nativeEndpoints.clear();
     this.nativeEndpointsByTurn.clear();
     this.nativeEndpointsByRpcId.clear();
@@ -1633,6 +1748,8 @@ export class CodexRuntime implements Runtime {
       if (this.child === child) await this.stop();
       throw error;
     }
+    // Not awaited: a slow or failed catalogue read must not delay or fail start.
+    this.readSupportedSettings();
   }
 
   async stop(): Promise<void> {
@@ -1643,6 +1760,8 @@ export class CodexRuntime implements Runtime {
     this.nativeGeneration = undefined;
     this.child = undefined;
     this.processIdentityValue = null;
+    this.supported = undefined;
+    this.settingsRead = undefined;
     this.fail(new Error("Runtime stopped"));
     this.nativeEndpoints.clear();
     this.nativeEndpointsByTurn.clear();
@@ -1682,6 +1801,7 @@ export class CodexRuntime implements Runtime {
   async startThread(
     workspace: string,
     tools: readonly RuntimeToolDefinition[] = [],
+    settings?: RuntimeTurnSettings,
   ): Promise<string> {
     const definitions = registeredTools(tools);
     const response = thread.parse(
@@ -1692,6 +1812,11 @@ export class CodexRuntime implements Runtime {
           approvalPolicy: "never",
           sandbox: "workspace-write",
           ephemeral: false,
+          // The thread-start snapshot then reports the configured values, as later resumes do.
+          ...(settings?.model ? { model: settings.model } : {}),
+          ...(settings?.reasoningEffort
+            ? { config: { model_reasoning_effort: settings.reasoningEffort } }
+            : {}),
           ...(definitions.length > 0 ? { dynamicTools: definitions } : {}),
         },
         (raw) => {
@@ -1783,6 +1908,7 @@ export class CodexRuntime implements Runtime {
     threadId: string,
     workspace: string,
     prompt: string,
+    settings?: RuntimeTurnSettings,
   ): Promise<string> {
     // Retire only the ephemeral readback before a new turn can emit callbacks.
     // Saved endpoints/receipts and disqualified turn identities remain historical.
@@ -1799,6 +1925,11 @@ export class CodexRuntime implements Runtime {
         input: [{ type: "text", text: prompt }],
         approvalPolicy: "never",
         sandboxPolicy: executionPolicy(workspace),
+        // Re-asserted every turn so follow-up and resumed turns keep the captured revision.
+        ...(settings?.model ? { model: settings.model } : {}),
+        ...(settings?.reasoningEffort
+          ? { effort: settings.reasoningEffort }
+          : {}),
       }),
     );
     this.nativeTurns.set(threadId, response.turn.id);

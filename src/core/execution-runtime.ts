@@ -17,7 +17,7 @@ export const executionIntentStateSchema = z.enum([
   "resolved-failed",
 ]);
 
-/** Shape only; the installed Claude integration narrows supported values (C3). */
+/** Shape only; the installed integration narrows supported values. */
 const runtimeSetting = z
   .string()
   .trim()
@@ -27,7 +27,15 @@ const runtimeSetting = z
   .nullable();
 
 export const profileRuntimeSchema = z.discriminatedUnion("harness", [
-  z.object({ harness: z.literal("codex") }).strict(),
+  // Optional, with no default: a profile without settings stays `{ harness: "codex" }` in
+  // stored rows and recorded commands.
+  z
+    .object({
+      harness: z.literal("codex"),
+      model: runtimeSetting.optional(),
+      reasoningEffort: runtimeSetting.optional(),
+    })
+    .strict(),
   z
     .object({
       harness: z.literal("claude"),
@@ -52,17 +60,18 @@ export const executionHarnessLabels: Record<ExecutionHarness, string> = {
   claude: "Claude",
 };
 
-/** "Codex", "Claude · sonnet · high" or "Claude · default model and effort". */
+/** "Codex", "Codex · gpt-x · high", "Claude · sonnet · high" or "Claude · default model and effort". */
 export function runtimeSummary(runtime: ProfileRuntime): string {
   const label = executionHarnessLabels[runtime.harness];
-  if (runtime.harness === "codex") return label;
-  if (runtime.model === null && runtime.reasoningEffort === null)
-    return `${label} · default model and effort`;
-  return [
-    label,
-    runtime.model ?? "default model",
-    runtime.reasoningEffort ?? "default effort",
-  ].join(" · ");
+  const model = runtime.model ?? null;
+  const effort = runtime.reasoningEffort ?? null;
+  if (model === null && effort === null)
+    return runtime.harness === "codex"
+      ? label
+      : `${label} · default model and effort`;
+  return [label, model ?? "default model", effort ?? "default effort"].join(
+    " · ",
+  );
 }
 
 /** Values the installed integration supports: each model with its reasoning efforts. */
@@ -84,18 +93,18 @@ export type SupportedRuntimeSettings = z.infer<
   typeof supportedRuntimeSettingsSchema
 >;
 
-/** The field a Claude runtime fails against supported settings; `default` is the unset model. */
+/** The field a runtime fails against supported settings; `default` is the unset model. */
 export function unsupportedRuntimeField(
   runtime: ProfileRuntime,
   supported: SupportedRuntimeSettings,
 ): "runtime.model" | "runtime.reasoningEffort" | null {
-  if (runtime.harness !== "claude") return null;
-  const entry = supported.models.find(
-    (m) => m.model === (runtime.model ?? "default"),
-  );
+  const model = runtime.model ?? null;
+  const effort = runtime.reasoningEffort ?? null;
+  if (runtime.harness === "codex" && model === null && effort === null)
+    return null;
+  const entry = supported.models.find((m) => m.model === (model ?? "default"));
   if (!entry) return "runtime.model";
-  return runtime.reasoningEffort !== null &&
-    !entry.efforts.includes(runtime.reasoningEffort)
+  return effort !== null && !entry.efforts.includes(effort)
     ? "runtime.reasoningEffort"
     : null;
 }
