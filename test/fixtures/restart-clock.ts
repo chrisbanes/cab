@@ -73,16 +73,20 @@ export async function flush(turns = 100) {
     await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-/** Runs the event loop turn by turn until the condition holds; bounded by turns, not time. */
+/**
+ * Runs the event loop turn by turn until the condition holds. The bound is a deadline: work
+ * that waits on real I/O (SQLite, git, files) advances by time, not by turns, so a turn
+ * count passes before it has progressed whenever the machine is loaded.
+ */
 export async function settle(
   condition: () => boolean,
   describe: () => unknown = () => undefined,
-  turns = 2000,
+  timeoutMs = 10_000,
 ) {
-  for (let turn = 0; turn < turns; turn++) {
-    if (condition()) return;
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline)
+      throw new Error(`Condition not reached: ${JSON.stringify(describe())}`);
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  if (!condition())
-    throw new Error(`Condition not reached: ${JSON.stringify(describe())}`);
 }

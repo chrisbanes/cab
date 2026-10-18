@@ -31,9 +31,11 @@ const refresh = async (page: Page) => {
   );
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await read;
-  await page.getByText("Refreshing.", { exact: false }).waitFor({
-    state: "hidden",
-  });
+  // The shell and the page each show their own "Refreshing." notice while their read is
+  // in flight, so wait for none rather than for one locator to hide.
+  await page.waitForFunction(
+    () => !document.body.innerText.includes("Refreshing."),
+  );
 };
 /** The "Reveal …" button of a private text field. */
 const revealButton = (page: Page, noun: string) =>
