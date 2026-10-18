@@ -364,7 +364,34 @@ export async function checkOperatorUi(
     ).status !== 200
   )
     throw new Error(`Operator UI asset ${asset} was not served`);
+  await checkServiceWorker(origin, requestMs);
   return asset;
+}
+
+/**
+ * The push worker is optional to the service (a build without one serves a 404), so a release
+ * that lost it would otherwise pass: it must be served as JavaScript, uncached, at /app/ scope.
+ */
+async function checkServiceWorker(origin, requestMs) {
+  const response = await fetch(`${origin}/app/service-worker.js`, {
+    signal: AbortSignal.timeout(requestMs),
+  });
+  const problem =
+    response.status !== 200
+      ? `status ${response.status}`
+      : !/^text\/javascript/.test(response.headers.get("content-type") ?? "")
+        ? "a non-JavaScript content type"
+        : response.headers.get("cache-control") !== "no-store"
+          ? "a cacheable response"
+          : ![null, "/app/"].includes(
+                response.headers.get("service-worker-allowed"),
+              )
+            ? "a scope wider than /app/"
+            : !(await response.text()).includes('addEventListener("push"')
+              ? "no push handler"
+              : undefined;
+  if (problem)
+    throw new Error(`/app/service-worker.js was served with ${problem}`);
 }
 
 async function waitForApp(origin, child, deadline, requestMs) {

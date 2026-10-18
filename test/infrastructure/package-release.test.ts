@@ -199,3 +199,60 @@ test("checkOperatorUi fails within its request bound when an asset stalls", asyn
   );
   assert.ok(Date.now() - started < 5000);
 });
+
+test("checkOperatorUi requires the push worker at /app/ with the right headers", async (t) => {
+  const good = {
+    status: 200,
+    headers: {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+    } as Record<string, string>,
+    body: 'self.addEventListener("push", () => {});',
+  };
+  let worker = good;
+  const server = createServer((request, response) => {
+    if (request.url === "/app")
+      response.end('<script src="/assets/index.js"></script>');
+    else if (request.url === "/assets/index.js") response.end("");
+    else if (request.url === "/app/service-worker.js") {
+      response.writeHead(worker.status, worker.headers);
+      response.end(worker.body);
+    } else response.writeHead(404).end();
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  t.after(() => server.closeAllConnections());
+  t.after(() => new Promise((done) => server.close(done)));
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const check = () =>
+    release.checkOperatorUi(
+      origin,
+      { exitCode: null, signalCode: null },
+      Date.now() + 60_000,
+    );
+  assert.equal(await check(), "/assets/index.js");
+  worker = {
+    ...good,
+    headers: { ...good.headers, "service-worker-allowed": "/app/" },
+  };
+  assert.equal(await check(), "/assets/index.js");
+  const bad: [RegExp, typeof good][] = [
+    [/status 404/, { ...good, status: 404 }],
+    [
+      /non-JavaScript/,
+      { ...good, headers: { ...good.headers, "content-type": "text/html" } },
+    ],
+    [
+      /cacheable/,
+      { ...good, headers: { ...good.headers, "cache-control": "max-age=60" } },
+    ],
+    [
+      /wider than \/app\//,
+      { ...good, headers: { ...good.headers, "service-worker-allowed": "/" } },
+    ],
+    [/no push handler/, { ...good, body: "// empty" }],
+  ];
+  for (const [message, served] of bad) {
+    worker = served;
+    await assert.rejects(check(), message);
+  }
+});

@@ -4,6 +4,7 @@ import {
   type DaemonFacts,
   daemonDecision,
   type Observed,
+  parseLsofListeners,
   type ProcessIdentity,
   refineObserved,
   type Seen,
@@ -163,4 +164,63 @@ test("daemon ownership observations only move up and never lose an unconfirmed i
     crowded = refineObserved(crowded, identity(id));
   assert.equal(crowded?.unidentified, true);
   assert.ok((crowded?.processes.length ?? 0) <= 8);
+});
+
+// `lsof -nP -iTCP:PORT -sTCP:LISTEN -Fp` as the default host runs it: exit status and stdout only.
+const lsof = (status: number, stdout: string) =>
+  parseLsofListeners({ status, stdout });
+
+test("lsof listeners: nothing listening is an empty list, not an unknown one", () => {
+  assert.deepEqual(lsof(1, ""), []);
+  assert.deepEqual(lsof(1, "\n"), []);
+  assert.deepEqual(lsof(0, ""), []);
+  // Permission-denied warnings go to stderr, which is not read: the result is the same as free.
+  assert.deepEqual(lsof(1, ""), lsof(1, "  \n"));
+});
+
+test("lsof listeners: every listener pid is returned, in order", () => {
+  assert.deepEqual(lsof(0, "p4242\n"), [4242]);
+  assert.deepEqual(lsof(0, "p10\np20\np30\n"), [10, 20, 30]);
+  assert.deepEqual(lsof(0, "p10\np20"), [10, 20], "no trailing newline");
+  // A process on both IPv4 and IPv6 may be listed twice; each is checked against the identity.
+  assert.deepEqual(lsof(0, "p10\np10\n"), [10, 10]);
+});
+
+test("lsof listeners: other fields and IPv6 addresses are never read as pids", () => {
+  assert.deepEqual(
+    lsof(0, "p10\nf7\nn[::1]:8080\np20\nf9\nn*:8080\n"),
+    [10, 20],
+  );
+  assert.deepEqual(
+    lsof(0, "p10\nn[fe80::1%lo0]:8080\nn127.0.0.1:8080\n"),
+    [10],
+  );
+});
+
+test("lsof listeners: only whole p<digits> lines are pids", () => {
+  for (const line of [
+    "p",
+    "pabc",
+    "p12x",
+    "p-5",
+    "p1 2",
+    "p1.5",
+    " p12",
+    "p12 ",
+    "P12",
+    "q12",
+    "12",
+    "lsof: WARNING: can't stat() fuse file system /Volumes/x",
+  ])
+    assert.deepEqual(lsof(0, `${line}\n`), [], JSON.stringify(line));
+  assert.deepEqual(lsof(0, "p10\ngarbage\np20x\n\np30\n"), [10, 30]);
+});
+
+test("lsof listeners: any failure is unknown, whatever stdout holds", () => {
+  for (const status of [2, 127, -1])
+    assert.equal(lsof(status, "p10\n"), null, `status ${status}`);
+  for (const status of [2, 127, -1])
+    assert.equal(lsof(status, ""), null, `status ${status} with no output`);
+  // Exit 1 is "nothing found" only with no output: partial results are not a clean answer.
+  assert.equal(lsof(1, "p10\n"), null);
 });
