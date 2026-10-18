@@ -4383,11 +4383,20 @@ export class StandaloneService {
     const { drafting, state } = this.started();
     const run = drafting.get(runId);
     if (!run) throw new DomainConflictError("Unknown drafting run");
+    const workId = StandaloneService.draftingWorkId(runId);
     if (run.state === "queued") {
-      drafting.transition(runId, "interrupted", draftingStoppedReason);
-      state.releaseDraftingExecution(StandaloneService.draftingWorkId(runId));
-      await this.discardDraftingWorkspace(runId);
-    } else if (run.state === "running" || run.state === "stopping")
+      // Leaving `queued` first, synchronously, ends any admission in flight.
+      drafting.transition(runId, "stopping", draftingCleanupReason);
+      state.releaseDraftingExecution(workId);
+      await this.settleUnadmitted(runId, "interrupted", draftingStoppedReason);
+    } else if (
+      run.state === "stopping" &&
+      !this.draftingControls.has(runId) &&
+      !state.recoveryIdentity(workId)
+    )
+      // Never admitted and waiting only for its copy to go: Stop retries the removal.
+      await this.settleUnadmitted(runId, "interrupted", draftingStoppedReason);
+    else if (run.state === "running" || run.state === "stopping")
       this.requestDraftingStop(runId, draftingStoppedReason);
     return drafting.require(runId);
   }
@@ -4524,6 +4533,19 @@ export class StandaloneService {
   }
 
   /**
+   * A run that never started settles once its copy is gone; until then it stays
+   * `stopping`, so Stop or the next start can retry the removal.
+   */
+  private async settleUnadmitted(
+    runId: string,
+    state: "interrupted" | "failed",
+    reason: string,
+  ): Promise<void> {
+    if (await this.discardDraftingWorkspace(runId))
+      this.started().drafting.transition(runId, state, reason);
+  }
+
+  /**
    * Removes a run's worktree and Claude sandbox base. False when the copy is
    * still there, so the caller keeps the run unsettled and a later start retries.
    */
@@ -4572,6 +4594,24 @@ export class StandaloneService {
     for (const run of c.drafting.unfinished()) {
       if (run.state === "queued") continue;
       const workId = StandaloneService.draftingWorkId(run.runId);
+      // Never admitted, so nothing ran: only its copy was waiting to go.
+      if (run.state === "stopping" && !c.state.recoveryIdentity(workId)) {
+        if (
+          await StandaloneService.discardDrafting(
+            c.draftingWorkspaces,
+            c.draftingBindings,
+            run.runId,
+          )
+        ) {
+          c.state.releaseDraftingExecution(workId);
+          c.drafting.transition(
+            run.runId,
+            "interrupted",
+            draftingRestartedReason,
+          );
+        }
+        continue;
+      }
       if (await c.supervisor.verifyEnded(workId)) {
         // The copy goes first; a run whose copy stays is held with its capacity.
         if (
@@ -4650,9 +4690,13 @@ export class StandaloneService {
       return realpathSync(binding.path);
     } catch {
       if (drafting.get(runId)?.state === "queued") {
-        drafting.transition(runId, "failed", draftingWorkspaceFailedReason);
+        drafting.transition(runId, "stopping", draftingCleanupReason);
         state.releaseDraftingExecution(request.workId);
-        await this.discardDraftingWorkspace(runId);
+        await this.settleUnadmitted(
+          runId,
+          "failed",
+          draftingWorkspaceFailedReason,
+        );
       }
       return undefined;
     }

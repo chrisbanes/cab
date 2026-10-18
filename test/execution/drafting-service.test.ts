@@ -760,6 +760,56 @@ test("a copy that cannot be removed keeps the run held with its capacity until a
   await second.service.stop();
 });
 
+test("a queued run whose copy cannot be removed stays stopping, and Stop retries the removal", async (t) => {
+  const w = world(t);
+  const flag = join(w.root, "refuse-remove");
+  const git = join(w.root, "git-shim");
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    git,
+    `#!/bin/sh\ncase "$*" in *"worktree remove"*) [ -e '${flag}' ] && exit 1;; esac\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  const { service, codex } = w.open({ gitExecutable: git });
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  w.execute(service, {
+    type: "capacity.configure",
+    globalLimit: 1,
+    projectOverrides: {},
+  });
+  codex.script(() => new Promise<void>(() => {}));
+  const running = randomUUID();
+  await service.startDrafting({ runId: running, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(running)?.state === "running",
+    () => w.tracked(service).runs(),
+  );
+  const queued = randomUUID();
+  await service.startDrafting({ runId: queued, projectId, idea });
+  const copies = join(w.dataDir, "drafting-workspaces");
+  await waitUntil(
+    () => readdirSync(copies).length === 2,
+    () => readdirSync(copies),
+  );
+  writeFileSync(flag, "");
+  const stopped = await service.stopDrafting(queued);
+  // The copy stayed, so the run is not settled; it holds no capacity.
+  assert.equal(stopped.state, "stopping");
+  assert.equal(readdirSync(copies).length, 2);
+  assert.equal(w.tracked(service).usage(projectId).global, 1);
+  rmSync(flag);
+  assert.equal((await service.stopDrafting(queued)).state, "interrupted");
+  assert.equal(readdirSync(copies).length, 1);
+  // It is never admitted afterwards.
+  await service.stopDrafting(running);
+  await waitUntil(
+    () => service.readDrafting(running)?.state === "interrupted",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(service.readDrafting(queued)?.state, "interrupted");
+});
+
 test("a Stop during thread start is applied once the turn binds", async (t) => {
   const w = world(t);
   const opened = w.open();

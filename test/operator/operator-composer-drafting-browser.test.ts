@@ -310,6 +310,39 @@ for (const [name, viewport] of viewports) {
     await until(() => f.service.readDrafting(runId)?.state === "interrupted");
   });
 
+  test(`${name}: a draft in progress stays visible and stoppable after the lead is removed`, async (_t, j) => {
+    const { f, page, projectId, open } = await launch(j, viewport);
+    await open();
+    await openPanel(page);
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    const domain = f.service.domain();
+    domain.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: crypto.randomUUID(),
+      projectId,
+      expectedVersion: Number(domain.project(projectId).version),
+      leadProfileId: null,
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Resume unfinished input" }).click();
+    // No lead means no new draft, but the run in progress shows its own state.
+    await panel(page).getByText("Drafting", { exact: true }).waitFor();
+    const stop = panel(page).getByRole("button", { name: "Stop", exact: true });
+    await stop.waitFor();
+    await stop.click();
+    await until(() => f.service.readDrafting(runId)?.state === "stopping");
+    f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
+    await panel(page).getByText("Draft interrupted", { exact: true }).waitFor();
+    // With the lead gone, Retry cannot start another.
+    assert.equal(
+      await panel(page).getByRole("button", { name: "Retry" }).isDisabled(),
+      true,
+    );
+  });
+
   test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport, {
       lead: false,

@@ -842,7 +842,10 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   its capacity and the composer keeps showing it as stopping; the next service start
   retries the removal and settles the run as interrupted, so a proposal held back
   this way is not offered. Drafting has no operator recovery. A queued run that has
-  not been admitted has nothing to wait for and is interrupted at once.
+  not been admitted has no runtime to wait for: it is interrupted as soon as its
+  working copy is removed, and stays stopping, with Stop or the next start retrying, if
+  the removal fails. The panel shows a run in progress from its own state even when
+  the project has lost its lead; the lead only gates starting another.
 - **Fill.** Nothing is saved or created until Save draft or Create. An empty title or
   outcome field is filled. A field the operator already typed in shows the proposal
   beside it with Replace or Keep, so typed text is never overwritten silently. An

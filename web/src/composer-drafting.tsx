@@ -218,7 +218,7 @@ export function useDrafting({
 
   const idle = !runId;
   const view: keyof typeof stateLabels =
-    lead === null || !input.projectId
+    !input.projectId || (lead === null && idle)
       ? "unavailable"
       : idle || lost
         ? "idle"

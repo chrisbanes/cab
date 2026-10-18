@@ -28,7 +28,7 @@ export type DraftingState = (typeof draftingStates)[number];
 
 /** Legal moves; every other pair, including any move out of a terminal state, is refused. */
 const transitions: Record<DraftingState, readonly DraftingState[]> = {
-  queued: ["running", "interrupted", "failed"],
+  queued: ["running", "stopping", "interrupted", "failed"],
   running: ["stopping", "proposed", "interrupted", "failed"],
   stopping: ["interrupted", "failed"],
   proposed: ["accepted", "discarded", "expired"],
