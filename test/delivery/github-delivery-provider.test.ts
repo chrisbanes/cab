@@ -239,6 +239,7 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     base: { sha: base, ref: "main", repo: { node_id: "R1" } },
   };
   let protection: unknown = null;
+  let threadPages: unknown[] | null = null;
   let rules: unknown[] = [],
     checks: unknown[] = [
       {
@@ -265,7 +266,18 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
         assert.match(body.query, /requiresDeployments/);
         assert.match(body.query, /requiredDeploymentEnvironments/);
         assert.match(body.query, /requiresStrictStatusChecks/);
-        return Response.json({ data: { node: graphPr } });
+        const after = body.variables.after as string | null;
+        return Response.json({
+          data: {
+            node: threadPages
+              ? {
+                  ...graphPr,
+                  reviewThreads:
+                    threadPages[after === null ? 0 : Number(after)],
+                }
+              : graphPr,
+          },
+        });
       }
       return Response.json({
         data: { node: { id: "R1", nameWithOwner: "org/repo" } },
@@ -317,6 +329,9 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     graphPr,
     raw,
     getWrites: () => writes,
+    setThreadPages: (v: unknown[]) => {
+      threadPages = v;
+    },
     setProtection: (value: unknown) => {
       protection = value;
     },
@@ -424,7 +439,14 @@ test("HTTP exact-head observation rejects app spoofing, missing data and malform
 test("effective pull-request merge methods and conversation requirements constrain actual merge", async () => {
   const f = prProviderFixture({
     reviewThreads: {
-      nodes: [{ isResolved: false }],
+      nodes: [
+        {
+          id: "T1",
+          isResolved: false,
+          firstComment: { nodes: [{ id: "C1" }] },
+          latestComment: { nodes: [{ id: "C1" }] },
+        },
+      ],
       pageInfo: { hasNextPage: false, endCursor: null },
     },
   });
@@ -532,7 +554,7 @@ test("fresh closed-issue readback reports the latest ClosedEvent and its closer 
 });
 
 import type { ExternalAction } from "../../src/core/delivery.js";
-test("all nine concrete action transports preserve exact target, incremental labels and readback", async () => {
+test("all eleven concrete action transports preserve exact target, incremental labels and readback", async () => {
   const writes: Array<{ path: string; method: string; body: unknown }> = [];
   let reads = 0;
   class DispatchProvider extends GitHubHttpDeliveryProvider {
@@ -595,6 +617,16 @@ test("all nine concrete action transports preserve exact target, incremental lab
     { kind: "pr.ready", target: pr },
     { kind: "pr.merge", target: pr, method: "squash", reviewedResultIds: [] },
     { kind: "issue.close", target: issue, reviewedResultIds: [] },
+    {
+      kind: "pr.thread.reply",
+      target: { ...pr, threadNodeId: "T1" },
+      body: "Fixed",
+    },
+    {
+      kind: "pr.thread.resolve",
+      target: { ...pr, threadNodeId: "T1" },
+      expectedLatestCommentNodeId: "C2",
+    },
   ];
   for (const action of actions) {
     const record = commentRecord();
@@ -604,7 +636,7 @@ test("all nine concrete action transports preserve exact target, incremental lab
       "confirmed-success",
     );
   }
-  assert.equal(reads, 9);
+  assert.equal(reads, 11);
   assert.deepEqual(
     writes.map((w) => [w.method, w.path]),
     [
@@ -618,6 +650,8 @@ test("all nine concrete action transports preserve exact target, incremental lab
       ["POST", "/graphql"],
       ["PUT", "/repos/org/repo/pulls/7/merge"],
       ["PATCH", "/repos/org/repo/issues/7"],
+      ["POST", "/graphql"],
+      ["POST", "/graphql"],
     ],
   );
   assert.deepEqual(writes[8]?.body, {
@@ -891,4 +925,314 @@ test("a rate-limited write is a retryable confirmed failure that names when to r
   ).performAction(commentRecord());
   assert.equal(denied.state, "confirmed-failure");
   assert.equal(denied.retryable, undefined);
+});
+
+test("pull-request observation lists every paginated review thread with first and latest comment", async () => {
+  const f = prProviderFixture();
+  const thread = (
+    id: string,
+    isResolved: boolean,
+    first: string,
+    last: string,
+  ) => ({
+    id,
+    isResolved,
+    firstComment: { nodes: [{ id: first }] },
+    latestComment: { nodes: [{ id: last }] },
+  });
+  f.setThreadPages([
+    {
+      nodes: [thread("T2", true, "C3", "C3")],
+      pageInfo: { hasNextPage: true, endCursor: "1" },
+    },
+    {
+      nodes: [thread("T1", false, "C1", "C2")],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    },
+  ]);
+  f.setRules([
+    {
+      type: "pull_request",
+      parameters: {
+        required_approving_review_count: 0,
+        required_review_thread_resolution: true,
+      },
+    },
+  ]);
+  const p = await f.provider.inspectPr(f.identity, f.policy);
+  assert.deepEqual(p.reviewThreads, [
+    {
+      nodeId: "T1",
+      isResolved: false,
+      firstCommentNodeId: "C1",
+      latestCommentNodeId: "C2",
+    },
+    {
+      nodeId: "T2",
+      isResolved: true,
+      firstCommentNodeId: "C3",
+      latestCommentNodeId: "C3",
+    },
+  ]);
+  // An unresolved thread on a later page still holds the conversation gate.
+  assert.ok(p.mergeBlockers.includes("unresolved-review-thread"));
+});
+
+/** A scripted GitHub holding one review thread; counts mutations and can lose their responses. */
+function threadFixture() {
+  const state = {
+    resolved: false,
+    resolvedBy: null as string | null,
+    comments: [
+      {
+        id: "C1",
+        body: "Please fix",
+        state: "SUBMITTED",
+        author: "U_REVIEWER",
+      },
+    ],
+    pr: { id: "P7", number: 7, repository: { id: "R1" } },
+    replies: 0,
+    resolves: 0,
+    lost: false,
+    graphqlErrors: false,
+    replyState: "SUBMITTED",
+    status: 200,
+  };
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/user") return Response.json({ node_id: "U1" });
+    if (url.pathname === "/repos/org/repo")
+      return Response.json({
+        node_id: "R1",
+        full_name: "org/repo",
+        allow_merge_commit: true,
+        allow_squash_merge: true,
+        allow_rebase_merge: false,
+      });
+    assert.equal(url.pathname, "/graphql");
+    const { query, variables } = JSON.parse(String(init?.body));
+    const operation = /^(?:query|mutation) (\w+)/.exec(query)?.[1];
+    if (operation === "EnsembleDeliveryRepository")
+      return Response.json({
+        data: { node: { id: "R1", nameWithOwner: "org/repo" } },
+      });
+    if (operation === "EnsembleDeliveryThread")
+      return Response.json({
+        data: {
+          node: {
+            id: "T1",
+            isResolved: state.resolved,
+            resolvedBy: state.resolvedBy ? { id: state.resolvedBy } : null,
+            pullRequest: state.pr,
+            latestComment: { nodes: [{ id: state.comments.at(-1)?.id }] },
+            comments: {
+              nodes: state.comments.map((c) => ({
+                id: c.id,
+                body: c.body,
+                state: c.state,
+                author: { __typename: "User", id: c.author },
+              })),
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      });
+    if (state.status !== 200) return new Response("", { status: state.status });
+    if (operation === "EnsembleDeliveryThreadReply") {
+      state.replies++;
+      assert.equal(variables.thread, "T1");
+      if (state.graphqlErrors)
+        return Response.json({ data: null, errors: [{ message: "nope" }] });
+      state.comments.push({
+        id: `C${state.comments.length + 1}`,
+        body: variables.body,
+        state: state.replyState,
+        author: "U1",
+      });
+    } else if (operation === "EnsembleDeliveryThreadResolve") {
+      state.resolves++;
+      assert.deepEqual(variables, { thread: "T1" });
+      state.resolved = true;
+      state.resolvedBy = "U1";
+    } else throw new Error(`unexpected GraphQL ${operation}`);
+    if (state.lost) throw new Error("scripted lost response");
+    return Response.json({ data: {} });
+  };
+  const provider = new GitHubHttpDeliveryProvider("fixture-marker", fetcher);
+  const target = {
+    repositoryId: "R1",
+    nodeId: "P7",
+    number: 7,
+    threadNodeId: "T1",
+  };
+  const record = (action: ExternalAction) => {
+    const r = commentRecord();
+    r.request.action = action;
+    return r;
+  };
+  return {
+    state,
+    provider,
+    policy: {
+      version: 2,
+      mode: "reviewable-pr" as const,
+      credentialRef: null,
+      grants: [],
+      requiredChecks: [],
+    },
+    reply: record({ kind: "pr.thread.reply", target, body: "Fixed in abc" }),
+    resolve: (expected: string) =>
+      record({
+        kind: "pr.thread.resolve",
+        target,
+        expectedLatestCommentNodeId: expected,
+      }),
+  };
+}
+
+test("thread reply is confirmed only by one exact submitted marker comment by the credential user", async () => {
+  const f = threadFixture();
+  const before = await f.provider.preflight(f.reply.request.action, f.policy);
+  f.reply.beforeState = before;
+  const result = await f.provider.performAction(f.reply);
+  assert.equal(result.state, "confirmed-success");
+  assert.equal(result.receipt?.nodeId, "C2");
+  assert.equal(f.state.replies, 1);
+  assert.match(
+    f.state.comments[1]?.body ?? "",
+    /^Fixed in abc\n\n<!-- ensemble-operation:/,
+  );
+  const exact = f.state.comments[1];
+  assert.ok(exact);
+  const unproved = async (change: () => void, restore: () => void) => {
+    change();
+    const o = await f.provider.inspectAction(f.reply);
+    restore();
+    assert.equal(o.state, "uncertain");
+  };
+  await unproved(
+    () => (exact.state = "PENDING"),
+    () => (exact.state = "SUBMITTED"),
+  );
+  await unproved(
+    () => (exact.author = "U2"),
+    () => (exact.author = "U1"),
+  );
+  await unproved(
+    () => f.state.comments.push({ ...exact, id: "C9" }),
+    () => f.state.comments.pop(),
+  );
+  await unproved(
+    () => (f.state.pr = { ...f.state.pr, id: "P8" }),
+    () => (f.state.pr = { ...f.state.pr, id: "P7" }),
+  );
+  assert.equal(
+    (await f.provider.inspectAction(f.reply)).state,
+    "confirmed-success",
+  );
+});
+
+test("thread reply to an already resolved thread is allowed", async () => {
+  const f = threadFixture();
+  f.state.resolved = true;
+  const before = await f.provider.preflight(f.reply.request.action, f.policy);
+  assert.equal(before.isResolved, true);
+});
+
+test("thread resolve is refused in preflight when resolved, stale or on another PR, without any mutation", async () => {
+  const f = threadFixture();
+  const stale = f.resolve("C0").request.action;
+  await assert.rejects(f.provider.preflight(stale, f.policy), /resolve-held/);
+  f.state.resolved = true;
+  await assert.rejects(
+    f.provider.preflight(f.resolve("C1").request.action, f.policy),
+    /resolve-held/,
+  );
+  f.state.resolved = false;
+  f.state.pr = { ...f.state.pr, id: "P8" };
+  await assert.rejects(
+    f.provider.preflight(f.resolve("C1").request.action, f.policy),
+    /thread-mismatch/,
+  );
+  f.state.pr = { ...f.state.pr, id: "P7" };
+  f.state.comments.push({
+    id: "C2",
+    body: "More",
+    state: "SUBMITTED",
+    author: "U_REVIEWER",
+  });
+  await assert.rejects(
+    f.provider.preflight(f.resolve("C1").request.action, f.policy),
+    /resolve-held/,
+  );
+  assert.equal(f.state.resolves + f.state.replies, 0);
+});
+
+test("thread resolve is confirmed only when the credential user resolved the thread", async () => {
+  const f = threadFixture();
+  const record = f.resolve("C1");
+  record.beforeState = await f.provider.preflight(
+    record.request.action,
+    f.policy,
+  );
+  const result = await f.provider.performAction(record);
+  assert.deepEqual(
+    [result.state, result.receipt?.nodeId],
+    ["confirmed-success", "T1"],
+  );
+  assert.equal(f.state.resolves, 1);
+  f.state.resolvedBy = "U_OTHER";
+  assert.equal((await f.provider.inspectAction(record)).state, "uncertain");
+  f.state.resolved = false;
+  assert.equal((await f.provider.inspectAction(record)).state, "uncertain");
+});
+
+test("thread write failures are uncertain unless the provider definitively rejected the request", async () => {
+  for (const [name, change, expected] of [
+    [
+      "lost response with effect",
+      (s: ReturnType<typeof threadFixture>["state"]) => {
+        s.lost = true;
+      },
+      "uncertain",
+    ],
+    [
+      "GraphQL errors without effect",
+      (s: ReturnType<typeof threadFixture>["state"]) => {
+        s.graphqlErrors = true;
+      },
+      "uncertain",
+    ],
+    [
+      "pending review comment",
+      (s: ReturnType<typeof threadFixture>["state"]) => {
+        s.replyState = "PENDING";
+      },
+      "uncertain",
+    ],
+    [
+      "HTTP 403",
+      (s: ReturnType<typeof threadFixture>["state"]) => {
+        s.status = 403;
+      },
+      "confirmed-failure",
+    ],
+  ] as const) {
+    const f = threadFixture();
+    change(f.state);
+    f.reply.beforeState = await f.provider.preflight(
+      f.reply.request.action,
+      f.policy,
+    );
+    const result = await f.provider.performAction(f.reply);
+    assert.equal(result.state, expected, name);
+    if (name === "HTTP 403") assert.equal(result.reason, "provider-http-403");
+    // Only readback, never the lost response, proves the effect.
+    if (name === "lost response with effect")
+      assert.equal(
+        (await f.provider.inspectAction(f.reply)).state,
+        "confirmed-success",
+      );
+  }
 });
