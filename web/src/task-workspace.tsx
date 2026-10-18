@@ -19,6 +19,7 @@ import {
   type CommandReceipt,
   type OperatorCommand,
   operatorCommandSchema,
+  questionReadSchema,
   type Session,
   type TaskRead,
   taskSchema,
@@ -200,6 +201,37 @@ function Literal({ text }: { text: string | null | undefined }) {
   return (
     <pre className="literal-text">{text ?? "Unavailable or redacted"}</pre>
   );
+}
+/** A question's own text: the exact read's first label, or the request prompt when that read withholds it or fails. */
+function RequestText({
+  client,
+  session,
+  taskId,
+  interactionId,
+  prompt,
+}: {
+  client: OperatorClient;
+  session: Session;
+  taskId: string;
+  interactionId: string;
+  prompt: string | null;
+}) {
+  // shortcut: one extra GET per open question; QuestionResponse repeats it once opened, as on the Home card.
+  const loader = useCallback(
+      (signal: AbortSignal) =>
+        client.read(
+          `/api/operator/tasks/${taskId}/questions/${interactionId}`,
+          questionReadSchema,
+          signal,
+        ),
+      [client, taskId, interactionId],
+    ),
+    read = useOperatorResource(
+      `${session.csrfToken}:task-question:${taskId}:${interactionId}`,
+      loader,
+    ).state.data?.data,
+    label = read?.source === "plain" ? null : read?.form?.questions[0]?.label;
+  return <Literal text={label ?? prompt} />;
 }
 function Disclosure({
   id,
@@ -1718,7 +1750,17 @@ export function TaskWorkspace({
                           ? "approval pending"
                           : "question pending"}
                       </p>
-                      <Literal text={q.prompt} />
+                      {q.kind === "question" ? (
+                        <RequestText
+                          client={client}
+                          session={session}
+                          taskId={taskId}
+                          interactionId={q.interactionId}
+                          prompt={q.prompt}
+                        />
+                      ) : (
+                        <Literal text={q.prompt} />
+                      )}
                       {q.kind === "approval" && (
                         <p className="metadata muted">
                           Action: {q.action ?? "Unavailable"} · Target:{" "}

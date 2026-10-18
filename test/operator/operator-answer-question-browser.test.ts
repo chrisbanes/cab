@@ -157,4 +157,35 @@ for (const [label, viewport] of [
       .waitFor();
     assert.equal(interactions, 3);
   });
+  test(`answer a question budget: three interactions from the task decision card (${label})`, async (_t, journey) => {
+    const s = await start(
+      journey,
+      viewport,
+      ({ taskId }) => `/app/tasks/${taskId}`,
+    );
+    const decision = s.page.locator(
+      `#decisions .decision[data-record-id="${s.interactionId}"]`,
+    );
+    const open = decision.getByRole("link", {
+      name: "Answer question",
+      exact: true,
+    });
+    await assertFirstScreen(s.page, [
+      decision.getByText(question, { exact: true }),
+      open,
+    ]);
+    assert.equal(await decision.getByText("Structured question").count(), 0);
+    let interactions = 0;
+    await open.click();
+    interactions++;
+    const response = s.page.getByRole("region", {
+      name: "Exact question response",
+    });
+    await choose(response).click();
+    interactions++;
+    await submit(response).click();
+    interactions++;
+    await assertRecorded(s, response);
+    assert.equal(interactions, 3);
+  });
 }
