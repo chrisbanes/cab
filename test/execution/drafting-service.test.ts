@@ -884,7 +884,6 @@ test("an assignment thread is never offered the proposal tool, and the tool refu
   await w.start(service, "codex");
   const { projectId } = await w.project(service, "codex");
   // A finished draft: its turn no longer exists, so a late call is refused.
-  let late: { success: boolean; text: string } | undefined;
   codex.script(async (api) => {
     await api.callTool(draftProposalToolName, proposal);
   });
@@ -899,7 +898,7 @@ test("an assignment thread is never offered the proposal tool, and the tool refu
       tool: (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
     }
   ).tool;
-  late = await handler({
+  const late = await handler({
     threadId: "draft-thread-1",
     turnId: "draft-turn-2",
     callId: randomUUID(),
