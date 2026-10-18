@@ -237,12 +237,19 @@ export class DraftingRunStore {
     return this.move(runId, to, reason);
   }
 
+  /** Runs `change` in one transaction, joining the caller's when one is open. */
+  atomically<T>(change: () => T): T {
+    return this.db.isTransaction === true
+      ? change()
+      : transaction(this.db, change);
+  }
+
   private move(
     runId: string,
     to: DraftingState,
     reason: string | null,
   ): DraftingRun {
-    return transaction(this.db, () => {
+    return this.atomically(() => {
       const row = this.db
         .prepare("SELECT state, title FROM drafting_runs WHERE runId = ?")
         .get(runId) as

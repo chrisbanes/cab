@@ -1093,6 +1093,45 @@ test("an accepted proposal is handed over once and a discarded or expired draft 
   );
 });
 
+test("accepting and its receipt commit together, so a failed receipt write leaves the draft claimable", async (t) => {
+  const w = world(t);
+  const opened = w.open();
+  const { service, codex } = opened;
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  codex.script(proposing(proposal));
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "proposed",
+    () => w.tracked(service).runs(),
+  );
+  const drafting = startedOf(service).drafting;
+  const record = drafting.recordReceipt.bind(drafting);
+  let failing = true;
+  drafting.recordReceipt = (...args) => {
+    if (failing) throw new Error("receipt write failed");
+    record(...args);
+  };
+  const command = {
+    type: "drafting.settle",
+    key: randomUUID(),
+    runId,
+    disposition: "accept",
+  } as const;
+  await assert.rejects(
+    service.draftingCommand(command),
+    /receipt write failed/,
+  );
+  // The accept rolled back with the receipt: the proposal is still offered.
+  assert.equal(service.readDrafting(runId)?.state, "proposed");
+  assert.deepEqual(service.readDrafting(runId)?.proposal, proposal);
+  failing = false;
+  const receipt = await service.draftingCommand(command);
+  assert.equal(receipt.state, "accepted");
+  assert.deepEqual(await service.draftingCommand(command), receipt);
+});
+
 test("an assignment thread is never offered the proposal tool, and the tool refuses a call outside a running draft", async (t) => {
   const w = world(t);
   const opened = w.open();

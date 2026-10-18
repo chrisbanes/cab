@@ -4418,30 +4418,39 @@ export class StandaloneService {
     const { key, ...content } = command;
     const prior = drafting.receipt<DraftingReceipt>(key, content);
     if (prior) return prior;
-    let operation: DraftingReceipt["operation"];
-    let run: DraftingRun;
-    if (command.type === "drafting.start") {
-      operation = "start";
-      run = await this.startDrafting({
-        runId: command.runId,
-        projectId: command.projectId,
-        idea: command.idea,
-      });
-    } else if (command.type === "drafting.stop") {
-      operation = "stop";
-      run = await this.stopDrafting(command.runId);
-    } else {
-      operation = command.disposition;
-      run = this.settleDrafting(command.runId, command.disposition).run;
-    }
-    const receipt: DraftingReceipt = {
+    const receiptOf = (
+      operation: DraftingReceipt["operation"],
+      run: DraftingRun,
+    ): DraftingReceipt => ({
       kind: "drafting",
       key,
       recorded: true,
       operation,
       runId: run.runId,
       state: run.state,
-    };
+    });
+    // Accepting is the one command a replay cannot repeat, so it commits with its receipt.
+    // Start and Stop converge when repeated.
+    if (command.type === "drafting.settle")
+      return drafting.atomically(() => {
+        const receipt = receiptOf(
+          command.disposition,
+          this.settleDrafting(command.runId, command.disposition).run,
+        );
+        drafting.recordReceipt(key, content, receipt);
+        return receipt;
+      });
+    const receipt =
+      command.type === "drafting.start"
+        ? receiptOf(
+            "start",
+            await this.startDrafting({
+              runId: command.runId,
+              projectId: command.projectId,
+              idea: command.idea,
+            }),
+          )
+        : receiptOf("stop", await this.stopDrafting(command.runId));
     drafting.recordReceipt(key, content, receipt);
     return receipt;
   }
