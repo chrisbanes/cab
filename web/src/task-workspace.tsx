@@ -19,6 +19,7 @@ import {
   type CommandReceipt,
   type OperatorCommand,
   operatorCommandSchema,
+  questionReadSchema,
   type Session,
   type TaskRead,
   taskSchema,
@@ -200,6 +201,53 @@ function Literal({ text }: { text: string | null | undefined }) {
   return (
     <pre className="literal-text">{text ?? "Unavailable or redacted"}</pre>
   );
+}
+/** A question's own text: the exact read's first label, or the request prompt when that read withholds it or fails. */
+function RequestText({
+  client,
+  session,
+  taskId,
+  interactionId,
+  prompt,
+  observedAt,
+}: {
+  client: OperatorClient;
+  session: Session;
+  taskId: string;
+  interactionId: string;
+  prompt: string | null;
+  /** The task read's last success: each change rereads, so a withheld label is withdrawn as `prompt` is. */
+  observedAt: number | null | undefined;
+}) {
+  // shortcut: one extra GET per open question; QuestionResponse repeats it once opened, as on the Home card.
+  const loader = useCallback(
+      (signal: AbortSignal) =>
+        client.read(
+          `/api/operator/tasks/${taskId}/questions/${interactionId}`,
+          questionReadSchema,
+          signal,
+        ),
+      [client, taskId, interactionId],
+    ),
+    resource = useOperatorResource(
+      `${session.csrfToken}:task-question:${taskId}:${interactionId}`,
+      loader,
+    ),
+    read = resource.state.data?.data,
+    // A failed reread keeps its last read, which may predate a privacy change.
+    label =
+      read?.source === "plain" || resource.state.error
+        ? null
+        : read?.form?.questions[0]?.label;
+  const seen = useRef(observedAt),
+    reread = useRef(resource.poll);
+  reread.current = resource.poll;
+  useEffect(() => {
+    if (seen.current === observedAt) return;
+    seen.current = observedAt;
+    void reread.current();
+  }, [observedAt]);
+  return <Literal text={label ?? prompt} />;
 }
 function Disclosure({
   id,
@@ -1718,7 +1766,18 @@ export function TaskWorkspace({
                           ? "approval pending"
                           : "question pending"}
                       </p>
-                      <Literal text={q.prompt} />
+                      {q.kind === "question" ? (
+                        <RequestText
+                          client={client}
+                          session={session}
+                          taskId={taskId}
+                          interactionId={q.interactionId}
+                          prompt={q.prompt}
+                          observedAt={resource.state.fetchedAt}
+                        />
+                      ) : (
+                        <Literal text={q.prompt} />
+                      )}
                       {q.kind === "approval" && (
                         <p className="metadata muted">
                           Action: {q.action ?? "Unavailable"} · Target:{" "}

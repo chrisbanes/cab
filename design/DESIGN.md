@@ -2314,9 +2314,13 @@ as follows:
   disclosures hold their content mounted, so closing one loses no read, selection or
   focus target. Open cards belong to the history entry, are written only by their
   own toggles and links, and a task opened fresh starts with all three closed. The decision card leads
-  with any request ("Your decision · approval pending", exact action, target,
-  revision and material hash, and "Review material & decide" to the coordination
-  view; the page never approves), then pending completion and unresolved result
+  with any request: a question ("Your decision · question pending", the first
+  question's label from the exact question read or the request prompt when that
+  read withholds it or fails, and "Answer question" to the form on this page,
+  as in `20-task-answering-grouped-request`) or an approval ("Your decision ·
+  approval pending", exact action, target, revision and material hash, and
+  "Review material & decide" to the coordination view; the page never
+  approves), then pending completion and unresolved result
   links, a "Review rejected completion" link for a completion rejected at the
   current task version and "Inspect uncertain execution" for an uncertain execution
   without its hold line, then, once and only while a request is open, the holds it does not clear

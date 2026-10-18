@@ -1,7 +1,14 @@
 # Answer a question
 
-**Status:** planned. The Inbox, Home card and task decision card answer questions
-today; the budget below is not yet asserted by a journey test.
+**Status:** built for the three budgeted entry points. The Home card answers a
+single pending single-choice question in place, the Inbox row opens the request in
+the pane, and the task decision card shows the first question's label and opens the
+form on the task page; each records the answer and shows "Answer recorded". The
+budget below is asserted at 1366 × 900 and 390 × 844 by
+`test/operator/operator-answer-question-browser.test.ts` ("answer a question
+budget"), with Home's runtime readiness passing and one paused-project getting-started
+row above the card; each further getting-started row that needs attention pushes the
+Home card down. The browser notification and the operator CLI are outside it.
 
 ## Goal
 
