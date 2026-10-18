@@ -1185,7 +1185,7 @@ function isSafeRedirect(location: string): boolean {
 
 // Pages of the server-rendered operator UI; only these may start a pre-login session.
 const LEGACY_PAGE =
-  /^\/(?:(?:project|task|profile|assignment|runtime|coordination)(?:\/|$)|$)/;
+  /^\/(?:$|(?:runtime|coordination)(?:\/|$)|(?:project|task|profile|assignment)\/)/;
 
 /** Authenticated loopback HTTP server for the standalone operator surface. */
 export class LocalOperatorHttp {
