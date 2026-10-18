@@ -840,7 +840,8 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   and the run settled as interrupted, with no recovery page or Inbox alert. If
   termination cannot be verified, or the working copy cannot be removed, the run keeps
   its capacity and the composer keeps showing it as stopping; the next service start
-  retries the removal. Drafting has no operator recovery. A queued run that has
+  retries the removal and settles the run as interrupted, so a proposal held back
+  this way is not offered. Drafting has no operator recovery. A queued run that has
   not been admitted has nothing to wait for and is interrupted at once.
 - **Fill.** Nothing is saved or created until Save draft or Create. An empty title or
   outcome field is filled. A field the operator already typed in shows the proposal
