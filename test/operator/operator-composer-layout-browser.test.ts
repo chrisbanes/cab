@@ -1085,12 +1085,6 @@ for (const [entry, path, scoped] of [
         verdict = page.getByRole("region", { name: "If you create it now" }),
         badge = verdict.getByText(/^(Will wait|Starts now)$/);
       await title.waitFor();
-      for (const target of [project, title, outcome])
-        assert.equal(
-          await inFirstViewport(page, target),
-          true,
-          `the form is in the first view ${JSON.stringify(await target.boundingBox())}`,
-        );
       // The form fill is one interaction, as in docs/user-flows/create-task.md, and
       // includes choosing the project when the entry point did not name one.
       if (!scoped) await project.selectOption(ids.atlas);
@@ -1099,12 +1093,14 @@ for (const [entry, path, scoped] of [
       await outcome.fill("The budget task is created.");
       interactions++;
       await badge.waitFor();
-      for (const target of [verdict, badge])
+      // Project, title, outcome and verdict together, once the fill and prediction settle.
+      for (const target of [project, title, outcome, verdict, badge])
         assert.equal(
           await inFirstViewport(page, target),
           true,
-          `the verdict is in the first view ${JSON.stringify(await target.boundingBox())}`,
+          `the composer is in the first view ${JSON.stringify(await target.boundingBox())}`,
         );
+      assert.equal(await page.evaluate(() => scrollY), 0, "nothing scrolled");
       await noPageOverflow(page);
       await page
         .getByRole("button", { name: "Create and start", exact: true })
