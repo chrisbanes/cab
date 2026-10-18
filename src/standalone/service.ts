@@ -4527,8 +4527,8 @@ export class StandaloneService {
   /** A failed interrupt is tried again while the run is still stopping, a few times. */
   private retryDraftingInterrupt(runId: string): void {
     const control = this.draftingControls.get(runId);
-    if (!control || (control.interrupts = (control.interrupts ?? 0) + 1) > 5)
-      return;
+    if (!control || (control.interrupts ?? 0) >= 5) return;
+    control.interrupts = (control.interrupts ?? 0) + 1;
     setTimeout(() => {
       if (
         this.draftingControls.get(runId) === control &&

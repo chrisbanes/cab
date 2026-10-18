@@ -81,6 +81,23 @@ test("turn request migration keeps rows, sequences and links and admits drafting
   db.close();
 });
 
+test("the migration is not blocked by a foreign key violation elsewhere", () => {
+  const db = legacyDatabase();
+  // Another table's own, older violation is not the migration's to judge.
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec(
+    "CREATE TABLE unrelated (id TEXT, parent TEXT REFERENCES missing(id))",
+  );
+  db.exec("INSERT INTO unrelated VALUES ('a', 'absent')");
+  db.exec("PRAGMA foreign_keys = ON");
+  new SchedulerStore(db);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM turn_requests").get()?.n,
+    2,
+  );
+  db.close();
+});
+
 test("turn request migration is idempotent", () => {
   const db = legacyDatabase();
   new SchedulerStore(db);

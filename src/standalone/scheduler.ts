@@ -104,8 +104,27 @@ export class SchedulerStore {
               "UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'turn_requests'",
             )
             .run(highWater.seq);
-        if (this.db.prepare("PRAGMA foreign_key_check").all().length)
-          throw new Error("Turn request migration broke a foreign key");
+        // Only what the rebuild could break: the table and the tables that reference it.
+        const references = (
+          this.db
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as Array<{ name: string }>
+        )
+          .map(({ name }) => name)
+          .filter(
+            (name) =>
+              name === "turn_requests" ||
+              (
+                this.db
+                  .prepare(`PRAGMA foreign_key_list("${name}")`)
+                  .all() as Array<{ table: string }>
+              ).some(({ table }) => table === "turn_requests"),
+          );
+        for (const name of references)
+          if (
+            this.db.prepare(`PRAGMA foreign_key_check("${name}")`).all().length
+          )
+            throw new Error("Turn request migration broke a foreign key");
       });
     } finally {
       this.db.exec(`PRAGMA foreign_keys = ${foreignKeys}`);
