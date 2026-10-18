@@ -654,6 +654,23 @@ recorded in the
 | One identical status line before sending in the Reply composer, contextual drafts and Local review (1366 px, 390 px, keyboard); Send label unchanged; resumed receipts; refusals keep the draft | `operator-local-review-browser.test.ts`, `operator-review-browser.test.ts` |
 | Local review shows the recovery-continuation copy only while the flag is set (panel rendering; the flag itself is proved in `recovery-continuation.test.ts`) | `operator-local-review-browser.test.ts` |
 
+## Drafting runs
+
+A drafting run proposes a task title and outcome for the composer without creating
+anything. Service, API and composer are covered by these deterministic suites on both
+harnesses; the real-runtime run is recorded in the
+[live drafting evidence](evidence/2026-10-18-drafting-live-run.md).
+
+| Criteria | Deterministic evidence |
+| --- | --- |
+| A rough idea yields a proposal drafted in a disposable copy of the linked repositories at their configured commits; no task, assignment or task workspace is created, and the copy is deleted | `drafting-service.test.ts` (Codex and Claude) |
+| A run counts against the global and project limits and waits when either is full; a paused project holds it; a project without a lead refuses | `drafting-service.test.ts` |
+| Stop, the time limit and a restart hold the run until the runtime is seen to end, release capacity only then, delete the copy and settle it as interrupted; unverifiable termination keeps capacity; a queued run stops at once | `drafting-service.test.ts` |
+| An invalid proposal is refused so the lead can retry; a turn with no proposal fails; only the running draft's own thread can propose | `drafting-service.test.ts` |
+| The turn-request migration keeps rows, sequences and links; an unclaimed proposal expires after 24 hours | `drafting-runs.test.ts` |
+| Commands are receipted by key; a replay returns the receipt and other content conflicts; the read needs a session | `operator-drafting-api.test.ts` |
+| The composer fills empty fields, offers Replace or Keep beside typed text, reattaches after a reload, keeps text through Stop with Retry, and shows the no-lead state; nothing is saved without Save draft or Create and start (1366 px, 390 px, WebKit phone) | `operator-composer-drafting-browser.test.ts`, `composer-drafting-model.test.ts` |
+
 ## State and recovery boundary cases
 
 These state the product failure cases with standalone ownership. They are required

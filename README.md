@@ -75,6 +75,12 @@ owns delivery scope and status.
   overview, cross-project and per-project List and Board views, a local task
   composer, the Inbox, retained search and Settings. The original HTML forms remain
   reachable at `/`.
+- **Draft with lead.** In the task composer, a rough idea goes to the project lead,
+  who reads the project's linked repositories in a throwaway copy with network off
+  and proposes a title and outcome. Empty fields are filled; typed text keeps its
+  place until Replace or Keep. It counts against capacity, can be stopped, and
+  nothing is saved until Save draft or Create and start. It is not a read-only
+  sandbox, and the operator CLI does not offer it.
 - **Inbox and questions.** The action Inbox lists cross-project questions, approvals
   and recorded interventions by urgency and age. Exact own-tool forms support grouped
   text, single-choice and multiple-choice answers, with preserved drafts and durable

@@ -852,8 +852,12 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
 - **Operator CLI.** The CLI does not offer drafting; see
   [Operator CLI](design/operator-cli.md).
 
-Status: planned. The composer states and the run lifecycle are specified here and in
-the design; the service, API and composer do not implement them yet.
+Status: implemented, on Codex and Claude with fake-host tests and on Codex in one
+bounded live run ([evidence](evidence/2026-10-18-drafting-live-run.md); [acceptance plan](acceptance.md#drafting-runs)).
+The operator API carries `drafting.start`, `drafting.stop` and `drafting.settle`
+commands, receipted by key, and one read of a run by id. A run that is held because its
+end cannot be verified stays held until a later start verifies it; there is no operator
+recovery for drafting.
 
 ### Imported issues and source ownership
 
