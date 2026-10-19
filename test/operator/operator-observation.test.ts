@@ -109,3 +109,32 @@ test("the pull request link is built only for the source's own repository", asyn
   ])
     assert.equal(parse(url), false, url);
 });
+
+test("the delivery projection lists the assigned branch without private names or credentials", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedDeliveryCoverage(f);
+  const store = f.service.delivery();
+  const api = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(
+    (await api.readTask(task.taskId)).data.delivery!.branches,
+    [],
+  );
+  const sha = "a".repeat(40);
+  f.seedPersistedState((db) =>
+    db
+      .prepare("INSERT INTO delivery_task_branches VALUES (?,?,?,?,?,1)")
+      .run(task.taskId, "R1", "ensemble/12345678-fix-it", sha, null),
+  );
+  const read = (await api.readTask(task.taskId)).data.delivery!;
+  assert.deepEqual(read.branches, [
+    {
+      repositoryName: "R1",
+      branch: "ensemble/12345678-fix-it",
+      lastPushedSha: sha,
+      outsideHeadSha: null,
+    },
+  ]);
+  assert.equal(store.taskBranches(task.taskId).length, 1);
+  assert.equal(deliveryReadSchema.safeParse(read).success, true);
+});

@@ -4591,7 +4591,8 @@ export class OperatorApi {
     const v = this.service.delivery().publicTask(taskId),
       b = v.binding;
     // The source's name is the PR's repository name only when `githubPullUrl` verifies it is the PR's own.
-    const source = b ? this.sourceSummary(taskId, excluded) : null;
+    const source =
+      b || v.branches.length ? this.sourceSummary(taskId, excluded) : null;
     const url = b
       ? githubPullUrl(
           source?.repositoryName ?? null,
@@ -4606,6 +4607,15 @@ export class OperatorApi {
       blockers: v.blockers.slice(0, 128),
       omittedBlockerCount: Math.max(0, v.blockers.length - 128),
       omittedActionCount: Math.max(0, v.actions.length - 128),
+      branches: v.branches.slice(0, 20).map((r) => ({
+        repositoryName:
+          source?.identity.repositoryId === r.repositoryId
+            ? (source.repositoryName ?? r.repositoryId)
+            : r.repositoryId,
+        branch: this.safe(r.branch, excluded),
+        lastPushedSha: r.lastPushedSha,
+        outsideHeadSha: r.outsideHeadSha,
+      })),
       binding: b
         ? {
             revision: b.revision,

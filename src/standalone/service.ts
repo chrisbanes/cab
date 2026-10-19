@@ -114,6 +114,7 @@ import {
   StandaloneDataDirectory,
 } from "./data-directory.js";
 import { DeliveryCoordinator, unresolvedThreadSummary } from "./delivery.js";
+import { verifyTaskPush } from "./push-verification.js";
 import {
   type DiagnosticKind,
   type DiagnosticLimits,
@@ -986,6 +987,30 @@ export class StandaloneService {
             reason,
             identity,
           ),
+        verifyPush: async ({
+          taskId,
+          repositoryId,
+          commitSha,
+          lastPushedSha,
+        }) => {
+          const binding = await workspaces.get(taskId),
+            repository =
+              binding?.state === "ready"
+                ? binding.repositories.find(
+                    (r) => r.repositoryId === repositoryId,
+                  )
+                : undefined;
+          return repository
+            ? verifyTaskPush(
+                {
+                  workspacePath: repository.workspacePath,
+                  baseCommit: repository.commit,
+                },
+                commitSha,
+                lastPushedSha,
+              )
+            : null;
+        },
         approved: (request, caller) =>
           isOperatorDeliveryCaller(caller)
             ? deliveryStore.operatorApprovalCurrent(request, caller)

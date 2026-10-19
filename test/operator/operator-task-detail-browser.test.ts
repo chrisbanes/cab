@@ -3208,6 +3208,36 @@ test("The delivery block links the PR, says its state and blockers in words, and
     .getByText("PR merged; task completion still requires", { exact: false })
     .waitFor();
 
+  // The assigned task branch reads with its last push and, when set, an outside push.
+  const branch = {
+    repositoryName: "acme/app",
+    branch: "ensemble/aaaa1111-ship-it",
+    lastPushedSha: head,
+    outsideHeadSha: null as string | null,
+  };
+  reads.set(a.taskId, { ...read({}), branches: [branch] });
+  await refreshTask(page, a.taskId);
+  const branchLine = changes.locator("p", { hasText: /^Branch / });
+  await branchLine.waitFor();
+  assert.equal(
+    await flat(branchLine),
+    "Branch ensemble/aaaa1111-ship-it · pushed 11111111",
+  );
+  reads.set(a.taskId, {
+    ...read({}),
+    branches: [{ ...branch, outsideHeadSha: earlier }],
+  });
+  await refreshTask(page, a.taskId);
+  await branchLine.getByText("Outside push cccccccc").waitFor();
+  reads.set(a.taskId, {
+    ...read({}),
+    branches: [{ ...branch, branch: null, lastPushedSha: null }],
+  });
+  await refreshTask(page, a.taskId);
+  await changes
+    .getByText("Branch withheld · not pushed yet", { exact: true })
+    .waitFor();
+
   // Checks read in words; one on an earlier head says so; the repair owner is never invented.
   reads.set(
     a.taskId,

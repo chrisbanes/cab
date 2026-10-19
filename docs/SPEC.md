@@ -462,7 +462,11 @@ verification) clears inherited `GIT_*` variables, never prompts on a terminal,
 lazily fetches objects or allows transport protocols, and uses bounded time and
 output. A repository that needs the network to supply objects therefore fails
 closed. This governs Ensemble's own Git; agent processes run their own Git with
-their runtime environment.
+their runtime environment. The one exception is [task commit
+publication](#github-and-completion): a single bounded HTTPS push to the verified
+github.com repository, in a scratch repository that reads the worktree's objects, with
+the delivery credential in that push child's environment only (never in argv, Git
+configuration, a file or an agent environment) and no other transport.
 
 New projects default to Codex `workspaceWrite` with explicit task writable roots,
 command network access disabled and approval policy `never`. Broader command
@@ -1648,6 +1652,31 @@ Readback requires exactly one submitted marker reply by the credential user, or 
 thread resolved by that user; a lost response stays uncertain and is not replayed.
 Unresolving threads, editing or deleting comments and submitting reviews are not
 supported, and the operator comment path is unchanged.
+
+Agents never push. Task commit publication is two grantable actions per repository,
+`branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or
+`approval` (approval binds the exact commit) and following the same delivery lifecycle
+([ADR-1016](adr/1016-ensemble-owned-commit-publication.md)). Ensemble assigns each task
+one **task branch** per repository, `<project prefix><task id hex>-<title slug>`, on
+first use; the operator sets the prefix per project (default `ensemble/`), agents cannot
+choose a name, later renames never happen, and `pr.create` accepts only that branch as its
+head. The agent names an exact commit. Before any network call Ensemble proves offline
+that it is the task worktree's `HEAD` or an ancestor of it and descends from the base the
+workspace was provisioned at, and reports uncommitted entries, which are never pushed. A
+push needs the remote branch to be where Ensemble last left it: absent before the first
+push, or equal to the last pushed commit. `branch.push` also refuses a commit that does not
+descend from that commit; `branch.force-push` needs a recorded last push, which is its
+lease. Any other remote head, seen at a push or on the task's PR, is an outside change: the
+push is refused, the lead is woken and handback settlement is invalidated; without a PR it
+is noticed at the next push, as Ensemble does not poll branches. A rewritten history means
+the next review covers the whole new head. Success needs a read of the remote ref equal to
+the pushed commit; a timeout, cancellation or unobserved exit is uncertain, is settled by
+reading the ref and is never replayed blindly. Ensemble does not delete branches or push
+tags or other remotes; merged branches follow the repository's head-branch deletion
+setting. Ensemble cannot prevent a push made with ambient host credentials once agent
+network access is enabled; it detects the result as an outside change. A task branch
+whose head was changed outside stays refused until the remote returns to the last pushed
+commit.
 
 The lead explicitly submits merge or issue closure with its current reviewed result
 set. Shared completion checks run with the current action intent transition, excluding

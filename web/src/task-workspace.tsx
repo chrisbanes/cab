@@ -3001,6 +3001,23 @@ function Changes({
           ))}
         </>
       )}
+      {d?.branches.map((b) => (
+        <p key={`${b.repositoryName}:${b.branch}`}>
+          Branch {b.branch ?? "withheld"} ·{" "}
+          {b.lastPushedSha ? (
+            <>
+              pushed <ShortId value={b.lastPushedSha} />
+            </>
+          ) : (
+            "not pushed yet"
+          )}{" "}
+          {b.outsideHeadSha && (
+            <StatusBadge tone="warning">
+              Outside push <ShortId value={b.outsideHeadSha} />
+            </StatusBadge>
+          )}
+        </p>
+      ))}
       {d?.binding && (
         <>
           <PullRequestLine binding={d.binding} />
