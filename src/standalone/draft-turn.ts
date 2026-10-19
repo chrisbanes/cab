@@ -12,7 +12,7 @@ export interface DraftTurnFacts {
   ready: boolean;
   /** Null when the task has no lead assignment. */
   lead: { state: string; revoked: boolean; ordinaryWork: boolean } | null;
-  /** A draft-turn request for this task is queued or running. */
+  /** A draft-turn request for this task is queued, held or running. */
   draftTurnActive: boolean;
 }
 

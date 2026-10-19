@@ -958,10 +958,10 @@ history.
   [--request-id UUID]` does the same. Both send `task.draft-turn {key, taskId,
   expectedVersion, message}`; the message is trimmed and 1 to 16000 characters. The
   receipt records the lead assignment and the work ID and is replayed for the same key
-  and content. The command cannot be retracted; Stop is the way back, and Resume
-  requeues the held turn.
+  and content. The command cannot be retracted; Stop holds a queued draft turn and Resume
+  releases it.
 - **Availability.** The task must be open and not Ready, and have a configured,
-  unrevoked lead that has not started ordinary work. One draft turn is queued or running
+  unrevoked lead that has not started ordinary work. One draft turn is queued, held or running
   per task. Otherwise the command is refused with 409 `conflict` and a reason
   (`task-not-open`, `task-ready`, `lead-unconfigured`, `lead-revoked`, `lead-unavailable`,
   `draft-turn-active`), which the task read also reports. A Ready task keeps the ordinary

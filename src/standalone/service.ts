@@ -3741,12 +3741,16 @@ export class StandaloneService {
         leadId,
         command.message,
       );
+      const workId = `assignment:${leadId}:v${Number(task.version)}:draft:${command.key}`;
       const delivery = coordination.bindDeliveryBatchWithinTransaction(
         leadId,
-        `assignment:${leadId}:v${Number(task.version)}:draft:${command.key}`,
+        workId,
         Number(lead.version),
       );
       if (!delivery) throw new Error("Draft turn message was not bound");
+      // A batch that was already queued belongs to an earlier draft turn: nothing new queues.
+      if (delivery.deliveryWorkId !== workId)
+        throw new DraftTurnUnavailableError("draft-turn-active");
       schedulerStore.ensure({
         requestKey: delivery.deliveryWorkId,
         workId: delivery.deliveryWorkId,

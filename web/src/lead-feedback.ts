@@ -59,5 +59,5 @@ export const draftTurnUnavailableNotice = (
     "lead-revoked": `${name}’s profile is revoked.`,
     "lead-unavailable": `${name} has started, is held or has completed, so a draft turn can’t start.`,
     "draft-turn-active":
-      "A draft turn is already queued or running. Start another when it ends.",
+      "A draft turn is already queued, held or running. Start another when it ends.",
   })[reason];

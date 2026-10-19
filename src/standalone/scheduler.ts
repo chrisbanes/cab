@@ -329,11 +329,11 @@ export class SchedulerStore {
     );
   }
 
-  /** The task's draft turn that is still queued or running, if any. */
+  /** The task's draft turn that is still queued, held or running, if any. */
   activeDraftTurn(taskId: string): TurnRequest | undefined {
     const row = this.db
       .prepare(`SELECT * FROM turn_requests WHERE taskId = ? AND draftTurn = 1
-        AND state IN ('queued','active') ORDER BY sequence DESC LIMIT 1`)
+        AND state IN ('queued','active','held') ORDER BY sequence DESC LIMIT 1`)
       .get(taskId);
     return row ? this.parse(row as Record<string, unknown>) : undefined;
   }

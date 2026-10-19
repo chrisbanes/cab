@@ -17,7 +17,7 @@ glossary defines **Draft turn**; delivery scope lives in
   the lead's conversation, task workspace, capacity reservation, writer, Stop and
   pause holds, questions, receipts, history and recovery.
 - The operator starts one with `task.draft-turn` (task page, CLI). One draft turn per
-  task is queued or running at a time. The task must be open and not Ready, with a
+  task is queued, held or running at a time. The task must be open and not Ready, with a
   configured, unrevoked lead that has not started ordinary work. Project pause, task
   Stop and capacity do not refuse it; they hold it like any other turn.
 - Admission drops only `task-unready`, and only for work whose request is a draft

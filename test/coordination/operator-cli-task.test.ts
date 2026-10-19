@@ -671,7 +671,7 @@ test("draft turns start only on an open Draft task", async (t) => {
   const before = posts(o);
   r = await cli("rw", args(draft.taskId, version(draft.taskId)));
   assert.equal(r.code, 4, r.out);
-  assert.match(r.json().error.message, /already queued or running/);
+  assert.match(r.json().error.message, /already queued, held or running/);
   assert.equal(posts(o), before);
 
   // A Ready task keeps the ordinary reply.

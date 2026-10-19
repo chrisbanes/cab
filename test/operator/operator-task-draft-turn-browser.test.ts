@@ -90,7 +90,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
         "Done task",
         /Draft turns need an open task\. This task is Done\./,
       ],
-      [active, "Active task", /already queued or running/],
+      [active, "Active task", /already queued, held or running/],
     ] as const) {
       await visit(task.taskId, title);
       await page.getByText(sentence).waitFor();

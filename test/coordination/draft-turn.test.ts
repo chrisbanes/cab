@@ -278,7 +278,38 @@ test("a draft turn is refused with its reason and records nothing", async (t) =>
   configure(f, queued.projectId, true);
   await queued.api.execute(startCommand(f, queued.taskId));
   assert.equal(rows(f, queued.taskId).draftRequests, 1);
-  await refuse(queued, "draft-turn-active", /already queued or running/);
+  await refuse(queued, "draft-turn-active", /already queued, held or running/);
+});
+
+test("a stopped draft turn stays the task's draft turn, so a second one is refused rather than lost", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await draftTask(f, "Held draft turn");
+  await runDraftTurn(f, task);
+  await task.api.execute({
+    type: "task.stop",
+    key: randomUUID(),
+    taskId: task.taskId,
+  });
+  await until(
+    () =>
+      count(
+        f,
+        "SELECT COUNT(*) AS n FROM turn_requests WHERE taskId=? AND state='held'",
+        task.taskId,
+      ) === 1,
+    "held draft turn",
+  );
+  const before = rows(f, task.taskId);
+  assert.deepEqual((await task.api.readTask(task.taskId)).data.draftTurn, {
+    available: false,
+    reason: "draft-turn-active",
+  });
+  await assert.rejects(
+    task.api.execute(startCommand(f, task.taskId, "second")),
+    conflict(/already queued, held or running/),
+  );
+  assert.deepEqual(rows(f, task.taskId), before);
 });
 
 test("a lead with queued ordinary work refuses a draft turn and leaves that work alone", async (t) => {

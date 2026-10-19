@@ -8,7 +8,7 @@ export const draftTurnUnavailableMessages: Record<DraftTurnReason, string> = {
   "lead-revoked": "the project lead's profile is revoked",
   "lead-unavailable": "the project lead has started, is held or has completed",
   "draft-turn-active":
-    "a draft turn for this task is already queued or running",
+    "a draft turn for this task is already queued, held or running",
 };
 
 export const draftTurnUnavailableText = (reason: DraftTurnReason) =>

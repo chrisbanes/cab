@@ -664,7 +664,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
           ],
           notes: [
             "Queued one read-only turn for the project lead, subject to admission, pause, Stop and capacity; the task stays not Ready.",
-            "A draft turn cannot be retracted; 'task stop' holds it and 'task resume' requeues it.",
+            "A draft turn cannot be retracted; 'task stop' holds a queued one and 'task resume' releases it.",
           ],
           data: {
             workId: receipt.kind === "draft-turn" ? receipt.workId : null,
