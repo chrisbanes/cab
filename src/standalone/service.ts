@@ -2394,13 +2394,10 @@ export class StandaloneService {
     return this.started().state.byWorkId(workId);
   }
 
-  /** Command network access a work's turn was admitted with; null before admission. */
+  /** Command network access a work's turn was admitted with; null when no admission recorded it. */
   commandNetworkAccessFor(workId: string): boolean | null {
     const intent = this.executionForWork(workId);
-    if (!intent) return null;
-    return intent.state === "ready" || intent.state === "capacity-waiting"
-      ? null
-      : this.started().state.commandNetworkAccess(intent.id);
+    return intent ? this.started().state.commandNetworkAccess(intent.id) : null;
   }
 
   recoveryFor(

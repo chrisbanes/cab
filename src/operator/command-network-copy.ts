@@ -15,10 +15,10 @@ export const projectCommandNetworkLine = (enabled: boolean) =>
     ? "Command network access is enabled for this project's Codex turns; Claude Code turns keep it denied."
     : "Command network access is disabled for this project.";
 
-/** `null` is a turn that has not been admitted yet. */
+/** `null` is a turn with no recorded admission: not admitted yet, held before admission, or admitted before the setting existed. */
 export const turnCommandNetworkLine = (value: boolean | null) =>
   value === null
-    ? "Not yet admitted; the project's setting at admission applies."
+    ? "No admission recorded; the project's setting at admission applies."
     : value
       ? "Admitted with command network access enabled."
       : "Admitted with command network access disabled.";

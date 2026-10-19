@@ -1322,17 +1322,14 @@ export class ExecutionState {
     );
   }
 
-  /** Whether the turn was admitted with command network access; a missing row means off. */
-  commandNetworkAccess(intentId: string): boolean {
-    return (
-      (
-        this.db
-          .prepare(
-            "SELECT enabled FROM execution_intent_network_access WHERE intentId = ?",
-          )
-          .get(intentId) as { enabled: number } | undefined
-      )?.enabled === 1
-    );
+  /** Command network access the turn was admitted with; null when no admission recorded it. */
+  commandNetworkAccess(intentId: string): boolean | null {
+    const row = this.db
+      .prepare(
+        "SELECT enabled FROM execution_intent_network_access WHERE intentId = ?",
+      )
+      .get(intentId) as { enabled: number } | undefined;
+    return row ? row.enabled === 1 : null;
   }
 
   /** The harness a work item runs on: its task binding, else its drafting run, else the default. */

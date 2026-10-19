@@ -599,7 +599,7 @@ test("assignment get states the turn's command network access with its disclosur
   assert.ok(
     human.includes(
       recorded === null
-        ? "Not yet admitted; the project's setting at admission applies."
+        ? "No admission recorded; the project's setting at admission applies."
         : recorded
           ? "Admitted with command network access enabled."
           : "Admitted with command network access disabled.",

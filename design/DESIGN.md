@@ -2613,8 +2613,8 @@ frames 114 and 118–128 as follows:
   Task rows, assignment history and recovery name the runtime, explain runtime
   waits and held Claude failures with route links, and history adds an "Effective
   execution policy" disclosure. For a Codex assignment it opens with one line stating
-  the command network access its latest turn was admitted with, or that it is not yet
-  admitted, above the shared policy lines and limits. The shell raises one alert per unavailable runtime; it
+  the command network access its latest turn was admitted with, or that no admission is recorded
+  for it, above the shared policy lines and limits. The shell raises one alert per unavailable runtime; it
   says "Restarting · attempt N of 3 · next at HH:MM" while Ensemble retries and
   "Retries exhausted" once it stops, in the same words as the Runtime page, Settings,
   Readiness and the CLI.

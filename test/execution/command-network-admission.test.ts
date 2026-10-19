@@ -75,7 +75,7 @@ test("a turn records the project's command network setting at its own admission"
   try {
     const before = ready(taskA);
     const earlier = ready(taskB);
-    assert.equal(f.state.commandNetworkAccess(before.id), false);
+    assert.equal(f.state.commandNetworkAccess(before.id), null);
 
     // Enabled after `before` was created but before it is admitted: the
     // setting at admission wins, and an already admitted turn keeps its value.
@@ -113,8 +113,19 @@ test("only Codex task turns can be admitted with command network access", () => 
     assert.equal(f.state.begin(drafting.id, { projectId }), true);
     assert.equal(f.state.commandNetworkAccess(drafting.id), false);
 
-    // A turn that was never admitted has no record, which means off.
-    assert.equal(f.state.commandNetworkAccess(ready(taskB).id), false);
+    // No admission, no record: a waiting turn, one held before it was ever
+    // admitted, and one admitted before the setting existed all read null.
+    const waiting = ready(taskB);
+    assert.equal(f.state.commandNetworkAccess(waiting.id), null);
+    const heldEarly = ready(taskB);
+    assert.equal(
+      f.state.hold(heldEarly.id, "Storage failure before submission"),
+      true,
+    );
+    assert.equal(f.state.commandNetworkAccess(heldEarly.id), null);
+    const running = f.state.byWorkId("work-child-a");
+    assert.equal(running?.state, "running");
+    assert.equal(f.state.commandNetworkAccess(String(running?.id)), null);
   } finally {
     f.close();
   }
