@@ -3020,8 +3020,9 @@ function Changes({
       ))}
       {d && d.branches.length > 0 && (
         <p>
-          Ensemble assigns and pushes these. A head it did not push is flagged
-          until the lead reviews it.
+          Ensemble assigns and pushes these. A head it did not push is flagged,
+          and Ensemble will not push that branch again until it returns to
+          Ensemble's last push.
         </p>
       )}
       {d?.binding && (
