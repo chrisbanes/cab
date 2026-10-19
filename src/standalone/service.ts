@@ -74,6 +74,7 @@ import {
   DraftTurnUnavailableError,
   draftTurnAvailability,
   draftTurnInstruction,
+  draftTaskDigest,
   draftTurnToolDecision,
 } from "./draft-turn.js";
 import {
@@ -3766,6 +3767,7 @@ export class StandaloneService {
         workspace: null,
         previousWorkId: state.latestCompletedAssignmentWork(leadId) ?? null,
         draftTurn: true,
+        draftTaskDigest: draftTaskDigest(task),
       });
       return { leadAssignmentId: leadId, workId: delivery.deliveryWorkId };
     });
@@ -5161,7 +5163,10 @@ export class StandaloneService {
     const withdrawStaleRefusedDeliveries = (): number => {
       let withdrawn = 0;
       for (const delivery of coordination.queuedDeliveries())
-        if (coordination.withdrawStaleRefusedDelivery(delivery.deliveryWorkId))
+        if (
+          coordination.withdrawStaleRefusedDelivery(delivery.deliveryWorkId) ||
+          coordination.releaseRefusedDraftTurnDelivery(delivery.deliveryWorkId)
+        )
           withdrawn++;
       return withdrawn;
     };
@@ -5893,13 +5898,15 @@ export class StandaloneService {
               profileRevision,
             })
             .reasons.filter(
-              // A draft turn runs while the task is not Ready, and a task edit or Ready
-              // since it was queued does not make it stale.
+              // A draft turn runs while the task is not Ready. Making the task Ready since
+              // it was queued does not make it stale, but editing its title or outcome does.
               (reason) =>
                 !(
                   request.draftTurn &&
                   (reason === "task-unready" ||
-                    reason === "task-revision-changed")
+                    (reason === "task-revision-changed" &&
+                      request.draftTaskDigest ===
+                        draftTaskDigest(domain.task(binding.taskId))))
                 ),
             );
           if (this.recoveryContinuationUnresolved(assignmentId, request.workId))

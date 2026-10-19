@@ -312,6 +312,98 @@ test("a stopped draft turn stays the task's draft turn, so a second one is refus
   assert.deepEqual(rows(f, task.taskId), before);
 });
 
+/** A draft turn queued behind a project pause, then the task edited, then the project resumed. */
+async function refusedStaleDraft(
+  f: Fixture,
+  task: Awaited<ReturnType<typeof draftTask>>,
+  edit: { title?: string; outcome?: string },
+) {
+  const domain = f.service.domain();
+  configure(f, task.projectId, true);
+  await task.api.execute(startCommand(f, task.taskId, "First question."));
+  domain.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: version(f, task.taskId),
+    ...edit,
+  });
+  configure(f, task.projectId, false);
+  await until(
+    () =>
+      count(
+        f,
+        "SELECT COUNT(*) AS n FROM turn_requests WHERE taskId=? AND draftTurn=1 AND state='held'",
+        task.taskId,
+      ) === 1,
+    "refused draft turn",
+  );
+}
+
+const pendingEventCount = (f: Fixture, assignmentId: string) =>
+  count(
+    f,
+    `SELECT COUNT(*) AS n FROM coordination_inbox_events e
+     WHERE e.recipientAssignmentId=? AND NOT EXISTS
+       (SELECT 1 FROM coordination_delivery_events d WHERE d.eventId=e.eventId)`,
+    assignmentId,
+  );
+
+for (const edit of [
+  { title: "A different title" },
+  { outcome: "A different outcome" },
+] as const)
+  test(`a queued draft turn is refused once the task ${Object.keys(edit)[0]} is edited and its message is released`, async (t) => {
+    const f = await createOperatorFixture();
+    t.after(() => f.close());
+    const task = await draftTask(f, "Stale draft turn");
+    await refusedStaleDraft(f, task, edit);
+    assert.equal(f.runtime.turns, 0);
+    assert.equal(
+      count(
+        f,
+        "SELECT COUNT(*) AS n FROM turn_requests WHERE taskId=? AND draftTurn=1 AND reason LIKE 'Request refused: captured revisions no longer match (%task-revision-changed%'",
+        task.taskId,
+      ),
+      1,
+    );
+    assert.equal(pendingEventCount(f, task.assignmentId), 1);
+    assert.deepEqual((await task.api.readTask(task.taskId)).data.draftTurn, {
+      available: true,
+    });
+    // The released message reaches the next draft turn.
+    await task.api.execute(startCommand(f, task.taskId, "Second question."));
+    await until(() => f.runtime.hasPending(1), "second draft turn");
+    assert.match(f.runtime.prompts[0] ?? "", /First question\./);
+    assert.match(f.runtime.prompts[0] ?? "", /Second question\./);
+    assert.equal(f.runtime.policies[0]?.access, "read-only");
+  });
+
+test("a refused draft turn does not strand the lead when the task becomes Ready", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await draftTask(f, "Refused draft then ready");
+  await refusedStaleDraft(f, task, { outcome: "Edited outcome" });
+  f.service.domain().execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: version(f, task.taskId),
+    ready: true,
+  });
+  await until(() => f.runtime.hasPending(1), "initial turn");
+  assert.equal(f.runtime.policies[0], undefined);
+  assert.match(f.runtime.prompts[0] ?? "", /First question\./);
+  assert.equal(
+    f.service.domain().assignment(task.assignmentId).state,
+    "running",
+  );
+});
+
 test("a lead with queued ordinary work refuses a draft turn and leaves that work alone", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

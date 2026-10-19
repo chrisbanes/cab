@@ -17,6 +17,8 @@ const requestSchema = z.object({
   previousWorkId: z.string().min(1).nullable(),
   /** A read-only turn of the lead assignment on a task that is not Ready yet. */
   draftTurn: z.boolean().default(false),
+  /** Digest of the task's title and outcome when a draft turn was queued; see `draftTaskDigest`. */
+  draftTaskDigest: z.string().min(1).nullable().default(null),
 });
 
 export type TurnRequestInput = z.input<typeof requestSchema>;
@@ -48,7 +50,8 @@ export class SchedulerStore {
       state TEXT NOT NULL CHECK(state IN ('queued','active','completed','held')),
       reason TEXT,
       nextEligibleAt INTEGER,
-      draftTurn INTEGER NOT NULL DEFAULT 0 CHECK(draftTurn IN (0,1))
+      draftTurn INTEGER NOT NULL DEFAULT 0 CHECK(draftTurn IN (0,1)),
+      draftTaskDigest TEXT
     )`);
     this.allowDraftingKind();
     // Execution list reads page by scope without scanning history.
@@ -67,6 +70,8 @@ export class SchedulerStore {
       this.db.exec(
         "ALTER TABLE turn_requests ADD COLUMN draftTurn INTEGER NOT NULL DEFAULT 0 CHECK(draftTurn IN (0,1))",
       );
+    if (!columns.some((column) => column.name === "draftTaskDigest"))
+      this.db.exec("ALTER TABLE turn_requests ADD COLUMN draftTaskDigest TEXT");
   }
 
   /**
@@ -175,7 +180,8 @@ export class SchedulerStore {
         current.taskId !== value.taskId ||
         current.projectId !== value.projectId ||
         current.assignmentId !== value.assignmentId ||
-        current.draftTurn !== value.draftTurn
+        current.draftTurn !== value.draftTurn ||
+        current.draftTaskDigest !== value.draftTaskDigest
       )
         throw new Error(
           "Turn request identity already used with different content",
@@ -186,8 +192,8 @@ export class SchedulerStore {
       .prepare(`INSERT INTO turn_requests
         (requestKey, workId, kind, taskId, projectId, assignmentId, taskVersion,
           assignmentVersion, instructionsRevision, profileRevision, prompt,
-          workspace, previousWorkId, state, reason, draftTurn)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, ?)`)
+          workspace, previousWorkId, state, reason, draftTurn, draftTaskDigest)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, ?, ?)`)
       .run(
         value.requestKey,
         value.workId,
@@ -203,6 +209,7 @@ export class SchedulerStore {
         value.workspace,
         value.previousWorkId,
         value.draftTurn ? 1 : 0,
+        value.draftTaskDigest,
       );
     return this.byWorkId(value.workId);
   }
@@ -329,11 +336,26 @@ export class SchedulerStore {
     );
   }
 
-  /** The task's draft turn that is still queued, held or running, if any. */
+  /**
+   * The task's draft turn that is still queued, held or running, if any. A request refused
+   * before it ever ran (it has a refusal row; Stop writes none) is finished, not active.
+   */
   activeDraftTurn(taskId: string): TurnRequest | undefined {
+    const refusals = this.db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'execution_request_refusals'",
+      )
+      .get();
     const row = this.db
       .prepare(`SELECT * FROM turn_requests WHERE taskId = ? AND draftTurn = 1
-        AND state IN ('queued','active','held') ORDER BY sequence DESC LIMIT 1`)
+        AND state IN ('queued','active','held')
+        ${
+          refusals
+            ? `AND NOT (state = 'held' AND EXISTS (SELECT 1 FROM execution_request_refusals
+          refusal WHERE refusal.workId = turn_requests.workId))`
+            : ""
+        }
+        ORDER BY sequence DESC LIMIT 1`)
       .get(taskId);
     return row ? this.parse(row as Record<string, unknown>) : undefined;
   }
@@ -399,6 +421,8 @@ export class SchedulerStore {
       workspace: row.workspace,
       previousWorkId: row.previousWorkId,
       draftTurn: row.draftTurn === 1,
+      draftTaskDigest:
+        typeof row.draftTaskDigest === "string" ? row.draftTaskDigest : null,
     });
     const state = z
       .enum(["queued", "active", "completed", "held"])

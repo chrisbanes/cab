@@ -4,8 +4,16 @@
  * tool filter share one source.
  */
 
+import { materialDigest } from "../core/delivery.js";
 import type { DraftTurnReason } from "../operator/contracts.js";
 import { draftTurnUnavailableText } from "../operator/draft-turn-copy.js";
+
+/**
+ * What a queued draft turn depends on in the task: its title and outcome. Marking the task
+ * Ready changes the task version but not this, so only an edit makes a queued draft stale.
+ */
+export const draftTaskDigest = (task: Record<string, unknown>) =>
+  materialDigest({ title: String(task.title), outcome: String(task.outcome) });
 
 export interface DraftTurnFacts {
   taskState: "open" | "done" | "cancelled";

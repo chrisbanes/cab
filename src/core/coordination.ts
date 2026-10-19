@@ -3652,50 +3652,90 @@ export class CoordinationStore {
         return false;
       }
 
-      const events = this.db
-        .prepare(`SELECT delivery.eventId, delivery.ordinal, event.sequence,
-          event.taskId, event.recipientAssignmentId
-        FROM coordination_delivery_events delivery
-        JOIN coordination_inbox_events event ON event.eventId = delivery.eventId
-        WHERE delivery.batchId = ? ORDER BY delivery.ordinal`)
-        .all(String(batch.batchId)) as Array<{
-        eventId: string;
-        ordinal: number;
-        sequence: number;
-        taskId: string;
-        recipientAssignmentId: string;
-      }>;
-      if (
-        events.length === 0 ||
-        events.some(
-          (event, index) =>
-            event.ordinal !== index + 1 ||
-            event.taskId !== batch.taskId ||
-            event.recipientAssignmentId !== batch.recipientAssignmentId ||
-            event.sequence > batch.highWaterSequence,
-        ) ||
-        Math.max(...events.map((event) => event.sequence)) !==
-          batch.highWaterSequence
-      ) {
-        return false;
-      }
-
-      this.db
-        .prepare("DELETE FROM coordination_delivery_events WHERE batchId = ?")
-        .run(String(batch.batchId));
-      this.db
-        .prepare(
-          "DELETE FROM coordination_delivery_batches WHERE batchId = ? AND state = 'queued'",
-        )
-        .run(String(batch.batchId));
-      const remains = this.one(
-        "SELECT 1 AS present FROM coordination_delivery_batches WHERE batchId = ?",
-        String(batch.batchId),
-      );
-      if (remains)
-        throw new Error("Refused delivery batch changed during withdrawal");
-      return true;
+      return this.deleteQueuedBatchKeepingEvents(batch);
     });
+  }
+
+  /**
+   * A draft turn refused before it ever ran gives its message back: the queued batch goes and
+   * the events stay, pending again for the next draft turn, the Ready initial turn or routing.
+   */
+  releaseRefusedDraftTurnDelivery(deliveryWorkId: string): boolean {
+    const workId = z.string().min(1).max(512).parse(deliveryWorkId);
+    return transaction(this.db, () => {
+      const batch = this.one(
+        `SELECT batch.batchId, batch.taskId, batch.recipientAssignmentId,
+          batch.assignmentVersion, batch.highWaterSequence
+        FROM coordination_delivery_batches batch
+        JOIN turn_requests request ON request.workId = batch.deliveryWorkId
+        WHERE batch.deliveryWorkId = ? AND batch.state = 'queued'
+          AND request.draftTurn = 1 AND request.state = 'held'
+          AND request.kind = 'assignment' AND request.taskId = batch.taskId
+          AND request.assignmentId = batch.recipientAssignmentId
+          AND request.assignmentVersion = batch.assignmentVersion`,
+        workId,
+      );
+      if (!batch || !this.isNeverAdmittedRefusedAssignmentWork?.(workId))
+        return false;
+      return this.deleteQueuedBatchKeepingEvents({
+        batchId: String(batch.batchId),
+        taskId: String(batch.taskId),
+        recipientAssignmentId: String(batch.recipientAssignmentId),
+        highWaterSequence: Number(batch.highWaterSequence),
+      });
+    });
+  }
+
+  /** Must run inside a transaction. Deletes the queued batch only when its events are consistent. */
+  private deleteQueuedBatchKeepingEvents(batch: {
+    batchId: string;
+    taskId: string;
+    recipientAssignmentId: string;
+    highWaterSequence: number;
+  }): boolean {
+    const events = this.db
+      .prepare(`SELECT delivery.eventId, delivery.ordinal, event.sequence,
+        event.taskId, event.recipientAssignmentId
+      FROM coordination_delivery_events delivery
+      JOIN coordination_inbox_events event ON event.eventId = delivery.eventId
+      WHERE delivery.batchId = ? ORDER BY delivery.ordinal`)
+      .all(String(batch.batchId)) as Array<{
+      eventId: string;
+      ordinal: number;
+      sequence: number;
+      taskId: string;
+      recipientAssignmentId: string;
+    }>;
+    if (
+      events.length === 0 ||
+      events.some(
+        (event, index) =>
+          event.ordinal !== index + 1 ||
+          event.taskId !== batch.taskId ||
+          event.recipientAssignmentId !== batch.recipientAssignmentId ||
+          event.sequence > batch.highWaterSequence,
+      ) ||
+      Math.max(...events.map((event) => event.sequence)) !==
+        batch.highWaterSequence
+    ) {
+      return false;
+    }
+
+    this.db
+      .prepare("DELETE FROM coordination_delivery_events WHERE batchId = ?")
+      .run(String(batch.batchId));
+    this.db
+      .prepare(
+        "DELETE FROM coordination_delivery_batches WHERE batchId = ? AND state = 'queued'",
+      )
+      .run(String(batch.batchId));
+    const remains = this.one(
+      "SELECT 1 AS present FROM coordination_delivery_batches WHERE batchId = ?",
+      String(batch.batchId),
+    );
+    if (remains)
+      throw new Error("Refused delivery batch changed during withdrawal");
+    return true;
   }
 
   private isDraftTurnWork(workId: string): boolean {

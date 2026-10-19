@@ -1739,7 +1739,7 @@ export class ExecutionState {
     )
       return false;
     const row = this.db
-      .prepare(`SELECT request.kind, request.taskId, request.projectId,
+      .prepare(`SELECT request.kind, request.draftTurn, request.taskId, request.projectId,
         request.assignmentId, request.taskVersion, request.assignmentVersion,
         request.instructionsRevision, request.profileRevision,
         request.state AS requestState, request.reason AS requestReason,
@@ -1775,6 +1775,7 @@ export class ExecutionState {
       .get(id) as
       | {
           kind: string;
+          draftTurn: number;
           taskId: string | null;
           projectId: string | null;
           assignmentId: string | null;
@@ -1835,6 +1836,20 @@ export class ExecutionState {
     if (!refusal.startsWith(refusedRevisionPrefix) || !refusal.endsWith(")"))
       return false;
     const reasons = refusal.slice(refusedRevisionPrefix.length, -1).split(", ");
+    // A refused draft turn is history on the same evidence; its stale task is the extra reason.
+    if (row.draftTurn === 1)
+      return (
+        reasons.some(
+          (reason) =>
+            refusedAssignmentRevisionReasons.has(reason) ||
+            reason === "task-revision-changed",
+        ) &&
+        reasons.every(
+          (reason) =>
+            safeRefusedAssignmentRevisionReasons.has(reason) ||
+            reason === "task-revision-changed",
+        )
+      );
     if (
       reasons.length === 0 ||
       !reasons.some(
