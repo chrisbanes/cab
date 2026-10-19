@@ -22,6 +22,11 @@ export interface GitRunOptions {
   /** Stdout plus stderr bytes; the child is stopped when exceeded. */
   maxOutputBytes: number;
   signal?: AbortSignal;
+  /**
+   * Applied over the offline `gitEnvironment()`. Only `git-push.ts` may pass this (a structural
+   * test enforces it): every other Git child stays without transports.
+   */
+  environmentOverrides?: Readonly<Record<string, string>>;
 }
 
 export type GitRunResult =
@@ -66,7 +71,7 @@ export function runGit(options: GitRunOptions): Promise<GitRunResult> {
     try {
       child = spawn(options.executable ?? "git", [...options.args], {
         cwd: options.cwd,
-        env: gitEnvironment(),
+        env: { ...gitEnvironment(), ...options.environmentOverrides },
         stdio: [
           options.input === undefined ? "ignore" : "pipe",
           "pipe",

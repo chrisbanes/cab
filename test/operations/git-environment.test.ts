@@ -81,6 +81,13 @@ test("every production Git spawn uses the shared hardened environment", () => {
     );
 });
 
+test("only the push module relaxes the offline Git environment", () => {
+  const overriding = [...productionSources()]
+    .filter(([, text]) => /\benvironmentOverrides\s*:/.test(text))
+    .map(([path]) => path);
+  assert.deepEqual(overriding, [join("src", "standalone", "git-push.ts")]);
+});
+
 test("the domain core neither spawns processes nor reaches the filesystem or standalone", () => {
   const hostImport =
     /from\s+["'](?:node:(?:child_process|fs)\b|[^"']*\/standalone\/)/;
