@@ -990,7 +990,7 @@ history.
   routing runs as for any task, without a preliminary lead turn, or, with routing off, the
   lead's initial turn runs as ordinary execution and resumes the same conversation. With
   routing on, a lead that has only had draft turns waits for the routing decision even
-  when answers are pending. A draft turn that is still queued or running when the task
+  when answers are pending, and after a routed assignment it waits for the routed result, so a message to it waits too. A draft turn that is still queued or running when the task
   becomes Ready finishes read-only first. Draft prompts and the first ordinary turn after
   draft turns carry the task's current title and outcome.
   Automatic draft turns, triage procedures and readiness proposals are not part of this.
