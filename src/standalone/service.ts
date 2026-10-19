@@ -3763,7 +3763,12 @@ export class StandaloneService {
         assignmentVersion: Number(lead.version),
         instructionsRevision: Number(lead.instructionsRevision),
         profileRevision: Number(lead.profileRevision),
-        prompt: this.assignmentPrompt(String(lead.brief), delivery),
+        // The lead's brief is frozen at its first draft turn; the task may have moved on.
+        prompt: this.assignmentPrompt(String(lead.brief), delivery, {
+          version: Number(task.version),
+          title: String(task.title),
+          outcome: String(task.outcome),
+        }),
         workspace: null,
         previousWorkId: state.latestCompletedAssignmentWork(leadId) ?? null,
         draftTurn: true,
@@ -5440,7 +5445,17 @@ export class StandaloneService {
             assignmentVersion: Number(assignment.version),
             instructionsRevision: Number(assignment.instructionsRevision),
             profileRevision: Number(assignment.profileRevision),
-            prompt: this.assignmentPrompt(String(assignment.brief), delivery),
+            prompt: this.assignmentPrompt(
+              String(assignment.brief),
+              delivery,
+              store.hasOnlyDraftTurns(assignmentId)
+                ? {
+                    version: Number(task.version),
+                    title: String(task.title),
+                    outcome: String(task.outcome),
+                  }
+                : undefined,
+            ),
             // Resumes the draft-turn conversation when the lead has had draft turns.
             previousWorkId:
               state.latestCompletedAssignmentWork(assignmentId) ?? null,
@@ -5645,13 +5660,13 @@ export class StandaloneService {
     delivery?: InboxDelivery,
     currentTask?: { version: number; title: string; outcome: string },
   ): string {
-    if (!delivery) return brief;
-    const events = delivery.events.map(
-      (event) => `- ${event.eventType}: ${event.payload}`,
-    );
     const context = currentTask
       ? `Current task (revision ${currentTask.version}): ${currentTask.title}\nCurrent outcome: ${currentTask.outcome}\n\nPreserved assignment brief:\n`
       : "";
+    if (!delivery) return `${context}${brief}`;
+    const events = delivery.events.map(
+      (event) => `- ${event.eventType}: ${event.payload}`,
+    );
     return `${context}${brief}\n\nDurable assignment inbox through event ${delivery.highWaterSequence}:\n${events.join("\n")}`;
   }
 

@@ -404,6 +404,67 @@ test("a refused draft turn does not strand the lead when the task becomes Ready"
   );
 });
 
+test("draft turns and the first ordinary turn after them carry the current task", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await draftTask(f, "Current task context");
+  const domain = f.service.domain();
+  await runDraftTurn(f, task);
+  f.runtime.complete(1);
+  await until(
+    () => !f.service.list().some((work) => work.state === "running"),
+    "turn end",
+  );
+  domain.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: version(f, task.taskId),
+    title: "A reworked title",
+    outcome: "A reworked outcome",
+  });
+  const current =
+    /Current task \(revision \d+\): A reworked title\nCurrent outcome: A reworked outcome/;
+  await task.api.execute(startCommand(f, task.taskId, "Continue."));
+  await until(() => f.runtime.hasPending(2), "second draft turn");
+  assert.match(f.runtime.prompts[1] ?? "", current);
+  f.runtime.complete(2);
+  await until(
+    () => !f.service.list().some((work) => work.state === "running"),
+    "turn end",
+  );
+  domain.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: version(f, task.taskId),
+    ready: true,
+  });
+  await until(() => f.runtime.hasPending(3), "initial turn");
+  assert.match(f.runtime.prompts[2] ?? "", current);
+});
+
+test("a task that never had a draft turn keeps exactly its brief", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await draftTask(f, "No draft turns");
+  f.service.domain().execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: version(f, task.taskId),
+    ready: true,
+  });
+  await until(() => f.runtime.hasPending(1), "initial turn");
+  assert.doesNotMatch(f.runtime.prompts[0] ?? "", /Current task \(revision/);
+});
+
 test("a lead with queued ordinary work refuses a draft turn and leaves that work alone", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
