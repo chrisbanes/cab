@@ -850,8 +850,8 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   run's turn still live is held the same way, whether the runtime reports it live or
   cannot say: nothing interrupts a turn of a previous runtime process, since Codex
   and Claude Code cannot inspect or interrupt a historical execution by its recorded
-  identity. The run keeps its capacity and its copy, shown as stopping, until a later
-  start verifies the recorded process ended. This is an accepted limit. The panel shows a run in progress from its own state even when
+  identity. The run keeps its capacity and its copy, shown as stopping, until a start
+  verifies the recorded process ended. This is an accepted limit. The panel shows a run in progress from its own state even when
   the project has lost its lead; the lead only gates starting another.
 - **Fill.** Nothing is saved or created until Save draft or Create. An empty title or
   outcome field is filled. A field the operator already typed in shows the proposal
