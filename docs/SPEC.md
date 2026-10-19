@@ -1676,7 +1676,8 @@ tags or other remotes; merged branches follow the repository's head-branch delet
 setting. Ensemble cannot prevent a push made with ambient host credentials once a
 project's command network access is enabled; it detects the result as an outside change. A task branch
 whose head was changed outside stays refused until the remote returns to the last pushed
-commit.
+commit. The bounded live run is in the
+[branch publication evidence](evidence/2026-10-19-branch-publication.md).
 
 The lead explicitly submits merge or issue closure with its current reviewed result
 set. Shared completion checks run with the current action intent transition, excluding

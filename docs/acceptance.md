@@ -378,8 +378,11 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   task branch, offline commit verification, the fast-forward and lease rules, uncertain
   and outside-change outcomes, and the credential-containing push invocation
   (`branch-publication`, `git-push`, `git-environment`, `delivery-integration`,
-  `publication-live-harness`). The bounded live run that publishes a task commit, opens the PR and pushes a repair is
-  unproved until its evidence record exists.
+  `publication-live-harness`). One bounded live run on the fixture repository published
+  a task commit, opened the PR and pushed a repair commit to the same branch, with
+  verified cleanup; it was coordinator-level with no model turns, and a real foreign
+  push, force-push and approval mode were not exercised live. Evidence:
+  [branch publication](evidence/2026-10-19-branch-publication.md).
 - **Operations, recovery and cutover** (R06) — **Bounded.** A disposable launchd
   service lifecycle with database backup/restore passed, and current-schema backup,
   verify and restore with exact owned-process recovery passed locally. Deterministic
