@@ -4999,6 +4999,7 @@ export class ExecutionState {
         request.taskId, request.projectId, request.assignmentId, request.taskVersion,
         request.assignmentVersion, request.instructionsRevision,
         request.profileRevision, request.prompt, request.state AS requestState,
+        request.draftTurn, request.draftTaskDigest,
         request.sequence AS requestSequence, identity.workRevision,
         identity.requestSequence AS identitySequence,
         identity.threadId AS identityThreadId, identity.turnId AS identityTurnId,
@@ -5025,6 +5026,8 @@ export class ExecutionState {
             profileRevision: number | null;
             prompt: string;
             requestState: string;
+            draftTurn: number;
+            draftTaskDigest: string | null;
             requestSequence: number;
             workRevision: number | null;
             identitySequence: number;
@@ -5243,8 +5246,9 @@ export class ExecutionState {
         .prepare(`INSERT INTO turn_requests
         (requestKey, workId, kind, taskId, projectId, assignmentId, taskVersion,
           assignmentVersion, instructionsRevision, profileRevision, prompt,
-          workspace, previousWorkId, state, reason, nextEligibleAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', NULL, ?)`)
+          workspace, previousWorkId, state, reason, nextEligibleAt, draftTurn,
+          draftTaskDigest)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', NULL, ?, ?, ?)`)
         .run(
           retryRequestKey,
           retryWorkId,
@@ -5259,6 +5263,8 @@ export class ExecutionState {
           current.prompt,
           current.workspace,
           value.nextEligibleAt,
+          current.draftTurn,
+          current.draftTaskDigest,
         );
       const resolved = this.db
         .prepare(`UPDATE execution_intents SET state = 'resolved-failed',

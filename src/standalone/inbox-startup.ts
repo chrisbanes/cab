@@ -144,14 +144,7 @@ export class InboxStartupReconciliation {
             profileRevision: request.profileRevision!,
           },
         );
-        if (
-          admission.reasons.some(
-            (r) =>
-              r !== "project-paused" &&
-              !(request.draftTurn && r === "task-unready"),
-          )
-        )
-          continue;
+        if (admission.reasons.some((r) => r !== "project-paused")) continue;
         const exact = this.db
           .prepare(`SELECT intent.id,batch.batchId FROM execution_intents intent
           JOIN task_execution_bindings binding ON binding.workId=intent.workId

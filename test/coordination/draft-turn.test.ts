@@ -710,7 +710,9 @@ for (const phase of ["queued", "running"] as const)
     const task = await draftTask(f, `Ready while ${phase}`);
     const domain = f.service.domain();
     if (phase === "queued") configure(f, task.projectId, true);
-    await task.api.execute(startCommand(f, task.taskId));
+    const started = await task.api.execute(startCommand(f, task.taskId));
+    assert.equal(started.kind, "draft-turn");
+    const draftWorkId = (started as { workId: string }).workId;
     if (phase === "running")
       await until(() => f.runtime.hasPending(1), "draft");
     domain.execute({
@@ -741,6 +743,18 @@ for (const phase of ["queued", "running"] as const)
       );
     assert.equal(initial?.state, "running");
     assert.equal(domain.assignment(task.assignmentId).state, "running");
+    // The initial turn is chained to the draft turn and resumes its conversation.
+    assert.equal(
+      f.service
+        .turnRequests()
+        .find((request) => request.workId === initial?.workId)?.previousWorkId,
+      draftWorkId,
+    );
+    assert.equal(
+      initial?.threadId,
+      f.service.executionForWork(draftWorkId)?.threadId,
+    );
+    assert.ok(initial?.threadId);
   });
 
 test("making the task Ready with routing enabled routes it without a preliminary lead turn", async (t) => {

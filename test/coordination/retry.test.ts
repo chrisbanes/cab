@@ -267,6 +267,33 @@ test("a qualified transient failure atomically releases its generation and queue
   }
 });
 
+test("a retry of a draft turn stays a draft turn with its task digest", async () => {
+  const runtime = new RetryFixtureRuntime();
+  runtime.failure = transientEvidence();
+  const release = deferred<void>();
+  runtime.failureGate = release.promise;
+  const f = await fixture(runtime);
+  try {
+    const original = f.service.submit("first", "try safely", f.workspace);
+    await runtime.failureEntered.promise;
+    const db = (f.service as unknown as { db: DatabaseSync }).db;
+    db.prepare(
+      "UPDATE turn_requests SET draftTurn = 1, draftTaskDigest = 'digest-1' WHERE workId = 'first'",
+    ).run();
+    release.resolve();
+    assert.equal(await waitUntil(() => runtime.turns === 2), true);
+    const retry = f.service
+      .turnRequests()
+      .find((request) => request.workId !== "first");
+    assert.equal(retry?.draftTurn, true);
+    assert.equal(retry?.draftTaskDigest, "digest-1");
+    runtime.retryGate.resolve();
+    await original;
+  } finally {
+    await f.close();
+  }
+});
+
 test("missing, mismatched, generic, permanent, or uncounted failure evidence never retries", async () => {
   const cases: Array<{
     name: string;
