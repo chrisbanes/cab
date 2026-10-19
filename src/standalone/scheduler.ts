@@ -183,13 +183,11 @@ export class SchedulerStore {
       return current;
     }
     this.db
-      .prepare(
-        `INSERT INTO turn_requests
+      .prepare(`INSERT INTO turn_requests
         (requestKey, workId, kind, taskId, projectId, assignmentId, taskVersion,
           assignmentVersion, instructionsRevision, profileRevision, prompt,
           workspace, previousWorkId, state, reason, draftTurn)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, ?)`,
-      )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, ?)`)
       .run(
         value.requestKey,
         value.workId,
@@ -230,20 +228,16 @@ export class SchedulerStore {
 
   queued(now = Date.now()): TurnRequest[] {
     return this.db
-      .prepare(
-        `SELECT * FROM turn_requests WHERE state = 'queued'
-        AND (nextEligibleAt IS NULL OR nextEligibleAt <= ?) ORDER BY sequence`,
-      )
+      .prepare(`SELECT * FROM turn_requests WHERE state = 'queued'
+        AND (nextEligibleAt IS NULL OR nextEligibleAt <= ?) ORDER BY sequence`)
       .all(now)
       .map((row) => this.parse(row as Record<string, unknown>));
   }
 
   nextEligibility(now = Date.now()): number | undefined {
     const row = this.db
-      .prepare(
-        `SELECT MIN(nextEligibleAt) AS nextEligibleAt
-      FROM turn_requests WHERE state = 'queued' AND nextEligibleAt > ?`,
-      )
+      .prepare(`SELECT MIN(nextEligibleAt) AS nextEligibleAt
+      FROM turn_requests WHERE state = 'queued' AND nextEligibleAt > ?`)
       .get(now) as { nextEligibleAt: number | null };
     return row.nextEligibleAt === null ? undefined : row.nextEligibleAt;
   }
@@ -284,10 +278,8 @@ export class SchedulerStore {
       projectId: "projectId",
     }[scope];
     return this.db
-      .prepare(
-        `SELECT * FROM turn_requests WHERE kind = 'assignment'
-        AND ${column} = ? AND sequence < ? ORDER BY sequence DESC LIMIT ?`,
-      )
+      .prepare(`SELECT * FROM turn_requests WHERE kind = 'assignment'
+        AND ${column} = ? AND sequence < ? ORDER BY sequence DESC LIMIT ?`)
       .all(id, before ?? Number.MAX_SAFE_INTEGER, limit)
       .map((row) => this.parse(row as Record<string, unknown>));
   }
@@ -304,17 +296,13 @@ export class SchedulerStore {
   current(assignmentId: string, version: number): TurnRequest | undefined {
     const row =
       this.db
-        .prepare(
-          `SELECT * FROM turn_requests WHERE assignmentId = ?
-          AND state = 'active' ORDER BY sequence DESC LIMIT 1`,
-        )
+        .prepare(`SELECT * FROM turn_requests WHERE assignmentId = ?
+          AND state = 'active' ORDER BY sequence DESC LIMIT 1`)
         .get(assignmentId) ??
       (Number.isSafeInteger(version)
         ? this.db
-            .prepare(
-              `SELECT * FROM turn_requests WHERE assignmentId = ?
-              AND assignmentVersion = ? ORDER BY sequence DESC LIMIT 1`,
-            )
+            .prepare(`SELECT * FROM turn_requests WHERE assignmentId = ?
+              AND assignmentVersion = ? ORDER BY sequence DESC LIMIT 1`)
             .get(assignmentId, version)
         : undefined);
     return row ? this.parse(row as Record<string, unknown>) : undefined;
@@ -324,10 +312,8 @@ export class SchedulerStore {
   hasOrdinaryAssignmentWork(assignmentId: string): boolean {
     return (
       this.db
-        .prepare(
-          `SELECT 1 FROM turn_requests WHERE assignmentId = ?
-          AND kind = 'assignment' AND draftTurn = 0 LIMIT 1`,
-        )
+        .prepare(`SELECT 1 FROM turn_requests WHERE assignmentId = ?
+          AND kind = 'assignment' AND draftTurn = 0 LIMIT 1`)
         .get(assignmentId) !== undefined
     );
   }
@@ -335,10 +321,8 @@ export class SchedulerStore {
   /** The task's draft turn that is still queued or running, if any. */
   activeDraftTurn(taskId: string): TurnRequest | undefined {
     const row = this.db
-      .prepare(
-        `SELECT * FROM turn_requests WHERE taskId = ? AND draftTurn = 1
-        AND state IN ('queued','active') ORDER BY sequence DESC LIMIT 1`,
-      )
+      .prepare(`SELECT * FROM turn_requests WHERE taskId = ? AND draftTurn = 1
+        AND state IN ('queued','active') ORDER BY sequence DESC LIMIT 1`)
       .get(taskId);
     return row ? this.parse(row as Record<string, unknown>) : undefined;
   }
