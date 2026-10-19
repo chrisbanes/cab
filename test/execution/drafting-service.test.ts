@@ -64,6 +64,9 @@ class DraftRuntime implements Runtime {
     tools: readonly RuntimeToolDefinition[];
   }> = [];
   readonly prompts: string[] = [];
+  /** The settings argument of each `startThread` and `startTurn`, undefined when omitted. */
+  readonly threadSettings: unknown[] = [];
+  readonly turnSettings: unknown[] = [];
   readonly interrupts: string[] = [];
   /** Interrupts are acknowledged but the turn keeps running until `release`. */
   holdOnInterrupt = false;
@@ -96,7 +99,9 @@ class DraftRuntime implements Runtime {
   async startThread(
     workspace: string,
     tools: readonly RuntimeToolDefinition[] = [],
+    settings?: unknown,
   ) {
+    this.threadSettings.push(settings);
     if (this.threadDelayMs)
       await new Promise((resolve) => setTimeout(resolve, this.threadDelayMs));
     const id = `draft-thread-${++this.count}`;
@@ -104,8 +109,14 @@ class DraftRuntime implements Runtime {
     return id;
   }
   async resumeThread() {}
-  async startTurn(threadId: string, _workspace: string, prompt: string) {
+  async startTurn(
+    threadId: string,
+    _workspace: string,
+    prompt: string,
+    settings?: unknown,
+  ) {
     this.prompts.push(prompt);
+    this.turnSettings.push(settings);
     const turnId = `draft-turn-${++this.count}`;
     let settle!: (status: "completed" | "failed") => void;
     const promise = new Promise<"completed" | "failed">((resolve) => {
@@ -509,6 +520,30 @@ function firstTurn(harness: ExecutionHarness, opened: Opened) {
     prompt: String(session.prompt?.message.content ?? ""),
   };
 }
+
+test("codex: a drafting run uses the lead profile's captured model and effort", async (t) => {
+  const w = world(t);
+  const opened = w.open();
+  const { service } = opened;
+  await w.start(service, "codex");
+  const { projectId, lead } = await w.project(service, "codex");
+  w.execute(service, {
+    type: "profile.configure",
+    profileId: lead,
+    expectedVersion: 1,
+    runtime: { harness: "codex", model: "m-alt", reasoningEffort: "medium" },
+  });
+  opened.codex.script(proposing(proposal));
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "proposed",
+    () => ({ requests: service.turnRequests() }),
+  );
+  const settings = { model: "m-alt", reasoningEffort: "medium" };
+  assert.deepEqual(opened.codex.threadSettings, [settings]);
+  assert.deepEqual(opened.codex.turnSettings, [settings]);
+});
 
 for (const harness of harnesses) {
   test(`${harness}: a drafting run proposes from a disposable copy at the configured commit and creates no task`, async (t) => {

@@ -164,6 +164,17 @@ export interface OperatorFixture<R extends Runtime> {
   ): Promise<void>;
 }
 
+/** A Codex fake that reports its supported models, as App Server `model/list` does. */
+export class CodexShapedFixtureRuntime extends OperatorFixtureRuntime {
+  supportedSettings(): Record<string, string[]> | undefined {
+    return {
+      default: ["low", "high"],
+      "m-default": ["low", "high"],
+      "m-alt": ["medium"],
+    };
+  }
+}
+
 /** A Claude-shaped fake: the optional seams the operator UI reads, no SDK. */
 export class ClaudeShapedFixtureRuntime extends OperatorFixtureRuntime {
   readonly harness = "claude" as const;

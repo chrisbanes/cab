@@ -63,9 +63,13 @@ test("configuration journey through the CLI and the shared service", async (t) =
   };
   const out = () => join(h.dir, `${randomUUID()}.json`);
 
-  // Help offers no runtime or model controls (GitHub sources and delivery are CLI4).
+  // Help offers no runtime switch; model and effort are profile settings (GitHub sources and delivery are CLI4).
   const help = await h.run(["--help", "--all"]);
-  assert.doesNotMatch(help.out, /--runtime|--model/i);
+  assert.doesNotMatch(help.out, /--runtime/i);
+  assert.match(
+    help.out,
+    /profile prepare .*\[--model NAME\|default\] \[--effort NAME\|default\]/,
+  );
 
   // 1. Prepare read-only, review, apply read-write, read back and compare reads.
   const profileDoc = out();

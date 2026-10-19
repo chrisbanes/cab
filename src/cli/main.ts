@@ -290,6 +290,8 @@ export const OPTIONS = {
   "capabilities-file": { type: "string" },
   "restore-revision": { type: "string" },
   revoked: { type: "string" },
+  model: { type: "string" },
+  effort: { type: "string" },
   paused: { type: "string" },
   "lead-profile": { type: "string" },
   "diagnostic-capture": { type: "string" },

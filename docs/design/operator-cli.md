@@ -301,8 +301,8 @@ Node.js version and package tooling; distribution follows
 
 Service administration remains the separate host-local surface. Full setup
 discovery, line-comment review composition, MCP packaging, remote process control
-and runtime or model setting mutations other than runtime enablement are outside
-the first release. Existing
+and runtime setting mutations other than runtime enablement and a profile's model
+and reasoning effort are outside the first release. Existing
 configuration operations such as source activation retain their staged previews.
 No generic command bypasses the typed operation contracts.
 
@@ -317,6 +317,7 @@ ensemble --connection home logs --execution EXECUTION --cursor CURSOR --output j
 ensemble --connection home doctor --output json
 ensemble --connection home profile prepare PROFILE --instructions-file instructions.md --expected-version 4 --out change.json
 ensemble --connection home profile apply --file change.json --request-id REQUEST
+ensemble --connection home profile prepare PROFILE --model MODEL --effort high --out change.json
 ensemble --connection home assignment apply-current ASSIGNMENT --expected-version 7 --request-id REQUEST
 ensemble --connection home operation get REQUEST --scope SCOPE --output json
 ```

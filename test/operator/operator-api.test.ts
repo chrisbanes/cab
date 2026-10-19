@@ -31,6 +31,7 @@ import {
 } from "../../src/standalone/state.js";
 import {
   ClaudeShapedFixtureRuntime,
+  CodexShapedFixtureRuntime,
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
@@ -2564,11 +2565,28 @@ test("profile configuration reads and writes a validated execution runtime", asy
       key: randomUUID(),
       profileId: ids.profileId,
       expectedVersion: 1,
-      runtime: { harness: "codex", model: "opus" },
+      runtime: { harness: "codex", temperature: 1 },
     } as never),
     /Unrecognized key/,
   );
   assert.equal(f.service.domain().profile(ids.profileId).version, 1);
+  // Codex settings are accepted while the runtime has not reported its supported values.
+  const codex = {
+    harness: "codex" as const,
+    model: "m-alt",
+    reasoningEffort: "medium",
+  };
+  await api.execute({
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: ids.profileId,
+    expectedVersion: 1,
+    runtime: codex,
+  });
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.runtime,
+    codex,
+  );
   const runtime = {
     harness: "claude" as const,
     model: "opus",
@@ -2578,7 +2596,7 @@ test("profile configuration reads and writes a validated execution runtime", asy
     type: "profile.configure",
     key: randomUUID(),
     profileId: ids.profileId,
-    expectedVersion: 1,
+    expectedVersion: 2,
     runtime,
   });
   assert.deepEqual(
@@ -2864,6 +2882,66 @@ test("unknown well-shaped Claude values save while supported settings are unknow
   assert.equal(
     (f.service.domain().profileRuntime(profileId) as { model: string }).model,
     "future-model",
+  );
+});
+
+test("Codex settings are validated against the runtime catalogue and a rejected revision waits with the profile Fix", async (t) => {
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    (_context, harness) =>
+      harness === "codex"
+        ? new CodexShapedFixtureRuntime()
+        : new OperatorFixtureRuntime(),
+  );
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const create = (runtime: Record<string, unknown>) =>
+    api.execute({
+      type: "profile.create",
+      key: randomUUID(),
+      profileId: randomUUID(),
+      name: "Codex",
+      instructions: "x",
+      capabilities: "x",
+      runtime,
+    } as never);
+  const rejected = (field: string) => (error: unknown) =>
+    error instanceof OperatorApiError &&
+    error.status === 400 &&
+    error.fieldPaths?.[0] === field;
+  await assert.rejects(
+    create({ harness: "codex", model: "gone", reasoningEffort: null }),
+    rejected("runtime.model"),
+  );
+  await assert.rejects(
+    create({ harness: "codex", model: "m-alt", reasoningEffort: "high" }),
+    rejected("runtime.reasoningEffort"),
+  );
+  // The catalogue's default entry is not a model name an API client can save.
+  await assert.rejects(
+    create({ harness: "codex", model: "default", reasoningEffort: null }),
+    /Use no model/,
+  );
+  await create({ harness: "codex", model: "m-alt", reasoningEffort: "medium" });
+  await create({ harness: "codex" });
+
+  // An unsupported captured revision waits with the open-profile Fix.
+  const ids = await seed(f);
+  f.service.domain().execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.profileId,
+    expectedVersion: 1,
+    runtime: { harness: "codex", model: "gone", reasoningEffort: null },
+  });
+  const waits = (await api.readTask(ids.taskId)).data.waits;
+  assert.deepEqual(
+    waits.find((w) => w.code === "profile-runtime-not-configured")?.fix,
+    { kind: "open-profile", profileId: ids.profileId },
   );
 });
 

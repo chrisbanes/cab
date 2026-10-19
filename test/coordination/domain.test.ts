@@ -1856,7 +1856,8 @@ test("profiles store a validated execution runtime per revision", () => {
     assert.deepEqual(f.domain.profileRuntime(q, 1), claude);
 
     for (const runtime of [
-      { harness: "codex", model: "x" },
+      { harness: "codex", temperature: 1 },
+      { harness: "codex", model: "has space" },
       { harness: "claude", model: "has space", reasoningEffort: null },
       { harness: "other" },
     ])
@@ -1895,6 +1896,30 @@ test("profiles store a validated execution runtime per revision", () => {
       name: "Renamed",
     });
     assert.equal(f.domain.profileRuntime(profile, 3).harness, "claude");
+    // Codex settings are stored per revision, and a bare Codex runtime stays bare.
+    const codex = {
+      harness: "codex" as const,
+      model: "m-alt",
+      reasoningEffort: "medium",
+    };
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 3,
+      runtime: codex,
+    });
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 4,
+      runtime: { harness: "codex" },
+    });
+    assert.deepEqual(f.domain.profileRuntime(profile, 4), codex);
+    assert.deepEqual(f.domain.profileRuntime(profile, 5), {
+      harness: "codex",
+    });
   } finally {
     f.close();
   }

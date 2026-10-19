@@ -23,7 +23,7 @@ import { runtimeErrors } from "./execution-runtime.js";
 import { FolderPicker } from "./folder-picker.js";
 import { ReadyCheck } from "./ready-check.js";
 import {
-  claudeSettings,
+  harnessSettings,
   emptyProfile,
   profileCreateCommand,
   RuntimeFields,
@@ -426,7 +426,7 @@ export function ProjectSetup(
       p.session,
       profileCreateCommand(inline.values),
       adoptProfile,
-      runtimeErrors(inline.values, claudeSettings(p.workspace)),
+      runtimeErrors(inline.values, harnessSettings(p.workspace, inline.values)),
     );
 
   // Create is always drawn: held, it stays focusable with its reason, and submitting is
@@ -601,7 +601,11 @@ export function ProjectSetup(
                     label="Profile name"
                   />
                 </div>
-                <RuntimeFields draft={inline} workspace={p.workspace} />
+                <RuntimeFields
+                  draft={inline}
+                  workspace={p.workspace}
+                  codexSettings={false}
+                />
                 <p className="metadata muted">
                   Add a summary and instructions later in Settings → Profiles.
                 </p>

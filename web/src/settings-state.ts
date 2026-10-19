@@ -151,8 +151,6 @@ const inactive = (
   values: Record<string, string | boolean | string[]>,
 ) =>
   (field === "credentialRef" && values.referenceMode !== "set") ||
-  ((field === "runtimeModel" || field === "runtimeEffort") &&
-    values.runtimeHarness !== "claude") ||
   // A project's cap counts only while its override is on.
   (field.startsWith("limit-") && !values[`override-${field.slice(6)}`]) ||
   // Matching applies to conditions; with none there is nothing to match.
@@ -258,7 +256,14 @@ export class ConfigurationDraft {
       this.lifecycle.uncertain
     )
       return false;
-    this.values = { ...this.values, [field]: value };
+    // Model names belong to one runtime, so a runtime switch starts from its defaults.
+    const switched =
+      field === "runtimeHarness" && this.values.runtimeHarness !== value;
+    this.values = {
+      ...this.values,
+      [field]: value,
+      ...(switched ? { runtimeModel: "", runtimeEffort: "" } : {}),
+    };
     this.savedAt = null;
     this.changed();
     return true;

@@ -27,6 +27,7 @@
     "routing:live": "node test/coordination/routing-qualification/live-runtime.mjs --live",
     "operator:live": "node test/operator/integration-qualification/live-operator.mjs --live",
     "diagnostics:live": "node test/operator/diagnostics-qualification/live-diagnostics.mjs --live --one-attempt",
+    "codex-settings:live": "node test/operator/diagnostics-qualification/live-diagnostics.mjs --codex-settings --live --one-attempt",
     "operator-cli:live": "node test/operator/cli-journey-qualification/live-journey.mjs --live --max-turns 2",
     "mixed-runtime:live": "node test/execution/mixed-runtime-qualification/live-journeys.mjs",
     "coordination:live": "node test/coordination/live-qualification/live-journey.mjs",

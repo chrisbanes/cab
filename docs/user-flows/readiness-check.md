@@ -59,6 +59,12 @@ service sees rather than the operator's interactive shell.
   Until then a Claude profile cannot be confirmed, and Runtime harness fails with
   "Claude's supported models are not known yet"; run a Claude task, then run the
   check again.
+- Codex's supported models are read from its App Server when the runtime starts. A
+  Codex profile that sets a model or reasoning effort cannot be confirmed until then,
+  and Runtime harness fails with "Codex's supported models are not known yet"; run the
+  check again, or restart the service if the read keeps failing. A Codex profile
+  without a model or reasoning effort runs on the Codex default and is not held to
+  the catalogue.
 - `ensemble doctor` exits 0 whenever the read succeeds, whatever the checks report;
   its JSON `data` is the service's `data` unchanged.
 - Re-running is the only action of the check, and it changes nothing. In Settings

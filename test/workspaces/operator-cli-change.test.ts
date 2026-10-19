@@ -236,6 +236,94 @@ test("profile changes prepare read-only, apply once and keep revisions immutable
   assert.equal(Number(d.profile(seed.profileId).version), 8);
 });
 
+test("profile prepare sets, shows and clears Codex model and effort", async (t) => {
+  const { seed, d, out, cli, h } = await setup(t);
+  assert.deepEqual(d.profileRuntime(seed.profileId), { harness: "codex" });
+  const apply = async (...args: string[]) => {
+    const doc = out();
+    let r = await cli("ro", [
+      "profile",
+      "prepare",
+      seed.profileId,
+      ...args,
+      "--out",
+      doc,
+    ]);
+    assert.equal(r.code, 0, r.err + r.out);
+    const prepared = r.json().data.document as Json;
+    r = await cli("rw", ["profile", "apply", "--file", doc]);
+    assert.equal(r.code, 0, r.err + r.out);
+    return prepared;
+  };
+  const prepared = await apply("--model", "m-alt", "--effort", "medium");
+  assert.deepEqual(prepared.command.runtime, {
+    harness: "codex",
+    model: "m-alt",
+    reasoningEffort: "medium",
+  });
+  assert.deepEqual(prepared.preview.changes, [
+    { field: "runtime.model", from: "default", to: "m-alt" },
+    { field: "runtime.reasoningEffort", from: "default", to: "medium" },
+  ]);
+  assert.deepEqual(d.profileRuntime(seed.profileId), {
+    harness: "codex",
+    model: "m-alt",
+    reasoningEffort: "medium",
+  });
+  const shown = await cli("ro", ["profile", "get", seed.profileId]);
+  assert.equal(shown.code, 0, shown.err);
+  assert.deepEqual(shown.json().data.runtime, {
+    harness: "codex",
+    model: "m-alt",
+    reasoningEffort: "medium",
+  });
+  const human = await h.run([
+    "profile",
+    "get",
+    seed.profileId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /codex \(model m-alt, effort medium\)/);
+
+  // One value changes alone; an unchanged value is no change and writes nothing.
+  const effortOnly = await apply("--effort", "high");
+  assert.deepEqual(effortOnly.preview.changes, [
+    { field: "runtime.reasoningEffort", from: "medium", to: "high" },
+  ]);
+  for (const args of [
+    ["--effort", "high"],
+    ["--model", "m alt"],
+  ]) {
+    const target = out();
+    const refused = await cli("ro", [
+      "profile",
+      "prepare",
+      seed.profileId,
+      ...args,
+      "--out",
+      target,
+    ]);
+    assert.equal(refused.code, 2, args.join(" "));
+    assert.equal(existsSync(target), false, args.join(" "));
+  }
+
+  // `default` clears both and returns to the bare stored form.
+  await apply("--model", "default", "--effort", "default");
+  assert.deepEqual(d.profileRuntime(seed.profileId), { harness: "codex" });
+  const target = out();
+  const none = await cli("ro", [
+    "profile",
+    "prepare",
+    seed.profileId,
+    "--model",
+    "default",
+    "--out",
+    target,
+  ]);
+  assert.equal(none.code, 2);
+});
+
 test("profile and project instructions can be given inline or on stdin", async (t) => {
   const { seed, d, file, out, cli, h } = await setup(t);
   type Kind = {

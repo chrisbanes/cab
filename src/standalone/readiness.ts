@@ -464,7 +464,6 @@ export class Readiness {
     const states = new Map(statuses.map((s) => [s.harness, s.state]));
     const reasons: string[] = [];
     let rejected = 0;
-    let unknownSettings = false;
     // A runtime that failed, or a profile it rejects: only these call for a restart.
     let other = false;
     let notEnabledFix: string | undefined;
@@ -487,16 +486,23 @@ export class Readiness {
         if (restart) unavailableFix ??= readinessFix(harness, restart);
       }
     }
-    const settings =
-      states.get("claude") === "available"
-        ? this.deps.harnessSettings("claude")
-        : null;
+    const known = new Map<ExecutionHarness, SupportedRuntimeSettings | null>();
+    const unknown = new Set<ExecutionHarness>();
     for (const profile of used) {
       const { runtime } = profile;
-      if (runtime.harness !== "claude" || states.get("claude") !== "available")
+      if (states.get(runtime.harness) !== "available") continue;
+      // Codex without a configured value runs on the runtime's own default.
+      if (
+        runtime.harness === "codex" &&
+        (runtime.model ?? null) === null &&
+        (runtime.reasoningEffort ?? null) === null
+      )
         continue;
+      if (!known.has(runtime.harness))
+        known.set(runtime.harness, this.deps.harnessSettings(runtime.harness));
+      const settings = known.get(runtime.harness) ?? null;
       if (settings === null) {
-        unknownSettings = true;
+        unknown.add(runtime.harness);
         continue;
       }
       const field = unsupportedRuntimeField(runtime, settings);
@@ -511,8 +517,10 @@ export class Readiness {
       reasons.push(
         `${rejected} ${rejected === 1 ? "profile uses" : "profiles use"} a model or reasoning effort the runtime does not accept`,
       );
-    if (unknownSettings)
-      reasons.push("Claude's supported models are not known yet");
+    for (const harness of unknown)
+      reasons.push(
+        `${executionHarnessLabels[harness]}'s supported models are not known yet`,
+      );
     if (reasons.length === 0) return pass(id);
     return outcome(
       id,
@@ -525,7 +533,11 @@ export class Readiness {
             : unavailableFix
           : fixes.harness
         : (notEnabledFix ??
-            (unknownSettings ? fixes.harnessSettings : fixes.harness)),
+            (unknown.has("claude")
+              ? fixes.harnessSettings
+              : unknown.size > 0
+                ? fixes.unknown
+                : fixes.harness)),
     );
   }
 

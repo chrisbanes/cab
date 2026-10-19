@@ -58,19 +58,20 @@ export const unavailableAlert = unavailableAlertText;
 /** Draft values of the profile runtime fields. */
 export const runtimeValues = (runtime: ProfileRuntime): Values => ({
   runtimeHarness: runtime.harness,
-  runtimeModel: runtime.harness === "claude" ? (runtime.model ?? "") : "",
-  runtimeEffort:
-    runtime.harness === "claude" ? (runtime.reasoningEffort ?? "") : "",
+  runtimeModel: runtime.model ?? "",
+  runtimeEffort: runtime.reasoningEffort ?? "",
 });
 
 export function runtimeCommand(v: Values): ProfileRuntime {
-  if (v.runtimeHarness !== "claude") return { harness: "codex" };
   const value = (x: unknown) => String(x ?? "").trim() || null;
-  return {
-    harness: "claude",
-    model: value(v.runtimeModel),
-    reasoningEffort: value(v.runtimeEffort),
-  };
+  const model = value(v.runtimeModel),
+    reasoningEffort = value(v.runtimeEffort);
+  if (v.runtimeHarness === "claude")
+    return { harness: "claude", model, reasoningEffort };
+  // A Codex profile without settings keeps the bare stored form.
+  return model === null && reasoningEffort === null
+    ? { harness: "codex" }
+    : { harness: "codex", model, reasoningEffort };
 }
 
 const settingFields = [
@@ -84,12 +85,17 @@ export function runtimeErrors(
   supported?: SupportedRuntimeSettings | null,
 ): Record<string, string> {
   const errors: Record<string, string> = {};
-  if (v.runtimeHarness !== "claude") return errors;
   for (const [field, path, label] of settingFields) {
     const value = String(v[field] ?? "").trim();
     if (/\s/.test(value)) errors[path] = `${label} cannot contain spaces.`;
     else if (value.length > 128)
       errors[path] = `${label} must be at most 128 characters.`;
+    else if (
+      field === "runtimeModel" &&
+      v.runtimeHarness === "codex" &&
+      value === "default"
+    )
+      errors[path] = "Leave Model blank to use the runtime default.";
   }
   if (Object.keys(errors).length || !supported) return errors;
   const runtime = runtimeCommand(v);

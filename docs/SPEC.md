@@ -693,8 +693,11 @@ capabilities. Settings and routing candidate lists show the name with its summar
 (for example "Eli · Repairs"). Like capabilities, the summary describes
 suitability; it grants no permission or repository access. A profile also selects
 its execution runtime, by default the first enabled runtime (Codex, then Claude;
-Codex when none is enabled), with harness-specific settings (model and reasoning
-effort for Claude). An assignment conversation keeps the runtime that
+Codex when none is enabled), with a model and reasoning effort for either runtime
+(blank uses the runtime's default). Each runtime reports the values it supports (Codex
+from its App Server model list), a value outside them waits visibly and never falls
+back to another model, effort or runtime, and a profile without settings runs on the
+runtime's default exactly as before. An assignment conversation keeps the runtime that
 started it; work for an unconfigured or unavailable runtime waits visibly and never
 falls back to another. The operator UI selects and shows each profile's runtime,
 the runtime of each assignment and each runtime's effective policy, and sets the

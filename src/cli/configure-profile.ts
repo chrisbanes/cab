@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { profileRuntimeSchema } from "../core/execution-runtime.js";
 import {
   profileConfigurationSchema,
   profileInstructionsSchema,
@@ -140,7 +141,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
     "profile prepare",
     {
       usage:
-        "profile prepare PROFILE_ID [--out FILE] [--expected-version N] [--name S] [--summary S] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N] [--capabilities-file PATH] [--revoked true|false]",
+        "profile prepare PROFILE_ID [--out FILE] [--expected-version N] [--name S] [--summary S] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N] [--capabilities-file PATH] [--revoked true|false] [--model NAME|default] [--effort NAME|default]",
       positionals: 1,
       expects:
         "--expected-version: the profile's version ('ensemble profile get PROFILE_ID'); omitted, the version this command reads.",
@@ -154,6 +155,8 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
         "restore-revision",
         "capabilities-file",
         "revoked",
+        "model",
+        "effort",
       ],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROFILE_ID");
@@ -232,6 +235,45 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
             from: String(p.profile.revoked),
             to: String(revoked),
           });
+        }
+        // `default` clears a setting; the profile keeps its current harness.
+        const setting = (flag: string | undefined, now: string | null) =>
+          flag === undefined ? now : flag === "default" ? null : flag.trim();
+        const model = setting(ctx.values.model, p.runtime.model ?? null);
+        const effort = setting(
+          ctx.values.effort,
+          p.runtime.reasoningEffort ?? null,
+        );
+        const modelChanged = model !== (p.runtime.model ?? null);
+        const effortChanged = effort !== (p.runtime.reasoningEffort ?? null);
+        if (modelChanged || effortChanged) {
+          const next = profileRuntimeSchema.safeParse(
+            p.runtime.harness === "codex" && model === null && effort === null
+              ? { harness: "codex" }
+              : { harness: p.runtime.harness, model, reasoningEffort: effort },
+          );
+          if (!next.success)
+            throw new CliError(
+              "invalid-input",
+              "--model and --effort take a name without spaces, or default.",
+            );
+          command.runtime = next.data;
+          notes.push(
+            "A runtime change saves a new profile revision and affects new conversations only; existing conversations keep their runtime.",
+          );
+          const show = (v: string | null) => v ?? "default";
+          if (modelChanged)
+            changes.push({
+              field: "runtime.model",
+              from: show(p.runtime.model ?? null),
+              to: show(model),
+            });
+          if (effortChanged)
+            changes.push({
+              field: "runtime.reasoningEffort",
+              from: show(p.runtime.reasoningEffort ?? null),
+              to: show(effort),
+            });
         }
         instructionChange(current, proposed, changes, diff, gaps, notes);
         if (proposed !== undefined) command.instructions = proposed;

@@ -6597,9 +6597,9 @@ export class OperatorApi {
         // Supported values are authoritative once the runtime has read them.
         if (
           (c.type === "profile.create" || c.type === "profile.configure") &&
-          c.runtime?.harness === "claude"
+          c.runtime
         ) {
-          const supported = this.service.harnessSettings("claude");
+          const supported = this.service.harnessSettings(c.runtime.harness);
           const field =
             supported && unsupportedRuntimeField(c.runtime, supported);
           // An exact replay returns its recorded receipt whatever is supported now.

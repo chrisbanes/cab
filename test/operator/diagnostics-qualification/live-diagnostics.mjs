@@ -1,5 +1,7 @@
 // One bounded live Codex turn through the real service, then the CLI7 reads through the
 // built CLI on loopback. Prints sanitised evidence JSON; never reads operator data or ~/.env.
+// With --codex-settings the lead profile sets a model and reasoning effort taken from the
+// runtime's own model list, and the run passes only when the runtime reports those values.
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -30,8 +32,9 @@ import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/term
 import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 
 const args = process.argv.slice(2);
+const settingsMode = args.includes("--codex-settings");
 if (
-  args.length !== 2 ||
+  args.length !== (settingsMode ? 3 : 2) ||
   !args.includes("--live") ||
   !args.includes("--one-attempt")
 ) {
@@ -50,7 +53,7 @@ const run = promisify(execFile);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const sentinel = `cli7-sentinel-${randomBytes(12).toString("hex")}`;
 process.env.CLI7_SENTINEL_TOKEN = sentinel;
-const deadline = Date.now() + 15 * 60_000;
+const deadline = Date.now() + (settingsMode ? 10 : 15) * 60_000;
 const cliEntry = resolve("dist/src/cli/main.js");
 
 const evidence = {
@@ -66,6 +69,7 @@ const evidence = {
     }).trim(),
   },
   startTurnCalls: 0,
+  configured: null,
   execution: null,
   surfaces: {},
   sentinel: { cliOutputs: null, databaseBytes: null },
@@ -113,6 +117,22 @@ try {
   stage("service-start");
   await service.start();
   const processIdentity = await runtime.processIdentity?.();
+  let configured;
+  if (settingsMode) {
+    stage("supported-settings");
+    // The catalogue is read in the background after start; a model with a low effort is cheap.
+    const settingsDeadline = Date.now() + 60_000;
+    while (!runtime.supportedSettings() && Date.now() < settingsDeadline)
+      await new Promise((r) => setTimeout(r, 250));
+    const supported = runtime.supportedSettings();
+    assert.ok(supported, "the runtime reported its supported models");
+    const model = Object.keys(supported)
+      .filter((name) => name !== "default" && supported[name].length > 0)
+      .at(-1);
+    assert.ok(model, "the runtime lists a model with reasoning efforts");
+    configured = { model, reasoningEffort: supported[model][0] };
+    evidence.configured = configured;
+  }
 
   auth = await OperatorAuth.open({ authFile, origin: "http://127.0.0.1:1" });
   http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
@@ -138,6 +158,7 @@ try {
     name: "CLI7 live lead",
     instructions: "CLI7_PROFILE_INSTRUCTIONS: keep the turn short.",
     capabilities: "shell",
+    ...(configured ? { runtime: { harness: "codex", ...configured } } : {}),
   });
   exec({
     type: "project.create",
@@ -282,6 +303,16 @@ try {
       name: s.name,
       source: s.source,
       present: s.value !== null,
+      // Model names are service configuration, not operator data.
+      ...(settingsMode &&
+      [
+        "profile.model",
+        "profile.reasoningEffort",
+        "model",
+        "reasoningEffort",
+      ].includes(s.name)
+        ? { value: s.value }
+        : {}),
     })),
     inputs: {
       provenance: inputs.data.provenance,
@@ -320,6 +351,22 @@ try {
     },
     storeHealth: store.health(),
   };
+  if (settingsMode) {
+    const reported = (name) =>
+      evidence.surfaces.settings?.find(
+        (s) => s.name === name && s.source === "runtime-reported",
+      )?.value;
+    evidence.surfaces.profileRuntime = (
+      await json(["profile", "get", profileId])
+    ).data.runtime;
+    assert.equal(intent.state, "completed", "the turn completed");
+    assert.deepEqual(evidence.surfaces.profileRuntime, {
+      harness: "codex",
+      ...configured,
+    });
+    assert.equal(reported("model"), configured.model);
+    assert.equal(reported("reasoningEffort"), configured.reasoningEffort);
+  }
   evidence.sentinel.cliOutputs = outputs.some((o) => o.includes(sentinel))
     ? "present"
     : "absent";

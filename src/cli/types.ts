@@ -68,6 +68,8 @@ export type Values = {
   "capabilities-file"?: string | undefined;
   "restore-revision"?: string | undefined;
   revoked?: string | undefined;
+  model?: string | undefined;
+  effort?: string | undefined;
   paused?: string | undefined;
   "lead-profile"?: string | undefined;
   "diagnostic-capture"?: string | undefined;
