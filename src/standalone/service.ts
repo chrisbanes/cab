@@ -104,7 +104,7 @@ import {
   STANDALONE_MARKER_CONTENTS,
   StandaloneDataDirectory,
 } from "./data-directory.js";
-import { DeliveryCoordinator } from "./delivery.js";
+import { DeliveryCoordinator, unresolvedThreadSummary } from "./delivery.js";
 import {
   type DiagnosticKind,
   type DiagnosticLimits,
@@ -4097,7 +4097,7 @@ export class StandaloneService {
             call as CoordinationCall,
             caller,
             {
-              text: `PR delivery retained ${result.observation.nodeId} at ${result.observation.headSha}`,
+              text: `PR delivery retained ${result.observation.nodeId} at ${result.observation.headSha}\n${unresolvedThreadSummary(result.observation)}`.trimEnd(),
               success: true,
             },
           );

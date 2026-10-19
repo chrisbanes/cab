@@ -524,6 +524,7 @@ export async function createReleaseDeliveryFixture(
         expectedHeadSha: scripted.state.head,
       });
       assert.equal(r.success, true, r.text);
+      return r;
     },
     async merge(operationId = randomUUID()) {
       return call("ensemble_external_action", {

@@ -764,7 +764,7 @@ async function threadWorld(mode: "allow" | "approval" | null = "allow") {
       { action: "pr.thread.reply", mode },
       { action: "pr.thread.resolve", mode },
     );
-  await f.register();
+  const registered = await f.register();
   const reply = (body = "Fixed in abc") => ({
     kind: "pr.thread.reply",
     body,
@@ -778,14 +778,16 @@ async function threadWorld(mode: "allow" | "approval" | null = "allow") {
       .delivery()
       .actions(f.taskId)
       .map((a) => [a.request.action.kind, a.state, a.observation?.reason]);
-  return { f, reply, resolve, threadStates };
+  return { f, reply, resolve, threadStates, registered };
 }
 
 test("thread reply and resolve write once each, refuse stale or repeated resolves without writing, and reach the lead and task view", async () => {
-  const { f, reply, resolve, threadStates } = await threadWorld();
+  const { f, reply, resolve, threadStates, registered } = await threadWorld();
   try {
     const thread = f.scripted.state.thread;
     assert.ok(thread);
+    // The lead's first view of the binding names the thread it can act on.
+    assert.match(registered.text, /\nreview-thread T1 latest C1$/);
     assert.deepEqual(
       f.service.delivery().delivery(f.taskId)?.observation.reviewThreads,
       [

@@ -1566,6 +1566,18 @@ creates retain uncertainty across restart; a missing marker cannot authorize rep
 Only positively confirmed transient no-effect failures receive up to two retries,
 each made by reconciliation once any provider rate-limit resume time has passed.
 
+Review-thread replies (`pr.thread.reply`) and resolutions (`pr.thread.resolve`) are
+separately grantable per repository in `allow` or `approval` mode and follow the same
+delivery lifecycle. The lead names a thread from the bound PR's observed review
+threads, which the retained observation lists with each thread's latest comment;
+a thread not on the task's bound PR is denied. A reply may target a resolved thread.
+Resolving names the latest comment the lead observed and re-reads the thread first,
+refusing without a write when the thread is already resolved or has a newer comment.
+Readback requires exactly one submitted marker reply by the credential user, or a
+thread resolved by that user; a lost response stays uncertain and is not replayed.
+Unresolving threads, editing or deleting comments and submitting reviews are not
+supported, and the operator comment path is unchanged.
+
 The lead explicitly submits merge or issue closure with its current reviewed result
 set. Shared completion checks run with the current action intent transition, excluding
 only that lead's current work/turn, its result effect and that callback. Confirmed
