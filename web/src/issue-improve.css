@@ -1,0 +1,127 @@
+/* Improve with lead (206-221): the panel on an imported task. */
+.issue-improve {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+  padding: var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+
+.issue-improve p,
+.issue-improve h2 {
+  margin: 0;
+}
+
+.issue-improve-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.issue-improve-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.issue-improve-between {
+  justify-content: space-between;
+}
+
+.issue-improve-progress {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.issue-improve-strong {
+  font-weight: 500;
+}
+
+.issue-improve-compare {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.issue-improve-diff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.issue-improve-diff-column {
+  flex: 1 1 280px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.issue-improve-diff-label {
+  display: block;
+  padding: var(--space-4) var(--space-8);
+  border-bottom: 1px solid var(--border);
+  background: var(--raised);
+}
+
+.issue-improve-diff-rows {
+  padding: var(--space-4) 0;
+}
+
+.issue-improve-diff-row {
+  display: flex;
+  gap: var(--space-8);
+  padding: 2px var(--space-8);
+  line-height: 20px;
+}
+
+.issue-improve-diff-row[data-kind="removed"] {
+  background: var(--risk-soft);
+}
+
+.issue-improve-diff-row[data-kind="added"] {
+  background: var(--ok-soft);
+}
+
+.issue-improve-diff-mark {
+  flex: none;
+  width: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--muted-foreground);
+}
+
+.issue-improve-diff-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.issue-improve-note {
+  display: flex;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--attn-border);
+  border-radius: var(--radius-md);
+  background: var(--attn-soft);
+}
+
+.issue-improve-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 759px) {
+  .issue-improve-actions [data-slot="button"] {
+    min-height: 44px;
+  }
+}
