@@ -230,9 +230,8 @@ try {
     calls[0].policy === null &&
     calls[1].phase === "on" &&
     calls[1].policy?.networkAccess === true &&
-    typeof off.result === "string" &&
-    !off.result.includes("200") &&
-    !off.result.endsWith("exit=0") &&
+    // The status code and exit are the file's last line; error text above may contain digits.
+    /(?<!\d)(?!200 )\d{3} exit=[1-9]\d*$/.test(off.result ?? "") &&
     on.result === "200 exit=0";
 } catch (error) {
   evidence.failure = String(error?.message ?? error);
