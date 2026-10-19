@@ -53,6 +53,7 @@ const evidence = {
     }).trim(),
   },
   startTurnCalls: [],
+  refusedTurns: 0,
   tasks: {},
   pass: false,
   cleanup: { serviceStopped: false, processExit: null, fixtureRemoved: false },
@@ -63,6 +64,7 @@ const stage = (name) => process.stderr.write(`[network-live] ${name}\n`);
 let root;
 let service;
 let runtime;
+let phase;
 try {
   stage("fixture");
   root = mkdtempSync(join(tmpdir(), "ensemble-network-live-"));
@@ -73,11 +75,22 @@ try {
     (context) => {
       runtime = new CodexRuntime(codexExecutable, context);
       const startTurn = runtime.startTurn.bind(runtime);
-      // At most two turns; each call's network policy is what the setting produced.
+      // Exactly one real turn per phase, found by its marker. The lead's automatic repair
+      // turn (it reports no result) is refused here, so at most two turns ever start.
       runtime.startTurn = (...call) => {
-        evidence.startTurnCalls.push({ policy: call[4] ?? null });
-        if (evidence.startTurnCalls.length > 2)
+        const forwarded = evidence.startTurnCalls.length;
+        const marker = `net-live-${phase}`;
+        if (
+          phase === undefined ||
+          !String(call[2]).includes(marker) ||
+          evidence.startTurnCalls.some((c) => c.phase === phase)
+        ) {
+          evidence.refusedTurns += 1;
+          return Promise.reject(new Error("turn outside the two-turn budget"));
+        }
+        if (forwarded >= 2)
           return Promise.reject(new Error("two-turn budget exhausted"));
+        evidence.startTurnCalls.push({ phase, policy: call[4] ?? null });
         return startTurn(...call);
       };
       return runtime;
@@ -117,6 +130,7 @@ try {
   const seen = new Set();
   const runTask = async (label) => {
     stage(`task-${label}`);
+    phase = label;
     const taskId = randomUUID();
     exec({
       type: "task.create",
@@ -125,6 +139,7 @@ try {
       title: `Network live ${label}`,
       outcome: [
         "Disposable network probe.",
+        `Marker: net-live-${label}`,
         `Run exactly this one shell command in the current directory: ${command}`,
         "Then reply with one short sentence and end the turn. Do not call any Ensemble tool.",
       ].join("\n"),
@@ -210,7 +225,9 @@ try {
     off.recorded === false &&
     on.recorded === true &&
     calls.length === 2 &&
+    calls[0].phase === "off" &&
     calls[0].policy === null &&
+    calls[1].phase === "on" &&
     calls[1].policy?.networkAccess === true &&
     typeof off.result === "string" &&
     !off.result.includes("200") &&
