@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
 
 export interface PolicyDisclosure {
   lines: string[];
@@ -10,11 +11,12 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
   return {
     lines: [
       "Default policy: workspace writes with broad host-permitted reads.",
-      "Command network access is disabled. Approval policy is never.",
+      "Command network access is disabled unless the project enables it. Approval policy is never.",
     ],
     limits: [
       "Stricter isolation, exhaustive ambient access containment, and universal descendant containment are not proved.",
       "Codex runs with the operator's existing runtime login; Ensemble does not provide an independent execution sandbox.",
+      commandNetworkDisclosure,
     ],
   };
 }

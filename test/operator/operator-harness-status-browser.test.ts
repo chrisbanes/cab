@@ -117,7 +117,7 @@ for (const [name, viewport] of [
     });
     await runtimes
       .getByText(
-        "Command network access is disabled. Approval policy is never.",
+        "Command network access is disabled unless the project enables it. Approval policy is never.",
       )
       .waitFor();
     // The third Claude line sits in the closed limits disclosure.
@@ -685,7 +685,7 @@ for (const [name, viewport] of [
       claudeEnabled,
     );
     for (const [runtime, count] of [
-      ["Codex", 2],
+      ["Codex", 3],
       ["Claude", 12],
     ] as const) {
       const row = runtimeRow(page, runtime),

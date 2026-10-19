@@ -2499,6 +2499,79 @@ test("project diagnostic capture defaults to enhanced and is reversible", () => 
   }
 });
 
+test("project command network access defaults off, is versioned and is operator-only", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "project.create",
+      actor: "operator",
+      projectId: p,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    assert.equal(f.domain.commandNetworkAccess(p), false);
+    const command = {
+      type: "project.configure",
+      actor: "operator",
+      key: key(),
+      projectId: p,
+      expectedVersion: 1,
+      commandNetworkAccess: true,
+    } as const;
+    const first = f.domain.execute(command);
+    assert.equal(f.domain.commandNetworkAccess(p), true);
+    assert.equal(Number(f.domain.project(p).version), 2);
+    assert.deepEqual(f.domain.execute(command), first);
+    assert.throws(
+      () => f.domain.execute({ ...command, commandNetworkAccess: false }),
+      /different payload/,
+    );
+    assert.throws(
+      () =>
+        run(f.domain, {
+          type: "project.configure",
+          actor: "operator",
+          projectId: p,
+          expectedVersion: 1,
+          commandNetworkAccess: false,
+        }),
+      /Version conflict/,
+    );
+    assert.throws(
+      () =>
+        run(f.domain, {
+          type: "project.configure",
+          actor: "agent",
+          projectId: p,
+          expectedVersion: 2,
+          commandNetworkAccess: false,
+        }),
+      DomainPolicyError,
+    );
+    assert.equal(f.domain.commandNetworkAccess(p), true);
+    // An absent field leaves it unchanged.
+    run(f.domain, {
+      type: "project.configure",
+      actor: "operator",
+      projectId: p,
+      expectedVersion: 2,
+      name: "Renamed",
+    });
+    f.reopen();
+    assert.equal(f.domain.commandNetworkAccess(p), true);
+    run(f.domain, {
+      type: "project.configure",
+      actor: "operator",
+      projectId: p,
+      expectedVersion: 3,
+      commandNetworkAccess: false,
+    });
+    assert.equal(f.domain.commandNetworkAccess(p), false);
+  } finally {
+    f.close();
+  }
+});
+
 test("runtime enablement persists per harness, replays its receipt and sets the profile default", () => {
   const f = fixture();
   try {

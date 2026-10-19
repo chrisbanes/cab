@@ -100,6 +100,8 @@ const commandSchema = z.discriminatedUnion("type", [
       leadProfileId: id.nullable().optional(),
       // Applies to executions admitted afterwards; absent leaves it unchanged.
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
+      // Applies to turns admitted afterwards; absent leaves it unchanged.
+      commandNetworkAccess: z.boolean().optional(),
     })
     .strict(),
   z
@@ -548,6 +550,10 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS project_diagnostic_capture (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           mode TEXT NOT NULL CHECK(mode IN ('enhanced', 'baseline'))
+        );
+        CREATE TABLE IF NOT EXISTS project_command_network_access (
+          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
+          enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
         CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
@@ -1515,6 +1521,16 @@ export class DomainStore {
     return row?.mode === "baseline" ? "baseline" : "enhanced";
   }
 
+  /** Command network access for new Codex turns; no row means off. */
+  commandNetworkAccess(projectId: string): boolean {
+    return (
+      this.one(
+        "SELECT enabled FROM project_command_network_access WHERE projectId = ?",
+        id.parse(projectId),
+      )?.enabled === 1
+    );
+  }
+
   /** Internal credential reference for the TypeSafe adapter; never part of routing(). */
   routingCredentialReference(projectId: string): string | null {
     const row = this.required(
@@ -2020,6 +2036,12 @@ export class DomainStore {
               "INSERT INTO project_diagnostic_capture (projectId, mode) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET mode = excluded.mode",
             )
             .run(command.projectId, command.diagnosticCapture);
+        if (command.commandNetworkAccess !== undefined)
+          this.db
+            .prepare(
+              "INSERT INTO project_command_network_access (projectId, enabled) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET enabled = excluded.enabled",
+            )
+            .run(command.projectId, Number(command.commandNetworkAccess));
         return this.project(command.projectId);
       }
       case "task.create": {
