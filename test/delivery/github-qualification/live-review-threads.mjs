@@ -170,6 +170,8 @@ try {
     sha: base.object.sha,
   });
   created.branch = true;
+  // Cleanup must be able to remove the branch even if a later setup step fails.
+  allowedWrites.push(["DELETE", `${root}/git/refs/heads/${branch}`]);
   allowedWrites.push(["PUT", `${root}/contents/${file}`]);
   await api("PUT", `${root}/contents/${file}`, {
     message: "Review thread qualification scratch file",
@@ -188,7 +190,6 @@ try {
   allowedWrites.push(
     ["POST", `${root}/pulls/${pr.number}/comments`],
     ["PATCH", `${root}/pulls/${pr.number}`],
-    ["DELETE", `${root}/git/refs/heads/${branch}`],
   );
   const setup = await api("POST", `${root}/pulls/${pr.number}/comments`, {
     body: "Qualification review comment",
