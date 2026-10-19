@@ -148,7 +148,7 @@ function fixture(
   });
   /** Starts a turn and binds it the way the service does. */
   const settings = { model: "haiku", reasoningEffort: "low" };
-  const turn = async (threadId: string) => {
+  const turn = async (threadId: string, access?: "read-only") => {
     assert.equal(
       await settledPreflight(runtime, { workspace, settings }),
       undefined,
@@ -158,6 +158,7 @@ function fixture(
       workspace,
       "Do the work",
       settings,
+      access ? { networkAccess: false, access } : undefined,
     );
     const generation = runtime.currentUserInputGeneration();
     assert.ok(generation);
@@ -816,6 +817,50 @@ test("the PreToolUse hook records every call and denies calls outside policy", a
       f.runtime.toolLedger(threadId, turnId)[5]?.toolName,
       "WebFetch",
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a read-only turn can write only the temporary base, in the sandbox and the hook", async () => {
+  const decisions: unknown[] = [];
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        const workspace = String(session.options.cwd);
+        const base = claudeTemporaryBase(workspace);
+        const calls: Array<[string, unknown]> = [
+          ["Write", { file_path: join(workspace, "inside.txt"), content: "x" }],
+          ["Edit", { file_path: join(workspace, "inside.txt") }],
+          ["Write", { file_path: join(base, "scratch.txt"), content: "x" }],
+          ["Read", { file_path: join(workspace, "inside.txt") }],
+        ];
+        for (const [index, [name, input]] of calls.entries())
+          decisions.push(await session.hook(name, input, `toolu_${index}`));
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId, "read-only");
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    const base = claudeTemporaryBase(f.workspace);
+    assert.deepEqual(f.sessions[0]?.options.sandbox?.filesystem, {
+      allowWrite: [base],
+    });
+    const verdict = (index: number) =>
+      (
+        decisions[index] as {
+          hookSpecificOutput?: { permissionDecision: string };
+        }
+      ).hookSpecificOutput?.permissionDecision;
+    assert.equal(verdict(0), "deny");
+    assert.equal(verdict(1), "deny");
+    assert.equal(verdict(2), undefined);
+    assert.equal(verdict(3), undefined);
   } finally {
     await f.cleanup();
   }

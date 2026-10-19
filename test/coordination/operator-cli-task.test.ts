@@ -625,6 +625,74 @@ test("a follow-up never reopens a done task, through the CLI or the session API"
   assert.equal(d.task(task.taskId).state, "done");
 });
 
+test("draft turns start only on an open Draft task", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, d, file } = o;
+  const draft = await seedReviewTask(o.s.f, "CLI draft turn");
+  configure(o.s.f, draft.projectId, false);
+  const message = file("draft.md", "Why is the deploy check flaky?");
+  const args = (taskId: string, version: number) => [
+    "task",
+    "draft-turn",
+    taskId,
+    "--expected-version",
+    String(version),
+    "--message-file",
+    message,
+  ];
+  const version = (taskId: string) => Number(d.task(taskId).version);
+
+  const sent = posts(o);
+  const key = randomUUID();
+  let r = await cli("rw", [
+    ...args(draft.taskId, version(draft.taskId)),
+    "--request-id",
+    key,
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const out = r.json();
+  assert.equal(out.data.effect, "queued");
+  assert.equal(out.data.receipt.kind, "draft-turn");
+  assert.equal(out.data.receipt.leadAssignmentId, draft.assignmentId);
+  assert.equal(posts(o), sent + 1);
+  // The same request id replays the receipt and starts nothing new.
+  r = await cli("rw", [
+    ...args(draft.taskId, version(draft.taskId)),
+    "--request-id",
+    key,
+  ]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json().data.receipt, out.data.receipt);
+  await until(
+    () => o.s.f.service.list().some((w) => w.state === "running"),
+    "draft turn",
+  );
+  // A second draft turn is refused before anything is sent.
+  const before = posts(o);
+  r = await cli("rw", args(draft.taskId, version(draft.taskId)));
+  assert.equal(r.code, 4, r.out);
+  assert.match(r.json().error.message, /already queued, held or running/);
+  assert.equal(posts(o), before);
+
+  // A Ready task keeps the ordinary reply.
+  const ready = await seedReviewTask(o.s.f, "CLI ready", "Ready task");
+  configure(o.s.f, ready.projectId, true);
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ready.projectId,
+    taskId: ready.taskId,
+    expectedVersion: version(ready.taskId),
+    ready: true,
+  });
+  r = await cli("rw", args(ready.taskId, version(ready.taskId)));
+  assert.equal(r.code, 4, r.out);
+  assert.match(r.json().error.message, /task is Ready/);
+  r = await cli("ro", args(draft.taskId, version(draft.taskId)));
+  assert.equal(r.code, 3, r.out);
+});
+
 test("lost replies reuse the unresolved key once; read-only and managed callers are refused", async (t) => {
   const o = await startCliOperator(t);
   const { cli, s, d, file, lostReply } = o;

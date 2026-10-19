@@ -66,6 +66,12 @@ import { MarkdownPreview, TaskFiles } from "./task-files.js";
 import { TaskWorkspaceChanges } from "./inspection-changes.js";
 import { RetainedResultEvidence } from "./retained-evidence.js";
 import {
+  draftTurnAccessNotice,
+  draftTurnHeading,
+  draftTurnQueueNotice,
+  draftTurnSentNotice,
+  draftTurnStart,
+  draftTurnUnavailableNotice,
   leadFeedbackMode,
   leadReceivesNotice,
   leadUnavailableNotice,
@@ -286,6 +292,11 @@ const writeCopy = (type: OperatorCommand["type"]) => {
   switch (type) {
     case "message":
       return { failed: "Couldn't send the reply", unknown: "it was sent" };
+    case "task.draft-turn":
+      return {
+        failed: "Couldn't start the draft turn",
+        unknown: "the draft turn was queued",
+      };
     case "comment.send":
       return {
         failed: "Couldn't post the comment",
@@ -1082,7 +1093,10 @@ export function TaskWorkspace({
     const reviewIntent =
       input.type === "comment.review" || input.type === "comment.confirm";
     const reply =
-      input.type === "message" || input.type === "comment.send" || reviewIntent;
+      input.type === "message" ||
+      input.type === "task.draft-turn" ||
+      input.type === "comment.send" ||
+      reviewIntent;
     if (reviewIntent) {
       if (state.frozen && state.frozen.key !== input.key) {
         setPending(false);
@@ -1209,8 +1223,10 @@ export function TaskWorkspace({
         outcome.receipt.taskId !== taskId ||
         (input.type === "message"
           ? outcome.receipt.kind !== "coordination"
-          : outcome.receipt.kind !== "delivery" ||
-            outcome.receipt.operationId !== input.key))
+          : input.type === "task.draft-turn"
+            ? outcome.receipt.kind !== "draft-turn"
+            : outcome.receipt.kind !== "delivery" ||
+              outcome.receipt.operationId !== input.key))
     ) {
       state.uncertain = true;
       state.notice = {
@@ -1238,9 +1254,11 @@ export function TaskWorkspace({
             ? "The comment wasn't posted. Your draft is kept."
             : delivery
               ? "Comment posted."
-              : receipt.kind === "coordination" && receipt.resumedLead
-                ? `Sent. ${data?.lead?.name ?? "The lead"} resumed with this feedback.`
-                : `Sent to ${data?.lead?.name ?? "the lead"}.`,
+              : receipt.kind === "draft-turn"
+                ? draftTurnSentNotice(data?.lead?.name ?? "the lead")
+                : receipt.kind === "coordination" && receipt.resumedLead
+                  ? `Sent. ${data?.lead?.name ?? "The lead"} resumed with this feedback.`
+                  : `Sent to ${data?.lead?.name ?? "the lead"}.`,
         details: rows(
           receipt,
           undefined,
@@ -1256,6 +1274,7 @@ export function TaskWorkspace({
       };
       if (
         receipt.kind === "coordination" ||
+        receipt.kind === "draft-turn" ||
         (delivery && delivery.state === "confirmed-success")
       ) {
         state.draft = "";
@@ -1395,6 +1414,15 @@ export function TaskWorkspace({
   if (data && !data.source && state.destination === "github" && !state.frozen)
     state.destination = "lead";
   const destination = state.destination;
+  // A Draft task's lead reply starts a read-only draft turn instead of queueing a message.
+  // The ordinary reply stays for a lead that is missing or has started, which it already explains.
+  const draftTurn =
+    data &&
+    !data.task.ready &&
+    data.draftTurn?.reason !== "lead-unconfigured" &&
+    data.draftTurn?.reason !== "lead-unavailable"
+      ? data.draftTurn
+      : undefined;
   async function send() {
     if (!state.draft.trim() || pending) return;
     if (state.frozen) {
@@ -1403,7 +1431,16 @@ export function TaskWorkspace({
     }
     const key = crypto.randomUUID();
     let input: OperatorCommand;
-    if (destination === "lead") {
+    if (destination === "lead" && draftTurn) {
+      if (!draftTurn.available) return;
+      input = {
+        type: "task.draft-turn",
+        key,
+        taskId,
+        expectedVersion: data?.task.version ?? 0,
+        message: state.draft,
+      };
+    } else if (destination === "lead") {
       if (!lead) return;
       input = {
         type: "message",
@@ -1508,18 +1545,26 @@ export function TaskWorkspace({
   const comment = commentAvailability(data.commentPolicy);
   // Exactly one sentence sits above the box: what this destination does now.
   const replyNote =
-    destination === "lead"
-      ? !lead
-        ? "This project has no lead to message yet."
-        : leadMode === "resumes"
-          ? leadResumeNotice(leadName)
-          : leadMode === "receives"
-            ? leadReceivesNotice(leadName)
-            : leadUnavailableNotice(leadName)
-      : (comment.sentence ??
-        (data.commentPolicy?.mode === "approval"
-          ? "You review the exact comment before it posts to the GitHub issue."
-          : "Posts a comment on the GitHub issue."));
+    destination === "lead" && draftTurn
+      ? draftTurn.available
+        ? `${draftTurnAccessNotice(leadName)} ${draftTurnQueueNotice(leadName)}`
+        : draftTurnUnavailableNotice(
+            draftTurn.reason ?? "lead-unavailable",
+            leadName,
+            data.task.state,
+          )
+      : destination === "lead"
+        ? !lead
+          ? "This project has no lead to message yet."
+          : leadMode === "resumes"
+            ? leadResumeNotice(leadName)
+            : leadMode === "receives"
+              ? leadReceivesNotice(leadName)
+              : leadUnavailableNotice(leadName)
+        : (comment.sentence ??
+          (data.commentPolicy?.mode === "approval"
+            ? "You review the exact comment before it posts to the GitHub issue."
+            : "Posts a comment on the GitHub issue."));
   const reply = (
     <section id="reply" className="reply-card">
       <h3 className="section-heading">Reply</h3>
@@ -1532,7 +1577,7 @@ export function TaskWorkspace({
             changed();
           }}
         >
-          Message task lead
+          {draftTurn ? draftTurnHeading(leadName) : "Message task lead"}
         </Button>
         {data.source && (
           <Button
@@ -1629,7 +1674,9 @@ export function TaskWorkspace({
             pending ||
             !state.draft.trim() ||
             (destination === "lead" &&
-              (!lead || leadMode === "unavailable") &&
+              (draftTurn
+                ? !draftTurn.available
+                : !lead || leadMode === "unavailable") &&
               !state.uncertain) ||
             (destination === "github" &&
               (!comment.postable ||
@@ -1642,7 +1689,9 @@ export function TaskWorkspace({
           {pending
             ? "Sending…"
             : destination === "lead"
-              ? "Send to task lead"
+              ? draftTurn
+                ? draftTurnStart
+                : "Send to task lead"
               : "Post comment"}
         </Button>
       )}

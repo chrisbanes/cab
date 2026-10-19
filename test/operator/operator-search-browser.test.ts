@@ -6,7 +6,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import { markTaskReady, seedReviewTask } from "../fixtures/task-review.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import {
@@ -576,6 +576,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
     () => f.lifecycle.steps,
   );
   const a = await seedReviewTask(f, "Reply entry", "Pending entry task");
+  markTaskReady(f, a.taskId);
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage();

@@ -3,6 +3,7 @@ import {
   type TaskRead,
   taskSchema,
 } from "../operator/contracts.js";
+import { draftTurnUnavailableText } from "../operator/draft-turn-copy.js";
 import { taskColumnOf } from "../operator/task-presentation.js";
 import { cliFix, type Wait, waitLabels } from "../operator/wait-reasons.js";
 import { uuidArg } from "./browse.js";
@@ -601,6 +602,74 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
               );
           },
         );
+      },
+    },
+  ],
+  [
+    "task draft-turn",
+    {
+      usage:
+        "task draft-turn TASK_ID --expected-version N --message-file FILE [--request-id UUID]",
+      positionals: 1,
+      expects:
+        "--expected-version: the task's version ('ensemble task get TASK_ID'); required.",
+      flags: ["expected-version", "message-file", "request-id"],
+      async run(ctx) {
+        const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
+        const expectedVersion = requiredVersion(ctx);
+        const message = await messageText(ctx);
+        const session = await connectWrite(ctx, TASK_WRITE);
+        const task = (await readTask(session, taskId)).data;
+        const type = "task.draft-turn";
+        const scope = `task:${taskId}`;
+        const command = { type, taskId, expectedVersion, message };
+        const { key, digest, reused } = await chooseKey(
+          ctx,
+          session,
+          { scope, type },
+          command,
+        );
+        // A retry of an earlier attempt must reach the service, which replays or refuses.
+        const refusal = task.draftTurn;
+        if (!reused && refusal && !refusal.available && refusal.reason)
+          throw new CliError(
+            "conflict",
+            draftTurnUnavailableText(refusal.reason),
+            {
+              fix: `Run 'ensemble task get ${taskId}' to see the task's state and lead.`,
+            },
+          );
+        const { receipt, request } = await withConflictRemedy(
+          () =>
+            sendCommand(ctx, session, {
+              scope,
+              type,
+              key,
+              digest,
+              resource: taskId,
+              command: exactCommand(command, key),
+              match: (r) => r.kind === "draft-turn" && r.taskId === taskId,
+            }),
+          taskVersion(session, taskId, expectedVersion),
+        );
+        return writeOutput({
+          request,
+          receipt,
+          reused,
+          effect: "queued",
+          summary: "Queued a draft turn",
+          lines: [
+            ["Task", taskId],
+            ["Work", receipt.kind === "draft-turn" ? receipt.workId : ""],
+          ],
+          notes: [
+            "Queued one read-only turn for the project lead, subject to admission, pause, Stop and capacity; the task stays not Ready.",
+            "A draft turn cannot be retracted; 'task stop' holds a queued one and 'task resume' releases it.",
+          ],
+          data: {
+            workId: receipt.kind === "draft-turn" ? receipt.workId : null,
+          },
+        });
       },
     },
   ],

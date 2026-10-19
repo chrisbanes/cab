@@ -151,8 +151,8 @@ const OPTIONS_HELP = `Options:
   --version             Show the Ensemble version
 `;
 
-const TASK_NOTE = `Task operations: task create, task message, task follow-up, question answer and
-approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
+const TASK_NOTE = `Task operations: task create, task message, task follow-up, task draft-turn, question answer
+and approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
 best-effort cancellation of an open task; Resume clears only the operator
 Stop),
 add-dependency/remove-dependency and task configure --ready true/false.`;

@@ -29,6 +29,7 @@ import {
   type RuntimeToolCall,
   type RuntimeToolDefinition,
   type RuntimeToolResult,
+  type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
   type UnexpectedRequest,
 } from "./codex.js";
@@ -831,6 +832,7 @@ export class ClaudeRuntime implements Runtime {
     workspace: string,
     prompt: string,
     settings?: RuntimeTurnSettings,
+    policy?: RuntimeTurnPolicy,
   ): Promise<string> {
     const { sdk, executable } = this;
     const generation = this.generation;
@@ -845,6 +847,9 @@ export class ClaudeRuntime implements Runtime {
         ? undefined
         : effortSchema.parse(settings.reasoningEffort);
     const base = claudeTemporaryBase(workspace);
+    // A read-only turn writes only the per-task temporary base, in the sandbox and the hook.
+    const writable =
+      policy?.access === "read-only" ? [base] : [workspace, base];
     const temporary = await ensureTemporaryBase(base);
     if (temporary) throw new Error(`Claude runtime unavailable: ${temporary}`);
     const fresh = this.freshThreads.delete(threadId);
@@ -866,7 +871,7 @@ export class ClaudeRuntime implements Runtime {
       malformed: false,
       pendingToolUses: new Map(),
       pendingCount: 0,
-      roots: [workspace, base],
+      roots: writable,
       ledger: [],
       release: (released) => {
         turn.released = released;
@@ -918,7 +923,7 @@ export class ClaudeRuntime implements Runtime {
         allowUnsandboxedCommands: false,
         autoAllowBashIfSandboxed: true,
         network: { allowedDomains: [] },
-        filesystem: { allowWrite: [workspace, base] },
+        filesystem: { allowWrite: writable },
       },
       mcpServers: {
         [mcpServerName]: sdk.createSdkMcpServer({

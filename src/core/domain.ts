@@ -1277,6 +1277,46 @@ export class DomainStore {
       .all(id.parse(taskId)) as Row[];
   }
 
+  /** Routing's latest recorded disposition for this task (any task version), or null. */
+  routingDisposition(taskId: string): string | null {
+    const row = this.one(
+      "SELECT disposition FROM routing_operations WHERE taskId = ? ORDER BY rowid DESC LIMIT 1",
+      id.parse(taskId),
+    );
+    return row ? String(row.disposition) : null;
+  }
+
+  /** Whether routing has recorded its decision for this task (at any task version). */
+  hasRoutingRecord(taskId: string): boolean {
+    return this.routingDisposition(taskId) !== null;
+  }
+
+  /**
+   * The task's assignments as routing sees them. A pending lead that has only had draft
+   * turns, with nothing routed yet, has not started, so it does not count as assigned.
+   */
+  routingAssignments(taskId: string): Row[] {
+    const draftTurns = this.one(
+      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'turn_requests'",
+    );
+    if (!draftTurns || this.hasRoutingRecord(taskId))
+      return this.assignments(taskId);
+    const unstarted = (assignmentId: string) =>
+      this.one(
+        `SELECT 1 AS found FROM task_lead_bindings binding
+        JOIN domain_assignments assignment ON assignment.id = binding.assignmentId
+        WHERE binding.assignmentId = ? AND assignment.state = 'pending'
+          AND EXISTS (SELECT 1 FROM turn_requests r
+            WHERE r.assignmentId = binding.assignmentId AND r.draftTurn = 1)
+          AND NOT EXISTS (SELECT 1 FROM turn_requests r
+            WHERE r.assignmentId = binding.assignmentId AND r.draftTurn = 0)`,
+        assignmentId,
+      ) !== undefined;
+    return this.assignments(taskId).filter(
+      (assignment) => !unstarted(String(assignment.id)),
+    );
+  }
+
   pendingAssignments(): Row[] {
     return this.db
       .prepare(
@@ -1874,7 +1914,7 @@ export class DomainStore {
             "Candidate profile revision changed",
             "stale",
           );
-      if (this.assignments(data.taskId).length > 0)
+      if (this.routingAssignments(data.taskId).length > 0)
         throw new DomainStaleDispositionError(
           "Routing decision became stale: task already assigned",
           "stale",
@@ -2679,9 +2719,8 @@ export class DomainStore {
     }
   }
 
-  private ensureLeadAssignmentWithinTransaction(
-    taskId: string,
-  ): Row | undefined {
+  /** Must run inside the caller's transaction. */
+  ensureLeadAssignmentWithinTransaction(taskId: string): Row | undefined {
     const assignmentId = this.ensureLeadBindingWithinTransaction(taskId);
     if (!assignmentId) return undefined;
     const existing = this.one(

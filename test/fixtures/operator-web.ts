@@ -15,6 +15,8 @@ import type {
   Runtime,
   RuntimeToolCall,
   RuntimeToolDefinition,
+  RuntimeTurnPolicy,
+  RuntimeTurnSettings,
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
 import {
@@ -59,6 +61,8 @@ const operatorFixtureThreadSequence = new WeakMap<
 export class OperatorFixtureRuntime implements Runtime {
   turns = 0;
   prompts: string[] = [];
+  /** The per-turn policy each startTurn received, undefined when none. */
+  policies: Array<RuntimeTurnPolicy | undefined> = [];
   private outcomes = new Map<string, (value: "completed" | "failed") => void>();
   private tool:
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
@@ -82,8 +86,15 @@ export class OperatorFixtureRuntime implements Runtime {
     return sequence === 1 ? "fixture-thread" : `fixture-thread-${sequence}`;
   }
   async resumeThread() {}
-  async startTurn(_thread: string, _workspace: string, prompt: string) {
+  async startTurn(
+    _thread: string,
+    _workspace: string,
+    prompt: string,
+    _settings?: RuntimeTurnSettings,
+    policy?: RuntimeTurnPolicy,
+  ) {
     if (prompt) this.prompts.push(prompt);
+    this.policies.push(policy);
     return `fixture-turn-${++this.turns}`;
   }
   async interruptTurn(_thread: string, _turn: string) {}

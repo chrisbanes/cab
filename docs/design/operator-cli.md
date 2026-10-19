@@ -290,7 +290,7 @@ Node.js version and package tooling; distribution follows
 | `auth`, `connection` | Login, status, logout; select/list/remove local connections |
 | `project` | List/get/create; inspect and prepare/apply supported configuration, instructions, routing and source settings |
 | `profile` | List/get/create; inspect revisions; prepare/apply supported fields and restore earlier content as a new revision |
-| `task` | List/search/get/create/configure; dependencies; existing task controls, messages and follow-up |
+| `task` | List/search/get/create/configure; dependencies; existing task controls, messages, follow-up and draft turns |
 | `assignment` | Get/history; compare bound/current instructions; explicit current-revision adoption |
 | `inbox`, `question`, `approval` | Inspect attention; answer supported forms; approve/deny exact reviewed material |
 | `execution`, `logs`, `doctor` | List/get; supplied inputs, observed settings, events/tool activity, filtered service diagnostics and bounded follow; the service readiness checks |
@@ -426,8 +426,8 @@ The CLI exits 2 with `change-document-invalid` or `wrong-service` and 5 with
 `journal-unavailable` before sending anything.
 
 Task and attention writes (`task create|configure|add-dependency|remove-dependency|
-message|follow-up|stop|resume`, `question answer`, `approval decide`) drive the
-existing operator commands unchanged, plus two receipted commands on the same
+message|follow-up|draft-turn|stop|resume`, `question answer`, `approval decide`) drive the
+existing operator commands unchanged (`task draft-turn` sends `task.draft-turn {key, taskId, expectedVersion, message}` and gets a `draft-turn {taskId, leadAssignmentId, workId}` receipt), plus two receipted commands on the same
 route: `task.stop` and `task.resume` (`{key, taskId, expectedVersion?}`). Their
 receipts, `task-stop {taskId, cancellationRequested}` and `task-resume {taskId,
 stopCleared, requeued}`, are recorded in one transaction with the Stop hold change,

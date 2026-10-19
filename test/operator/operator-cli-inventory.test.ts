@@ -63,6 +63,7 @@ const documentedWrites = [
   "task remove-dependency",
   "task message",
   "task follow-up",
+  "task draft-turn",
   "question answer",
   "approval decide",
   "task stop",
@@ -93,7 +94,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
   assert.equal(help.code, 0);
   assert.match(
     help.out,
-    /task create, task message, task follow-up, question answer and\napproval decide cannot be undone/,
+    /task create, task message, task follow-up, task draft-turn, question answer\nand approval decide cannot be undone/,
   );
   assert.match(help.out, /Reverse pairs: task stop\/resume/);
   assert.match(

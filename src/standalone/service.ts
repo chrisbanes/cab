@@ -70,6 +70,14 @@ import {
   draftingTimeLimitMs,
 } from "./drafting.js";
 import {
+  type DraftTurnFacts,
+  DraftTurnUnavailableError,
+  draftTurnAvailability,
+  draftTurnInstruction,
+  draftTaskDigest,
+  draftTurnToolDecision,
+} from "./draft-turn.js";
+import {
   claudeTokenExclusions,
   claudeTokenSource,
   readClaudeToken,
@@ -83,6 +91,7 @@ import {
   RuntimeNotEnabledError,
   type RuntimeToolCall,
   type RuntimeToolResult,
+  type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
 } from "./codex.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
@@ -201,6 +210,7 @@ import {
   type ExecutionIntent,
   ExecutionState,
   harnessRetrySupported,
+  type DraftTurnReceipt,
   type StopTarget,
   type TaskControlReceipt,
   type TaskExecutionBinding,
@@ -322,7 +332,8 @@ interface PromptPart {
     | "review-references"
     | "project-instructions"
     | "profile-instructions"
-    | "drafting-instruction";
+    | "drafting-instruction"
+    | "draft-turn";
   text: string;
   revision?: number;
 }
@@ -494,6 +505,13 @@ interface Started {
   /** Status reads use it without spawning anything. */
   claude: RuntimeSpawnContext["claude"];
 }
+
+/** The task as a prompt names it: its revision, title and outcome now. */
+const currentTaskOf = (task: Record<string, unknown>) => ({
+  version: Number(task.version),
+  title: String(task.title),
+  outcome: String(task.outcome),
+});
 
 function harnessForWork(
   state: ExecutionState,
@@ -2971,9 +2989,15 @@ export class StandaloneService {
     if (canonicalMaterial(current) !== canonicalMaterial(caller))
       throw new Error("Delivery caller revision changed");
     if (state.taskHold(caller.taskId)) throw new Error("Task is held");
+    const draftTurn =
+      this.started().schedulerStore.find(caller.workId)?.draftTurn === true;
     const reasons = domain
       .assignmentAdmission(caller.assignmentId)
-      .reasons.filter((reason) => !reason.startsWith("external-action-"));
+      .reasons.filter(
+        (reason) =>
+          !reason.startsWith("external-action-") &&
+          !(draftTurn && reason === "task-unready"),
+      );
     if (
       reasons.length ||
       deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
@@ -3653,6 +3677,131 @@ export class StandaloneService {
     return receipt;
   }
 
+  /** What the draft-turn availability rule reads for one task. */
+  private draftTurnFacts(taskId: string): DraftTurnFacts {
+    const domain = this.domain();
+    const task = domain.task(taskId);
+    const project = domain.project(String(task.projectId));
+    const binding = domain
+      .leadBindings()
+      .find((item) => item.taskId === taskId);
+    const assignment = binding
+      ? domain
+          .assignments(taskId)
+          .find((item) => item.id === binding.assignmentId)
+      : undefined;
+    const configured =
+      typeof project.leadProfileId === "string" ? project.leadProfileId : null;
+    return {
+      taskState: z.enum(["open", "done", "cancelled"]).parse(task.state),
+      ready: Number(task.ready) === 1,
+      lead: configured
+        ? {
+            // A lead binding without an assignment row yet is still waiting to start.
+            state: String(assignment?.state ?? "pending"),
+            // Queued, held or refused ordinary work also means the lead has started.
+            ordinaryWork:
+              binding !== undefined &&
+              this.started().schedulerStore.hasOrdinaryAssignmentWork(
+                String(binding.assignmentId),
+              ),
+            revoked: [configured, binding && String(binding.profileId)].some(
+              (profileId) =>
+                profileId !== null &&
+                profileId !== undefined &&
+                Boolean(domain.profile(profileId).revoked),
+            ),
+          }
+        : null,
+      // A queued batch of the lead's means an earlier draft turn still owns the message queue,
+      // so a new one could not queue (a refused draft whose batch is not released yet).
+      draftTurnActive:
+        this.started().schedulerStore.activeDraftTurn(taskId) !== undefined ||
+        (binding !== undefined &&
+          this.started()
+            .coordination.queuedDeliveries()
+            .some(
+              (item) => item.recipientAssignmentId === binding.assignmentId,
+            )),
+    };
+  }
+
+  /** Whether the operator can start a draft turn on this task now, and why not. */
+  draftTurnAvailability(taskId: string) {
+    return draftTurnAvailability(this.draftTurnFacts(taskId));
+  }
+
+  /**
+   * Queues one read-only turn of the task's lead: the operator message becomes the lead's
+   * inbox event, is bound into a delivery batch for a new work id and queued as a draft
+   * turn request, all in the receipt's transaction. Admission applies as for any turn.
+   */
+  async startDraftTurn(command: {
+    key: string;
+    taskId: string;
+    expectedVersion: number;
+    message: string;
+  }): Promise<DraftTurnReceipt> {
+    const { state, domain, coordination, schedulerStore } = this.started();
+    domain.task(command.taskId);
+    const { receipt, replayed } = state.recordDraftTurn(command, () => {
+      const availability = this.draftTurnAvailability(command.taskId);
+      if (!availability.available)
+        throw new DraftTurnUnavailableError(availability.reason);
+      const lead = domain.ensureLeadAssignmentWithinTransaction(command.taskId);
+      if (!lead) throw new DraftTurnUnavailableError("lead-unconfigured");
+      const leadId = String(lead.id);
+      const task = domain.task(command.taskId);
+      coordination.deliverOperatorFeedback(
+        command.taskId,
+        leadId,
+        command.message,
+      );
+      const workId = `assignment:${leadId}:v${Number(task.version)}:draft:${command.key}`;
+      const delivery = coordination.bindDeliveryBatchWithinTransaction(
+        leadId,
+        workId,
+        Number(lead.version),
+      );
+      if (!delivery) throw new Error("Draft turn message was not bound");
+      // A batch that was already queued belongs to an earlier draft turn: nothing new queues.
+      if (delivery.deliveryWorkId !== workId)
+        throw new DraftTurnUnavailableError("draft-turn-active");
+      schedulerStore.ensure({
+        requestKey: delivery.deliveryWorkId,
+        workId: delivery.deliveryWorkId,
+        kind: "assignment",
+        taskId: command.taskId,
+        projectId: String(lead.projectId),
+        assignmentId: leadId,
+        taskVersion: Number(task.version),
+        assignmentVersion: Number(lead.version),
+        instructionsRevision: Number(lead.instructionsRevision),
+        profileRevision: Number(lead.profileRevision),
+        // The lead's brief is frozen at its first draft turn; the task may have moved on.
+        prompt: this.assignmentPrompt(
+          String(lead.brief),
+          delivery,
+          currentTaskOf(task),
+        ),
+        workspace: null,
+        previousWorkId: state.latestCompletedAssignmentWork(leadId) ?? null,
+        draftTurn: true,
+        draftTaskDigest: draftTaskDigest(task),
+      });
+      return { leadAssignmentId: leadId, workId: delivery.deliveryWorkId };
+    });
+    if (!replayed) {
+      // Post-commit: the receipt stands even if the wake fails.
+      const generation = this.generation;
+      if (generation)
+        this.observeBackgroundFailure(generation, "domain-wake", () =>
+          this.wakeScheduler(0, generation),
+        );
+    }
+    return receipt;
+  }
+
   /** Cancels pending native questions and observes the stop for a bounded window. */
   private afterStop(
     taskId: string,
@@ -3876,8 +4025,13 @@ export class StandaloneService {
     const state = this.started().state,
       runtime = this.runtimeForWork(state, question.requestingWorkId),
       domain = this.domain();
+    const draftTurn =
+      this.started().schedulerStore.find(question.requestingWorkId)
+        ?.draftTurn === true;
+    const unready = (reason: string) =>
+      !(draftTurn && reason === "task-unready");
     const reasons: string[] = [
-      ...domain.admission(question.taskId, false).reasons,
+      ...domain.admission(question.taskId, false).reasons.filter(unready),
     ];
     const binding = state.runtimeQuestionBinding(
       question.identity.threadId,
@@ -3905,7 +4059,11 @@ export class StandaloneService {
     )
       reasons.push("native-process-identity-changed");
     if (binding) {
-      reasons.push(...domain.assignmentAdmission(binding.assignmentId).reasons);
+      reasons.push(
+        ...domain
+          .assignmentAdmission(binding.assignmentId)
+          .reasons.filter(unready),
+      );
       const assignment = domain.assignment(binding.assignmentId);
       if (
         Number(assignment.version) !== binding.assignmentVersion ||
@@ -4046,6 +4204,11 @@ export class StandaloneService {
         text: "Coordination call is not bound to current task work",
         success: false,
       });
+    if (binding.draftTurn) {
+      const decision = draftTurnToolDecision(call.tool, call.arguments);
+      if (!decision.allowed)
+        return Promise.resolve({ text: decision.text, success: false });
+    }
     if (
       call.tool === "ensemble_report_result" &&
       (binding.requestSequence === null || binding.admittedTaskVersion === null)
@@ -4976,7 +5139,7 @@ export class StandaloneService {
     )
       return "candidate-profile-changed";
     if (!domain.admission(snapshot.taskId).eligible) return "admission-held";
-    if (domain.assignments(snapshot.taskId).length > 0)
+    if (domain.routingAssignments(snapshot.taskId).length > 0)
       return "assignment-already-exists";
     return undefined;
   }
@@ -5020,7 +5183,10 @@ export class StandaloneService {
     const withdrawStaleRefusedDeliveries = (): number => {
       let withdrawn = 0;
       for (const delivery of coordination.queuedDeliveries())
-        if (coordination.withdrawStaleRefusedDelivery(delivery.deliveryWorkId))
+        if (
+          coordination.withdrawStaleRefusedDelivery(delivery.deliveryWorkId) ||
+          coordination.releaseRefusedDraftTurnDelivery(delivery.deliveryWorkId)
+        )
           withdrawn++;
       return withdrawn;
     };
@@ -5043,6 +5209,7 @@ export class StandaloneService {
     }
     for (const workId of coordination.completedWorkNeedingDisposition())
       coordination.recordSuccessfulTerminal(workId);
+    state.settleDraftTurnEffects();
 
     for (const operationId of queries.missingRoutingFallbackOperationIds()) {
       const operation = domain.routingOperation(operationId);
@@ -5083,9 +5250,10 @@ export class StandaloneService {
 
     for (const task of domain.readyTasksWithLead()) {
       const taskId = String(task.id);
-      const taskAssignments = domain.assignments(taskId);
-      if (taskAssignments.length > 0) continue;
       const route = domain.routing(String(task.projectId));
+      // A lead that has only had draft turns has not started: routing runs as for any task.
+      const taskAssignments = domain.routingAssignments(taskId);
+      if (taskAssignments.length > 0) continue;
       if (Number(route.enabled) !== 1) {
         domain.ensureLeadAssignment(taskId);
         continue;
@@ -5252,6 +5420,29 @@ export class StandaloneService {
         });
       }
     }
+    /**
+     * With routing on, a lead that has only had draft turns waits for the routing decision.
+     * After a fallback it runs once an event is pending; after a routed assignment, only once
+     * the routed result arrives, so the worker runs first and the lead sees its answers with it.
+     */
+    const draftOnlyLeadWaits = (
+      assignment: ReturnType<DomainStore["assignment"]>,
+    ): boolean => {
+      if (
+        Number(domain.routing(String(assignment.projectId)).enabled) !== 1 ||
+        !domain
+          .leadBindings()
+          .some((lead) => lead.assignmentId === assignment.id) ||
+        !store.hasOnlyDraftTurns(String(assignment.id))
+      )
+        return false;
+      const disposition = domain.routingDisposition(String(assignment.taskId));
+      if (disposition === null) return true;
+      const pending = coordination.pendingEvents(String(assignment.id));
+      return disposition === "assigned"
+        ? !pending.some((event) => event.eventType === "assignment-result")
+        : pending.length === 0;
+    };
     for (const assignment of domain.pendingAssignments()) {
       const taskId = String(assignment.taskId);
       const task = domain.task(taskId);
@@ -5259,9 +5450,12 @@ export class StandaloneService {
       const assignmentId = String(assignment.id);
       const initialWorkId = `assignment:${assignmentId}:initial`;
       if (queries.hasWork(initialWorkId)) continue;
+      if (draftOnlyLeadWaits(assignment)) continue;
       const queued = coordination
         .queuedDeliveries()
         .find((item) => item.recipientAssignmentId === assignmentId);
+      // A draft turn's own batch waits for that turn to finish; it is not the initial turn's.
+      if (queued && store.find(queued.deliveryWorkId)?.draftTurn) continue;
       let delivery: InboxDelivery | undefined = queued;
       if (!delivery && coordination.pendingEvents(assignmentId).length > 0)
         delivery = coordination.bindDeliveryBatch(
@@ -5280,10 +5474,16 @@ export class StandaloneService {
             assignmentVersion: Number(assignment.version),
             instructionsRevision: Number(assignment.instructionsRevision),
             profileRevision: Number(assignment.profileRevision),
-            prompt: this.assignmentPrompt(String(assignment.brief), delivery),
-            previousWorkId: delivery
-              ? (state.latestCompletedAssignmentWork(assignmentId) ?? null)
-              : null,
+            prompt: this.assignmentPrompt(
+              String(assignment.brief),
+              delivery,
+              store.hasOnlyDraftTurns(assignmentId)
+                ? currentTaskOf(task)
+                : undefined,
+            ),
+            // Resumes the draft-turn conversation when the lead has had draft turns.
+            previousWorkId:
+              state.latestCompletedAssignmentWork(assignmentId) ?? null,
           },
           delivery
             ? { requestKey: requestWorkId, workId: requestWorkId }
@@ -5385,6 +5585,7 @@ export class StandaloneService {
         assignment = leadAssignment;
       }
       const task = domain.task(String(assignment.taskId));
+      if (draftOnlyLeadWaits(assignment)) continue;
       if (
         (assignment.state !== "pending" && assignment.state !== "running") ||
         (Number(task.ready) !== 1 &&
@@ -5485,13 +5686,13 @@ export class StandaloneService {
     delivery?: InboxDelivery,
     currentTask?: { version: number; title: string; outcome: string },
   ): string {
-    if (!delivery) return brief;
-    const events = delivery.events.map(
-      (event) => `- ${event.eventType}: ${event.payload}`,
-    );
     const context = currentTask
       ? `Current task (revision ${currentTask.version}): ${currentTask.title}\nCurrent outcome: ${currentTask.outcome}\n\nPreserved assignment brief:\n`
       : "";
+    if (!delivery) return `${context}${brief}`;
+    const events = delivery.events.map(
+      (event) => `- ${event.eventType}: ${event.payload}`,
+    );
     return `${context}${brief}\n\nDurable assignment inbox through event ${delivery.highWaterSequence}:\n${events.join("\n")}`;
   }
 
@@ -5600,6 +5801,9 @@ export class StandaloneService {
       : "Unavailable: no retained source capture for this work";
     return [
       { name: "request", text: request.prompt },
+      ...(request.draftTurn
+        ? [{ name: "draft-turn" as const, text: draftTurnInstruction }]
+        : []),
       { name: "role", text: roleContext },
       {
         name: "review-references",
@@ -5727,12 +5931,25 @@ export class StandaloneService {
           throw new Error("Task request is missing captured revisions");
         validateAssignment = () => {
           const domain = this.domain();
-          const reasons = domain.assignmentAdmission(assignmentId, {
-            taskVersion,
-            assignmentVersion,
-            instructionsRevision,
-            profileRevision,
-          }).reasons;
+          const reasons = domain
+            .assignmentAdmission(assignmentId, {
+              taskVersion,
+              assignmentVersion,
+              instructionsRevision,
+              profileRevision,
+            })
+            .reasons.filter(
+              // A draft turn runs while the task is not Ready. Making the task Ready since
+              // it was queued does not make it stale, but editing its title or outcome does.
+              (reason) =>
+                !(
+                  request.draftTurn &&
+                  (reason === "task-unready" ||
+                    (reason === "task-revision-changed" &&
+                      request.draftTaskDigest ===
+                        draftTaskDigest(domain.task(binding.taskId))))
+                ),
+            );
           if (this.recoveryContinuationUnresolved(assignmentId, request.workId))
             reasons.push("recovery-continuation-unresolved");
           if (
@@ -6178,9 +6395,12 @@ export class StandaloneService {
       if (diagnostics)
         this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
       // Passed only when enabled at this turn's admission, so off keeps today's call shapes.
-      const policy = state.commandNetworkAccess(intent.id)
-        ? { networkAccess: true }
-        : undefined;
+      // A draft turn is always read-only with network off, whatever the project sets.
+      const policy: RuntimeTurnPolicy | undefined = request.draftTurn
+        ? { networkAccess: false, access: "read-only" }
+        : state.commandNetworkAccess(intent.id)
+          ? { networkAccess: true }
+          : undefined;
       const turnId = await guard(
         policy
           ? runtime.startTurn(threadId, workspace, prompt, settings, policy)
