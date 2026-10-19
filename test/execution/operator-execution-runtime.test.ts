@@ -45,7 +45,7 @@ test("runtime errors name the field and accept blank or token values", () => {
   });
   assert.deepEqual(runtimeErrors(codex("m-alt", "medium")), {});
   assert.deepEqual(runtimeErrors(codex("default", "")), {
-    "runtime.model": "Leave Model blank to use the Codex default.",
+    "runtime.model": "Leave Model blank to use the runtime default.",
   });
   const supported = {
     models: [

@@ -95,7 +95,7 @@ export function runtimeErrors(
       v.runtimeHarness === "codex" &&
       value === "default"
     )
-      errors[path] = "Leave Model blank to use the Codex default.";
+      errors[path] = "Leave Model blank to use the runtime default.";
   }
   if (Object.keys(errors).length || !supported) return errors;
   const runtime = runtimeCommand(v);
