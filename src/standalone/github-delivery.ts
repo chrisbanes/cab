@@ -1312,8 +1312,27 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           });
         if (outcome === "rejected-non-fast-forward")
           return failure("branch-not-fast-forward");
-        if (outcome === "rejected-remote")
-          return failure("branch-push-rejected");
+        if (outcome === "rejected-remote") {
+          // The ref can move between Git's lease check and GitHub's update: a head that is neither
+          // the one preflight saw nor the commit is an outside change, not a plain refusal.
+          const head = await this.optionalRef(
+            before.repositoryPath,
+            before.branch,
+          ).catch(() => before.beforeHead);
+          return head === before.beforeHead
+            ? failure("branch-push-rejected")
+            : head === a.commitSha
+              ? unsettled
+              : failure("branch-outside-change", {
+                  receipt: head
+                    ? {
+                        nodeId: a.target.repositoryId,
+                        ref: before.branch,
+                        headSha: head,
+                      }
+                    : null,
+                });
+        }
         if (outcome === "rejected-lease") {
           const head = await this.optionalRef(
             before.repositoryPath,

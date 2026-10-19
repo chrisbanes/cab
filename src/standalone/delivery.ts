@@ -224,7 +224,8 @@ export class DeliveryCoordinator {
         ...verified,
         branch: assigned.branch,
         lastPushedSha: assigned.lastPushedSha,
-        retry: record.attempts > 0,
+        // Only an earlier attempt that may have pushed can have landed late.
+        retry: record.observation?.reason === "branch-push-not-applied",
       };
     }
     let before: Record<string, z.output<ReturnType<typeof z.json>>>;

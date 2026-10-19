@@ -177,7 +177,9 @@ export function publicationWorld(
     | "uncertain-applied"
     | "uncertain-lost"
     | "outside-during-push"
-    | "applied-but-unread" = "apply";
+    | "applied-but-unread"
+    | "not-attempted"
+    | "remote-rejected" = "apply";
   let racer: string | null = null;
   const push: PushFunction = async (request): Promise<PushOutcome> => {
     pushes.push(request);
@@ -188,6 +190,8 @@ export function publicationWorld(
     }
     if (pushBehaviour === "uncertain-lost") return "uncertain";
     if (pushBehaviour === "applied-but-unread") return "pushed";
+    if (pushBehaviour === "not-attempted") return "not-attempted";
+    if (pushBehaviour === "remote-rejected") return "rejected-remote";
     if (pushBehaviour === "outside-during-push") {
       remote.head = "d".repeat(40);
       return "rejected-lease";

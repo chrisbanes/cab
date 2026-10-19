@@ -576,3 +576,40 @@ test("a force-push is leased against the observed head and loses to a writer tha
   assert.equal(world.pushes[1]?.lease, first);
   assert.equal(world.remote.head, "c".repeat(40));
 });
+
+test("a server-side rejection after the ref moved is an outside change, not a plain refusal", async (t) => {
+  const world = publicationWorld(t);
+  const sha = world.commit();
+  world.setPush("remote-rejected");
+  world.raceBeforeNextPush("e".repeat(40));
+  const moved = await world.submit("branch.push", sha);
+  assert.equal(moved.observation?.reason, "branch-outside-change");
+  assert.equal(world.wakes.length, 1);
+
+  const plain = publicationWorld(t);
+  plain.setPush("remote-rejected");
+  const refused = await plain.submit("branch.push", plain.commit());
+  assert.equal(refused.observation?.reason, "branch-push-rejected");
+  assert.deepEqual(plain.wakes, []);
+});
+
+test("a retry after a push that never started does not accept an equal remote as its own", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const world = publicationWorld(t);
+  const sha = world.commit();
+  world.setPush("not-attempted");
+  const record = await world.submit("branch.push", sha);
+  assert.equal(record.observation?.reason, "push-not-attempted");
+  // Someone else creates exactly the requested commit before the retry.
+  world.remote.head = sha;
+  t.mock.timers.tick(61_000);
+  world.setPush("apply");
+  await world.coordinatorFor().reconcile();
+  const after = world.store.action(record.operationId);
+  assert.equal(after.observation?.reason, "branch-outside-change");
+  assert.equal(world.wakes.length, 1);
+  assert.equal(
+    world.store.taskBranch(world.taskId, repositoryId)?.lastPushedSha,
+    null,
+  );
+});
