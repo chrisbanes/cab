@@ -1170,11 +1170,13 @@ export class DeliveryStore {
     }
     throw new Error("Task branch could not be assigned");
   }
-  /** Commits Ensemble pushed, or may have pushed (an unsettled attempt), for the task's repository. */
+  /** Commits Ensemble pushed, or may have pushed (an unsettled or retryable attempt), for the task's repository. */
   private pushedShas(taskId: string, repositoryId: string): Set<string> {
     return new Set(
       this.actions(taskId).flatMap((a) =>
-        ["attempting", "uncertain", "confirmed-success"].includes(a.state) &&
+        (["attempting", "uncertain", "confirmed-success"].includes(a.state) ||
+          (a.state === "confirmed-failure" &&
+            a.observation?.retryable === true)) &&
         a.request.action.kind.startsWith("branch.") &&
         a.request.action.target.repositoryId === repositoryId &&
         "commitSha" in a.request.action

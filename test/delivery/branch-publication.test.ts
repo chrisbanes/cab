@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { deliverySection } from "../../src/standalone/operator-coordination.js";
 import { test } from "node:test";
 import {
@@ -460,4 +461,19 @@ test("a push whose readback lags is unproved and reconciled, not recorded as not
     "confirmed-success",
   );
   assert.equal(world.pushes.length, 1);
+});
+
+test("a graft cannot fake a commit's ancestry", async (t) => {
+  const world = publicationWorld(t);
+  git(world.workspace, "checkout", "-q", "--orphan", "alien");
+  git(world.workspace, "commit", "-q", "--allow-empty", "-m", "alien");
+  const alien = git(world.workspace, "rev-parse", "HEAD");
+  const grafts = git(world.workspace, "rev-parse", "--git-path", "info/grafts");
+  mkdirSync(dirname(resolve(world.workspace, grafts)), { recursive: true });
+  writeFileSync(resolve(world.workspace, grafts), `${alien} ${world.base}\n`);
+  // Plain Git is fooled: this exits 0.
+  git(world.workspace, "merge-base", "--is-ancestor", world.base, alien);
+  const record = await world.submit("branch.push", alien);
+  assert.equal(record.observation?.reason, "push-commit-not-verified");
+  assert.deepEqual(world.requests, []);
 });
