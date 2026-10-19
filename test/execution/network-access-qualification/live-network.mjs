@@ -157,7 +157,7 @@ try {
     while (Date.now() < deadline) {
       intent = service
         .list()
-        .find((i) => i.workId.includes(":") && !seen.has(i.id));
+        .find((i) => i.workId.endsWith(":initial") && !seen.has(i.id));
       if (
         intent &&
         ["completed", "held", "resolved-failed"].includes(intent.state)
@@ -172,6 +172,7 @@ try {
     evidence.tasks[label] = {
       intentId: intent.id,
       state: intent.state,
+      reason: intent.reason,
       result:
         file && existsSync(file) ? readFileSync(file, "utf8").trim() : null,
       recorded: null,
