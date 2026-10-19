@@ -54,6 +54,12 @@ instruction presence, but not instruction bodies. Captured conversation history
 contains bounded, sanitized assistant text and omission records; it is not a
 complete transcript or general runtime log feed.
 
+The CLI does not offer composer drafting (Draft with lead,
+[SPEC](../SPEC.md#drafting-runs)). A CLI caller already has its own agent to draft
+a brief, and a drafting run's value is the composer fill and reattaching to it after
+leaving or reloading. Revisit if a CLI journey needs the lead to read a project's
+repositories for a brief.
+
 ## Diagnostic evidence
 
 Add richer bounded capture for future executions: Ensemble-supplied instructions

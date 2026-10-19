@@ -36,6 +36,12 @@ import {
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
 import { optionalFields, optionalSummary } from "./composer-summary.js";
+import {
+  DraftChoice,
+  DraftWithLead,
+  useDrafting,
+} from "./composer-drafting.js";
+import { type DraftStart, startOf } from "./composer-release.js";
 import "./composer.css";
 export function TaskComposer({
   client,
@@ -45,6 +51,7 @@ export function TaskComposer({
   onRecorded,
   drafts,
   refresh,
+  releaseDraft,
 }: {
   client: OperatorClient;
   session: Session;
@@ -54,6 +61,8 @@ export function TaskComposer({
   drafts: ConfigurationDrafts;
   /** Re-reads the workspace after a Fix changes a project. */
   refresh: () => void;
+  /** Ends a draft the composer leaves behind; owned by the app so it outlives this page. */
+  releaseDraft: (runId: string, start?: DraftStart) => void;
 }) {
   const labels = workspaceLabels(workspace);
   const [, render] = useState(0);
@@ -109,6 +118,21 @@ export function TaskComposer({
     taskLoader,
   );
   const edit = (patch: Partial<ComposerInput>) => state.edit(patch);
+  const projectOptions = options.state.data?.data;
+  const drafting = useDrafting({
+    state,
+    client,
+    csrfToken: session.csrfToken,
+    // Undefined while the project's options load; null when it has no lead.
+    lead:
+      input.projectId && projectOptions
+        ? projectOptions.lead
+          ? { name: projectOptions.lead.name }
+          : null
+        : undefined,
+    locked,
+    releaseDraft,
+  });
   // Fresh options can show a stored selection is no longer permitted before submit.
   const fresh =
     state.phase === "editable" && options.state.status === "fresh"
@@ -155,11 +179,17 @@ export function TaskComposer({
       return;
     }
     const isCurrent = state.captureScope();
+    const draftRunId = input.draftingRunId;
+    const draftStart = startOf(input);
     await state.submit(client, session.csrfToken, ready);
     if (!isCurrent()) return;
     const first = Object.keys(state.errors)[0];
     if (first) reveal(first);
-    if (state.phase === "recorded") onRecorded();
+    if (state.phase === "recorded") {
+      // A draft left over from this composer ends with it.
+      if (draftRunId) releaseDraft(draftRunId, draftStart);
+      onRecorded();
+    }
   }
   if (state.recovered && !resumed && state.phase === "editable")
     return (
@@ -179,6 +209,9 @@ export function TaskComposer({
           <Button
             variant="secondary"
             onClick={() => {
+              // The run would otherwise outlive the input that could reach it.
+              if (input.draftingRunId)
+                releaseDraft(input.draftingRunId, startOf(input));
               state.discard();
               setLinkText("");
               setResumed(true);
@@ -316,21 +349,31 @@ export function TaskComposer({
       >
         <div className="composer-body">
           <fieldset disabled={locked} className="composer-fields">
+            <DraftWithLead d={drafting} state={state} />
             <div className="composer-lead-row">
               <label className="field body" htmlFor="composer-projectId">
                 Project
                 <NativeSelect
                   id="composer-projectId"
                   aria-label="Project"
+                  // A start still in flight cannot yet be released for another project.
+                  disabled={drafting.starting}
                   value={input.projectId}
                   onChange={(e) => {
+                    // A draft read the old project's repositories, so it ends with the change.
+                    const staleDraft = input.draftingRunId;
+                    if (staleDraft) releaseDraft(staleDraft, startOf(input));
                     edit({
                       projectId: e.target.value,
                       profileId: "",
                       blockerTaskIds: [],
+                      draftingRunId: undefined,
+                      draftingKey: undefined,
+                      draftingStart: undefined,
                     });
-                    state.notice =
-                      "Project changed. Assignee and dependency selections were cleared.";
+                    state.notice = staleDraft
+                      ? "Project changed. Assignee and dependency selections were cleared, and the draft for the previous project was ended."
+                      : "Project changed. Assignee and dependency selections were cleared.";
                     setDependencyQuery("");
                   }}
                 >
@@ -343,18 +386,21 @@ export function TaskComposer({
                 </NativeSelect>
                 {error("projectId")}
               </label>
-              <label className="field body" htmlFor="composer-title">
-                Task title
-                <Input
-                  id="composer-title"
-                  aria-label="Task title"
-                  className="control"
-                  value={input.title}
-                  onChange={(e) => edit({ title: e.target.value })}
-                  aria-invalid={Boolean(state.errors.title)}
-                />
-                {error("title")}
-              </label>
+              <div className="composer-title-cell">
+                <label className="field body" htmlFor="composer-title">
+                  Task title
+                  <Input
+                    id="composer-title"
+                    aria-label="Task title"
+                    className="control"
+                    value={input.title}
+                    onChange={(e) => edit({ title: e.target.value })}
+                    aria-invalid={Boolean(state.errors.title)}
+                  />
+                  {error("title")}
+                </label>
+                <DraftChoice d={drafting} field="title" />
+              </div>
             </div>
             <label className="field body" htmlFor="composer-outcome">
               Desired outcome
@@ -377,6 +423,7 @@ export function TaskComposer({
               )}
               {error("outcome")}
             </label>
+            <DraftChoice d={drafting} field="outcome" />
             <div
               className="composer-optional"
               data-invalid={optional.fix ? "true" : undefined}

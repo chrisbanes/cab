@@ -22,6 +22,17 @@ export const composerInputSchema = z
     links: z.array(z.string()),
     profileId: z.union([uuid, z.literal("")]),
     blockerTaskIds: z.array(uuid),
+    /** The rough idea handed to the project lead; absent until written. */
+    idea: z.string().optional(),
+    /** The drafting run this composer reattaches to after a reload. */
+    draftingRunId: uuid.optional(),
+    /** The key its start was sent under, so a start that never arrived can be sent again. */
+    draftingKey: uuid.optional(),
+    /** What that start sent, so a later edit of the idea cannot change a replayed start. */
+    draftingStart: z
+      .object({ projectId: uuid, idea: z.string().min(1).max(16000) })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ComposerInput = z.infer<typeof composerInputSchema>;

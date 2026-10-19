@@ -62,6 +62,7 @@ import {
   claudeTokenStatusSchema,
   commandReceiptSchema,
   composerOptionsSchema,
+  draftingRunReadSchema,
   configurationImpactSchema,
   deliveryReadSchema,
   discoveryBranchesSchema,
@@ -2702,6 +2703,49 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
+  /** A drafting run for the composer to reattach to; its proposal is redacted like any agent text. */
+  async readDraftingRun(runId: string) {
+    return this.readWithExclusionFence(() => this.readDraftingRunOnce(runId));
+  }
+  private async readDraftingRunOnce(runId: string) {
+    if (!uuid.safeParse(runId).success)
+      throw new OperatorApiError(404, "not-found");
+    const run = this.service.readDrafting(runId);
+    if (!run) throw new OperatorApiError(404, "not-found");
+    const current = await this.exclusions(run.projectId);
+    if (current === undefined) throw new OperatorApiError(503, "unavailable");
+    // The paths this run was built from stay private even after the project unlinks them.
+    const excluded = prepareExclusions([
+      ...current,
+      ...this.service.draftingGrantPaths(runId),
+    ]);
+    // Text the exclusions would change is withheld whole, never shown altered or empty.
+    const title = run.proposal && this.exact(run.proposal.title, excluded);
+    const outcome = run.proposal && this.exact(run.proposal.outcome, excluded);
+    const shown =
+      run.proposal && title !== null && outcome !== null
+        ? { title, outcome }
+        : null;
+    return draftingRunReadSchema.parse({
+      data: {
+        runId: run.runId,
+        projectId: run.projectId,
+        state: run.state,
+        reason: run.reason,
+        proposal: shown,
+        proposalWithheld: run.proposal !== null && shown === null,
+        leadName: this.safe(
+          this.domain().profileRevision(run.profileId, run.profileRevision)
+            .name,
+          excluded,
+        ),
+        createdAt: run.createdAt,
+        expiresAt: run.expiresAt,
+      },
+      observedAt: Date.now(),
+    });
+  }
+
   async readComposerOptions(projectId: string) {
     return this.readWithExclusionFence(() =>
       this.readComposerOptionsOnce(projectId),
@@ -6365,6 +6409,18 @@ export class OperatorApi {
   async execute(input: unknown, reviewSession?: OperatorReviewSessionContext) {
     const c = operatorCommandSchema.parse(input);
     try {
+      if (
+        c.type === "drafting.start" ||
+        c.type === "drafting.stop" ||
+        c.type === "drafting.settle"
+      ) {
+        if (c.type === "drafting.start") this.requireProject(c.projectId);
+        else if (!this.service.readDrafting(c.runId))
+          throw new OperatorApiError(404, "not-found");
+        return commandReceiptSchema.parse(
+          await this.service.draftingCommand(c),
+        );
+      }
       if (
         c.type === "review.anchor.stage" ||
         c.type === "review.draft.save" ||

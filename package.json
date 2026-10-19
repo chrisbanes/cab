@@ -31,6 +31,7 @@
     "mixed-runtime:live": "node test/execution/mixed-runtime-qualification/live-journeys.mjs",
     "coordination:live": "node test/coordination/live-qualification/live-journey.mjs",
     "coordination:routing:live": "node test/coordination/live-qualification/live-routing.mjs",
+    "drafting:live": "node test/execution/drafting-qualification/live-drafting.mjs",
     "recovery:live": "node test/execution/recovery-qualification/live-runtime.mjs --live",
     "operations:live": "node test/operations/live-qualification/live-operations.mjs",
     "lint": "biome lint --error-on-warnings .",

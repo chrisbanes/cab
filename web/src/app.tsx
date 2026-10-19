@@ -55,6 +55,7 @@ import {
   taskColumn,
   taskRouteSubtitle,
 } from "./tasks.js";
+import { useDraftReleases } from "./composer-drafting.js";
 import { TaskComposer } from "./task-composer.js";
 import { RuntimeSettings, AssignmentRecovery } from "./recovery.js";
 import { unavailableAlert } from "./execution-runtime.js";
@@ -555,6 +556,10 @@ export function App() {
   }, []);
   const client = useMemo(() => new OperatorClient(fetch, expired), [expired]);
   clientRef.current = client;
+  const releaseDraft = useDraftReleases(
+    client,
+    session?.authenticated ? session.csrfToken : null,
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: browser-entry purge is needed only when accepting this exact current authentication scope.
   const acceptSession = useCallback(
     (next: Session) => {
@@ -1216,6 +1221,7 @@ export function App() {
               onRecorded={tasks.refresh}
               drafts={drafts.current}
               refresh={workspace.refresh}
+              releaseDraft={releaseDraft}
             />
           ) : pathname === "/app/inbox" ? (
             <Inbox

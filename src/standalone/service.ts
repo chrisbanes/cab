@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -46,12 +47,28 @@ import {
 } from "../core/execution-runtime.js";
 import { GitHubSourceStore } from "../core/github-source.js";
 import { Store } from "../core/store.js";
+import {
+  type CommandReceipt,
+  type DraftProposal,
+  draftProposalSchema,
+  type OperatorCommand,
+} from "../operator/contracts.js";
+
+type DraftingReceipt = Extract<CommandReceipt, { kind: "drafting" }>;
 import { reviewMetadataSchema } from "../core/task-review.js";
 import type {
   HarnessStatus,
   RuntimeRestartFailure,
 } from "../operator/contracts.js";
 import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
+import {
+  type DraftingRun,
+  DraftingRunStore,
+  draftProposalTool,
+  draftProposalToolName,
+  draftingInstruction,
+  draftingTimeLimitMs,
+} from "./drafting.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,
@@ -74,6 +91,7 @@ import {
   ConversationHistoryCapture,
   ConversationHistoryStore,
   prepareExclusions,
+  sanitizeConversationText,
 } from "./conversation-history.js";
 import { type SanitizedError, sanitizeError } from "./service-log.js";
 import {
@@ -303,7 +321,8 @@ interface PromptPart {
     | "role"
     | "review-references"
     | "project-instructions"
-    | "profile-instructions";
+    | "profile-instructions"
+    | "drafting-instruction";
   text: string;
   revision?: number;
 }
@@ -330,6 +349,13 @@ const unionExclusions = (
 /** The exact submitted prompt; captured segments cannot drift from it. */
 const joinPromptParts = (parts: readonly PromptPart[]) =>
   parts.map((part) => part.text).join("\n\n");
+
+const draftingStoppedReason = "You stopped the draft";
+const draftingTimeLimitReason = "The 10 minute time limit was reached";
+const draftingRestartedReason = "The service restarted";
+const draftingUnverifiedReason = "Waiting to confirm the runtime stopped";
+const draftingCleanupReason = "Waiting to remove the working copy";
+const draftingWorkspaceFailedReason = "The working copy could not be prepared";
 
 /** Why `configureRuntime` refused before saving anything (ADR-1012). */
 export class RuntimeConfigurationRefusedError extends Error {
@@ -373,6 +399,10 @@ export interface StandaloneServiceOptions {
   supervisor?: ExecutionSupervisorOptions;
   terminationVerifier?: TerminationVerifier;
   workspaceManager?: WorkspaceManagerOptions;
+  /** Test-only; production uses the fixed 10 minute cap. */
+  draftingTimeLimitMs?: number;
+  /** Test-only; production retries a failed interrupt after 5 seconds. */
+  draftingInterruptRetryMs?: number;
   power?: {
     enabled?: boolean;
     eventSource?: PowerEventSource;
@@ -444,6 +474,10 @@ interface Started {
   routingAttempts: RoutingAttemptStore;
   workspaces: WorkspaceManager;
   workspaceBindings: SqliteWorkspaceBindingStore;
+  /** Disposable worktrees of drafting runs, apart from task workspaces. */
+  draftingWorkspaces: WorkspaceManager;
+  draftingBindings: SqliteWorkspaceBindingStore;
+  drafting: DraftingRunStore;
   workspaceComparisons: SqliteWorkspaceComparisonStore;
   operatorCredentials: OperatorCredentialStore;
   operatorPush: OperatorPushStore;
@@ -465,7 +499,7 @@ function harnessForWork(
   state: ExecutionState,
   workId: string,
 ): ExecutionHarness {
-  return state.taskBinding(workId)?.harness ?? defaultExecutionHarness;
+  return state.workHarness(workId);
 }
 
 function retractWriterAndSuccessors(
@@ -588,6 +622,20 @@ export class StandaloneService {
     { workId: string; interactionId: string; resolve: () => void }
   >();
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
+  /** Drafting commands in flight, by key. */
+  private readonly draftingKeys = new Map<string, Promise<unknown>>();
+  /** The linked repositories each queued draft's copy was built from, until it is admitted. */
+  private readonly draftingGrants = new Map<string, string>();
+  /** A running drafting run's bound turn and pending Stop, which may arrive before the turn binds. */
+  private readonly draftingControls = new Map<
+    string,
+    {
+      threadId?: string;
+      turnId?: string;
+      stopReason?: string;
+      interrupts?: number;
+    }
+  >();
   private readonly routingCoordinators = new Map<string, RoutingCoordinator>();
   private readonly retryNow: () => number;
   private readonly restartClock: SupervisorClock;
@@ -661,7 +709,11 @@ export class StandaloneService {
     const generation = this.createGeneration();
     this.generation = generation;
     this.stopPromise = undefined;
-    const { databasePath: database, workspacePath } = dataDirectory;
+    const {
+      databasePath: database,
+      workspacePath,
+      draftingWorkspacePath,
+    } = dataDirectory;
     // Re-created if stop() releases it mid-start, so the catch path still sees later parts.
     const acquire = <K extends keyof Started>(key: K, value: Started[K]) => {
       this.acquired ??= {};
@@ -734,6 +786,19 @@ export class StandaloneService {
       );
       await workspaces.recover();
       workspaces.assertNotCancelled();
+      const drafting = new DraftingRunStore(db);
+      const draftingBindings = new SqliteWorkspaceBindingStore(
+        db,
+        "drafting_workspace_bindings",
+      );
+      const draftingWorkspaces = acquire(
+        "draftingWorkspaces",
+        new WorkspaceManager(
+          draftingBindings,
+          draftingWorkspacePath,
+          this.options.workspaceManager,
+        ),
+      );
       const state = new ExecutionState(db);
       let afterWorkspaceRowId = 0;
       for (;;) {
@@ -1125,6 +1190,14 @@ export class StandaloneService {
           harness !== defaultExecutionHarness,
         );
       await supervisor.reconcileOnStart();
+      await this.resolveDraftingOnStart({
+        drafting,
+        draftingBindings,
+        draftingWorkspaces,
+        schedulerStore,
+        state,
+        supervisor,
+      });
       await deliveryCoordinator.refresh();
       await this.reconcileOwnDeliveryClosures({
         domain,
@@ -1206,6 +1279,9 @@ export class StandaloneService {
         routingAttempts,
         workspaces,
         workspaceBindings,
+        draftingWorkspaces,
+        draftingBindings,
+        drafting,
         workspaceComparisons,
         operatorCredentials,
         operatorPush,
@@ -1246,8 +1322,9 @@ export class StandaloneService {
       generation.accepting = false;
       this.abortRuntimeRestarts();
       // Read live, as stop() may release these while start() is still running.
-      const { scheduler, workspaces } = this.acquired ?? {};
+      const { scheduler, workspaces, draftingWorkspaces } = this.acquired ?? {};
       workspaces?.cancelGitWork();
+      draftingWorkspaces?.cancelGitWork();
       scheduler?.stop();
       try {
         this.acquired?.state?.holdReadyOnStartupFailure(
@@ -1273,6 +1350,7 @@ export class StandaloneService {
           ]);
           this.detachedRuntimeStops.clear();
           await workspaces?.settle();
+          await draftingWorkspaces?.settle();
           try {
             await scheduler?.settle();
           } catch (cleanupError) {
@@ -1708,9 +1786,7 @@ export class StandaloneService {
     state: ExecutionState,
     supervisor: () => ExecutionSupervisor | undefined,
   ): void {
-    const ownWork = (workId: string) =>
-      (state.taskBinding(workId)?.harness ?? defaultExecutionHarness) ===
-      harness;
+    const ownWork = (workId: string) => state.workHarness(workId) === harness;
     /** A callback naming another harness's execution is rejected, not acted on. */
     const foreign = (threadId: string, turnId: string) => {
       try {
@@ -1950,6 +2026,10 @@ export class StandaloneService {
         ...gitHubCredentialExclusions(domain).redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...this.claudeTokensHandedOut,
+        // Copies still in use keep their grant's paths private even once it is unlinked.
+        ...(this.current?.draftingBindings
+          .unarchived()
+          .flatMap((binding) => this.draftingGrantPaths(binding.taskId)) ?? []),
         ...domain.projects().flatMap((project) => {
           const id = String(project.id);
           return [
@@ -2063,6 +2143,7 @@ export class StandaloneService {
       deliveryCoordinator: delivery,
       power,
       workspaces,
+      draftingWorkspaces,
     } = this.acquired ?? {};
     const runtimes = new Map(this.runtimes);
     const db = this.db;
@@ -2080,6 +2161,7 @@ export class StandaloneService {
 
     try {
       workspaces?.cancelGitWork();
+      draftingWorkspaces?.cancelGitWork();
     } catch (error) {
       recordFailure("workspace Git cancellation", error);
     }
@@ -2118,6 +2200,9 @@ export class StandaloneService {
       ...detachedStops.map((cleanup) => attempt("runtime stop", () => cleanup)),
     ]);
     await attempt("workspace settlement", () => workspaces?.settle());
+    await attempt("drafting workspace settlement", () =>
+      draftingWorkspaces?.settle(),
+    );
     await attempt("scheduler settlement", () => scheduler?.settle());
     await attempt("active-work settlement", async () => {
       const settled = await Promise.allSettled([...this.active]);
@@ -3923,6 +4008,8 @@ export class StandaloneService {
 
   private handleToolCall(call: RuntimeToolCall): Promise<RuntimeToolResult> {
     const { coordination, state } = this.started();
+    if (call.tool === draftProposalToolName)
+      return Promise.resolve(this.handleDraftProposal(call));
     if (!isCoordinationTool(call.tool))
       return Promise.resolve({
         text: "Coordination tool is unavailable for this execution",
@@ -4216,6 +4303,628 @@ export class StandaloneService {
     });
     this.started().state.create(workId, prompt, workspaceKey, previousWorkId);
     return this.dispatchAndRead(workId);
+  }
+
+  /** A drafting run's work and request identity; see SPEC "Drafting runs". */
+  private static draftingWorkId(runId: string): string {
+    return `drafting:${runId}`;
+  }
+
+  private draftingRunIdOf(request: TurnRequest): string {
+    return request.workId.slice("drafting:".length);
+  }
+
+  private draftingLead(projectId: string) {
+    const domain = this.domain();
+    const project = domain.project(projectId);
+    const leadId = project.leadProfileId
+      ? String(project.leadProfileId)
+      : undefined;
+    const profile = leadId ? domain.profile(leadId) : undefined;
+    if (!leadId || !profile || profile.revoked)
+      throw new DomainConflictError("Drafting needs a project lead");
+    const profileRevision = Number(profile.version);
+    return {
+      profileId: leadId,
+      profileRevision,
+      instructionsRevision: Number(project.instructionsRevision),
+      harness: domain.profileRuntime(leadId, profileRevision).harness,
+    };
+  }
+
+  /** What holds a queued drafting run back; the same wording as a task's wait. */
+  private draftingAdmissionReasons(run: DraftingRun): string[] {
+    const domain = this.domain();
+    const reasons: string[] = [];
+    if (domain.project(run.projectId).paused) reasons.push("project-paused");
+    if (domain.profile(run.profileId).revoked)
+      reasons.push("project-lead-revoked");
+    return reasons;
+  }
+
+  /**
+   * Starts a project-owned drafting run that proposes a task title and outcome.
+   * It creates no task; the run waits for capacity like any turn.
+   */
+  async startDrafting(input: {
+    runId: string;
+    projectId: string;
+    idea: string;
+  }): Promise<DraftingRun> {
+    const value = z
+      .object({
+        runId: z.string().uuid(),
+        projectId: z.string().uuid(),
+        idea: z.string().min(1).max(16_000),
+      })
+      .strict()
+      .parse(input);
+    const { drafting, schedulerStore } = this.started();
+    // The run and its turn request commit together: neither can exist without the other.
+    const run = drafting.atomically(() => {
+      const existing = drafting.get(value.runId);
+      const created = existing
+        ? drafting.create({ ...existing, ...value })
+        : drafting.create({
+            ...value,
+            ...this.draftingLead(value.projectId),
+          });
+      schedulerStore.ensure(StandaloneService.draftingRequest(created));
+      return created;
+    });
+    await this.wakeScheduler();
+    return drafting.require(run.runId);
+  }
+
+  /**
+   * The private paths of the copy a run was built from, kept with the run after the
+   * project unlinks the repository or the copy is removed.
+   */
+  draftingGrantPaths(runId: string): string[] {
+    const binding = this.started().draftingBindings.get(runId);
+    return binding
+      ? [
+          binding.path,
+          ...binding.repositories.flatMap((repository) => [
+            repository.sourcePath,
+            repository.workspacePath,
+            ...(repository.gitCommonDir ? [repository.gitCommonDir] : []),
+          ]),
+        ].filter((path) => path.length > 0)
+      : [];
+  }
+
+  /** The turn request that carries a drafting run through admission. */
+  private static draftingRequest(run: DraftingRun) {
+    const workId = StandaloneService.draftingWorkId(run.runId);
+    return {
+      requestKey: workId,
+      workId,
+      kind: "drafting" as const,
+      taskId: null,
+      projectId: run.projectId,
+      assignmentId: null,
+      taskVersion: null,
+      assignmentVersion: null,
+      instructionsRevision: run.instructionsRevision,
+      profileRevision: run.profileRevision,
+      prompt: run.idea,
+      workspace: null,
+      previousWorkId: null,
+    };
+  }
+
+  readDrafting(runId: string): DraftingRun | undefined {
+    return this.started().drafting.get(runId);
+  }
+
+  /**
+   * Stop holds a running draft until the runtime is seen to end; a queued one
+   * has nothing to wait for and ends at once.
+   */
+  async stopDrafting(runId: string): Promise<DraftingRun> {
+    const { drafting, state } = this.started();
+    const run = drafting.get(runId);
+    if (!run) throw new DomainConflictError("Unknown drafting run");
+    const workId = StandaloneService.draftingWorkId(runId);
+    if (run.state === "queued") {
+      // Leaving `queued` first, synchronously, ends any admission in flight.
+      drafting.transition(runId, "stopping", draftingCleanupReason);
+      state.releaseDraftingExecution(workId);
+      this.draftingGrants.delete(runId);
+      await this.settleUnadmitted(runId, "interrupted", draftingStoppedReason);
+    } else if (
+      run.state === "stopping" &&
+      !this.draftingControls.has(runId) &&
+      !state.recoveryIdentity(workId)
+    ) {
+      // Never admitted and waiting only for its copy to go: Stop retries the removal.
+      state.releaseDraftingExecution(workId);
+      await this.settleUnadmitted(
+        runId,
+        ...StandaloneService.unadmittedOutcome(run, draftingStoppedReason),
+      );
+    } else if (run.state === "running" || run.state === "stopping")
+      this.requestDraftingStop(runId, draftingStoppedReason);
+    return drafting.require(runId);
+  }
+
+  /**
+   * Applies a drafting command once per key: a replay returns its receipt and
+   * the same key with other content conflicts.
+   */
+  draftingCommand(
+    command: Extract<
+      OperatorCommand,
+      { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
+    >,
+  ): Promise<DraftingReceipt> {
+    // One command per key at a time: a second with the same key waits, then finds the
+    // first one's receipt (or a conflict) instead of applying its own.
+    const earlier = this.draftingKeys.get(command.key) ?? Promise.resolve();
+    const applied = earlier
+      .catch(() => {})
+      .then(() => this.applyDraftingCommand(command));
+    this.draftingKeys.set(command.key, applied);
+    const release = () => {
+      if (this.draftingKeys.get(command.key) === applied)
+        this.draftingKeys.delete(command.key);
+    };
+    applied.then(release, release);
+    return applied;
+  }
+
+  private async applyDraftingCommand(
+    command: Extract<
+      OperatorCommand,
+      { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
+    >,
+  ): Promise<DraftingReceipt> {
+    const { drafting } = this.started();
+    const { key, ...content } = command;
+    const prior = drafting.receipt<DraftingReceipt>(key, content);
+    if (prior) return prior;
+    const receiptOf = (
+      operation: DraftingReceipt["operation"],
+      run: DraftingRun,
+    ): DraftingReceipt => ({
+      kind: "drafting",
+      key,
+      recorded: true,
+      operation,
+      runId: run.runId,
+      state: run.state,
+    });
+    // Accepting is the one command a replay cannot repeat, so it commits with its receipt.
+    // Start and Stop converge when repeated.
+    if (command.type === "drafting.settle")
+      return drafting.atomically(() => {
+        const receipt = receiptOf(
+          command.disposition,
+          this.settleDrafting(command.runId, command.disposition).run,
+        );
+        return drafting.recordReceipt(key, content, receipt);
+      });
+    const receipt =
+      command.type === "drafting.start"
+        ? receiptOf(
+            "start",
+            await this.startDrafting({
+              runId: command.runId,
+              projectId: command.projectId,
+              idea: command.idea,
+            }),
+          )
+        : receiptOf("stop", await this.stopDrafting(command.runId));
+    return drafting.recordReceipt(key, content, receipt);
+  }
+
+  /** Accepting hands over the proposal once; the composer then owns its text. */
+  settleDrafting(
+    runId: string,
+    disposition: "accept" | "discard",
+  ): { run: DraftingRun; proposal: DraftProposal | null } {
+    const { drafting } = this.started();
+    const run = drafting.get(runId);
+    if (!run) throw new DomainConflictError("Unknown drafting run");
+    if (disposition === "accept") {
+      if (run.state !== "proposed" || !run.proposal)
+        throw new DomainConflictError(
+          run.state === "expired"
+            ? "The draft expired"
+            : "There is no draft to use",
+        );
+      return {
+        proposal: run.proposal,
+        run: drafting.transition(runId, "accepted"),
+      };
+    }
+    if (["proposed", "interrupted", "failed"].includes(run.state))
+      return { run: drafting.transition(runId, "discarded"), proposal: null };
+    if (["accepted", "discarded", "expired"].includes(run.state))
+      return { run, proposal: null };
+    throw new DomainConflictError("Stop the draft before discarding it");
+  }
+
+  private requestDraftingStop(runId: string, reason: string): void {
+    if (!this.current) return;
+    const { drafting } = this.current;
+    const run = drafting.get(runId);
+    if (run?.state === "running")
+      drafting.transition(runId, "stopping", reason);
+    else if (run?.state !== "stopping") return;
+    const control = this.draftingControls.get(runId);
+    if (!control) return;
+    control.stopReason ??= reason;
+    this.interruptDrafting(runId);
+  }
+
+  /** Interrupts the bound turn; a Stop that beats the binding is applied when it lands. */
+  private interruptDrafting(runId: string): void {
+    const control = this.draftingControls.get(runId);
+    const { state } = this.started();
+    if (!control?.threadId || !control.turnId) return;
+    const { threadId, turnId } = control;
+    const runtime = this.runtimeForWork(
+      state,
+      StandaloneService.draftingWorkId(runId),
+    );
+    if (!runtime) return;
+    void this.untilFailure(
+      runtime,
+      runtime.interruptTurn(threadId, turnId),
+      runtimeFailedError,
+    ).catch(() => this.retryDraftingInterrupt(runId));
+  }
+
+  /** A failed interrupt is tried again while the run is still stopping, a few times. */
+  private retryDraftingInterrupt(runId: string): void {
+    const control = this.draftingControls.get(runId);
+    if (!control || (control.interrupts ?? 0) >= 5) return;
+    control.interrupts = (control.interrupts ?? 0) + 1;
+    setTimeout(() => {
+      if (
+        this.draftingControls.get(runId) === control &&
+        this.current?.drafting.get(runId)?.state === "stopping"
+      )
+        this.interruptDrafting(runId);
+    }, this.options.draftingInterruptRetryMs ?? 5000).unref();
+  }
+
+  private handleDraftProposal(call: RuntimeToolCall): RuntimeToolResult {
+    const { drafting } = this.started();
+    for (const [runId, control] of this.draftingControls) {
+      // A drafting thread runs one turn, whose id may not be bound yet when the call lands.
+      if (
+        control.threadId !== call.threadId ||
+        (control.turnId !== undefined && control.turnId !== call.turnId)
+      )
+        continue;
+      if (drafting.get(runId)?.state !== "running") break;
+      const parsed = draftProposalSchema.safeParse(call.arguments);
+      if (!parsed.success)
+        return {
+          success: false,
+          text: parsed.error.issues
+            .map(
+              (issue) =>
+                `${issue.path.join(".") || "arguments"}: ${issue.message}`,
+            )
+            .join("; ")
+            .slice(0, 1000),
+        };
+      // The operator could not be shown text the exclusions would change, so it is refused now.
+      const run = drafting.require(runId);
+      const domain = this.domain();
+      const failure = this.failureExclusions();
+      // Including the instructions this run was given, which the operator's reads also redact,
+      // and the paths of the grant it was built from, which an unlink does not make public.
+      const excluded =
+        failure &&
+        prepareExclusions([
+          ...failure,
+          ...this.draftingGrantPaths(runId),
+          ...[
+            String(
+              domain.profileRevision(run.profileId, run.profileRevision)
+                .instructions,
+            ),
+            domain.instructionRevision(run.projectId, run.instructionsRevision),
+          ].filter((text) => text.length > 0),
+        ]);
+      const shown = (text: string) =>
+        excluded !== undefined &&
+        sanitizeConversationText(text, excluded) === text;
+      if (!shown(parsed.data.title) || !shown(parsed.data.outcome))
+        return {
+          success: false,
+          text: "The draft holds text that cannot be shown to the operator, such as a private path or credential. Remove it and call the tool again.",
+        };
+      drafting.recordProposal(runId, parsed.data);
+      return { success: true, text: "Draft recorded. You can finish now." };
+    }
+    return {
+      success: false,
+      text: "This tool is only available to a running drafting run",
+    };
+  }
+
+  /**
+   * A run that never started settles once its copy is gone; until then it stays
+   * `stopping`, so Stop or the next start can retry the removal.
+   */
+  private async settleUnadmitted(
+    runId: string,
+    state: "interrupted" | "failed",
+    reason: string,
+  ): Promise<void> {
+    if (!(await this.discardDraftingWorkspace(runId))) return;
+    // A concurrent Stop or retry may have settled it while the removal waited.
+    const { drafting } = this.started();
+    if (drafting.get(runId)?.state === "stopping")
+      drafting.transition(runId, state, reason);
+  }
+
+  /**
+   * Removes a run's worktree and Claude sandbox base. False when the copy is
+   * still there, so the caller keeps the run unsettled and a later start retries.
+   */
+  private discardDraftingWorkspace(runId: string): Promise<boolean> {
+    const { draftingWorkspaces, draftingBindings } = this.started();
+    return StandaloneService.discardDrafting(
+      draftingWorkspaces,
+      draftingBindings,
+      runId,
+    );
+  }
+
+  private static async discardDrafting(
+    workspaces: WorkspaceManager,
+    bindings: SqliteWorkspaceBindingStore,
+    runId: string,
+  ): Promise<boolean> {
+    try {
+      const binding = bindings.get(runId);
+      const workspace = binding
+        ? await realpath(binding.path).catch(() => binding.path)
+        : undefined;
+      const discarded = await workspaces.discard(runId);
+      if (discarded && discarded.state !== "archived") return false;
+      if (workspace)
+        await releaseClaudeTemporaryBase(workspace).catch(() => {});
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * After a restart a drafting run's capacity is released only once its runtime
+   * is known to have ended; otherwise it stays held and keeps its reservation.
+   */
+  private async resolveDraftingOnStart(c: {
+    drafting: DraftingRunStore;
+    draftingBindings: SqliteWorkspaceBindingStore;
+    draftingWorkspaces: WorkspaceManager;
+    schedulerStore: SchedulerStore;
+    state: ExecutionState;
+    supervisor: ExecutionSupervisor;
+  }): Promise<void> {
+    c.drafting.sweepExpired();
+    for (let run of c.drafting.unfinished()) {
+      const workId = StandaloneService.draftingWorkId(run.runId);
+      if (run.state === "queued") {
+        // A run that was committed without its request (an earlier build) gets it now.
+        c.schedulerStore.ensure(StandaloneService.draftingRequest(run));
+        // Admitted but the crash came before it was marked running: treat it as running.
+        if (!c.state.recoveryIdentity(workId)) continue;
+        run = c.drafting.transition(run.runId, "running");
+      }
+      // Never admitted, so nothing ran: only its copy was waiting to go.
+      if (run.state === "stopping" && !c.state.recoveryIdentity(workId)) {
+        if (
+          await StandaloneService.discardDrafting(
+            c.draftingWorkspaces,
+            c.draftingBindings,
+            run.runId,
+          )
+        ) {
+          c.state.releaseDraftingExecution(workId);
+          const [settled, reason] = StandaloneService.unadmittedOutcome(
+            run,
+            draftingRestartedReason,
+          );
+          c.drafting.transition(run.runId, settled, reason);
+        }
+        continue;
+      }
+      if (await c.supervisor.verifyEnded(workId)) {
+        // The copy goes first; a run whose copy stays is held with its capacity.
+        if (
+          await StandaloneService.discardDrafting(
+            c.draftingWorkspaces,
+            c.draftingBindings,
+            run.runId,
+          )
+        ) {
+          c.state.releaseDraftingExecution(workId);
+          c.drafting.transition(
+            run.runId,
+            "interrupted",
+            draftingRestartedReason,
+          );
+        } else if (run.state === "running")
+          c.drafting.transition(run.runId, "stopping", draftingCleanupReason);
+      } else if (run.state === "running")
+        c.drafting.transition(run.runId, "stopping", draftingUnverifiedReason);
+    }
+    for (const binding of c.draftingBindings.list()) {
+      if (binding.state === "archived") continue;
+      const run = c.drafting.get(binding.taskId);
+      if (run && ["queued", "running", "stopping"].includes(run.state))
+        continue;
+      await StandaloneService.discardDrafting(
+        c.draftingWorkspaces,
+        c.draftingBindings,
+        binding.taskId,
+      );
+    }
+  }
+
+  /** Verifies linked repositories as a task grant does, then provisions the disposable copy. */
+  private async prepareDraftingWorkspace(
+    request: TurnRequest,
+  ): Promise<string | undefined> {
+    const { drafting, draftingWorkspaces, schedulerStore } = this.started();
+    const runId = this.draftingRunIdOf(request);
+    const run = drafting.get(runId);
+    if (run?.state !== "queued") return undefined;
+    const waits = this.draftingAdmissionReasons(run);
+    if (waits.length > 0) {
+      schedulerStore.wait(
+        request.workId,
+        `Admission waiting: ${waits.join(", ")}`,
+      );
+      return undefined;
+    }
+    try {
+      const config = this.domain().githubConfiguration(run.projectId);
+      this.draftingGrants.set(runId, StandaloneService.grantOf(config));
+      const repositories = [];
+      for (const match of config.repositories) {
+        const current = await verifiedRepository({
+          repositoryId: match.repositoryId,
+          path: match.path,
+          ref: match.ref,
+        });
+        if (
+          current.gitCommonDirectory !== match.gitCommonDirectory ||
+          current.path !== match.path
+        )
+          throw new Error("Linked repository identity changed");
+        repositories.push({
+          repositoryId: match.repositoryId,
+          path: match.path,
+          ref: match.ref,
+        });
+      }
+      // A Stop during verification has settled the run: build nothing for it.
+      if (drafting.get(runId)?.state !== "queued") return undefined;
+      const binding = await draftingWorkspaces.provision(runId, repositories);
+      if (binding.state !== "ready")
+        throw new Error(binding.reason ?? "Working copy is not ready");
+      // A Stop during provisioning settled the run, so the copy it just got is not wanted.
+      if (drafting.get(runId)?.state !== "queued") {
+        await this.discardDraftingWorkspace(runId);
+        return undefined;
+      }
+      // Access may have changed while Git ran: a copy of the old grant is never used.
+      if (this.draftingGrantChanged(runId, run.projectId))
+        throw new Error("Linked repository access changed");
+      return realpathSync(binding.path);
+    } catch {
+      await this.failQueuedDrafting(request);
+      return undefined;
+    }
+  }
+
+  /** The access a copy was built from: the linked repositories, not unrelated source settings. */
+  private static grantOf(config: { repositories: unknown }): string {
+    return JSON.stringify(config.repositories);
+  }
+
+  /** Whether the project's linked repositories differ from those the copy was built from. */
+  private draftingGrantChanged(runId: string, projectId: string): boolean {
+    return (
+      this.draftingGrants.get(runId) !==
+      StandaloneService.grantOf(this.domain().githubConfiguration(projectId))
+    );
+  }
+
+  /** Ends a queued run that cannot start, once its copy is removed. */
+  private async failQueuedDrafting(request: TurnRequest): Promise<void> {
+    const { drafting, state } = this.started();
+    const runId = this.draftingRunIdOf(request);
+    this.draftingGrants.delete(runId);
+    if (drafting.get(runId)?.state !== "queued") {
+      // Stopped meanwhile: a copy built after that Stop is removed here.
+      await this.discardDraftingWorkspace(runId);
+      return;
+    }
+    // The cause stays on the run, so a retried removal still settles it as failed.
+    drafting.transition(runId, "stopping", draftingWorkspaceFailedReason);
+    state.releaseDraftingExecution(request.workId);
+    await this.settleUnadmitted(runId, "failed", draftingWorkspaceFailedReason);
+  }
+
+  /** How a never-admitted run settles once its copy is gone: failed if that was its cause. */
+  private static unadmittedOutcome(
+    run: DraftingRun,
+    otherwise: string,
+  ): ["interrupted" | "failed", string] {
+    return run.reason === draftingWorkspaceFailedReason
+      ? ["failed", draftingWorkspaceFailedReason]
+      : ["interrupted", otherwise];
+  }
+
+  /**
+   * The turn ended. Capacity is released only on an observed terminal status
+   * with nothing unfinished; the copy is then deleted and the run settled.
+   */
+  private async endDraftingTurn(input: {
+    request: TurnRequest;
+    intent: ExecutionIntent;
+    threadId: string;
+    turnId: string;
+    outcome: "completed" | "failed";
+    generation: ServiceGeneration | undefined;
+  }): Promise<void> {
+    const { request, intent, threadId, turnId, outcome, generation } = input;
+    const { drafting, state, supervisor } = this.started();
+    const runId = this.draftingRunIdOf(request);
+    if (
+      (this.callbacks.get(request.workId)?.size ?? 0) > 0 ||
+      supervisor.hasKnownRisk(request.workId) ||
+      !generation ||
+      this.generation !== generation ||
+      !generation.accepting
+    ) {
+      state.hold(intent.id, "Drafting run ended with work unfinished");
+      if (drafting.get(runId)?.state === "running")
+        drafting.transition(runId, "stopping", draftingUnverifiedReason);
+      return;
+    }
+    // The copy is removed before capacity is released and the run settles; a copy
+    // that stays keeps the run held, and the next start retries.
+    if (!(await this.discardDraftingWorkspace(runId))) {
+      state.hold(intent.id, "The drafting copy could not be removed");
+      if (drafting.get(runId)?.state === "running")
+        drafting.transition(runId, "stopping", draftingCleanupReason);
+      return;
+    }
+    const run = drafting.require(runId);
+    const stopReason = this.draftingControls.get(runId)?.stopReason;
+    const settle: () => void =
+      stopReason !== undefined || run.state === "stopping"
+        ? () =>
+            drafting.transition(
+              runId,
+              "interrupted",
+              stopReason ?? run.reason ?? draftingStoppedReason,
+            )
+        : outcome === "completed" && drafting.hasCandidate(runId)
+          ? () => drafting.transition(runId, "proposed")
+          : outcome === "completed"
+            ? () =>
+                drafting.transition(
+                  runId,
+                  "failed",
+                  "The lead returned no draft",
+                )
+            : () =>
+                drafting.transition(runId, "failed", "The lead's turn failed");
+    // Release and settlement commit together, so a crash cannot split them.
+    state.complete(intent.id, threadId, turnId, settle);
   }
 
   private async dispatchAndRead(workId: string): Promise<ExecutionIntent> {
@@ -4782,6 +5491,36 @@ export class StandaloneService {
 
   /** The submitted prompt's Ensemble-supplied segments, in submission order. */
   private executionPromptParts(request: TurnRequest): PromptPart[] {
+    if (request.kind === "drafting") {
+      const run = this.started().drafting.require(
+        this.draftingRunIdOf(request),
+      );
+      const domain = this.domain();
+      const profileInstructions = String(
+        domain.profileRevision(run.profileId, run.profileRevision).instructions,
+      );
+      const projectInstructions = domain.instructionRevision(
+        run.projectId,
+        run.instructionsRevision,
+      );
+      return [
+        {
+          name: "profile-instructions",
+          revision: run.profileRevision,
+          text: `Captured profile instructions (revision ${run.profileRevision}):\n${profileInstructions || "(none)"}`,
+        },
+        {
+          name: "project-instructions",
+          revision: run.instructionsRevision,
+          text: `Captured project instructions (revision ${run.instructionsRevision}):\n${projectInstructions || "(none)"}`,
+        },
+        { name: "drafting-instruction", text: draftingInstruction },
+        {
+          name: "request",
+          text: `Rough idea from the operator:\n${request.prompt}`,
+        },
+      ];
+    }
     if (
       request.kind !== "assignment" ||
       request.taskId === null ||
@@ -4933,7 +5672,11 @@ export class StandaloneService {
     let context: TaskExecutionContext | undefined;
     let validateAssignment: (() => string[]) | undefined;
     try {
-      if (request.taskId && request.assignmentId && request.projectId) {
+      if (request.kind === "drafting") {
+        const prepared = await this.prepareDraftingWorkspace(request);
+        if (prepared === undefined) return;
+        workspaceKey = prepared;
+      } else if (request.taskId && request.assignmentId && request.projectId) {
         // Initial local tasks need no repository grant. Existing bindings,
         // including held/missing workspaces, remain the recovery authority.
         if (
@@ -5073,7 +5816,7 @@ export class StandaloneService {
       previous = undefined;
     // Shutdown may finish while workspace or process admission is awaiting.
     // A request with no admitted effect remains queued for ordinary restart.
-    const harness = binding?.harness ?? defaultExecutionHarness;
+    const harness = state.workHarness(request.workId);
     const runtime = this.runtimes.get(harness);
     // Never falls back to another harness's runtime. Queued work stays queued:
     // nothing is admitted or held until restart.
@@ -5145,6 +5888,24 @@ export class StandaloneService {
         if (listenerFailure === null) this.pollPowerThenWake(power, generation);
         return;
       }
+      // No await may separate this check from state.begin: a Stop that lands
+      // first has already released the request.
+      const draftingRunId =
+        request.kind === "drafting" ? this.draftingRunIdOf(request) : undefined;
+      const drafts = this.started().drafting;
+      if (draftingRunId && drafts.get(draftingRunId)?.state !== "queued")
+        return;
+      // The grant may have changed since the copy was built; a stale copy never runs.
+      if (
+        draftingRunId &&
+        this.draftingGrantChanged(
+          draftingRunId,
+          drafts.require(draftingRunId).projectId,
+        )
+      ) {
+        await this.failQueuedDrafting(request);
+        return;
+      }
       const admitted = state.begin(intent.id, {
         projectId: request.projectId,
         requestSequence: store.sequence(request.workId),
@@ -5158,6 +5919,12 @@ export class StandaloneService {
                 ),
             }
           : {}),
+        ...(draftingRunId
+          ? {
+              validate: () =>
+                this.draftingAdmissionReasons(drafts.require(draftingRunId)),
+            }
+          : {}),
       });
       if (!admitted) {
         const current = state.get(intent.id);
@@ -5166,6 +5933,10 @@ export class StandaloneService {
           store.wait(request.workId, current.reason ?? "Waiting for admission");
         }
         return;
+      }
+      if (draftingRunId) {
+        this.draftingGrants.delete(draftingRunId);
+        drafts.transition(draftingRunId, "running");
       }
     } catch (error) {
       state.hold(
@@ -5179,13 +5950,17 @@ export class StandaloneService {
 
   /** Model settings of the bound profile revision; only Claude profiles carry them. */
   private turnSettings(request: TurnRequest): RuntimeTurnSettings | undefined {
-    if (!request.assignmentId || request.profileRevision === null)
-      return undefined;
+    if (request.profileRevision === null) return undefined;
     const domain = this.domain();
-    const runtime = domain.profileRuntime(
-      String(domain.assignment(request.assignmentId).profileId),
-      request.profileRevision,
-    );
+    const profileId =
+      request.kind === "drafting"
+        ? this.started().drafting.require(this.draftingRunIdOf(request))
+            .profileId
+        : request.assignmentId
+          ? String(domain.assignment(request.assignmentId).profileId)
+          : undefined;
+    if (!profileId) return undefined;
+    const runtime = domain.profileRuntime(profileId, request.profileRevision);
     return runtime.harness === "claude"
       ? { model: runtime.model, reasoningEffort: runtime.reasoningEffort }
       : undefined;
@@ -5258,6 +6033,24 @@ export class StandaloneService {
     let conversationCapture: ConversationHistoryCapture | undefined;
     let diagnostics: ExecutionDiagnosticsCapture | undefined;
     const comparisonStore = this.current?.workspaceComparisons;
+    const draftingRunId =
+      request.kind === "drafting" ? this.draftingRunIdOf(request) : undefined;
+    let draftingTimer: NodeJS.Timeout | undefined;
+    if (draftingRunId) {
+      // A Stop that landed before the turn existed is applied once it binds.
+      const earlier = this.started().drafting.get(draftingRunId);
+      this.draftingControls.set(
+        draftingRunId,
+        earlier?.state === "stopping"
+          ? { stopReason: earlier.reason ?? draftingStoppedReason }
+          : {},
+      );
+      draftingTimer = setTimeout(
+        () => this.requestDraftingStop(draftingRunId, draftingTimeLimitReason),
+        this.options.draftingTimeLimitMs ?? draftingTimeLimitMs,
+      );
+      draftingTimer.unref();
+    }
     if (
       comparisonStore &&
       request.kind === "assignment" &&
@@ -5317,9 +6110,11 @@ export class StandaloneService {
         throw new Error("Execution admission was held");
       let threadId: string;
       const tools =
-        request.kind === "assignment" && request.assignmentId
-          ? coordinationTools
-          : undefined;
+        request.kind === "drafting"
+          ? [draftProposalTool]
+          : request.kind === "assignment" && request.assignmentId
+            ? coordinationTools
+            : undefined;
       if (previous?.threadId) {
         if (state.get(intent.id).state !== "submitting")
           throw new Error("Execution admission was held");
@@ -5332,6 +6127,10 @@ export class StandaloneService {
         threadId = await guard(runtime.startThread(workspace, tools));
       }
       submissionStage = "bound";
+      const draftingControl = draftingRunId
+        ? this.draftingControls.get(draftingRunId)
+        : undefined;
+      if (draftingControl) draftingControl.threadId = threadId;
       const threadBound = state.bindThread(intent.id, threadId);
       this.started().supervisor.threadBound(request.workId, threadId);
       if (!threadBound) throw new Error("Thread binding was held or changed");
@@ -5365,6 +6164,12 @@ export class StandaloneService {
           ? runtime.startTurn(threadId, workspace, prompt, settings)
           : runtime.startTurn(threadId, workspace, prompt),
       );
+      if (draftingControl) {
+        draftingControl.turnId = turnId;
+        // A Stop or the time limit may have fired before the turn existed.
+        if (draftingControl.stopReason !== undefined && draftingRunId)
+          this.interruptDrafting(draftingRunId);
+      }
       const runtimeGeneration = runtime.currentUserInputGeneration?.();
       let turnBound = runtimeGeneration
         ? state.bindTurn(intent.id, turnId, runtimeGeneration)
@@ -5497,6 +6302,8 @@ export class StandaloneService {
       if (exactBinding) conversationCapture?.bind(exactBinding);
       else conversationCapture?.discard();
       const outcome = await guard(runtime.waitForTurn(threadId, turnId));
+      // The turn has ended: a late limit must not turn its result into an interruption.
+      if (draftingTimer) clearTimeout(draftingTimer);
       diagnostics?.add(serviceItem("terminal-observed", "info", { outcome }));
       conversationCapture?.finish();
       if (conversationCapture)
@@ -5538,7 +6345,16 @@ export class StandaloneService {
           );
         }
       }
-      if (
+      if (draftingRunId) {
+        await this.endDraftingTurn({
+          request,
+          intent,
+          threadId,
+          turnId,
+          outcome,
+          generation,
+        });
+      } else if (
         outcome === "completed" &&
         (this.callbacks.get(request.workId)?.size ?? 0) > 0
       ) {
@@ -5639,6 +6455,16 @@ export class StandaloneService {
           intent.id,
           `Runtime submission or observation uncertain: ${String(error)}`,
         );
+      // The run stays held, with its capacity, until the next start verifies the runtime ended.
+      if (
+        draftingRunId &&
+        this.current?.drafting.get(draftingRunId)?.state === "running"
+      )
+        this.current.drafting.transition(
+          draftingRunId,
+          "stopping",
+          draftingUnverifiedReason,
+        );
       if (turnCapture) {
         const admittedCapture = turnCapture;
         try {
@@ -5676,6 +6502,8 @@ export class StandaloneService {
         }
       }
     } finally {
+      if (draftingTimer) clearTimeout(draftingTimer);
+      if (draftingRunId) this.draftingControls.delete(draftingRunId);
       if (conversationCapture) {
         conversationCapture.discard();
         if (captureThreadId)
