@@ -291,6 +291,13 @@ before harness selection read as Codex through the `harness` column default of
 
 Select supported App Server `workspaceWrite` controls with task working directory
 and explicit task writable roots, `networkAccess: false`, and `approvalPolicy: never`.
+A project's operator-owned `commandNetworkAccess` setting, off by default, is the one
+policy expansion: a Codex task turn admitted while it is on sends `networkAccess: true`
+in `turn/start.sandboxPolicy`. The value is recorded at admission, so a later change
+reaches only later admissions and a running turn keeps its policy. Claude Code turns,
+drafting runs and requests without a task binding always run with command network access
+denied. The setting is not an allow-list, proxy or host filter: it enables whatever the
+runtime then permits, including the credentials and logins the host exposes.
 Retain full read access: use `readOnlyAccess: { type: "fullAccess" }` where supported,
 or the verified broad-read default on versions without that field. Do not send an
 unsupported field or require a named profile for equivalent default read behavior.

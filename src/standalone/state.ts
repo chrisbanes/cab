@@ -522,6 +522,13 @@ export class ExecutionState {
     CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
       projectId TEXT PRIMARY KEY, projectLimit INTEGER NOT NULL CHECK(projectLimit > 0)
     );
+    CREATE TABLE IF NOT EXISTS project_command_network_access (
+      projectId TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
+    CREATE TABLE IF NOT EXISTS execution_intent_network_access (
+      intentId TEXT PRIMARY KEY REFERENCES execution_intents(id),
+      enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+    );
     CREATE TABLE IF NOT EXISTS execution_retry_chains (
       chainId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       ensembleRetriesUsed INTEGER NOT NULL CHECK(ensembleRetriesUsed >= 0),
@@ -1313,6 +1320,16 @@ export class ExecutionState {
         )
         .get() !== undefined
     );
+  }
+
+  /** Command network access the turn was admitted with; null when no admission recorded it. */
+  commandNetworkAccess(intentId: string): boolean | null {
+    const row = this.db
+      .prepare(
+        "SELECT enabled FROM execution_intent_network_access WHERE intentId = ?",
+      )
+      .get(intentId) as { enabled: number } | undefined;
+    return row ? row.enabled === 1 : null;
   }
 
   /** The harness a work item runs on: its task binding, else its drafting run, else the default. */
@@ -4458,6 +4475,15 @@ export class ExecutionState {
             .prepare("SELECT workId FROM execution_intents WHERE id = ?")
             .get(id) as { workId: string }
         ).workId;
+        // Only a Codex task turn can run with command network access: drafting
+        // runs and Claude turns have no qualifying binding and stay off.
+        this.db
+          .prepare(`INSERT OR REPLACE INTO execution_intent_network_access (intentId, enabled)
+          SELECT ?, EXISTS (
+            SELECT 1 FROM project_command_network_access p
+            JOIN task_execution_bindings b ON b.workId = ?
+            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = 'codex')`)
+          .run(id, workId, options.projectId);
         const retryGeneration = this.db
           .prepare(`SELECT chainId FROM execution_retry_generations
           WHERE workId = ?`)

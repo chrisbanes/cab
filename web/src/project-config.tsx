@@ -10,6 +10,11 @@ import {
   projectLabel,
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
+import {
+  commandNetworkAppliesNote,
+  commandNetworkDisclosure,
+  projectCommandNetworkLine,
+} from "../../src/operator/command-network-copy.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
@@ -262,6 +267,9 @@ function GeneralTab(p: TabProps) {
     name: data.project.name ?? "",
     leadProfileId: data.project.leadProfileId ?? "",
     paused: data.project.paused,
+    ...(data.commandNetworkAccess === undefined
+      ? {}
+      : { commandNetworkAccess: data.commandNetworkAccess }),
     expectedVersion: String(data.project.version),
   };
   useLoadedDraft(d, initial, p.loadedAt);
@@ -301,6 +309,10 @@ function GeneralTab(p: TabProps) {
       : {}),
     ...(v.leadProfileId !== (data.project.leadProfileId ?? "")
       ? { leadProfileId: v.leadProfileId || null }
+      : {}),
+    ...(data.commandNetworkAccess !== undefined &&
+    Boolean(v.commandNetworkAccess) !== data.commandNetworkAccess
+      ? { commandNetworkAccess: Boolean(v.commandNetworkAccess) }
       : {}),
     ...privateField("instructions", v.instructions, revealed),
   });
@@ -344,6 +356,20 @@ function GeneralTab(p: TabProps) {
               Unpausing never clears Stop, writer, capacity or uncertainty
               holds.
             </p>
+            {data.commandNetworkAccess !== undefined && (
+              <>
+                <DraftCheck
+                  draft={d}
+                  field="commandNetworkAccess"
+                  label="Command network access"
+                  toggle
+                />
+                <p className="metadata muted">
+                  {projectCommandNetworkLine(data.commandNetworkAccess)}{" "}
+                  {commandNetworkAppliesNote} {commandNetworkDisclosure}
+                </p>
+              </>
+            )}
             <PrivateTextField
               draft={d}
               field="instructions"

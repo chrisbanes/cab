@@ -1,5 +1,9 @@
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
-import { ExecutionNotices, PolicyDisclosure } from "./execution-notice.js";
+import {
+  CommandNetworkLine,
+  ExecutionNotices,
+  PolicyDisclosure,
+} from "./execution-notice.js";
 import { executionSummary } from "./execution-runtime.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {
@@ -2387,6 +2391,11 @@ export function TaskWorkspace({
                         Effective execution policy ·{" "}
                         {executionHarnessLabels[execution.harness]}
                       </summary>
+                      {execution.harness === "codex" && (
+                        <CommandNetworkLine
+                          generation={a.executionGeneration}
+                        />
+                      )}
                       <PolicyDisclosure
                         harness={execution.harness}
                         workspace={workspace}

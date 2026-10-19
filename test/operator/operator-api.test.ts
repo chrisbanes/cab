@@ -2692,6 +2692,8 @@ test("task reads report the persisted binding harness of each execution generati
     reasoningEffort: null,
   });
   assert.equal(assignment?.executionGeneration?.failure, null);
+  // A turn that is not admitted yet has no recorded network setting.
+  assert.equal(assignment?.executionGeneration?.commandNetworkAccess, null);
 
   // A failed Claude turn reports its bounded classification; malformed codes read unknown.
   const workId = String(assignment?.executionGeneration?.workId);
@@ -2752,6 +2754,28 @@ test("task reads report the persisted binding harness of each execution generati
   );
   assert.equal(after?.executionGeneration?.harness, "codex");
   assert.equal(after?.executionGeneration?.failure, null);
+
+  // An admitted turn reports the setting recorded at its admission, in the task read and detail.
+  assert.equal(after?.executionGeneration?.commandNetworkAccess, false);
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "INSERT OR REPLACE INTO execution_intent_network_access (intentId, enabled) SELECT id, 1 FROM execution_intents WHERE workId = ?",
+      )
+      .run(String(after?.executionGeneration?.workId)),
+  );
+  assert.equal(
+    (await api.readTask(ids.taskId)).data.assignments[0]?.executionGeneration
+      ?.commandNetworkAccess,
+    true,
+  );
+  assert.equal(
+    (await api.readAssignment(String(after?.assignmentId))).data
+      .executionGeneration?.commandNetworkAccess,
+    true,
+  );
+  const configuration = await api.readProjectConfiguration(ids.projectId);
+  assert.equal(configuration.data.commandNetworkAccess, false);
 });
 
 test("workspace reads report every harness's status", async (t) => {

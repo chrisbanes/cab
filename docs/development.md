@@ -375,6 +375,10 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    applies the mode change through the same revision-checked, replay-safe flow;
    omitting the flag leaves the mode unchanged.
 
+   `project prepare PROJECT_ID --command-network-access true|false` changes the
+   project's command network access the same way. It applies to Codex task turns
+   admitted afterwards; running turns keep their policy.
+
    Retention: items older than `ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS` (1–365,
    default 30) are deleted hourly; beyond `ENSEMBLE_DIAGNOSTIC_STORAGE_MIB`
    (16–1048576, default 1024) the oldest items are evicted. Invalid values fail

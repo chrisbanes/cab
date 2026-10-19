@@ -180,7 +180,8 @@ each acceptance scenario to its evidence and disposition.
   no release has been published
   ([ADR-1011](docs/adr/1011-packaging-and-distribution.md)).
 - **Isolation.** Ensemble relies on the execution runtime and host for isolation.
-  Broad host-permitted reads remain enabled, and Stop is best-effort: unresolved work
+  Broad host-permitted reads remain enabled, command network access is off unless the
+  operator enables it per project, and Stop is best-effort: unresolved work
   can remain held for reconciliation. See the
   [execution policy](docs/design/standalone.md#default-execution-policy) and
   [acceptance plan](docs/acceptance.md) for the boundaries and required evidence.

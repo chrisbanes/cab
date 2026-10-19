@@ -79,6 +79,14 @@ export function projectChanges(
     );
   if (v.paused !== undefined && Boolean(v.paused) !== data.project.paused)
     lines.push(v.paused ? "Pause project" : "Unpause project");
+  if (
+    v.commandNetworkAccess !== undefined &&
+    data.commandNetworkAccess !== undefined &&
+    Boolean(v.commandNetworkAccess) !== data.commandNetworkAccess
+  )
+    lines.push(
+      `Command network access ${v.commandNetworkAccess ? "enabled" : "disabled"}`,
+    );
   const instructions = privateEdit(v.instructions, revealed);
   if (instructions) lines.push(`Instructions ${instructions}`);
   return lines;

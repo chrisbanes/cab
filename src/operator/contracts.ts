@@ -1033,6 +1033,8 @@ const generation = z
     instructionsRevision: revision,
     profileRevision: revision,
     harness: executionHarnessSchema.nullable(),
+    /** Optional so older services still parse; null until the turn is admitted. */
+    commandNetworkAccess: z.boolean().nullable().optional(),
     /** The latest failed turn's bounded classification; null when none failed. */
     failure: z
       .object({
@@ -1909,6 +1911,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       leadProfileId: uuid.nullable().optional(),
       instructions: text.optional(),
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
+      commandNetworkAccess: z.boolean().optional(),
     })
     .strict(),
   z
@@ -2571,6 +2574,7 @@ export const projectConfigurationSchema = envelope(
       instructionPresent: z.boolean(),
       /** Optional so older services still parse; absent means not reported. */
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
+      commandNetworkAccess: z.boolean().optional(),
       routing: z
         .object({
           version: revision,

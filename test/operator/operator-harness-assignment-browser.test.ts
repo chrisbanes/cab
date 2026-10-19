@@ -226,3 +226,60 @@ for (const [name, viewport] of [
     await noPageOverflow(page);
     await captureBrowserEvidence(page, `${name}-recovery-harness`);
   });
+
+test("Codex assignment history states the command network access each turn was admitted with", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const ids = await seed(f);
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport: desktop });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  const disclosure =
+    "Network-enabled commands can reach whatever credentials and logins the host exposes.";
+  const line = (text: string) =>
+    page.locator("#history").getByText(text, { exact: true }).first();
+  // The history details stay collapsed, so the lines are attached rather than visible.
+  const attached = { state: "attached" } as const;
+
+  await signIn(page, web, `/app/tasks/${ids.taskId}`);
+  await openOverviewCard(page, "assignments");
+  await line("Admitted with command network access disabled.").waitFor(
+    attached,
+  );
+  await line(disclosure).waitFor(attached);
+  assert.equal(
+    await page
+      .locator("#history")
+      .getByText("Admitted with command network access enabled.")
+      .count(),
+    0,
+  );
+
+  // A turn recorded as admitted with network access reads as enabled.
+  f.seedPersistedState((db) =>
+    db.exec(
+      "INSERT OR REPLACE INTO execution_intent_network_access (intentId, enabled) SELECT id, 1 FROM execution_intents",
+    ),
+  );
+  await page.reload();
+  await openOverviewCard(page, "assignments");
+  await line("Admitted with command network access enabled.").waitFor(attached);
+  // Claude turns always deny it, so they carry no turn line of their own.
+  const claude = page.locator(
+    `#history details[data-record-id="${ids.workerId}"]`,
+  );
+  await claude.waitFor(attached);
+  assert.equal(
+    await claude.getByText(/Admitted with command network access/).count(),
+    0,
+  );
+});

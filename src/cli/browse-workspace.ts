@@ -7,6 +7,7 @@ import {
   taskMessagePageSchema,
   workspaceSchema,
 } from "../operator/contracts.js";
+import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
 import { taskColumn } from "../operator/task-presentation.js";
 import {
   anyNull,
@@ -162,6 +163,14 @@ const projectGet: BrowseCommand = {
           ],
           ["Diagnostic capture", d.diagnosticCapture ?? "not reported"],
           [
+            "Command network access",
+            d.commandNetworkAccess === undefined
+              ? "not reported"
+              : d.commandNetworkAccess
+                ? "enabled"
+                : "disabled",
+          ],
+          [
             "Routing",
             `${d.routing.availability} (${d.routing.enabled ? "enabled" : "disabled"}, ${d.routing.candidateProfileIds.length} candidates)`,
           ],
@@ -170,6 +179,7 @@ const projectGet: BrowseCommand = {
             `${d.source.selections.length} selections, ${d.source.repositories.length} repositories`,
           ],
         ]),
+        commandNetworkDisclosure,
         "",
         d.profiles.length
           ? table(

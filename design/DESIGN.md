@@ -1908,6 +1908,14 @@ Interaction notes:
   per-project summary.
 - Project configuration has General, Routing, GitHub source, and Sync & placement
   tabs. Each section saves separately against its own version.
+- The General tab adds a "Command network access" switch under Pause project, off by
+  default (`118-project-config-general`; no new frame, as with other existing-field
+  additions). Beneath it one line states the saved state, the note that it applies to
+  turns admitted after the change and that running turns keep their policy, and the
+  disclosure that network-enabled commands can reach whatever credentials and logins
+  the host exposes. A change shows "Command network access enabled|disabled" under
+  "Changes to save" and saves as an ordinary versioned change. The operator CLI
+  makes the same change; agents have no tool for it.
 - Settings edit values in place. Instructions and routing guidance open as "Kept ·
   Reveal" in the project General, profile and Routing forms
   (`118-project-config-general`, `123-profile-revoked`,
@@ -2604,7 +2612,9 @@ frames 114 and 118–128 as follows:
   profile "Execution policy" aside and task history list them in full.
   Task rows, assignment history and recovery name the runtime, explain runtime
   waits and held Claude failures with route links, and history adds an "Effective
-  execution policy" disclosure. The shell raises one alert per unavailable runtime; it
+  execution policy" disclosure. For a Codex assignment it opens with one line stating
+  the command network access its latest turn was admitted with, or that no admission is recorded
+  for it, above the shared policy lines and limits. The shell raises one alert per unavailable runtime; it
   says "Restarting · attempt N of 3 · next at HH:MM" while Ensemble retries and
   "Retries exhausted" once it stops, in the same words as the Runtime page, Settings,
   Readiness and the CLI.

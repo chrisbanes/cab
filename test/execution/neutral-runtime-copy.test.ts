@@ -15,6 +15,12 @@ const allowed: Record<string, { reason: string; lines?: string[] }> = {
   [join("src", "standalone", "execution-policy.ts")]: {
     reason: "Codex-specific execution policy disclosure",
   },
+  [join("src", "operator", "command-network-copy.ts")]: {
+    reason: "the setting applies only to Codex turns",
+    lines: [
+      '? "Command network access is enabled for this project\'s Codex turns; Claude Code turns keep it denied."',
+    ],
+  },
   [join("src", "core", "execution-runtime.ts")]: {
     reason: "the shared harness label map",
     lines: ['codex: "Codex",'],

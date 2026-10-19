@@ -295,6 +295,7 @@ export const OPTIONS = {
   paused: { type: "string" },
   "lead-profile": { type: "string" },
   "diagnostic-capture": { type: "string" },
+  "command-network-access": { type: "string" },
   id: { type: "string" },
   enabled: { type: "string" },
   "guidance-file": { type: "string" },

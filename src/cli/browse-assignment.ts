@@ -1,4 +1,8 @@
 import {
+  commandNetworkDisclosure,
+  turnCommandNetworkLine,
+} from "../operator/command-network-copy.js";
+import {
   assignmentDetailSchema,
   assignmentHistorySchema,
   assignmentInstructionsSchema,
@@ -161,6 +165,13 @@ const assignmentGet: BrowseCommand = {
               : "none",
           ],
         ]),
+        ...((g?.harness ?? a.runtime.harness) === "codex" &&
+        (!g || g.commandNetworkAccess !== undefined)
+          ? [
+              turnCommandNetworkLine(g?.commandNetworkAccess ?? null),
+              commandNetworkDisclosure,
+            ]
+          : []),
         ...(a.brief ? ["", oneLine(a.brief, 400)] : []),
         ...(a.state === "held" || Object.values(a.execution.holds).some(Boolean)
           ? ["", `Recovery: ensemble recovery get ${a.assignmentId}`]
