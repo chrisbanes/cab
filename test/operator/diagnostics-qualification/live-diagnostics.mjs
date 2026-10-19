@@ -53,7 +53,7 @@ const run = promisify(execFile);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const sentinel = `cli7-sentinel-${randomBytes(12).toString("hex")}`;
 process.env.CLI7_SENTINEL_TOKEN = sentinel;
-const deadline = Date.now() + 15 * 60_000;
+const deadline = Date.now() + (settingsMode ? 10 : 15) * 60_000;
 const cliEntry = resolve("dist/src/cli/main.js");
 
 const evidence = {
