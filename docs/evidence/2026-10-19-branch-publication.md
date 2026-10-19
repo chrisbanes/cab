@@ -69,7 +69,7 @@ Pass conditions, each checked by the harness:
 - No outside-push event was reported.
 - The credential did not appear in any file under the clone or worktree, or in the Git
   configuration of either, and not in this result.
-- No repository other than the fixture was contacted.
+- The guard permitted no other repository or host.
 
 ## Cleanup proof
 
