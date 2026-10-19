@@ -2394,6 +2394,15 @@ export class StandaloneService {
     return this.started().state.byWorkId(workId);
   }
 
+  /** Command network access a work's turn was admitted with; null before admission. */
+  commandNetworkAccessFor(workId: string): boolean | null {
+    const intent = this.executionForWork(workId);
+    if (!intent) return null;
+    return intent.state === "ready" || intent.state === "capacity-waiting"
+      ? null
+      : this.started().state.commandNetworkAccess(intent.id);
+  }
+
   recoveryFor(
     assignmentId: string,
     assignmentVersion: number,
@@ -6171,10 +6180,16 @@ export class StandaloneService {
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
         this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
+      // Passed only when enabled at this turn's admission, so off keeps today's call shapes.
+      const policy = state.commandNetworkAccess(intent.id)
+        ? { networkAccess: true }
+        : undefined;
       const turnId = await guard(
-        settings
-          ? runtime.startTurn(threadId, workspace, prompt, settings)
-          : runtime.startTurn(threadId, workspace, prompt),
+        policy
+          ? runtime.startTurn(threadId, workspace, prompt, settings, policy)
+          : settings
+            ? runtime.startTurn(threadId, workspace, prompt, settings)
+            : runtime.startTurn(threadId, workspace, prompt),
       );
       if (draftingControl) {
         draftingControl.turnId = turnId;

@@ -507,10 +507,10 @@ function makeFailureClassification(
   };
 }
 
-export const executionPolicy = (workspace: string) => ({
+export const executionPolicy = (workspace: string, networkAccess = false) => ({
   type: "workspaceWrite" as const,
   writableRoots: [workspace],
-  networkAccess: false,
+  networkAccess,
   excludeSlashTmp: true,
   excludeTmpdirEnvVar: true,
 });
@@ -575,6 +575,11 @@ export interface RuntimeTurnSettings {
   reasoningEffort: string | null;
 }
 
+/** The operator's command network setting captured when the turn was admitted; Codex only. */
+export interface RuntimeTurnPolicy {
+  networkAccess: boolean;
+}
+
 /**
  * Thrown by `Runtime.start()` when the harness cannot run on this host because something it
  * runs is absent (Claude without `claude` on the `PATH`). The service treats that harness as
@@ -624,6 +629,7 @@ export interface Runtime {
     workspace: string,
     prompt: string,
     settings?: RuntimeTurnSettings,
+    policy?: RuntimeTurnPolicy,
   ): Promise<string>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   waitForTurn(
@@ -1933,6 +1939,7 @@ export class CodexRuntime implements Runtime {
     workspace: string,
     prompt: string,
     settings?: RuntimeTurnSettings,
+    policy?: RuntimeTurnPolicy,
   ): Promise<string> {
     // Retire only the ephemeral readback before a new turn can emit callbacks.
     // Saved endpoints/receipts and disqualified turn identities remain historical.
@@ -1948,7 +1955,10 @@ export class CodexRuntime implements Runtime {
         cwd: workspace,
         input: [{ type: "text", text: prompt }],
         approvalPolicy: "never",
-        sandboxPolicy: executionPolicy(workspace),
+        sandboxPolicy: executionPolicy(
+          workspace,
+          policy?.networkAccess === true,
+        ),
         // Re-asserted every turn so follow-up and resumed turns keep the captured revision.
         ...(settings?.model ? { model: settings.model } : {}),
         ...(settings?.reasoningEffort

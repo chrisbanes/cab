@@ -114,8 +114,14 @@ function newTestRuntime(
   (runtime as unknown as { nativeGeneration: string }).nativeGeneration =
     "runtime-test-generation";
   const startTurn = runtime.startTurn.bind(runtime);
-  runtime.startTurn = async (threadId, workspace, prompt, settings) => {
-    const turnId = await startTurn(threadId, workspace, prompt, settings);
+  runtime.startTurn = async (threadId, workspace, prompt, settings, policy) => {
+    const turnId = await startTurn(
+      threadId,
+      workspace,
+      prompt,
+      settings,
+      policy,
+    );
     const generation = (runtime as unknown as { nativeGeneration?: string })
       .nativeGeneration;
     if (!generation) throw new Error("Runtime test generation unavailable");
@@ -3321,6 +3327,41 @@ test("a profile without settings sends the same thread and turn start parameters
     const turns = requests("turn/start") as Record<string, unknown>[];
     assert.equal("model" in (turns[1] ?? {}), false);
     assert.equal("effort" in (turns[1] ?? {}), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a turn sends network access only when its admission policy enables it", async () => {
+  const { root, runtime, requests, cleanup } = settingsFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    await bounded(runtime.startTurn("thread-1", root, "off"), 3000);
+    await bounded(
+      runtime.startTurn("thread-1", root, "on", undefined, {
+        networkAccess: true,
+      }),
+      3000,
+    );
+    // Every turn states its policy, so an off turn after an on turn is off again.
+    await bounded(
+      runtime.startTurn("thread-1", root, "off again", undefined, {
+        networkAccess: false,
+      }),
+      3000,
+    );
+    const turns = requests("turn/start") as {
+      sandboxPolicy: unknown;
+      input: unknown;
+    }[];
+    assert.deepEqual(turns[0]?.sandboxPolicy, executionPolicy(root));
+    assert.deepEqual(turns[1]?.sandboxPolicy, {
+      ...executionPolicy(root),
+      networkAccess: true,
+    });
+    assert.deepEqual(turns[2]?.sandboxPolicy, executionPolicy(root));
+    assert.equal(executionPolicy(root).networkAccess, false);
   } finally {
     await cleanup();
   }

@@ -466,6 +466,17 @@ New projects default to Codex `workspaceWrite` with explicit task writable roots
 command network access disabled and approval policy `never`. Broader command
 sandbox escalation is denied; expanding that policy requires separate operator
 approval and fresh admission.
+Command network access is the one operator setting that expands it: a per-project,
+versioned `project.configure` field, off by default, that only the operator can
+change through project configuration or the operator CLI; agents have no tool for it.
+Each Codex task turn records the setting when it is admitted and sends it as that
+turn's `networkAccess`, so a change reaches only later admissions and a running turn
+keeps its policy. Claude Code turns, drafting runs and any turn without a task
+binding always run with it denied. Every place the effective policy is shown states
+the setting and that network-enabled commands can reach whatever credentials and
+logins the host exposes. Ensemble enforces only what it sends the runtime; it is not
+an allow-list, a proxy or a host filter, and MCP and app tools, web tools and model
+transport are separate surfaces.
 Reads retain Codex full read access subject to host permissions; outside-read
 denial is not implied. Runtime temporary write roots and protected paths must be
 disclosed with the effective policy. See the [default execution policy](design/standalone.md#default-execution-policy)

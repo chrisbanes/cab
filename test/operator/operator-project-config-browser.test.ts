@@ -3738,3 +3738,54 @@ test("renaming a project into another project's name shows the service's message
   await savedOutcome(page, /^Saved\./);
   assert.equal(d.project(ids.atlas).paused, 1);
 });
+
+test("command network access is a switch with its disclosure that saves as a versioned change", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const network = page.getByRole("switch", { name: "Command network access" });
+  await network.waitFor();
+  assert.equal(await network.isChecked(), false);
+  await page
+    .getByText("Command network access is disabled for this project.")
+    .waitFor();
+  await page
+    .getByText(
+      "Network-enabled commands can reach whatever credentials and logins the host exposes.",
+    )
+    .waitFor();
+  await page
+    .getByText("running turns keep their policy", { exact: false })
+    .waitFor();
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+  assert.equal(await save.isDisabled(), true);
+
+  await network.click();
+  await changes(page).getByText("Command network access enabled").waitFor();
+  const version = Number(d.project(ids.atlas).version);
+  const sent = commandBody(page);
+  await save.click();
+  const body = await sent;
+  assert.equal(body.type, "project.configure");
+  assert.equal(body.commandNetworkAccess, true);
+  assert.equal(body.expectedVersion, version);
+  assert.equal("paused" in body, false);
+  await savedOutcome(page);
+  assert.equal(d.commandNetworkAccess(ids.atlas), true);
+  await page
+    .getByText(
+      "Command network access is enabled for this project's Codex turns; Claude Code turns keep it denied.",
+    )
+    .waitFor();
+  assert.equal(await network.isChecked(), true);
+
+  await network.click();
+  await changes(page).getByText("Command network access disabled").waitFor();
+  const back = commandBody(page);
+  await save.click();
+  assert.equal((await back).commandNetworkAccess, false);
+  await savedOutcome(page);
+  assert.equal(d.commandNetworkAccess(ids.atlas), false);
+});

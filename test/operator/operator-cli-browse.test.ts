@@ -589,6 +589,30 @@ test("task messages page and task get reports coverage", async (t) => {
 
 const cells = (line: string) => line.trim().split(/ {2,}/);
 
+test("assignment get states the turn's command network access with its disclosure", async (t) => {
+  const { seed, h, ok } = await setup(t);
+  const task = await ok(["task", "get", seed.betaSharedTaskId]);
+  const assignmentId = task.data.leadAssignmentId as string;
+  const json = await ok(["assignment", "get", assignmentId]);
+  const recorded = json.data.executionGeneration?.commandNetworkAccess ?? null;
+  const human = (await h.run(["assignment", "get", assignmentId])).out;
+  assert.ok(
+    human.includes(
+      recorded === null
+        ? "Not yet admitted; the project's setting at admission applies."
+        : recorded
+          ? "Admitted with command network access enabled."
+          : "Admitted with command network access disabled.",
+    ),
+    human,
+  );
+  assert.ok(
+    human.includes(
+      "Network-enabled commands can reach whatever credentials and logins the host exposes.",
+    ),
+  );
+});
+
 test("task get names the lead assignment, execution and who acts next", async (t) => {
   const { s, seed, h, ok, api } = await setup(t);
   const line = (out: string, label: string) =>

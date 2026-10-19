@@ -1985,6 +1985,9 @@ export class OperatorApi {
       instructionsRevision: request.instructionsRevision,
       profileRevision: request.profileRevision,
       harness,
+      commandNetworkAccess: this.service.commandNetworkAccessFor(
+        request.workId,
+      ),
       failure:
         harness === "claude" && held
           ? this.service.terminalFailure(request.workId)
@@ -5155,6 +5158,7 @@ export class OperatorApi {
         instructionsRevision: Number(p.instructionsRevision),
         instructionPresent: Boolean(p.instructions),
         diagnosticCapture: d.diagnosticCaptureMode(projectId),
+        commandNetworkAccess: d.commandNetworkAccess(projectId),
         placements: this.service
           .githubSources()
           .conflicts()

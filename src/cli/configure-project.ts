@@ -3,6 +3,10 @@ import {
   projectConfigurationSchema,
   projectInstructionsSchema,
 } from "../operator/contracts.js";
+import {
+  commandNetworkAppliesNote,
+  commandNetworkDisclosure,
+} from "../operator/command-network-copy.js";
 import { type CoverageGap, uuidArg } from "./browse.js";
 import {
   applyFile,
@@ -44,7 +48,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       expects:
         "--expected-version: the project's version ('ensemble project get PROJECT_ID'); omitted, the version this command reads.",
@@ -55,6 +59,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "paused",
         "lead-profile",
         "diagnostic-capture",
+        "command-network-access",
         "instructions",
         "instructions-file",
         "restore-revision",
@@ -78,6 +83,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             "invalid-input",
             "--diagnostic-capture must be enhanced or baseline.",
           );
+        const network = boolFlag(
+          ctx.values["command-network-access"],
+          "command-network-access",
+        );
         // Read once before connecting: standard input cannot be read again on a retried read.
         const given = await givenInstructions(ctx);
         const session = await ctx.connect([
@@ -154,6 +163,17 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           notes.push(
             "The capture mode applies to executions started after the change; it erases no stored diagnostics.",
           );
+        }
+        const currentNetwork = config.data.commandNetworkAccess;
+        if (network !== undefined && network !== currentNetwork) {
+          if (currentNetwork === undefined) gaps.push("content-unavailable");
+          command.commandNetworkAccess = network;
+          changes.push({
+            field: "commandNetworkAccess",
+            from: currentNetwork === undefined ? null : String(currentNetwork),
+            to: String(network),
+          });
+          notes.push(commandNetworkAppliesNote, commandNetworkDisclosure);
         }
         instructionChange(current, proposed, changes, diff, gaps, notes);
         if (proposed !== undefined) command.instructions = proposed;
