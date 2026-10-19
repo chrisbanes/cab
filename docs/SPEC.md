@@ -1662,24 +1662,36 @@ first use; the operator sets the prefix per project (default `ensemble/`), agent
 choose a name, later renames never happen, and `pr.create` accepts only that branch as its
 head. The agent names an exact commit. Before any network call Ensemble proves offline
 that it is the task worktree's `HEAD` or an ancestor of it and descends from the base the
-workspace was provisioned at, and reports uncommitted entries, which are never pushed. A
-push needs the remote branch to be where Ensemble last left it: absent before the first
-push, or equal to the last pushed commit, and every update is leased against that observed head
-(creation expects the branch to be absent), so a branch another writer created or moved after
-the read rejects the push and is an outside change. A remote that merely equals the requested
-commit is accepted only when retrying an earlier attempt of the same operation. `branch.push` also refuses a commit that does not
-descend from that commit; `branch.force-push` needs a recorded last push, which is its
-lease. Any other remote head, seen at a push or on the task's PR, is an outside change: the
-push is refused, the lead is woken and handback settlement is invalidated; without a PR it
-is noticed at the next push, as Ensemble does not poll branches. A rewritten history means
-the next review covers the whole new head. Success needs a read of the remote ref equal to
-the pushed commit; a timeout, cancellation or unobserved exit is uncertain, is settled by
-reading the ref and is never replayed blindly. Ensemble does not delete branches or push
-tags or other remotes; merged branches follow the repository's head-branch deletion
-setting. Ensemble cannot prevent a push made with ambient host credentials once a
-project's command network access is enabled; it detects the result as an outside change. A task branch
-whose head was changed outside stays refused until the remote returns to the last pushed
-commit. The bounded live run is in the
+workspace was provisioned at. Each ancestry is proved from the commit objects themselves,
+every one read raw and rehashed, so a forged commit-graph, replace ref, graft or lying object
+cannot manufacture it; a history too long to walk is unproved, not assumed. Uncommitted entries
+are reported and never pushed. A push needs the remote branch to be where Ensemble last left
+it: absent before the first push, or equal to the last pushed commit. Every update is leased
+against that observed head (creation expects the branch to be absent), so a branch another writer
+created or moved after the read rejects the push and is an outside change. `branch.push` also
+refuses a commit that does not descend from the last pushed commit; `branch.force-push` needs a
+recorded last push, which is its lease.
+
+Ensemble owns a commit on the task branch only if it pushed it or an attempt of that push may have
+landed: one that ended unproved, was reported pushed by Git, was concluded not applied from a read,
+or was never settled. A push that never started or was rejected owns nothing. A remote that equals
+the requested commit is therefore accepted only on a retry whose earlier attempt may have landed,
+and a retry of an operation superseded by a newer push is refused. Git reporting a push done keeps
+the outcome unproved until a read shows it; a later third head then records the push and the outside
+head separately. Any head Ensemble does not own, seen at a push or on the task's PR, is an outside
+change: the push is refused, the lead is woken and handback settlement is invalidated at once;
+without a PR it is noticed at the next push, as Ensemble does not poll branches. While the branch
+holds an outside head, or the PR's head is not Ensemble's last push, completion is held and
+settlement is refused, and PR actions that name the task branch (`pr.create`, `pr.edit`,
+`pr.ready`, `pr.merge`) need `expectedHeadSha` to equal Ensemble's last push. The record clears when
+the branch is back at that commit or Ensemble pushes again. A rewritten history means the next review
+covers the whole new head. Success needs a read of the remote ref equal to the pushed commit; a
+timeout, cancellation or unobserved exit is uncertain, is settled by reading the ref and is never
+replayed blindly. Ensemble does not delete branches or push tags or other remotes; merged branches
+follow the repository's head-branch deletion setting. Ensemble cannot prevent a push made with
+ambient host credentials once a project's command network access is enabled; it detects the
+result as an outside change. A task branch whose head was changed outside stays refused until the
+remote returns to the last pushed commit. The bounded live run is in the
 [branch publication evidence](evidence/2026-10-19-branch-publication.md).
 
 The lead explicitly submits merge or issue closure with its current reviewed result

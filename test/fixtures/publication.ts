@@ -83,7 +83,15 @@ const header = { "content-type": "application/json" };
 export function publicationWorld(
   t: TestContext,
   options: {
-    grants?: Array<"branch.push" | "branch.force-push" | "pr.create">;
+    grants?: Array<
+      | "branch.push"
+      | "branch.force-push"
+      | "pr.create"
+      | "pr.merge"
+      | "pr.ready"
+      | "pr.edit"
+    >;
+    deliveryMode?: "reviewable-pr" | "through-merge";
     mode?: "allow" | "approval";
     branchPrefix?: string;
     title?: string;
@@ -124,7 +132,7 @@ export function publicationWorld(
       key: randomUUID(),
       projectId,
       expectedVersion: store.configuration(projectId).version,
-      mode: "reviewable-pr",
+      mode: options.deliveryMode ?? "reviewable-pr",
       credentialRef: null,
       ...(options.branchPrefix === undefined
         ? {}
@@ -157,6 +165,7 @@ export function publicationWorld(
       });
     const prefix = "/repos/org/repo/git/ref/heads/";
     if (url.pathname.startsWith(prefix)) {
+      if (refReadsFail) return Response.json({}, { status: 500 });
       if (!remote.head)
         return Response.json({ message: "Not Found" }, { status: 404 });
       return Response.json(
@@ -179,8 +188,13 @@ export function publicationWorld(
     | "outside-during-push"
     | "applied-but-unread"
     | "not-attempted"
-    | "remote-rejected" = "apply";
+    | "remote-rejected"
+    | "applied-then-moved"
+    | "stale-unchanged"
+    | "stale-readback-fails" = "apply";
   let racer: string | null = null;
+  let movedHead = "9".repeat(40);
+  let refReadsFail = false;
   const push: PushFunction = async (request): Promise<PushOutcome> => {
     pushes.push(request);
     // Another writer moves the branch after Ensemble's preflight and before its push.
@@ -191,6 +205,16 @@ export function publicationWorld(
     if (pushBehaviour === "uncertain-lost") return "uncertain";
     if (pushBehaviour === "applied-but-unread") return "pushed";
     if (pushBehaviour === "not-attempted") return "not-attempted";
+    if (pushBehaviour === "stale-unchanged") return "rejected-lease";
+    if (pushBehaviour === "stale-readback-fails") {
+      refReadsFail = true;
+      return "rejected-lease";
+    }
+    if (pushBehaviour === "applied-then-moved") {
+      // Git succeeds, then another writer moves the branch before Ensemble reads it back.
+      remote.head = movedHead;
+      return "pushed";
+    }
     if (pushBehaviour === "remote-rejected") return "rejected-remote";
     if (pushBehaviour === "outside-during-push") {
       remote.head = "d".repeat(40);
@@ -267,6 +291,12 @@ export function publicationWorld(
     wakes,
     submit,
     configure,
+    failRefReads: (fail: boolean) => {
+      refReadsFail = fail;
+    },
+    movedHeadAfterPush: (head: string) => {
+      movedHead = head;
+    },
     raceBeforeNextPush: (head: string) => {
       racer = head;
     },

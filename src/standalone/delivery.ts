@@ -205,6 +205,17 @@ export class DeliveryCoordinator {
       (action.kind === "branch.push" || action.kind === "branch.force-push") &&
       assigned
     ) {
+      // A retry of an older operation must not rewrite a branch a newer push has moved on.
+      const first =
+        record.attempts > 0
+          ? this.store.firstAttemptLastPushed(record.operationId)
+          : undefined;
+      if (first !== undefined && first !== assigned.lastPushedSha)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "push-superseded",
+          receipt: null,
+        });
       // Offline first: a commit that is not the task's own work never reaches a provider.
       const verified = await this.options
         .verifyPush?.({
@@ -225,7 +236,7 @@ export class DeliveryCoordinator {
         branch: assigned.branch,
         lastPushedSha: assigned.lastPushedSha,
         // Only an earlier attempt that may have pushed can have landed late.
-        retry: record.observation?.reason === "branch-push-not-applied",
+        retry: this.store.mayHaveLanded(record.operationId),
       };
     }
     let before: Record<string, z.output<ReturnType<typeof z.json>>>;
@@ -334,17 +345,22 @@ export class DeliveryCoordinator {
     record: DeliveryActionRecord,
     observation: ProviderActionObservation,
   ): DeliveryActionRecord {
-    const action = record.request.action;
+    const action = record.request.action,
+      outside =
+        observation.outsideHeadSha ??
+        (observation.reason === "branch-outside-change"
+          ? (observation.receipt?.headSha ?? null)
+          : undefined);
     return this.store.recordObservation(
       record.operationId,
       observation,
       () =>
         action.kind.startsWith("branch.") &&
-        observation.reason === "branch-outside-change" &&
+        outside !== undefined &&
         this.outsidePush(
           record.binding.taskId,
           action.target.repositoryId,
-          observation.receipt?.headSha ?? null,
+          outside,
         ),
     );
   }
@@ -375,11 +391,23 @@ export class DeliveryCoordinator {
           this.options.leadAssignmentId?.(caller.taskId) ?? caller.assignmentId;
         if (lead !== caller.assignmentId)
           throw new Error("Only the task lead registers PR delivery");
-        return this.store.registerPrWithinTransaction(
+        // Recorded before registration so an existing binding's own observation cannot swallow it.
+        const outside = this.store.outsideHeadWithinTransaction(
+          caller.taskId,
+          observation,
+        );
+        const registered = this.store.registerPrWithinTransaction(
           caller,
           observation,
           lead,
         );
+        if (outside)
+          this.outsidePush(
+            caller.taskId,
+            observation.repositoryId,
+            observation.headSha,
+          );
+        return registered;
       });
     });
   }
@@ -614,6 +642,7 @@ export class DeliveryCoordinator {
             state: "uncertain" as const,
             reason: "provider-readback-unavailable",
             receipt: null,
+            ...(current.observation?.pushed ? { pushed: true } : {}),
           };
         }
         this.recordPublicationAware(current, observation);

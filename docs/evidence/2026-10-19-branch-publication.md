@@ -81,9 +81,11 @@ branches are `main` and `qualification`.
 
 ## Limits
 
-One run, no retries. The run predates a change that leases every push (creation expects the
-branch absent, an advance expects the observed head) instead of leasing only force-pushes;
-its pushes ran on a clean fixture where that lease matches, so its outcome is unchanged,
-but this evidence ran the earlier invocation and the live allowance was not spent again. It exercised the HTTPS push, the credential helper, REST readback, a
+One run, no retries. The run predates later changes to the push path: every push is now leased
+against the observed head (creation expects the branch absent), ownership of a commit follows the
+attempt history, PR actions on the task branch need Ensemble's last push, and ancestry is proved
+from rehashed commit objects. Its pushes ran on a clean fixture where those checks match, so its
+outcome is unchanged, but this evidence ran the earlier invocation and the live allowance was not
+spent again. It exercised the HTTPS push, the credential helper, REST readback, a
 real `pr.create` and a fast-forward repair on the same branch. It did not exercise a real
 lease mismatch or force-push, approval mode, or a Codex lead turn.

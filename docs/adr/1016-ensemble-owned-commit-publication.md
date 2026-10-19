@@ -23,15 +23,19 @@ agent turns run with network off. Delivery scope lives in
   branch as its head.
 - The agent names an exact commit. Before any network call Ensemble proves offline
   that the commit is the task worktree's `HEAD` or an ancestor of it and descends
-  from the base the workspace was provisioned at. Uncommitted changes are never
+  from the base the workspace was provisioned at, proving each ancestry from rehashed
+  commit objects so that a forged commit-graph, replace ref or lying object cannot fake it. Uncommitted changes are never
   pushed and are reported in the receipt.
-- A push is accepted only when the remote branch is where Ensemble last left it. The
-  lease for a force-push is the commit Ensemble last pushed, and every push, fast-forward
-  or not, is leased to the head Ensemble observed (creation expects the branch absent).
-  Any other remote head, seen at a push or on the task's PR, is an **outside change**:
-  the push is refused,
-  the lead is woken and handback settlement is invalidated. A rewritten history means
-  the next review covers the whole new head.
+- A push is accepted only when the remote branch is where Ensemble last left it, and every
+  push, fast-forward or not, is leased to the head Ensemble observed (creation expects the
+  branch absent). Ensemble owns a commit on the branch only if it pushed it or an attempt of
+  that push may have landed (unproved, reported pushed by Git, concluded not applied from a
+  read, or never settled); a push that never started or was rejected owns nothing, so an
+  equal remote is accepted only on such a retry. Any other remote head, seen at a push or on
+  the task's PR, is an **outside change**: the push is refused, the lead is woken, handback
+  settlement is invalidated and completion held. PR actions naming the task branch need the
+  commit Ensemble last pushed. A rewritten history means the next review covers the whole
+  new head.
 - Transport is the one exception to Ensemble's offline Git: HTTPS to the verified
   github.com repository only, with the delivery credential supplied to that single
   push child through its environment, never in argv, any Git configuration, a file or

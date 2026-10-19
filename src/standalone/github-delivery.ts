@@ -1048,6 +1048,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         lastPushedSha: publication.lastPushedSha,
         workspacePath: publication.workspacePath,
         uncommittedEntries: publication.uncommittedEntries,
+        retry: publication.retry,
       };
     }
     if (action.kind === "pr.create") {
@@ -1264,11 +1265,14 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     record: DeliveryActionRecord,
     a: Extract<ExternalAction, { kind: "branch.push" | "branch.force-push" }>,
   ): Promise<ProviderActionObservation> {
-    const unsettled: ProviderActionObservation = {
+    // Once Git reports the push done, the outcome stays unproved (never "not applied") until a read shows it.
+    let pushed = false;
+    const unsettled = (): ProviderActionObservation => ({
       state: "uncertain",
       reason: "provider-effect-unproved",
       receipt: null,
-    };
+      ...(pushed ? { pushed: true } : {}),
+    });
     const failure = (
       reason: string,
       extra: Partial<ProviderActionObservation> = {},
@@ -1286,9 +1290,35 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           beforeHead: sha.nullable(),
           lastPushedSha: sha.nullable(),
           workspacePath: name,
+          retry: z.boolean(),
         })
         .parse(record.beforeState);
-      let pushed = false;
+      const outside = (head: string | null) =>
+        failure("branch-outside-change", {
+          receipt: head
+            ? {
+                nodeId: a.target.repositoryId,
+                ref: before.branch,
+                headSha: head,
+              }
+            : null,
+        });
+      // A rejected update leaves the head it found: another writer's, unless an earlier attempt of
+      // this operation may have landed that same commit.
+      const afterRejection = async (
+        outcomeFailure: ProviderActionObservation | null,
+      ): Promise<ProviderActionObservation> => {
+        let head: string | null;
+        try {
+          head = await this.optionalRef(before.repositoryPath, before.branch);
+        } catch {
+          return outcomeFailure ?? unsettled();
+        }
+        if (head === before.beforeHead) return outcomeFailure ?? unsettled();
+        if (head === a.commitSha)
+          return before.retry ? unsettled() : outside(head);
+        return outside(head);
+      };
       if (before.beforeHead !== a.commitSha) {
         const outcome = await this.push({
           workspacePath: before.workspacePath,
@@ -1304,7 +1334,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           lease: before.beforeHead,
           token: this.credential,
         });
-        if (outcome === "uncertain") return unsettled;
+        if (outcome === "uncertain") return unsettled();
         if (outcome === "not-attempted")
           return failure("push-not-attempted", {
             retryable: true,
@@ -1312,52 +1342,71 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           });
         if (outcome === "rejected-non-fast-forward")
           return failure("branch-not-fast-forward");
-        if (outcome === "rejected-remote") {
-          // The ref can move between Git's lease check and GitHub's update: a head that is neither
-          // the one preflight saw nor the commit is an outside change, not a plain refusal.
-          const head = await this.optionalRef(
-            before.repositoryPath,
-            before.branch,
-          ).catch(() => before.beforeHead);
-          return head === before.beforeHead
-            ? failure("branch-push-rejected")
-            : head === a.commitSha
-              ? unsettled
-              : failure("branch-outside-change", {
-                  receipt: head
-                    ? {
-                        nodeId: a.target.repositoryId,
-                        ref: before.branch,
-                        headSha: head,
-                      }
-                    : null,
-                });
-        }
-        if (outcome === "rejected-lease") {
-          const head = await this.optionalRef(
-            before.repositoryPath,
-            before.branch,
-          ).catch(() => null);
-          return failure("branch-outside-change", {
-            receipt: head
-              ? {
-                  nodeId: a.target.repositoryId,
-                  ref: before.branch,
-                  headSha: head,
-                }
-              : null,
-          });
-        }
+        if (outcome === "rejected-remote")
+          return afterRejection(failure("branch-push-rejected"));
+        if (outcome === "rejected-lease") return afterRejection(null);
         pushed = true;
       }
-      const settled = await this.inspectAction(record);
-      // A finished push that a lagging read does not show yet is unproved, not a no-effect failure.
-      return pushed && settled.reason === "branch-push-not-applied"
-        ? unsettled
-        : settled;
+      const settled = await this.inspectBranch(record, a, pushed);
+      return settled;
     } catch {
-      return unsettled;
+      return unsettled();
     }
+  }
+  /** Settles a branch action from the remote ref alone. */
+  private async inspectBranch(
+    record: DeliveryActionRecord,
+    a: Extract<ExternalAction, { kind: "branch.push" | "branch.force-push" }>,
+    pushed: boolean,
+  ): Promise<ProviderActionObservation> {
+    const repo = await this.repository(a.target.repositoryId);
+    const before = z
+      .object({
+        branch: name,
+        beforeHead: sha.nullable(),
+        uncommittedEntries: z.number().int().nonnegative(),
+      })
+      .parse(record.beforeState);
+    const remote = await this.optionalRef(repo.path, before.branch);
+    const at = (headSha: string) => ({
+      nodeId: a.target.repositoryId,
+      ref: before.branch,
+      headSha,
+    });
+    const success = (extra: Partial<ProviderActionObservation> = {}) =>
+      ({
+        state: "confirmed-success",
+        reason: null,
+        receipt: {
+          ...at(a.commitSha),
+          uncommittedEntries: before.uncommittedEntries,
+        },
+        ...extra,
+      }) as ProviderActionObservation;
+    if (remote === a.commitSha) return success();
+    if (remote === before.beforeHead)
+      // Git said done but the read does not show it yet: unproved, never "not applied".
+      return pushed
+        ? {
+            state: "uncertain",
+            reason: "provider-effect-unproved",
+            receipt: null,
+            pushed: true,
+          }
+        : {
+            state: "confirmed-failure",
+            reason: "branch-push-not-applied",
+            receipt: null,
+            retryable: true,
+          };
+    // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved it.
+    return pushed
+      ? success(remote ? { outsideHeadSha: remote } : {})
+      : {
+          state: "confirmed-failure",
+          reason: "branch-outside-change",
+          receipt: remote ? at(remote) : null,
+        };
   }
   async inspectAction(
     record: DeliveryActionRecord,
@@ -1366,43 +1415,12 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       const a = record.request.action,
         repo = await this.repository(a.target.repositoryId),
         marker = `<!-- ensemble-operation:${record.operationId} -->`;
-      if (a.kind === "branch.push" || a.kind === "branch.force-push") {
-        const before = z
-          .object({
-            branch: name,
-            beforeHead: sha.nullable(),
-            uncommittedEntries: z.number().int().nonnegative(),
-          })
-          .parse(record.beforeState);
-        const remote = await this.optionalRef(repo.path, before.branch);
-        const at = (headSha: string) => ({
-          nodeId: a.target.repositoryId,
-          ref: before.branch,
-          headSha,
-        });
-        if (remote === a.commitSha)
-          return {
-            state: "confirmed-success",
-            reason: null,
-            receipt: {
-              ...at(remote),
-              uncommittedEntries: before.uncommittedEntries,
-            },
-          };
-        // Neither the commit nor the head Ensemble saw before pushing: someone else moved the branch.
-        return remote === before.beforeHead
-          ? {
-              state: "confirmed-failure",
-              reason: "branch-push-not-applied",
-              receipt: null,
-              retryable: true,
-            }
-          : {
-              state: "confirmed-failure",
-              reason: "branch-outside-change",
-              receipt: remote ? at(remote) : null,
-            };
-      }
+      if (a.kind === "branch.push" || a.kind === "branch.force-push")
+        return await this.inspectBranch(
+          record,
+          a,
+          record.observation?.pushed === true,
+        );
       const user = z
         .object({ node_id: name })
         .parse((await this.request("/user")).json);
@@ -1579,6 +1597,8 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         state: "uncertain",
         reason: "provider-readback-unavailable",
         receipt: null,
+        // A readback failure never forgets that Git reported the push done.
+        ...(record.observation?.pushed ? { pushed: true } : {}),
       };
     }
   }
