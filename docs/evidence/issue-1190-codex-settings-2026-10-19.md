@@ -27,8 +27,9 @@ workspace: one attempt, two `turn/start` calls, no retries. Sanitised output:
 ## Bounded live run
 
 `npm run codex-settings:live` (`test/operator/diagnostics-qualification/live-diagnostics.mjs
---codex-settings --live --one-attempt`) at `01e95a0e`: one attempt, 10-minute bound,
-exit 0, about 13 s. It starts the real service on a disposable data directory, waits
+--codex-settings --live --one-attempt`) at `2f3b65f8`: one attempt, 10-minute bound,
+exit 0, about 13 s. An earlier identical run at `01e95a0e` passed the same way; this one
+follows the later runtime change to the catalogue retry and the reserved `default` name. It starts the real service on a disposable data directory, waits
 for the runtime's `model/list`, creates a lead profile with a model and its lowest
 reasoning effort from that list, runs one task turn and reads the execution through the
 built CLI over loopback. Sanitised output:
