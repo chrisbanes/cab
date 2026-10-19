@@ -20,9 +20,13 @@ glossary defines **Draft turn**; delivery scope lives in
   task is queued, held or running at a time. The task must be open and not Ready, with a
   configured, unrevoked lead that has not started ordinary work. Project pause, task
   Stop and capacity do not refuse it; they hold it like any other turn.
-- Admission drops only `task-unready`, and only for work whose request is a draft
-  turn. Ordinary work on a Draft task keeps every gate. The same turn waits on every
-  other admission reason.
+- Admission drops `task-unready` for a draft turn, and `task-revision-changed` only
+  while the task's title and outcome still match the digest captured when the turn was
+  queued: making the task Ready bumps its version but does not make a queued draft turn
+  stale, and any edit does. Ordinary work on a Draft task keeps every gate, and the
+  draft turn waits on every other admission reason. A draft turn refused before it ran
+  gives its messages back: they become pending again and the turn no longer counts as
+  the task's draft turn.
 - During a draft turn the lead may ask questions, request approvals, and use
   `ensemble_external_action` for `issue.comment` and `issue.labels` where grants allow.
   The service refuses every other coordination tool before dispatch. The existing
@@ -44,7 +48,10 @@ glossary defines **Draft turn**; delivery scope lives in
 - When the task becomes Ready, the lead is treated as not started. With routing
   disabled the lead's initial turn runs as ordinary execution and resumes the draft
   conversation. With routing enabled, routing runs as for any task, without a
-  preliminary lead turn. A draft turn already queued or running keeps its draft restrictions and finishes before the initial turn; an answer to a draft-turn question that is still pending goes to that initial turn.
+  preliminary lead turn, even when answers to draft-turn questions are pending; they go
+  with the fallback or the routed result. A draft turn already queued or running keeps
+  its draft restrictions and finishes before the initial turn. Draft prompts and the
+  first ordinary turn after draft turns carry the task's current title and outcome.
 - An answer to a draft-turn question waits for the next draft turn or for Ready. It
   never starts a turn. Automatic and rule-driven draft turns, triage procedures and
   readiness proposals are out of scope.

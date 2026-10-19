@@ -967,8 +967,12 @@ history.
   `draft-turn-active`), which the task read also reports. A Ready task keeps the ordinary
   reply. Project pause, task Stop and capacity do not refuse a draft turn; they hold the
   queued turn like any other.
-- **Admission.** Admission drops only the task-unready reason, and only for a draft
-  turn. Ordinary work on a Draft task keeps every gate. A draft turn never changes the
+- **Admission.** Admission drops the task-unready reason for a draft turn, and the
+  task-revision-changed reason only while the task's title and outcome match the digest
+  captured when the turn was queued, so making the task Ready never makes it stale and
+  any edit does. A draft turn refused before it ran gives its messages back (they are
+  pending again) and stops counting as the task's draft turn. Ordinary work on a Draft
+  task keeps every gate. A draft turn never changes the
   lead assignment's state, creates assignments, results, completion requests or pull
   request bindings, edits task fields, or grants readiness.
 - **Tools.** The lead may ask questions, request approval, and use external actions of
@@ -984,7 +988,11 @@ history.
   [recorded](evidence/2026-10-19-codex-read-only-turn.md).
 - **Ready.** The lead stays pending through draft turns. When the task becomes Ready,
   routing runs as for any task, without a preliminary lead turn, or, with routing off, the
-  lead's initial turn runs as ordinary execution and resumes the same conversation. A draft turn that is still queued or running when the task becomes Ready finishes read-only first.
+  lead's initial turn runs as ordinary execution and resumes the same conversation. With
+  routing on, a lead that has only had draft turns waits for the routing decision even
+  when answers are pending. A draft turn that is still queued or running when the task
+  becomes Ready finishes read-only first. Draft prompts and the first ordinary turn after
+  draft turns carry the task's current title and outcome.
   Automatic draft turns, triage procedures and readiness proposals are not part of this.
 
 ### Task brief, evidence and delegation

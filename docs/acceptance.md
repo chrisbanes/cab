@@ -686,6 +686,10 @@ per-turn read-only policy is proved by the
 | An answer waits for the next draft turn; pause, Stop and capacity hold a queued turn; a restart keeps it queued as a draft turn | `draft-turn.test.ts` |
 | Making the task Ready runs the lead's initial turn in the draft conversation, or routes without a lead turn when routing is on | `draft-turn.test.ts` |
 | Callbacks bind to a pending lead only for a draft turn; the migration marks existing turn requests ordinary | `draft-turn-store.test.ts`, `drafting-runs.test.ts` |
+| A queued draft turn is refused once the task title or outcome is edited (a Ready-only change keeps it), and its message is released for the next draft turn or the Ready initial turn; a refused draft is history and no longer the task's draft turn | `draft-turn.test.ts`, `draft-turn-store.test.ts` |
+| Draft prompts and the first ordinary turn after draft turns carry the current title and outcome; a task without draft turns keeps exactly its brief | `draft-turn.test.ts` |
+| With routing on, a draft-only lead waits for the routing record even with a pending answer, and a paused task routes nothing | `draft-turn.test.ts` |
+| A retry of a draft turn keeps the draft marker and the task digest | `retry.test.ts` |
 | Codex sends the read-only policy for a draft turn and workspace-write again on the next turn; Claude lists only its temporary base as writable | `codex-runtime.test.ts`, `claude-runtime.test.ts` |
 | The task page starts one draft turn, explains each unavailable reason without sending, shows the queued pause, and keeps typed text after a confirmed refusal (1366 px, 390 px) | `operator-task-draft-turn-browser.test.ts` |
 
