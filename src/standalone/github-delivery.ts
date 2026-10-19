@@ -62,11 +62,14 @@ export interface GitHubDeliveryProvider {
   ): Promise<PrDeliveryObservation>;
 }
 export const deliveryDocuments = {
-  EnsembleDeliveryPr: `query EnsembleDeliveryPr($id:ID!,$after:String){node(id:$id){... on PullRequest{id number repository{id nameWithOwner} baseRefName headRefName headRefOid baseRefOid state isDraft merged mergeable mergeStateStatus reviewDecision isMergeQueueEnabled closingIssuesReferences(first:100){nodes{id state repository{id}} pageInfo{hasNextPage endCursor}} baseRef{target{oid} branchProtectionRule{requiresDeployments requiredDeploymentEnvironments requiresStrictStatusChecks}} reviewThreads(first:100,after:$after){nodes{isResolved} pageInfo{hasNextPage endCursor}}}}}`,
+  EnsembleDeliveryPr: `query EnsembleDeliveryPr($id:ID!,$after:String){node(id:$id){... on PullRequest{id number repository{id nameWithOwner} baseRefName headRefName headRefOid baseRefOid state isDraft merged mergeable mergeStateStatus reviewDecision isMergeQueueEnabled closingIssuesReferences(first:100){nodes{id state repository{id}} pageInfo{hasNextPage endCursor}} baseRef{target{oid} branchProtectionRule{requiresDeployments requiredDeploymentEnvironments requiresStrictStatusChecks}} reviewThreads(first:100,after:$after){nodes{id isResolved firstComment:comments(first:1){nodes{id}} latestComment:comments(last:1){nodes{id}}} pageInfo{hasNextPage endCursor}}}}}`,
   EnsembleDeliveryRepository: `query EnsembleDeliveryRepository($id:ID!){node(id:$id){... on Repository{id nameWithOwner}}}`,
   EnsembleDeliveryClosure: `query EnsembleDeliveryClosure($id:ID!){node(id:$id){... on Issue{id repository{id} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{id closer{__typename ... on PullRequest{id}}}}}}}}`,
   EnsembleDeliveryField: `query EnsembleDeliveryField($item:ID!,$field:ID!,$after:String){node(id:$item){... on ProjectV2Item{id project{id} content{... on Issue{id repository{id}}} fieldValues(first:100,after:$after){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}}} field:node(id:$field){... on ProjectV2SingleSelectField{id options{id} project{id}}}}`,
   EnsembleDeliveryProject: `mutation EnsembleDeliveryProject($project:ID!,$item:ID!,$field:ID!,$option:String!){updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
+  EnsembleDeliveryThread: `query EnsembleDeliveryThread($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{id isResolved resolvedBy{id} pullRequest{id number repository{id}} latestComment:comments(last:1){nodes{id}} comments(first:100,after:$after){nodes{id body state author{__typename ... on User{id}}} pageInfo{hasNextPage endCursor}}}}}`,
+  EnsembleDeliveryThreadReply: `mutation EnsembleDeliveryThreadReply($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{id}}}`,
+  EnsembleDeliveryThreadResolve: `mutation EnsembleDeliveryThreadResolve($thread:ID!){resolveReviewThread(input:{threadId:$thread}){thread{id isResolved}}}`,
   EnsembleDeliveryReady: `mutation EnsembleDeliveryReady($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
 } as const;
 const name = z.string().min(1);
@@ -277,6 +280,86 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       throw new Error("provider-ref-mismatch");
     return value.object.sha;
   }
+  /** Reads a review thread; `all` pages every comment, otherwise only the first page. */
+  private async thread(id: string, all: boolean) {
+    const comments: Array<{
+      id: string;
+      body: string;
+      state: string;
+      authorId: string | null;
+    }> = [];
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    let head:
+      | {
+          id: string;
+          isResolved: boolean;
+          resolvedBy: string | null;
+          latest: string | null;
+          prId: string;
+          prNumber: number;
+          repositoryId: string;
+        }
+      | undefined;
+    for (let count = 0; count < 20; count++) {
+      const { node } = z
+        .object({
+          node: z.object({
+            id: name,
+            isResolved: z.boolean(),
+            resolvedBy: z.object({ id: name }).nullable(),
+            pullRequest: z.object({
+              id: name,
+              number: z.number().int().positive(),
+              repository: z.object({ id: name }),
+            }),
+            latestComment: z.object({ nodes: z.array(z.object({ id: name })) }),
+            comments: z.object({
+              nodes: z.array(
+                z.object({
+                  id: name,
+                  body: z.string(),
+                  state: name,
+                  author: z
+                    .object({ __typename: name, id: name.optional() })
+                    .nullable(),
+                }),
+              ),
+              pageInfo: page,
+            }),
+          }),
+        })
+        .parse(
+          await this.graph(deliveryDocuments.EnsembleDeliveryThread, {
+            id,
+            after: cursor,
+          }),
+        );
+      if (node.id !== id) throw new Error("provider-thread-mismatch");
+      head = {
+        id: node.id,
+        isResolved: node.isResolved,
+        resolvedBy: node.resolvedBy?.id ?? null,
+        latest: node.latestComment.nodes[0]?.id ?? null,
+        prId: node.pullRequest.id,
+        prNumber: node.pullRequest.number,
+        repositoryId: node.pullRequest.repository.id,
+      };
+      for (const c of node.comments.nodes)
+        comments.push({
+          id: c.id,
+          body: c.body,
+          state: c.state,
+          authorId: c.author?.id ?? null,
+        });
+      if (!all || !node.comments.pageInfo.hasNextPage)
+        return { ...head, comments };
+      cursor = node.comments.pageInfo.endCursor;
+      if (!cursor || seen.has(cursor)) break;
+      seen.add(cursor);
+    }
+    throw new Error("provider-thread-pagination-incomplete");
+  }
   async inspectClosedIssue(target: {
     repositoryId: string;
     nodeId: string;
@@ -474,7 +557,18 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           })
           .nullable(),
         reviewThreads: z.object({
-          nodes: z.array(z.object({ isResolved: z.boolean() })),
+          nodes: z.array(
+            z.object({
+              id: name,
+              isResolved: z.boolean(),
+              firstComment: z.object({
+                nodes: z.array(z.object({ id: name })),
+              }),
+              latestComment: z.object({
+                nodes: z.array(z.object({ id: name })),
+              }),
+            }),
+          ),
           pageInfo: page,
         }),
       }),
@@ -482,7 +576,8 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     let cursor: string | null = null;
     const seen = new Set<string>();
     let graph: ReturnType<typeof graphSchema.parse>["node"] | undefined;
-    let unresolved = false;
+    const reviewThreads: NonNullable<PrDeliveryObservation["reviewThreads"]> =
+      [];
     for (let count = 0; count < 100; count++) {
       const value: z.output<typeof graphSchema>["node"] = graphSchema.parse(
         await this.graph(prQuery, {
@@ -501,7 +596,13 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       )
         throw new Error("provider-pr-snapshot-changed");
       graph = value;
-      unresolved ||= value.reviewThreads.nodes.some((t) => !t.isResolved);
+      for (const t of value.reviewThreads.nodes)
+        reviewThreads.push({
+          nodeId: t.id,
+          isResolved: t.isResolved,
+          firstCommentNodeId: t.firstComment.nodes[0]?.id ?? null,
+          latestCommentNodeId: t.latestComment.nodes[0]?.id ?? null,
+        });
       if (!value.reviewThreads.pageInfo.hasNextPage) break;
       cursor = value.reviewThreads.pageInfo.endCursor;
       if (!cursor || seen.has(cursor) || count === 99)
@@ -584,6 +685,8 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
                 : "failure",
         });
     }
+    reviewThreads.sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+    const unresolved = reviewThreads.some((t) => !t.isResolved);
     const requirements = [...policy.requiredChecks];
     let requireThreads = false;
     let allowedMethods = [...repo.methods];
@@ -846,6 +949,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       reviewDecision: graph.reviewDecision,
       checks,
       feedback,
+      reviewThreads,
       mergeBlockers,
       closedIssueNodeIds: graph.closingIssuesReferences.pageInfo.hasNextPage
         ? []
@@ -859,6 +963,17 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       allowedMethods,
     });
   }
+  private assertThreadOn(
+    thread: { prId: string; prNumber: number; repositoryId: string },
+    target: { repositoryId: string; nodeId: string; number: number },
+  ) {
+    if (
+      thread.prId !== target.nodeId ||
+      thread.prNumber !== target.number ||
+      thread.repositoryId !== target.repositoryId
+    )
+      throw new Error("provider-thread-mismatch");
+  }
   async preflight(action: ExternalAction, policy: DeliveryPolicy) {
     const repo = await this.repository(action.target.repositoryId);
     if (action.kind === "pr.create") {
@@ -870,6 +985,25 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         repositoryPath: repo.path,
         repositoryId: action.target.repositoryId,
         headSha: head,
+      };
+    }
+    if (
+      action.kind === "pr.thread.reply" ||
+      action.kind === "pr.thread.resolve"
+    ) {
+      const thread = await this.thread(action.target.threadNodeId, false);
+      this.assertThreadOn(thread, action.target);
+      if (
+        action.kind === "pr.thread.resolve" &&
+        (thread.isResolved ||
+          thread.latest !== action.expectedLatestCommentNodeId)
+      )
+        throw new Error("provider-thread-resolve-held");
+      return {
+        repositoryPath: repo.path,
+        threadNodeId: thread.id,
+        latestCommentNodeId: thread.latest,
+        isResolved: thread.isResolved,
       };
     }
     if (action.kind.startsWith("pr.") && "expectedHeadSha" in action.target) {
@@ -1006,6 +1140,17 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
             id: a.target.nodeId,
           });
           break;
+        case "pr.thread.reply":
+          await this.graph(deliveryDocuments.EnsembleDeliveryThreadReply, {
+            thread: a.target.threadNodeId,
+            body: `${a.body}\n\n${marker}`,
+          });
+          break;
+        case "pr.thread.resolve":
+          await this.graph(deliveryDocuments.EnsembleDeliveryThreadResolve, {
+            thread: a.target.threadNodeId,
+          });
+          break;
         case "pr.merge":
           await this.request(
             `${repo.path}/pulls/${a.target.number}/merge`,
@@ -1071,6 +1216,23 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           matching[0].user.node_id === user.node_id
         )
           receipt = { nodeId: matching[0].node_id };
+      } else if (a.kind === "pr.thread.reply") {
+        const thread = await this.thread(a.target.threadNodeId, true);
+        this.assertThreadOn(thread, a.target);
+        const matching = thread.comments.filter((c) => c.body.includes(marker));
+        // A reply on the credential user's pending review is not yet visible.
+        if (
+          matching.length === 1 &&
+          matching[0]?.body === `${a.body}\n\n${marker}` &&
+          matching[0].state === "SUBMITTED" &&
+          matching[0].authorId === user.node_id
+        )
+          receipt = { nodeId: matching[0].id };
+      } else if (a.kind === "pr.thread.resolve") {
+        const thread = await this.thread(a.target.threadNodeId, false);
+        this.assertThreadOn(thread, a.target);
+        if (thread.isResolved && thread.resolvedBy === user.node_id)
+          receipt = { nodeId: thread.id };
       } else if (a.kind === "pr.create") {
         // GitHub filters by head owner:branch; the marker filter below keeps
         // unrelated PRs (e.g. a deleted fork's null head.repo) out of strict parsing.

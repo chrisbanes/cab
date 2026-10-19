@@ -21,6 +21,24 @@ import {
   GitHubHttpDeliveryProvider,
 } from "./github-delivery.js";
 
+/** The unresolved review threads a lead can reply to or resolve, capped with an omitted count. */
+export function unresolvedThreadSummary(
+  observation: PrDeliveryObservation,
+): string {
+  const open = (observation.reviewThreads ?? []).filter((t) => !t.isResolved);
+  return [
+    ...open
+      .slice(0, 20)
+      .map(
+        (t) =>
+          `review-thread ${t.nodeId} latest ${t.latestCommentNodeId ?? "none"}`,
+      ),
+    ...(open.length > 20
+      ? [`${open.length - 20} more unresolved review threads omitted`]
+      : []),
+  ].join("\n");
+}
+
 /** Only provider inspection failures are recoverable per-binding read holds. */
 class DeliveryReadUnavailable extends Error {
   constructor() {
@@ -345,7 +363,7 @@ export class DeliveryCoordinator {
           )
             .slice(-10)
             .map((f) => `${f.kind} ${f.nodeId} (${f.state}): ${f.body}`)
-            .join("\n")}`,
+            .join("\n")}\n${unresolvedThreadSummary(observation)}`.trimEnd(),
           `${result.binding.revision}:${result.binding.observationDigest}`,
         );
       return result.binding;

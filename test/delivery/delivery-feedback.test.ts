@@ -12,7 +12,10 @@ import {
   type DeliveryCaller,
   type PrDeliveryObservation,
 } from "../../src/core/delivery.js";
-import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
+import {
+  DeliveryCoordinator,
+  unresolvedThreadSummary,
+} from "../../src/standalone/delivery.js";
 import type { GitHubDeliveryProvider } from "../../src/standalone/github-delivery.js";
 
 test("unchanged feedback is deduplicated and cached settlement never qualifies a changed provider head", async () => {
@@ -188,4 +191,26 @@ test("unchanged feedback is deduplicated and cached settlement never qualifies a
     db.close();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the lead sees unresolved review threads with their latest comment, capped at twenty", () => {
+  const thread = (i: number, isResolved = false) => ({
+    nodeId: `T${i}`,
+    isResolved,
+    firstCommentNodeId: `F${i}`,
+    latestCommentNodeId: i === 0 ? null : `L${i}`,
+  });
+  const summary = (reviewThreads?: ReturnType<typeof thread>[]) =>
+    unresolvedThreadSummary({ reviewThreads } as PrDeliveryObservation);
+  assert.equal(summary(), "");
+  assert.equal(summary([thread(1, true)]), "");
+  assert.equal(
+    summary([thread(0), thread(1), thread(2, true)]),
+    "review-thread T0 latest none\nreview-thread T1 latest L1",
+  );
+  const lines = summary(
+    Array.from({ length: 23 }, (_, i) => thread(i + 1)),
+  ).split("\n");
+  assert.equal(lines.length, 21);
+  assert.equal(lines[20], "3 more unresolved review threads omitted");
 });
