@@ -191,7 +191,11 @@ export class DraftingRunStore {
     return JSON.parse(stored.receiptJson) as T;
   }
 
-  recordReceipt(key: string, content: unknown, receipt: unknown): void {
+  /**
+   * Records a receipt; if another already holds the key, that one is returned, or a
+   * conflict thrown when it was for other content.
+   */
+  recordReceipt<T>(key: string, content: unknown, receipt: T): T {
     this.db
       .prepare(
         "INSERT OR IGNORE INTO drafting_command_receipts (key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?)",
@@ -202,6 +206,7 @@ export class DraftingRunStore {
         JSON.stringify(receipt),
         this.now(),
       );
+    return this.receipt<T>(key, content) ?? receipt;
   }
 
   /** Settles every overdue proposal and drops old receipts; run at service start. */

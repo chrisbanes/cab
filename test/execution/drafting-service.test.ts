@@ -1132,6 +1132,116 @@ test("a proposal holding text that cannot be shown is refused so the lead can re
   assert.deepEqual(service.readDrafting(runId)?.proposal, proposal);
 });
 
+test("a failed scheduler request leaves no drafting run, and a run lacking its request gets one at start", async (t) => {
+  const w = world(t);
+  const first = w.open();
+  await w.start(first.service, "codex");
+  const { projectId } = await w.project(first.service, "codex");
+  const store = startedOf(first.service).schedulerStore;
+  const ensure = store.ensure.bind(store);
+  let failing = true;
+  store.ensure = (input) => {
+    if (failing) throw new Error("request write failed");
+    return ensure(input);
+  };
+  const runId = randomUUID();
+  await assert.rejects(
+    first.service.startDrafting({ runId, projectId, idea }),
+    /request write failed/,
+  );
+  // Rolled back together: no run without a request.
+  assert.equal(first.service.readDrafting(runId), undefined);
+  failing = false;
+  // A run an earlier build committed without its request is given one on the next start.
+  const orphan = randomUUID();
+  const drafting = startedOf(first.service).drafting;
+  drafting.create({
+    runId: orphan,
+    projectId,
+    idea,
+    harness: "codex",
+    profileId: randomUUID(),
+    profileRevision: 1,
+    instructionsRevision: 1,
+  });
+  const lead = first.service.domain().project(projectId);
+  const leadProfile = String(lead.leadProfileId);
+  const created = drafting.require(orphan);
+  assert.ok(created);
+  const raw = (
+    first.service as unknown as { db: import("node:sqlite").DatabaseSync }
+  ).db;
+  raw
+    .prepare(
+      "UPDATE drafting_runs SET profileId = ?, profileRevision = ? WHERE runId = ?",
+    )
+    .run(
+      leadProfile,
+      Number(first.service.domain().profile(leadProfile).version),
+      orphan,
+    );
+  await first.service.stop();
+  const second = w.open();
+  second.codex.script(proposing(proposal));
+  await second.service.start();
+  assert.ok(
+    second.service
+      .turnRequests()
+      .some((item) => item.workId === `drafting:${orphan}`),
+  );
+  await waitUntil(
+    () => second.service.readDrafting(orphan)?.state === "proposed",
+    () => w.tracked(second.service).runs(),
+  );
+});
+
+test("concurrent commands under one key apply once, and other content under it conflicts", async (t) => {
+  const w = world(t);
+  const { service } = w.open();
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  const runId = randomUUID();
+  const key = randomUUID();
+  const start = {
+    type: "drafting.start",
+    key,
+    runId,
+    projectId,
+    idea,
+  } as const;
+  const same = await Promise.all([
+    service.draftingCommand(start),
+    service.draftingCommand(start),
+  ]);
+  assert.deepEqual(same[0], same[1]);
+  assert.equal(
+    service.turnRequests().filter((item) => item.workId === `drafting:${runId}`)
+      .length,
+    1,
+  );
+  // Another idea under the same key, at the same time as a repeat: exactly one wins.
+  const other = randomUUID();
+  const racing = await Promise.allSettled([
+    service.draftingCommand({ ...start, key: other, runId: randomUUID() }),
+    service.draftingCommand({
+      ...start,
+      key: other,
+      runId: randomUUID(),
+      idea: "Other idea",
+    }),
+  ]);
+  assert.deepEqual(
+    racing.map((item) => item.status),
+    ["fulfilled", "rejected"],
+  );
+  assert.match(
+    String((racing[1] as PromiseRejectedResult).reason),
+    /other content/,
+  );
+  // A replay returns the one stored receipt.
+  assert.deepEqual(await service.draftingCommand(start), same[0]);
+});
+
 test("a Stop during thread start is applied once the turn binds", async (t) => {
   const w = world(t);
   const opened = w.open();
@@ -1362,7 +1472,7 @@ test("accepting and its receipt commit together, so a failed receipt write leave
   let failing = true;
   drafting.recordReceipt = (...args) => {
     if (failing) throw new Error("receipt write failed");
-    record(...args);
+    return record(...args);
   };
   const command = {
     type: "drafting.settle",

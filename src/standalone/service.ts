@@ -622,6 +622,8 @@ export class StandaloneService {
     { workId: string; interactionId: string; resolve: () => void }
   >();
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
+  /** Drafting commands in flight, by key. */
+  private readonly draftingKeys = new Map<string, Promise<unknown>>();
   /** The linked repositories each queued draft's copy was built from, until it is admitted. */
   private readonly draftingGrants = new Map<string, string>();
   /** A running drafting run's bound turn and pending Stop, which may arrive before the turn binds. */
@@ -4354,18 +4356,29 @@ export class StandaloneService {
       .strict()
       .parse(input);
     const { drafting, schedulerStore } = this.started();
-    const existing = drafting.get(value.runId);
-    const run = existing
-      ? drafting.create({ ...existing, ...value })
-      : drafting.create({
-          ...value,
-          ...this.draftingLead(value.projectId),
-        });
+    // The run and its turn request commit together: neither can exist without the other.
+    const run = drafting.atomically(() => {
+      const existing = drafting.get(value.runId);
+      const created = existing
+        ? drafting.create({ ...existing, ...value })
+        : drafting.create({
+            ...value,
+            ...this.draftingLead(value.projectId),
+          });
+      schedulerStore.ensure(StandaloneService.draftingRequest(created));
+      return created;
+    });
+    await this.wakeScheduler();
+    return drafting.require(run.runId);
+  }
+
+  /** The turn request that carries a drafting run through admission. */
+  private static draftingRequest(run: DraftingRun) {
     const workId = StandaloneService.draftingWorkId(run.runId);
-    schedulerStore.ensure({
+    return {
       requestKey: workId,
       workId,
-      kind: "drafting",
+      kind: "drafting" as const,
       taskId: null,
       projectId: run.projectId,
       assignmentId: null,
@@ -4376,9 +4389,7 @@ export class StandaloneService {
       prompt: run.idea,
       workspace: null,
       previousWorkId: null,
-    });
-    await this.wakeScheduler();
-    return drafting.require(run.runId);
+    };
   }
 
   readDrafting(runId: string): DraftingRun | undefined {
@@ -4420,7 +4431,28 @@ export class StandaloneService {
    * Applies a drafting command once per key: a replay returns its receipt and
    * the same key with other content conflicts.
    */
-  async draftingCommand(
+  draftingCommand(
+    command: Extract<
+      OperatorCommand,
+      { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
+    >,
+  ): Promise<DraftingReceipt> {
+    // One command per key at a time: a second with the same key waits, then finds the
+    // first one's receipt (or a conflict) instead of applying its own.
+    const earlier = this.draftingKeys.get(command.key) ?? Promise.resolve();
+    const applied = earlier
+      .catch(() => {})
+      .then(() => this.applyDraftingCommand(command));
+    this.draftingKeys.set(command.key, applied);
+    const release = () => {
+      if (this.draftingKeys.get(command.key) === applied)
+        this.draftingKeys.delete(command.key);
+    };
+    applied.then(release, release);
+    return applied;
+  }
+
+  private async applyDraftingCommand(
     command: Extract<
       OperatorCommand,
       { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
@@ -4449,8 +4481,7 @@ export class StandaloneService {
           command.disposition,
           this.settleDrafting(command.runId, command.disposition).run,
         );
-        drafting.recordReceipt(key, content, receipt);
-        return receipt;
+        return drafting.recordReceipt(key, content, receipt);
       });
     const receipt =
       command.type === "drafting.start"
@@ -4463,8 +4494,7 @@ export class StandaloneService {
             }),
           )
         : receiptOf("stop", await this.stopDrafting(command.runId));
-    drafting.recordReceipt(key, content, receipt);
-    return receipt;
+    return drafting.recordReceipt(key, content, receipt);
   }
 
   /** Accepting hands over the proposal once; the composer then owns its text. */
@@ -4660,6 +4690,8 @@ export class StandaloneService {
     for (let run of c.drafting.unfinished()) {
       const workId = StandaloneService.draftingWorkId(run.runId);
       if (run.state === "queued") {
+        // A run that was committed without its request (an earlier build) gets it now.
+        c.schedulerStore.ensure(StandaloneService.draftingRequest(run));
         // Admitted but the crash came before it was marked running: treat it as running.
         if (!c.state.recoveryIdentity(workId)) continue;
         run = c.drafting.transition(run.runId, "running");
