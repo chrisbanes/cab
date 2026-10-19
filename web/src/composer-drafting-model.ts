@@ -2,6 +2,8 @@ import type { DraftProposal } from "../../src/operator/contracts.js";
 import type { ComposerInput } from "./composer-state.js";
 
 export const draftingPollMs = 2000;
+/** A release the service has not confirmed is sent again this often. */
+export const draftingReleaseRetryMs = 5000;
 /** A proposal nobody has settled is read this often, so its expiry is shown. */
 export const draftingProposedPollMs = 30_000;
 /** The service's fixed run limit, shown beside the elapsed time. */

@@ -419,6 +419,38 @@ for (const [name, viewport] of viewports) {
     );
   });
 
+  test(`${name}: a release whose stop was lost is repeated under its key until the draft is discarded`, async (_t, j) => {
+    const { f, page, commands, open } = await launch(j, viewport);
+    const other = await seedDraftingProject(f, { name: "Relay" });
+    await open();
+    await openPanel(page);
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    // The first stop is lost on the way to the service.
+    let lost = false;
+    await page.route("**/api/operator/commands", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      if (body.type === "drafting.stop" && !lost) {
+        lost = true;
+        await route.abort();
+      } else await route.continue();
+    });
+    await page
+      .getByLabel("Project", { exact: true })
+      .selectOption(other.projectId);
+    await until(() => commands("drafting.stop").length === 2, 15000);
+    const stops = commands("drafting.stop");
+    assert.equal(stops[0]?.key, stops[1]?.key);
+    await until(() => f.service.readDrafting(runId)?.state === "stopping");
+    // Discarding waits for the run to end, then goes out under its own key.
+    f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
+    await until(
+      () => f.service.readDrafting(runId)?.state === "discarded",
+      20000,
+    );
+  });
+
   test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport, {
       lead: false,

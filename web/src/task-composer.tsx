@@ -39,7 +39,7 @@ import { optionalFields, optionalSummary } from "./composer-summary.js";
 import {
   DraftChoice,
   DraftWithLead,
-  releaseDraft,
+  useDraftReleases,
   useDrafting,
 } from "./composer-drafting.js";
 import "./composer.css";
@@ -116,6 +116,7 @@ export function TaskComposer({
   );
   const edit = (patch: Partial<ComposerInput>) => state.edit(patch);
   const projectOptions = options.state.data?.data;
+  const releaseDraft = useDraftReleases(client, session.csrfToken);
   const drafting = useDrafting({
     state,
     client,
@@ -182,7 +183,7 @@ export function TaskComposer({
     if (first) reveal(first);
     if (state.phase === "recorded") {
       // A draft left over from this composer ends with it.
-      if (draftRunId) void releaseDraft(client, session.csrfToken, draftRunId);
+      if (draftRunId) releaseDraft(draftRunId);
       onRecorded();
     }
   }
@@ -205,12 +206,7 @@ export function TaskComposer({
             variant="secondary"
             onClick={() => {
               // The run would otherwise outlive the input that could reach it.
-              if (input.draftingRunId)
-                void releaseDraft(
-                  client,
-                  session.csrfToken,
-                  input.draftingRunId,
-                );
+              if (input.draftingRunId) releaseDraft(input.draftingRunId);
               state.discard();
               setLinkText("");
               setResumed(true);
@@ -361,8 +357,7 @@ export function TaskComposer({
                   onChange={(e) => {
                     // A draft read the old project's repositories, so it ends with the change.
                     const staleDraft = input.draftingRunId;
-                    if (staleDraft)
-                      void releaseDraft(client, session.csrfToken, staleDraft);
+                    if (staleDraft) releaseDraft(staleDraft);
                     edit({
                       projectId: e.target.value,
                       profileId: "",

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   draftingRunReadSchema,
   type OperatorCommand,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { Button } from "./components.js";
+import { attemptRelease, PendingReleases } from "./composer-release.js";
 import type { ComposerState } from "./composer-state.js";
 import {
   type DraftChoice as Choice,
@@ -12,6 +13,7 @@ import {
   draftingCopy,
   draftingLimitSeconds,
   draftingPollMs,
+  draftingReleaseRetryMs,
   formatElapsed,
   planFill,
   proposedReadDelay,
@@ -26,20 +28,42 @@ type Command = Extract<
 >;
 
 /**
- * Best effort when a task is created: ends the project's draft so nothing
- * lingers. A running draft is stopped; any other is discarded.
+ * Ends a draft the composer is leaving behind (a project change, discarded input, a created
+ * task) and keeps at it until the service confirms, even across a reload. Returns the
+ * function that starts one.
  */
-export async function releaseDraft(
-  client: OperatorClient,
-  csrfToken: string,
-  runId: string,
-) {
-  const key = () => crypto.randomUUID();
-  await client.command({ type: "drafting.stop", key: key(), runId }, csrfToken);
-  await client.command(
-    { type: "drafting.settle", key: key(), runId, disposition: "discard" },
-    csrfToken,
+export function useDraftReleases(client: OperatorClient, csrfToken: string) {
+  const releases = useMemo(
+    () =>
+      new PendingReleases({
+        getItem: (k) => sessionStorage.getItem(k),
+        setItem: (k, v) => sessionStorage.setItem(k, v),
+        removeItem: (k) => sessionStorage.removeItem(k),
+      }),
+    [],
   );
+  const busy = useRef(new Set<string>());
+  const pump = useCallback(async () => {
+    for (const release of releases.list()) {
+      if (busy.current.has(release.runId)) continue;
+      busy.current.add(release.runId);
+      try {
+        if ((await attemptRelease(client, csrfToken, release)) === "done")
+          releases.remove(release.runId);
+      } finally {
+        busy.current.delete(release.runId);
+      }
+    }
+  }, [client, csrfToken, releases]);
+  useEffect(() => {
+    void pump();
+    const timer = setInterval(() => void pump(), draftingReleaseRetryMs);
+    return () => clearInterval(timer);
+  }, [pump]);
+  return (runId: string) => {
+    releases.add(runId);
+    void pump();
+  };
 }
 
 const stateLabels = {
@@ -207,7 +231,11 @@ export function useDrafting({
       runId,
     });
     if (result.state === "recorded") void refresh.current();
-    else setMessage("Couldn't stop the draft. Try again.");
+    else {
+      // An unknown outcome may have landed: read the run, then let the operator try again.
+      void refresh.current();
+      setMessage("Couldn't stop the draft. Try again.");
+    }
   };
 
   // A run the service does not know may be a start that never arrived: send it once more.
