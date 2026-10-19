@@ -1,15 +1,32 @@
 import { z } from "zod";
 import { uuid } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import type { RecoveryStorage } from "./composer-state.js";
+import type { ComposerInput, RecoveryStorage } from "./composer-state.js";
 
 /** Draft releases still owed to the service, kept apart from the composer's own input. */
 export const releaseStorageKey = "ensemble.ui03.composer.releases.v1";
+/** The start a release may still have to settle: sent again under its key until known. */
+const startSchema = z
+  .object({ key: uuid, projectId: uuid, idea: z.string().min(1).max(16000) })
+  .strict();
+export type DraftStart = z.infer<typeof startSchema>;
 const releaseSchema = z
-  .object({ runId: uuid, stopKey: uuid, discardKey: uuid })
+  .object({
+    runId: uuid,
+    stopKey: uuid,
+    discardKey: uuid,
+    start: startSchema.optional(),
+  })
   .strict();
 const releasesSchema = z.array(releaseSchema);
 export type DraftRelease = z.infer<typeof releaseSchema>;
+
+/** The start a composer sent for its run, as a release needs it; absent if none was recorded. */
+export function startOf(input: ComposerInput): DraftStart | undefined {
+  return input.draftingKey && input.draftingStart
+    ? { key: input.draftingKey, ...input.draftingStart }
+    : undefined;
+}
 
 /**
  * A draft that must end whatever the composer does next (a project change, discarded
@@ -41,13 +58,14 @@ export class PendingReleases {
   list(): DraftRelease[] {
     return [...this.items];
   }
-  add(runId: string): DraftRelease {
+  add(runId: string, start?: DraftStart): DraftRelease {
     const existing = this.items.find((item) => item.runId === runId);
     if (existing) return existing;
-    const release = {
+    const release: DraftRelease = {
       runId,
       stopKey: crypto.randomUUID(),
       discardKey: crypto.randomUUID(),
+      ...(start ? { start } : {}),
     };
     // Never evicted: only a confirmed (or unknown-to-the-service) run leaves the list.
     this.items = [...this.items, release];
@@ -73,7 +91,9 @@ export class PendingReleases {
  * tried again under the same keys. `restop` means the Stop was recorded but the run is still
  * ending (a held copy, a runtime not yet seen to end): the next attempt uses a new Stop key,
  * because a replayed key returns its old receipt without retrying the service's cleanup.
- * Stop is idempotent by run state. A run the service does not know is done.
+ * Stop is idempotent by run state. A run the service does not know is done. A release that
+ * carries its start first sends that start again under its key (a replay returns the stored
+ * receipt), so a start whose outcome was never seen cannot land afterwards unreachable.
  */
 export async function attemptRelease(
   client: OperatorClient,
@@ -81,6 +101,25 @@ export async function attemptRelease(
   release: DraftRelease,
 ): Promise<"done" | "retry" | "restop"> {
   const { runId } = release;
+  if (release.start) {
+    const started = await client.command(
+      {
+        type: "drafting.start",
+        key: release.start.key,
+        runId,
+        projectId: release.start.projectId,
+        idea: release.start.idea,
+      },
+      csrfToken,
+    );
+    // Only a refusal of the start itself means no run exists; anything else is tried again.
+    if (
+      started.state === "conflict" ||
+      (started.state === "rejected" && started.code === "invalid-input")
+    )
+      return "done";
+    if (started.state !== "recorded") return "retry";
+  }
   const stop = await client.command(
     { type: "drafting.stop", key: release.stopKey, runId },
     csrfToken,

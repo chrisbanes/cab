@@ -102,6 +102,31 @@ test("no unconfirmed release is evicted, however many accumulate", () => {
   assert.equal(new PendingReleases(store).list().length, 39);
 });
 
+test("a release carrying its start repeats the start under its key until the outcome is known", async () => {
+  const release = new PendingReleases(storage()).add(randomUUID(), {
+    key: randomUUID(),
+    projectId: randomUUID(),
+    idea: "Rough idea",
+  });
+  const lost = client("unknown");
+  assert.equal(await attemptRelease(lost.client, "csrf", release), "retry");
+  // Nothing is stopped or discarded while the start is unknown.
+  assert.deepEqual(
+    lost.sent.map((c) => c.type),
+    ["drafting.start"],
+  );
+  const known = client();
+  assert.equal(await attemptRelease(known.client, "csrf", release), "done");
+  assert.deepEqual(
+    known.sent.map((c) => c.type),
+    ["drafting.start", "drafting.stop", "drafting.settle"],
+  );
+  assert.equal(known.sent[0]?.key, lost.sent[0]?.key);
+  const refused = client("conflict");
+  assert.equal(await attemptRelease(refused.client, "csrf", release), "done");
+  assert.equal(refused.sent.length, 1);
+});
+
 test("pending releases survive a reload until they are removed", () => {
   const store = storage();
   const runId = randomUUID();

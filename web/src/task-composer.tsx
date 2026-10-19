@@ -41,6 +41,7 @@ import {
   DraftWithLead,
   useDrafting,
 } from "./composer-drafting.js";
+import { type DraftStart, startOf } from "./composer-release.js";
 import "./composer.css";
 export function TaskComposer({
   client,
@@ -61,7 +62,7 @@ export function TaskComposer({
   /** Re-reads the workspace after a Fix changes a project. */
   refresh: () => void;
   /** Ends a draft the composer leaves behind; owned by the app so it outlives this page. */
-  releaseDraft: (runId: string) => void;
+  releaseDraft: (runId: string, start?: DraftStart) => void;
 }) {
   const labels = workspaceLabels(workspace);
   const [, render] = useState(0);
@@ -130,6 +131,7 @@ export function TaskComposer({
           : null
         : undefined,
     locked,
+    releaseDraft,
   });
   // Fresh options can show a stored selection is no longer permitted before submit.
   const fresh =
@@ -178,13 +180,14 @@ export function TaskComposer({
     }
     const isCurrent = state.captureScope();
     const draftRunId = input.draftingRunId;
+    const draftStart = startOf(input);
     await state.submit(client, session.csrfToken, ready);
     if (!isCurrent()) return;
     const first = Object.keys(state.errors)[0];
     if (first) reveal(first);
     if (state.phase === "recorded") {
       // A draft left over from this composer ends with it.
-      if (draftRunId) releaseDraft(draftRunId);
+      if (draftRunId) releaseDraft(draftRunId, draftStart);
       onRecorded();
     }
   }
@@ -207,7 +210,8 @@ export function TaskComposer({
             variant="secondary"
             onClick={() => {
               // The run would otherwise outlive the input that could reach it.
-              if (input.draftingRunId) releaseDraft(input.draftingRunId);
+              if (input.draftingRunId)
+                releaseDraft(input.draftingRunId, startOf(input));
               state.discard();
               setLinkText("");
               setResumed(true);
@@ -358,13 +362,14 @@ export function TaskComposer({
                   onChange={(e) => {
                     // A draft read the old project's repositories, so it ends with the change.
                     const staleDraft = input.draftingRunId;
-                    if (staleDraft) releaseDraft(staleDraft);
+                    if (staleDraft) releaseDraft(staleDraft, startOf(input));
                     edit({
                       projectId: e.target.value,
                       profileId: "",
                       blockerTaskIds: [],
                       draftingRunId: undefined,
                       draftingKey: undefined,
+                      draftingStart: undefined,
                     });
                     state.notice = staleDraft
                       ? "Project changed. Assignee and dependency selections were cleared, and the draft for the previous project was ended."

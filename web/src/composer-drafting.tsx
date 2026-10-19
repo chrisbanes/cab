@@ -5,7 +5,12 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { Button } from "./components.js";
-import { attemptRelease, PendingReleases } from "./composer-release.js";
+import {
+  attemptRelease,
+  type DraftStart,
+  PendingReleases,
+  startOf,
+} from "./composer-release.js";
 import type { ComposerState } from "./composer-state.js";
 import {
   type DraftChoice as Choice,
@@ -79,8 +84,8 @@ export function useDraftReleases(
     const timer = setInterval(() => void pump(), draftingReleaseRetryMs);
     return () => clearInterval(timer);
   }, [pump]);
-  return (runId: string) => {
-    releases.add(runId);
+  return (runId: string, start?: DraftStart) => {
+    releases.add(runId, start);
     backoff.current.delete(runId);
     void pump();
   };
@@ -105,6 +110,7 @@ export function useDrafting({
   csrfToken,
   lead,
   locked,
+  releaseDraft,
 }: {
   state: ComposerState;
   client: OperatorClient;
@@ -112,6 +118,8 @@ export function useDrafting({
   /** Undefined while the project's options load; null when the project has no lead. */
   lead: { name: string | null } | null | undefined;
   locked: boolean;
+  /** Hands a run on to the app's durable release; see `useDraftReleases`. */
+  releaseDraft: (runId: string, start?: DraftStart) => void;
 }) {
   const input = state.input;
   const runId = input.draftingRunId ?? "";
@@ -179,7 +187,11 @@ export function useDrafting({
     return result;
   };
   const clearRun = (note = "") => {
-    state.edit({ draftingRunId: undefined, draftingKey: undefined });
+    state.edit({
+      draftingRunId: undefined,
+      draftingKey: undefined,
+      draftingStart: undefined,
+    });
     setChoices([]);
     applied.current = null;
     setMessage(note);
@@ -205,7 +217,11 @@ export function useDrafting({
     const key = crypto.randomUUID();
     // Stored with its key before it is sent, so a reload reattaches to a run that did
     // start and can send the same start again if it never arrived.
-    state.edit({ draftingRunId: next, draftingKey: key });
+    state.edit({
+      draftingRunId: next,
+      draftingKey: key,
+      draftingStart: { projectId: input.projectId, idea },
+    });
     setChoices([]);
     applied.current = null;
     setMessage("");
@@ -262,12 +278,13 @@ export function useDrafting({
   const replayed = useRef(new Set<string>());
   const notFound = resource.state.error === "not-found" && !starting;
   const replay =
-    notFound && Boolean(input.draftingKey) && !replayed.current.has(runId);
+    notFound && Boolean(startOf(input)) && !replayed.current.has(runId);
   // biome-ignore lint/correctness/useExhaustiveDependencies: sends each stored start once.
   useEffect(() => {
-    if (!replay || !input.draftingKey || !input.projectId) return;
+    const sent = startOf(input);
+    if (!replay || !sent) return;
     replayed.current.add(runId);
-    void sendStart(runId, input.draftingKey, input.projectId, input.idea ?? "");
+    void sendStart(runId, sent.key, sent.projectId, sent.idea);
   }, [replay, runId]);
   // A draft that is gone, expired or used elsewhere releases the composer.
   const lost =
@@ -278,6 +295,9 @@ export function useDrafting({
   // biome-ignore lint/correctness/useExhaustiveDependencies: releases once when the run is lost; the handlers are rebuilt every render.
   useEffect(() => {
     if (!lost || !runId) return;
+    // A start that is still unknown after its replays is handed on, so it is replayed
+    // until known and then ended, instead of being left reachable from nowhere.
+    if (notFound) releaseDraft(runId, startOf(input));
     clearRun(
       run?.state === "expired" ? draftingCopy.expired : draftingCopy.gone,
     );

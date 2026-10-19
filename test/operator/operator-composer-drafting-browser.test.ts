@@ -488,6 +488,34 @@ for (const [name, viewport] of viewports) {
     );
   });
 
+  test(`${name}: a start whose outcome stays unknown is replayed by the release, then ended`, async (_t, j) => {
+    const { f, page, commands, open } = await launch(j, viewport);
+    await open();
+    await openPanel(page);
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    // The first two starts are lost on the way, so the composer's own replay is spent.
+    let lost = 0;
+    await page.route("**/api/operator/commands", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      if (body.type === "drafting.start" && lost < 2) {
+        lost++;
+        await route.abort();
+      } else await route.continue();
+    });
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    const starts = commands("drafting.start");
+    assert.equal(starts.length, 3);
+    assert.equal(new Set(starts.map((c) => c.key)).size, 1);
+    // The run that did start is ended, not left behind the cleared composer.
+    await until(() => f.service.readDrafting(runId)?.state === "stopping");
+    f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
+    await until(
+      () => f.service.readDrafting(runId)?.state === "discarded",
+      30000,
+    );
+  });
+
   test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport, {
       lead: false,
