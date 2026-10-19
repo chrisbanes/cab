@@ -3691,6 +3691,12 @@ export class StandaloneService {
         ? {
             // A lead binding without an assignment row yet is still waiting to start.
             state: String(assignment?.state ?? "pending"),
+            // Queued, held or refused ordinary work also means the lead has started.
+            ordinaryWork:
+              binding !== undefined &&
+              this.started().schedulerStore.hasOrdinaryAssignmentWork(
+                String(binding.assignmentId),
+              ),
             revoked: [configured, binding && String(binding.profileId)].some(
               (profileId) =>
                 profileId !== null &&

@@ -11,7 +11,7 @@ import { draftTurnUnavailableText } from "../../src/operator/draft-turn-copy.js"
 const open: DraftTurnFacts = {
   taskState: "open",
   ready: false,
-  lead: { state: "pending", revoked: false },
+  lead: { state: "pending", revoked: false, ordinaryWork: false },
   draftTurnActive: false,
 };
 
@@ -22,10 +22,27 @@ test("a draft turn is available only on an open, unready task with a waiting lea
     [{ taskState: "cancelled", ready: true }, "task-not-open"],
     [{ ready: true }, "task-ready"],
     [{ lead: null }, "lead-unconfigured"],
-    [{ lead: { state: "pending", revoked: true } }, "lead-revoked"],
-    [{ lead: { state: "held", revoked: false } }, "lead-unavailable"],
-    [{ lead: { state: "completed", revoked: false } }, "lead-unavailable"],
-    [{ lead: { state: "running", revoked: false } }, "lead-unavailable"],
+    [
+      { lead: { state: "pending", revoked: true, ordinaryWork: false } },
+      "lead-revoked",
+    ],
+    [
+      { lead: { state: "held", revoked: false, ordinaryWork: false } },
+      "lead-unavailable",
+    ],
+    [
+      { lead: { state: "completed", revoked: false, ordinaryWork: false } },
+      "lead-unavailable",
+    ],
+    [
+      { lead: { state: "running", revoked: false, ordinaryWork: false } },
+      "lead-unavailable",
+    ],
+    // Queued, held or refused ordinary work means the lead has started.
+    [
+      { lead: { state: "pending", revoked: false, ordinaryWork: true } },
+      "lead-unavailable",
+    ],
     [{ draftTurnActive: true }, "draft-turn-active"],
   ];
   for (const [change, reason] of refused)

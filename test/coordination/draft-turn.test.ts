@@ -245,7 +245,11 @@ test("a draft turn is refused with its reason and records nothing", async (t) =>
       .prepare("UPDATE domain_assignments SET state='held' WHERE id=?")
       .run(held.assignmentId),
   );
-  await refuse(held, "lead-unavailable", /running, held or has completed/);
+  await refuse(
+    held,
+    "lead-unavailable",
+    /has started, is held or has completed/,
+  );
 
   const noLead = await draftTask(f, "No lead draft");
   f.seedPersistedState((db) =>
@@ -275,6 +279,55 @@ test("a draft turn is refused with its reason and records nothing", async (t) =>
   await queued.api.execute(startCommand(f, queued.taskId));
   assert.equal(rows(f, queued.taskId).draftRequests, 1);
   await refuse(queued, "draft-turn-active", /already queued or running/);
+});
+
+test("a lead with queued ordinary work refuses a draft turn and leaves that work alone", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await draftTask(f, "Queued ordinary work");
+  const domain = f.service.domain();
+  const setReady = (ready: boolean) =>
+    domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: task.projectId,
+      taskId: task.taskId,
+      expectedVersion: version(f, task.taskId),
+      ready,
+    });
+  // The initial lead request is queued while the project is paused, then the task is Draft again.
+  configure(f, task.projectId, true);
+  setReady(true);
+  await until(
+    () =>
+      count(
+        f,
+        "SELECT COUNT(*) AS n FROM turn_requests WHERE assignmentId=? AND draftTurn=0",
+        task.assignmentId,
+      ) === 1,
+    "queued initial request",
+  );
+  setReady(false);
+  const before = rows(f, task.taskId);
+  await assert.rejects(
+    task.api.execute(startCommand(f, task.taskId)),
+    conflict(/has started, is held or has completed/),
+  );
+  assert.deepEqual(rows(f, task.taskId), before);
+  assert.deepEqual((await task.api.readTask(task.taskId)).data.draftTurn, {
+    available: false,
+    reason: "lead-unavailable",
+  });
+  // The queued ordinary request is untouched: no draft turn touched it.
+  assert.equal(
+    count(
+      f,
+      "SELECT COUNT(*) AS n FROM turn_requests WHERE assignmentId=? AND draftTurn=0 AND state='queued'",
+      task.assignmentId,
+    ),
+    1,
+  );
 });
 
 test("a draft turn allows questions and refuses every other tool without recording anything", async (t) => {

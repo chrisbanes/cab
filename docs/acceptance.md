@@ -681,7 +681,7 @@ per-turn read-only policy is proved by the
 | Criteria | Evidence |
 | --- | --- |
 | A draft turn runs on an open Draft task with the operator message and the draft-turn instruction, read-only, network off whatever the project sets, leaves the lead pending and records no reporting repair; replay returns the receipt | `draft-turn.test.ts` |
-| Ready, Done, Cancelled, no lead, revoked or held lead, a queued draft turn and a stale version refuse with a reason and record nothing | `draft-turn.test.ts` |
+| Ready, Done, Cancelled, no lead, revoked or held lead, a lead with queued ordinary work, a queued draft turn and a stale version refuse with a reason and record nothing | `draft-turn.test.ts` |
 | Delegation, pull request registration and actions, issue close, results, follow-up and completion are refused without recording rows; question and `issue.comment`/`issue.labels` pass the filter; the filter and instruction are unit tested | `draft-turn.test.ts`, `draft-turn-rules.test.ts` |
 | An answer waits for the next draft turn; pause, Stop and capacity hold a queued turn; a restart keeps it queued as a draft turn | `draft-turn.test.ts` |
 | Making the task Ready runs the lead's initial turn in the draft conversation, or routes without a lead turn when routing is on | `draft-turn.test.ts` |

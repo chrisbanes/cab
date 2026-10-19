@@ -11,7 +11,7 @@ export interface DraftTurnFacts {
   taskState: "open" | "done" | "cancelled";
   ready: boolean;
   /** Null when the task has no lead assignment. */
-  lead: { state: string; revoked: boolean } | null;
+  lead: { state: string; revoked: boolean; ordinaryWork: boolean } | null;
   /** A draft-turn request for this task is queued or running. */
   draftTurnActive: boolean;
 }
@@ -36,7 +36,7 @@ export function draftTurnAvailability(
           ? "lead-unconfigured"
           : facts.lead.revoked
             ? "lead-revoked"
-            : facts.lead.state !== "pending"
+            : facts.lead.state !== "pending" || facts.lead.ordinaryWork
               ? "lead-unavailable"
               : facts.draftTurnActive
                 ? "draft-turn-active"
