@@ -135,13 +135,18 @@ function SettingOptions({
   );
 }
 
-/** Runtime selector, plus model and effort (blank uses the harness default). */
+/**
+ * Runtime selector, plus model and effort (blank uses the harness default). Guided setup
+ * keeps its first screen short by leaving a Codex profile's settings to Settings → Profiles.
+ */
 export function RuntimeFields({
   draft,
   workspace,
+  codexSettings = true,
 }: {
   draft: ConfigurationDraft;
   workspace: SettingsProps["workspace"];
+  codexSettings?: boolean;
 }) {
   const harness = draft.values.runtimeHarness,
     status = workspace?.data.harnesses.find((h) => h.harness === harness),
@@ -153,7 +158,7 @@ export function RuntimeFields({
         <option value="codex">{executionHarnessLabels.codex}</option>
         <option value="claude">{executionHarnessLabels.claude}</option>
       </DraftField>
-      {(harness === "claude" || harness === "codex") && (
+      {(harness === "claude" || (harness === "codex" && codexSettings)) && (
         <>
           <DraftField
             draft={draft}

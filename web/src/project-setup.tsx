@@ -601,7 +601,11 @@ export function ProjectSetup(
                     label="Profile name"
                   />
                 </div>
-                <RuntimeFields draft={inline} workspace={p.workspace} />
+                <RuntimeFields
+                  draft={inline}
+                  workspace={p.workspace}
+                  codexSettings={false}
+                />
                 <p className="metadata muted">
                   Add a summary and instructions later in Settings → Profiles.
                 </p>

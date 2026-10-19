@@ -1541,7 +1541,7 @@ export class CodexRuntime implements Runtime {
       captureProcessIdentity?: (
         pid: number | undefined,
       ) => Promise<RuntimeProcessIdentity | null>;
-      /** Delay before a failed `model/list` read is retried; default 30s. */
+      /** Delay before waiting work is offered again after a failed `model/list` read; default 30s. */
       settingsRetryMs?: number;
     },
   ) {}
@@ -1590,7 +1590,10 @@ export class CodexRuntime implements Runtime {
     return undefined;
   }
 
-  /** Single-flight and never awaited by a caller; a failure retries after a delay. */
+  /**
+   * Single-flight and never awaited by a caller. A failed read is read again by the next
+   * preflight of work with settings; the delayed wake only makes sure such work is offered again.
+   */
   private readSupportedSettings(): void {
     const child = this.child;
     if (!child || this.settingsRead) return;
