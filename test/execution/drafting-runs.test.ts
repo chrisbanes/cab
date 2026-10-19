@@ -47,9 +47,17 @@ test("turn request migration keeps rows, sequences and links and admits drafting
     .prepare("SELECT * FROM turn_requests ORDER BY sequence")
     .all();
   new SchedulerStore(db);
+  const after = db
+    .prepare("SELECT * FROM turn_requests ORDER BY sequence")
+    .all() as Array<{ draftTurn: number }>;
+  // Every migrated row is an ordinary turn.
   assert.deepEqual(
-    db.prepare("SELECT * FROM turn_requests ORDER BY sequence").all(),
-    before,
+    after.map((row) => row.draftTurn),
+    [0, 0],
+  );
+  assert.deepEqual(
+    after.map(({ draftTurn: _, ...row }) => row),
+    before.map((row) => ({ ...row })),
   );
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   assert.equal(db.prepare("SELECT * FROM successor").all().length, 1);
