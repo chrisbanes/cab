@@ -2729,6 +2729,11 @@ export class OperatorApi {
         reason: run.reason,
         proposal: shown,
         proposalWithheld: run.proposal !== null && shown === null,
+        leadName: this.safe(
+          this.domain().profileRevision(run.profileId, run.profileRevision)
+            .name,
+          excluded,
+        ),
         createdAt: run.createdAt,
         expiresAt: run.expiresAt,
       },

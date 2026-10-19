@@ -283,7 +283,10 @@ export function useDrafting({
     Boolean(input.projectId) &&
     (input.idea ?? "").trim() !== "";
   const waitingForRun = Boolean(runId) && !run && !lost;
-  const leadName = lead?.name ?? "The lead";
+  // The run's own lead, which may no longer be the project's.
+  const leadName = run
+    ? (run.leadName ?? "The lead")
+    : (lead?.name ?? "The lead");
   const elapsed = run ? (now - run.createdAt) / 1000 : 0;
   return {
     input,

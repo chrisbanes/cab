@@ -105,6 +105,27 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
   const proposed = await runOf(runId);
   assert.equal(proposed.state, "proposed");
   assert.deepEqual(proposed.proposal, proposal);
+  assert.equal(proposed.leadName, "Mira");
+  // The project's lead is replaced: the run still names the lead it captured.
+  const replacement = randomUUID();
+  domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: replacement,
+    name: "Replacement",
+    instructions: "Another lead.",
+    capabilities: "plan",
+  });
+  domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(domain.project(projectId).version),
+    leadProfileId: replacement,
+  });
+  assert.equal((await runOf(runId)).leadName, "Mira");
   assert.equal(typeof proposed.expiresAt, "number");
 
   // Accepting settles the run; neither the receipt nor a later read carries the text.
