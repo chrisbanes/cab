@@ -1677,7 +1677,8 @@ landed: one that ended unproved, was reported pushed by Git, was concluded not a
 or was never settled. A push that never started or was rejected owns nothing. A remote that equals
 the requested commit is therefore accepted only on a retry whose earlier attempt may have landed,
 and a retry of an operation superseded by a newer push is refused. Git reporting a push done keeps
-the outcome unproved until a read shows it; a later third head then records the push and the outside
+the outcome unproved until a read shows it (a first push whose branch is deleted before the read cannot be
+told from read lag, so it stays unproved until an operator acts); a later third head then records the push and the outside
 head separately. Any head Ensemble does not own, seen at a push or on the task's PR, is an outside
 change: the push is refused, the lead is woken and handback settlement is invalidated at once;
 without a PR it is noticed at the next push, as Ensemble does not poll branches. While the branch
