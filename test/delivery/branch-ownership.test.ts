@@ -377,10 +377,18 @@ test("ancestry is proved from hash-verified commits, not from a forged commit-gr
     "objects/info/commit-graph",
   );
   forgeCommitGraphParent(graph, x, first);
-  // Plain Git trusts the graph: it now believes `first` is an ancestor of X.
-  execFileSync("git", ["merge-base", "--is-ancestor", first, x], {
-    cwd: w.workspace,
-  });
+  // Plain Git trusts the graph on most versions: it then believes `first` is an ancestor of X.
+  // A Git that rejects this forgery is already safe; the verifier is asserted either way.
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", first, x], {
+      cwd: w.workspace,
+      stdio: "ignore",
+    });
+  } catch {
+    t.diagnostic(
+      `Git ${execFileSync("git", ["--version"], { encoding: "utf8" }).trim()} does not trust the forged commit-graph; asserting only the verifier`,
+    );
+  }
   const verification = await verifyTaskPush(
     { workspacePath: w.workspace, baseCommit: w.base },
     x,
@@ -468,4 +476,25 @@ test("an update Git rejected never owns an equal head, even when its readback fa
     "branch-push-rejected",
   );
   assert.deepEqual(unchanged.wakes, []);
+});
+
+test("a branch deleted after Ensemble's push is an outside change, not a clean success", async (t) => {
+  const w = publicationWorld(t);
+  const { first } = await withPr(w);
+  await settle(w, first);
+  w.wakes.length = 0;
+  const second = w.commit();
+  w.setPush("applied-then-deleted");
+  const record = await w.submit("branch.push", second);
+  assert.equal(record.state, "confirmed-success");
+  assert.equal(branchOf(w)?.lastPushedSha, second);
+  assert.equal(w.store.delivery(w.taskId)?.settlement, null);
+  assert.deepEqual(
+    w.wakes.map((x) => x.identity),
+    [`outside-push:${repositoryId}:absent`],
+  );
+  // The absent branch is not where Ensemble left it, so the next push is refused.
+  w.setPush("apply");
+  const next = await w.submit("branch.push", w.commit());
+  assert.equal(next.observation?.reason, "branch-outside-change");
 });

@@ -350,7 +350,9 @@ export class DeliveryCoordinator {
         observation.outsideHeadSha ??
         (observation.reason === "branch-outside-change"
           ? (observation.receipt?.headSha ?? null)
-          : undefined);
+          : observation.outsideDeleted
+            ? null
+            : undefined);
     return this.store.recordObservation(
       record.operationId,
       observation,

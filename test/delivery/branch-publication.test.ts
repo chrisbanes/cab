@@ -613,3 +613,22 @@ test("a retry after a push that never started does not accept an equal remote as
     null,
   );
 });
+
+test("a complete branch name longer than the prefix cap is valid", async (t) => {
+  const prefix = `${"p".repeat(62)}/`;
+  const w = publicationWorld(t, {
+    grants: ["branch.push"],
+    branchPrefix: prefix,
+    title:
+      "A very long title that keeps going well past the slug cap for a task",
+  });
+  const record = await w.submit("branch.push", w.commit());
+  assert.equal(
+    record.state,
+    "confirmed-success",
+    record.observation?.reason ?? "",
+  );
+  const branch = w.store.taskBranch(w.taskId, repositoryId)?.branch ?? "";
+  assert.ok(branch.length > 64 && branch.length <= 160, String(branch.length));
+  assert.ok(branch.startsWith(prefix));
+});

@@ -1414,7 +1414,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           };
     // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved it.
     return pushed
-      ? success(remote ? { outsideHeadSha: remote } : {})
+      ? success(remote ? { outsideHeadSha: remote } : { outsideDeleted: true })
       : {
           state: "confirmed-failure",
           reason: "branch-outside-change",

@@ -22,22 +22,25 @@ export const actionKinds = [
 ] as const;
 export const defaultBranchPrefix = "ensemble/";
 const branchPrefixMax = 64;
-/** Pure ref-safety for a name's leading part; the prefix may end mid-segment (`team-`). */
-export function validBranchPrefix(prefix: string): boolean {
+/** Ref-safety of a name, or of its leading part, which may end mid-segment (`team-`); no length rule. */
+function refSafe(name: string): boolean {
   return (
-    prefix.length <= branchPrefixMax &&
-    /^[A-Za-z0-9._/-]*$/.test(prefix) &&
-    !prefix.includes("..") &&
-    !prefix.includes("//") &&
-    prefix.split("/").every((s) => !/^[.-]|\.lock$/.test(s))
+    /^[A-Za-z0-9._/-]*$/.test(name) &&
+    !name.includes("..") &&
+    !name.includes("//") &&
+    name.split("/").every((s) => !/^[.-]|\.lock$/.test(s))
   );
+}
+/** A project's branch prefix: ref-safe and at most 64 characters. */
+export function validBranchPrefix(prefix: string): boolean {
+  return prefix.length <= branchPrefixMax && refSafe(prefix);
 }
 /** A complete, Ensemble-assigned task branch name. */
 export function safeBranchName(name: string): boolean {
   return (
     name.length > 0 &&
     name.length <= 160 &&
-    validBranchPrefix(name) &&
+    refSafe(name) &&
     !/[./-]$/.test(name) &&
     !name.startsWith("/")
   );
@@ -322,6 +325,8 @@ export const actionObservationSchema = z
     rejected: z.boolean().optional(),
     /** A head Ensemble did not push, seen alongside this outcome. */
     outsideHeadSha: commitSha.optional(),
+    /** The branch was deleted by another writer after Ensemble's push. */
+    outsideDeleted: z.boolean().optional(),
     /** Epoch ms before which a retryable failure is not re-attempted. */
     resumeAt: z.number().int().positive().optional(),
   })
@@ -1136,7 +1141,11 @@ export class DeliveryStore {
               "UPDATE delivery_task_branches SET outsideHeadSha=? WHERE taskId=? AND repositoryId=?",
             )
             .run(outside, taskId, repositoryId);
-        if (outside || observation.reason === "branch-outside-change")
+        if (
+          outside ||
+          observation.outsideDeleted ||
+          observation.reason === "branch-outside-change"
+        )
           this.clearSettlementOnBranch(taskId, repositoryId);
       }
       within?.(record);

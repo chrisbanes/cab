@@ -191,7 +191,8 @@ export function publicationWorld(
     | "remote-rejected"
     | "applied-then-moved"
     | "stale-unchanged"
-    | "stale-readback-fails" = "apply";
+    | "stale-readback-fails"
+    | "applied-then-deleted" = "apply";
   let racer: string | null = null;
   let movedHead = "9".repeat(40);
   let refReadsFail = false;
@@ -209,6 +210,11 @@ export function publicationWorld(
     if (pushBehaviour === "stale-readback-fails") {
       refReadsFail = true;
       return "rejected-lease";
+    }
+    if (pushBehaviour === "applied-then-deleted") {
+      // Git succeeds, then another writer deletes the branch before Ensemble reads it back.
+      remote.head = null;
+      return "pushed";
     }
     if (pushBehaviour === "applied-then-moved") {
       // Git succeeds, then another writer moves the branch before Ensemble reads it back.
