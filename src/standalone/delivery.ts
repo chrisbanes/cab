@@ -19,6 +19,10 @@ import {
 import {
   type GitHubDeliveryProvider,
   GitHubHttpDeliveryProvider,
+  PublicationRefusal,
+  type PublicationContext,
+  type PushFunction,
+  type PushVerification,
 } from "./github-delivery.js";
 
 /** The unresolved review threads a lead can reply to or resolve, capped with an omitted count. */
@@ -64,6 +68,15 @@ export interface DeliveryCoordinatorOptions {
   taskVersion?: (taskId: string) => number;
   leadAssignmentId?: (taskId: string) => string;
   feedback?: (taskId: string, reason: string, identity: string) => void;
+  /** Offline check of a push's commit in the task worktree; null when it cannot be verified. */
+  verifyPush?: (input: {
+    taskId: string;
+    repositoryId: string;
+    commitSha: string;
+    lastPushedSha: string | null;
+  }) => Promise<PushVerification | null>;
+  /** Test seam for the HTTPS push; production uses `pushTaskCommit`. */
+  push?: PushFunction;
   activationAllowed?: (policy: DeliveryPolicy) => boolean;
 }
 function actionKeys(record: {
@@ -73,7 +86,7 @@ function actionKeys(record: {
   const target = record.request.action.target;
   return [
     `task:${record.binding.taskId}`,
-    `target:${target.repositoryId}:${"number" in target ? target.number : target.headRef}`,
+    `target:${target.repositoryId}:${"number" in target ? target.number : "headRef" in target ? target.headRef : "branch"}`,
   ];
 }
 /** A confirmed no-effect failure the provider allows retrying, once its resume time has passed. */
@@ -105,6 +118,19 @@ export class DeliveryCoordinator {
     return new GitHubHttpDeliveryProvider(
       credential ?? "",
       this.options.fetcher,
+      this.options.push,
+    );
+  }
+  /** Wakes the lead when a push found, or the PR shows, a branch head Ensemble did not push. */
+  private outsidePush(
+    taskId: string,
+    repositoryId: string,
+    sha: string | null,
+  ) {
+    this.options.feedback?.(
+      taskId,
+      `The task branch changed outside Ensemble (head ${sha ?? "deleted"}). Review the branch before publishing again.`,
+      `outside-push:${repositoryId}:${sha ?? "absent"}`,
     );
   }
   private serialize<T>(keys: string[], run: () => Promise<T>): Promise<T> {
@@ -165,10 +191,66 @@ export class DeliveryCoordinator {
     const caller = record.binding,
       policy = this.store.configuration(caller.projectId);
     const provider = this.provider(caller.projectId, policy);
+    const action = record.request.action;
+    let publication: PublicationContext | undefined;
+    const assigned =
+      action.kind === "branch.push" || action.kind === "branch.force-push"
+        ? this.store.taskBranch(caller.taskId, action.target.repositoryId)
+        : null;
+    if (
+      (action.kind === "branch.push" || action.kind === "branch.force-push") &&
+      assigned
+    ) {
+      // Offline first: a commit that is not the task's own work never reaches a provider.
+      const verified = await this.options
+        .verifyPush?.({
+          taskId: caller.taskId,
+          repositoryId: action.target.repositoryId,
+          commitSha: action.commitSha,
+          lastPushedSha: assigned.lastPushedSha,
+        })
+        .catch(() => null);
+      if (!verified)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "push-commit-not-verified",
+          receipt: null,
+        });
+      publication = {
+        ...verified,
+        branch: assigned.branch,
+        lastPushedSha: assigned.lastPushedSha,
+      };
+    }
     let before: Record<string, z.output<ReturnType<typeof z.json>>>;
     try {
-      before = await provider.preflight(record.request.action, policy);
-    } catch {
+      before = await provider.preflight(action, policy, publication);
+    } catch (error) {
+      if (error instanceof PublicationRefusal) {
+        const outside = error.reason === "branch-outside-change";
+        return this.store.recordObservation(
+          record.operationId,
+          {
+            state: "confirmed-failure",
+            reason: error.reason,
+            receipt:
+              outside && error.outsideHeadSha && assigned
+                ? {
+                    nodeId: action.target.repositoryId,
+                    ref: assigned.branch,
+                    headSha: error.outsideHeadSha,
+                  }
+                : null,
+          },
+          () =>
+            outside &&
+            this.outsidePush(
+              caller.taskId,
+              action.target.repositoryId,
+              error.outsideHeadSha,
+            ),
+        );
+      }
       return this.store.recordObservation(record.operationId, {
         state: "confirmed-failure",
         reason: "provider-preflight-held",
@@ -190,6 +272,18 @@ export class DeliveryCoordinator {
       attempting = this.store.beginAttempt(record.operationId, before, () => {
         if (closureGuard?.().length)
           throw new Error("PR delivery boundary held");
+        if (assigned) {
+          // The branch and the last push must be what preflight saw after the final await.
+          const current = this.store.taskBranch(
+            caller.taskId,
+            assigned.repositoryId,
+          );
+          if (
+            current?.branch !== assigned.branch ||
+            current.lastPushedSha !== assigned.lastPushedSha
+          )
+            throw new Error("Task branch changed during publication");
+        }
         if (this.stopped || this.options.activationAllowed?.(policy) === false)
           throw new Error(
             "Delivery credential activation requires safe runtime restart",
@@ -220,7 +314,33 @@ export class DeliveryCoordinator {
       };
     }
     // A retryable failure waits for reconcile() once its resume time passes.
-    return this.store.recordObservation(record.operationId, observation);
+    const recorded = this.recordPublicationAware(record, observation);
+    // The PR head moved with the push: observe it now, under the task's serialization.
+    if (
+      assigned &&
+      recorded.state === "confirmed-success" &&
+      this.store.delivery(caller.taskId)
+    )
+      await this.inspectBinding(caller.taskId).catch(() => {});
+    return recorded;
+  }
+  private recordPublicationAware(
+    record: DeliveryActionRecord,
+    observation: ProviderActionObservation,
+  ): DeliveryActionRecord {
+    const action = record.request.action;
+    return this.store.recordObservation(
+      record.operationId,
+      observation,
+      () =>
+        action.kind.startsWith("branch.") &&
+        observation.reason === "branch-outside-change" &&
+        this.outsidePush(
+          record.binding.taskId,
+          action.target.repositoryId,
+          observation.receipt?.headSha ?? null,
+        ),
+    );
   }
   async registerPr(input: unknown, caller: DeliveryCaller) {
     if (isOperatorDeliveryCaller(caller))
@@ -355,7 +475,10 @@ export class DeliveryCoordinator {
       if (!current || current.revision !== binding.revision)
         throw new Error("PR delivery changed during inspection");
       const result = this.store.observePrWithinTransaction(taskId, observation);
-      if (result.changed)
+      // One event: an outside head is the more specific notice for a changed PR.
+      if (result.outsideHead)
+        this.outsidePush(taskId, observation.repositoryId, observation.headSha);
+      else if (result.changed)
         this.options.feedback?.(
           taskId,
           `PR delivery feedback changed: ${observation.checks.map((c) => `${c.name}: ${c.status}`).join("; ")}. ${(
@@ -487,7 +610,7 @@ export class DeliveryCoordinator {
             receipt: null,
           };
         }
-        this.store.recordObservation(current.operationId, observation);
+        this.recordPublicationAware(current, observation);
       });
     }
   }

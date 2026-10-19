@@ -373,6 +373,13 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   of it. Evidence: [GitHub delivery](evidence/s07a-github-delivery.md),
   [release candidate](evidence/s07b-release-candidate.md),
   [inventory](evidence/release-candidate-inventory.json).
+- **Task commit publication** (#1199, ADR-1016) — **Bounded.** Deterministic tests
+  cover the `branch.push` and `branch.force-push` grants and approval, the assigned
+  task branch, offline commit verification, the fast-forward and lease rules, uncertain
+  and outside-change outcomes, and the credential-containing push invocation
+  (`branch-publication`, `git-push`, `delivery-integration`, `delivery-feedback`). The
+  bounded live run that publishes a task commit, opens the PR and pushes a repair is
+  unproved until its evidence record exists.
 - **Operations, recovery and cutover** (R06) — **Bounded.** A disposable launchd
   service lifecycle with database backup/restore passed, and current-schema backup,
   verify and restore with exact owned-process recovery passed locally. Deterministic

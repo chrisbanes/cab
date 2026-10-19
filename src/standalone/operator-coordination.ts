@@ -110,7 +110,7 @@ const settlementFields = z
     decision: z.enum(["accepted", "closed"]),
   })
   .strict();
-function deliverySection(
+export function deliverySection(
   view: CoordinationTaskView,
   csrfToken: string,
 ): string {
@@ -121,6 +121,9 @@ function deliverySection(
     ? `<p>Issue ${issue.issueNumber} (${escapeHtml(issue.nodeId)}): observed ${escapeHtml(issue.observedState)}. Labels: ${escapeHtml(issue.labels.join(", "))}.</p>`
     : "<p>No imported issue observation.</p>";
   const fieldFacts = `<p>Project field observations: ${escapeHtml(delivery.projectFieldObservations.map((f) => `${f.projectNodeId}/${f.fieldNodeId}: ${f.optionNodeId}`).join("; ") || "None observed")}.</p>`;
+  const branchFacts = delivery.branches.length
+    ? `<p>Task branches: ${escapeHtml(delivery.branches.map((r) => `${r.branch} (${r.repositoryId}) pushed ${r.lastPushedSha ?? "nothing yet"}${r.outsideHeadSha ? `; outside push ${r.outsideHeadSha}` : ""}`).join("; "))}.</p>`
+    : "";
   const b = delivery.binding,
     p = b?.observation;
   const actions = delivery.actions
@@ -161,7 +164,7 @@ function deliverySection(
           "Settle outcome as closed",
         )
       : "";
-  return `<section><h2>GitHub delivery</h2><p>Completion mode: ${escapeHtml(delivery.mode)}. Local task: ${escapeHtml(view.task.state)}. Delivery holds: ${escapeHtml(delivery.blockers.join(", ") || "None")}.</p>${sourceFacts}${fieldFacts}${pr}${actions ? `<ul>${actions}</ul>` : "<p>No external actions.</p>"}${settlement}${form("/coordination/control/delivery/refresh", [["taskId", view.task.id]], csrfToken, "Refresh delivery observations")}</section>`;
+  return `<section><h2>GitHub delivery</h2><p>Completion mode: ${escapeHtml(delivery.mode)}. Local task: ${escapeHtml(view.task.state)}. Delivery holds: ${escapeHtml(delivery.blockers.join(", ") || "None")}.</p>${sourceFacts}${fieldFacts}${branchFacts}${pr}${actions ? `<ul>${actions}</ul>` : "<p>No external actions.</p>"}${settlement}${form("/coordination/control/delivery/refresh", [["taskId", view.task.id]], csrfToken, "Refresh delivery observations")}</section>`;
 }
 function form(
   action: string,

@@ -8,6 +8,7 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
+import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import {
   actionObservationSchema,
   prObservationSchema,
@@ -40,6 +41,34 @@ export type ClosedIssueInspection =
         closerPrNodeId: string | null;
       } | null;
     };
+/** Offline facts about a push's commit in the task worktree, established before any network call. */
+export interface PushVerification {
+  workspacePath: string;
+  /** Changed or untracked worktree entries; they are never pushed. */
+  uncommittedEntries: number;
+  /** Whether the commit descends from the last commit Ensemble pushed; null before the first push. */
+  descendsFromLastPushed: boolean | null;
+}
+export interface PublicationContext extends PushVerification {
+  /** The task's assigned branch, and the commit Ensemble last pushed to it. */
+  branch: string;
+  lastPushedSha: string | null;
+}
+export type PushFunction = (
+  request: Parameters<typeof pushTaskCommit>[0],
+) => Promise<PushOutcome>;
+/** A publication refused at preflight; `outsideHeadSha` names a remote head Ensemble did not push. */
+export class PublicationRefusal extends Error {
+  constructor(
+    readonly reason:
+      | "branch-outside-change"
+      | "branch-not-fast-forward"
+      | "branch-force-push-needs-lease",
+    readonly outsideHeadSha: string | null = null,
+  ) {
+    super(reason);
+  }
+}
 export interface GitHubDeliveryProvider {
   inspectClosedIssue?(target: {
     repositoryId: string;
@@ -52,6 +81,7 @@ export interface GitHubDeliveryProvider {
   preflight(
     action: ExternalAction,
     policy: DeliveryPolicy,
+    publication?: PublicationContext,
   ): Promise<Record<string, z.output<ReturnType<typeof z.json>>>>;
   performAction(
     record: DeliveryActionRecord,
@@ -153,6 +183,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
   constructor(
     private readonly credential: string,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly push: PushFunction = pushTaskCommit,
   ) {}
   private async request(
     path: string,
@@ -273,12 +304,24 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     const value = z
       .object({ ref: name, object: z.object({ sha }) })
       .parse(
-        (await this.request(`${path}/git/ref/heads/${encodeURIComponent(ref)}`))
-          .json,
+        (
+          await this.request(
+            `${path}/git/ref/heads/${ref.split("/").map(encodeURIComponent).join("/")}`,
+          )
+        ).json,
       );
     if (value.ref !== `refs/heads/${ref}`)
       throw new Error("provider-ref-mismatch");
     return value.object.sha;
+  }
+  /** The branch's head, or null when the branch does not exist. */
+  private async optionalRef(path: string, ref: string): Promise<string | null> {
+    try {
+      return await this.ref(path, ref);
+    } catch (error) {
+      if (error instanceof ProviderFailure && error.status === 404) return null;
+      throw error;
+    }
   }
   /** Reads a review thread; `all` pages every comment, otherwise only the first page. */
   private async thread(id: string, all: boolean) {
@@ -974,8 +1017,33 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     )
       throw new Error("provider-thread-mismatch");
   }
-  async preflight(action: ExternalAction, policy: DeliveryPolicy) {
+  async preflight(
+    action: ExternalAction,
+    policy: DeliveryPolicy,
+    publication?: PublicationContext,
+  ) {
     const repo = await this.repository(action.target.repositoryId);
+    if (action.kind === "branch.push" || action.kind === "branch.force-push") {
+      if (!publication) throw new Error("provider-publication-unverified");
+      const remote = await this.optionalRef(repo.path, publication.branch);
+      // The remote must be where Ensemble left it (or already at the commit, after a lagging readback).
+      if (remote !== action.commitSha && remote !== publication.lastPushedSha)
+        throw new PublicationRefusal("branch-outside-change", remote);
+      if (action.kind === "branch.force-push") {
+        if (publication.lastPushedSha === null)
+          throw new PublicationRefusal("branch-force-push-needs-lease");
+      } else if (publication.descendsFromLastPushed === false)
+        throw new PublicationRefusal("branch-not-fast-forward");
+      return {
+        repositoryPath: repo.path,
+        repositoryId: action.target.repositoryId,
+        branch: publication.branch,
+        beforeHead: remote,
+        lastPushedSha: publication.lastPushedSha,
+        workspacePath: publication.workspacePath,
+        uncommittedEntries: publication.uncommittedEntries,
+      };
+    }
     if (action.kind === "pr.create") {
       const head = await this.ref(repo.path, action.target.headRef);
       await this.ref(repo.path, action.target.baseRef);
@@ -1068,6 +1136,8 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         "Operator delivery only permits the bound issue.comment",
       );
     const a = record.request.action;
+    if (a.kind === "branch.push" || a.kind === "branch.force-push")
+      return this.publish(record, a);
     try {
       const repo = {
         path: z
@@ -1183,6 +1253,81 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       };
     }
   }
+  /** Pushes the named commit unless the branch already has it, then settles by reading the ref. */
+  private async publish(
+    record: DeliveryActionRecord,
+    a: Extract<ExternalAction, { kind: "branch.push" | "branch.force-push" }>,
+  ): Promise<ProviderActionObservation> {
+    const unsettled: ProviderActionObservation = {
+      state: "uncertain",
+      reason: "provider-effect-unproved",
+      receipt: null,
+    };
+    const failure = (
+      reason: string,
+      extra: Partial<ProviderActionObservation> = {},
+    ): ProviderActionObservation => ({
+      state: "confirmed-failure",
+      reason,
+      receipt: null,
+      ...extra,
+    });
+    try {
+      const before = z
+        .object({
+          repositoryPath: z.string().regex(/^\/repos\/[^/]+\/[^/]+$/),
+          branch: name,
+          beforeHead: sha.nullable(),
+          lastPushedSha: sha.nullable(),
+          workspacePath: name,
+        })
+        .parse(record.beforeState);
+      if (before.beforeHead !== a.commitSha) {
+        const outcome = await this.push({
+          workspacePath: before.workspacePath,
+          nameWithOwner: before.repositoryPath
+            .slice("/repos/".length)
+            .split("/")
+            .map(decodeURIComponent)
+            .join("/"),
+          commitSha: a.commitSha,
+          branch: before.branch,
+          ...(a.kind === "branch.force-push" && before.lastPushedSha
+            ? { lease: before.lastPushedSha }
+            : {}),
+          token: this.credential,
+        });
+        if (outcome === "uncertain") return unsettled;
+        if (outcome === "not-attempted")
+          return failure("push-not-attempted", {
+            retryable: true,
+            resumeAt: Date.now() + 60_000,
+          });
+        if (outcome === "rejected-non-fast-forward")
+          return failure("branch-not-fast-forward");
+        if (outcome === "rejected-remote")
+          return failure("branch-push-rejected");
+        if (outcome === "rejected-lease") {
+          const head = await this.optionalRef(
+            before.repositoryPath,
+            before.branch,
+          ).catch(() => null);
+          return failure("branch-outside-change", {
+            receipt: head
+              ? {
+                  nodeId: a.target.repositoryId,
+                  ref: before.branch,
+                  headSha: head,
+                }
+              : null,
+          });
+        }
+      }
+      return await this.inspectAction(record);
+    } catch {
+      return unsettled;
+    }
+  }
   async inspectAction(
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation> {
@@ -1190,6 +1335,43 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       const a = record.request.action,
         repo = await this.repository(a.target.repositoryId),
         marker = `<!-- ensemble-operation:${record.operationId} -->`;
+      if (a.kind === "branch.push" || a.kind === "branch.force-push") {
+        const before = z
+          .object({
+            branch: name,
+            beforeHead: sha.nullable(),
+            uncommittedEntries: z.number().int().nonnegative(),
+          })
+          .parse(record.beforeState);
+        const remote = await this.optionalRef(repo.path, before.branch);
+        const at = (headSha: string) => ({
+          nodeId: a.target.repositoryId,
+          ref: before.branch,
+          headSha,
+        });
+        if (remote === a.commitSha)
+          return {
+            state: "confirmed-success",
+            reason: null,
+            receipt: {
+              ...at(remote),
+              uncommittedEntries: before.uncommittedEntries,
+            },
+          };
+        // Neither the commit nor the head Ensemble saw before pushing: someone else moved the branch.
+        return remote === before.beforeHead
+          ? {
+              state: "confirmed-failure",
+              reason: "branch-push-not-applied",
+              receipt: null,
+              retryable: true,
+            }
+          : {
+              state: "confirmed-failure",
+              reason: "branch-outside-change",
+              receipt: remote ? at(remote) : null,
+            };
+      }
       const user = z
         .object({ node_id: name })
         .parse((await this.request("/user")).json);

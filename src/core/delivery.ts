@@ -17,7 +17,31 @@ export const actionKinds = [
   "issue.close",
   "pr.thread.reply",
   "pr.thread.resolve",
+  "branch.push",
+  "branch.force-push",
 ] as const;
+export const defaultBranchPrefix = "ensemble/";
+const branchPrefixMax = 64;
+/** Pure ref-safety for a name's leading part; the prefix may end mid-segment (`team-`). */
+export function validBranchPrefix(prefix: string): boolean {
+  return (
+    prefix.length <= branchPrefixMax &&
+    /^[A-Za-z0-9._/-]*$/.test(prefix) &&
+    !prefix.includes("..") &&
+    !prefix.includes("//") &&
+    prefix.split("/").every((s) => !/^[.-]|\.lock$/.test(s))
+  );
+}
+/** A complete, Ensemble-assigned task branch name. */
+export function safeBranchName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name.length <= 160 &&
+    validBranchPrefix(name) &&
+    !/[./-]$/.test(name) &&
+    !name.startsWith("/")
+  );
+}
 export const deliveryPolicySchema = z
   .object({
     mode: z.enum(["reviewable-pr", "through-merge"]),
@@ -25,6 +49,8 @@ export const deliveryPolicySchema = z
       .string()
       .regex(/^env:[A-Z][A-Z0-9_]*$/)
       .nullable(),
+    /** Absent on policies persisted before publication existed; `defaultBranchPrefix` then applies. */
+    branchPrefix: z.string().refine(validBranchPrefix).optional(),
     grants: z
       .array(
         z
@@ -69,6 +95,8 @@ const prTargetSchema = targetSchema
     expectedHeadSha: z.string().regex(/^[0-9a-f]{40}$/),
   })
   .strict();
+const branchTargetSchema = z.object({ repositoryId: identity }).strict();
+const commitSha = z.string().regex(/^[0-9a-f]{40}$/);
 const threadTargetSchema = targetSchema
   .extend({ threadNodeId: identity })
   .strict();
@@ -169,6 +197,20 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       expectedLatestCommentNodeId: identity,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("branch.push"),
+      target: branchTargetSchema,
+      commitSha,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("branch.force-push"),
+      target: branchTargetSchema,
+      commitSha,
+    })
+    .strict(),
 ]);
 export const externalActionArgumentsSchema = z
   .object({
@@ -259,6 +301,10 @@ export const actionObservationSchema = z
     receipt: z
       .object({
         nodeId: identity,
+        /** The branch a publication receipt or outside-change failure names. */
+        ref: identity.optional(),
+        /** Worktree entries a publication left unpushed. */
+        uncommittedEntries: z.number().int().nonnegative().optional(),
         number: z.number().int().positive().optional(),
         headSha: z
           .string()
@@ -407,6 +453,16 @@ const actionRecordSchema = z
   })
   .strict();
 export type DeliveryActionRecord = z.output<typeof actionRecordSchema>;
+const taskBranchSchema = z
+  .object({
+    repositoryId: identity,
+    branch: identity,
+    lastPushedSha: commitSha.nullable(),
+    outsideHeadSha: commitSha.nullable(),
+    assignedAt: z.number(),
+  })
+  .strict();
+export type TaskBranch = z.output<typeof taskBranchSchema>;
 
 export function canonicalMaterial(value: unknown): string {
   if (Array.isArray(value))
@@ -440,6 +496,10 @@ export class DeliveryStore {
     CREATE TABLE IF NOT EXISTS delivery_approval_bindings (interactionId TEXT PRIMARY KEY REFERENCES coordination_interactions(interactionId),taskId TEXT NOT NULL,assignmentId TEXT NOT NULL,taskVersion INTEGER NOT NULL,assignmentVersion INTEGER NOT NULL,conversationRevision INTEGER NOT NULL,workRevision INTEGER NOT NULL,policyVersion INTEGER NOT NULL,materialHash TEXT NOT NULL,operationId TEXT UNIQUE);
     CREATE TABLE IF NOT EXISTS delivery_waiting_work (workId TEXT PRIMARY KEY,taskId TEXT NOT NULL REFERENCES domain_tasks(id),assignmentId TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS delivery_settlement_receipts (commandKey TEXT PRIMARY KEY,payloadHash TEXT NOT NULL,recordJson TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS delivery_task_branches (
+      taskId TEXT NOT NULL REFERENCES domain_tasks(id), repositoryId TEXT NOT NULL, branch TEXT NOT NULL,
+      lastPushedSha TEXT, outsideHeadSha TEXT, assignedAt INTEGER NOT NULL,
+      PRIMARY KEY(taskId,repositoryId), UNIQUE(repositoryId,branch));
     CREATE TABLE IF NOT EXISTS delivery_attempts (
       operationId TEXT NOT NULL REFERENCES delivery_actions(operationId), attempt INTEGER NOT NULL,
       beforeJson TEXT NOT NULL, observationJson TEXT, PRIMARY KEY(operationId,attempt));
@@ -564,6 +624,12 @@ export class DeliveryStore {
       throw new Error("Exact material approval required");
     if (action.kind === "pr.merge" && policy.mode !== "through-merge")
       throw new Error("Project delivery mode forbids merge");
+    if (
+      action.kind === "pr.create" &&
+      this.taskBranch(binding.taskId, action.target.repositoryId)?.branch !==
+        action.target.headRef
+    )
+      throw new Error("PR head is not the task's assigned branch");
     if (
       action.kind === "pr.thread.reply" ||
       action.kind === "pr.thread.resolve"
@@ -935,6 +1001,11 @@ export class DeliveryStore {
       } catch {
         denied = true;
       }
+      if (!denied && request.action.kind.startsWith("branch."))
+        this.assignTaskBranchWithinTransaction(
+          binding.taskId,
+          request.action.target.repositoryId,
+        );
       const now = Date.now();
       const record: DeliveryActionRecord = {
         operationId: request.operationId,
@@ -996,9 +1067,11 @@ export class DeliveryStore {
       return record;
     });
   }
+  /** `within` runs in the same transaction, e.g. to wake the lead with the recorded outcome. */
   recordObservation(
     operationId: string,
     input: ProviderActionObservation,
+    within?: (record: DeliveryActionRecord) => void,
   ): DeliveryActionRecord {
     const observation = actionObservationSchema.parse(input);
     return this.transaction(() => {
@@ -1013,8 +1086,102 @@ export class DeliveryStore {
           "UPDATE delivery_attempts SET observationJson=? WHERE operationId=? AND attempt=?",
         )
         .run(canonicalMaterial(observation), operationId, record.attempts);
+      const action = record.request.action,
+        headSha = observation.receipt?.headSha;
+      if (action.kind.startsWith("branch.") && headSha) {
+        const column =
+          observation.state === "confirmed-success"
+            ? "lastPushedSha"
+            : observation.reason === "branch-outside-change"
+              ? "outsideHeadSha"
+              : undefined;
+        if (column)
+          this.db
+            .prepare(
+              `UPDATE delivery_task_branches SET ${column}=? WHERE taskId=? AND repositoryId=?`,
+            )
+            .run(headSha, record.binding.taskId, action.target.repositoryId);
+      }
+      within?.(record);
       return record;
     });
+  }
+  taskBranch(taskId: string, repositoryId: string): TaskBranch | null {
+    const row = this.db
+      .prepare(
+        "SELECT repositoryId,branch,lastPushedSha,outsideHeadSha,assignedAt FROM delivery_task_branches WHERE taskId=? AND repositoryId=?",
+      )
+      .get(taskId, repositoryId);
+    return row ? taskBranchSchema.parse(row) : null;
+  }
+  taskBranches(taskId: string): TaskBranch[] {
+    return this.db
+      .prepare(
+        "SELECT repositoryId,branch,lastPushedSha,outsideHeadSha,assignedAt FROM delivery_task_branches WHERE taskId=? ORDER BY assignedAt,repositoryId",
+      )
+      .all(taskId)
+      .map((row) => taskBranchSchema.parse(row));
+  }
+  /**
+   * Assigns the task's one branch per repository on first use: `<prefix><task id hex>-<title slug>`,
+   * with the id part lengthened on a collision. Later title or prefix changes never rename it.
+   */
+  assignTaskBranchWithinTransaction(
+    taskId: string,
+    repositoryId: string,
+  ): TaskBranch {
+    const existing = this.taskBranch(taskId, repositoryId);
+    if (existing) return existing;
+    const task = z
+        .object({ projectId: z.string(), title: z.string() })
+        .parse(
+          this.db
+            .prepare("SELECT projectId,title FROM tasks WHERE id=?")
+            .get(taskId),
+        ),
+      prefix =
+        this.configuration(task.projectId).branchPrefix ?? defaultBranchPrefix,
+      slug =
+        task.title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 40)
+          .replace(/-$/, "") || "task",
+      hex = taskId.replaceAll("-", "");
+    for (const length of [8, 12, 16, 32]) {
+      const branch = `${prefix}${hex.slice(0, length)}-${slug}`;
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM delivery_task_branches WHERE repositoryId=? AND branch=?",
+          )
+          .get(repositoryId, branch)
+      )
+        continue;
+      if (!safeBranchName(branch)) throw new Error("Task branch name invalid");
+      this.db
+        .prepare(
+          "INSERT INTO delivery_task_branches VALUES (?,?,?,NULL,NULL,?)",
+        )
+        .run(taskId, repositoryId, branch, Date.now());
+      const assigned = this.taskBranch(taskId, repositoryId);
+      if (assigned) return assigned;
+    }
+    throw new Error("Task branch could not be assigned");
+  }
+  /** Commits Ensemble itself pushed for the task's repository, in any state of the branch. */
+  private pushedShas(taskId: string, repositoryId: string): Set<string> {
+    return new Set(
+      this.actions(taskId).flatMap((a) =>
+        a.state === "confirmed-success" &&
+        a.request.action.kind.startsWith("branch.") &&
+        a.request.action.target.repositoryId === repositoryId &&
+        "commitSha" in a.request.action
+          ? [a.request.action.commitSha]
+          : [],
+      ),
+    );
   }
   delivery(taskId: string): PrDeliveryBinding | null {
     const row = this.db
@@ -1091,7 +1258,13 @@ export class DeliveryStore {
   observePrWithinTransaction(
     taskId: string,
     input: PrDeliveryObservation,
-  ): { binding: PrDeliveryBinding; changed: boolean; firstSeen: boolean } {
+  ): {
+    binding: PrDeliveryBinding;
+    changed: boolean;
+    firstSeen: boolean;
+    /** Newly recorded: the PR's head is on the task branch but is no commit Ensemble pushed. */
+    outsideHead: boolean;
+  } {
     const observation = prObservationSchema.parse(input),
       binding = this.delivery(taskId);
     if (!binding) throw new Error("Unknown PR delivery");
@@ -1123,7 +1296,21 @@ export class DeliveryStore {
     this.db
       .prepare("INSERT OR IGNORE INTO delivery_observations VALUES (?,?,?,?)")
       .run(taskId, digest, canonicalMaterial(observation), Date.now());
-    return { binding, changed, firstSeen };
+    // A lagging PR head can still show an earlier Ensemble push, so any pushed commit is fine.
+    const branch = this.taskBranch(taskId, observation.repositoryId),
+      outsideHead =
+        branch?.branch === observation.headRef &&
+        branch.outsideHeadSha !== observation.headSha &&
+        !this.pushedShas(taskId, observation.repositoryId).has(
+          observation.headSha,
+        );
+    if (outsideHead)
+      this.db
+        .prepare(
+          "UPDATE delivery_task_branches SET outsideHeadSha=? WHERE taskId=? AND repositoryId=?",
+        )
+        .run(observation.headSha, taskId, observation.repositoryId);
+    return { binding, changed, firstSeen, outsideHead };
   }
   recordPrReadFailure(taskId: string): void {
     this.transaction(() => {
@@ -1263,6 +1450,7 @@ export class DeliveryStore {
       policyVersion: configuration.version,
       mode: configuration.mode,
       binding: this.delivery(taskId),
+      branches: this.taskBranches(taskId),
       blockers: this.completionBlockers(taskId, task.version),
       actions: this.actions(taskId).map((a) => ({
         operationId: a.operationId,
