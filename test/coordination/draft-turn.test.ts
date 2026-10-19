@@ -841,7 +841,10 @@ test("making the task Ready with routing enabled routes it without a preliminary
 });
 
 /** A routing project with one worker candidate, whose routing answer waits for `release`. */
-async function routedDraftTask(t: { after(fn: () => unknown): void }) {
+async function routedDraftTask(
+  t: { after(fn: () => unknown): void },
+  choose: "worker" | "lead_review" = "worker",
+) {
   const previous = process.env.TEST_TYPESAFE_KEY;
   process.env.TEST_TYPESAFE_KEY = "fixture-key";
   t.after(() => {
@@ -859,10 +862,13 @@ async function routedDraftTask(t: { after(fn: () => unknown): void }) {
       calls.routed++;
       await gate;
       return {
-        choice: workerId,
+        choice: choose === "worker" ? workerId : "lead_review",
         model: request.requestedModel,
         confidence: 0.9,
-        probabilities: { [workerId]: 0.9, lead_review: 0.1 },
+        probabilities:
+          choose === "worker"
+            ? { [workerId]: 0.9, lead_review: 0.1 }
+            : { [workerId]: 0.1, lead_review: 0.9 },
         usage: { inputTokens: 1, outputTokens: 1 },
       };
     },
@@ -948,14 +954,61 @@ test("with routing on, a draft-only lead with a pending answer waits for the rou
         .some((assignment) => assignment.profileId === workerId),
     "routed assignment",
   );
-  // The lead's turn, when it comes, carries the answer.
-  for (let turn = 2; turn <= 4; turn++) {
-    await until(() => f.runtime.hasPending(turn), `turn ${turn}`);
-    if (f.runtime.prompts.some((prompt) => /The api repository\./.test(prompt)))
-      return;
-    f.runtime.complete(turn);
-  }
-  assert.fail("the lead never received the answer");
+  // The routed worker runs first; the lead has no turn until the result arrives.
+  await until(() => f.runtime.hasPending(2), "worker turn");
+  assert.doesNotMatch(f.runtime.prompts[1] ?? "", /The api repository\./);
+  const worker = f.service.list().find((work) => work.state === "running");
+  assert.ok(worker?.threadId && worker.turnId);
+  const reported = await f.runtime.callTool(
+    call(worker, "ensemble_report_result", {
+      summary: "Worker found the cause",
+    }),
+  );
+  assert.equal(reported.success, true, reported.text);
+  f.runtime.complete(2);
+  await until(() => f.runtime.hasPending(3), "lead turn");
+  assert.match(f.runtime.prompts[2] ?? "", /The api repository\./);
+  assert.match(f.runtime.prompts[2] ?? "", /Worker found the cause/);
+});
+
+test("with routing on and a fallback, the draft-only lead runs with its pending answer", async (t) => {
+  const { f, task, domain, release } = await routedDraftTask(t, "lead_review");
+  const { running } = await runDraftTurn(f, task);
+  const asked = await f.runtime.callTool(
+    call(running, "ensemble_ask_question", { question: "Which repository?" }),
+  );
+  assert.equal(asked.success, true, asked.text);
+  const question = (await task.api.readTask(task.taskId)).data.questions[0];
+  assert.ok(question);
+  await task.api.execute({
+    type: "question.answer",
+    key: randomUUID(),
+    taskId: task.taskId,
+    interactionId: question.interactionId,
+    expectedRevision: question.revision,
+    answer: "The api repository.",
+  });
+  f.runtime.complete(1);
+  await until(
+    () => !f.service.list().some((work) => work.state === "running"),
+    "turn end",
+  );
+  domain.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: version(f, task.taskId),
+    ready: true,
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 200));
+  assert.equal(f.runtime.turns, 1, "no preliminary lead turn");
+  release();
+  await until(() => f.runtime.hasPending(2), "lead turn");
+  assert.match(f.runtime.prompts[1] ?? "", /The api repository\./);
+  assert.match(f.runtime.prompts[1] ?? "", /routing-fallback/);
+  assert.equal(f.runtime.policies[1], undefined);
 });
 
 test("a queued draft turn survives a restart and still runs read-only", async (t) => {

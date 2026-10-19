@@ -506,6 +506,13 @@ interface Started {
   claude: RuntimeSpawnContext["claude"];
 }
 
+/** The task as a prompt names it: its revision, title and outcome now. */
+const currentTaskOf = (task: Record<string, unknown>) => ({
+  version: Number(task.version),
+  title: String(task.title),
+  outcome: String(task.outcome),
+});
+
 function harnessForWork(
   state: ExecutionState,
   workId: string,
@@ -3706,8 +3713,16 @@ export class StandaloneService {
             ),
           }
         : null,
+      // A queued batch of the lead's means an earlier draft turn still owns the message queue,
+      // so a new one could not queue (a refused draft whose batch is not released yet).
       draftTurnActive:
-        this.started().schedulerStore.activeDraftTurn(taskId) !== undefined,
+        this.started().schedulerStore.activeDraftTurn(taskId) !== undefined ||
+        (binding !== undefined &&
+          this.started()
+            .coordination.queuedDeliveries()
+            .some(
+              (item) => item.recipientAssignmentId === binding.assignmentId,
+            )),
     };
   }
 
@@ -3764,11 +3779,11 @@ export class StandaloneService {
         instructionsRevision: Number(lead.instructionsRevision),
         profileRevision: Number(lead.profileRevision),
         // The lead's brief is frozen at its first draft turn; the task may have moved on.
-        prompt: this.assignmentPrompt(String(lead.brief), delivery, {
-          version: Number(task.version),
-          title: String(task.title),
-          outcome: String(task.outcome),
-        }),
+        prompt: this.assignmentPrompt(
+          String(lead.brief),
+          delivery,
+          currentTaskOf(task),
+        ),
         workspace: null,
         previousWorkId: state.latestCompletedAssignmentWork(leadId) ?? null,
         draftTurn: true,
@@ -5405,14 +5420,29 @@ export class StandaloneService {
         });
       }
     }
-    const draftOnlyLeadAwaitsRouting = (
+    /**
+     * With routing on, a lead that has only had draft turns waits for the routing decision.
+     * After a fallback it runs once an event is pending; after a routed assignment, only once
+     * the routed result arrives, so the worker runs first and the lead sees its answers with it.
+     */
+    const draftOnlyLeadWaits = (
       assignment: ReturnType<DomainStore["assignment"]>,
-    ) =>
-      Number(domain.routing(String(assignment.projectId)).enabled) === 1 &&
-      domain
-        .leadBindings()
-        .some((lead) => lead.assignmentId === assignment.id) &&
-      store.hasOnlyDraftTurns(String(assignment.id));
+    ): boolean => {
+      if (
+        Number(domain.routing(String(assignment.projectId)).enabled) !== 1 ||
+        !domain
+          .leadBindings()
+          .some((lead) => lead.assignmentId === assignment.id) ||
+        !store.hasOnlyDraftTurns(String(assignment.id))
+      )
+        return false;
+      const disposition = domain.routingDisposition(String(assignment.taskId));
+      if (disposition === null) return true;
+      const pending = coordination.pendingEvents(String(assignment.id));
+      return disposition === "assigned"
+        ? !pending.some((event) => event.eventType === "assignment-result")
+        : pending.length === 0;
+    };
     for (const assignment of domain.pendingAssignments()) {
       const taskId = String(assignment.taskId);
       const task = domain.task(taskId);
@@ -5420,14 +5450,7 @@ export class StandaloneService {
       const assignmentId = String(assignment.id);
       const initialWorkId = `assignment:${assignmentId}:initial`;
       if (queries.hasWork(initialWorkId)) continue;
-      // With routing on, a lead that has only had draft turns waits for the routing
-      // decision, pending answers or not, and then for an event.
-      if (
-        draftOnlyLeadAwaitsRouting(assignment) &&
-        (!domain.hasRoutingRecord(taskId) ||
-          coordination.pendingEvents(assignmentId).length === 0)
-      )
-        continue;
+      if (draftOnlyLeadWaits(assignment)) continue;
       const queued = coordination
         .queuedDeliveries()
         .find((item) => item.recipientAssignmentId === assignmentId);
@@ -5455,11 +5478,7 @@ export class StandaloneService {
               String(assignment.brief),
               delivery,
               store.hasOnlyDraftTurns(assignmentId)
-                ? {
-                    version: Number(task.version),
-                    title: String(task.title),
-                    outcome: String(task.outcome),
-                  }
+                ? currentTaskOf(task)
                 : undefined,
             ),
             // Resumes the draft-turn conversation when the lead has had draft turns.
@@ -5566,11 +5585,7 @@ export class StandaloneService {
         assignment = leadAssignment;
       }
       const task = domain.task(String(assignment.taskId));
-      if (
-        draftOnlyLeadAwaitsRouting(assignment) &&
-        !domain.hasRoutingRecord(String(task.id))
-      )
-        continue;
+      if (draftOnlyLeadWaits(assignment)) continue;
       if (
         (assignment.state !== "pending" && assignment.state !== "running") ||
         (Number(task.ready) !== 1 &&

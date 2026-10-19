@@ -1277,14 +1277,18 @@ export class DomainStore {
       .all(id.parse(taskId)) as Row[];
   }
 
+  /** Routing's latest recorded disposition for this task (any task version), or null. */
+  routingDisposition(taskId: string): string | null {
+    const row = this.one(
+      "SELECT disposition FROM routing_operations WHERE taskId = ? ORDER BY rowid DESC LIMIT 1",
+      id.parse(taskId),
+    );
+    return row ? String(row.disposition) : null;
+  }
+
   /** Whether routing has recorded its decision for this task (at any task version). */
   hasRoutingRecord(taskId: string): boolean {
-    return (
-      this.one(
-        "SELECT 1 AS routed FROM routing_operations WHERE taskId = ?",
-        id.parse(taskId),
-      ) !== undefined
-    );
+    return this.routingDisposition(taskId) !== null;
   }
 
   /**
