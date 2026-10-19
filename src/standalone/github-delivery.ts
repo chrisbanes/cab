@@ -1282,6 +1282,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           workspacePath: name,
         })
         .parse(record.beforeState);
+      let pushed = false;
       if (before.beforeHead !== a.commitSha) {
         const outcome = await this.push({
           workspacePath: before.workspacePath,
@@ -1322,8 +1323,13 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
               : null,
           });
         }
+        pushed = true;
       }
-      return await this.inspectAction(record);
+      const settled = await this.inspectAction(record);
+      // A finished push that a lagging read does not show yet is unproved, not a no-effect failure.
+      return pushed && settled.reason === "branch-push-not-applied"
+        ? unsettled
+        : settled;
     } catch {
       return unsettled;
     }

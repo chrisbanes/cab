@@ -176,10 +176,12 @@ export function publicationWorld(
     | "apply"
     | "uncertain-applied"
     | "uncertain-lost"
-    | "outside-during-push" = "apply";
+    | "outside-during-push"
+    | "applied-but-unread" = "apply";
   const push: PushFunction = async (request): Promise<PushOutcome> => {
     pushes.push(request);
     if (pushBehaviour === "uncertain-lost") return "uncertain";
+    if (pushBehaviour === "applied-but-unread") return "pushed";
     if (pushBehaviour === "outside-during-push") {
       remote.head = "d".repeat(40);
       return "rejected-lease";

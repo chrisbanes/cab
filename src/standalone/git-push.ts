@@ -100,6 +100,8 @@ export async function pushTaskCommit(
         "protocol.https.allow=always",
         "-c",
         "http.followRedirects=false",
+        "-c",
+        "http.proxy=",
         "push",
         "--porcelain",
         "--no-verify",

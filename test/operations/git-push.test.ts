@@ -217,6 +217,7 @@ test("repository-local, user and system configuration cannot redirect the push o
   assert.match(joined, /protocol\.allow=never/);
   assert.match(joined, /protocol\.https\.allow=always/);
   assert.match(joined, /http\.followredirects=false/);
+  assert.match(joined, /http\.proxy=(\n|$)/);
   assert.match(joined, /credential\.usehttppath=true/);
   assert.equal(joined.includes("evil"), false);
 });

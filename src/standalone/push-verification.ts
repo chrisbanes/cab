@@ -26,11 +26,17 @@ export async function verifyTaskPush(
   signal?: AbortSignal,
 ): Promise<PushVerification | null> {
   const { workspacePath, baseCommit } = workspace;
+  // Replace refs and grafts live in the agent-writable repository and could fake ancestry that the
+  // push (which reads neither) would not send; these overrides only harden, never allow a transport.
   const git = (args: string[]) =>
     runGit({
-      args,
+      args: ["--no-replace-objects", "-c", "core.fsmonitor=false", ...args],
       cwd: workspacePath,
       ...bounds,
+      environmentOverrides: {
+        GIT_NO_REPLACE_OBJECTS: "1",
+        GIT_GRAFT_FILE: "/dev/null",
+      },
       ...(signal ? { signal } : {}),
     });
   // Exit 0 is yes and 1 is no; anything else (including a missing object) proves nothing.
@@ -45,8 +51,11 @@ export async function verifyTaskPush(
   if (!/^[0-9a-f]{40}$/.test(commitSha) || !baseCommit) return null;
   if ((await ancestor(commitSha, "HEAD")) !== true) return null;
   if ((await ancestor(baseCommit, commitSha)) !== true) return null;
+  // A last push Git cannot place (for example a missing object) is not a fast-forward.
   const descendsFromLastPushed =
-    lastPushedSha === null ? null : await ancestor(lastPushedSha, commitSha);
+    lastPushedSha === null
+      ? null
+      : (await ancestor(lastPushedSha, commitSha)) === true;
   const status = await git(["status", "--porcelain=v1", "-z"]);
   if (status.status !== "ok") return null;
   return {
@@ -55,10 +64,6 @@ export async function verifyTaskPush(
       .toString("utf8")
       .split("\0")
       .filter(Boolean).length,
-    // A last push Git cannot place (for example a missing object) is not a fast-forward.
-    descendsFromLastPushed:
-      descendsFromLastPushed === null && lastPushedSha !== null
-        ? false
-        : descendsFromLastPushed,
+    descendsFromLastPushed,
   };
 }

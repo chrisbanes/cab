@@ -422,3 +422,42 @@ test("the task's delivery view and retained page show the branch, its last push 
   // The projection carries refs and commits only, never the delivery credential.
   assert.equal(JSON.stringify(delivery).includes("token"), false);
 });
+
+test("a replace ref cannot fake a commit's ancestry", async (t) => {
+  const world = publicationWorld(t);
+  // The worktree's HEAD is an unrelated root commit that a replace ref makes look like a child of the base.
+  git(world.workspace, "checkout", "-q", "--orphan", "alien");
+  git(world.workspace, "commit", "-q", "--allow-empty", "-m", "alien");
+  const alien = git(world.workspace, "rev-parse", "HEAD");
+  const fake = git(
+    world.workspace,
+    "commit-tree",
+    "-p",
+    world.base,
+    "-m",
+    "fake",
+    `${alien}^{tree}`,
+  );
+  git(world.workspace, "replace", alien, fake);
+  // Plain Git is fooled: this exits 0.
+  git(world.workspace, "merge-base", "--is-ancestor", world.base, alien);
+  const record = await world.submit("branch.push", alien);
+  assert.equal(record.observation?.reason, "push-commit-not-verified");
+  assert.deepEqual(world.requests, []);
+});
+
+test("a push whose readback lags is unproved and reconciled, not recorded as not applied", async (t) => {
+  const world = publicationWorld(t);
+  const sha = world.commit();
+  world.setPush("applied-but-unread");
+  const record = await world.submit("branch.push", sha);
+  assert.equal(record.state, "uncertain");
+  assert.equal(world.pushes.length, 1);
+  world.remote.head = sha;
+  await world.coordinatorFor().reconcile();
+  assert.equal(
+    world.store.action(record.operationId).state,
+    "confirmed-success",
+  );
+  assert.equal(world.pushes.length, 1);
+});

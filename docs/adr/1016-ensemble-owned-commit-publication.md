@@ -47,7 +47,10 @@ agent turns run with network off. Delivery scope lives in
 
 Ensemble cannot prevent a push made with ambient host credentials once agent network
 access is enabled ([#1191](https://github.com/chrisbanes/ensemble/issues/1191)). It
-detects the result as an outside change, and discloses the limit.
+detects the result as an outside change, and discloses the limit. An outside change
+also ends Ensemble's publication to that branch until the remote head returns to the
+commit Ensemble last pushed, because that commit is the only lease; adopting an
+outside head needs a separate operator action that this decision does not provide.
 
 ## Considered options
 
