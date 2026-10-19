@@ -226,6 +226,8 @@ export function publicationWorld(
       remote.head = "d".repeat(40);
       return "rejected-lease";
     }
+    // Git checks "up to date" before the lease: an equal remote sends nothing.
+    if (remote.head === request.commitSha) return "up-to-date";
     if (remote.head !== request.lease) return "rejected-lease";
     remote.head = request.commitSha;
     return pushBehaviour === "uncertain-applied" ? "uncertain" : "pushed";

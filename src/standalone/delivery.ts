@@ -646,6 +646,7 @@ export class DeliveryCoordinator {
             receipt: null,
             ...(current.observation?.pushed ? { pushed: true } : {}),
             ...(current.observation?.rejected ? { rejected: true } : {}),
+            ...(current.observation?.ambiguous ? { ambiguous: true } : {}),
           };
         }
         this.recordPublicationAware(current, observation);

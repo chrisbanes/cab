@@ -1350,7 +1350,9 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           return failure("branch-not-fast-forward");
         if (outcome === "rejected-remote")
           return afterRejection(failure("branch-push-rejected"));
-        if (outcome === "rejected-lease") return afterRejection(null);
+        // Nothing was sent: an equal head is another writer's unless an earlier attempt may have landed.
+        if (outcome === "rejected-lease" || outcome === "up-to-date")
+          return afterRejection(null);
         pushed = true;
       }
       return await this.inspectBranch(record, a, pushed);
@@ -1412,13 +1414,20 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
             receipt: null,
             retryable: true,
           };
-    // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved it.
+    // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved
+    // it, and an ambiguous attempt keeps its possible ownership of the commit it may have landed.
+    const ambiguous =
+      !pushed &&
+      (record.state === "attempting" ||
+        (record.observation?.state === "uncertain" && !rejected) ||
+        record.observation?.ambiguous === true);
     return pushed
       ? success(remote ? { outsideHeadSha: remote } : { outsideDeleted: true })
       : {
           state: "confirmed-failure",
           reason: "branch-outside-change",
           receipt: remote ? at(remote) : null,
+          ...(ambiguous ? { ambiguous: true } : {}),
         };
   }
   async inspectAction(
@@ -1613,6 +1622,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         // A readback failure never forgets that Git reported the push done.
         ...(record.observation?.pushed ? { pushed: true } : {}),
         ...(record.observation?.rejected ? { rejected: true } : {}),
+        ...(record.observation?.ambiguous ? { ambiguous: true } : {}),
       };
     }
   }

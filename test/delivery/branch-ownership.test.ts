@@ -498,3 +498,79 @@ test("a branch deleted after Ensemble's push is an outside change, not a clean s
   const next = await w.submit("branch.push", w.commit());
   assert.equal(next.observation?.reason, "branch-outside-change");
 });
+
+test("a Git-rejected update does not own its commit on the PR while its readback is unproved", async (t) => {
+  const w = publicationWorld(t);
+  const { branch } = await withPr(w);
+  const second = w.commit();
+  w.setPush("stale-readback-fails");
+  const record = await w.submit("branch.push", second);
+  assert.equal(record.observation?.rejected, true);
+  w.failRefReads(false);
+  // Another writer puts the commit on the branch; the PR is inspected before the reconcile runs.
+  const recorded = w.store.transaction(() =>
+    w.store.outsideHeadWithinTransaction(w.taskId, w.showPr(second, branch)),
+  );
+  assert.equal(recorded, true);
+  assert.equal(branchOf(w)?.outsideHeadSha, second);
+});
+
+test("a remote already at the commit makes Git send nothing, and that is not Ensemble's push", async (t) => {
+  const w = publicationWorld(t);
+  const sha = w.commit();
+  w.raceBeforeNextPush(sha);
+  const record = await w.submit("branch.push", sha);
+  assert.equal(record.state, "confirmed-failure");
+  assert.equal(record.observation?.reason, "branch-outside-change");
+  assert.equal(branchOf(w)?.lastPushedSha, null);
+  assert.equal(branchOf(w)?.outsideHeadSha, sha);
+  assert.equal(w.wakes.length, 1);
+});
+
+test("a retry whose earlier attempt landed finds Git sending nothing and is settled by the read", async (t) => {
+  const w = publicationWorld(t);
+  const sha = w.commit();
+  w.setPush("uncertain-lost");
+  const record = await w.submit("branch.push", sha);
+  const coordinator = w.coordinatorFor();
+  await coordinator.reconcile();
+  assert.equal(
+    w.store.action(record.operationId).observation?.reason,
+    "branch-push-not-applied",
+  );
+  // The first attempt lands late, between the retry's preflight and its push.
+  w.setPush("apply");
+  w.raceBeforeNextPush(sha);
+  await coordinator.reconcile();
+  await coordinator.reconcile();
+  assert.equal(w.store.action(record.operationId).state, "confirmed-success");
+  assert.equal(branchOf(w)?.lastPushedSha, sha);
+  assert.deepEqual(w.wakes, []);
+});
+
+test("an ambiguous push keeps its possible ownership when a later read shows a third head", async (t) => {
+  const w = publicationWorld(t);
+  const { branch } = await withPr(w);
+  const second = w.commit();
+  w.setPush("uncertain-lost");
+  const record = await w.submit("branch.push", second);
+  assert.equal(record.state, "uncertain");
+  const third = "8".repeat(40);
+  w.remote.head = third;
+  await w.coordinatorFor().reconcile();
+  assert.equal(
+    w.store.action(record.operationId).observation?.reason,
+    "branch-outside-change",
+  );
+  assert.equal(branchOf(w)?.outsideHeadSha, third);
+  assert.equal(w.store.mayHaveLanded(record.operationId), true);
+  // The attempt's own commit later shows up on the PR: it is not reported as an outside push.
+  w.wakes.length = 0;
+  w.showPr(second, branch);
+  await w.coordinator.refresh();
+  assert.deepEqual(
+    w.wakes.filter((x) => x.identity.startsWith("outside-push")),
+    [],
+  );
+  assert.equal(branchOf(w)?.outsideHeadSha, third);
+});

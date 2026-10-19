@@ -1674,7 +1674,7 @@ recorded last push, which is its lease.
 
 Ensemble owns a commit on the task branch only if it pushed it or an attempt of that push may have
 landed: one that ended unproved, was reported pushed by Git, was concluded not applied from a read,
-or was never settled. A push that never started or was rejected owns nothing. A remote that equals
+or was never settled. A push that never started or was rejected owns nothing, and neither does one Git skipped because the remote already held the commit (another writer's push). An ambiguous attempt keeps its possible ownership even when a later read shows a different head, which is then recorded as an outside change. A remote that equals
 the requested commit is therefore accepted only on a retry whose earlier attempt may have landed,
 and a retry of an operation superseded by a newer push is refused. Git reporting a push done keeps
 the outcome unproved until a read shows it (a first push whose branch is deleted before the read cannot be
@@ -1685,7 +1685,8 @@ without a PR it is noticed at the next push, as Ensemble does not poll branches.
 holds an outside head, or the PR's head is not Ensemble's last push, completion is held and
 settlement is refused, and PR actions that name the task branch (`pr.create`, `pr.edit`,
 `pr.ready`, `pr.merge`) need `expectedHeadSha` to equal Ensemble's last push. The record clears when
-the branch is back at that commit or Ensemble pushes again. A rewritten history means the next review
+the branch is back at that commit or Ensemble pushes again; a PR inspection that still shows the last push while
+the PR head lags behind a later Ensemble push also clears it until the PR catches up. A rewritten history means the next review
 covers the whole new head. Success needs a read of the remote ref equal to the pushed commit; a
 timeout, cancellation or unobserved exit is uncertain, is settled by reading the ref and is never
 replayed blindly. Ensemble does not delete branches or push tags or other remotes; merged branches

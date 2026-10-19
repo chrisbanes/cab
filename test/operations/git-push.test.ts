@@ -265,6 +265,7 @@ test("a lease push names the lease commit and the refusal reports map to outcome
   const lease = "1".repeat(40);
   const cases: Array<[string, number, string]> = [
     ["", 0, "pushed"],
+    ["=\tx:y\t[up to date]\n", 0, "up-to-date"],
     ["!\tx:y\t[rejected] (non-fast-forward)\n", 1, "rejected-non-fast-forward"],
     ["!\tx:y\t[rejected] (fetch first)\n", 1, "rejected-non-fast-forward"],
     ["!\tx:y\t[rejected] (stale info)\n", 1, "rejected-lease"],

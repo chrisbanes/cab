@@ -14,6 +14,8 @@ export type PushOutcome =
   /** Nothing reached the network (setup failed or the child never started). */
   | "not-attempted"
   | "pushed"
+  /** Git found the remote already at the commit and sent nothing: someone else's push, not Ensemble's. */
+  | "up-to-date"
   | "rejected-non-fast-forward"
   | "rejected-lease"
   | "rejected-remote"
@@ -125,7 +127,11 @@ export async function pushTaskCommit(
         ENSEMBLE_PUSH_TOKEN: token,
       },
     });
-    if (result.status === "ok") return "pushed";
+    if (result.status === "ok")
+      // Git checks "up to date" before the lease, so an equal remote exits 0 without pushing.
+      return /^=\t/m.test(result.stdout.toString("utf8"))
+        ? "up-to-date"
+        : "pushed";
     if (result.status === "interrupted")
       return result.spawned ? "uncertain" : "not-attempted";
     if (!result.childExitObserved) return "uncertain";

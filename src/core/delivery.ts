@@ -321,6 +321,8 @@ export const actionObservationSchema = z
     retryable: z.boolean().optional(),
     /** Git reported the push done; a readback that does not show it yet leaves the outcome unproved. */
     pushed: z.boolean().optional(),
+    /** The attempt was ambiguous, so its commit may have landed even though a later read showed another head. */
+    ambiguous: z.boolean().optional(),
     /** Git rejected this attempt's update, so it provably did not land even though the outcome is unproved. */
     rejected: z.boolean().optional(),
     /** A head Ensemble did not push, seen alongside this outcome. */
@@ -1185,6 +1187,7 @@ export class DeliveryStore {
       return (
         (o.state === "uncertain" && o.rejected !== true) ||
         o.pushed === true ||
+        o.ambiguous === true ||
         o.reason === "branch-push-not-applied"
       );
     });
@@ -1271,7 +1274,7 @@ export class DeliveryStore {
   private pushedShas(taskId: string, repositoryId: string): Set<string> {
     return new Set(
       this.actions(taskId).flatMap((a) =>
-        (["attempting", "uncertain", "confirmed-success"].includes(a.state) ||
+        (a.state === "confirmed-success" ||
           this.mayHaveLanded(a.operationId)) &&
         a.request.action.kind.startsWith("branch.") &&
         a.request.action.target.repositoryId === repositoryId &&
