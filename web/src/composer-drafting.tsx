@@ -15,6 +15,7 @@ import {
   draftingPollMs,
   draftingReleaseRetryMs,
   formatElapsed,
+  releaseBackoffMs,
   planFill,
   proposedReadDelay,
 } from "./composer-drafting-model.js";
@@ -29,10 +30,14 @@ type Command = Extract<
 
 /**
  * Ends a draft the composer is leaving behind (a project change, discarded input, a created
- * task) and keeps at it until the service confirms, even across a reload. Returns the
- * function that starts one.
+ * task) and keeps at it until the service confirms, even across a reload. Mounted once by
+ * the app, so it carries on wherever the operator goes. Returns the function that starts
+ * one. A release that keeps not completing is retried less often, up to a minute apart.
  */
-export function useDraftReleases(client: OperatorClient, csrfToken: string) {
+export function useDraftReleases(
+  client: OperatorClient,
+  csrfToken: string | null,
+) {
   const releases = useMemo(
     () =>
       new PendingReleases({
@@ -43,13 +48,27 @@ export function useDraftReleases(client: OperatorClient, csrfToken: string) {
     [],
   );
   const busy = useRef(new Set<string>());
+  const backoff = useRef(new Map<string, { failures: number; next: number }>());
   const pump = useCallback(async () => {
+    if (!csrfToken) return;
     for (const release of releases.list()) {
       if (busy.current.has(release.runId)) continue;
+      const waiting = backoff.current.get(release.runId);
+      if (waiting && Date.now() < waiting.next) continue;
       busy.current.add(release.runId);
       try {
-        if ((await attemptRelease(client, csrfToken, release)) === "done")
+        const outcome = await attemptRelease(client, csrfToken, release);
+        if (outcome === "done") {
           releases.remove(release.runId);
+          backoff.current.delete(release.runId);
+        } else {
+          if (outcome === "restop") releases.restop(release.runId);
+          const failures = (waiting?.failures ?? 0) + 1;
+          backoff.current.set(release.runId, {
+            failures,
+            next: Date.now() + releaseBackoffMs(failures),
+          });
+        }
       } finally {
         busy.current.delete(release.runId);
       }
@@ -62,6 +81,7 @@ export function useDraftReleases(client: OperatorClient, csrfToken: string) {
   }, [pump]);
   return (runId: string) => {
     releases.add(runId);
+    backoff.current.delete(runId);
     void pump();
   };
 }

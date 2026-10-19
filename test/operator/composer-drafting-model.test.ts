@@ -5,6 +5,7 @@ import {
   formatElapsed,
   planFill,
   proposedReadDelay,
+  releaseBackoffMs,
 } from "../../web/src/composer-drafting-model.js";
 
 const proposal = { title: "Proposed title", outcome: "Proposed outcome" };
@@ -20,6 +21,14 @@ test("a proposal fills empty fields and offers a choice beside typed text", () =
   });
   // Text that already equals the proposal needs no second choice after a reload.
   assert.deepEqual(planFill(proposal, proposal), { fill: {}, choices: [] });
+});
+
+test("a release that keeps not completing backs off to a minute and keeps retrying", () => {
+  const waits = [1, 2, 3, 4, 5, 6, 50].map(releaseBackoffMs);
+  assert.deepEqual(
+    waits,
+    [5000, 10_000, 20_000, 40_000, 60_000, 60_000, 60_000],
+  );
 });
 
 test("elapsed time reads as minutes and seconds", () => {

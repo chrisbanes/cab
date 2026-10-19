@@ -2028,8 +2028,7 @@ export class StandaloneService {
         ...this.claudeTokensHandedOut,
         // Copies still in use keep their grant's paths private even once it is unlinked.
         ...(this.current?.draftingBindings
-          .list()
-          .filter((binding) => binding.state !== "archived")
+          .unarchived()
           .flatMap((binding) => this.draftingGrantPaths(binding.taskId)) ?? []),
         ...domain.projects().flatMap((project) => {
           const id = String(project.id);

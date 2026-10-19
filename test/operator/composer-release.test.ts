@@ -71,12 +71,35 @@ test("a release keeps its keys, so an unknown stop is repeated under the same ke
 test("a run that is still ending is discarded later under the same key, and an unknown run is done", async () => {
   const release = new PendingReleases(storage()).add(randomUUID());
   const ending = client("recorded", "conflict");
-  assert.equal(await attemptRelease(ending.client, "csrf", release), "retry");
+  assert.equal(await attemptRelease(ending.client, "csrf", release), "restop");
   const later = client();
   assert.equal(await attemptRelease(later.client, "csrf", release), "done");
   assert.equal(later.sent[1]?.key, ending.sent[1]?.key);
   const gone = client("not-found");
   assert.equal(await attemptRelease(gone.client, "csrf", release), "done");
+});
+
+test("a stop that left the run ending is repeated under a new key, so the service retries its cleanup", () => {
+  const releases = new PendingReleases(storage());
+  const runId = randomUUID();
+  const first = releases.add(runId);
+  releases.restop(runId);
+  const [after] = releases.list();
+  assert.notEqual(after?.stopKey, first.stopKey);
+  assert.equal(after?.discardKey, first.discardKey);
+});
+
+test("no unconfirmed release is evicted, however many accumulate", () => {
+  const store = storage();
+  const releases = new PendingReleases(store);
+  const ids = Array.from({ length: 40 }, () => randomUUID());
+  for (const id of ids) releases.add(id);
+  assert.deepEqual(
+    new PendingReleases(store).list().map((r) => r.runId),
+    ids,
+  );
+  releases.remove(ids[0] as string);
+  assert.equal(new PendingReleases(store).list().length, 39);
 });
 
 test("pending releases survive a reload until they are removed", () => {

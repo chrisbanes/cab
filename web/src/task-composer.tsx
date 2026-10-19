@@ -39,7 +39,6 @@ import { optionalFields, optionalSummary } from "./composer-summary.js";
 import {
   DraftChoice,
   DraftWithLead,
-  useDraftReleases,
   useDrafting,
 } from "./composer-drafting.js";
 import "./composer.css";
@@ -51,6 +50,7 @@ export function TaskComposer({
   onRecorded,
   drafts,
   refresh,
+  releaseDraft,
 }: {
   client: OperatorClient;
   session: Session;
@@ -60,6 +60,8 @@ export function TaskComposer({
   drafts: ConfigurationDrafts;
   /** Re-reads the workspace after a Fix changes a project. */
   refresh: () => void;
+  /** Ends a draft the composer leaves behind; owned by the app so it outlives this page. */
+  releaseDraft: (runId: string) => void;
 }) {
   const labels = workspaceLabels(workspace);
   const [, render] = useState(0);
@@ -116,7 +118,6 @@ export function TaskComposer({
   );
   const edit = (patch: Partial<ComposerInput>) => state.edit(patch);
   const projectOptions = options.state.data?.data;
-  const releaseDraft = useDraftReleases(client, session.csrfToken);
   const drafting = useDrafting({
     state,
     client,

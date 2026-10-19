@@ -4,6 +4,14 @@ import type { ComposerInput } from "./composer-state.js";
 export const draftingPollMs = 2000;
 /** A release the service has not confirmed is sent again this often. */
 export const draftingReleaseRetryMs = 5000;
+/** The longest wait between attempts for a release that keeps not completing. */
+export const draftingReleaseMaxBackoffMs = 60_000;
+/** Doubles from the retry interval to the cap, so a run stuck stopping is still retried. */
+export const releaseBackoffMs = (failures: number) =>
+  Math.min(
+    draftingReleaseRetryMs * 2 ** Math.max(0, failures - 1),
+    draftingReleaseMaxBackoffMs,
+  );
 /** A proposal nobody has settled is read this often, so its expiry is shown. */
 export const draftingProposedPollMs = 30_000;
 /** The service's fixed run limit, shown beside the elapsed time. */

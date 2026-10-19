@@ -8,7 +8,7 @@ export const releaseStorageKey = "ensemble.ui03.composer.releases.v1";
 const releaseSchema = z
   .object({ runId: uuid, stopKey: uuid, discardKey: uuid })
   .strict();
-const releasesSchema = z.array(releaseSchema).max(16);
+const releasesSchema = z.array(releaseSchema);
 export type DraftRelease = z.infer<typeof releaseSchema>;
 
 /**
@@ -49,9 +49,17 @@ export class PendingReleases {
       stopKey: crypto.randomUUID(),
       discardKey: crypto.randomUUID(),
     };
-    this.items = [...this.items, release].slice(-16);
+    // Never evicted: only a confirmed (or unknown-to-the-service) run leaves the list.
+    this.items = [...this.items, release];
     this.write();
     return release;
+  }
+  /** A fresh Stop key, so a later attempt reaches the service instead of a stored receipt. */
+  restop(runId: string) {
+    this.items = this.items.map((item) =>
+      item.runId === runId ? { ...item, stopKey: crypto.randomUUID() } : item,
+    );
+    this.write();
   }
   remove(runId: string) {
     this.items = this.items.filter((item) => item.runId !== runId);
@@ -61,14 +69,17 @@ export class PendingReleases {
 
 /**
  * One pass at ending a draft: Stop, then discard once it has ended. Both go out under the
- * release's own keys. `retry` means an outcome is unknown or the run is still ending; the
- * same release is tried again. A run the service does not know is done.
+ * release's own keys. `retry` means the Stop's outcome is unknown, so the same release is
+ * tried again under the same keys. `restop` means the Stop was recorded but the run is still
+ * ending (a held copy, a runtime not yet seen to end): the next attempt uses a new Stop key,
+ * because a replayed key returns its old receipt without retrying the service's cleanup.
+ * Stop is idempotent by run state. A run the service does not know is done.
  */
 export async function attemptRelease(
   client: OperatorClient,
   csrfToken: string,
   release: DraftRelease,
-): Promise<"done" | "retry"> {
+): Promise<"done" | "retry" | "restop"> {
   const { runId } = release;
   const stop = await client.command(
     { type: "drafting.stop", key: release.stopKey, runId },
@@ -88,5 +99,5 @@ export async function attemptRelease(
   if (discard.state === "recorded") return "done";
   if (discard.state === "rejected" && discard.code === "not-found")
     return "done";
-  return "retry";
+  return "restop";
 }

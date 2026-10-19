@@ -37,14 +37,19 @@ test("a drafting workspace is discarded even with written files, apart from task
     const commit = git(source, "rev-parse", "HEAD");
 
     const taskBindings = new SqliteWorkspaceBindingStore(db);
+    const draftingBindings = new SqliteWorkspaceBindingStore(
+      db,
+      "drafting_workspace_bindings",
+    );
     const manager = new WorkspaceManager(
-      new SqliteWorkspaceBindingStore(db, "drafting_workspace_bindings"),
+      draftingBindings,
       join(root, "drafting-workspaces"),
     );
     const binding = await manager.provision("run-1", [
       { repositoryId: "repo", path: source, ref: "HEAD" },
     ]);
     assert.equal(binding.state, "ready");
+    assert.equal(draftingBindings.unarchived().length, 1);
     const worktree = binding.repositories[0]?.workspacePath as string;
     assert.equal(git(worktree, "rev-parse", "HEAD"), commit);
     writeFileSync(join(worktree, "scratch.txt"), "untracked\n");
@@ -63,6 +68,9 @@ test("a drafting workspace is discarded even with written files, apart from task
       "archived",
     );
     assert.equal(await manager.discard("never-provisioned"), undefined);
+    // Archived rows stay recorded but are not listed as copies that may still exist.
+    assert.deepEqual(draftingBindings.unarchived(), []);
+    assert.equal(draftingBindings.list().length, 1);
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });

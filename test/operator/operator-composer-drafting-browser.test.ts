@@ -451,6 +451,43 @@ for (const [name, viewport] of viewports) {
     );
   });
 
+  test(`${name}: a release still completes after the operator leaves the composer`, async (_t, j) => {
+    const { f, page, commands, open } = await launch(j, viewport);
+    const other = await seedDraftingProject(f, { name: "Relay" });
+    await open();
+    await openPanel(page);
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    let lost = false;
+    await page.route("**/api/operator/commands", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      if (body.type === "drafting.stop" && !lost) {
+        lost = true;
+        await route.abort();
+      } else await route.continue();
+    });
+    await page
+      .getByLabel("Project", { exact: true })
+      .selectOption(other.projectId);
+    await until(() => lost);
+    // Leave the composer without a reload; nothing mounted there can resend the stop.
+    await page.evaluate(() => {
+      history.pushState({}, "", "/app/inbox");
+      dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await page.getByLabel("Rough idea").waitFor({ state: "detached" });
+    await until(() => commands("drafting.stop").length === 2, 15000);
+    const stops = commands("drafting.stop");
+    assert.equal(stops[0]?.key, stops[1]?.key);
+    await until(() => f.service.readDrafting(runId)?.state === "stopping");
+    f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
+    await until(
+      () => f.service.readDrafting(runId)?.state === "discarded",
+      30000,
+    );
+  });
+
   test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport, {
       lead: false,

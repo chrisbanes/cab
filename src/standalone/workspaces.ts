@@ -240,6 +240,16 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
       .map((row) => this.parseRow(row));
   }
 
+  /** Bindings whose copy may still exist, selected in SQL so archived rows cost nothing. */
+  unarchived(): TaskWorkspaceBinding[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM ${this.table} WHERE state != 'archived' ORDER BY createdAt, taskId`,
+      )
+      .all()
+      .map((row) => this.parseRow(row));
+  }
+
   bindRepository(
     taskId: string,
     repositoryId: string,
