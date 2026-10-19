@@ -377,7 +377,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   cover the `branch.push` and `branch.force-push` grants and approval, the assigned
   task branch, offline commit verification, the fast-forward and lease rules, uncertain
   and outside-change outcomes, and the credential-containing push invocation
-  (`branch-publication`, `git-push`, `git-environment`, `delivery-integration`). The
+  (`branch-publication`, `git-push`, `git-environment`, `delivery-integration`, `publication-live-harness`). The
   bounded live run that publishes a task commit, opens the PR and pushes a repair is
   unproved until its evidence record exists.
 - **Operations, recovery and cutover** (R06) — **Bounded.** A disposable launchd
