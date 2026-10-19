@@ -1,6 +1,8 @@
 // One bounded live drafting run on the real Codex runtime. Refuses without
 // `--live`, makes exactly one attempt (no retries) and prints redacted evidence
 // JSON only: states, counts and validity, never the model's text or any path.
+// `--issue` runs the issue-improvement kind against a seeded imported task whose
+// issue comes from an in-process fake GitHub source; it makes no network call.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -16,7 +18,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { draftProposalSchema } from "../../../dist/src/operator/contracts.js";
 import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
-import { draftingTimeLimitMs } from "../../../dist/src/standalone/drafting.js";
+import {
+  draftingTimeLimitMs,
+  issueEditProposalOf,
+  issueEditProposalSchema,
+} from "../../../dist/src/standalone/drafting.js";
 import { StandaloneService } from "../../../dist/src/standalone/service.js";
 
 const args = process.argv.slice(2);
@@ -34,7 +40,23 @@ if (
   process.exit(2);
 }
 
+const issueMode = args.includes("--issue");
+// A fixed thin issue, as a GitHub reader would list it.
+const thinIssue = {
+  providerInstance: "github.com",
+  nodeId: "I_LIVE",
+  repositoryId: "R_LIVE",
+  repositoryName: "acme/greeter",
+  number: 1,
+  title: "Greeter flag",
+  body: "add a shout option",
+  state: "open",
+  labels: ["ready"],
+  projectFields: [],
+};
+
 const result = {
+  mode: issueMode ? "issue" : "brief",
   candidate: execFileSync("git", ["rev-parse", "HEAD"], {
     encoding: "utf8",
   }).trim(),
@@ -51,12 +73,17 @@ const result = {
   capacityAfter: null,
   worktreeRemoved: null,
   tasksCreated: null,
+  assignmentsCreated: null,
+  deliveryRecords: null,
   cleanup: { rootRemoved: false },
   failure: null,
 };
 let root;
 let service;
 let stage = "setup";
+
+if (issueMode)
+  process.env.DRAFTING_LIVE_SOURCE = "offline-drafting-source-value";
 
 const command = (domain, body) =>
   domain.execute({ key: randomUUID(), actor: "operator", ...body });
@@ -93,6 +120,24 @@ try {
   service = new StandaloneService(
     dataDir,
     (context) => new CodexRuntime("codex", context),
+    undefined,
+    issueMode
+      ? {
+          github: {
+            readerFactory: () => ({
+              async readSelection() {
+                return { complete: true, issues: [thinIssue], reason: null };
+              },
+              async readBlockers() {
+                return { complete: true, blockers: [], reason: null };
+              },
+              async readIssueStatus() {
+                return { status: "open" };
+              },
+            }),
+          },
+        }
+      : {},
   );
   await service.start();
   const domain = service.domain();
@@ -123,7 +168,7 @@ try {
     key: randomUUID(),
     projectId,
     expectedVersion: Number(domain.githubConfiguration(projectId).version),
-    credentialRef: null,
+    credentialRef: issueMode ? "env:DRAFTING_LIVE_SOURCE" : null,
     selections: [
       {
         id: "repo",
@@ -137,14 +182,30 @@ try {
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   });
 
+  let taskId;
+  if (issueMode) {
+    stage = "issue-import";
+    command(domain, {
+      type: "github.activate",
+      projectId,
+      selectionId: "repo",
+      expectedVersion: Number(domain.githubConfiguration(projectId).version),
+    });
+    await service.refreshGitHub();
+    taskId = service.githubSources().issue(thinIssue.nodeId)?.taskId;
+    if (!taskId) throw new Error("The seeded issue was not imported");
+  }
+
   stage = "drafting";
   const runId = randomUUID();
   const started = Date.now();
-  await service.startDrafting({
-    runId,
-    projectId,
-    idea: "Let the greeter take a --shout flag that prints the greeting in capitals.",
-  });
+  if (issueMode) await service.startIssueDrafting({ runId, taskId, note: "" });
+  else
+    await service.startDrafting({
+      runId,
+      projectId,
+      idea: "Let the greeter take a --shout flag that prints the greeting in capitals.",
+    });
   const settled = ["proposed", "failed", "interrupted", "expired"];
   let run = service.readDrafting(runId);
   result.stateSequence.push(run.state);
@@ -159,7 +220,10 @@ try {
   }
   result.elapsedMs = Date.now() - started;
   result.outcome = run.state;
-  const checked = draftProposalSchema.safeParse(run.proposal);
+  const issueProposal = issueMode ? issueEditProposalOf(run) : null;
+  const checked = issueMode
+    ? issueEditProposalSchema.safeParse(issueProposal)
+    : draftProposalSchema.safeParse(run.proposal);
   result.proposal = {
     valid: checked.success,
     titleLength: run.proposal?.title.length ?? null,
@@ -171,13 +235,20 @@ try {
   const copies = join(dataDir, "drafting-workspaces");
   result.worktreeRemoved =
     !existsSync(copies) || readdirSync(copies).length === 0;
-  result.tasksCreated = domain.tasks(projectId).length;
+  // The imported task is the one task an issue run may find, never create.
+  result.tasksCreated = domain.tasks(projectId).length - (issueMode ? 1 : 0);
+  result.assignmentsCreated = issueMode ? domain.assignments(taskId).length : 0;
+  result.deliveryRecords = service.delivery().actions().length;
   if (
     run.state !== "proposed" ||
     !checked.success ||
+    !result.stateSequence.includes("running") ||
+    result.elapsedMs > draftingTimeLimitMs ||
     result.capacityAfter !== 0 ||
     !result.worktreeRemoved ||
-    result.tasksCreated !== 0
+    result.tasksCreated !== 0 ||
+    result.assignmentsCreated !== 0 ||
+    result.deliveryRecords !== 0
   )
     throw new Error("The drafting run did not meet its acceptance conditions");
 } catch (error) {

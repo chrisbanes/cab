@@ -666,9 +666,10 @@ recorded in the
 
 ## Drafting runs
 
-A drafting run proposes a task title and outcome for the composer without creating
-anything. Service, API and composer are covered by these deterministic suites on both
-harnesses; the real-runtime run is recorded in the
+A drafting run proposes a task title and outcome for the composer, or an improved
+title and body for an imported issue (Improve with lead), without creating anything.
+Service, API and composer are covered by these deterministic suites on both
+harnesses; the real-runtime runs are recorded in the
 [live drafting evidence](evidence/2026-10-18-drafting-live-run.md).
 
 | Criteria | Deterministic evidence |
@@ -680,6 +681,11 @@ harnesses; the real-runtime run is recorded in the
 | The turn-request migration keeps rows, sequences and links; an unclaimed proposal expires after 24 hours | `drafting-runs.test.ts` |
 | Commands are receipted by key; a replay returns the receipt and other content conflicts; the read needs a session | `operator-drafting-api.test.ts` |
 | The composer fills empty fields, offers Replace or Keep beside typed text, reattaches after a reload, keeps text through Stop with Retry, and shows the no-lead state; nothing is saved without Save draft or Create and start (1366 px, 390 px, WebKit phone) | `operator-composer-drafting-browser.test.ts`, `composer-drafting-model.test.ts` |
+| An issue run records the synced title and body it starts from and proposes a replacement title and body (the body may exceed a brief's limit) through its own tool; blank or oversize proposals are refused; no task, assignment, workspace or delivery record is created; Stop and the time limit behave as for a brief run; existing databases migrate and read as briefs | `issue-drafting.test.ts` (Codex and Claude), `drafting-runs.test.ts` |
+| A confirmed operator edit makes exactly one `issue.edit` on the bound issue under the repository grant, with read-back; imported content is not copied, so the next sync shows the new title and outcome; no grant, a runtime caller, an unapproved or altered review and another issue are refused; it is offered on any open imported task, including running, unready or held work, and not on a closed one | `operator-issue-edit.test.ts` |
+| An issue changed on GitHub after the draft started is refused as stale at review and again at the provider before any write; an unknown outcome stays uncertain across a restart and is never resent | `operator-issue-edit.test.ts`, `github-delivery-provider.test.ts` |
+| Commands are receipted by key; excluded text, a stale copy, a missing grant and a runtime actor are refused; the task read reports the first unavailable reason and the latest edit | `operator-issue-edit-api.test.ts` |
+| Improve with lead runs from note to proposal, edit, full current-and-proposed review and send, shows disabled, stale (Redraft) and uncertain (held, no resend, kept across a reload) states, and sends no task or comment command (1366 px, 390 px, WebKit phone) | `operator-issue-improve-browser.test.ts`, `issue-improve-model.test.ts` |
 
 ## Draft turns
 

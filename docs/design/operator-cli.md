@@ -60,6 +60,12 @@ a brief, and a drafting run's value is the composer fill and reattaching to it a
 leaving or reloading. Revisit if a CLI journey needs the lead to read a project's
 repositories for a brief.
 
+The CLI likewise does not offer Improve with lead (a drafting run that proposes a
+better title and body for an imported issue, sent as an operator `issue.edit`). The
+value is the same: the lead's read of the repositories, the editable proposal, the
+full-text review and the reattach after a reload, none of which a CLI caller
+needs. Revisit with composer drafting.
+
 ## Diagnostic evidence
 
 Add richer bounded capture for future executions: Ensemble-supplied instructions
