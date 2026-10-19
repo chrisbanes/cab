@@ -66,7 +66,7 @@ export const draftingCopy = {
   waiting:
     "Waiting to start. A draft waits for capacity, and for a paused project to resume.",
   stopping:
-    "Stopping. The draft ends when the runtime is seen to stop; capacity is released then.",
+    "Stopping. The draft ends when the runtime is seen to stop; capacity is released then. If its working copy could not be removed, Stop again retries.",
   interrupted:
     "The run ended and its working copy was deleted. Your idea, title and outcome are unchanged.",
   failed:

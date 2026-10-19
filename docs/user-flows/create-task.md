@@ -50,3 +50,4 @@ Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
 - An unknown outcome offers Check whether it saved, which replays the exact request.
 - A stopped or failed draft shows Retry and Dismiss and keeps the idea, title and
   outcome. Reloading or locking a phone reattaches to a draft in progress.
+  A stopping draft offers Stop again, which retries removing a working copy that was held.

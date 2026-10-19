@@ -532,9 +532,22 @@ export function DraftWithLead({
           </p>
         )}
         {view === "stopping" && (
-          <p className="body" role="status">
-            {draftingCopy.stopping}
-          </p>
+          <>
+            <p className="body" role="status">
+              {draftingCopy.stopping}
+            </p>
+            {/* A held working copy is only removed by another Stop; Stop is idempotent by state. */}
+            <div className="composer-draft-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void stop()}
+              >
+                Stop again
+              </Button>
+            </div>
+          </>
         )}
         {view === "proposed" && (
           <>

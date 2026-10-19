@@ -516,6 +516,28 @@ for (const [name, viewport] of viewports) {
     );
   });
 
+  test(`${name}: a stopping draft offers Stop again, sent under a new key`, async (_t, j) => {
+    const { f, page, commands, open } = await launch(j, viewport);
+    await open();
+    await openPanel(page);
+    await panel(page).getByLabel("Rough idea").fill(idea);
+    await draftButton(page).click();
+    const runId = await runningRun(f);
+    await panel(page)
+      .getByRole("button", { name: "Stop", exact: true })
+      .click();
+    await panel(page).getByText("Stopping", { exact: true }).waitFor();
+    // The status alone left nothing to press when a held copy needed another Stop.
+    await panel(page)
+      .getByRole("button", { name: "Stop again", exact: true })
+      .click();
+    await until(() => commands("drafting.stop").length === 2);
+    const stops = commands("drafting.stop");
+    assert.notEqual(stops[0]?.key, stops[1]?.key);
+    f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
+    await panel(page).getByText("Draft interrupted", { exact: true }).waitFor();
+  });
+
   test(`${name}: a project without a lead shows why and never starts a run`, async (_t, j) => {
     const { f, page, commands, open } = await launch(j, viewport, {
       lead: false,
