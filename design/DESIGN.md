@@ -688,7 +688,7 @@ each flow document states what is implemented. Fixtures are fixture-app, `fixtur
     it. The line is informational and never disables Resume. While anything would make work wait, the primary is disabled (50%)
     and the reasons sit beneath it, one item each: the readiness reason with its fix
     line in Geist Mono, and a secondary link that opens in a new tab when the fix is
-    elsewhere (Add Claude for the Claude token, Edit profile when the Claude lead's
+    elsewhere (Add Claude for the Claude token, Edit profile when the lead's
     model or reasoning effort is not accepted). Under the items, a hint ("Links open
     in a new tab. Fix the item, then check again here. If you leave this page, resume
     later with the Pause project switch in project configuration.") and a secondary
@@ -2592,8 +2592,8 @@ frames 114 and 118–128 as follows:
 - Execution runtimes ([#826](https://github.com/chrisbanes/ensemble/issues/826)),
   which frames 114, 118–125, 127 and 128 do not draw, use existing fields, rows and asides:
   profile pages add a Runtime select (Codex or Claude) with Model and Reasoning
-  effort for Claude (selects once the runtime has read its supported values, else
-  text), a not-enabled or unavailable note, a "Runtime change" aside (new
+  effort for either runtime (selects once the runtime has read its supported values,
+  else text; blank uses the runtime default), a not-enabled or unavailable note, a "Runtime change" aside (new
   conversations only) and an "Execution policy" aside for the selected runtime;
   each Settings profile row adds a "Runtime: …" line; the Runtime and recovery
   panel carries the Claude subscription token row (like the discovery row); Runtime

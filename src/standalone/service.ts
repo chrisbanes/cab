@@ -5948,7 +5948,10 @@ export class StandaloneService {
     this.startExecution(request, intent, workspaceKey, previous);
   }
 
-  /** Model settings of the bound profile revision; only Claude profiles carry them. */
+  /**
+   * Model settings of the bound profile revision. Claude always carries them; Codex only
+   * when a value is set, so a Codex profile without settings keeps today's call shapes.
+   */
   private turnSettings(request: TurnRequest): RuntimeTurnSettings | undefined {
     if (request.profileRevision === null) return undefined;
     const domain = this.domain();
@@ -5961,8 +5964,12 @@ export class StandaloneService {
           : undefined;
     if (!profileId) return undefined;
     const runtime = domain.profileRuntime(profileId, request.profileRevision);
-    return runtime.harness === "claude"
-      ? { model: runtime.model, reasoningEffort: runtime.reasoningEffort }
+    const model = runtime.model ?? null,
+      reasoningEffort = runtime.reasoningEffort ?? null;
+    return runtime.harness === "claude" ||
+      model !== null ||
+      reasoningEffort !== null
+      ? { model, reasoningEffort }
       : undefined;
   }
 
@@ -6124,7 +6131,12 @@ export class StandaloneService {
       } else {
         if (state.get(intent.id).state !== "submitting")
           throw new Error("Execution admission was held");
-        threadId = await guard(runtime.startThread(workspace, tools));
+        const threadSettings = this.turnSettings(request);
+        threadId = await guard(
+          threadSettings
+            ? runtime.startThread(workspace, tools, threadSettings)
+            : runtime.startThread(workspace, tools),
+        );
       }
       submissionStage = "bound";
       const draftingControl = draftingRunId
@@ -6671,10 +6683,17 @@ export class StandaloneService {
           String(domain.assignment(request.assignmentId).profileId),
           request.profileRevision,
         );
-        if (configured.harness === "claude")
+        if (
+          configured.harness === "claude" ||
+          configured.model != null ||
+          configured.reasoningEffort != null
+        )
           entries.push(
-            admitted("profile.model", configured.model),
-            admitted("profile.reasoningEffort", configured.reasoningEffort),
+            admitted("profile.model", configured.model ?? null),
+            admitted(
+              "profile.reasoningEffort",
+              configured.reasoningEffort ?? null,
+            ),
           );
       }
     } catch {
