@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
 import { coordinationFixture } from "../fixtures/coordination.js";
@@ -111,4 +112,15 @@ test("only Codex task turns can be admitted with command network access", () => 
   } finally {
     f.close();
   }
+});
+
+test("the live network run refuses to start without --live --one-attempt", () => {
+  const run = spawnSync(
+    process.execPath,
+    ["test/execution/network-access-qualification/live-network.mjs"],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /Refusing live Codex execution/);
+  assert.equal(run.stdout, "");
 });
