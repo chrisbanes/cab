@@ -1,0 +1,161 @@
+{
+  "version": "codex-cli 0.163.0-alpha.10.2",
+  "turnStartCalls": 2,
+  "modelList": {
+    "count": 7,
+    "keys": [
+      "id",
+      "model",
+      "upgrade",
+      "upgradeInfo",
+      "availabilityNux",
+      "displayName",
+      "description",
+      "modelSpecialty",
+      "hidden",
+      "supportedReasoningEfforts",
+      "defaultReasoningEffort",
+      "inputModalities",
+      "supportsPersonality",
+      "multiAgentVersion",
+      "additionalSpeedTiers",
+      "serviceTiers",
+      "defaultServiceTier",
+      "availableAccessPrograms",
+      "isDefault"
+    ],
+    "nextCursor": null,
+    "models": [
+      {
+        "model": "gpt-6.1-sol",
+        "isDefault": true,
+        "hidden": false,
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "model": "gpt-6-astra",
+        "isDefault": false,
+        "hidden": false,
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "model": "gpt-6-sol",
+        "isDefault": false,
+        "hidden": false,
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "model": "gpt-6-luna",
+        "isDefault": false,
+        "hidden": false,
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "isDefault": false,
+        "hidden": false,
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "isDefault": false,
+        "hidden": false,
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "isDefault": false,
+        "hidden": false,
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    ]
+  },
+  "chosen": {
+    "M": "gpt-6-astra",
+    "E": "low",
+    "modelIsDefault": false,
+    "effortIsDefault": false
+  },
+  "threadStart": {
+    "model": "gpt-6-astra",
+    "reasoningEffort": "low"
+  },
+  "turnStartResponseKeys": [
+    "turn"
+  ],
+  "turnCompleted": {
+    "status": "completed",
+    "error": null
+  },
+  "threadResume": {
+    "model": "gpt-6-astra",
+    "reasoningEffort": "low"
+  },
+  "equalities": {
+    "start": true,
+    "resume": true,
+    "turnCompleted": true
+  },
+  "rejection": {
+    "shape": "accepted-then",
+    "turnStartResponse": [
+      "turn"
+    ],
+    "turnStatus": "failed",
+    "turnError": "{\"message\":\"{\\\"type\\\":\\\"error\\\",\\\"status\\\":400,\\\"error\\\":{\\\"type\\\":\\\"invalid_request_error\\\",\\\"message\\\":\\\"The 'ensemble-unsupported-model' model is not supported when using Codex with a ChatGPT account.\\\"}}\",\"codexErrorInfo\":\"other\",\"additionalDetails\":null,\"misalignment\":null}"
+  }
+}

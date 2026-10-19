@@ -1,0 +1,198 @@
+{
+  "candidate": "01e95a0eccda38369e32047f3831d136cca5d6eb",
+  "node": "v24.22.0",
+  "codex": {
+    "launcher": "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+    "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+    "version": "codex-cli 0.163.0-alpha.10.2"
+  },
+  "startTurnCalls": 2,
+  "configured": {
+    "model": "gpt-5.6-luna",
+    "reasoningEffort": "low"
+  },
+  "execution": {
+    "state": "completed",
+    "reasonPresent": false,
+    "threadBound": true,
+    "turnBound": true
+  },
+  "surfaces": {
+    "listed": [
+      "captured",
+      "captured"
+    ],
+    "identity": {
+      "taskMatches": true,
+      "assignmentPresent": true,
+      "threadBound": true,
+      "turnBound": true,
+      "bound": {
+        "assignmentVersion": 1,
+        "instructionsRevision": 2,
+        "profileRevision": 1,
+        "conversationRevision": 1,
+        "harness": "codex"
+      }
+    },
+    "settings": [
+      {
+        "name": "harness",
+        "source": "service-admitted",
+        "present": true
+      },
+      {
+        "name": "sandbox",
+        "source": "service-admitted",
+        "present": true
+      },
+      {
+        "name": "approval",
+        "source": "service-admitted",
+        "present": true
+      },
+      {
+        "name": "accountType",
+        "source": "service-admitted",
+        "present": true
+      },
+      {
+        "name": "profile.model",
+        "source": "service-admitted",
+        "present": true,
+        "value": "gpt-5.6-luna"
+      },
+      {
+        "name": "profile.reasoningEffort",
+        "source": "service-admitted",
+        "present": true,
+        "value": "low"
+      },
+      {
+        "name": "model",
+        "source": "runtime-reported",
+        "present": true,
+        "value": "gpt-5.6-luna"
+      },
+      {
+        "name": "modelProvider",
+        "source": "runtime-reported",
+        "present": true
+      },
+      {
+        "name": "reasoningEffort",
+        "source": "runtime-reported",
+        "present": true,
+        "value": "low"
+      },
+      {
+        "name": "serviceTier",
+        "source": "runtime-reported",
+        "present": false
+      }
+    ],
+    "inputs": {
+      "provenance": {
+        "source": "captured-submission",
+        "effectivePrompt": "not-captured"
+      },
+      "segments": [
+        {
+          "name": "request",
+          "state": "available",
+          "redacted": false
+        },
+        {
+          "name": "role",
+          "state": "available",
+          "redacted": false
+        },
+        {
+          "name": "review-references",
+          "state": "available",
+          "redacted": false
+        },
+        {
+          "name": "project-instructions",
+          "state": "available",
+          "redacted": false
+        },
+        {
+          "name": "profile-instructions",
+          "state": "available",
+          "redacted": false
+        }
+      ],
+      "submittedDigestMatches": true,
+      "comparison": [
+        {
+          "name": "project-instructions",
+          "sameRevision": true
+        },
+        {
+          "name": "profile-instructions",
+          "sameRevision": true
+        }
+      ]
+    },
+    "events": {
+      "count": 17,
+      "kinds": [
+        "service",
+        "setting",
+        "input",
+        "runtime"
+      ],
+      "runtimeItemTypes": [
+        "reasoning",
+        "commandExecution",
+        "turn"
+      ],
+      "commandExecutionObserved": true,
+      "commandOutputRedacted": true,
+      "toolCalls": 0,
+      "service": [
+        "thread-bound",
+        "input-captured",
+        "turn-bound",
+        "terminal-observed",
+        "execution-settled"
+      ],
+      "gaps": [],
+      "health": {
+        "mode": "enhanced",
+        "eventSource": "supported",
+        "toolObservation": "incomplete",
+        "reasoning": "not-collected",
+        "gaps": [],
+        "unrecorded": 0
+      }
+    },
+    "follow": {
+      "records": [
+        "item",
+        "end"
+      ],
+      "end": "execution-finished"
+    },
+    "storeHealth": {
+      "unrecorded": 0,
+      "totalBytes": 4492
+    },
+    "profileRuntime": {
+      "harness": "codex",
+      "model": "gpt-5.6-luna",
+      "reasoningEffort": "low"
+    }
+  },
+  "sentinel": {
+    "cliOutputs": "absent",
+    "databaseBytes": "absent"
+  },
+  "cleanup": {
+    "serviceStopped": true,
+    "processExit": "verified",
+    "fixtureRemoved": true
+  },
+  "failure": null
+}
