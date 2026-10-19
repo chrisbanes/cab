@@ -127,11 +127,15 @@ export class DeliveryCoordinator {
     repositoryId: string,
     sha: string | null,
   ) {
-    this.options.feedback?.(
-      taskId,
-      `The task branch changed outside Ensemble (head ${sha ?? "deleted"}). Review the branch before publishing again.`,
-      `outside-push:${repositoryId}:${sha ?? "absent"}`,
-    );
+    try {
+      this.options.feedback?.(
+        taskId,
+        `The task branch changed outside Ensemble (head ${sha ?? "deleted"}). Review the branch before publishing again.`,
+        `outside-push:${repositoryId}:${sha ?? "absent"}`,
+      );
+    } catch {
+      // The outside head is already recorded; a task without a lead has nobody to wake.
+    }
   }
   private serialize<T>(keys: string[], run: () => Promise<T>): Promise<T> {
     const prior = [
