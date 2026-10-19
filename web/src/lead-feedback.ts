@@ -1,3 +1,5 @@
+import type { DraftTurnReason } from "../../src/operator/contracts.js";
+
 /** How operator feedback reaches the task lead; one source of copy for every entry point. */
 export type LeadFeedbackMode = "receives" | "resumes" | "unavailable";
 
@@ -27,15 +29,6 @@ export const leadUnavailableNotice = (name: string) =>
 export const leadAwaitingRecoveryNotice = (name: string) =>
   `${name} is waiting for an operator message to continue after recovery. Sending this review won't resume it. Send an ordinary message to continue.`;
 
-/** Why a draft turn can't start now; mirrors the server's availability reasons. */
-export type DraftTurnReason =
-  | "task-not-open"
-  | "task-ready"
-  | "lead-unconfigured"
-  | "lead-revoked"
-  | "lead-unavailable"
-  | "draft-turn-active";
-
 export const draftTurnHeading = (name: string) => `Draft turn with ${name}`;
 
 export const draftTurnPlaceholder = (name: string) =>
@@ -56,11 +49,12 @@ export const draftTurnSentNotice = (name: string) =>
 export const draftTurnUnavailableNotice = (
   reason: DraftTurnReason,
   name: string,
+  taskState?: string,
 ) =>
   ({
     "task-ready":
       "This task is Ready, so the ordinary Message lead reply is shown instead.",
-    "task-not-open": "Draft turns need an open task.",
+    "task-not-open": `Draft turns need an open task.${taskState === "done" ? " This task is Done." : taskState === "cancelled" ? " This task is Cancelled." : ""}`,
     "lead-unconfigured": "Draft turns need a project lead.",
     "lead-revoked": `${name}’s profile is revoked.`,
     "lead-unavailable": `${name} is running, held or has completed, so a draft turn can’t start.`,

@@ -44,6 +44,7 @@ export type TaskControlReceipt = Extract<
   CommandReceipt,
   { kind: "task-stop" | "task-resume" }
 >;
+export type DraftTurnReceipt = Extract<CommandReceipt, { kind: "draft-turn" }>;
 
 const stopTargetColumns = `(
       taskId TEXT NOT NULL,
@@ -126,6 +127,8 @@ export interface CoordinationExecutionBinding extends TaskExecutionBinding {
   admittedTaskVersion: number | null;
   profileId: string;
   state: "running" | "completed";
+  /** The turn is a read-only draft turn of a pending lead. */
+  draftTurn: boolean;
 }
 
 export interface NativeTurnPrebinding extends TaskExecutionBinding {
@@ -896,6 +899,77 @@ export class ExecutionState {
     });
   }
 
+  /**
+   * Runs `record` and stores the draft-turn receipt in one transaction, so a refusal or
+   * failure leaves nothing behind. Same key and content replays the receipt; other
+   * content under the key, or a stale task version, conflicts.
+   */
+  recordDraftTurn(
+    command: {
+      key: string;
+      taskId: string;
+      expectedVersion: number;
+      message: string;
+    },
+    record: () => { leadAssignmentId: string; workId: string },
+  ): { receipt: DraftTurnReceipt; replayed: boolean } {
+    const id = z.string().uuid().parse(command.taskId);
+    const key = z.string().uuid().parse(command.key);
+    const payloadHash = materialDigest({
+      type: "task.draft-turn",
+      taskId: id,
+      expectedVersion: command.expectedVersion,
+      message: command.message,
+    });
+    return transaction(this.db, () => {
+      const stored = this.db
+        .prepare(
+          "SELECT payloadHash, receiptJson FROM task_control_receipts WHERE taskId = ? AND key = ?",
+        )
+        .get(id, key) as
+        | { payloadHash: string; receiptJson: string }
+        | undefined;
+      if (stored) {
+        if (stored.payloadHash !== payloadHash)
+          throw new DomainConflictError("Request key reused for other content");
+        return {
+          receipt: JSON.parse(stored.receiptJson) as DraftTurnReceipt,
+          replayed: true,
+        };
+      }
+      const row = this.db
+        .prepare("SELECT version FROM domain_tasks WHERE id = ?")
+        .get(id) as { version: number } | undefined;
+      if (row?.version !== command.expectedVersion)
+        throw new DomainConflictError("Task version conflict");
+      const receipt: DraftTurnReceipt = {
+        kind: "draft-turn",
+        key,
+        recorded: true,
+        taskId: id,
+        ...record(),
+      };
+      this.db
+        .prepare(
+          "INSERT INTO task_control_receipts (taskId, key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(id, key, payloadHash, JSON.stringify(receipt), Date.now());
+      return { receipt, replayed: false };
+    });
+  }
+
+  /** A completed draft turn expects no result, so its result effect is not left pending. */
+  settleDraftTurnEffects(): void {
+    if (!this.hasTurnRequests) return;
+    this.db.exec(`UPDATE execution_pending_effects
+      SET state = 'settled', reason = 'Draft turns record no result'
+      WHERE effectKey = 'assignment-result' AND state = 'pending'
+        AND workId IN (
+          SELECT request.workId FROM turn_requests request
+          JOIN execution_intents intent ON intent.workId = request.workId
+          WHERE request.draftTurn = 1 AND intent.state = 'completed')`);
+  }
+
   /** Must run inside a transaction. */
   private holdTask(id: string): { active: number } {
     const task = this.db
@@ -1571,6 +1645,7 @@ export class ExecutionState {
       assignment.profileId,
       ${this.hasTurnRequests ? "request.sequence" : "NULL"} AS requestSequence,
       ${this.hasTurnRequests ? "request.taskVersion" : "NULL"} AS admittedTaskVersion,
+      ${this.hasTurnRequests ? "request.draftTurn" : "0"} AS draftTurn,
       intent.state
       FROM task_execution_bindings binding
       JOIN execution_intents intent ON intent.workId = binding.workId
@@ -1599,10 +1674,13 @@ export class ExecutionState {
             AND newer.workRevision > revision.workRevision
         )
       LIMIT 2`)
-      .all(threadId, turnId) as CoordinationExecutionBinding[];
+      .all(threadId, turnId) as Array<
+      Omit<CoordinationExecutionBinding, "draftTurn"> & { draftTurn: number }
+    >;
     if (rows.length > 1)
       throw new Error("Coordination callback matches ambiguous work");
-    return rows[0];
+    const [row] = rows;
+    return row && { ...row, draftTurn: row.draftTurn === 1 };
   }
 
   latestCompletedAssignmentWork(assignmentId: string): string | undefined {
@@ -4482,8 +4560,19 @@ export class ExecutionState {
           SELECT ?, EXISTS (
             SELECT 1 FROM project_command_network_access p
             JOIN task_execution_bindings b ON b.workId = ?
-            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = 'codex')`)
-          .run(id, workId, options.projectId);
+            WHERE p.projectId = ? AND p.enabled = 1 AND b.harness = 'codex')
+            ${
+              // A draft turn never gets command network access.
+              this.hasTurnRequests
+                ? "AND NOT EXISTS (SELECT 1 FROM turn_requests r WHERE r.workId = ? AND r.draftTurn = 1)"
+                : ""
+            }`)
+          .run(
+            id,
+            workId,
+            options.projectId,
+            ...(this.hasTurnRequests ? [workId] : []),
+          );
         const retryGeneration = this.db
           .prepare(`SELECT chainId FROM execution_retry_generations
           WHERE workId = ?`)
@@ -4509,10 +4598,19 @@ export class ExecutionState {
           .run(workId, options.projectId);
         const taskBinding = this.taskBinding(workId);
         if (taskBinding) {
+          // A draft turn only checks the lead is still pending: it never activates it.
+          const draftTurn =
+            this.hasTurnRequests &&
+            this.db
+              .prepare(
+                "SELECT 1 FROM turn_requests WHERE workId = ? AND draftTurn = 1",
+              )
+              .get(workId) !== undefined;
           const activated = this.db
-            .prepare(`UPDATE domain_assignments SET state = 'running'
+            .prepare(`UPDATE domain_assignments
+            SET state = ${draftTurn ? "state" : "'running'"}
             WHERE id = ? AND taskId = ? AND version = ?
-              AND state IN ('pending', 'running')
+              AND state IN (${draftTurn ? "'pending'" : "'pending', 'running'"})
               AND EXISTS (
                 SELECT 1 FROM task_execution_bindings binding
                 WHERE binding.workId = ?

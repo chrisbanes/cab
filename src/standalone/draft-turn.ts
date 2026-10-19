@@ -4,13 +4,9 @@
  * tool filter share one source.
  */
 
-export type DraftTurnUnavailableReason =
-  | "task-not-open"
-  | "task-ready"
-  | "lead-unconfigured"
-  | "lead-revoked"
-  | "lead-unavailable"
-  | "draft-turn-active";
+import type { DraftTurnReason } from "../operator/contracts.js";
+
+export type DraftTurnUnavailableReason = DraftTurnReason;
 
 /** The reason sentences shown by the command, the CLI and the task page. */
 export const draftTurnUnavailableMessages: Record<
@@ -65,6 +61,13 @@ export function draftTurnAvailability(
 
 export const draftTurnUnavailableText = (reason: DraftTurnUnavailableReason) =>
   `Draft turn unavailable: ${draftTurnUnavailableMessages[reason]}`;
+
+/** A definite refusal: nothing was recorded. */
+export class DraftTurnUnavailableError extends Error {
+  constructor(readonly reason: DraftTurnUnavailableReason) {
+    super(draftTurnUnavailableText(reason));
+  }
+}
 
 /**
  * Appended to the ordinary assignment prompt of a draft turn. It states the limits only;

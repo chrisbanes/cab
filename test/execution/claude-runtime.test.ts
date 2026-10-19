@@ -158,7 +158,7 @@ function fixture(
       workspace,
       "Do the work",
       settings,
-      access,
+      access ? { networkAccess: false, access } : undefined,
     );
     const generation = runtime.currentUserInputGeneration();
     assert.ok(generation);

@@ -141,6 +141,7 @@ import type {
   CoordinationTaskView,
   CoordinationView,
 } from "./coordination-view.js";
+import { DraftTurnUnavailableError } from "./draft-turn.js";
 import {
   boundDetail,
   DiagnosticCursorError,
@@ -3346,6 +3347,7 @@ export class OperatorApi {
             },
           }
         : {}),
+      draftTurn: this.service.draftTurnAvailability(taskId),
       assignments: assignments.map((a) => {
         const s = this.selection(a),
           request = s.request;
@@ -6657,6 +6659,24 @@ export class OperatorApi {
               undefined,
               undefined,
               `Only an open task can be stopped. This task is ${error.taskState === "done" ? "Done" : "Cancelled"}.`,
+            );
+          throw error;
+        }
+      }
+      if (c.type === "task.draft-turn") {
+        this.requireTask(c.taskId);
+        try {
+          return commandReceiptSchema.parse(
+            await this.service.startDraftTurn(c),
+          );
+        } catch (error) {
+          if (error instanceof DraftTurnUnavailableError)
+            throw new OperatorApiError(
+              409,
+              "conflict",
+              undefined,
+              undefined,
+              error.message,
             );
           throw error;
         }

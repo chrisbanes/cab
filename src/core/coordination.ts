@@ -2605,6 +2605,9 @@ export class CoordinationStore {
         return undefined;
       }
 
+      // A draft turn expects no result, so a missing one needs no reporting repair.
+      if (this.isDraftTurnWork(work)) return undefined;
+
       const assignmentId = String(binding.assignmentId);
       const assignmentVersion = Number(binding.assignmentVersion);
       const hasResult = Boolean(
@@ -3190,98 +3193,109 @@ export class CoordinationStore {
     deliveryWorkId: string,
     assignmentVersion?: number,
   ): InboxDelivery | undefined {
+    return transaction(this.db, () =>
+      this.bindDeliveryBatchWithinTransaction(
+        recipientAssignmentId,
+        deliveryWorkId,
+        assignmentVersion,
+      ),
+    );
+  }
+
+  /** Must run inside the caller's transaction. */
+  bindDeliveryBatchWithinTransaction(
+    recipientAssignmentId: string,
+    deliveryWorkId: string,
+    assignmentVersion?: number,
+  ): InboxDelivery | undefined {
     const recipient = uuid.parse(recipientAssignmentId);
     const workId = z.string().min(1).max(512).parse(deliveryWorkId);
     const requestedVersion =
       assignmentVersion === undefined
         ? undefined
         : z.number().int().positive().parse(assignmentVersion);
-    return transaction(this.db, () => {
-      const sameWork = this.one(
-        "SELECT batchId, recipientAssignmentId, state FROM coordination_delivery_batches WHERE deliveryWorkId = ?",
-        workId,
-      );
-      if (sameWork) {
-        if (sameWork.recipientAssignmentId !== recipient)
-          throw new Error(
-            "Delivery work identity reused for another recipient",
-          );
-        const batch = this.delivery(String(sameWork.batchId));
-        const recipientState = this.required(
-          "SELECT state FROM domain_assignments WHERE id = ?",
-          recipient,
-        ).state;
-        if (
-          requestedVersion !== undefined &&
-          batch.assignmentVersion !== requestedVersion
-        )
-          throw new Error(
-            "Delivery work identity reused for another assignment version",
-          );
-        if (
-          sameWork.state !== "completed" &&
-          recipientState !== "pending" &&
-          recipientState !== "running"
-        ) {
-          return undefined;
-        }
-        return batch;
-      }
+    const sameWork = this.one(
+      "SELECT batchId, recipientAssignmentId, state FROM coordination_delivery_batches WHERE deliveryWorkId = ?",
+      workId,
+    );
+    if (sameWork) {
+      if (sameWork.recipientAssignmentId !== recipient)
+        throw new Error("Delivery work identity reused for another recipient");
+      const batch = this.delivery(String(sameWork.batchId));
       const recipientState = this.required(
         "SELECT state FROM domain_assignments WHERE id = ?",
         recipient,
       ).state;
-      if (recipientState !== "pending" && recipientState !== "running") {
+      if (
+        requestedVersion !== undefined &&
+        batch.assignmentVersion !== requestedVersion
+      )
+        throw new Error(
+          "Delivery work identity reused for another assignment version",
+        );
+      if (
+        sameWork.state !== "completed" &&
+        recipientState !== "pending" &&
+        recipientState !== "running"
+      ) {
         return undefined;
       }
-      const active = this.one(
-        "SELECT batchId FROM coordination_delivery_batches WHERE recipientAssignmentId = ? AND state = 'queued'",
-        recipient,
-      );
-      if (active) {
-        const batch = this.delivery(String(active.batchId));
-        return batch;
-      }
-      const pending = this.db
-        .prepare(`SELECT event.sequence, event.eventId, event.taskId,
-        event.recipientAssignmentId, event.eventType, event.resultId, event.interactionId,
-        event.payload, event.createdAt
-        FROM coordination_inbox_events event
-        LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
-        WHERE event.recipientAssignmentId = ? AND delivery.eventId IS NULL
-        ORDER BY event.sequence`)
-        .all(recipient) as Row[];
-      if (pending.length === 0) {
-        return undefined;
-      }
-      const taskId = String(pending[0]?.taskId);
-      const storedVersion = Number(
-        this.required(
-          "SELECT version FROM domain_assignments WHERE id = ?",
-          recipient,
-        ).version,
-      );
-      const boundVersion = requestedVersion ?? storedVersion;
-      if (storedVersion !== boundVersion)
-        throw new Error("Delivery assignment version changed before binding");
-      const highWater = Math.max(...pending.map((row) => Number(row.sequence)));
-      const batchId = randomUUID();
-      this.db
-        .prepare(`INSERT INTO coordination_delivery_batches
-        (batchId, deliveryWorkId, taskId, recipientAssignmentId, assignmentVersion,
-          highWaterSequence, state)
-        VALUES (?, ?, ?, ?, ?, ?, 'queued')`)
-        .run(batchId, workId, taskId, recipient, boundVersion, highWater);
-      pending.forEach((event, index) => {
-        this.db
-          .prepare(
-            "INSERT INTO coordination_delivery_events (eventId, batchId, ordinal) VALUES (?, ?, ?)",
-          )
-          .run(String(event.eventId), batchId, index + 1);
-      });
-      const batch = this.delivery(batchId);
       return batch;
+    }
+    const recipientState = this.required(
+      "SELECT state FROM domain_assignments WHERE id = ?",
+      recipient,
+    ).state;
+    if (recipientState !== "pending" && recipientState !== "running") {
+      return undefined;
+    }
+    const active = this.one(
+      "SELECT batchId FROM coordination_delivery_batches WHERE recipientAssignmentId = ? AND state = 'queued'",
+      recipient,
+    );
+    if (active) {
+      const batch = this.delivery(String(active.batchId));
+      return batch;
+    }
+    const pending = this.db
+      .prepare(`SELECT event.sequence, event.eventId, event.taskId,
+      event.recipientAssignmentId, event.eventType, event.resultId, event.interactionId,
+      event.payload, event.createdAt
+      FROM coordination_inbox_events event
+      LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
+      WHERE event.recipientAssignmentId = ? AND delivery.eventId IS NULL
+      ORDER BY event.sequence`)
+      .all(recipient) as Row[];
+    if (pending.length === 0) {
+      return undefined;
+    }
+    const taskId = String(pending[0]?.taskId);
+    const storedVersion = Number(
+      this.required(
+        "SELECT version FROM domain_assignments WHERE id = ?",
+        recipient,
+      ).version,
+    );
+    const boundVersion = requestedVersion ?? storedVersion;
+    if (storedVersion !== boundVersion)
+      throw new Error("Delivery assignment version changed before binding");
+    const highWater = Math.max(...pending.map((row) => Number(row.sequence)));
+    const batchId = randomUUID();
+    this.db
+      .prepare(`INSERT INTO coordination_delivery_batches
+      (batchId, deliveryWorkId, taskId, recipientAssignmentId, assignmentVersion,
+        highWaterSequence, state)
+      VALUES (?, ?, ?, ?, ?, ?, 'queued')`)
+      .run(batchId, workId, taskId, recipient, boundVersion, highWater);
+    pending.forEach((event, index) => {
+      this.db
+        .prepare(
+          "INSERT INTO coordination_delivery_events (eventId, batchId, ordinal) VALUES (?, ?, ?)",
+        )
+        .run(String(event.eventId), batchId, index + 1);
     });
+    const batch = this.delivery(batchId);
+    return batch;
   }
 
   completeDeliveryBatch(deliveryWorkId: string): InboxDelivery {
@@ -3682,6 +3696,18 @@ export class CoordinationStore {
         throw new Error("Refused delivery batch changed during withdrawal");
       return true;
     });
+  }
+
+  private isDraftTurnWork(workId: string): boolean {
+    return Boolean(
+      this.one(
+        "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='turn_requests'",
+      ) &&
+        this.one(
+          "SELECT 1 AS draft FROM turn_requests WHERE workId = ? AND draftTurn = 1",
+          workId,
+        ),
+    );
   }
 
   private currentBinding(threadId: string, turnId: string): Row | undefined {

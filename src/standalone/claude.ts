@@ -29,6 +29,7 @@ import {
   type RuntimeToolCall,
   type RuntimeToolDefinition,
   type RuntimeToolResult,
+  type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
   type UnexpectedRequest,
 } from "./codex.js";
@@ -831,7 +832,7 @@ export class ClaudeRuntime implements Runtime {
     workspace: string,
     prompt: string,
     settings?: RuntimeTurnSettings,
-    access: "workspace-write" | "read-only" = "workspace-write",
+    policy?: RuntimeTurnPolicy,
   ): Promise<string> {
     const { sdk, executable } = this;
     const generation = this.generation;
@@ -847,7 +848,8 @@ export class ClaudeRuntime implements Runtime {
         : effortSchema.parse(settings.reasoningEffort);
     const base = claudeTemporaryBase(workspace);
     // A read-only turn writes only the per-task temporary base, in the sandbox and the hook.
-    const writable = access === "read-only" ? [base] : [workspace, base];
+    const writable =
+      policy?.access === "read-only" ? [base] : [workspace, base];
     const temporary = await ensureTemporaryBase(base);
     if (temporary) throw new Error(`Claude runtime unavailable: ${temporary}`);
     const fresh = this.freshThreads.delete(threadId);

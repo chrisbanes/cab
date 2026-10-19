@@ -3367,6 +3367,38 @@ test("a turn sends network access only when its admission policy enables it", as
   }
 });
 
+test("a read-only turn sends the read-only policy without network and the next turn writes again", async () => {
+  const { root, runtime, requests, cleanup } = settingsFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await bounded(runtime.startThread(root), 3000);
+    // The project's network setting never reaches a read-only turn.
+    await bounded(
+      runtime.startTurn("thread-1", root, "draft", undefined, {
+        networkAccess: true,
+        access: "read-only",
+      }),
+      3000,
+    );
+    await bounded(runtime.startTurn("thread-1", root, "ordinary"), 3000);
+    const turns = requests("turn/start") as { sandboxPolicy: unknown }[];
+    assert.deepEqual(turns[0]?.sandboxPolicy, {
+      type: "readOnly",
+      networkAccess: false,
+    });
+    assert.deepEqual(turns[1]?.sandboxPolicy, executionPolicy(root));
+    // The thread itself still starts workspace-write.
+    assert.deepEqual(
+      (requests("thread/start") as { sandbox: string }[]).map(
+        (request) => request.sandbox,
+      ),
+      ["workspace-write"],
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
 test("preflight refuses values outside the runtime catalogue and never waits without settings", async () => {
   const { root, runtime, cleanup } = settingsFakeRuntime();
   try {

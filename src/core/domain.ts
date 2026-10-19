@@ -1277,6 +1277,38 @@ export class DomainStore {
       .all(id.parse(taskId)) as Row[];
   }
 
+  /**
+   * The task's assignments as routing sees them. A pending lead that has only had draft
+   * turns, with nothing routed yet, has not started, so it does not count as assigned.
+   */
+  routingAssignments(taskId: string): Row[] {
+    const draftTurns = this.one(
+      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'turn_requests'",
+    );
+    if (
+      !draftTurns ||
+      this.one(
+        "SELECT 1 AS routed FROM routing_operations WHERE taskId = ?",
+        taskId,
+      )
+    )
+      return this.assignments(taskId);
+    const unstarted = (assignmentId: string) =>
+      this.one(
+        `SELECT 1 AS found FROM task_lead_bindings binding
+        JOIN domain_assignments assignment ON assignment.id = binding.assignmentId
+        WHERE binding.assignmentId = ? AND assignment.state = 'pending'
+          AND EXISTS (SELECT 1 FROM turn_requests r
+            WHERE r.assignmentId = binding.assignmentId AND r.draftTurn = 1)
+          AND NOT EXISTS (SELECT 1 FROM turn_requests r
+            WHERE r.assignmentId = binding.assignmentId AND r.draftTurn = 0)`,
+        assignmentId,
+      ) !== undefined;
+    return this.assignments(taskId).filter(
+      (assignment) => !unstarted(String(assignment.id)),
+    );
+  }
+
   pendingAssignments(): Row[] {
     return this.db
       .prepare(
@@ -1874,7 +1906,7 @@ export class DomainStore {
             "Candidate profile revision changed",
             "stale",
           );
-      if (this.assignments(data.taskId).length > 0)
+      if (this.routingAssignments(data.taskId).length > 0)
         throw new DomainStaleDispositionError(
           "Routing decision became stale: task already assigned",
           "stale",
@@ -2679,9 +2711,8 @@ export class DomainStore {
     }
   }
 
-  private ensureLeadAssignmentWithinTransaction(
-    taskId: string,
-  ): Row | undefined {
+  /** Must run inside the caller's transaction. */
+  ensureLeadAssignmentWithinTransaction(taskId: string): Row | undefined {
     const assignmentId = this.ensureLeadBindingWithinTransaction(taskId);
     if (!assignmentId) return undefined;
     const existing = this.one(

@@ -61,6 +61,17 @@ export {
 } from "../core/execution-runtime.js";
 export const uuid = z.string().uuid();
 const revision = z.number().int().positive().safe();
+
+/** Why a draft turn cannot start now; pause, Stop and capacity queue it instead. */
+export const draftTurnReasonSchema = z.enum([
+  "task-not-open",
+  "task-ready",
+  "lead-unconfigured",
+  "lead-revoked",
+  "lead-unavailable",
+  "draft-turn-active",
+]);
+export type DraftTurnReason = z.infer<typeof draftTurnReasonSchema>;
 const time = z.number().int().nonnegative().safe();
 /** The most Unicode characters (code points, as zod counts them) any operator text field takes. */
 export const textMaxLength = 16000;
@@ -1368,6 +1379,14 @@ export const taskSchema = envelope(
         })
         .strict()
         .optional(),
+      /** Whether the operator can start a draft turn now, and why not. */
+      draftTurn: z
+        .object({
+          available: z.boolean(),
+          reason: draftTurnReasonSchema.optional(),
+        })
+        .strict()
+        .optional(),
       assignments: z.array(assignmentSchema),
       admission: z
         .object({
@@ -2082,6 +2101,16 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedTaskVersion: revision,
       body: z.string().trim().min(1).max(16000),
       reviewId: uuid.optional(),
+    })
+    .strict(),
+  // Queues one read-only turn of the project lead on an open task that is not Ready.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.draft-turn"),
+      taskId: uuid,
+      expectedVersion: revision,
+      message: z.string().trim().min(1).max(16000),
     })
     .strict(),
   // Optional fence: Stop and Resume act on a hold, so an unrelated edit must not block them.
@@ -2910,6 +2939,16 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
         "denied",
       ]),
       reason: safeText,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("draft-turn"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      leadAssignmentId: uuid,
+      workId: z.string().min(1).max(512),
     })
     .strict(),
   z

@@ -575,10 +575,20 @@ export interface RuntimeTurnSettings {
   reasoningEffort: string | null;
 }
 
-/** The operator's command network setting captured when the turn was admitted; Codex only. */
+/**
+ * The operator's command network setting captured when the turn was admitted (Codex
+ * only), and `access: "read-only"` for a draft turn, which also forces network off.
+ */
 export interface RuntimeTurnPolicy {
   networkAccess: boolean;
+  access?: "read-only";
 }
+
+/** Per-turn read-only policy of a draft turn; proven on a workspace-write thread. */
+export const readOnlyPolicy = () => ({
+  type: "readOnly" as const,
+  networkAccess: false,
+});
 
 /**
  * Thrown by `Runtime.start()` when the harness cannot run on this host because something it
@@ -1955,10 +1965,10 @@ export class CodexRuntime implements Runtime {
         cwd: workspace,
         input: [{ type: "text", text: prompt }],
         approvalPolicy: "never",
-        sandboxPolicy: executionPolicy(
-          workspace,
-          policy?.networkAccess === true,
-        ),
+        sandboxPolicy:
+          policy?.access === "read-only"
+            ? readOnlyPolicy()
+            : executionPolicy(workspace, policy?.networkAccess === true),
         // Re-asserted every turn so follow-up and resumed turns keep the captured revision.
         ...(settings?.model ? { model: settings.model } : {}),
         ...(settings?.reasoningEffort
