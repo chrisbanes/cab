@@ -3003,7 +3003,7 @@ function Changes({
       )}
       {d?.branches.map((b) => (
         <p key={`${b.repositoryName}:${b.branch}`}>
-          Branch {b.branch ?? "withheld"} ·{" "}
+          {b.repositoryName} · branch {b.branch ?? "withheld"} ·{" "}
           {b.lastPushedSha ? (
             <>
               pushed <ShortId value={b.lastPushedSha} />

@@ -3217,11 +3217,11 @@ test("The delivery block links the PR, says its state and blockers in words, and
   };
   reads.set(a.taskId, { ...read({}), branches: [branch] });
   await refreshTask(page, a.taskId);
-  const branchLine = changes.locator("p", { hasText: /^Branch / });
+  const branchLine = changes.locator("p", { hasText: /· branch / });
   await branchLine.waitFor();
   assert.equal(
     await flat(branchLine),
-    "Branch ensemble/aaaa1111-ship-it · pushed 11111111",
+    "acme/app · branch ensemble/aaaa1111-ship-it · pushed 11111111",
   );
   reads.set(a.taskId, {
     ...read({}),
@@ -3235,7 +3235,7 @@ test("The delivery block links the PR, says its state and blockers in words, and
   });
   await refreshTask(page, a.taskId);
   await changes
-    .getByText("Branch withheld · not pushed yet", { exact: true })
+    .getByText("acme/app · branch withheld · not pushed yet", { exact: true })
     .waitFor();
 
   // Checks read in words; one on an earlier head says so; the repair owner is never invented.

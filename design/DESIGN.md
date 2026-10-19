@@ -1097,7 +1097,13 @@ newer work appears; it does not silently retarget.
   are labelled; they are not simultaneous facts or evidence that approval or
   publication happened in the primary fixture. Provider observations identify
   their timestamp and revision. Refresh retries a read, not execution. Result
-  diffs stay bound to the result revision; head comparisons are separate.
+  diffs stay bound to the result revision; head comparisons are separate. The
+  Delivery section lists each task branch Ensemble assigned, one line per
+  repository, as `<repository> · branch <name> · pushed <short commit>`, or
+  `not pushed yet`; a name the redaction rules withhold reads `withheld`. A head
+  Ensemble did not push adds an `Outside push <short commit>` warning badge and the
+  line that the lead reviews it before publishing again. `69-changes-delivery` and
+  `70-phone-changes-delivery` show one pushed branch and one with an outside push.
 - **Returning:** Back through the journey restores the previous section and
   reading anchor. External evidence opens with task context retained; returning
   restores that exact material. Preserve expansion, comparison selection, focus
