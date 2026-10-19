@@ -90,6 +90,12 @@ export function runtimeErrors(
     if (/\s/.test(value)) errors[path] = `${label} cannot contain spaces.`;
     else if (value.length > 128)
       errors[path] = `${label} must be at most 128 characters.`;
+    else if (
+      field === "runtimeModel" &&
+      v.runtimeHarness === "codex" &&
+      value === "default"
+    )
+      errors[path] = "Leave Model blank to use the Codex default.";
   }
   if (Object.keys(errors).length || !supported) return errors;
   const runtime = runtimeCommand(v);

@@ -2920,6 +2920,11 @@ test("Codex settings are validated against the runtime catalogue and a rejected 
     create({ harness: "codex", model: "m-alt", reasoningEffort: "high" }),
     rejected("runtime.reasoningEffort"),
   );
+  // The catalogue's default entry is not a model name an API client can save.
+  await assert.rejects(
+    create({ harness: "codex", model: "default", reasoningEffort: null }),
+    /Use no model/,
+  );
   await create({ harness: "codex", model: "m-alt", reasoningEffort: "medium" });
   await create({ harness: "codex" });
 

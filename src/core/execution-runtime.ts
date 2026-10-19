@@ -32,7 +32,12 @@ export const profileRuntimeSchema = z.discriminatedUnion("harness", [
   z
     .object({
       harness: z.literal("codex"),
-      model: runtimeSetting.optional(),
+      // `default` is the catalogue's name for "no model", which is stored as null.
+      model: runtimeSetting
+        .refine((model) => model !== "default", {
+          message: "Use no model, not `default`",
+        })
+        .optional(),
       reasoningEffort: runtimeSetting.optional(),
     })
     .strict(),
@@ -102,7 +107,10 @@ export function unsupportedRuntimeField(
   const effort = runtime.reasoningEffort ?? null;
   if (runtime.harness === "codex" && model === null && effort === null)
     return null;
-  const entry = supported.models.find((m) => m.model === (model ?? "default"));
+  const entry =
+    runtime.harness === "codex" && model === "default"
+      ? undefined
+      : supported.models.find((m) => m.model === (model ?? "default"));
   if (!entry) return "runtime.model";
   return effort !== null && !entry.efforts.includes(effort)
     ? "runtime.reasoningEffort"

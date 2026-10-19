@@ -3188,7 +3188,7 @@ test("diagnostic events carry tool metadata and observed settings only", async (
 });
 
 /** A fake App Server whose `model/list` has two pages and which echoes the configured settings. */
-function settingsFakeRuntime(options: { failFirstList?: boolean } = {}) {
+function settingsFakeRuntime(options: { failLists?: number } = {}) {
   const root = mkdtempSync(join(tmpdir(), "codex-settings-"));
   const executable = join(root, "fake-codex.mjs");
   const log = join(root, "requests.jsonl");
@@ -3197,7 +3197,7 @@ function settingsFakeRuntime(options: { failFirstList?: boolean } = {}) {
     "import { appendFileSync } from 'node:fs';",
     "import { createInterface } from 'node:readline';",
     `const log = ${JSON.stringify(log)};`,
-    `const failFirstList = ${JSON.stringify(options.failFirstList ?? false)};`,
+    `const failLists = ${JSON.stringify(options.failLists ?? 0)};`,
     "const efforts = (...names) => names.map((reasoningEffort) => ({ reasoningEffort }));",
     "const pages = [",
     "  { data: [{ model: 'm-default', isDefault: true, supportedReasoningEfforts: efforts('low', 'high') }], nextCursor: 'page-2' },",
@@ -3214,7 +3214,7 @@ function settingsFakeRuntime(options: { failFirstList?: boolean } = {}) {
     "  else if (message.method === 'config/read') write({ id: message.id, result: { config: { approval_policy: 'never', sandbox_mode: 'workspace-write' } } });",
     "  else if (message.method === 'model/list') {",
     "    lists += 1;",
-    "    if (failFirstList && lists === 1) write({ id: message.id, error: { code: -32000, message: 'unavailable' } });",
+    "    if (lists <= failLists) write({ id: message.id, error: { code: -32000, message: 'unavailable' } });",
     "    else write({ id: message.id, result: pages[message.params?.cursor ? 1 : 0] });",
     "  }",
     "  else if (message.method === 'thread/start') write({ id: message.id, result: reported(message.params) });",
@@ -3353,9 +3353,9 @@ test("preflight refuses values outside the runtime catalogue and never waits wit
   }
 });
 
-test("an unreadable catalogue waits with a reason, then retries once and wakes admission", async () => {
+test("an unreadable catalogue is read again on its own, with backoff and one read at a time", async () => {
   const { root, runtime, requests, cleanup } = settingsFakeRuntime({
-    failFirstList: true,
+    failLists: 3,
   });
   let wakes = 0;
   runtime.onAdmissionChange(() => {
@@ -3365,25 +3365,42 @@ test("an unreadable catalogue waits with a reason, then retries once and wakes a
     // A failed read does not fail start, and a profile without settings is never held.
     await bounded(runtime.start(), 3000);
     assert.equal(await runtime.preflightTurn({ workspace: root }), undefined);
-    await eventually(() => wakes === 1);
-    assert.equal(runtime.supportedSettings(), undefined);
     const settings = { model: "m-alt", reasoningEffort: "medium" };
     const reason = "Codex runtime unavailable: supported models are unknown";
-    assert.equal(
-      await runtime.preflightTurn({ workspace: root, settings }),
-      reason,
-    );
-    // Single-flight: a second preflight while the retry runs starts no further read.
-    assert.equal(
-      await runtime.preflightTurn({ workspace: root, settings }),
-      reason,
-    );
-    await eventually(() => wakes === 2);
+    // Work with settings waits meanwhile, and asking again starts no concurrent read.
+    for (let i = 0; i < 3; i += 1)
+      assert.equal(
+        await runtime.preflightTurn({ workspace: root, settings }),
+        reason,
+      );
+    // No queued work is needed: the failure path schedules the reads (3 failures, then 2 pages).
+    await eventually(() => runtime.supportedSettings() !== undefined);
+    await eventually(() => wakes === 1);
+    assert.equal(requests("model/list").length, 5);
     assert.equal(
       await runtime.preflightTurn({ workspace: root, settings }),
       undefined,
     );
-    assert.equal(requests("model/list").length, 3);
+    // Once known, nothing reads again.
+    assert.equal(requests("model/list").length, 5);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("the catalogue's default entry is not a model name", async () => {
+  const { root, runtime, requests, cleanup } = settingsFakeRuntime();
+  try {
+    await bounded(runtime.start(), 3000);
+    await eventually(() => runtime.supportedSettings() !== undefined);
+    assert.equal(
+      await runtime.preflightTurn({
+        workspace: root,
+        settings: { model: "default", reasoningEffort: null },
+      }),
+      "Codex runtime unavailable: model default is not supported",
+    );
+    assert.equal(requests("model/list").length, 2);
   } finally {
     await cleanup();
   }

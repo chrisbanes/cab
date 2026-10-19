@@ -83,6 +83,7 @@ const modelList = z.object({
 });
 const maxModelListPages = 8;
 const defaultSettingsRetryMs = 30_000;
+const maxSettingsRetryMs = 10 * 60_000;
 const qualifiedCodexVersion = "codex-cli 0.159.0";
 /** Native input is qualified only for the pinned Codex CLI. */
 export const codexNativeInputQualificationSchema =
@@ -1541,13 +1542,15 @@ export class CodexRuntime implements Runtime {
       captureProcessIdentity?: (
         pid: number | undefined,
       ) => Promise<RuntimeProcessIdentity | null>;
-      /** Delay before waiting work is offered again after a failed `model/list` read; default 30s. */
+      /** First delay before a failed `model/list` read is retried (it doubles, to 10 min); default 30s. */
       settingsRetryMs?: number;
     },
   ) {}
 
   private supported: Map<string, readonly string[]> | undefined;
   private settingsRead: Promise<void> | undefined;
+  private settingsRetry: NodeJS.Timeout | undefined;
+  private settingsFailures = 0;
   private admissionChanged?: () => void;
 
   /** Undefined until `model/list` has been read; `default` is the default model's entry. */
@@ -1578,7 +1581,9 @@ export class CodexRuntime implements Runtime {
       return unavailable("supported models are unknown");
     }
     const model = settings.model ?? "default";
-    const efforts = supported.get(model);
+    // `default` names the catalogue's default entry, never a model to send.
+    const efforts =
+      settings.model === "default" ? undefined : supported.get(model);
     if (!efforts) return unavailable(`model ${model} is not supported`);
     if (
       settings.reasoningEffort !== null &&
@@ -1591,29 +1596,47 @@ export class CodexRuntime implements Runtime {
   }
 
   /**
-   * Single-flight and never awaited by a caller. A failed read is read again by the next
-   * preflight of work with settings; the delayed wake only makes sure such work is offered again.
+   * Single-flight and never awaited by a caller. A failed read schedules one retry with
+   * doubling backoff, so an idle installation still learns the catalogue; the next preflight
+   * of work with settings also reads it again. Success wakes admission for waiting work.
    */
   private readSupportedSettings(): void {
     const child = this.child;
-    if (!child || this.settingsRead) return;
-    const notify = (afterMs: number) =>
-      setTimeout(() => {
-        if (this.child === child) this.admissionChanged?.();
-      }, afterMs).unref();
+    if (!child || this.supported || this.settingsRead) return;
     this.settingsRead = this.listSupportedSettings().then(
       (supported) => {
         if (this.child !== child) return;
         this.supported = supported;
         this.settingsRead = undefined;
-        notify(0);
+        this.settingsFailures = 0;
+        setTimeout(() => {
+          if (this.child === child) this.admissionChanged?.();
+        }, 0).unref();
       },
       () => {
         if (this.child !== child) return;
         this.settingsRead = undefined;
-        notify(this.options.settingsRetryMs ?? defaultSettingsRetryMs);
+        if (this.settingsRetry) return;
+        const base = this.options.settingsRetryMs ?? defaultSettingsRetryMs;
+        const delay = Math.min(
+          base * 2 ** this.settingsFailures++,
+          maxSettingsRetryMs,
+        );
+        this.settingsRetry = setTimeout(() => {
+          this.settingsRetry = undefined;
+          if (this.child === child) this.readSupportedSettings();
+        }, delay);
+        this.settingsRetry.unref();
       },
     );
+  }
+
+  private resetSupportedSettings(): void {
+    this.supported = undefined;
+    this.settingsRead = undefined;
+    this.settingsFailures = 0;
+    clearTimeout(this.settingsRetry);
+    this.settingsRetry = undefined;
   }
 
   private async listSupportedSettings(): Promise<
@@ -1692,8 +1715,7 @@ export class CodexRuntime implements Runtime {
     this.failure = undefined;
     this.clearConversationCaptures();
     this.nativeGeneration = randomUUID();
-    this.supported = undefined;
-    this.settingsRead = undefined;
+    this.resetSupportedSettings();
     this.nativeEndpoints.clear();
     this.nativeEndpointsByTurn.clear();
     this.nativeEndpointsByRpcId.clear();
@@ -1763,8 +1785,7 @@ export class CodexRuntime implements Runtime {
     this.nativeGeneration = undefined;
     this.child = undefined;
     this.processIdentityValue = null;
-    this.supported = undefined;
-    this.settingsRead = undefined;
+    this.resetSupportedSettings();
     this.fail(new Error("Runtime stopped"));
     this.nativeEndpoints.clear();
     this.nativeEndpointsByTurn.clear();

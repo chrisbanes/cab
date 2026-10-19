@@ -44,6 +44,9 @@ test("runtime errors name the field and accept blank or token values", () => {
     "runtime.model": "Model cannot contain spaces.",
   });
   assert.deepEqual(runtimeErrors(codex("m-alt", "medium")), {});
+  assert.deepEqual(runtimeErrors(codex("default", "")), {
+    "runtime.model": "Leave Model blank to use the Codex default.",
+  });
   const supported = {
     models: [
       { model: "default", efforts: ["low", "high"] },
@@ -93,6 +96,19 @@ test("runtime summaries and commands", () => {
   assert.equal(
     runtimeSummary({ harness: "codex", reasoningEffort: "high" }),
     "Codex · default model · high",
+  );
+  // `default` is the catalogue's entry for no model; it is stored as null, never as a name.
+  assert.throws(
+    () => profileRuntimeSchema.parse({ harness: "codex", model: "default" }),
+    /Use no model/,
+  );
+  assert.deepEqual(
+    profileRuntimeSchema.parse({
+      harness: "claude",
+      model: "default",
+      reasoningEffort: null,
+    }),
+    { harness: "claude", model: "default", reasoningEffort: null },
   );
   // A Codex profile without settings keeps the bare stored form.
   assert.deepEqual(profileRuntimeSchema.parse({ harness: "codex" }), {
@@ -435,6 +451,7 @@ test("unsupported Codex settings are judged against the runtime catalogue", () =
   assert.equal(unsupported(null, "high"), null);
   assert.equal(unsupported("m-alt", "medium"), null);
   assert.equal(unsupported("x", null), "runtime.model");
+  assert.equal(unsupported("default", null), "runtime.model");
   assert.equal(unsupported("m-alt", "high"), "runtime.reasoningEffort");
   // Settings the runtime has not reported cannot refuse a profile without them.
   assert.equal(
