@@ -1673,8 +1673,8 @@ the next review covers the whole new head. Success needs a read of the remote re
 the pushed commit; a timeout, cancellation or unobserved exit is uncertain, is settled by
 reading the ref and is never replayed blindly. Ensemble does not delete branches or push
 tags or other remotes; merged branches follow the repository's head-branch deletion
-setting. Ensemble cannot prevent a push made with ambient host credentials once agent
-network access is enabled; it detects the result as an outside change. A task branch
+setting. Ensemble cannot prevent a push made with ambient host credentials once a
+project's command network access is enabled; it detects the result as an outside change. A task branch
 whose head was changed outside stays refused until the remote returns to the last pushed
 commit.
 
