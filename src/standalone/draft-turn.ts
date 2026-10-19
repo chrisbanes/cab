@@ -7,8 +7,6 @@
 import type { DraftTurnReason } from "../operator/contracts.js";
 import { draftTurnUnavailableText } from "../operator/draft-turn-copy.js";
 
-export type DraftTurnUnavailableReason = DraftTurnReason;
-
 export interface DraftTurnFacts {
   taskState: "open" | "done" | "cancelled";
   ready: boolean;
@@ -20,7 +18,7 @@ export interface DraftTurnFacts {
 
 export type DraftTurnAvailability =
   | { available: true }
-  | { available: false; reason: DraftTurnUnavailableReason };
+  | { available: false; reason: DraftTurnReason };
 
 /**
  * Pause, Stop and capacity never make a draft turn unavailable: it queues and is held
@@ -29,7 +27,7 @@ export type DraftTurnAvailability =
 export function draftTurnAvailability(
   facts: DraftTurnFacts,
 ): DraftTurnAvailability {
-  const reason: DraftTurnUnavailableReason | undefined =
+  const reason: DraftTurnReason | undefined =
     facts.taskState !== "open"
       ? "task-not-open"
       : facts.ready
@@ -48,7 +46,7 @@ export function draftTurnAvailability(
 
 /** A definite refusal: nothing was recorded. */
 export class DraftTurnUnavailableError extends Error {
-  constructor(readonly reason: DraftTurnUnavailableReason) {
+  constructor(readonly reason: DraftTurnReason) {
     super(draftTurnUnavailableText(reason));
   }
 }

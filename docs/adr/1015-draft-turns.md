@@ -44,7 +44,7 @@ glossary defines **Draft turn**; delivery scope lives in
 - When the task becomes Ready, the lead is treated as not started. With routing
   disabled the lead's initial turn runs as ordinary execution and resumes the draft
   conversation. With routing enabled, routing runs as for any task, without a
-  preliminary lead turn. A draft turn already queued keeps its draft restrictions.
+  preliminary lead turn. A draft turn already queued or running keeps its draft restrictions and finishes before the initial turn; an answer to a draft-turn question that is still pending goes to that initial turn.
 - An answer to a draft-turn question waits for the next draft turn or for Ready. It
   never starts a turn. Automatic and rule-driven draft turns, triage procedures and
   readiness proposals are out of scope.

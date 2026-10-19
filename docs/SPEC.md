@@ -984,7 +984,7 @@ history.
   [recorded](evidence/2026-10-19-codex-read-only-turn.md).
 - **Ready.** The lead stays pending through draft turns. When the task becomes Ready,
   routing runs as for any task, without a preliminary lead turn, or, with routing off, the
-  lead's initial turn runs as ordinary execution and resumes the same conversation.
+  lead's initial turn runs as ordinary execution and resumes the same conversation. A draft turn that is still queued or running when the task becomes Ready finishes read-only first.
   Automatic draft turns, triage procedures and readiness proposals are not part of this.
 
 ### Task brief, evidence and delegation

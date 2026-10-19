@@ -5405,6 +5405,8 @@ export class StandaloneService {
       const queued = coordination
         .queuedDeliveries()
         .find((item) => item.recipientAssignmentId === assignmentId);
+      // A draft turn's own batch waits for that turn to finish; it is not the initial turn's.
+      if (queued && store.find(queued.deliveryWorkId)?.draftTurn) continue;
       let delivery: InboxDelivery | undefined = queued;
       if (!delivery && coordination.pendingEvents(assignmentId).length > 0)
         delivery = coordination.bindDeliveryBatch(
@@ -5881,8 +5883,14 @@ export class StandaloneService {
               profileRevision,
             })
             .reasons.filter(
-              // A draft turn is the one work that runs while the task is not Ready.
-              (reason) => !(request.draftTurn && reason === "task-unready"),
+              // A draft turn runs while the task is not Ready, and a task edit or Ready
+              // since it was queued does not make it stale.
+              (reason) =>
+                !(
+                  request.draftTurn &&
+                  (reason === "task-unready" ||
+                    reason === "task-revision-changed")
+                ),
             );
           if (this.recoveryContinuationUnresolved(assignmentId, request.workId))
             reasons.push("recovery-continuation-unresolved");

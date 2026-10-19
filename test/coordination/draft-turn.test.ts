@@ -466,6 +466,46 @@ test("making the task Ready runs the lead's initial turn in the draft conversati
   assert.doesNotMatch(delegated.text, /^Draft turn: /);
 });
 
+for (const phase of ["queued", "running"] as const)
+  test(`making the task Ready while a draft turn is ${phase} lets it finish read-only before the initial turn`, async (t) => {
+    const f = await createOperatorFixture();
+    t.after(() => f.close());
+    const task = await draftTask(f, `Ready while ${phase}`);
+    const domain = f.service.domain();
+    if (phase === "queued") configure(f, task.projectId, true);
+    await task.api.execute(startCommand(f, task.taskId));
+    if (phase === "running")
+      await until(() => f.runtime.hasPending(1), "draft");
+    domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: task.projectId,
+      taskId: task.taskId,
+      expectedVersion: version(f, task.taskId),
+      ready: true,
+    });
+    if (phase === "queued") configure(f, task.projectId, false);
+    await until(() => f.runtime.hasPending(1), "draft turn");
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    assert.equal(
+      count(f, "SELECT COUNT(*) AS n FROM turn_requests WHERE state='held'"),
+      0,
+    );
+    assert.equal(f.runtime.turns, 1);
+    assert.equal(f.runtime.policies[0]?.access, "read-only");
+    f.runtime.complete(1);
+    await until(() => f.runtime.hasPending(2), "initial turn");
+    assert.equal(f.runtime.policies[1], undefined);
+    const initial = f.service
+      .list()
+      .find(
+        (work) => work.workId === `assignment:${task.assignmentId}:initial`,
+      );
+    assert.equal(initial?.state, "running");
+    assert.equal(domain.assignment(task.assignmentId).state, "running");
+  });
+
 test("making the task Ready with routing enabled routes it without a preliminary lead turn", async (t) => {
   const previous = process.env.TEST_TYPESAFE_KEY;
   process.env.TEST_TYPESAFE_KEY = "fixture-key";
