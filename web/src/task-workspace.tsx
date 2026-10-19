@@ -1415,7 +1415,14 @@ export function TaskWorkspace({
     state.destination = "lead";
   const destination = state.destination;
   // A Draft task's lead reply starts a read-only draft turn instead of queueing a message.
-  const draftTurn = data && !data.task.ready ? data.draftTurn : undefined;
+  // The ordinary reply stays for a lead that is missing or has started, which it already explains.
+  const draftTurn =
+    data &&
+    !data.task.ready &&
+    data.draftTurn?.reason !== "lead-unconfigured" &&
+    data.draftTurn?.reason !== "lead-unavailable"
+      ? data.draftTurn
+      : undefined;
   async function send() {
     if (!state.draft.trim() || pending) return;
     if (state.frozen) {

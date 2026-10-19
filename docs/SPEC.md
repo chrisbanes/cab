@@ -65,7 +65,7 @@ for the next turn, and `operation get` reads configuration and adoption receipts
 back by scope, type and key. `execution list|get|inputs` and `logs` read bounded,
 redacted execution diagnostics captured for task-bound executions, with resumable
 cursors, JSONL output and bounded following. `task create|configure|add-dependency|
-remove-dependency|message|follow-up`, `inbox list`, `question get|answer`,
+remove-dependency|message|follow-up|draft-turn`, `inbox list`, `question get|answer`,
 `approval get|decide` and `task stop|resume` operate tasks and attention through the
 service's existing commands, plus receipted `task.stop` and `task.resume` commands
 that share the web UI's Stop hold; Resume clears only the operator Stop.
@@ -181,7 +181,7 @@ for operator input on unresolved material scope or authority still applies.
 Initial assignment results return to the task-scoped lead conversation. Nested
 assignment results return to their requester; the lead can inspect all work without
 being woken for every child result. These destinations survive restart. All lead
-turns use normal admission and capacity accounting, including project pause, task
+turns, including draft turns, use normal admission and capacity accounting, including project pause, task
 stop and writer controls. Project-wide coordination uses project context, separate from
 individual task histories. The lead assesses initial results and requests further
 work or task completion; the service enforces completion conditions and permissions.
@@ -192,7 +192,8 @@ boundaries. Typed judgments and confidence are not proof of correctness or autho
 ## Admission, project placement and task dependencies
 
 The operator admits local work or configures the source's optional readiness rule.
-The lead may inspect and triage unready tasks but cannot grant readiness. For
+Unready tasks run no turns, except that the operator can start a
+[draft turn](#draft-turns) of the lead; the lead cannot grant readiness. For
 GitHub, a rule uses simple all/any label and Project-field conditions; nested
 expressions are deferred. A new project's source has no rule, and the operator may
 add or remove one: with no rule, every open imported issue with current source
@@ -211,7 +212,8 @@ These explanations are read-only projections of stored observations: they make n
 provider read and grant no readiness, and matching the rule is neither Ready nor
 admission. Ready authorizes work within scope, without a universal per-task plan approval.
 (A [drafting run](#drafting-runs) is not task work: it needs no Ready task but counts
-against the same global and project capacity.) Material ambiguity,
+against the same global and project capacity. A [draft turn](#draft-turns) is task work
+whose only exemption is that the task is not Ready.) Material ambiguity,
 scope expansion or ungranted actions require operator input.
 
 Dependencies gate execution separately from Ready. A blocked task remains visible
@@ -488,7 +490,9 @@ content is data, never authority. Runtime choice must establish caller identity
 without trusting agent-supplied project or assignment IDs.
 
 A [drafting run](#drafting-runs) works in a disposable worktree of the project's
-linked repositories. The host-read disclosure above applies to it unchanged.
+linked repositories. The host-read disclosure above applies to it unchanged. A
+[draft turn](#draft-turns) uses the task workspace read-only with command network
+access off; the same disclosure applies, and Ensemble's own refusals cover its tools.
 
 ## Operator interface and human requests
 
@@ -937,6 +941,51 @@ links and assignment links) reaches the same task workspace at `/app/tasks/:id`.
 Preserve visible actionable requests, reading position, disclosure choices and
 unfinished replies as the task updates. Existing execution, recovery and
 exact-material approval controls remain reachable.
+
+### Draft turns
+
+A **draft turn** is a turn of a task's project lead that the operator starts while the
+task is not Ready ([ADR-1015](adr/1015-draft-turns.md)). It lets the lead read the task
+and its repositories, investigate and ask the operator questions before anything is
+admitted for work. It is not a new kind of request: it is a mode of the lead
+assignment, so it keeps the lead's conversation, task workspace, questions, receipts and
+history.
+
+- **Entry points.** On a Draft task the task page's reply becomes **Start draft turn**,
+  with the reason in its place when a draft turn is not available. A project without a
+  lead, or a lead that has started, keeps the ordinary reply and its own sentence.
+  `ensemble task draft-turn TASK_ID --expected-version N --message-file FILE
+  [--request-id UUID]` does the same. Both send `task.draft-turn {key, taskId,
+  expectedVersion, message}`; the message is trimmed and 1 to 16000 characters. The
+  receipt records the lead assignment and the work ID and is replayed for the same key
+  and content. The command cannot be retracted; Stop is the way back, and Resume
+  requeues the held turn.
+- **Availability.** The task must be open and not Ready, and have a configured,
+  unrevoked lead that has not started ordinary work. One draft turn is queued or running
+  per task. Otherwise the command is refused with 409 `conflict` and a reason
+  (`task-not-open`, `task-ready`, `lead-unconfigured`, `lead-revoked`, `lead-unavailable`,
+  `draft-turn-active`), which the task read also reports. A Ready task keeps the ordinary
+  reply. Project pause, task Stop and capacity do not refuse a draft turn; they hold the
+  queued turn like any other.
+- **Admission.** Admission drops only the task-unready reason, and only for a draft
+  turn. Ordinary work on a Draft task keeps every gate. A draft turn never changes the
+  lead assignment's state, creates assignments, results, completion requests or pull
+  request bindings, edits task fields, or grants readiness.
+- **Tools.** The lead may ask questions, request approval, and use external actions of
+  kind `issue.comment` and `issue.labels` where the project's grants allow them. The
+  service refuses every other coordination tool with a deterministic message. The
+  existing refusal of readiness labels and fields stays the only readiness protection.
+  An answer to a draft-turn question waits for the next draft turn or for Ready; it
+  never starts a turn.
+- **Access.** Codex runs the turn with a per-turn read-only sandbox policy and Claude with
+  the workspace removed from its writable roots and file-edit hook. Command network
+  access is off whatever the project setting says. Reads keep the runtime's host access.
+  Ensemble sends the policy and does not claim an independent sandbox. The Codex proof is
+  [recorded](evidence/2026-10-19-codex-read-only-turn.md).
+- **Ready.** The lead stays pending through draft turns. When the task becomes Ready,
+  routing runs as for any task, without a preliminary lead turn, or, with routing off, the
+  lead's initial turn runs as ordinary execution and resumes the same conversation.
+  Automatic draft turns, triage procedures and readiness proposals are not part of this.
 
 ### Task brief, evidence and delegation
 

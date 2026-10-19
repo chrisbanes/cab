@@ -671,6 +671,24 @@ harnesses; the real-runtime run is recorded in the
 | Commands are receipted by key; a replay returns the receipt and other content conflicts; the read needs a session | `operator-drafting-api.test.ts` |
 | The composer fills empty fields, offers Replace or Keep beside typed text, reattaches after a reload, keeps text through Stop with Retry, and shows the no-lead state; nothing is saved without Save draft or Create and start (1366 px, 390 px, WebKit phone) | `operator-composer-drafting-browser.test.ts`, `composer-drafting-model.test.ts` |
 
+## Draft turns
+
+A draft turn is a read-only turn of the project lead on a task that is not Ready. The
+service, API, CLI and task page are covered by deterministic suites; the Codex
+per-turn read-only policy is proved by the
+[live evidence](evidence/2026-10-19-codex-read-only-turn.md), which CI does not repeat.
+
+| Criteria | Evidence |
+| --- | --- |
+| A draft turn runs on an open Draft task with the operator message and the draft-turn instruction, read-only, network off whatever the project sets, leaves the lead pending and records no reporting repair; replay returns the receipt | `draft-turn.test.ts` |
+| Ready, Done, Cancelled, no lead, revoked or held lead, a queued draft turn and a stale version refuse with a reason and record nothing | `draft-turn.test.ts` |
+| Delegation, pull request registration and actions, issue close, results, follow-up and completion are refused without recording rows; question and `issue.comment`/`issue.labels` pass the filter; the filter and instruction are unit tested | `draft-turn.test.ts`, `draft-turn-rules.test.ts` |
+| An answer waits for the next draft turn; pause, Stop and capacity hold a queued turn; a restart keeps it queued as a draft turn | `draft-turn.test.ts` |
+| Making the task Ready runs the lead's initial turn in the draft conversation, or routes without a lead turn when routing is on | `draft-turn.test.ts` |
+| Callbacks bind to a pending lead only for a draft turn; the migration marks existing turn requests ordinary | `draft-turn-store.test.ts`, `drafting-runs.test.ts` |
+| Codex sends the read-only policy for a draft turn and workspace-write again on the next turn; Claude lists only its temporary base as writable | `codex-runtime.test.ts`, `claude-runtime.test.ts` |
+| The task page starts one draft turn, explains each unavailable reason without sending, shows the queued pause, and keeps typed text after a confirmed refusal (1366 px, 390 px) | `operator-task-draft-turn-browser.test.ts` |
+
 ## State and recovery boundary cases
 
 These state the product failure cases with standalone ownership. They are required

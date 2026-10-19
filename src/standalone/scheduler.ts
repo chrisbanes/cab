@@ -318,6 +318,17 @@ export class SchedulerStore {
     );
   }
 
+  /** Whether the assignment has only had draft turns: some, and nothing else. */
+  hasOnlyDraftTurns(assignmentId: string): boolean {
+    return (
+      !this.hasOrdinaryAssignmentWork(assignmentId) &&
+      this.db
+        .prepare(`SELECT 1 FROM turn_requests WHERE assignmentId = ?
+          AND kind = 'assignment' AND draftTurn = 1 LIMIT 1`)
+        .get(assignmentId) !== undefined
+    );
+  }
+
   /** The task's draft turn that is still queued or running, if any. */
   activeDraftTurn(taskId: string): TurnRequest | undefined {
     const row = this.db

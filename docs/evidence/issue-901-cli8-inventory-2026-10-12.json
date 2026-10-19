@@ -764,6 +764,20 @@
       "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). A follow-up after adoption on a completed lead exits 4 (see assignment apply-current)."
     },
     {
+      "id": "task draft-turn",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": ["test/operator-cli-task.test.ts", "test/draft-turn.test.ts"],
+      "effect": "Queues one read-only turn of the project lead on an open Draft task (effect queued); the task stays not Ready and the lead stays pending.",
+      "denial": "A read-only credential exits 3; a Ready, Done or Cancelled task, a missing or revoked lead, a held lead and a draft turn already queued exit 4 with the reason and nothing sent.",
+      "revision": "A stale task --expected-version exits 4 with no event.",
+      "retry": "A lost reply then rerun reuses the key and replays the receipt; operation get does not read coordination receipts.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added after the CLI8 live run: exercised only through the in-process CLI against a real loopback service with fixture runtimes, not through the installed binary. A draft turn cannot be retracted; Stop is the recovery."
+    },
+    {
       "id": "task stop",
       "kind": "command",
       "area": "task",

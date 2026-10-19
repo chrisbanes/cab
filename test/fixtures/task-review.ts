@@ -34,6 +34,34 @@ export function setLinkedRepository(
       ),
   );
 }
+/**
+ * Marks a seeded task Ready without waking the scheduler, so its ordinary lead reply is
+ * offered (a Draft task offers a draft turn instead). The project must stay paused.
+ */
+export function markTaskReady(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  taskId: string,
+) {
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE domain_tasks SET ready=1, version=version+1 WHERE id=?")
+      .run(taskId),
+  );
+}
+/**
+ * Marks the seeded lead as having started, so the task's ordinary lead reply is offered
+ * (a pending lead on a Draft task offers a draft turn instead).
+ */
+export function markLeadStarted(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  assignmentId: string,
+) {
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE domain_assignments SET state='running' WHERE id=?")
+      .run(assignmentId),
+  );
+}
 /** Records one result for `producerAssignmentId` as if its work had just reported it. */
 export function seedTaskResult(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,

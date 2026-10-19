@@ -5,22 +5,9 @@
  */
 
 import type { DraftTurnReason } from "../operator/contracts.js";
+import { draftTurnUnavailableText } from "../operator/draft-turn-copy.js";
 
 export type DraftTurnUnavailableReason = DraftTurnReason;
-
-/** The reason sentences shown by the command, the CLI and the task page. */
-export const draftTurnUnavailableMessages: Record<
-  DraftTurnUnavailableReason,
-  string
-> = {
-  "task-not-open": "task is Done or Cancelled",
-  "task-ready": "task is Ready",
-  "lead-unconfigured": "the project has no project lead",
-  "lead-revoked": "the project lead's profile is revoked",
-  "lead-unavailable": "the project lead is running, held or has completed",
-  "draft-turn-active":
-    "a draft turn for this task is already queued or running",
-};
 
 export interface DraftTurnFacts {
   taskState: "open" | "done" | "cancelled";
@@ -58,9 +45,6 @@ export function draftTurnAvailability(
                 : undefined;
   return reason ? { available: false, reason } : { available: true };
 }
-
-export const draftTurnUnavailableText = (reason: DraftTurnUnavailableReason) =>
-  `Draft turn unavailable: ${draftTurnUnavailableMessages[reason]}`;
 
 /** A definite refusal: nothing was recorded. */
 export class DraftTurnUnavailableError extends Error {

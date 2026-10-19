@@ -5398,7 +5398,7 @@ export class StandaloneService {
         domain
           .leadBindings()
           .some((lead) => lead.assignmentId === assignment.id) &&
-        !store.hasOrdinaryAssignmentWork(assignmentId) &&
+        store.hasOnlyDraftTurns(assignmentId) &&
         coordination.pendingEvents(assignmentId).length === 0
       )
         continue;

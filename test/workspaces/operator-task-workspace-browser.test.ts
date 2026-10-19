@@ -15,6 +15,7 @@ import {
   leadResumeNotice,
 } from "../../web/src/lead-feedback.js";
 import {
+  markLeadStarted,
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
@@ -37,6 +38,7 @@ test("production workspace retains literal history, pending request, focused rep
   const a = await seedReviewTask(f),
     r = a.delegatedResult("Original source-faithful result"),
     questionId = randomUUID();
+  markLeadStarted(f, a.assignmentId);
   // Delivery controls belong to a task whose project links a repository.
   setLinkedRepository(f, a.projectId, true);
   f.seedPersistedState((db) => {

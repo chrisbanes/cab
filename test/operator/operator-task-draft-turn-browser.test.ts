@@ -90,7 +90,6 @@ for (const [name, viewport] of Object.entries(viewports)) {
         "Done task",
         /Draft turns need an open task\. This task is Done\./,
       ],
-      [noLead, "No lead task", /Draft turns need a project lead\./],
       [active, "Active task", /already queued or running/],
     ] as const) {
       await visit(task.taskId, title);
@@ -98,6 +97,10 @@ for (const [name, viewport] of Object.entries(viewports)) {
       await startButton().waitFor();
       assert.equal(await startButton().isDisabled(), true, title);
     }
+    // A project without a lead keeps the ordinary reply.
+    await visit(noLead.taskId, "No lead task");
+    await page.getByRole("button", { name: "Send to task lead" }).waitFor();
+    assert.equal(await startButton().count(), 0);
     // A Ready task keeps the ordinary reply.
     await visit(ready.taskId, "Ready task");
     await page.getByRole("button", { name: "Send to task lead" }).waitFor();

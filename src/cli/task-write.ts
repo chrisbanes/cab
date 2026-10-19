@@ -3,7 +3,7 @@ import {
   type TaskRead,
   taskSchema,
 } from "../operator/contracts.js";
-import { draftTurnUnavailableText } from "../standalone/draft-turn.js";
+import { draftTurnUnavailableText } from "../operator/draft-turn-copy.js";
 import { taskColumnOf } from "../operator/task-presentation.js";
 import { cliFix, type Wait, waitLabels } from "../operator/wait-reasons.js";
 import { uuidArg } from "./browse.js";

@@ -11,6 +11,7 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { TaskReviewStore } from "../../src/core/task-review.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
+  markTaskReady,
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
@@ -29,6 +30,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   );
   const a = await seedReviewTask(f),
     workspace = await f.service.taskWorkspace(a.taskId);
+  markTaskReady(f, a.taskId);
   // Delivery controls belong to a task whose project links a repository.
   setLinkedRepository(f, a.projectId, true);
   assert.ok(workspace);

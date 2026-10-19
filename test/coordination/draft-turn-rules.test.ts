@@ -5,8 +5,8 @@ import {
   draftTurnAvailability,
   draftTurnInstruction,
   draftTurnToolDecision,
-  draftTurnUnavailableText,
 } from "../../src/standalone/draft-turn.js";
+import { draftTurnUnavailableText } from "../../src/operator/draft-turn-copy.js";
 
 const open: DraftTurnFacts = {
   taskState: "open",
