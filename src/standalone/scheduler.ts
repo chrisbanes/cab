@@ -15,6 +15,8 @@ const requestSchema = z.object({
   prompt: z.string().min(1),
   workspace: z.string().min(1).nullable(),
   previousWorkId: z.string().min(1).nullable(),
+  /** A read-only turn of the lead assignment on a task that is not Ready yet. */
+  draftTurn: z.boolean().default(false),
 });
 
 export type TurnRequestInput = z.input<typeof requestSchema>;
@@ -45,7 +47,8 @@ export class SchedulerStore {
       previousWorkId TEXT,
       state TEXT NOT NULL CHECK(state IN ('queued','active','completed','held')),
       reason TEXT,
-      nextEligibleAt INTEGER
+      nextEligibleAt INTEGER,
+      draftTurn INTEGER NOT NULL DEFAULT 0 CHECK(draftTurn IN (0,1))
     )`);
     this.allowDraftingKind();
     // Execution list reads page by scope without scanning history.
@@ -59,6 +62,10 @@ export class SchedulerStore {
     if (!columns.some((column) => column.name === "nextEligibleAt"))
       this.db.exec(
         "ALTER TABLE turn_requests ADD COLUMN nextEligibleAt INTEGER",
+      );
+    if (!columns.some((column) => column.name === "draftTurn"))
+      this.db.exec(
+        "ALTER TABLE turn_requests ADD COLUMN draftTurn INTEGER NOT NULL DEFAULT 0 CHECK(draftTurn IN (0,1))",
       );
   }
 
@@ -167,7 +174,8 @@ export class SchedulerStore {
         current.kind !== value.kind ||
         current.taskId !== value.taskId ||
         current.projectId !== value.projectId ||
-        current.assignmentId !== value.assignmentId
+        current.assignmentId !== value.assignmentId ||
+        current.draftTurn !== value.draftTurn
       )
         throw new Error(
           "Turn request identity already used with different content",
@@ -175,11 +183,13 @@ export class SchedulerStore {
       return current;
     }
     this.db
-      .prepare(`INSERT INTO turn_requests
+      .prepare(
+        `INSERT INTO turn_requests
         (requestKey, workId, kind, taskId, projectId, assignmentId, taskVersion,
           assignmentVersion, instructionsRevision, profileRevision, prompt,
-          workspace, previousWorkId, state, reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL)`)
+          workspace, previousWorkId, state, reason, draftTurn)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, ?)`,
+      )
       .run(
         value.requestKey,
         value.workId,
@@ -194,6 +204,7 @@ export class SchedulerStore {
         value.prompt,
         value.workspace,
         value.previousWorkId,
+        value.draftTurn ? 1 : 0,
       );
     return this.byWorkId(value.workId);
   }
@@ -219,16 +230,20 @@ export class SchedulerStore {
 
   queued(now = Date.now()): TurnRequest[] {
     return this.db
-      .prepare(`SELECT * FROM turn_requests WHERE state = 'queued'
-        AND (nextEligibleAt IS NULL OR nextEligibleAt <= ?) ORDER BY sequence`)
+      .prepare(
+        `SELECT * FROM turn_requests WHERE state = 'queued'
+        AND (nextEligibleAt IS NULL OR nextEligibleAt <= ?) ORDER BY sequence`,
+      )
       .all(now)
       .map((row) => this.parse(row as Record<string, unknown>));
   }
 
   nextEligibility(now = Date.now()): number | undefined {
     const row = this.db
-      .prepare(`SELECT MIN(nextEligibleAt) AS nextEligibleAt
-      FROM turn_requests WHERE state = 'queued' AND nextEligibleAt > ?`)
+      .prepare(
+        `SELECT MIN(nextEligibleAt) AS nextEligibleAt
+      FROM turn_requests WHERE state = 'queued' AND nextEligibleAt > ?`,
+      )
       .get(now) as { nextEligibleAt: number | null };
     return row.nextEligibleAt === null ? undefined : row.nextEligibleAt;
   }
@@ -269,8 +284,10 @@ export class SchedulerStore {
       projectId: "projectId",
     }[scope];
     return this.db
-      .prepare(`SELECT * FROM turn_requests WHERE kind = 'assignment'
-        AND ${column} = ? AND sequence < ? ORDER BY sequence DESC LIMIT ?`)
+      .prepare(
+        `SELECT * FROM turn_requests WHERE kind = 'assignment'
+        AND ${column} = ? AND sequence < ? ORDER BY sequence DESC LIMIT ?`,
+      )
       .all(id, before ?? Number.MAX_SAFE_INTEGER, limit)
       .map((row) => this.parse(row as Record<string, unknown>));
   }
@@ -287,15 +304,42 @@ export class SchedulerStore {
   current(assignmentId: string, version: number): TurnRequest | undefined {
     const row =
       this.db
-        .prepare(`SELECT * FROM turn_requests WHERE assignmentId = ?
-          AND state = 'active' ORDER BY sequence DESC LIMIT 1`)
+        .prepare(
+          `SELECT * FROM turn_requests WHERE assignmentId = ?
+          AND state = 'active' ORDER BY sequence DESC LIMIT 1`,
+        )
         .get(assignmentId) ??
       (Number.isSafeInteger(version)
         ? this.db
-            .prepare(`SELECT * FROM turn_requests WHERE assignmentId = ?
-              AND assignmentVersion = ? ORDER BY sequence DESC LIMIT 1`)
+            .prepare(
+              `SELECT * FROM turn_requests WHERE assignmentId = ?
+              AND assignmentVersion = ? ORDER BY sequence DESC LIMIT 1`,
+            )
             .get(assignmentId, version)
         : undefined);
+    return row ? this.parse(row as Record<string, unknown>) : undefined;
+  }
+
+  /** Whether the assignment has any turn that is not a draft turn. */
+  hasOrdinaryAssignmentWork(assignmentId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM turn_requests WHERE assignmentId = ?
+          AND kind = 'assignment' AND draftTurn = 0 LIMIT 1`,
+        )
+        .get(assignmentId) !== undefined
+    );
+  }
+
+  /** The task's draft turn that is still queued or running, if any. */
+  activeDraftTurn(taskId: string): TurnRequest | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM turn_requests WHERE taskId = ? AND draftTurn = 1
+        AND state IN ('queued','active') ORDER BY sequence DESC LIMIT 1`,
+      )
+      .get(taskId);
     return row ? this.parse(row as Record<string, unknown>) : undefined;
   }
 
@@ -359,6 +403,7 @@ export class SchedulerStore {
       prompt: row.prompt,
       workspace: row.workspace,
       previousWorkId: row.previousWorkId,
+      draftTurn: row.draftTurn === 1,
     });
     const state = z
       .enum(["queued", "active", "completed", "held"])

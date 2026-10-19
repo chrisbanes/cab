@@ -3699,6 +3699,7 @@ export class CoordinationStore {
       assignment.profileId,
       ${hasTurnRequests ? "request.sequence" : "NULL"} AS requestSequence,
       ${hasTurnRequests ? "request.taskVersion" : "NULL"} AS admittedTaskVersion,
+      ${hasTurnRequests ? "request.draftTurn" : "0"} AS draftTurn,
       revision.workRevision, intent.workId, assignment.resultDestination,
       assignment.resultRecipientAssignmentId, assignment.resultRecipientDisposition,
       assignment.requesterAssignmentId, assignment.projectId
@@ -3725,7 +3726,9 @@ export class CoordinationStore {
         AND conversation.revision = binding.conversationRevision
       WHERE intent.threadId = ? AND intent.turnId = ? AND intent.state = 'running'
         AND assignment.version = binding.assignmentVersion
-        AND assignment.state = 'running'
+        AND (assignment.state = 'running'
+          -- A draft turn never activates the lead assignment.
+          OR (assignment.state = 'pending' AND ${hasTurnRequests ? "request.draftTurn = 1" : "0"}))
         AND NOT EXISTS (
           SELECT 1 FROM task_work_revision_ambiguities ambiguous
           WHERE ambiguous.assignmentId = binding.assignmentId
