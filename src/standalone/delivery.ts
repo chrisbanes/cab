@@ -224,6 +224,7 @@ export class DeliveryCoordinator {
         ...verified,
         branch: assigned.branch,
         lastPushedSha: assigned.lastPushedSha,
+        retry: record.attempts > 0,
       };
     }
     let before: Record<string, z.output<ReturnType<typeof z.json>>>;

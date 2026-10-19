@@ -178,16 +178,21 @@ export function publicationWorld(
     | "uncertain-lost"
     | "outside-during-push"
     | "applied-but-unread" = "apply";
+  let racer: string | null = null;
   const push: PushFunction = async (request): Promise<PushOutcome> => {
     pushes.push(request);
+    // Another writer moves the branch after Ensemble's preflight and before its push.
+    if (racer) {
+      remote.head = racer;
+      racer = null;
+    }
     if (pushBehaviour === "uncertain-lost") return "uncertain";
     if (pushBehaviour === "applied-but-unread") return "pushed";
     if (pushBehaviour === "outside-during-push") {
       remote.head = "d".repeat(40);
       return "rejected-lease";
     }
-    if (request.lease !== undefined && remote.head !== request.lease)
-      return "rejected-lease";
+    if (remote.head !== request.lease) return "rejected-lease";
     remote.head = request.commitSha;
     return pushBehaviour === "uncertain-applied" ? "uncertain" : "pushed";
   };
@@ -258,6 +263,9 @@ export function publicationWorld(
     wakes,
     submit,
     configure,
+    raceBeforeNextPush: (head: string) => {
+      racer = head;
+    },
     setPush: (behaviour: typeof pushBehaviour) => {
       pushBehaviour = behaviour;
     },

@@ -121,6 +121,7 @@ const request = (repo: ReturnType<typeof repository>, executable: string) => ({
   branch: "ensemble/abcd1234-task",
   token,
   executable,
+  lease: null as string | null,
 });
 
 function filesContaining(directory: string, needle: string): string[] {
@@ -154,14 +155,15 @@ test("the token reaches only the push child's environment, never argv, configura
     false,
     "scratch repository removed",
   );
+  assert.ok(seen.args.includes("--no-verify"));
   assert.deepEqual(seen.args.slice(-3), [
-    "--no-verify",
+    "--force-with-lease=refs/heads/ensemble/abcd1234-task:",
     "https://github.com/octo/fixture.git",
     `${repo.sha}:refs/heads/ensemble/abcd1234-task`,
   ]);
-  assert.equal(
-    seen.args.some((a) => a.startsWith("--force-with-lease")),
-    false,
+  // Even a first push is leased: the branch must not exist yet.
+  assert.ok(
+    seen.args.includes("--force-with-lease=refs/heads/ensemble/abcd1234-task:"),
   );
   assert.equal(seen.env.GIT_ALLOW_PROTOCOL, "https");
   assert.equal(
@@ -325,4 +327,67 @@ test("a cancelled push is uncertain and an invalid request never starts Git", as
     }),
     "not-attempted",
   );
+});
+
+test("every push carries an exact lease, and Git enforces it against a head that moved", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-git-lease-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const remote = join(root, "remote");
+  git(root, "init", "-q", "--bare", remote);
+  const source = join(root, "source");
+  mkdirSync(source);
+  git(source, "init", "-q", "-b", "main");
+  const commit = (name: string) => {
+    writeFileSync(join(source, name), `${name}\n`);
+    git(source, "add", ".");
+    git(
+      source,
+      "-c",
+      "user.name=T",
+      "-c",
+      "user.email=t@e.com",
+      "commit",
+      "-q",
+      "-m",
+      name,
+    );
+    return git(source, "rev-parse", "HEAD");
+  };
+  const a = commit("a"),
+    b = commit("b"),
+    c = commit("c");
+  // The exact arguments pushTaskCommit builds, against a local remote.
+  const push = (sha: string, lease: string | null) => {
+    try {
+      git(
+        source,
+        "push",
+        "--porcelain",
+        "--no-verify",
+        `--force-with-lease=refs/heads/x:${lease ?? ""}`,
+        remote,
+        `${sha}:refs/heads/x`,
+      );
+      return "pushed";
+    } catch (error) {
+      return /stale info/.test(String((error as { stdout?: string }).stdout))
+        ? "stale"
+        : "other";
+    }
+  };
+  const head = () => git(remote, "rev-parse", "refs/heads/x");
+  // Creation expects absence: an outsider who created the branch first is not overwritten, even
+  // by a commit that is a fast-forward of what they pushed.
+  assert.equal(push(a, null), "pushed");
+  git(remote, "update-ref", "-d", "refs/heads/x");
+  git(source, "push", "-q", remote, `${a}:refs/heads/x`);
+  assert.equal(push(b, null), "stale");
+  assert.equal(head(), a);
+  // An advance leased against the observed head rejects when the head moved to an ancestor of the
+  // new commit; a plain fast-forward would have succeeded.
+  git(source, "push", "-q", remote, `${b}:refs/heads/x`);
+  assert.equal(push(c, a), "stale");
+  assert.equal(head(), b);
+  assert.equal(push(c, b), "pushed");
+  assert.equal(head(), c);
 });

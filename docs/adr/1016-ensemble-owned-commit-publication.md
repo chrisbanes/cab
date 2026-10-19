@@ -26,8 +26,10 @@ agent turns run with network off. Delivery scope lives in
   from the base the workspace was provisioned at. Uncommitted changes are never
   pushed and are reported in the receipt.
 - A push is accepted only when the remote branch is where Ensemble last left it. The
-  lease for a force-push is the commit Ensemble last pushed. Any other remote head,
-  seen at a push or on the task's PR, is an **outside change**: the push is refused,
+  lease for a force-push is the commit Ensemble last pushed, and every push, fast-forward
+  or not, is leased to the head Ensemble observed (creation expects the branch absent).
+  Any other remote head, seen at a push or on the task's PR, is an **outside change**:
+  the push is refused,
   the lead is woken and handback settlement is invalidated. A rewritten history means
   the next review covers the whole new head.
 - Transport is the one exception to Ensemble's offline Git: HTTPS to the verified

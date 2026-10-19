@@ -27,8 +27,11 @@ export interface PushRequest {
   nameWithOwner: string;
   commitSha: string;
   branch: string;
-  /** Force-with-lease against exactly this remote commit; absent for a fast-forward push. */
-  lease?: string;
+  /**
+   * The remote head the push expects, enforced with an exact lease: a commit, or null when the branch
+   * must not exist yet. A head that moved since it was observed rejects the push.
+   */
+  lease: string | null;
   token: string;
   signal?: AbortSignal;
   /** Test-only override of the Git executable. */
@@ -60,7 +63,7 @@ export async function pushTaskCommit(
     !token ||
     !repositoryPath.test(nameWithOwner) ||
     !/^[0-9a-f]{40}$/.test(commitSha) ||
-    (lease !== undefined && !/^[0-9a-f]{40}$/.test(lease)) ||
+    (lease !== null && !/^[0-9a-f]{40}$/.test(lease)) ||
     !safeBranchName(branch)
   )
     return "not-attempted";
@@ -105,9 +108,8 @@ export async function pushTaskCommit(
         "push",
         "--porcelain",
         "--no-verify",
-        ...(lease === undefined
-          ? []
-          : [`--force-with-lease=refs/heads/${branch}:${lease}`]),
+        // An empty expectation is Git's form for "the branch must not exist".
+        `--force-with-lease=refs/heads/${branch}:${lease ?? ""}`,
         `https://github.com/${nameWithOwner}.git`,
         `${commitSha}:refs/heads/${branch}`,
       ],

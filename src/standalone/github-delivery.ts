@@ -53,6 +53,8 @@ export interface PublicationContext extends PushVerification {
   /** The task's assigned branch, and the commit Ensemble last pushed to it. */
   branch: string;
   lastPushedSha: string | null;
+  /** A later attempt of an operation whose earlier attempt may have landed late. */
+  retry: boolean;
 }
 export type PushFunction = (
   request: Parameters<typeof pushTaskCommit>[0],
@@ -1026,8 +1028,12 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     if (action.kind === "branch.push" || action.kind === "branch.force-push") {
       if (!publication) throw new Error("provider-publication-unverified");
       const remote = await this.optionalRef(repo.path, publication.branch);
-      // The remote must be where Ensemble left it (or already at the commit, after a lagging readback).
-      if (remote !== action.commitSha && remote !== publication.lastPushedSha)
+      // A fresh publication needs the remote exactly where Ensemble left it. Only a retry may find it
+      // already at the commit: its earlier push could have landed after the readback.
+      if (
+        remote !== publication.lastPushedSha &&
+        !(publication.retry && remote === action.commitSha)
+      )
         throw new PublicationRefusal("branch-outside-change", remote);
       if (action.kind === "branch.force-push") {
         if (publication.lastPushedSha === null)
@@ -1293,9 +1299,9 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
             .join("/"),
           commitSha: a.commitSha,
           branch: before.branch,
-          ...(a.kind === "branch.force-push" && before.lastPushedSha
-            ? { lease: before.lastPushedSha }
-            : {}),
+          // Every update is leased against the head preflight observed, so a branch another writer
+          // created or advanced since then rejects the push instead of being recorded as ours.
+          lease: before.beforeHead,
           token: this.credential,
         });
         if (outcome === "uncertain") return unsettled;

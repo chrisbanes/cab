@@ -1664,7 +1664,10 @@ head. The agent names an exact commit. Before any network call Ensemble proves o
 that it is the task worktree's `HEAD` or an ancestor of it and descends from the base the
 workspace was provisioned at, and reports uncommitted entries, which are never pushed. A
 push needs the remote branch to be where Ensemble last left it: absent before the first
-push, or equal to the last pushed commit. `branch.push` also refuses a commit that does not
+push, or equal to the last pushed commit, and every update is leased against that observed head
+(creation expects the branch to be absent), so a branch another writer created or moved after
+the read rejects the push and is an outside change. A remote that merely equals the requested
+commit is accepted only when retrying an earlier attempt of the same operation. `branch.push` also refuses a commit that does not
 descend from that commit; `branch.force-push` needs a recorded last push, which is its
 lease. Any other remote head, seen at a push or on the task's PR, is an outside change: the
 push is refused, the lead is woken and handback settlement is invalidated; without a PR it

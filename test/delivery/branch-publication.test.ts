@@ -181,7 +181,7 @@ test("a verified commit creates then advances the branch, confirmed by readback"
     uncommittedEntries: 0,
   });
   assert.equal(branch?.lastPushedSha, first);
-  assert.equal(world.pushes[0]?.lease, undefined);
+  assert.equal(world.pushes[0]?.lease, null, "creation expects absence");
   assert.equal(world.pushes[0]?.token, "token");
 
   const second = world.commit();
@@ -190,6 +190,11 @@ test("a verified commit creates then advances the branch, confirmed by readback"
     "confirmed-success",
   );
   assert.equal(world.remote.head, second);
+  assert.equal(
+    world.pushes[1]?.lease,
+    first,
+    "an advance expects the observed head",
+  );
   assert.equal(
     world.store.taskBranch(world.taskId, repositoryId)?.lastPushedSha,
     second,
@@ -476,4 +481,98 @@ test("a graft cannot fake a commit's ancestry", async (t) => {
   const record = await world.submit("branch.push", alien);
   assert.equal(record.observation?.reason, "push-commit-not-verified");
   assert.deepEqual(world.requests, []);
+});
+
+test("a branch another writer creates after preflight is not recorded as Ensemble's push", async (t) => {
+  const world = publicationWorld(t);
+  const sha = world.commit();
+  // The outsider's commit is an ancestor of the one being pushed: a plain fast-forward would succeed.
+  world.raceBeforeNextPush(world.base);
+  const record = await world.submit("branch.push", sha);
+  assert.equal(record.state, "confirmed-failure");
+  assert.equal(record.observation?.reason, "branch-outside-change");
+  assert.equal(world.pushes[0]?.lease, null);
+  assert.equal(
+    world.remote.head,
+    world.base,
+    "the outsider's branch is untouched",
+  );
+  const branch = world.store.taskBranch(world.taskId, repositoryId);
+  assert.equal(branch?.lastPushedSha, null);
+  assert.equal(branch?.outsideHeadSha, world.base);
+  assert.equal(world.wakes.length, 1);
+});
+
+test("a branch another writer advances after preflight is not recorded as Ensemble's push", async (t) => {
+  const world = publicationWorld(t);
+  const first = world.commit();
+  await world.submit("branch.push", first);
+  const second = world.commit();
+  world.raceBeforeNextPush(world.base);
+  const record = await world.submit("branch.push", second);
+  assert.equal(record.observation?.reason, "branch-outside-change");
+  assert.equal(world.pushes[1]?.lease, first);
+  assert.equal(world.remote.head, world.base);
+  assert.equal(
+    world.store.taskBranch(world.taskId, repositoryId)?.lastPushedSha,
+    first,
+  );
+  assert.equal(world.wakes.length, 1);
+});
+
+test("a remote that already equals the commit but was not pushed by Ensemble is an outside change", async (t) => {
+  for (const pushedBefore of [false, true]) {
+    const world = publicationWorld(t);
+    const first = world.commit();
+    if (pushedBefore) await world.submit("branch.push", first);
+    const target = world.commit();
+    world.remote.head = target;
+    const pushes = world.pushes.length;
+    const record = await world.submit("branch.push", target);
+    assert.equal(record.state, "confirmed-failure", String(pushedBefore));
+    assert.equal(record.observation?.reason, "branch-outside-change");
+    assert.equal(world.pushes.length, pushes, "no push, no laundering");
+    assert.equal(
+      world.store.taskBranch(world.taskId, repositoryId)?.lastPushedSha,
+      pushedBefore ? first : null,
+    );
+    assert.equal(world.wakes.length, 1);
+  }
+});
+
+test("a retry may find its own earlier push, which landed late, without a push or a wake", async (t) => {
+  const world = publicationWorld(t);
+  const sha = world.commit();
+  world.setPush("uncertain-lost");
+  const record = await world.submit("branch.push", sha);
+  const restarted = world.coordinatorFor();
+  await restarted.reconcile();
+  assert.equal(
+    world.store.action(record.operationId).observation?.retryable,
+    true,
+  );
+  world.remote.head = sha;
+  await restarted.reconcile();
+  assert.equal(
+    world.store.action(record.operationId).state,
+    "confirmed-success",
+  );
+  assert.equal(world.pushes.length, 1);
+  assert.deepEqual(world.wakes, []);
+  assert.equal(
+    world.store.taskBranch(world.taskId, repositoryId)?.lastPushedSha,
+    sha,
+  );
+});
+
+test("a force-push is leased against the observed head and loses to a writer that moved it", async (t) => {
+  const world = publicationWorld(t);
+  const first = world.commit();
+  await world.submit("branch.push", first);
+  const rewritten = world.amend();
+  world.raceBeforeNextPush("c".repeat(40));
+  const record = await world.submit("branch.force-push", rewritten);
+  assert.equal(record.observation?.reason, "branch-outside-change");
+  assert.equal(world.pushes[1]?.lease, first);
+  assert.equal(world.remote.head, "c".repeat(40));
 });
