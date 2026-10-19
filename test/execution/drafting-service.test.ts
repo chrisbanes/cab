@@ -1242,6 +1242,62 @@ test("concurrent commands under one key apply once, and other content under it c
   assert.deepEqual(await service.draftingCommand(start), same[0]);
 });
 
+test("an unlinked repository's paths stay private to the run built from it", async (t) => {
+  const w = world(t);
+  const { service, codex } = w.open();
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  let unlinked = false;
+  const results: boolean[] = [];
+  codex.script(async (api) => {
+    while (!unlinked) await new Promise((resolve) => setTimeout(resolve, 20));
+    // The repository is no longer linked, yet its checkout path is still private.
+    results.push(
+      (
+        await api.callTool(draftProposalToolName, {
+          title: "Leaky",
+          outcome: `Look in ${w.source.path}`,
+        })
+      ).success,
+      (await api.callTool(draftProposalToolName, proposal)).success,
+    );
+  });
+  const runId = randomUUID();
+  await service.startDrafting({ runId, projectId, idea });
+  await waitUntil(
+    () =>
+      service.readDrafting(runId)?.state === "running" &&
+      codex.threads.length > 0,
+    () => w.tracked(service).runs(),
+  );
+  const domain = service.domain();
+  await domain.configureGitHub({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(domain.githubConfiguration(projectId).version),
+    credentialRef: null,
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R_1",
+        owner: "acme",
+        name: "atlas",
+      },
+    ],
+    repositories: [],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+  });
+  unlinked = true;
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "proposed",
+    () => w.tracked(service).runs(),
+  );
+  assert.deepEqual(results, [false, true]);
+});
+
 test("a Stop during thread start is applied once the turn binds", async (t) => {
   const w = world(t);
   const opened = w.open();

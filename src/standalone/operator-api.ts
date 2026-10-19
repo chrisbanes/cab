@@ -2712,8 +2712,13 @@ export class OperatorApi {
       throw new OperatorApiError(404, "not-found");
     const run = this.service.readDrafting(runId);
     if (!run) throw new OperatorApiError(404, "not-found");
-    const excluded = await this.exclusions(run.projectId);
-    if (excluded === undefined) throw new OperatorApiError(503, "unavailable");
+    const current = await this.exclusions(run.projectId);
+    if (current === undefined) throw new OperatorApiError(503, "unavailable");
+    // The paths this run was built from stay private even after the project unlinks them.
+    const excluded = prepareExclusions([
+      ...current,
+      ...this.service.draftingGrantPaths(runId),
+    ]);
     // Text the exclusions would change is withheld whole, never shown altered or empty.
     const title = run.proposal && this.exact(run.proposal.title, excluded);
     const outcome = run.proposal && this.exact(run.proposal.outcome, excluded);

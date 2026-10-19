@@ -2026,6 +2026,11 @@ export class StandaloneService {
         ...gitHubCredentialExclusions(domain).redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...this.claudeTokensHandedOut,
+        // Copies still in use keep their grant's paths private even once it is unlinked.
+        ...(this.current?.draftingBindings
+          .list()
+          .filter((binding) => binding.state !== "archived")
+          .flatMap((binding) => this.draftingGrantPaths(binding.taskId)) ?? []),
         ...domain.projects().flatMap((project) => {
           const id = String(project.id);
           return [
@@ -4372,6 +4377,24 @@ export class StandaloneService {
     return drafting.require(run.runId);
   }
 
+  /**
+   * The private paths of the copy a run was built from, kept with the run after the
+   * project unlinks the repository or the copy is removed.
+   */
+  draftingGrantPaths(runId: string): string[] {
+    const binding = this.started().draftingBindings.get(runId);
+    return binding
+      ? [
+          binding.path,
+          ...binding.repositories.flatMap((repository) => [
+            repository.sourcePath,
+            repository.workspacePath,
+            ...(repository.gitCommonDir ? [repository.gitCommonDir] : []),
+          ]),
+        ].filter((path) => path.length > 0)
+      : [];
+  }
+
   /** The turn request that carries a drafting run through admission. */
   private static draftingRequest(run: DraftingRun) {
     const workId = StandaloneService.draftingWorkId(run.runId);
@@ -4595,11 +4618,13 @@ export class StandaloneService {
       const run = drafting.require(runId);
       const domain = this.domain();
       const failure = this.failureExclusions();
-      // Including the instructions this run was given, which the operator's reads also redact.
+      // Including the instructions this run was given, which the operator's reads also redact,
+      // and the paths of the grant it was built from, which an unlink does not make public.
       const excluded =
         failure &&
         prepareExclusions([
           ...failure,
+          ...this.draftingGrantPaths(runId),
           ...[
             String(
               domain.profileRevision(run.profileId, run.profileRevision)

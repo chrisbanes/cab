@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { draftProposalToolName } from "../../src/standalone/drafting.js";
 import { draftingTurn, seedDraftingProject } from "../fixtures/drafting.js";
+import { startedOf } from "../fixtures/service-internals.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 
 const proposal = {
@@ -222,6 +223,51 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
   assert.equal(withheld.proposal, null);
   assert.equal(withheld.proposalWithheld, true);
   assert.equal((await runOf(runId)).proposalWithheld, false);
+
+  // A path of the grant a run was built from stays withheld after the project unlinks it.
+  const pathId = randomUUID();
+  await post({
+    type: "drafting.start",
+    key: randomUUID(),
+    runId: pathId,
+    projectId,
+    idea: "A fourth idea",
+  });
+  await until(() => f.runtime.hasPending(4), "the fourth drafting turn");
+  const grantPath = f.service.draftingGrantPaths(pathId)[0];
+  assert.ok(grantPath);
+  // Recorded straight in the store, as a proposal that got past the tool would be.
+  startedOf(f.service).drafting.recordProposal(pathId, {
+    title: "Path draft",
+    outcome: `Look in ${grantPath}`,
+  });
+  await domain.configureGitHub({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(domain.githubConfiguration(projectId).version),
+    credentialRef: null,
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R_1",
+        owner: "acme",
+        name: "atlas",
+      },
+    ],
+    repositories: [],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+  });
+  f.runtime.complete(4);
+  await until(
+    () => f.service.readDrafting(pathId)?.state === "proposed",
+    "the fourth proposal",
+  );
+  const unlinkedRead = await runOf(pathId);
+  assert.equal(unlinkedRead.proposal, null);
+  assert.equal(unlinkedRead.proposalWithheld, true);
 
   // Guards: CSRF, authentication, unknown runs and a missing project.
   assert.equal((await post(start, "wrong-token")).status, 403);
