@@ -826,6 +826,124 @@ test("making the task Ready with routing enabled routes it without a preliminary
   );
 });
 
+/** A routing project with one worker candidate, whose routing answer waits for `release`. */
+async function routedDraftTask(t: { after(fn: () => unknown): void }) {
+  const previous = process.env.TEST_TYPESAFE_KEY;
+  process.env.TEST_TYPESAFE_KEY = "fixture-key";
+  t.after(() => {
+    if (previous === undefined) delete process.env.TEST_TYPESAFE_KEY;
+    else process.env.TEST_TYPESAFE_KEY = previous;
+  });
+  let workerId = "";
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const calls = { routed: 0 };
+  const client: RoutingChoiceClient = {
+    choose: async (request) => {
+      calls.routed++;
+      await gate;
+      return {
+        choice: workerId,
+        model: request.requestedModel,
+        confidence: 0.9,
+        probabilities: { [workerId]: 0.9, lead_review: 0.1 },
+        usage: { inputTokens: 1, outputTokens: 1 },
+      };
+    },
+  };
+  const f = await createOperatorFixture(client);
+  t.after(() => f.close());
+  const task = await draftTask(f, "Routed draft turn");
+  const domain = f.service.domain();
+  workerId = randomUUID();
+  domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: workerId,
+    name: "Worker",
+    instructions: "Build",
+    capabilities: "code",
+  });
+  domain.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    expectedVersion: Number(domain.routing(task.projectId).version),
+    enabled: true,
+    guidance: "Route everything to the worker.",
+    credentialRef: "env:TEST_TYPESAFE_KEY",
+    candidateProfileIds: [workerId],
+  });
+  return { f, task, domain, calls, release, workerId };
+}
+
+test("with routing on, a draft-only lead with a pending answer waits for the routing record", async (t) => {
+  const { f, task, domain, calls, release, workerId } =
+    await routedDraftTask(t);
+  const { running } = await runDraftTurn(f, task);
+  const asked = await f.runtime.callTool(
+    call(running, "ensemble_ask_question", { question: "Which repository?" }),
+  );
+  assert.equal(asked.success, true, asked.text);
+  const question = (await task.api.readTask(task.taskId)).data.questions[0];
+  assert.ok(question);
+  await task.api.execute({
+    type: "question.answer",
+    key: randomUUID(),
+    taskId: task.taskId,
+    interactionId: question.interactionId,
+    expectedRevision: question.revision,
+    answer: "The api repository.",
+  });
+  f.runtime.complete(1);
+  await until(
+    () => !f.service.list().some((work) => work.state === "running"),
+    "turn end",
+  );
+  assert.equal(pendingEventCount(f, task.assignmentId), 1);
+
+  // Paused at Ready: routing and the lead both wait.
+  configure(f, task.projectId, true);
+  domain.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: version(f, task.taskId),
+    ready: true,
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 150));
+  assert.equal(f.runtime.turns, 1);
+  assert.equal(calls.routed, 0);
+
+  // Resumed: routing is asked, and the lead still has no turn while it is undecided.
+  configure(f, task.projectId, false);
+  await new Promise<void>((resolve) => setTimeout(resolve, 300));
+  assert.equal(f.runtime.turns, 1, "no preliminary lead turn");
+  await until(() => calls.routed === 1, "routing asked");
+  release();
+  await until(
+    () =>
+      domain
+        .assignments(task.taskId)
+        .some((assignment) => assignment.profileId === workerId),
+    "routed assignment",
+  );
+  // The lead's turn, when it comes, carries the answer.
+  for (let turn = 2; turn <= 4; turn++) {
+    await until(() => f.runtime.hasPending(turn), `turn ${turn}`);
+    if (f.runtime.prompts.some((prompt) => /The api repository\./.test(prompt)))
+      return;
+    f.runtime.complete(turn);
+  }
+  assert.fail("the lead never received the answer");
+});
+
 test("a queued draft turn survives a restart and still runs read-only", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

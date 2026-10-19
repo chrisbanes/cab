@@ -1277,6 +1277,16 @@ export class DomainStore {
       .all(id.parse(taskId)) as Row[];
   }
 
+  /** Whether routing has recorded its decision for this task (at any task version). */
+  hasRoutingRecord(taskId: string): boolean {
+    return (
+      this.one(
+        "SELECT 1 AS routed FROM routing_operations WHERE taskId = ?",
+        id.parse(taskId),
+      ) !== undefined
+    );
+  }
+
   /**
    * The task's assignments as routing sees them. A pending lead that has only had draft
    * turns, with nothing routed yet, has not started, so it does not count as assigned.
@@ -1285,13 +1295,7 @@ export class DomainStore {
     const draftTurns = this.one(
       "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'turn_requests'",
     );
-    if (
-      !draftTurns ||
-      this.one(
-        "SELECT 1 AS routed FROM routing_operations WHERE taskId = ?",
-        taskId,
-      )
-    )
+    if (!draftTurns || this.hasRoutingRecord(taskId))
       return this.assignments(taskId);
     const unstarted = (assignmentId: string) =>
       this.one(
