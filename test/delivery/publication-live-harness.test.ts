@@ -37,7 +37,7 @@ const manifest = () => ({
   },
   credential: "gh-cli",
   actions: ["branch.push", "pr.create"],
-  runtimeTurnLimit: 4,
+  runtimeTurnLimit: 0,
   branchPrefix: "s07a-pub/",
 });
 function files(
@@ -53,7 +53,7 @@ function files(
     repositoryVisibility: "public",
     credential: "gh-cli",
     actions: ["branch.push", "pr.create"],
-    runtimeTurnLimit: 4,
+    runtimeTurnLimit: 0,
     expiresAt,
     cleanup: { closeRecordedPrs: true, deleteRecordedHeads: true },
   };
@@ -89,7 +89,7 @@ test("the publication guard enforces the exact grant and the fixture's resources
     { branchPrefix: "cb/" },
     { credential: "env:S07A_GITHUB_TOKEN" },
     { actions: ["branch.push", "pr.create", "pr.merge"] },
-    { runtimeTurnLimit: 5 },
+    { runtimeTurnLimit: 4 },
   ])
     assert.equal(
       publicationManifestSchema.safeParse({ ...manifest(), ...change }).success,

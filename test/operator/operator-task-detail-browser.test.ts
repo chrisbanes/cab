@@ -3229,6 +3229,12 @@ test("The delivery block links the PR, says its state and blockers in words, and
   });
   await refreshTask(page, a.taskId);
   await branchLine.getByText("Outside push cccccccc").waitFor();
+  await changes
+    .getByText(
+      "Ensemble assigns and pushes these. A head it did not push is flagged until the lead reviews it.",
+      { exact: true },
+    )
+    .waitFor();
   reads.set(a.taskId, {
     ...read({}),
     branches: [{ ...branch, branch: null, lastPushedSha: null }],

@@ -26,8 +26,8 @@ export const publicationManifestSchema = z
     /** The product's `ghToken()` (the maintainer's `gh` login), read in-process and never stored. */
     credential: z.literal("gh-cli"),
     actions: z.array(z.enum(publicationActions)).refine(exactActions),
-    /** The run drives the real delivery coordinator with no model turns; the ceiling is for the record. */
-    runtimeTurnLimit: z.number().int().min(0).max(4),
+    /** The run drives the real delivery coordinator directly, so it grants no model turns. */
+    runtimeTurnLimit: z.literal(0),
     branchPrefix: z.literal("s07a-pub/"),
   })
   .strict();
@@ -40,7 +40,7 @@ const publicationGrantSchema = z
     repositoryVisibility: z.enum(["private", "public"]),
     credential: z.literal("gh-cli"),
     actions: z.array(z.enum(publicationActions)).refine(exactActions),
-    runtimeTurnLimit: z.number().int().min(0).max(4),
+    runtimeTurnLimit: z.literal(0),
     expiresAt: z.iso.datetime(),
     cleanup: z
       .object({
@@ -82,7 +82,6 @@ export class PublicationGuard {
       g.accountNodeId !== m.account.nodeId ||
       g.repositoryVisibility !==
         (m.repository.private ? "private" : "public") ||
-      g.runtimeTurnLimit > m.runtimeTurnLimit ||
       Date.parse(g.expiresAt) <= now
     )
       throw new Error(

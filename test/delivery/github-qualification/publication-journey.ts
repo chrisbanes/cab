@@ -97,10 +97,12 @@ export async function runPublicationJourney(
   const db = new DatabaseSync(":memory:");
   let branch: string | undefined;
   let prNumber: number | undefined;
+  let prAttempted = false;
   const raw = options.fetcher ?? fetch;
   const guardedFetch: typeof fetch = async (input, init) => {
     guard.assertRequest(input, init);
-    return raw(input, init);
+    // A redirect would leave the guarded path; the provider sets its own policy for reads.
+    return raw(input, { ...init, redirect: init?.redirect ?? "error" });
   };
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await guardedFetch(`https://api.github.com${path}`, {
@@ -228,6 +230,8 @@ export async function runPublicationJourney(
     const push: PushFunction = async (request) => {
       guard.assertPush(request);
       guard.recordBranch(request.branch);
+      // Known before the push can fail, so cleanup deletes a head even when the run does not finish.
+      branch = request.branch;
       pushes++;
       return (options.push ?? pushTaskCommit)(request);
     };
@@ -272,6 +276,7 @@ export async function runPublicationJourney(
     if (options.readRef(branch) !== first)
       throw new Error("Remote branch is not the first commit");
 
+    prAttempted = true;
     const created = await submit({
       kind: "pr.create",
       target: {
@@ -285,15 +290,10 @@ export async function runPublicationJourney(
       draft: true,
     });
     mustSucceed("pr.create", created);
-    const pulls = (
-      await api(
-        "GET",
-        `/repos/${fullName}/pulls?state=all&head=${encodeURIComponent(`chrisbanes:${branch}`)}&per_page=5`,
-      )
-    ).json as Array<{ number: number; node_id: string }>;
-    const pull = pulls[0];
-    if (!pull || pulls.length !== 1)
-      throw new Error("The created PR was not found exactly once");
+    // The confirmed readback receipt names the PR; no list query decides which one to close.
+    const receipt = created.observation?.receipt;
+    if (!receipt?.number) throw new Error("pr.create receipt names no PR");
+    const pull = { number: receipt.number, node_id: receipt.nodeId };
     prNumber = pull.number;
     guard.recordPr(pull.number, pull.node_id);
     await coordinator.registerPr(
@@ -361,12 +361,12 @@ export async function runPublicationJourney(
       if (branch)
         await api("DELETE", `/repos/${fullName}/git/refs/heads/${branch}`);
       const closed =
-        prNumber === undefined ||
-        (
-          (await api("GET", `/repos/${fullName}/pulls/${prNumber}`)).json as {
-            state: string;
-          }
-        ).state === "closed";
+        prNumber === undefined
+          ? !prAttempted
+          : (
+              (await api("GET", `/repos/${fullName}/pulls/${prNumber}`))
+                .json as { state: string }
+            ).state === "closed";
       const gone =
         !branch ||
         (await api("GET", `/repos/${fullName}/git/ref/heads/${branch}`))

@@ -3018,6 +3018,12 @@ function Changes({
           )}
         </p>
       ))}
+      {d && d.branches.length > 0 && (
+        <p>
+          Ensemble assigns and pushes these. A head it did not push is flagged
+          until the lead reviews it.
+        </p>
+      )}
       {d?.binding && (
         <>
           <PullRequestLine binding={d.binding} />
