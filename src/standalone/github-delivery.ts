@@ -1293,6 +1293,11 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           retry: z.boolean(),
         })
         .parse(record.beforeState);
+      // Rejected by Git: unproved only in what the readback shows, never as a push that may have landed.
+      const rejectedUnsettled = (): ProviderActionObservation => ({
+        ...unsettled(),
+        rejected: true,
+      });
       const outside = (head: string | null) =>
         failure("branch-outside-change", {
           receipt: head
@@ -1312,9 +1317,10 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         try {
           head = await this.optionalRef(before.repositoryPath, before.branch);
         } catch {
-          return outcomeFailure ?? unsettled();
+          return outcomeFailure ?? rejectedUnsettled();
         }
-        if (head === before.beforeHead) return outcomeFailure ?? unsettled();
+        if (head === before.beforeHead)
+          return outcomeFailure ?? rejectedUnsettled();
         if (head === a.commitSha)
           return before.retry ? unsettled() : outside(head);
         return outside(head);
@@ -1347,8 +1353,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         if (outcome === "rejected-lease") return afterRejection(null);
         pushed = true;
       }
-      const settled = await this.inspectBranch(record, a, pushed);
-      return settled;
+      return await this.inspectBranch(record, a, pushed);
     } catch {
       return unsettled();
     }
@@ -1383,7 +1388,15 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         },
         ...extra,
       }) as ProviderActionObservation;
-    if (remote === a.commitSha) return success();
+    // An update Git rejected cannot own an equal head: that is another writer's.
+    const rejected = record.observation?.rejected === true;
+    if (remote === a.commitSha && !rejected) return success();
+    if (remote === before.beforeHead && rejected)
+      return {
+        state: "confirmed-failure",
+        reason: "branch-push-rejected",
+        receipt: null,
+      };
     if (remote === before.beforeHead)
       // Git said done but the read does not show it yet: unproved, never "not applied".
       return pushed
@@ -1599,6 +1612,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         receipt: null,
         // A readback failure never forgets that Git reported the push done.
         ...(record.observation?.pushed ? { pushed: true } : {}),
+        ...(record.observation?.rejected ? { rejected: true } : {}),
       };
     }
   }

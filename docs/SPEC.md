@@ -1664,7 +1664,7 @@ head. The agent names an exact commit. Before any network call Ensemble proves o
 that it is the task worktree's `HEAD` or an ancestor of it and descends from the base the
 workspace was provisioned at. Each ancestry is proved from the commit objects themselves,
 every one read raw and rehashed, so a forged commit-graph, replace ref, graft or lying object
-cannot manufacture it; a history too long to walk is unproved, not assumed. Uncommitted entries
+cannot manufacture it; a history too long to walk is unproved, not assumed, and the proof assumes SHA-1 object ids as GitHub repositories use (another format fails closed). Uncommitted entries
 are reported and never pushed. A push needs the remote branch to be where Ensemble last left
 it: absent before the first push, or equal to the last pushed commit. Every update is leased
 against that observed head (creation expects the branch to be absent), so a branch another writer

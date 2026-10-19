@@ -439,3 +439,33 @@ test("status in the verifier never runs a configured clean filter", async (t) =>
   assert.ok(verification && verification.uncommittedEntries > 0);
   assert.equal(existsSync(marker), false, "the clean filter did not run");
 });
+
+test("an update Git rejected never owns an equal head, even when its readback failed", async (t) => {
+  const w = publicationWorld(t);
+  const sha = w.commit();
+  w.setPush("stale-readback-fails");
+  const record = await w.submit("branch.push", sha);
+  assert.equal(record.state, "uncertain");
+  assert.equal(record.observation?.rejected, true);
+  assert.equal(w.store.mayHaveLanded(record.operationId), false);
+  // Another writer pushes exactly the requested commit before the read recovers.
+  w.failRefReads(false);
+  w.remote.head = sha;
+  await w.coordinatorFor().reconcile();
+  const settled = w.store.action(record.operationId);
+  assert.equal(settled.observation?.reason, "branch-outside-change");
+  assert.equal(branchOf(w)?.lastPushedSha, null);
+  assert.equal(branchOf(w)?.outsideHeadSha, sha);
+  assert.equal(w.wakes.length, 1);
+
+  const unchanged = publicationWorld(t);
+  unchanged.setPush("stale-readback-fails");
+  const again = await unchanged.submit("branch.push", unchanged.commit());
+  unchanged.failRefReads(false);
+  await unchanged.coordinatorFor().reconcile();
+  assert.equal(
+    unchanged.store.action(again.operationId).observation?.reason,
+    "branch-push-rejected",
+  );
+  assert.deepEqual(unchanged.wakes, []);
+});

@@ -318,6 +318,8 @@ export const actionObservationSchema = z
     retryable: z.boolean().optional(),
     /** Git reported the push done; a readback that does not show it yet leaves the outcome unproved. */
     pushed: z.boolean().optional(),
+    /** Git rejected this attempt's update, so it provably did not land even though the outcome is unproved. */
+    rejected: z.boolean().optional(),
     /** A head Ensemble did not push, seen alongside this outcome. */
     outsideHeadSha: commitSha.optional(),
     /** Epoch ms before which a retryable failure is not re-attempted. */
@@ -1172,7 +1174,7 @@ export class DeliveryStore {
       if (row.observationJson === null) return true;
       const o = actionObservationSchema.parse(JSON.parse(row.observationJson));
       return (
-        o.state === "uncertain" ||
+        (o.state === "uncertain" && o.rejected !== true) ||
         o.pushed === true ||
         o.reason === "branch-push-not-applied"
       );

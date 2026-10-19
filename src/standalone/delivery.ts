@@ -643,6 +643,7 @@ export class DeliveryCoordinator {
             reason: "provider-readback-unavailable",
             receipt: null,
             ...(current.observation?.pushed ? { pushed: true } : {}),
+            ...(current.observation?.rejected ? { rejected: true } : {}),
           };
         }
         this.recordPublicationAware(current, observation);
