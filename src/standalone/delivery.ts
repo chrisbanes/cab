@@ -1,5 +1,8 @@
 import { credentialFreeEnvironment } from "../core/child-environment.js";
-import { isOperatorDeliveryCaller } from "../core/delivery.js";
+import {
+  isOperatorAction,
+  isOperatorDeliveryCaller,
+} from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
 import type { z } from "zod";
 import {
@@ -163,11 +166,7 @@ export class DeliveryCoordinator {
     const request = externalActionArgumentsSchema.parse(input);
     if (
       isOperatorDeliveryCaller(caller) &&
-      (!(
-        request.action.kind === "issue.comment" ||
-        (request.action.kind === "issue.edit" && request.action.expected)
-      ) ||
-        request.approval)
+      (!isOperatorAction(request.action) || request.approval)
     )
       throw new DomainPolicyError(
         "forbidden",

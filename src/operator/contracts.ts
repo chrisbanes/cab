@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { issueBodyLimit, issueTitleLimit } from "../core/issue-text-limits.js";
 import { commentReasonCodes, issueEditReasonCodes } from "./github-reasons.js";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
@@ -1017,7 +1018,10 @@ export type TaskListSummary = z.infer<typeof taskListSummarySchema>;
 export type ComposerOptions = z.infer<typeof composerOptionsSchema>;
 /** The title and body of an imported issue, as `issue.edit` limits them. */
 export const issueTextSchema = z
-  .object({ title: z.string().max(512), body: z.string().max(64_000) })
+  .object({
+    title: z.string().max(issueTitleLimit),
+    body: z.string().max(issueBodyLimit),
+  })
   .strict();
 export const draftingRunReadSchema = envelope(
   z
@@ -2168,8 +2172,8 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       runId: uuid,
       operationId: uuid,
       expectedTaskVersion: revision,
-      title: z.string().trim().min(1).max(512),
-      body: z.string().max(64_000).regex(/\S/),
+      title: z.string().trim().min(1).max(issueTitleLimit),
+      body: z.string().max(issueBodyLimit).regex(/\S/),
     })
     .strict(),
   z

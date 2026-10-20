@@ -34,6 +34,27 @@ import { Input } from "./ui/input.js";
 import { Textarea } from "./ui/textarea.js";
 import "./issue-improve.css";
 
+/** Reaching `sessionStorage` itself throws when site data is blocked; the panel then keeps its state in memory. */
+const sessionStore = {
+  getItem: (key: string) => {
+    try {
+      return sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (key: string, value: string) => {
+    try {
+      sessionStorage.setItem(key, value);
+    } catch {}
+  },
+  removeItem: (key: string) => {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {}
+  },
+};
+
 export type Outcome<T = undefined> =
   | { state: "recorded"; receipt: T }
   | { state: "unknown" }
@@ -114,7 +135,7 @@ export type ReleaseRun = (runId: string, start?: IssueDraftStart) => void;
 
 /** Whether the panel has work to show again after a reload: a draft, an edit or an unsettled send. */
 export function hasImproveWork(taskId: string, policy: IssueEditPolicy) {
-  const stored = readStored(sessionStorage, taskId);
+  const stored = readStored(sessionStore, taskId);
   return Boolean(
     stored.runId ||
       stored.edit ||
@@ -140,7 +161,7 @@ export function useIssueImprove({
   onChanged: () => void;
 }) {
   const [stored, setStored] = useState<Stored>(() =>
-    readStored(sessionStorage, taskId),
+    readStored(sessionStore, taskId),
   );
   const [run, setRun] = useState<IssueDraftRun | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -158,7 +179,7 @@ export function useIssueImprove({
     (patch: Partial<Stored>) => {
       setStored((current) => {
         const next = { ...current, ...patch };
-        writeStored(sessionStorage, taskId, next);
+        writeStored(sessionStore, taskId, next);
         return next;
       });
     },
@@ -171,7 +192,7 @@ export function useIssueImprove({
       setStaleFlag(false);
       setSendFailure(null);
       setStored(emptyStored);
-      writeStored(sessionStorage, taskId, emptyStored);
+      writeStored(sessionStore, taskId, emptyStored);
       setMessage(note);
     },
     [taskId],

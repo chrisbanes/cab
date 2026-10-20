@@ -1,5 +1,8 @@
 import { issueChangedReason } from "../operator/github-reasons.js";
-import { isOperatorDeliveryCaller } from "../core/delivery.js";
+import {
+  isOperatorAction,
+  isOperatorDeliveryCaller,
+} from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
 import { z } from "zod";
 import {
@@ -1148,11 +1151,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
   ): Promise<ProviderActionObservation> {
     if (
       isOperatorDeliveryCaller(record.binding) &&
-      (!(
-        record.request.action.kind === "issue.comment" ||
-        (record.request.action.kind === "issue.edit" &&
-          record.request.action.expected)
-      ) ||
+      (!isOperatorAction(record.request.action) ||
         record.request.approval ||
         record.request.action.target.nodeId !== record.binding.sourceNodeId ||
         record.request.action.target.repositoryId !==

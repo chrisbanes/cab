@@ -28,6 +28,7 @@ import {
   type DeliveryPolicy,
   DeliveryStore,
   type ExternalAction,
+  isOperatorAction,
   isOperatorDeliveryCaller,
   materialDigest,
   type OperatorCommentReview,
@@ -54,7 +55,10 @@ import {
   draftProposalSchema,
   type OperatorCommand,
 } from "../operator/contracts.js";
-import type { IssueEditReasonCode } from "../operator/github-reasons.js";
+import {
+  type IssueEditReasonCode,
+  issueChangedReason,
+} from "../operator/github-reasons.js";
 
 type DraftingReceipt = Extract<CommandReceipt, { kind: "drafting" }>;
 import { reviewMetadataSchema } from "../core/task-review.js";
@@ -939,11 +943,7 @@ export class StandaloneService {
             request?.action.kind,
           );
           if (isOperatorDeliveryCaller(caller)) {
-            if (
-              request &&
-              request.action.kind !== "issue.comment" &&
-              !(request.action.kind === "issue.edit" && request.action.expected)
-            )
+            if (request && !isOperatorAction(request.action))
               throw new DomainPolicyError(
                 "forbidden",
                 "Operator delivery only permits issue.comment",
@@ -3290,7 +3290,7 @@ export class StandaloneService {
     const caller = this.operatorCommentCaller(command.taskId);
     if (caller.taskVersion !== command.expectedTaskVersion)
       throw new DomainConflictError("Operator task revision conflict");
-    return this.started().deliveryCoordinator.submit(
+    const sent = await this.started().deliveryCoordinator.submit(
       {
         operationId: command.key,
         action: review.action,
@@ -3298,6 +3298,13 @@ export class StandaloneService {
       },
       caller,
     );
+    // The synced copy is what a Redraft starts from, so the change GitHub just showed is read
+    // now rather than at the next poll. A failed read leaves the earlier copy.
+    if (sent.observation?.reason === issueChangedReason)
+      await this.started()
+        .githubSynchronizer.refresh()
+        .catch(() => {});
+    return sent;
   }
   async refreshGitHub(): Promise<void> {
     const started = this.started();
@@ -4930,12 +4937,15 @@ export class StandaloneService {
         return drafting.recordReceipt(key, content, receipt);
       });
     if (command.type === "issue.draft.start") {
-      // Checked after the receipt lookup, so a replay of a start that landed still answers.
-      const task = this.domain().task(command.taskId);
-      if (Number(task.version) !== command.expectedTaskVersion)
-        throw new DomainConflictError("The task changed");
-      if (!this.issueEditAvailability(command.taskId).available)
-        throw new DomainConflictError("Improve with lead is unavailable");
+      // A run that already exists converges without the fences: the receipt is only missing
+      // because the service stopped between creating the run and recording it.
+      if (drafting.get(command.runId)?.taskId !== command.taskId) {
+        const task = this.domain().task(command.taskId);
+        if (Number(task.version) !== command.expectedTaskVersion)
+          throw new DomainConflictError("The task changed");
+        if (!this.issueEditAvailability(command.taskId).available)
+          throw new DomainConflictError("Improve with lead is unavailable");
+      }
       return drafting.recordReceipt(
         key,
         content,

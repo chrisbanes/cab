@@ -163,10 +163,17 @@ test("a send refused because GitHub changed writes nothing and is not retried", 
   t.after(() => f.close());
   const r = review(f);
   approve(f, r);
+  // GitHub moved on after the draft started; the synced copy has not caught up yet.
+  f.setSourceBody("Changed on GitHub");
   f.onPreflight(() => {
     throw new IssueChangedRefusal();
   });
   const saved = await post(f, r);
+  // The refusal reads the source again, so a Redraft starts from what GitHub shows.
+  assert.equal(
+    f.service.githubSources().issue("I1")?.observedBody,
+    "Changed on GitHub",
+  );
   assert.equal(saved.state, "confirmed-failure");
   assert.equal(saved.observation?.reason, issueChangedReason);
   assert.notEqual(saved.observation?.retryable, true);

@@ -1690,7 +1690,8 @@ text the draft started from, or when the operator could not be shown all of the 
 replaced because an exclusion would alter it. Before writing, the provider reads the issue
 and refuses with `provider-issue-changed`, writing nothing and not retrying, if GitHub no
 longer shows that text. GitHub has no conditional issue update, so a change between that
-read and the PATCH is an accepted race. Read-back requires both fields, an unknown outcome
+read and the PATCH is an accepted race. After that refusal the source is read again, so a
+Redraft starts from what GitHub shows. Read-back requires both fields, an unknown outcome
 stays uncertain and blocks further GitHub actions on the task until resolved, and nothing is
 resent. The edit is irreversible from Ensemble: the replaced text is kept only in the
 review record and no restore action exists. Sending needs an open task, a current task

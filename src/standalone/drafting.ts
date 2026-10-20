@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DomainConflictError } from "../core/domain-errors.js";
+import { issueBodyLimit, issueTitleLimit } from "../core/issue-text-limits.js";
 import { type Database, transaction } from "../core/store.js";
 import {
   type DraftProposal,
@@ -39,22 +40,18 @@ const transitions: Record<DraftingState, readonly DraftingState[]> = {
   expired: [],
 };
 
-/**
- * An imported issue's improved title and body: the `issue.edit` limits with both
- * fields required. Defined here until the operator contract adopts it.
- */
+/** An imported issue's improved title and body: the `issue.edit` limits with both fields required. */
 export const issueEditProposalSchema = z
   .object({
-    title: z.string().trim().min(1).max(512),
+    title: z.string().trim().min(1).max(issueTitleLimit),
     // A pattern, so it reaches the tool's JSON schema.
-    body: z.string().max(64_000).regex(/\S/, "Enter an issue body"),
+    body: z.string().max(issueBodyLimit).regex(/\S/, "Enter an issue body"),
   })
   .strict();
 export type IssueEditProposal = z.infer<typeof issueEditProposalSchema>;
 
 /** A `brief` run drafts a task from an idea; an `issue` run improves an imported issue. */
-export const draftingKinds = ["brief", "issue"] as const;
-export type DraftingKind = (typeof draftingKinds)[number];
+const draftingKinds = ["brief", "issue"] as const;
 
 const runSchema = z
   .object({

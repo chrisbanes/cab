@@ -1,5 +1,9 @@
 // Pure state for the Improve with lead panel.
 import { z } from "zod";
+import {
+  issueBodyLimit,
+  issueTitleLimit,
+} from "../../src/core/issue-text-limits.js";
 import type {
   CommandReceipt,
   DraftingRunRead,
@@ -8,8 +12,7 @@ import type {
 import { issueChangedReason } from "../../src/operator/github-reasons.js";
 
 export const issueNoteLimit = 16_000;
-export const issueTitleLimit = 512;
-export const issueBodyLimit = 64_000;
+export { issueBodyLimit, issueTitleLimit };
 export const issueImprovePollMs = 2000;
 
 export interface IssueText {

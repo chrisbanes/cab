@@ -278,6 +278,32 @@ test("starting a draft needs an available edit, replays by key and is fenced to 
   );
 });
 
+test("a start whose run already exists converges even after the task or the grant moved on", async (t) => {
+  const { f, api, configure } = await world(t);
+  f.service.domain().execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: Number(f.service.domain().project(f.projectId).version),
+    paused: true,
+  });
+  const runId = randomUUID();
+  const expectedTaskVersion = version(f);
+  // The run exists, as after a stop between creating it and recording its receipt.
+  await f.service.startIssueDrafting({ runId, taskId: f.taskId, note: "n" });
+  configure(false, true);
+  const receipt = await api.execute({
+    type: "issue.draft.start",
+    key: randomUUID(),
+    runId,
+    taskId: f.taskId,
+    expectedTaskVersion,
+    note: "n",
+  });
+  assert.equal(receipt.kind === "drafting" && receipt.runId, runId);
+});
+
 test("a drafting run read says its kind and carries an issue proposal apart from a brief", async (t) => {
   const { f, api } = await world(t);
   const runId = usedRun(f);

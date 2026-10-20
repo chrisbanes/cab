@@ -1,4 +1,5 @@
 import { TaskReviewStore } from "./task-review.js";
+import { issueBodyLimit, issueTitleLimit } from "./issue-text-limits.js";
 import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -111,8 +112,8 @@ const threadTargetSchema = targetSchema
   .extend({ threadNodeId: identity })
   .strict();
 const textFields = {
-  title: z.string().trim().min(1).max(512).optional(),
-  body: z.string().max(64000).optional(),
+  title: z.string().trim().min(1).max(issueTitleLimit).optional(),
+  body: z.string().max(issueBodyLimit).optional(),
 };
 const edits = z
   .object(textFields)
@@ -145,8 +146,8 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       // The text an operator edit replaces; the provider refuses if GitHub no longer shows it.
       expected: z
         .object({
-          title: z.string().max(512),
-          body: z.string().max(64000),
+          title: z.string().max(issueTitleLimit),
+          body: z.string().max(issueBodyLimit),
         })
         .strict()
         .optional(),
@@ -293,7 +294,7 @@ export function isOperatorDeliveryCaller(
   return "actor" in caller && caller.actor === "operator";
 }
 /** The two actions an operator may take on the bound issue: a comment, or an edit that names what it replaces. */
-function isOperatorAction(
+export function isOperatorAction(
   action: ExternalAction,
 ): action is Extract<ExternalAction, { kind: "issue.comment" | "issue.edit" }> {
   return (

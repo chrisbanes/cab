@@ -333,6 +333,9 @@ test("an issue that changed on GitHub is refused as stale, nothing is written, a
   const { page, effects, hooks, commands, open } = ctx;
   await open();
   await draftAndLoad(ctx);
+  // GitHub changed after the draft started; the synced copy has not caught up yet.
+  const changed = { title: "Retitled on GitHub", body: "Rewritten on GitHub" };
+  ctx.set(changed);
   hooks.changed = true;
   await panel(page).getByRole("button", { name: "Review changes" }).click();
   await panel(page).getByText("Review the full replacement.").waitFor();
@@ -343,10 +346,14 @@ test("an issue that changed on GitHub is refused as stale, nothing is written, a
     .getByText(/changed on GitHub after this draft started/)
     .waitFor();
   assert.equal(effects.length, 0);
-  hooks.changed = false;
+  // GitHub still shows the change: the redraft starts from it, not from the older copy.
   await panel(page).getByRole("button", { name: "Redraft" }).click();
   await panel(page).getByText("Drafting", { exact: true }).waitFor();
   assert.equal(commands("issue.draft.start").length, 2);
+  const redraft = await runningRun(ctx.f, 1);
+  const run = ctx.f.service.readDrafting(redraft);
+  assert.equal(run?.observedTitle, changed.title);
+  assert.equal(run?.observedBody, changed.body);
 });
 
 test("an unknown outcome stays held across a reload and offers no way to send again", async (_t, j) => {
