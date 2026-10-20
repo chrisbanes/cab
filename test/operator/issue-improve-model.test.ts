@@ -28,6 +28,7 @@ const base: ViewInput = {
   hasEdit: false,
   hasReview: false,
   sending: false,
+  sentConfirmed: false,
   staleFlag: false,
   sendFailure: false,
 };
@@ -191,4 +192,18 @@ test("a very large many-line body is diffed in bounded time and keeps every line
   const small = lineDiff(same, edited);
   assert.equal(small.current.filter((row) => row.kind === "removed").length, 1);
   assert.equal(small.proposed.filter((row) => row.kind === "added").length, 1);
+});
+
+test("a send the service confirmed shows sent before the task read catches up, but never over a held edit", () => {
+  const confirmed = { ...base, sentConfirmed: true };
+  assert.equal(improveView(confirmed), "sent");
+  const held = {
+    ...available,
+    latest: {
+      operationId: randomUUID(),
+      state: "uncertain" as const,
+      reason: null,
+    },
+  };
+  assert.equal(improveView({ ...confirmed, policy: held }), "held");
 });

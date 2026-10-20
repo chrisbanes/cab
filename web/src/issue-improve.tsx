@@ -166,6 +166,7 @@ export function useIssueImprove({
   const [run, setRun] = useState<IssueDraftRun | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sentConfirmed, setSentConfirmed] = useState(false);
   // The run whose start is in flight, which a not-found read does not yet mean was lost.
   const [startingId, setStartingId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -193,6 +194,7 @@ export function useIssueImprove({
       setNotFound(false);
       setStaleFlag(false);
       setSendFailure(null);
+      setSentConfirmed(false);
       setStored(emptyStored);
       writeStored(sessionStore, taskId, emptyStored);
       setMessage(note);
@@ -367,6 +369,7 @@ export function useIssueImprove({
     setRun(null);
     setNotFound(false);
     setStaleFlag(false);
+    setSentConfirmed(false);
     setSendFailure(null);
     // Stored with its key before it is sent, so a reload reattaches to a run that did start.
     change({
@@ -525,6 +528,7 @@ export function useIssueImprove({
         change({ sentOperationId: pending.operationId });
         const { state, reason } = sent.receipt;
         if (state === "confirmed-success") {
+          setSentConfirmed(true);
           change({
             edit: undefined,
             editRunId: undefined,
@@ -562,6 +566,7 @@ export function useIssueImprove({
     hasEdit: Boolean(stored.edit),
     hasReview: Boolean(stored.review?.receipt),
     sending,
+    sentConfirmed,
     staleFlag,
     sendFailure: sendFailure !== null,
   });

@@ -173,6 +173,8 @@ export interface ViewInput {
   hasEdit: boolean;
   hasReview: boolean;
   sending: boolean;
+  /** The service confirmed this panel's send in its own answer, ahead of the next task read. */
+  sentConfirmed: boolean;
   staleFlag: boolean;
   sendFailure: boolean;
 }
@@ -184,6 +186,7 @@ export interface ViewInput {
 export function improveView(input: ViewInput): IssueImproveView {
   const latest = input.policy.latest;
   if (latest && isOpenState(latest.state)) return "held";
+  if (input.sentConfirmed) return "sent";
   if (latest?.operationId === input.ownOperationId) {
     if (latest.state === "confirmed-success") return "sent";
     if (latest.reason === staleProviderReason) return "stale";
