@@ -678,12 +678,10 @@ export function IssueImprovePanel({
 
       {(view === "queued" || view === "running" || view === "stopping") && (
         <>
-          <div
-            className="issue-improve-actions issue-improve-between"
-            role="status"
-          >
+          <div className="issue-improve-actions issue-improve-between">
             <span className="issue-improve-progress">
-              <span className="body">
+              {/* Only the sentence is announced; the clock beside it ticks every second. */}
+              <span className="body" role="status">
                 {view === "queued"
                   ? "Waiting to start. A draft waits for capacity, and for a paused project to resume."
                   : view === "stopping"
@@ -691,7 +689,7 @@ export function IssueImprovePanel({
                     : `${lead} is reading the repositories`}
               </span>
               {view === "running" && (
-                <span className="metadata muted">
+                <span className="metadata muted" aria-live="off">
                   Requested {formatClock(s.elapsed)} ago · stops by itself after
                   10:00 of running
                 </span>

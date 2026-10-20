@@ -3301,9 +3301,7 @@ export class StandaloneService {
     // The synced copy is what a Redraft starts from, so the change GitHub just showed is read
     // now rather than at the next poll. A failed read leaves the earlier copy.
     if (sent.observation?.reason === issueChangedReason)
-      await this.started()
-        .githubSynchronizer.refresh()
-        .catch(() => {});
+      await this.refreshGitHub().catch(() => {});
     return sent;
   }
   async refreshGitHub(): Promise<void> {
