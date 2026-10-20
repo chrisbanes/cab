@@ -114,6 +114,11 @@ import {
   draftingTimeLimitMs,
   draftProposalTool,
   draftProposalToolName,
+  issueDraftingInstruction,
+  issueDraftingRequest,
+  issueEditProposalSchema,
+  issueEditProposalTool,
+  issueEditProposalToolName,
 } from "./drafting.js";
 import { resolveOnPath } from "./executable-path.js";
 import {
@@ -4312,7 +4317,10 @@ export class StandaloneService {
 
   private handleToolCall(call: RuntimeToolCall): Promise<RuntimeToolResult> {
     const { coordination, state } = this.started();
-    if (call.tool === draftProposalToolName)
+    if (
+      call.tool === draftProposalToolName ||
+      call.tool === issueEditProposalToolName
+    )
       return Promise.resolve(this.handleDraftProposal(call));
     if (!isCoordinationTool(call.tool))
       return Promise.resolve({
@@ -4686,6 +4694,61 @@ export class StandaloneService {
   }
 
   /**
+   * Starts a project-owned run that proposes a better title and body for an imported task's
+   * issue. It starts from the synced text, which it records, changes nothing, and works while
+   * the task has work running.
+   */
+  async startIssueDrafting(input: {
+    runId: string;
+    taskId: string;
+    note: string;
+  }): Promise<DraftingRun> {
+    const value = z
+      .object({
+        runId: z.string().uuid(),
+        taskId: z.string().uuid(),
+        note: z.string().max(16_000),
+      })
+      .strict()
+      .parse(input);
+    const { drafting, schedulerStore } = this.started();
+    const domain = this.domain();
+    const task = domain.task(value.taskId);
+    const imported = domain.importedTask(value.taskId);
+    const source = imported
+      ? this.githubSources().issue(String(imported.nodeId))
+      : undefined;
+    if (!imported || !source)
+      throw new DomainConflictError("Only an imported task has an issue");
+    if (task.state !== "open")
+      throw new DomainConflictError("Improve with lead needs an open task");
+    const projectId = String(task.projectId);
+    const issue = {
+      taskId: value.taskId,
+      sourceNodeId: String(imported.nodeId),
+      observedTitle: String(source.observedTitle),
+      observedBody: String(source.observedBody),
+    };
+    // The run and its turn request commit together: neither can exist without the other.
+    const run = drafting.atomically(() => {
+      const existing = drafting.get(value.runId);
+      const created = existing
+        ? drafting.create({ ...existing, idea: value.note, issue })
+        : drafting.create({
+            runId: value.runId,
+            projectId,
+            idea: value.note,
+            ...this.draftingLead(projectId),
+            issue,
+          });
+      schedulerStore.ensure(StandaloneService.draftingRequest(created));
+      return created;
+    });
+    await this.wakeScheduler();
+    return drafting.require(run.runId);
+  }
+
+  /**
    * The private paths of the copy a run was built from, kept with the run after the
    * project unlinks the repository or the copy is removed.
    */
@@ -4717,7 +4780,7 @@ export class StandaloneService {
       assignmentVersion: null,
       instructionsRevision: run.instructionsRevision,
       profileRevision: run.profileRevision,
-      prompt: run.idea,
+      prompt: run.kind === "issue" ? issueDraftingRequest(run) : run.idea,
       workspace: null,
       previousWorkId: null,
     };
@@ -4909,8 +4972,23 @@ export class StandaloneService {
         (control.turnId !== undefined && control.turnId !== call.turnId)
       )
         continue;
-      if (drafting.get(runId)?.state !== "running") break;
-      const parsed = draftProposalSchema.safeParse(call.arguments);
+      const run = drafting.get(runId);
+      if (run?.state !== "running") break;
+      // Each kind of run is offered one tool and no other.
+      if (
+        call.tool !==
+        (run.kind === "issue"
+          ? issueEditProposalToolName
+          : draftProposalToolName)
+      )
+        return {
+          success: false,
+          text: "This tool is not offered to this drafting run",
+        };
+      const parsed =
+        run.kind === "issue"
+          ? issueEditProposalSchema.safeParse(call.arguments)
+          : draftProposalSchema.safeParse(call.arguments);
       if (!parsed.success)
         return {
           success: false,
@@ -4923,7 +5001,6 @@ export class StandaloneService {
             .slice(0, 1000),
         };
       // The operator could not be shown text the exclusions would change, so it is refused now.
-      const run = drafting.require(runId);
       const domain = this.domain();
       const failure = this.failureExclusions();
       // Including the instructions this run was given, which the operator's reads also redact,
@@ -4944,7 +5021,9 @@ export class StandaloneService {
       const shown = (text: string) =>
         excluded !== undefined &&
         sanitizeConversationText(text, excluded) === text;
-      if (!shown(parsed.data.title) || !shown(parsed.data.outcome))
+      const body =
+        "body" in parsed.data ? parsed.data.body : parsed.data.outcome;
+      if (!shown(parsed.data.title) || !shown(body))
         return {
           success: false,
           text: "The draft holds text that cannot be shown to the operator, such as a private path or credential. Remove it and call the tool again.",
@@ -5861,10 +5940,19 @@ export class StandaloneService {
           revision: run.instructionsRevision,
           text: `Captured project instructions (revision ${run.instructionsRevision}):\n${projectInstructions || "(none)"}`,
         },
-        { name: "drafting-instruction", text: draftingInstruction },
+        {
+          name: "drafting-instruction",
+          text:
+            run.kind === "issue"
+              ? issueDraftingInstruction
+              : draftingInstruction,
+        },
         {
           name: "request",
-          text: `Rough idea from the operator:\n${request.prompt}`,
+          text:
+            run.kind === "issue"
+              ? request.prompt
+              : `Rough idea from the operator:\n${request.prompt}`,
         },
       ];
     }
@@ -6481,7 +6569,12 @@ export class StandaloneService {
       let threadId: string;
       const tools =
         request.kind === "drafting"
-          ? [draftProposalTool]
+          ? [
+              this.started().drafting.require(this.draftingRunIdOf(request))
+                .kind === "issue"
+                ? issueEditProposalTool
+                : draftProposalTool,
+            ]
           : request.kind === "assignment" && request.assignmentId
             ? coordinationTools
             : undefined;

@@ -5,8 +5,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -24,8 +24,11 @@ import type {
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
 import {
-  draftProposalToolName,
   draftingInstruction,
+  draftProposalToolName,
+  issueDraftingInstruction,
+  issueEditProposalOf,
+  issueEditProposalToolName,
 } from "../../src/standalone/drafting.js";
 import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
 import {
@@ -33,12 +36,12 @@ import {
   StandaloneService,
 } from "../../src/standalone/service.js";
 import { fakeSdk, init, result, sessionOf } from "../fixtures/claude-sdk.js";
-import { tmpdir } from "../fixtures/temp.js";
 import {
   acquiredOf,
   startedOf,
   unpublish,
 } from "../fixtures/service-internals.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 const processIdentity = {
   processId: "4242",
@@ -196,7 +199,22 @@ interface Options {
   draftingInterruptRetryMs?: number;
   /** A `git` that may refuse `worktree remove`, to make cleanup fail. */
   gitExecutable?: string;
+  /** Lists one open issue (acme/atlas#1) for the project to import. */
+  issue?: { state?: "open" | "closed" };
 }
+
+const thinIssue = {
+  providerInstance: "github.com" as const,
+  nodeId: "I_1",
+  repositoryId: "R_1",
+  repositoryName: "acme/atlas",
+  number: 1,
+  title: "keyboard shortcuts",
+  body: "document them",
+  state: "open" as const,
+  labels: ["ready"],
+  projectFields: [],
+};
 
 function sourceRepository(root: string): { path: string; commit: string } {
   const path = join(root, "source");
@@ -340,6 +358,27 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
         ...(options.gitExecutable
           ? { workspaceManager: { gitExecutable: options.gitExecutable } }
           : {}),
+        ...(options.issue
+          ? {
+              github: {
+                readerFactory: () => ({
+                  async readSelection() {
+                    return {
+                      complete: true,
+                      issues: [thinIssue],
+                      reason: null,
+                    };
+                  },
+                  async readBlockers() {
+                    return { complete: true, blockers: [], reason: null };
+                  },
+                  async readIssueStatus() {
+                    return { status: "open" as const };
+                  },
+                }),
+              },
+            }
+          : {}),
       },
     );
     services.push(service);
@@ -428,6 +467,37 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
       await service.start();
     }
   };
+  /** Imports the listed issue as a task of the project and returns its id. */
+  const importIssue = async (service: StandaloneService, projectId: string) => {
+    process.env.FIXTURE_DRAFTING_SOURCE = "offline-drafting-source-value";
+    const domain = service.domain();
+    const configured = domain.githubConfiguration(projectId);
+    await domain.configureGitHub({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(configured.version),
+      credentialRef: "env:FIXTURE_DRAFTING_SOURCE",
+      selections: configured.selections as never,
+      repositories: configured.repositories.map((r) => ({
+        repositoryId: r.repositoryId,
+        path: r.path,
+        ref: r.ref,
+      })),
+      readiness: configured.readiness as never,
+    });
+    execute(service, {
+      type: "github.activate",
+      projectId,
+      selectionId: "repo",
+      expectedVersion: Number(domain.githubConfiguration(projectId).version),
+    });
+    await service.refreshGitHub();
+    const task = service.githubSources().issue(thinIssue.nodeId)?.taskId;
+    assert.ok(task, "the issue was imported");
+    return String(task);
+  };
   const tracked = (service: StandaloneService) => ({
     runs: () =>
       (service as unknown as { db: import("node:sqlite").DatabaseSync }).db
@@ -451,6 +521,7 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
         tasks: count("domain_tasks"),
         assignments: count("domain_assignments"),
         deliveries: count("coordination_results"),
+        deliveryActions: count("delivery_actions"),
         taskWorkspaces: count("task_workspace_bindings"),
       };
     },
@@ -461,6 +532,7 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
     source,
     open,
     execute,
+    importIssue,
     project,
     start,
     tracked,
@@ -1690,3 +1762,173 @@ for (const how of ["graceful stop", "crash"] as const) {
     });
   }
 }
+
+const issueProposal = {
+  title: "Publish a keyboard shortcut guide",
+  // Longer than a brief's outcome may be.
+  body: `Context\n${"Cover every shortcut. ".repeat(900)}\nDone: reviewed examples.`,
+};
+const issueIdea = "Mention the command menu";
+const issueProposing =
+  (...calls: Array<Record<string, unknown>>): Behavior =>
+  async (api) => {
+    for (const args of calls)
+      await api.callTool(issueEditProposalToolName, args);
+  };
+
+for (const harness of harnesses) {
+  test(`${harness}: an issue run proposes a title and body from the synced text and creates nothing`, async (t) => {
+    const w = world(t);
+    const opened = w.open({ issue: {} });
+    const { service } = opened;
+    await w.start(service, harness);
+    const { projectId } = await w.project(service, harness);
+    const taskId = await w.importIssue(service, projectId);
+    const watch = w.tracked(service);
+    const before = watch.counts();
+    script(w, harness, opened, async (api) => {
+      const turn = firstTurn(harness, opened);
+      assert.ok(turn);
+      assert.equal(
+        (await api.callTool(issueEditProposalToolName, issueProposal)).success,
+        true,
+      );
+    });
+    const runId = randomUUID();
+    const started = await service.startIssueDrafting({
+      runId,
+      taskId,
+      note: issueIdea,
+    });
+    assert.equal(started.kind, "issue");
+    assert.equal(started.observedTitle, thinIssue.title);
+    assert.equal(started.observedBody, thinIssue.body);
+    await waitUntil(
+      () => service.readDrafting(runId)?.state === "proposed",
+      () => ({ runs: watch.runs(), requests: service.turnRequests() }),
+    );
+    const run = service.readDrafting(runId);
+    assert.ok(run);
+    assert.deepEqual(issueEditProposalOf(run), issueProposal);
+    assert.deepEqual(watch.counts(), before);
+    assert.equal(watch.counts().deliveryActions, 0);
+    assert.equal(watch.usage(projectId).global, 0);
+    const turn = firstTurn(harness, opened);
+    assert.ok(turn);
+    // Only the issue tool, and the prompt carries the text it starts from and the note.
+    assert.deepEqual(turn.tools, [issueEditProposalToolName]);
+    assert.ok(turn.prompt.includes(issueDraftingInstruction));
+    assert.ok(turn.prompt.includes(thinIssue.title));
+    assert.ok(turn.prompt.includes(thinIssue.body));
+    assert.ok(turn.prompt.includes(issueIdea));
+    assert.ok(!turn.prompt.includes(draftingInstruction));
+    assert.equal(existsSync(turn.workspace), false);
+    assert.deepEqual(readdirSync(join(w.dataDir, "drafting-workspaces")), []);
+    // Claiming it hands it over once; the run then keeps no proposal.
+    service.settleDrafting(runId, "accept");
+    assert.equal(
+      issueEditProposalOf(service.readDrafting(runId) as never),
+      null,
+    );
+  });
+}
+
+test("an issue run refuses invalid, oversize, brief-shaped and undisclosable proposals so the lead can retry", async (t) => {
+  const w = world(t);
+  const opened = w.open({ issue: {} });
+  const { service, codex } = opened;
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  const taskId = await w.importIssue(service, projectId);
+  const results: boolean[] = [];
+  codex.script(async (api) => {
+    const call = async (name: string, args: Record<string, unknown>) =>
+      (await api.callTool(name, args)).success;
+    results.push(
+      await call(issueEditProposalToolName, { title: " ", body: "b" }),
+      await call(issueEditProposalToolName, { title: "t", body: "  \n" }),
+      await call(issueEditProposalToolName, {
+        title: "t",
+        body: "x".repeat(64_001),
+      }),
+      // The brief tool is not this run's tool.
+      await call(draftProposalToolName, { title: "t", outcome: "o" }),
+      await call(issueEditProposalToolName, {
+        title: "Leak",
+        body: `See ${w.dataDir}`,
+      }),
+      await call(issueEditProposalToolName, {
+        title: "Echo",
+        body: "Lead instructions: prefer small, reviewable tasks.",
+      }),
+      await call(issueEditProposalToolName, issueProposal),
+    );
+  });
+  const runId = randomUUID();
+  await service.startIssueDrafting({ runId, taskId, note: "" });
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "proposed",
+    () => w.tracked(service).runs(),
+  );
+  assert.deepEqual(results, [false, false, false, false, false, false, true]);
+  assert.deepEqual(
+    issueEditProposalOf(service.readDrafting(runId) as never),
+    issueProposal,
+  );
+});
+
+test("an issue run is offered only on an open imported task, replays by run id and is stopped like a brief run", async (t) => {
+  const w = world(t);
+  const opened = w.open({ issue: {} });
+  const { service, codex } = opened;
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  const taskId = await w.importIssue(service, projectId);
+  const local = randomUUID();
+  service.domain().execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId: local,
+    title: "Local",
+    outcome: "Local task",
+    ready: false,
+  } as never);
+  await assert.rejects(
+    service.startIssueDrafting({
+      runId: randomUUID(),
+      taskId: local,
+      note: "",
+    }),
+    DomainConflictError,
+  );
+  codex.script(async (api) => {
+    await api.interrupted();
+    throw new Error("interrupted");
+  });
+  const runId = randomUUID();
+  await service.startIssueDrafting({ runId, taskId, note: "n" });
+  // The same start again is the same run; other content under the id conflicts.
+  await service.startIssueDrafting({ runId, taskId, note: "n" });
+  await assert.rejects(
+    service.startIssueDrafting({ runId, taskId, note: "different" }),
+    DomainConflictError,
+  );
+  assert.equal(w.tracked(service).runs().length, 1);
+  await waitUntil(
+    () =>
+      service.readDrafting(runId)?.state === "running" &&
+      codex.threads.length > 0,
+    () => w.tracked(service).runs(),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal((await service.stopDrafting(runId)).state, "stopping");
+  await waitUntil(
+    () => service.readDrafting(runId)?.state === "interrupted",
+    () => w.tracked(service).runs(),
+  );
+  assert.equal(w.tracked(service).usage(projectId).global, 0);
+  assert.equal(w.tracked(service).counts().deliveryActions, 0);
+  assert.deepEqual(readdirSync(join(w.dataDir, "drafting-workspaces")), []);
+});
