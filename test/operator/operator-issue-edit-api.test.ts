@@ -57,6 +57,8 @@ function usedRun(
     taskId?: string;
     kind?: "issue" | "brief";
     observedBody?: string;
+    /** Leave the proposal unclaimed, with this body. */
+    proposed?: string;
   } = {},
 ) {
   const drafting = startedOf(f.service).drafting;
@@ -85,10 +87,10 @@ function usedRun(
     runId,
     over.kind === "brief"
       ? { title: "t", outcome: "o" }
-      : { title: edit.title, body: edit.body },
+      : { title: edit.title, body: over.proposed ?? edit.body },
   );
   drafting.transition(runId, "proposed");
-  drafting.transition(runId, "accepted");
+  if (over.proposed === undefined) drafting.transition(runId, "accepted");
   return runId;
 }
 
@@ -373,6 +375,146 @@ test("an issue body longer than a replacement may be can still be reviewed in fu
       taskId: f.taskId,
       expectedTaskVersion: version(f),
       note: "",
+    }),
+    conflict,
+  );
+});
+
+const marker = "ZQXmarker123";
+const markedEdit = {
+  ...edit,
+  body: `A body naming ${marker} for implementers`,
+};
+const reviewMarked = (f: Fixture, runId: string) => ({
+  ...reviewCommand(f, runId),
+  ...markedEdit,
+});
+
+test("approval is refused, and recorded as nothing, for text that has become private", async (t) => {
+  const { f, api } = await world(t);
+  const reviewed = await api.execute(reviewMarked(f, usedRun(f)));
+  assert.equal(reviewed.kind, "edit-review");
+  if (reviewed.kind !== "edit-review") return;
+  // The delivery credential's value now equals text in the reviewed body.
+  process.env[credentialName] = marker;
+  await assert.rejects(
+    api.execute({
+      type: "issue.edit.confirm",
+      key: randomUUID(),
+      taskId: f.taskId,
+      reviewId: reviewed.reviewId,
+      expectedRevision: reviewed.revision,
+      materialHash: reviewed.materialHash,
+      decision: "approved",
+    }),
+    /forbidden/,
+  );
+  assert.equal(
+    f.service.delivery().operatorReview(reviewed.reviewId)?.decision,
+    "pending",
+  );
+  await assert.rejects(
+    api.execute({
+      type: "issue.edit.send",
+      key: reviewed.operationId,
+      taskId: f.taskId,
+      reviewId: reviewed.reviewId,
+      expectedTaskVersion: version(f),
+    }),
+  );
+  assert.equal(f.effects.length, 0);
+});
+
+test("a send rechecks the text against the exclusions as they are now, before anything is dispatched", async (t) => {
+  const { f, api } = await world(t);
+  const reviewed = await api.execute(reviewMarked(f, usedRun(f)));
+  assert.equal(reviewed.kind, "edit-review");
+  if (reviewed.kind !== "edit-review") return;
+  await api.execute({
+    type: "issue.edit.confirm",
+    key: randomUUID(),
+    taskId: f.taskId,
+    reviewId: reviewed.reviewId,
+    expectedRevision: reviewed.revision,
+    materialHash: reviewed.materialHash,
+    decision: "approved",
+  });
+  process.env[credentialName] = marker;
+  await assert.rejects(
+    api.execute({
+      type: "issue.edit.send",
+      key: reviewed.operationId,
+      taskId: f.taskId,
+      reviewId: reviewed.reviewId,
+      expectedTaskVersion: version(f),
+    }),
+    /forbidden/,
+  );
+  assert.equal(f.effects.length, 0);
+});
+
+test("a draft start is fenced across its exclusions read", async (t) => {
+  const { f, api } = await world(t);
+  let reads = 0;
+  // The visibility the note was checked under changes while the exclusions were being read.
+  (api as unknown as { visibilityToken: () => string }).visibilityToken = () =>
+    String(reads++ > 0);
+  await assert.rejects(
+    api.execute({
+      type: "issue.draft.start",
+      key: randomUUID(),
+      runId: randomUUID(),
+      taskId: f.taskId,
+      expectedTaskVersion: version(f),
+      note: "n",
+    }),
+    conflict,
+  );
+  assert.deepEqual(startedOf(f.service).drafting.unfinished(), []);
+});
+
+// The task workspace lives under the data directory, which the exclusion base already holds as a
+// control path, so a run read needs no task-specific paths of its own.
+test("an issue proposal naming a task workspace path is withheld on read", async (t) => {
+  const { f, api } = await world(t);
+  const paths = f.service.taskWorkspaceRedactionPaths(f.taskId);
+  assert.ok(paths.length > 0, "the fixture task has a workspace");
+  const runId = usedRun(f, { proposed: `Look in ${paths[0]}` });
+  const read = await api.readDraftingRun(runId);
+  assert.equal(read.data.issueProposal, null);
+  assert.equal(read.data.proposalWithheld, true);
+});
+
+test("a send receipt is fenced on the task workspace, and a review replays after its draft was discarded", async (t) => {
+  const { f, api } = await world(t);
+  const runId = usedRun(f, { proposed: edit.body });
+  const review = reviewCommand(f, runId);
+  const reviewed = await api.execute(review);
+  assert.equal(reviewed.kind, "edit-review");
+  if (reviewed.kind !== "edit-review") return;
+  // The draft is discarded after the review: its replay still answers with the recorded review.
+  f.service.settleDrafting(runId, "discard");
+  assert.deepEqual(await api.execute(review), reviewed);
+  await api.execute({
+    type: "issue.edit.confirm",
+    key: randomUUID(),
+    taskId: f.taskId,
+    reviewId: reviewed.reviewId,
+    expectedRevision: reviewed.revision,
+    materialHash: reviewed.materialHash,
+    decision: "approved",
+  });
+  let reads = 0;
+  const original = f.service.taskWorkspaceVisibility.bind(f.service);
+  f.service.taskWorkspaceVisibility = (id: string) =>
+    reads++ > 0 ? `${original(id)}-moved` : original(id);
+  await assert.rejects(
+    api.execute({
+      type: "issue.edit.send",
+      key: reviewed.operationId,
+      taskId: f.taskId,
+      reviewId: reviewed.reviewId,
+      expectedTaskVersion: version(f),
     }),
     conflict,
   );

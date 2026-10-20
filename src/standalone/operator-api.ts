@@ -4503,6 +4503,35 @@ export class OperatorApi {
         : null,
     };
   }
+  /**
+   * The text an edit replaces and the text it sends, each exactly as the exclusions leave it, or
+   * undefined when any of it would have to be hidden or altered.
+   */
+  private shownEditTexts(
+    action: OperatorCommentReview["action"],
+    excluded: readonly string[] | undefined,
+  ) {
+    if (action.kind !== "issue.edit" || !action.expected) return undefined;
+    const shown = (value: string, limit = 64_000) =>
+      this.exact(value, excluded, limit);
+    const current = {
+      title: shown(action.expected.title),
+      body: shown(action.expected.body, issueCurrentBodyLimit),
+    };
+    const proposed = {
+      title: shown(action.fields.title ?? action.expected.title),
+      body: shown(action.fields.body ?? action.expected.body),
+    };
+    return current.title === null ||
+      current.body === null ||
+      proposed.title === null ||
+      proposed.body === null
+      ? undefined
+      : {
+          current: { title: current.title, body: current.body },
+          proposed: { title: proposed.title, body: proposed.body },
+        };
+  }
   private editReviewReceipt(
     key: string,
     review: OperatorCommentReview,
@@ -4511,27 +4540,10 @@ export class OperatorApi {
     const action = review.action;
     if (action.kind !== "issue.edit" || !action.expected)
       throw new OperatorApiError(403, "forbidden");
-    const text = {
-      title: action.fields.title ?? action.expected.title,
-      body: action.fields.body ?? action.expected.body,
-    };
+    const texts = this.shownEditTexts(action, excluded);
     // The operator cannot review a replacement of text that would have to be hidden.
-    const shown = (value: string) => this.exact(value, excluded, 64_000);
-    const current = {
-      title: shown(action.expected.title),
-      body: this.exact(action.expected.body, excluded, issueCurrentBodyLimit),
-    };
-    const proposed = {
-      title: shown(text.title),
-      body: shown(text.body),
-    };
-    if (
-      current.title === null ||
-      current.body === null ||
-      proposed.title === null ||
-      proposed.body === null
-    )
-      throw new OperatorApiError(403, "forbidden");
+    if (!texts) throw new OperatorApiError(403, "forbidden");
+    const { current, proposed } = texts;
     return commandReceiptSchema.parse({
       kind: "edit-review",
       key,
@@ -6541,23 +6553,36 @@ export class OperatorApi {
         !this.disclosable(c.body, excluded, 64_000)
       )
         throw new OperatorApiError(403, "forbidden");
-      const run = this.service.readDrafting(c.runId);
-      // The text the draft started from is what the edit replaces; only a used draft of this task qualifies.
-      if (
-        run?.kind !== "issue" ||
-        run.taskId !== c.taskId ||
-        !["proposed", "accepted"].includes(run.state) ||
-        run.observedTitle === null ||
-        run.observedBody === null
-      )
-        throw new OperatorApiError(409, "conflict");
-      // The operator must see the whole text being replaced, so hidden text is refused before
-      // anything is recorded.
-      if (
-        !this.disclosable(run.observedTitle, excluded, issueCurrentBodyLimit) ||
-        !this.disclosable(run.observedBody, excluded, issueCurrentBodyLimit)
-      )
-        throw new OperatorApiError(403, "forbidden");
+      // A replay is answered from the review it recorded, whatever the draft's state is now.
+      const recorded = this.service.delivery().operatorReview(c.key);
+      let expected =
+        recorded?.action.kind === "issue.edit"
+          ? recorded.action.expected
+          : undefined;
+      if (!expected) {
+        const run = this.service.readDrafting(c.runId);
+        // The text the draft started from is what the edit replaces; only a used draft of this task qualifies.
+        if (
+          run?.kind !== "issue" ||
+          run.taskId !== c.taskId ||
+          !["proposed", "accepted"].includes(run.state) ||
+          run.observedTitle === null ||
+          run.observedBody === null
+        )
+          throw new OperatorApiError(409, "conflict");
+        // The operator must see the whole text being replaced, so hidden text is refused before
+        // anything is recorded.
+        if (
+          !this.disclosable(
+            run.observedTitle,
+            excluded,
+            issueCurrentBodyLimit,
+          ) ||
+          !this.disclosable(run.observedBody, excluded, issueCurrentBodyLimit)
+        )
+          throw new OperatorApiError(403, "forbidden");
+        expected = { title: run.observedTitle, body: run.observedBody };
+      }
       return this.editReviewReceipt(
         c.key,
         this.service.reviewOperatorEdit({
@@ -6567,7 +6592,7 @@ export class OperatorApi {
           expectedTaskVersion: c.expectedTaskVersion,
           title: c.title,
           body: c.body,
-          expected: { title: run.observedTitle, body: run.observedBody },
+          expected,
         }),
         excluded,
       );
@@ -6579,15 +6604,27 @@ export class OperatorApi {
       review.action.kind !== "issue.edit"
     )
       throw new OperatorApiError(403, "forbidden");
-    if (c.type === "issue.edit.confirm")
+    if (c.type === "issue.edit.confirm") {
+      // Approval is recorded only for text the operator can still be shown in full.
+      if (!this.shownEditTexts(review.action, excluded))
+        throw new OperatorApiError(403, "forbidden");
       return this.editReviewReceipt(
         c.key,
         this.service.confirmOperatorComment(c),
         excluded,
       );
+    }
     // One send per review: its key is the review's operation id.
     if (c.key !== review.operationId)
       throw new OperatorApiError(409, "conflict");
+    // Before anything is dispatched, the text is checked against the exclusions as they are now.
+    // A replay of a send that was already made returns its record and exposes no text.
+    const dispatched = this.service
+      .delivery()
+      .actions(c.taskId)
+      .some((a) => a.operationId === c.key);
+    if (!dispatched && !this.shownEditTexts(review.action, excluded))
+      throw new OperatorApiError(403, "forbidden");
     const saved = await this.service.postOperatorEdit({
       key: c.key,
       taskId: c.taskId,
@@ -6596,10 +6633,12 @@ export class OperatorApi {
     });
     const receiptVisibility = this.visibilityToken(),
       receiptTask = this.requireTask(c.taskId),
+      workspace = this.service.taskWorkspaceVisibility(c.taskId),
       receiptExcluded = await this.exclusions(String(task.projectId), c.taskId);
     if (
       receiptVisibility !== this.visibilityToken() ||
-      this.requireTask(c.taskId).version !== receiptTask.version
+      this.requireTask(c.taskId).version !== receiptTask.version ||
+      workspace !== this.service.taskWorkspaceVisibility(c.taskId)
     )
       throw new OperatorApiError(409, "conflict");
     return commandReceiptSchema.parse({
@@ -6630,7 +6669,14 @@ export class OperatorApi {
       }
       if (c.type === "issue.draft.start") {
         const task = this.requireTask(c.taskId),
+          visibility = this.visibilityToken(),
           excluded = await this.exclusions(String(task.projectId), c.taskId);
+        // The note was checked against exclusions that must still hold when the run starts.
+        if (
+          visibility !== this.visibilityToken() ||
+          this.requireTask(c.taskId).version !== task.version
+        )
+          throw new OperatorApiError(409, "conflict");
         if (!this.disclosable(c.note, excluded))
           throw new OperatorApiError(403, "forbidden");
         return commandReceiptSchema.parse(

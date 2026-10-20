@@ -503,6 +503,13 @@ export function useIssueImprove({
           if (confirmed.state === "conflict") {
             change({ review: undefined });
             setMessage("The task changed. Review the changes again.");
+          } else if (
+            confirmed.state === "rejected" &&
+            confirmed.code === "forbidden"
+          ) {
+            // A definite refusal: nothing was approved or sent.
+            change({ review: undefined });
+            setMessage(copy.refusedAtSend);
           } else setMessage(copy.sendUnknown);
           return;
         }
@@ -545,6 +552,9 @@ export function useIssueImprove({
       } else if (sent.state === "conflict") {
         change({ review: undefined });
         setMessage("The task changed. Review the changes again.");
+      } else if (sent.code === "forbidden") {
+        change({ review: undefined });
+        setMessage(copy.refusedAtSend);
       } else setMessage(`The edit wasn’t sent (${sent.code}).`);
       latest.current.onChanged();
     } finally {

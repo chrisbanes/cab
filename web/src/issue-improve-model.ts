@@ -314,6 +314,8 @@ export const issueImproveCopy = {
   failed: "The lead returned no draft. Nothing was changed.",
   refusedDisclosure:
     "The current text includes something that can’t be shown here, so a full replacement can’t be reviewed. Edit the issue on GitHub instead.",
+  refusedAtSend:
+    "The text can no longer be shown in full, so nothing was approved or sent. Edit it and review again.",
   sendUnknown:
     "We couldn’t confirm the send. Check the issue on GitHub; the edit is held until its outcome is known.",
 } as const;

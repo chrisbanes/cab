@@ -485,3 +485,37 @@ test("Sent stays shown when the claimed run is read back as accepted before the 
     .waitFor();
   assert.equal(effects.length, 1);
 });
+
+test("a refused approval reads as a refusal, not as an unknown outcome, and leaves the text to edit", async (_t, j) => {
+  const ctx = await launch(j, desktop);
+  const { page, effects, open } = ctx;
+  await open();
+  await draftAndLoad(ctx);
+  await panel(page).getByRole("button", { name: "Review changes" }).click();
+  await panel(page).getByText("Review the full replacement.").waitFor();
+  await page.route("**/api/operator/commands", (route) =>
+    (route.request().postData() ?? "").includes('"issue.edit.confirm"')
+      ? route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "forbidden", message: "Not permitted" },
+          }),
+        })
+      : route.continue(),
+  );
+  await panel(page)
+    .getByRole("button", { name: "Send edit to GitHub" })
+    .click();
+  await panel(page)
+    .getByText(/can no longer be shown in full/)
+    .waitFor();
+  assert.equal(
+    await panel(page)
+      .getByText(/couldn.t confirm/)
+      .count(),
+    0,
+  );
+  await panel(page).getByRole("button", { name: "Review changes" }).waitFor();
+  assert.equal(effects.length, 0);
+});
