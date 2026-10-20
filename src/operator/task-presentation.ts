@@ -1,4 +1,4 @@
-import { nextAttention, type AttentionCode } from "./attention.js";
+import { type AttentionCode, nextAttention } from "./attention.js";
 import type { TaskListSummary, TaskRead } from "./contracts.js";
 
 /** The task State/Next rules, shared by the operator UI and the CLI. */

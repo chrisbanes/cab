@@ -1045,7 +1045,9 @@ async function readJson(
       commands &&
       size > MAX_FORM_BYTES &&
       type !== "question.form.answer" &&
-      type !== "question.native.answer"
+      type !== "question.native.answer" &&
+      // An issue body may be up to 64,000 characters, which a 64 KiB command cannot carry.
+      type !== "issue.edit.review"
     )
       throw new OperatorHttpError(413);
     return value;

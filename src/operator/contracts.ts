@@ -1,23 +1,43 @@
 import { z } from "zod";
-import { commentReasonCodes } from "./github-reasons.js";
-import { waitCodes, waitSchema } from "./wait-reasons.js";
-import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
+  executionHarnessSchema,
+  executionIntentStateSchema,
+  profileRuntimeSchema,
+  supportedRuntimeSettingsSchema,
+} from "../core/execution-runtime.js";
+import {
   closedIssuesSchema,
-  githubConfigurationSchema,
   githubConfigurationCommandSchema,
+  githubConfigurationSchema,
   readinessConditionSchema,
   readinessSchema,
   setupRepositoriesSchema,
   setupRepositorySchema,
 } from "../core/github-source-contracts.js";
 import {
+  questionAnswersSchema,
+  questionFormSchema,
+  questionPayloadLimit,
+} from "../core/question-forms.js";
+import {
+  historicalNoTurnAdoptionBodySchema,
+  historicalPreTurnAdoptionBodySchema,
+  noTurnRecoveryBodySchema,
+  preTurnRecoveryBodySchema,
+  recoveryPaths,
+  replaceConversationBodySchema,
+} from "../core/recovery-contracts.js";
+import {
   retainedEvidenceIdentitySchema,
   retainedEvidenceSourceObservationSchema,
   reviewAnchorRecordBaseSchema,
   reviewAnchorSelectionSchema,
 } from "../core/review-anchor-contracts.js";
+import {
+  feedbackReferenceSchema,
+  taskReviewReadSchema,
+} from "../core/task-review-contracts.js";
 import {
   workspaceComparisonAnchorBase,
   workspaceComparisonContentBase,
@@ -28,32 +48,13 @@ import {
   workspaceTurnComparisonBase,
   workspaceTurnIdentityBase,
 } from "../core/workspace-comparison-contracts.js";
-import {
-  questionAnswersSchema,
-  questionFormSchema,
-  questionPayloadLimit,
-} from "../core/question-forms.js";
-import {
-  feedbackReferenceSchema,
-  taskReviewReadSchema,
-} from "../core/task-review-contracts.js";
-import {
-  historicalNoTurnAdoptionBodySchema,
-  historicalPreTurnAdoptionBodySchema,
-  noTurnRecoveryBodySchema,
-  preTurnRecoveryBodySchema,
-  recoveryPaths,
-  replaceConversationBodySchema,
-} from "../core/recovery-contracts.js";
-import {
-  executionHarnessSchema,
-  executionIntentStateSchema,
-  profileRuntimeSchema,
-  supportedRuntimeSettingsSchema,
-} from "../core/execution-runtime.js";
+import { attentionCodeSchema, attentionCodes } from "./attention.js";
+import { commentReasonCodes, issueEditReasonCodes } from "./github-reasons.js";
+import { waitCodes, waitSchema } from "./wait-reasons.js";
+
 export {
-  executionHarnessLabels,
   type ExecutionHarness,
+  executionHarnessLabels,
   type ProfileRuntime,
   runtimeSummary,
   type SupportedRuntimeSettings,
@@ -1015,6 +1016,10 @@ export const composerOptionsSchema = envelope(
 export type TaskListPage = z.infer<typeof taskListPageSchema>;
 export type TaskListSummary = z.infer<typeof taskListSummarySchema>;
 export type ComposerOptions = z.infer<typeof composerOptionsSchema>;
+/** The title and body of an imported issue, as `issue.edit` limits them. */
+export const issueTextSchema = z
+  .object({ title: z.string().max(512), body: z.string().max(64_000) })
+  .strict();
 export const draftingRunReadSchema = envelope(
   z
     .object({
@@ -1022,10 +1027,13 @@ export const draftingRunReadSchema = envelope(
       projectId: uuid,
       state: draftingStateSchema,
       reason: safeText,
+      /** A brief run proposes `proposal`; an issue run proposes `issueProposal`. */
+      kind: z.enum(["brief", "issue"]),
       proposal: z
         .object({ title: z.string().max(512), outcome: text })
         .strict()
         .nullable(),
+      issueProposal: issueTextSchema.nullable(),
       /** The lead the run captured when it started, not whoever leads the project now. */
       leadName: safeText,
       /** The run has a proposal that cannot be shown: it holds text the service withholds. */
@@ -1481,6 +1489,30 @@ export const taskSchema = envelope(
           reason: safeText,
           /** Why a comment cannot be posted; absent from older servers. `available` and `reason` are unchanged. */
           reasonCode: z.enum(commentReasonCodes).nullable().optional(),
+        })
+        .strict()
+        .optional(),
+      /** Whether the operator can improve and edit the source issue, and the newest such edit. */
+      issueEdit: z
+        .object({
+          available: z.boolean(),
+          reasonCode: z.enum(issueEditReasonCodes).nullable(),
+          reason: safeText,
+          latest: z
+            .object({
+              operationId: uuid,
+              state: z.enum([
+                "prepared",
+                "attempting",
+                "uncertain",
+                "confirmed-success",
+                "confirmed-failure",
+                "denied",
+              ]),
+              reason: safeText,
+            })
+            .strict()
+            .nullable(),
         })
         .strict()
         .optional(),
@@ -2115,6 +2147,51 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedTaskVersion: revision,
       body: z.string().trim().min(1).max(16000),
       reviewId: uuid.optional(),
+    })
+    .strict(),
+  // Improve with lead: a drafting run that proposes a better title and body for the task's issue.
+  z
+    .object({
+      ...base,
+      type: z.literal("issue.draft.start"),
+      runId: uuid,
+      taskId: uuid,
+      expectedTaskVersion: revision,
+      note: z.string().max(16000),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("issue.edit.review"),
+      taskId: uuid,
+      /** The drafting run whose recorded text the edit replaces. */
+      runId: uuid,
+      operationId: uuid,
+      expectedTaskVersion: revision,
+      title: z.string().trim().min(1).max(512),
+      body: z.string().max(64_000).regex(/\S/),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("issue.edit.confirm"),
+      taskId: uuid,
+      reviewId: uuid,
+      expectedRevision: revision,
+      materialHash: hash,
+      decision: z.enum(["approved", "denied"]),
+    })
+    .strict(),
+  // The key is the review's operation id: a send is one operation.
+  z
+    .object({
+      ...base,
+      type: z.literal("issue.edit.send"),
+      taskId: uuid,
+      reviewId: uuid,
+      expectedTaskVersion: revision,
     })
     .strict(),
   // Queues one read-only turn of the project lead on an open task that is not Ready.
@@ -2913,6 +2990,30 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       eventType: z.string(),
       createdAt: time,
       resumedLead: z.literal(true).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("edit-review"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      reviewId: uuid,
+      operationId: uuid,
+      revision,
+      materialHash: hash,
+      decision: z.enum(["pending", "approved", "denied"]),
+      /** What GitHub showed when the draft started, and what the edit would replace it with. */
+      current: issueTextSchema,
+      proposed: issueTextSchema,
+      target: z
+        .object({ repositoryId: text, nodeId: text, number: revision })
+        .strict(),
+      taskVersion: revision,
+      sourceId: uuid,
+      sourceRevision: revision,
+      sourceDigest: hash,
+      policyVersion: revision,
     })
     .strict(),
   z

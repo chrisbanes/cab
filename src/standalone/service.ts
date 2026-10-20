@@ -54,6 +54,7 @@ import {
   draftProposalSchema,
   type OperatorCommand,
 } from "../operator/contracts.js";
+import type { IssueEditReasonCode } from "../operator/github-reasons.js";
 
 type DraftingReceipt = Extract<CommandReceipt, { kind: "drafting" }>;
 
@@ -3216,6 +3217,46 @@ export class StandaloneService {
       this.operatorEditAction(caller, command),
     );
   }
+  /**
+   * Whether the operator can improve and edit an imported task's issue, and the first reason
+   * that applies if not. Running work, an unready task and a held task do not count: an edit
+   * waits for none of them.
+   */
+  issueEditAvailability(taskId: string): {
+    available: boolean;
+    reasonCode: IssueEditReasonCode | null;
+  } {
+    const d = this.domain();
+    const task = d.task(taskId);
+    const imported = d.importedTask(taskId);
+    const policy = this.delivery().configuration(String(task.projectId));
+    const hasLead = (() => {
+      try {
+        this.draftingLead(String(task.projectId));
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    const reasonCode: IssueEditReasonCode | null = !imported
+      ? "no-source-issue"
+      : task.state !== "open"
+        ? "task-not-open"
+        : !policy.grants.some(
+              (g) =>
+                g.action === "issue.edit" &&
+                g.repositoryId === String(imported.repositoryId),
+            )
+          ? "no-edit-grant"
+          : !hasLead
+            ? "no-project-lead"
+            : this.delivery().actionBlockers(taskId).length
+              ? "action-unresolved"
+              : policy.credentialRef === null
+                ? "no-delivery-credential"
+                : null;
+    return { available: reasonCode === null, reasonCode };
+  }
   /** Sends the reviewed edit exactly as reviewed; the review's key is its operation id. */
   async postOperatorEdit(command: {
     key: string;
@@ -4828,7 +4869,13 @@ export class StandaloneService {
   draftingCommand(
     command: Extract<
       OperatorCommand,
-      { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
+      {
+        type:
+          | "drafting.start"
+          | "drafting.stop"
+          | "drafting.settle"
+          | "issue.draft.start";
+      }
     >,
   ): Promise<DraftingReceipt> {
     // One command per key at a time: a second with the same key waits, then finds the
@@ -4849,7 +4896,13 @@ export class StandaloneService {
   private async applyDraftingCommand(
     command: Extract<
       OperatorCommand,
-      { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
+      {
+        type:
+          | "drafting.start"
+          | "drafting.stop"
+          | "drafting.settle"
+          | "issue.draft.start";
+      }
     >,
   ): Promise<DraftingReceipt> {
     const { drafting } = this.started();
@@ -4877,6 +4930,26 @@ export class StandaloneService {
         );
         return drafting.recordReceipt(key, content, receipt);
       });
+    if (command.type === "issue.draft.start") {
+      // Checked after the receipt lookup, so a replay of a start that landed still answers.
+      const task = this.domain().task(command.taskId);
+      if (Number(task.version) !== command.expectedTaskVersion)
+        throw new DomainConflictError("The task changed");
+      if (!this.issueEditAvailability(command.taskId).available)
+        throw new DomainConflictError("Improve with lead is unavailable");
+      return drafting.recordReceipt(
+        key,
+        content,
+        receiptOf(
+          "start",
+          await this.startIssueDrafting({
+            runId: command.runId,
+            taskId: command.taskId,
+            note: command.note,
+          }),
+        ),
+      );
+    }
     const receipt =
       command.type === "drafting.start"
         ? receiptOf(
