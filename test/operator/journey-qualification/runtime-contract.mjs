@@ -2,39 +2,39 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmodSync,
   mkdtempSync,
-  readdirSync,
+  writeFileSync,
   readFileSync,
+  readdirSync,
+  chmodSync,
   realpathSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createServer } from "node:net";
+import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
+import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
+import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
+import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
 import { chromium } from "playwright";
 import {
-  CodexRuntime,
   StandaloneService,
+  CodexRuntime,
 } from "../../../dist/src/standalone/index.js";
+import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
+import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../../dist/src/standalone/operator.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
-import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
-import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
-import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
 import {
-  OperatorWebBoundary,
   OperatorWebBundle,
+  OperatorWebBoundary,
 } from "../../../dist/src/standalone/operator-web.js";
-import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 export const instructions = [
   "Disposable repository-free native input qualification. Use no shell, filesystem, browser, network, delegation or additional external tools.",
   "Directly and synchronously call functions.request_user_input exactly once and await its answer. Ask one question: id delivery, header Delivery, question Select delivery, options Local (Local output) and Remote (Remote output). Custom text is permitted only when the native request explicitly exposes isOther support.",
@@ -63,12 +63,10 @@ const reportTool = {
     additionalProperties: false,
   },
 };
-
 import {
   consumeGrantMarker,
   observeFixtureChild,
 } from "../../workspaces/review-qualification/runtime-contract.mjs";
-
 export { consumeGrantMarker };
 export const resource = "existing-login:codex-app-server:qualification";
 const hash = (value) => createHash("sha256").update(value).digest("hex");

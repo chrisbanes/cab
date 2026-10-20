@@ -1,14 +1,13 @@
+import {
+  seedOwnQuestion,
+  until as questionUntil,
+} from "../fixtures/questions.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { mixedAnswers, mixedForm } from "../fixtures/question-data.js";
-import {
-  until as questionUntil,
-  seedOwnQuestion,
-} from "../fixtures/questions.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
-
+import { mixedForm, mixedAnswers } from "../fixtures/question-data.js";
 async function until(condition: () => boolean) {
   const deadline = Date.now() + 5000;
   while (!condition()) {

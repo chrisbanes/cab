@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
-import { type AddressInfo, createServer } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
+import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
-import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { StandaloneService } from "../../src/standalone/service.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 function renderedForm(html: string, type: string): string {
   const opening = `<form method="post" action="/command" data-command="${type}">`;

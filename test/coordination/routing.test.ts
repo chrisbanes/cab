@@ -6,11 +6,11 @@ import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import {
   RoutingAttemptStore,
+  RoutingCoordinator,
+  RoutingFailure,
   type RoutingChoiceClient,
   type RoutingChoiceRequest,
   type RoutingChoiceResponse,
-  RoutingCoordinator,
-  RoutingFailure,
   type RoutingSnapshot,
 } from "../../src/standalone/routing.js";
 

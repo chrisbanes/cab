@@ -1,17 +1,20 @@
-import type { z } from "zod";
-import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import type {
   CommandReceipt,
   OperatorCommand,
-  ReviewAnchorCandidate,
-  WorkspaceComparisonRead,
+} from "../../src/operator/contracts.js";
+import type { z } from "zod";
+import { CommitGate } from "./commit-gate.js";
+import type { TaskTab } from "./task-tabs.js";
+import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
+import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
+import type {
   workspaceDirectoryReadSchema,
   workspacePreviewReadSchema,
 } from "../../src/operator/contracts.js";
-import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
-import { CommitGate } from "./commit-gate.js";
-import type { TaskTab } from "./task-tabs.js";
-
+import type {
+  ReviewAnchorCandidate,
+  WorkspaceComparisonRead,
+} from "../../src/operator/contracts.js";
 type FeedbackReference = z.infer<typeof feedbackReferenceSchema>;
 type WorkspaceDirectory = z.infer<typeof workspaceDirectoryReadSchema>["data"];
 type WorkspacePreview = z.infer<typeof workspacePreviewReadSchema>["data"];
@@ -199,7 +202,6 @@ class TaskReplyState {
   }
   uncertain = false;
 }
-
 export type { ReviewAnchorCandidate };
 
 export type LocalReviewSend = {

@@ -8,11 +8,6 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
-import { createFakeGh } from "../fixtures/fake-gh.js";
-import {
-  outcomeMessages,
-  savedOutcome,
-} from "../fixtures/operator-settings.js";
 import {
   chooseRepository,
   commandRequest,
@@ -21,8 +16,12 @@ import {
   setupJourney,
   stubReadiness,
 } from "../fixtures/setup-browser.js";
+import { createFakeGh } from "../fixtures/fake-gh.js";
 import { git } from "../fixtures/setup-home.js";
-
+import {
+  outcomeMessages,
+  savedOutcome,
+} from "../fixtures/operator-settings.js";
 const test = browserSuite("operator-setup-browser");
 
 const fixFields =

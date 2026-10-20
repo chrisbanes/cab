@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { tmpdir } from "../fixtures/temp.js";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   CoordinationStore,
@@ -12,13 +13,6 @@ import {
   DomainStaleDispositionError,
   DomainStore,
 } from "../../src/core/domain.js";
-import type {
-  Runtime,
-  RuntimeToolCall,
-  RuntimeToolDefinition,
-  RuntimeToolResult,
-  UnexpectedRequest,
-} from "../../src/standalone/codex.js";
 import { coordinationTools } from "../../src/standalone/coordination-tools.js";
 import type {
   RoutingChoiceClient,
@@ -31,8 +25,14 @@ import {
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
+import type {
+  Runtime,
+  RuntimeToolCall,
+  RuntimeToolDefinition,
+  RuntimeToolResult,
+  UnexpectedRequest,
+} from "../../src/standalone/codex.js";
 import { startedOf } from "../fixtures/service-internals.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";

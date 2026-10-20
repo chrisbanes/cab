@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { test } from "node:test";
 
 // ponytail: these scans read text, so they cannot see a dynamically built command or import.
 const spawnsProcesses = /from\s+["']node:child_process["']/;

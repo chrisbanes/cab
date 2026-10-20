@@ -1,15 +1,14 @@
+import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { test } from "node:test";
+import { join } from "node:path";
 import { TaskReviewStore } from "../../src/core/task-review.js";
+import { test } from "node:test";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
-
 test("bounded retained search attributes same wording across projects and opens exact historical result and decision records", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

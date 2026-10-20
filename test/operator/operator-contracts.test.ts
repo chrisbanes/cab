@@ -5,16 +5,15 @@ import {
   assignmentRecoverySchema,
   commandReceiptSchema,
   localReviewOperationReadSchema,
-  materialSchema,
-  operationScopeSchema,
   operatorCommandSchema,
-  readinessRuleViewSchema,
-  selectionCountsSchema,
-  taskSchema,
+  operationScopeSchema,
+  materialSchema,
   workspaceComparisonReadSchema,
   workspaceSchema,
+  taskSchema,
+  readinessRuleViewSchema,
+  selectionCountsSchema,
 } from "../../src/operator/contracts.js";
-
 const key = "00000000-0000-4000-8000-000000000001";
 const create = {
   type: "task.create",

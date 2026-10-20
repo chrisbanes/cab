@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import type { Workspace } from "../../src/operator/contracts.js";
 import { workspaceLabels } from "../../src/operator/project-labels.js";
 import { Button } from "./components.js";
-import { columns, type TaskFilters } from "./tasks.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
+import { columns, type TaskFilters } from "./tasks.js";
 
 /** One row: heading, List/Board switch, inline Project and State dropdowns, count, refresh. */
 export function TaskToolbar({

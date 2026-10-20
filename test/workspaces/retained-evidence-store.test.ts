@@ -6,18 +6,18 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
-  type CoordinationCall,
   CoordinationStore,
+  type CoordinationCall,
 } from "../../src/core/coordination.js";
-import { type DomainCommand, DomainStore } from "../../src/core/domain.js";
+import { DomainStore, type DomainCommand } from "../../src/core/domain.js";
 import {
   emptyRetainedEvidenceCandidate,
-  type RetainedEvidenceCandidate,
   retainedEvidenceLimits,
+  type RetainedEvidenceCandidate,
 } from "../../src/core/retained-evidence.js";
 import { Store } from "../../src/core/store.js";
-import { captureRetainedResultEvidence } from "../../src/standalone/retained-evidence.js";
 import { SchedulerStore } from "../../src/standalone/scheduler.js";
+import { captureRetainedResultEvidence } from "../../src/standalone/retained-evidence.js";
 import { ExecutionState } from "../../src/standalone/state.js";
 
 const projectId = "10000000-0000-4000-8000-000000000001";

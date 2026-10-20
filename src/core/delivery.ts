@@ -1,8 +1,8 @@
+import { TaskReviewStore } from "./task-review.js";
+import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
-import { type Database, transaction } from "./store.js";
-import { TaskReviewStore } from "./task-review.js";
+import { transaction, type Database } from "./store.js";
 
 const identity = z.string().trim().min(1).max(512);
 export const actionKinds = [

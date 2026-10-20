@@ -1,9 +1,10 @@
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { childProcessEnvironment } from "../core/child-environment.js";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { isDeepStrictEqual, promisify } from "node:util";
-import { childProcessEnvironment } from "../core/child-environment.js";
-import type { ExecutionState, PowerEventCursor } from "./state.js";
+import type { PowerEventCursor } from "./state.js";
+import type { ExecutionState } from "./state.js";
 
 export interface PowerEvent {
   cursor: PowerEventCursor;

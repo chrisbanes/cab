@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { type BrowserType, chromium, type Page, webkit } from "playwright";
-import { questionReadSchema } from "../../src/operator/contracts.js";
+import { chromium, webkit, type BrowserType, type Page } from "playwright";
 import {
-  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { choiceForm, guideForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
-
+import { questionReadSchema } from "../../src/operator/contracts.js";
 const test = browserSuite("operator-question-cards-browser");
 const engines = [
   ["chromium", chromium],

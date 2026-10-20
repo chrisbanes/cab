@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { structuredAnswerDigest } from "../../src/core/structured-questions.js";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   chmodSync,
   mkdtempSync,
@@ -11,7 +12,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
-import { structuredAnswerDigest } from "../../src/core/structured-questions.js";
 import {
   CodexRuntime,
   executionPolicy,
@@ -1894,7 +1894,6 @@ test("handler rejection is bounded and response-pipe failure fails the runtime",
 });
 
 import { deliveryRuntimeEnvironment } from "../../src/standalone/delivery.js";
-
 test("delivery spawn snapshot excludes configured key and exact-value aliases while retaining login environment", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-delivery-spawn-")),
     executable = join(root, "codex.mjs"),

@@ -10,8 +10,8 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import test from "node:test";
 import { pathToFileURL } from "node:url";
+import test from "node:test";
 
 const driver = resolve("test/execution/claude-qualification/run.mjs");
 const harness = () =>

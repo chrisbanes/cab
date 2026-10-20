@@ -1,19 +1,19 @@
-import {
-  attentionNext,
-  kindLabels,
-  nextAttention,
-} from "../../src/operator/attention.js";
 import type {
   InboxItem,
   RuntimeInboxItem,
   TaskInboxItem,
   TaskRead,
 } from "../../src/operator/contracts.js";
+import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
+import {
+  attentionNext,
+  kindLabels,
+  nextAttention,
+} from "../../src/operator/attention.js";
 import {
   retriesExhausted,
   runtimeSettingsAction,
 } from "../../src/operator/runtime-restart-copy.js";
-import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { clockLabel, midSentence } from "./presentation.js";
 import { taskColumnOf } from "./task-overview.js";
 import { nextActor } from "./tasks.js";

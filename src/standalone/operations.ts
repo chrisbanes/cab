@@ -1,16 +1,16 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   chmodSync,
   closeSync,
-  copyFileSync,
-  createReadStream,
   constants as fsConstants,
+  copyFileSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   writeFileSync,
@@ -19,10 +19,10 @@ import { join } from "node:path";
 import { backup, DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { z } from "zod";
 import {
-  assertCanonicalDirectoryPath,
   STANDALONE_MARKER_CONTENTS,
   STANDALONE_MARKER_NAME,
   STANDALONE_OWNER_NAME,
+  assertCanonicalDirectoryPath,
   StandaloneDataDirectory,
 } from "./data-directory.js";
 import { isWithin } from "./workspace-inspection.js";

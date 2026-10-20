@@ -4,8 +4,8 @@ import { test } from "node:test";
 import { taskSchema } from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { ExecutionState } from "../../src/standalone/state.js";
-import { completedLead, configure, until } from "../fixtures/completed-lead.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { completedLead, configure, until } from "../fixtures/completed-lead.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;

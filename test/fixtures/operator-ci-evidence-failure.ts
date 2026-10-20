@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import { runBrowserJourney } from "./browser-diagnostics.js";
 import { createOperatorFixture } from "./operator-web.js";
 

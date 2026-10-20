@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import type { RetainedEvidenceIdentity } from "../../src/core/retained-evidence.js";
 import { RetainedEvidenceStore } from "../../src/core/retained-evidence.js";
 import { Store } from "../../src/core/store.js";
 import { reviewMetadataSchema } from "../../src/core/task-review.js";
@@ -13,6 +12,10 @@ import {
   captureRetainedResultEvidence,
   type RetainedEvidenceCapturePolicy,
 } from "../../src/standalone/retained-evidence.js";
+import {
+  SqliteWorkspaceBindingStore,
+  WorkspaceManager,
+} from "../../src/standalone/workspaces.js";
 import type {
   WorkspaceComparisonContent,
   WorkspaceComparisonEntry,
@@ -22,10 +25,7 @@ import type {
   WorkspaceTurnComparisonSnapshot,
   WorkspaceTurnWorkIdentity,
 } from "../../src/standalone/workspace-comparison.js";
-import {
-  SqliteWorkspaceBindingStore,
-  WorkspaceManager,
-} from "../../src/standalone/workspaces.js";
+import type { RetainedEvidenceIdentity } from "../../src/core/retained-evidence.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 

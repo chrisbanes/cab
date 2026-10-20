@@ -10,12 +10,12 @@ import type { z } from "zod";
 import type { sourceObservationSchema } from "../../src/operator/contracts.js";
 import { ActionOutcome, type OutcomeField } from "./action-feedback.js";
 import { Button } from "./components.js";
-import { clockLabel } from "./presentation.js";
 import type { TabProps } from "./project-config.js";
-import { type ConfigurationDraft, outcomeCopy } from "./settings-state.js";
-import { type SourceNaming, sourceCredentialCopy } from "./settings-view.js";
+import { clockLabel } from "./presentation.js";
 import { SourceNameText } from "./source-names.js";
+import { type SourceNaming, sourceCredentialCopy } from "./settings-view.js";
 import type { ObservationResource } from "./sync-placement.js";
+import { type ConfigurationDraft, outcomeCopy } from "./settings-state.js";
 
 type Observed = z.infer<
   typeof sourceObservationSchema

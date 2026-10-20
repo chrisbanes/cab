@@ -2,30 +2,30 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { tmpdir } from "../fixtures/temp.js";
+import { StandaloneService } from "../../src/standalone/service.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import type {
   Runtime,
   RuntimeToolCall,
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
-import {
-  ArchivedResumeRejectedError,
-  archivedResumeMessage,
-  type HistoricalPreTurnAdoption,
-  type PreTurnRecoveryCommand,
-} from "../../src/standalone/pre-turn-recovery.js";
 import type {
   RecoveryReceipt,
   RuntimeProcessIdentity,
 } from "../../src/standalone/recovery-types.js";
-import { StandaloneService } from "../../src/standalone/service.js";
+import { DatabaseSync } from "node:sqlite";
+import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
+import {
+  type HistoricalPreTurnAdoption,
+  type PreTurnRecoveryCommand,
+  ArchivedResumeRejectedError,
+  archivedResumeMessage,
+} from "../../src/standalone/pre-turn-recovery.js";
 import { startedOf } from "../fixtures/service-internals.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 function deferred() {
   let resolve!: () => void;

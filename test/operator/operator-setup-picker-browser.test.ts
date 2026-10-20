@@ -6,7 +6,6 @@ import {
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { chooseRepository, setupJourney } from "../fixtures/setup-browser.js";
-
 const test = browserSuite("operator-setup-picker-browser");
 
 const rows = (page: Page) =>

@@ -60,13 +60,12 @@ test("actual classic queue, strict status, deployments and app identity hold mer
 });
 
 import { randomUUID } from "node:crypto";
-import type { DeliveryActionRecord } from "../../src/core/delivery.js";
-import { DomainPolicyError } from "../../src/core/domain.js";
 import {
   GitHubHttpDeliveryProvider,
   IssueChangedRefusal,
 } from "../../src/standalone/github-delivery.js";
-
+import type { DeliveryActionRecord } from "../../src/core/delivery.js";
+import { DomainPolicyError } from "../../src/core/domain.js";
 function commentRecord(): DeliveryActionRecord {
   const projectId = randomUUID(),
     taskId = randomUUID(),
@@ -558,7 +557,6 @@ test("fresh closed-issue readback reports the latest ClosedEvent and its closer 
 });
 
 import type { ExternalAction } from "../../src/core/delivery.js";
-
 test("all eleven concrete action transports preserve exact target, incremental labels and readback", async () => {
   const writes: Array<{ path: string; method: string; body: unknown }> = [];
   let reads = 0;

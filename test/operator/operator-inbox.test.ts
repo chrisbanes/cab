@@ -1,28 +1,13 @@
-import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { taskItems } from "../fixtures/inbox-items.js";
 import { Agent, request as httpRequest } from "node:http";
 import type { Socket } from "node:net";
+import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  nativeQuestionAnswers,
-  nativeQuestionForm,
-} from "../../src/core/question-forms.js";
-import {
-  inboxReadSchema,
-  operatorCommandSchema,
-  questionCommandRawLimit,
-  questionReadSchema,
-} from "../../src/operator/contracts.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { randomUUID } from "node:crypto";
 import { databaseDigest } from "../fixtures/database-digest.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
-import { taskItems } from "../fixtures/inbox-items.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import {
-  choiceForm,
-  mixedAnswers,
-  mixedForm,
-} from "../fixtures/question-data.js";
 import {
   finishOwnWork,
   seedOwnApproval,
@@ -30,8 +15,22 @@ import {
   seedOwnQuestion,
   startOwnWork,
 } from "../fixtures/questions.js";
-import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
-
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import {
+  choiceForm,
+  mixedAnswers,
+  mixedForm,
+} from "../fixtures/question-data.js";
+import {
+  nativeQuestionForm,
+  nativeQuestionAnswers,
+} from "../../src/core/question-forms.js";
+import {
+  questionCommandRawLimit,
+  operatorCommandSchema,
+  questionReadSchema,
+  inboxReadSchema,
+} from "../../src/operator/contracts.js";
 test("action Inbox is cross-project summary-only, selected form is exact and answer replay precedes changed eligibility", async () => {
   const f = await createOperatorFixture();
   try {

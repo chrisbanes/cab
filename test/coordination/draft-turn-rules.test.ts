@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { draftTurnUnavailableText } from "../../src/operator/draft-turn-copy.js";
 import {
   type DraftTurnFacts,
   draftTurnAvailability,
   draftTurnInstruction,
   draftTurnToolDecision,
 } from "../../src/standalone/draft-turn.js";
+import { draftTurnUnavailableText } from "../../src/operator/draft-turn-copy.js";
 
 const open: DraftTurnFacts = {
   taskState: "open",

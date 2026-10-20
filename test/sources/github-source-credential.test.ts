@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { ghEnvironment } from "../../src/standalone/gh-credential.js";
 import {
   envCredentialReference,
   sourceCredentialReference,
 } from "../../src/core/credential-reference.js";
 import { githubConfigurationSchema } from "../../src/core/github-source-contracts.js";
-import { ghEnvironment } from "../../src/standalone/gh-credential.js";
 import {
   CredentialGitHubSourceReader,
   gitHubSourceCredentialStatus,
   resolveGitHubSourceCredential,
-  type SourceCredentialReason,
   sourceCredentialExplanation,
+  type SourceCredentialReason,
 } from "../../src/standalone/github-source-credential.js";
 import {
   createFakeGh,
-  type FakeGhState,
   fakeGhToken,
+  type FakeGhState,
 } from "../fixtures/fake-gh.js";
 
 const selection = {
@@ -352,8 +352,8 @@ test("a failed gh options factory never invokes host gh and preserves independen
   });
 });
 
-import { GhLoginScope } from "../../src/standalone/gh-credential.js";
 import { SourceRateLimitPauses } from "../../src/standalone/github-source-credential.js";
+import { GhLoginScope } from "../../src/standalone/gh-credential.js";
 
 test("resolved-token pauses cover all public reads, rotate immediately and prioritize resolver failure", async (t) => {
   const fake = createFakeGh();

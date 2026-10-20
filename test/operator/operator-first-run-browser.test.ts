@@ -9,7 +9,6 @@ import {
   phone,
 } from "../fixtures/operator-settings.js";
 import { setupJourney, stubReadiness } from "../fixtures/setup-browser.js";
-
 const test = browserSuite("operator-first-run-browser");
 
 /** Every target is wholly in the first screen, unscrolled and without sideways overflow. */

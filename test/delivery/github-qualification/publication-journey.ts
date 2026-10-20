@@ -12,10 +12,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { PrDeliveryObservation } from "../../../src/core/delivery.js";
 import {
-  type DeliveryCaller,
   DeliveryStore,
+  type DeliveryCaller,
 } from "../../../src/core/delivery.js";
 import { DomainStore } from "../../../src/core/domain.js";
 import { Store } from "../../../src/core/store.js";
@@ -26,6 +25,7 @@ import {
   type PushFunction,
 } from "../../../src/standalone/github-delivery.js";
 import { verifyTaskPush } from "../../../src/standalone/push-verification.js";
+import type { PrDeliveryObservation } from "../../../src/core/delivery.js";
 import type { PublicationGuard } from "./publication-fixture.js";
 
 export interface PublicationJourneyOptions {

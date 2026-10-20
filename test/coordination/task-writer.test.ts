@@ -1,32 +1,32 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
+import {
+  controlledGit,
+  type ControlledGitEvent,
+} from "../fixtures/controlled-git.js";
+import { StandaloneService } from "../../src/standalone/service.js";
+import {
+  ExecutionState,
+  type ExecutionIntent,
+} from "../../src/standalone/state.js";
 import type {
   Runtime,
   RuntimeToolCall,
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
-import { StandaloneService } from "../../src/standalone/service.js";
-import {
-  type ExecutionIntent,
-  ExecutionState,
-} from "../../src/standalone/state.js";
 import type {
   TaskWorkspaceRepositoryInput,
   WorkspaceManagerOptions,
 } from "../../src/standalone/workspaces.js";
 import { WorkspaceManager } from "../../src/standalone/workspaces.js";
-import {
-  type ControlledGitEvent,
-  controlledGit,
-} from "../fixtures/controlled-git.js";
 import { startedOf } from "../fixtures/service-internals.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 class RuntimeFixture implements Runtime {
   resultReports: Array<{

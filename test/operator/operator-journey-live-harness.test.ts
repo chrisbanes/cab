@@ -1,13 +1,12 @@
+import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { StandaloneService } from "../../src/standalone/service.js";
-import { browserTest } from "../fixtures/browser-engines.js";
 import { OperatorFixtureRuntime } from "../fixtures/operator-web.js";
-
 const harness = await import(
   pathToFileURL(
     resolve("test/operator/journey-qualification/runtime-contract.mjs"),

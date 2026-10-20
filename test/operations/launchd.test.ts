@@ -3,8 +3,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   accessSync,
   chmodSync,
-  existsSync,
   constants as fsConstants,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,10 +20,10 @@ import { test } from "node:test";
 import { diagnosticLimitsFromEnv } from "../../src/standalone/execution-diagnostics.js";
 import {
   assertNotRoot,
-  type LaunchAgentConfiguration,
   ROOT_REFUSAL,
   renderLaunchAgent,
   writeLaunchAgent,
+  type LaunchAgentConfiguration,
 } from "../../src/standalone/launchd.js";
 
 function createFixture(): {

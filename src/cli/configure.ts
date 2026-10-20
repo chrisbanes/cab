@@ -4,8 +4,8 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import {
   configurationImpactSchema,
-  fitsTextField,
   operatorCommandSchema,
+  fitsTextField,
   textMaxLength,
 } from "../operator/contracts.js";
 import { type CoverageGap, coverage, uuidArg } from "./browse.js";

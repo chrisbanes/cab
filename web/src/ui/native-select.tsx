@@ -1,5 +1,5 @@
-import { ChevronDown } from "lucide-react";
 import type * as React from "react";
+import { ChevronDown } from "lucide-react";
 import { cn } from "../lib/utils.js";
 
 function NativeSelect({

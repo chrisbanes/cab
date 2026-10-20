@@ -1,23 +1,22 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { randomUUID, createHash } from "node:crypto";
+import { writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type Browser, chromium } from "playwright";
-import { TaskReviewStore } from "../../src/core/task-review.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { leadResumeNotice } from "../../web/src/lead-feedback.js";
+import { chromium, type Browser } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { TaskReviewStore } from "../../src/core/task-review.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   markTaskReady,
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
+import { leadResumeNotice } from "../../web/src/lead-feedback.js";
 import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
-
 const test = browserSuite("operator-review-browser");
 test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, comparison identities and local artifact feedback on desktop and phone", async (_t, j) => {
   const f = await j.start("fixture.create", () =>

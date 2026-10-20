@@ -1,18 +1,26 @@
+import { QuestionHolds, QuestionResponse } from "./question-response.js";
 import {
-  type ReactNode,
-  type SyntheticEvent,
+  CommandNetworkLine,
+  ExecutionNotices,
+  PolicyDisclosure,
+} from "./execution-notice.js";
+import { executionSummary } from "./execution-runtime.js";
+import type { QuestionResponseStates } from "./question-response-state.js";
+import {
   useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
+  type SyntheticEvent,
 } from "react";
 import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import {
   assignmentHistorySchema,
-  type CommandReceipt,
   executionHarnessLabels,
+  type CommandReceipt,
   type OperatorCommand,
   operatorCommandSchema,
   questionReadSchema,
@@ -21,14 +29,7 @@ import {
   taskSchema,
   type Workspace,
 } from "../../src/operator/contracts.js";
-import { commentAvailability } from "../../src/operator/github-reasons.js";
 import { holdLines } from "../../src/operator/wait-reasons.js";
-import {
-  ActionOutcome,
-  detailRows,
-  OutcomeDetails,
-  type OutcomeField,
-} from "./action-feedback.js";
 import type { OperatorClient } from "./api.js";
 import {
   ActionLink,
@@ -37,6 +38,18 @@ import {
   ShortId,
   StatusBadge,
 } from "./components.js";
+import { useOperatorResource } from "./resource.js";
+import type {
+  OverviewCard,
+  ReplyOutcome,
+  TaskWorkspaceState,
+} from "./task-workspace-state.js";
+import {
+  ActionOutcome,
+  OutcomeDetails,
+  type OutcomeField,
+  detailRows,
+} from "./action-feedback.js";
 import {
   checkStatusWord,
   deliveryBlockerSentence,
@@ -44,14 +57,14 @@ import {
   pullRequestStateLabel,
   safePullRequestUrl,
 } from "./delivery-presentation.js";
-import {
-  CommandNetworkLine,
-  ExecutionNotices,
-  PolicyDisclosure,
-} from "./execution-notice.js";
-import { executionSummary } from "./execution-runtime.js";
-import { holdNoticesBesideRequests } from "./inbox-presentation.js";
+import { commentAvailability } from "../../src/operator/github-reasons.js";
+import { clockLabel } from "./presentation.js";
+import { failureCause } from "./outcome-copy.js";
+import { NativeSelect } from "./ui/native-select.js";
+import { Textarea } from "./ui/textarea.js";
+import { MarkdownPreview, TaskFiles } from "./task-files.js";
 import { TaskWorkspaceChanges } from "./inspection-changes.js";
+import { RetainedResultEvidence } from "./retained-evidence.js";
 import {
   hasImproveWork,
   ImproveWithLead,
@@ -66,26 +79,25 @@ import {
   draftTurnUnavailableNotice,
   leadFeedbackMode,
   leadReceivesNotice,
-  leadResumeNotice,
   leadUnavailableNotice,
+  leadResumeNotice,
 } from "./lead-feedback.js";
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
-import { failureCause } from "./outcome-copy.js";
-import { clockLabel } from "./presentation.js";
-import { QuestionHolds, QuestionResponse } from "./question-response.js";
-import type { QuestionResponseStates } from "./question-response-state.js";
-import { useOperatorResource } from "./resource.js";
-import { RetainedResultEvidence } from "./retained-evidence.js";
-import type { ConfigurationDrafts } from "./settings-state.js";
 import { AssignmentRows, openDisclosures, showSection } from "./task-detail.js";
-import { MarkdownPreview, TaskFiles } from "./task-files.js";
+import { TaskInspector } from "./task-inspector.js";
+import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
   type TaskHeaderReport,
   TaskStrip,
   TaskTabs,
   taskHeaderReport,
 } from "./task-header.js";
-import { TaskInspector } from "./task-inspector.js";
+import {
+  type TaskTab,
+  tabForLocation,
+  tabForSection,
+  tabIds,
+} from "./task-tabs.js";
 import {
   assignmentRow,
   briefParts,
@@ -93,19 +105,7 @@ import {
   deliveryApplies,
   taskNextActor,
 } from "./task-overview.js";
-import {
-  type TaskTab,
-  tabForLocation,
-  tabForSection,
-  tabIds,
-} from "./task-tabs.js";
-import type {
-  OverviewCard,
-  ReplyOutcome,
-  TaskWorkspaceState,
-} from "./task-workspace-state.js";
-import { NativeSelect } from "./ui/native-select.js";
-import { Textarea } from "./ui/textarea.js";
+import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;

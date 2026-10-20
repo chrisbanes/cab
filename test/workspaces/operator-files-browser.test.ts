@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { deflateSync } from "node:zlib";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { deflateSync } from "node:zlib";
-import { type Browser, chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import {
-  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
 
 const test = browserSuite("operator-files-browser");
 

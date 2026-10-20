@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
   chmodSync,

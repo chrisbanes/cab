@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
-
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 test("exact contextual feedback remains anchored to the original result/source after a revised result and source; one receipt/message and no provider/task/approval effect", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

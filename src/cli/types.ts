@@ -1,5 +1,5 @@
-import type { Coverage, Pagination } from "./browse.js";
 import type { CredentialStore } from "./connections.js";
+import type { Coverage, Pagination } from "./browse.js";
 
 export type CliDeps = {
   env: NodeJS.ProcessEnv;

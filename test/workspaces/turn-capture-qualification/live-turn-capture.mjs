@@ -9,15 +9,15 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { join } from "node:path";
 import { CodexRuntime } from "../../../dist/src/standalone/index.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
-import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 import {
   createTurnCaptureHarness,
   turnCaptureHarnessBudgets,
 } from "../../../dist/test/fixtures/turn-capture-harness.js";
+import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 
 const requiredArgs = ["--live", "--one-attempt"];
 if (

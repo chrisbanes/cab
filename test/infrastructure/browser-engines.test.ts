@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  browserEngineTestOptions,
   browserTestEngine,
+  browserEngineTestOptions,
   selectedBrowserEngines,
 } from "../fixtures/browser-engines.js";
 

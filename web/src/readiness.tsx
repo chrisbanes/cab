@@ -7,9 +7,9 @@ import {
   DraftMessage,
   key,
   Panel,
-  type SettingsProps,
   useDraft,
   useHeaderRefresh,
+  type SettingsProps,
 } from "./settings.js";
 import { useFragmentLanding } from "./settings-sections.js";
 

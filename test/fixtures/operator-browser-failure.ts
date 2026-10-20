@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { once } from "node:events";
 import { connect, type Socket } from "node:net";
 import { test } from "node:test";
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import { createOperatorFixture } from "./operator-web.js";
 
 test("injected browser assertion remains observable during fixture teardown", async (t) => {

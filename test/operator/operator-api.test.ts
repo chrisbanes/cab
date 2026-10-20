@@ -1,6 +1,7 @@
+import { taskItems } from "../fixtures/inbox-items.js";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -28,14 +29,13 @@ import {
   ExecutionState,
   refusedRevisionPrefix,
 } from "../../src/standalone/state.js";
-import { controlledGit } from "../fixtures/controlled-git.js";
-import { taskItems } from "../fixtures/inbox-items.js";
 import {
   ClaudeShapedFixtureRuntime,
   CodexShapedFixtureRuntime,
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
+import { controlledGit } from "../fixtures/controlled-git.js";
 import {
   ControllablePowerEvents,
   supervisedPower,
@@ -43,19 +43,19 @@ import {
 import { mixedForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import {
-  createTask as createNativeTask,
-  createNativeWork,
-  fixture as nativeFixture,
-  generation as nativeGeneration,
-  nativeRequest,
-  type RuntimeInternals,
-  until as untilNative,
-} from "../fixtures/runtime-retention.js";
-import {
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import { tmpdir } from "../fixtures/temp.js";
+import {
+  createNativeWork,
+  createTask as createNativeTask,
+  fixture as nativeFixture,
+  generation as nativeGeneration,
+  nativeRequest,
+  until as untilNative,
+  type RuntimeInternals,
+} from "../fixtures/runtime-retention.js";
 
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();

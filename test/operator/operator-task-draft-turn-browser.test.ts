@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { type Browser, chromium, type Page } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { configure } from "../fixtures/completed-lead.js";
+import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 

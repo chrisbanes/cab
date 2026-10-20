@@ -1,12 +1,12 @@
 import {
+  validateQuestionAnswers,
   type QuestionAnswers,
   type QuestionForm,
-  validateQuestionAnswers,
 } from "../../src/core/question-forms.js";
 import type {
-  CommandReceipt,
   OperatorCommand,
   QuestionRead,
+  CommandReceipt,
 } from "../../src/operator/contracts.js";
 import type { CommandState } from "./api.js";
 import { CommandLifecycle } from "./command-lifecycle.js";

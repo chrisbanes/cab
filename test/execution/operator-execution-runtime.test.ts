@@ -16,8 +16,8 @@ import {
   waitRoute,
 } from "../../web/src/execution-runtime.js";
 import {
-  type ProfileConfigurationData,
   profileChanges,
+  type ProfileConfigurationData,
 } from "../../web/src/settings-changes.js";
 
 const claude = (model: string, effort: string) => ({

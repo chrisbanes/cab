@@ -26,12 +26,6 @@ import {
   TaskNotOpenError,
 } from "../core/domain.js";
 import {
-  executionHarnessLabels,
-  executionIntentStateSchema,
-} from "../core/execution-runtime.js";
-import type { TaskReadiness } from "../core/github-source.js";
-import type { Readiness } from "../core/github-source-contracts.js";
-import {
   LocalReviewAnchorRequiredError,
   LocalReviewBatchTooLargeError,
   LocalReviewRecipientUnavailableError,
@@ -44,13 +38,19 @@ import {
   type QuestionForm,
   questionFormSchema,
 } from "../core/question-forms.js";
-import type { StructuredQuestionSet } from "../core/structured-questions.js";
-import { taskReviewReadSchema } from "../core/task-review.js";
 import {
-  type AttentionCode,
-  attentionNext,
-  interventionCode,
-} from "../operator/attention.js";
+  executionHarnessLabels,
+  executionIntentStateSchema,
+} from "../core/execution-runtime.js";
+import {
+  runtimeInboxHeadline,
+  runtimeInboxReason,
+  runtimeSettingsPath,
+} from "../operator/runtime-restart-copy.js";
+import type { StructuredQuestionSet } from "../core/structured-questions.js";
+import type { Readiness } from "../core/github-source-contracts.js";
+import type { TaskReadiness } from "../core/github-source.js";
+import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
   assignmentDetailSchema,
@@ -62,6 +62,7 @@ import {
   claudeTokenStatusSchema,
   commandReceiptSchema,
   composerOptionsSchema,
+  draftingRunReadSchema,
   configurationImpactSchema,
   deliveryReadSchema,
   discoveryBranchesSchema,
@@ -69,7 +70,6 @@ import {
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
   discoveryStatusSchema,
-  draftingRunReadSchema,
   type Execution,
   executionDetailSchema,
   executionEventsSchema,
@@ -78,6 +78,7 @@ import {
   folderListingSchema,
   folderListRequestSchema,
   type InboxItem,
+  type TaskInboxItem,
   inboxReadSchema,
   instructionProvenance,
   materialSchema,
@@ -86,13 +87,14 @@ import {
   operationTypeSchema,
   operatorCommandSchema,
   profileConfigurationSchema,
-  profileInstructionsSchema,
   profilePrivateValuesSchema,
+  profileInstructionsSchema,
   projectConfigurationSchema,
-  projectInstructionsSchema,
   projectPrivateValuesSchema,
+  projectInstructionsSchema,
   projectSchema,
   questionReadSchema,
+  setupHomeSchema,
   recoveryObservationSchema,
   retainedEvidenceItemContentReadSchema,
   retainedResultEvidenceReadSchema,
@@ -101,9 +103,7 @@ import {
   runtimeSettingsSchema,
   searchQuerySchema,
   searchReadSchema,
-  setupHomeSchema,
   sourceObservationSchema,
-  type TaskInboxItem,
   taskListPageSchema,
   taskListQuerySchema,
   taskMessagePageSchema,
@@ -123,12 +123,12 @@ import {
   type CommentReasonCode,
   issueEditReasonSentences,
 } from "../operator/github-reasons.js";
-import {
-  runtimeInboxHeadline,
-  runtimeInboxReason,
-  runtimeSettingsPath,
-} from "../operator/runtime-restart-copy.js";
 import { deriveWaits } from "../operator/wait-reasons.js";
+import {
+  type AttentionCode,
+  attentionNext,
+  interventionCode,
+} from "../operator/attention.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,

@@ -1,50 +1,52 @@
+import {
+  questionToolArgumentsSchema,
+  questionFormSchema,
+  questionAnswersSchema,
+  validateQuestionAnswers,
+  type QuestionForm,
+  type QuestionAnswers,
+} from "./question-forms.js";
+import {
+  TaskReviewStore,
+  reviewMetadataSchema,
+  feedbackReferenceSchema,
+} from "./task-review.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
-  actionKinds,
-  canonicalMaterial,
-  DeliveryStore,
-  externalActionSchema,
-  materialDigest,
-  type RuntimeDeliveryCaller,
-} from "./delivery.js";
+  validateStructuredAnswers,
+  type StructuredQuestionAnswers,
+} from "./structured-questions.js";
+import {
+  nativeInputEndpointIdentitySchema,
+  nativeEndpointKey,
+  parseNativeInputRequest,
+  runtimeUserInputOutcomeSchema,
+  type NativeInputEndpointIdentity,
+  type RuntimeReplyIntent,
+  type RuntimeUserInputOutcome,
+  type RuntimeUserInputRequest,
+} from "./structured-questions.js";
 import {
   DomainConflictError,
   DomainPolicyError,
   DomainStore,
 } from "./domain.js";
-import { LocalReviewStore } from "./local-review.js";
 import {
-  type QuestionAnswers,
-  type QuestionForm,
-  questionAnswersSchema,
-  questionFormSchema,
-  questionToolArgumentsSchema,
-  validateQuestionAnswers,
-} from "./question-forms.js";
-import {
-  type RetainedEvidenceCandidate,
   RetainedEvidenceStore,
   unavailableRetainedEvidenceCandidate,
+  type RetainedEvidenceCandidate,
 } from "./retained-evidence.js";
-import { type Database, transaction } from "./store.js";
 import {
-  type NativeInputEndpointIdentity,
-  nativeEndpointKey,
-  nativeInputEndpointIdentitySchema,
-  parseNativeInputRequest,
-  type RuntimeReplyIntent,
-  type RuntimeUserInputOutcome,
-  type RuntimeUserInputRequest,
-  runtimeUserInputOutcomeSchema,
-  type StructuredQuestionAnswers,
-  validateStructuredAnswers,
-} from "./structured-questions.js";
-import {
-  feedbackReferenceSchema,
-  reviewMetadataSchema,
-  TaskReviewStore,
-} from "./task-review.js";
+  DeliveryStore,
+  externalActionSchema,
+  actionKinds,
+  canonicalMaterial,
+  materialDigest,
+  type RuntimeDeliveryCaller,
+} from "./delivery.js";
+import { transaction, type Database } from "./store.js";
+import { LocalReviewStore } from "./local-review.js";
 
 // Results are unique per exact work; work revisions restart per conversation.
 const resultColumnNames = [

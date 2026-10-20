@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
+import {
+  browserSuite,
+  captureBrowserEvidence,
+} from "../fixtures/browser-diagnostics.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { CoordinationStore } from "../../src/core/coordination.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -10,18 +15,12 @@ import {
   leadResumeNotice,
 } from "../../web/src/lead-feedback.js";
 import {
-  browserSuite,
-  captureBrowserEvidence,
-} from "../fixtures/browser-diagnostics.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { openSearchFromSidebar } from "../fixtures/shell-search.js";
-import {
   markLeadStarted,
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
-
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 const test = browserSuite("operator-task-workspace-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
 const serviceWords =

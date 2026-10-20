@@ -3,19 +3,19 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { tmpdir } from "../fixtures/temp.js";
+import type {
+  RoutingChoiceClient,
+  RoutingChoiceRequest,
+  RoutingChoiceResponse,
+} from "../../src/standalone/routing.js";
 import type {
   Runtime,
   RuntimeToolCall,
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
-import type {
-  RoutingChoiceClient,
-  RoutingChoiceRequest,
-  RoutingChoiceResponse,
-} from "../../src/standalone/routing.js";
 import { StandaloneService } from "../../src/standalone/service.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 type ToolListener = (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
 

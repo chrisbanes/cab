@@ -1,11 +1,10 @@
 /** Pure rules for the readiness Project-field picker; no React. */
-
-import type { z } from "zod";
 import type {
   discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
 } from "../../src/operator/contracts.js";
+import type { z } from "zod";
 import { discoveryReasonCopy, typedRepositoryId } from "./setup-model.js";
 
 type Data<T extends z.ZodType> =

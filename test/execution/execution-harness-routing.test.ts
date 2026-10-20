@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import type { DatabaseSync } from "node:sqlite";
 import {
   type FailureEvidence,
   type Runtime,
@@ -13,12 +13,12 @@ import {
   type RuntimeToolResult,
   type UnexpectedRequest,
 } from "../../src/standalone/codex.js";
+import type { RuntimeSafetyPort } from "../../src/standalone/runtime-retention.js";
 import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
 import type {
   ExactExecutionIdentity,
   ExecutionInspection,
 } from "../../src/standalone/recovery-types.js";
-import type { RuntimeSafetyPort } from "../../src/standalone/runtime-retention.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { tmpdir } from "../fixtures/temp.js";
 

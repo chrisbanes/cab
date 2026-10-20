@@ -11,13 +11,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { verifyTaskPush } from "../../src/standalone/push-verification.js";
 import { forgeCommitGraphParent } from "../fixtures/forged-commit-graph.js";
 import {
   git,
   publicationWorld,
   repositoryId,
 } from "../fixtures/publication.js";
+import { verifyTaskPush } from "../../src/standalone/push-verification.js";
 
 type World = ReturnType<typeof publicationWorld>;
 const branchOf = (w: World) => w.store.taskBranch(w.taskId, repositoryId);

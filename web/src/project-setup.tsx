@@ -1,15 +1,14 @@
 import {
   type FocusEvent,
   type FormEvent,
-  type ReactNode,
   useEffect,
   useId,
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import type { z } from "zod";
 import {
   type CheckoutVerification,
   type DiscoveryUnavailableReason,
@@ -18,27 +17,26 @@ import {
   discoveryRepositoriesSchema,
   discoveryStatusSchema,
 } from "../../src/operator/contracts.js";
+import type { z } from "zod";
 import { ActionLink, Button } from "./components.js";
-import type { GhLogin } from "./discovery-credential.js";
 import { runtimeErrors } from "./execution-runtime.js";
 import { FolderPicker } from "./folder-picker.js";
+import { ReadyCheck } from "./ready-check.js";
 import {
-  emptyProfile,
   harnessSettings,
+  emptyProfile,
   profileCreateCommand,
   RuntimeFields,
 } from "./profile-config.js";
-import { ReadyCheck } from "./ready-check.js";
 import {
   DraftField,
   DraftMessage,
   key,
   locked,
-  type SettingsProps,
   sendDraft,
+  type SettingsProps,
   useDraft,
 } from "./settings.js";
-import { settingsSectionHref } from "./settings-sections.js";
 import {
   blankRow,
   buildProjectCreate,
@@ -54,6 +52,8 @@ import {
   typeRepository,
   verificationCopy,
 } from "./setup-model.js";
+import type { GhLogin } from "./discovery-credential.js";
+import { settingsSectionHref } from "./settings-sections.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import "./setup.css";

@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "../fixtures/temp.js";
 import { DatabaseSync } from "node:sqlite";
-import { test } from "node:test";
-import {
-  type DeliveryCaller,
-  DeliveryStore,
-  type PrDeliveryObservation,
-} from "../../src/core/delivery.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
+import {
+  DeliveryStore,
+  type DeliveryCaller,
+  type PrDeliveryObservation,
+} from "../../src/core/delivery.js";
 import {
   DeliveryCoordinator,
   unresolvedThreadSummary,
 } from "../../src/standalone/delivery.js";
 import type { GitHubDeliveryProvider } from "../../src/standalone/github-delivery.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 test("unchanged feedback is deduplicated and cached settlement never qualifies a changed provider head", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-feedback-restart-"));

@@ -7,9 +7,9 @@ import type { Database } from "../../src/core/store.js";
 import {
   boundDetail,
   DiagnosticCursorError,
-  type DiagnosticLimits,
-  diagnosticLimitsFromEnv,
   ExecutionDiagnosticsStore,
+  diagnosticLimitsFromEnv,
+  type DiagnosticLimits,
 } from "../../src/standalone/execution-diagnostics.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { tmpdir } from "../fixtures/temp.js";

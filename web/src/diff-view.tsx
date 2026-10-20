@@ -1,9 +1,9 @@
 import {
-  type KeyboardEvent,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
 } from "react";
 import type { WorkspaceComparisonRead } from "../../src/operator/contracts.js";
 import { Button } from "./components.js";

@@ -1,27 +1,26 @@
-import { CircleDot, History, Search as SearchIcon } from "lucide-react";
 import {
-  type KeyboardEvent,
-  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
   useState,
+  type KeyboardEvent,
+  type ReactNode,
 } from "react";
-import type { z } from "zod";
 import {
-  type Session,
   searchReadSchema,
+  type Session,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import { workspaceLabels } from "../../src/operator/project-labels.js";
+import type { z } from "zod";
 import type { OperatorClient } from "./api.js";
-import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import { useOperatorResource } from "./resource.js";
+import { CircleDot, History, Search as SearchIcon } from "lucide-react";
+import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import { Badge } from "./ui/badge.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import "./search.css";
-
 const typeLabel: Record<string, string> = {
   task: "Task",
   decision: "Decision",

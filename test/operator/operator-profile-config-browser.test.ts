@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import type { Page } from "playwright";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
+import type { Page } from "playwright";
 import {
   captureSettingsEvidence as captureBrowserEvidence,
   noPageOverflow,
@@ -12,12 +12,12 @@ import {
   trail,
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
+import { commandRequest } from "../fixtures/setup-browser.js";
 import {
   ClaudeShapedFixtureRuntime,
   CodexShapedFixtureRuntime,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
-import { commandRequest } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-profile-config-browser");
 /** Whether `text` is anywhere the operator can read: page text or a field's value. */

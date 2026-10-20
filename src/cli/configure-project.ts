@@ -1,24 +1,24 @@
 import { randomUUID } from "node:crypto";
 import {
-  commandNetworkAppliesNote,
-  commandNetworkDisclosure,
-} from "../operator/command-network-copy.js";
-import {
   projectConfigurationSchema,
   projectInstructionsSchema,
 } from "../operator/contracts.js";
+import {
+  commandNetworkAppliesNote,
+  commandNetworkDisclosure,
+} from "../operator/command-network-copy.js";
 import { type CoverageGap, uuidArg } from "./browse.js";
 import {
   applyFile,
   boolFlag,
   type Change,
   checkExpected,
-  checkOut,
   consistentRead,
   inlineText,
-  positiveIntFlag,
   readImpact,
+  checkOut,
   uuidOrNone,
+  positiveIntFlag,
   writePrepared,
 } from "./configure.js";
 import {

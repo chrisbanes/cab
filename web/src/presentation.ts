@@ -1,7 +1,6 @@
 // Shared wording rules for the operator UI: design/DESIGN.md -> Interaction notes -> Presentation.
 
 import { clockLabel } from "../../src/operator/clock-label.js";
-
 export { clockLabel };
 
 /** "Updated 16:48", or "Updated 16:47–16:48" only when the first and last reads show different clock labels. */

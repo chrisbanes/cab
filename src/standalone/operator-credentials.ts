@@ -7,9 +7,9 @@ import {
 import { z } from "zod";
 import { type Database, transaction } from "../core/store.js";
 import {
-  type OperatorCredential,
-  operatorCredentialIssueRequestSchema,
   OPERATOR_CREDENTIAL_TOKEN_PATTERN as TOKEN_PATTERN,
+  operatorCredentialIssueRequestSchema,
+  type OperatorCredential,
 } from "../operator/contracts.js";
 
 export type OperatorCredentialScope = OperatorCredential["scope"];

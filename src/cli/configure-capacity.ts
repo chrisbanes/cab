@@ -2,8 +2,8 @@ import { runtimeSettingsSchema } from "../operator/contracts.js";
 import { uuidArg } from "./browse.js";
 import {
   applyFile,
-  type Change,
   checkOut,
+  type Change,
   positiveIntFlag,
   writePrepared,
 } from "./configure.js";

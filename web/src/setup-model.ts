@@ -1,6 +1,4 @@
 /** Pure model for guided project setup: rows, the create command and fixed copy. */
-
-import type { z } from "zod";
 import {
   type CheckoutVerification,
   type ComposerOptions,
@@ -15,6 +13,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { ReadinessCheck } from "../../src/operator/readiness.js";
 import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
+import type { z } from "zod";
 import { unavailableAlert } from "./execution-runtime.js";
 import { addClaudeHref } from "./settings-sections.js";
 

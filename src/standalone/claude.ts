@@ -12,16 +12,17 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import type {
   CanUseTool,
-  createSdkMcpServer,
   HookCallback,
   Options,
   SDKUserMessage,
   SpawnOptions,
+  createSdkMcpServer,
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import {
   type FailureEvidence,
+  terminalFailureEvidence,
   type Runtime,
   type RuntimeConversationEvent,
   RuntimeNotEnabledError,
@@ -30,10 +31,8 @@ import {
   type RuntimeToolResult,
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
-  terminalFailureEvidence,
   type UnexpectedRequest,
 } from "./codex.js";
-import { resolveOnPath } from "./executable-path.js";
 import type {
   ExactExecutionIdentity,
   ExecutionInspection,
@@ -50,6 +49,7 @@ import {
   captureProcessIdentity,
   MacProcessTerminationVerifier,
 } from "./termination.js";
+import { resolveOnPath } from "./executable-path.js";
 import { isWithin } from "./workspace-inspection.js";
 
 /** The SDK surface the runtime uses; tests inject a fake. */

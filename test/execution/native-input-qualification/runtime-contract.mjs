@@ -19,8 +19,7 @@ import {
   MacProcessTerminationVerifier,
 } from "../../../dist/src/standalone/termination.js";
 
-import { qualificationResource, runService } from "./service-contract.mjs";
-
+import { runService, qualificationResource } from "./service-contract.mjs";
 export { runService } from "./service-contract.mjs";
 
 const bounds = {

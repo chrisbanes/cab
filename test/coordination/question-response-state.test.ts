@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import type { QuestionRead } from "../../src/operator/contracts.js";
-import type { CommandState } from "../../web/src/api.js";
+import { randomUUID } from "node:crypto";
 import {
+  QuestionResponseStates,
   answerSummary,
   completedQuestionCount,
-  QuestionResponseStates,
 } from "../../web/src/question-response-state.js";
-import { mixedAnswers, mixedForm } from "../fixtures/question-data.js";
-
+import { mixedForm, mixedAnswers } from "../fixtures/question-data.js";
+import type { QuestionRead } from "../../src/operator/contracts.js";
+import type { CommandState } from "../../web/src/api.js";
 const data: QuestionRead["data"] = {
   taskId: randomUUID(),
   interactionId: randomUUID(),

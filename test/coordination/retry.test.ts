@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import type { DatabaseSync } from "node:sqlite";
 import type {
   FailureEvidence,
   Runtime,
@@ -11,7 +12,6 @@ import type {
 } from "../../src/standalone/codex.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { startedOf } from "../fixtures/service-internals.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 interface RetryRuntime extends Runtime {
   failureEvidence(

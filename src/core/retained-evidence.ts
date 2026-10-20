@@ -1,12 +1,12 @@
+import { DomainConflictError } from "./domain.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { DomainConflictError } from "./domain.js";
 import {
   retainedEvidenceIdentitySchema,
   retainedEvidenceSourceObservationSchema,
   reviewAnchorRecordBaseSchema,
 } from "./review-anchor-contracts.js";
-import { type Database, transaction } from "./store.js";
+import { transaction, type Database } from "./store.js";
 
 export const retainedEvidenceLimits = Object.freeze({
   maxTextBytes: 1024 * 1024,

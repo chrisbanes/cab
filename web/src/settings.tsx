@@ -1,25 +1,25 @@
 import {
-  type FormEvent,
-  type ReactNode,
   useCallback,
   useEffect,
-  useId,
+  useState,
   useReducer,
   useRef,
-  useState,
+  useId,
+  type FormEvent,
+  type ReactNode,
 } from "react";
 import type { z } from "zod";
-import type { Session, Workspace } from "../../src/operator/contracts.js";
-import { ActionOutcome, detailRows } from "./action-feedback.js";
+import type { Workspace, Session } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { Button } from "./components.js";
-import { type ResourceState, useOperatorResource } from "./resource.js";
-import { sameText, type Values } from "./settings-changes.js";
+import { useOperatorResource, type ResourceState } from "./resource.js";
+import { ActionOutcome, detailRows } from "./action-feedback.js";
 import {
+  outcomeCopy,
   type ConfigurationDraft,
   type ConfigurationDrafts,
-  outcomeCopy,
 } from "./settings-state.js";
+import { sameText, type Values } from "./settings-changes.js";
+import { Button } from "./components.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";

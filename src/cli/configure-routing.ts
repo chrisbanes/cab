@@ -3,9 +3,9 @@ import {
   boolFlag,
   type Change,
   checkExpected,
+  readTextFile,
   checkOut,
   positiveIntFlag,
-  readTextFile,
   writePrepared,
 } from "./configure.js";
 import { readProject } from "./configure-project.js";

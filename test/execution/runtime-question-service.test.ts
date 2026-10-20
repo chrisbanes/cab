@@ -1,22 +1,22 @@
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "../fixtures/temp.js";
 import { test } from "node:test";
 import type { RuntimeQuestionRecord } from "../../src/core/coordination.js";
+import { ExecutionState } from "../../src/standalone/state.js";
+import { StandaloneService } from "../../src/standalone/service.js";
 import type { Runtime, UnexpectedRequest } from "../../src/standalone/codex.js";
 import type {
+  RuntimeUserInputRequest,
+  RuntimeUserInputOutcome,
   NativeInputEndpointIdentity,
   NativeInputReply,
   RuntimeReplyIntent,
-  RuntimeUserInputOutcome,
-  RuntimeUserInputRequest,
 } from "../../src/standalone/native-input.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { StandaloneService } from "../../src/standalone/service.js";
-import { ExecutionState } from "../../src/standalone/state.js";
 import { acquiredOf, startedOf } from "../fixtures/service-internals.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 function required<T>(value: T | null | undefined): T {
   assert.ok(value !== undefined && value !== null);

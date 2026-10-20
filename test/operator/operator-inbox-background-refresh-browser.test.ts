@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
+import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import {
   failResponses,
   holdResponse,
@@ -7,10 +8,8 @@ import {
   settleReads,
   watchDom,
 } from "../fixtures/background-refresh.js";
-import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
-
 const test = browserSuite("inbox-background-refresh-browser");
 
 test("Inbox and shell timer reads stay silent until they fail; header Refresh still shows progress", async (_t, j) => {

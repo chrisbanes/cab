@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { TaskRead } from "../../src/operator/contracts.js";
-import { emptyInput } from "../../web/src/composer-state.js";
 import { optionalSummary } from "../../web/src/composer-summary.js";
+import { emptyInput } from "../../web/src/composer-state.js";
 import {
   assignmentRow,
   briefParts,

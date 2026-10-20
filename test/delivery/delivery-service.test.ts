@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { type DeliveryCaller, DeliveryStore } from "../../src/core/delivery.js";
+import { DeliveryStore, type DeliveryCaller } from "../../src/core/delivery.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
@@ -140,7 +140,6 @@ test("persisted intent is visible before write and uncertain create is never rep
 });
 
 import { deliveryFixture } from "../fixtures/delivery-fixture.js";
-
 test("bound service delivery refuses spoofing and a revoked policy during asynchronous preflight", async () => {
   const f = await deliveryFixture();
   try {
@@ -209,7 +208,6 @@ test("bound service delivery refuses spoofing and a revoked policy during asynch
 });
 
 import { canonicalMaterial } from "../../src/core/delivery.js";
-
 test("actual operator approval authorizes only exact material on the next eligible bound lead turn", async () => {
   const f = await deliveryFixture();
   try {
@@ -655,7 +653,6 @@ import {
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
-
 test("restart retains one unavailable PR binding while independent feedback and operator views continue", async () => {
   const f = await deliveryFixture();
   try {

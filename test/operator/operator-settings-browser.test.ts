@@ -1,12 +1,11 @@
+import { before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { after, before } from "node:test";
-import { promisify } from "node:util";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
-
 const sourceFixtureValue = process.env.FIXTURE_GITHUB;
 before(() => {
   process.env.FIXTURE_GITHUB = "offline-settings-source-value";
@@ -16,13 +15,12 @@ after(() => {
   else process.env.FIXTURE_GITHUB = sourceFixtureValue;
 });
 const test = browserSuite("operator-settings-browser");
-
-import { type Browser, chromium, type Page } from "playwright";
 import { actionKinds } from "../../src/core/delivery.js";
 import {
   openAccountMenu,
   signOutFromSidebar,
 } from "../fixtures/operator-account.js";
+import { chromium, type Browser, type Page } from "playwright";
 import {
   captureSettingsEvidence,
   outcomeMessages,
@@ -30,11 +28,10 @@ import {
   seedImportedConflict,
 } from "../fixtures/operator-settings.js";
 import {
-  createOperatorFixture,
-  seedOperatorDelivery,
   seedOperatorRecovery,
+  seedOperatorDelivery,
+  createOperatorFixture,
 } from "../fixtures/operator-web.js";
-
 test("Settings guides empty workspace through profile and paused project creation", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),

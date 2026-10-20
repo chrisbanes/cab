@@ -17,8 +17,8 @@ import { RoutingAttemptStore } from "../../src/standalone/routing.js";
 import { SchedulerStore } from "../../src/standalone/scheduler.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { ExecutionState } from "../../src/standalone/state.js";
-import { startedOf } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { startedOf } from "../fixtures/service-internals.js";
 
 class FakeRuntime implements Runtime {
   turns = 0;

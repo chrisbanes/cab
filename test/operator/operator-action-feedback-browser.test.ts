@@ -1,22 +1,22 @@
+import { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before } from "node:test";
 import type { Page } from "playwright";
-import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import {
-  type BrowserJourney,
   browserSuite,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import {
   desktop,
   noPageOverflow,
   outcomeMessages,
   phone,
-  resolve,
   savedOutcome,
   seedImportedConflict,
   startSettings,
+  resolve,
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { commandRequest } from "../fixtures/setup-browser.js";

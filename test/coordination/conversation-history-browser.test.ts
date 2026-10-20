@@ -5,9 +5,7 @@ import { type AddressInfo, createServer } from "node:net";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
-
 const test = browserSuite("conversation");
-
 import { type Browser, chromium } from "playwright";
 import type { Runtime } from "../../src/standalone/codex.js";
 import {

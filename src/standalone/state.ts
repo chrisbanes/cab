@@ -1,37 +1,37 @@
-import { randomUUID } from "node:crypto";
-import { z } from "zod";
-import type { ReconciledAssignmentProof } from "../core/coordination.js";
+import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
 import { DomainConflictError, TaskNotOpenError } from "../core/domain.js";
 import { executionIntentStateSchema } from "../core/execution-runtime.js";
-import { type Database, transaction } from "../core/store.js";
-import { TaskReviewStore } from "../core/task-review.js";
 import type { CommandReceipt } from "../operator/contracts.js";
-import type { ConversationHistoryBinding } from "./conversation-history.js";
+import {
+  archivedResumeRejectionSchema,
+  historicalPreTurnAdoptionSchema,
+  historicalNoTurnAdoptionSchema,
+  replaceConversationCommandSchema,
+  type ArchivedResumeRejection,
+  type HistoricalPreTurnAdoption,
+  type HistoricalNoTurnAdoption,
+  type ReplaceConversationCommand,
+} from "./pre-turn-recovery.js";
 import { createDraftingTable } from "./drafting.js";
+import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
+import { RecoveryRejectedError } from "./recovery-types.js";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import {
   defaultExecutionHarness,
   type ExecutionHarness,
   executionHarnessSchema,
 } from "./execution-harness.js";
-import {
-  type ArchivedResumeRejection,
-  archivedResumeRejectionSchema,
-  type HistoricalNoTurnAdoption,
-  type HistoricalPreTurnAdoption,
-  historicalNoTurnAdoptionSchema,
-  historicalPreTurnAdoptionSchema,
-  type ReplaceConversationCommand,
-  recoveryReceiptSchema,
-  replaceConversationCommandSchema,
-} from "./pre-turn-recovery.js";
+import { transaction, type Database } from "../core/store.js";
+import type { ReconciledAssignmentProof } from "../core/coordination.js";
 import type {
-  RecoveryReceipt,
   RecoveryRecord,
+  RecoveryReceipt,
   RuntimeProcessIdentity,
   VerifiedTermination,
 } from "./recovery-types.js";
-import { RecoveryRejectedError } from "./recovery-types.js";
+import type { ConversationHistoryBinding } from "./conversation-history.js";
 import type {
   RuntimeTerminalEvidence,
   RuntimeTerminalFailureEvidence,

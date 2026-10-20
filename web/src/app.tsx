@@ -1,3 +1,17 @@
+import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
+import { inboxSummaryOf } from "./request-presentation.js";
+import { useMediaQuery } from "./use-media-query.js";
+import { QuestionResponseStates } from "./question-response-state.js";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useReducer,
+  useState,
+  useRef,
+  type ReactNode,
+} from "react";
 import {
   CirclePause,
   ExternalLink,
@@ -11,75 +25,60 @@ import {
   Settings,
 } from "lucide-react";
 import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-} from "react";
-import {
+  workspaceSchema,
   type Session,
   type TaskListSummary,
   type Workspace,
-  workspaceSchema,
 } from "../../src/operator/contracts.js";
 import {
   projectLabel,
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
-import { AccountMenu, OPERATOR_LABEL } from "./account-menu.js";
-import { ActionOutcome } from "./action-feedback.js";
 import { ClientError, OperatorClient } from "./api.js";
+import { useOperatorResource, type ResourceState } from "./resource.js";
 import {
   ActionLink,
   Button,
+  StatusBadge,
+  ResourceStatus,
   MobileNavigation,
   NavigationRow,
   PageHeader,
   ProjectName,
-  ResourceStatus,
-  StatusBadge,
   TopBar,
 } from "./components.js";
-import { useDraftReleases } from "./composer-drafting.js";
-import { unavailableAlert } from "./execution-runtime.js";
-import {
-  configureGettingStarted,
-  GETTING_STARTED_DRAFT,
-  GettingStarted,
-} from "./getting-started.js";
-import { Inbox, type InboxHeader, InboxState, loadInbox } from "./inbox.js";
-import { NotFound, notFoundSubtitle } from "./not-found.js";
-import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
-import { ProjectConfiguration } from "./project-config.js";
-import { ProjectSetup, type SetupHeader } from "./project-setup.js";
-import { QuestionResponseStates } from "./question-response-state.js";
-import { AssignmentRecovery, RuntimeSettings } from "./recovery.js";
-import { inboxSummaryOf } from "./request-presentation.js";
-import { type ResourceState, useOperatorResource } from "./resource.js";
-import { Search, SearchState } from "./search.js";
-import { SettingsWorkspace } from "./settings-index.js";
-import { landingDecision } from "./settings-sections.js";
-import { ConfigurationDrafts } from "./settings-state.js";
-import { settingsHeader } from "./settings-view.js";
-import { Login, SignInBootstrap } from "./sign-in.js";
-import { TaskComposer } from "./task-composer.js";
-import { TaskHeaderActions, type TaskHeaderReport } from "./task-header.js";
-import { TaskViews } from "./task-views.js";
-import { TaskWorkspace } from "./task-workspace.js";
-import { TaskWorkspaceStates } from "./task-workspace-state.js";
+import { ActionOutcome } from "./action-feedback.js";
+import { Alert } from "./ui/alert.js";
 import {
   isActiveColumn,
   loadTaskList,
   taskColumn,
   taskRouteSubtitle,
 } from "./tasks.js";
-import { Alert } from "./ui/alert.js";
-import { useMediaQuery } from "./use-media-query.js";
-
+import { useDraftReleases } from "./composer-drafting.js";
+import { TaskComposer } from "./task-composer.js";
+import { RuntimeSettings, AssignmentRecovery } from "./recovery.js";
+import { unavailableAlert } from "./execution-runtime.js";
+import { ConfigurationDrafts } from "./settings-state.js";
+import { ProjectSetup, type SetupHeader } from "./project-setup.js";
+import { SettingsWorkspace } from "./settings-index.js";
+import { landingDecision } from "./settings-sections.js";
+import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
+import { ProjectConfiguration } from "./project-config.js";
+import { settingsHeader } from "./settings-view.js";
+import { Search, SearchState } from "./search.js";
+import { TaskWorkspace } from "./task-workspace.js";
+import { TaskHeaderActions, type TaskHeaderReport } from "./task-header.js";
+import { TaskWorkspaceStates } from "./task-workspace-state.js";
+import { TaskViews } from "./task-views.js";
+import { Login, SignInBootstrap } from "./sign-in.js";
+import { NotFound, notFoundSubtitle } from "./not-found.js";
+import { AccountMenu, OPERATOR_LABEL } from "./account-menu.js";
+import {
+  configureGettingStarted,
+  GETTING_STARTED_DRAFT,
+  GettingStarted,
+} from "./getting-started.js";
 function RouteLink({
   href,
   current,

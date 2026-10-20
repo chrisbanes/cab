@@ -1,18 +1,18 @@
 import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import {
   ChevronsUpDown,
   ExternalLink,
   ListChecks,
   LogOut,
   Settings,
 } from "lucide-react";
-import {
-  type KeyboardEvent,
-  type ReactNode,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
 
 /** Sessions carry no operator name (SPEC: one operator), so the account is labelled by its role. */
 export const OPERATOR_LABEL = "Operator";

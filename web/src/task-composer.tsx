@@ -1,20 +1,14 @@
-import { CirclePlay, Clock } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CirclePlay, Clock } from "lucide-react";
 import { flushSync } from "react-dom";
 import {
   composerOptionsSchema,
-  type Session,
   taskSchema,
   uuid,
+  type Session,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import { workspaceLabels } from "../../src/operator/project-labels.js";
-import {
-  orderWaits,
-  runtimeWaitCodes,
-  type Wait,
-} from "../../src/operator/wait-reasons.js";
-import { ActionOutcome, detailRows } from "./action-feedback.js";
 import type { OperatorClient } from "./api.js";
 import {
   ActionLink,
@@ -22,26 +16,32 @@ import {
   ResourceStatus,
   StatusBadge,
 } from "./components.js";
+import { ActionOutcome, detailRows } from "./action-feedback.js";
+import { Alert } from "./ui/alert.js";
+import { Badge } from "./ui/badge.js";
+import { Input } from "./ui/input.js";
+import { NativeSelect } from "./ui/native-select.js";
+import { Textarea } from "./ui/textarea.js";
+import {
+  briefNearLimit,
+  ComposerState,
+  type ComposerInput,
+} from "./composer-state.js";
+import { useOperatorResource } from "./resource.js";
+import {
+  orderWaits,
+  runtimeWaitCodes,
+  type Wait,
+} from "../../src/operator/wait-reasons.js";
+import type { ConfigurationDrafts } from "./settings-state.js";
+import { WaitReasons } from "./wait-reasons.js";
+import { optionalFields, optionalSummary } from "./composer-summary.js";
 import {
   DraftChoice,
   DraftWithLead,
   useDrafting,
 } from "./composer-drafting.js";
 import { type DraftStart, startOf } from "./composer-release.js";
-import {
-  briefNearLimit,
-  type ComposerInput,
-  ComposerState,
-} from "./composer-state.js";
-import { optionalFields, optionalSummary } from "./composer-summary.js";
-import { useOperatorResource } from "./resource.js";
-import type { ConfigurationDrafts } from "./settings-state.js";
-import { Alert } from "./ui/alert.js";
-import { Badge } from "./ui/badge.js";
-import { Input } from "./ui/input.js";
-import { NativeSelect } from "./ui/native-select.js";
-import { Textarea } from "./ui/textarea.js";
-import { WaitReasons } from "./wait-reasons.js";
 import "./composer.css";
 export function TaskComposer({
   client,

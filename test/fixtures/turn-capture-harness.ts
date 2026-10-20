@@ -3,8 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
-  linkSync,
   lstatSync,
+  linkSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -19,15 +19,15 @@ import type {
   RuntimeToolDefinition,
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
-import type {
-  RuntimeProcessIdentity,
-  TerminationVerification,
-} from "../../src/standalone/recovery-types.js";
+import type { WorkspaceTurnCaptureRecord } from "../../src/standalone/workspace-comparison.js";
 import type {
   RuntimeSpawnContext,
   StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
-import type { WorkspaceTurnCaptureRecord } from "../../src/standalone/workspace-comparison.js";
+import type {
+  RuntimeProcessIdentity,
+  TerminationVerification,
+} from "../../src/standalone/recovery-types.js";
 import {
   createOperatorFixture,
   OperatorFixtureRuntime,

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 import type { ChildProcess } from "node:child_process";
 import type {
   HookCallback,
   Options,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { z } from "zod";
 import type { ClaudeSdk } from "../../src/standalone/claude.js";
 
 /** A scripted Claude Agent SDK that spawns a real child for abort, loss and exit. */

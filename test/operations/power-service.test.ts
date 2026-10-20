@@ -1,32 +1,32 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "../fixtures/temp.js";
+import { join } from "node:path";
 import { mock, test } from "node:test";
+import { StandaloneService } from "../../src/standalone/service.js";
 import type {
   Runtime,
   RuntimeToolCall,
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
 import type {
-  PowerEventBatch,
-  PowerEventSource,
-  PowerSignalListener,
-} from "../../src/standalone/power.js";
+  ExactExecutionIdentity,
+  ExecutionInspection,
+  RuntimeProcessIdentity,
+} from "../../src/standalone/recovery-types.js";
 import {
   CaffeinateAssertion,
   SleepWakeListener,
 } from "../../src/standalone/power.js";
 import type {
-  ExactExecutionIdentity,
-  ExecutionInspection,
-  RuntimeProcessIdentity,
-} from "../../src/standalone/recovery-types.js";
-import { StandaloneService } from "../../src/standalone/service.js";
+  PowerEventBatch,
+  PowerEventSource,
+  PowerSignalListener,
+} from "../../src/standalone/power.js";
 import type { PowerEventCursor } from "../../src/standalone/state.js";
 import { acquiredOf, startedOf } from "../fixtures/service-internals.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 class FakeChild extends EventEmitter {
   killed = 0;

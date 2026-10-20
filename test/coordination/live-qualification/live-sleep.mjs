@@ -1,5 +1,5 @@
-import assert from "node:assert/strict";
 import { execFile, execFileSync, spawn } from "node:child_process";
+import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -10,11 +10,11 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
-import { createServer } from "node:net";
 import {
-  tmpdir as operatingSystemTmpdir,
   hostname as readHostname,
+  tmpdir as operatingSystemTmpdir,
 } from "node:os";
+import { createServer } from "node:net";
 import {
   basename,
   dirname,

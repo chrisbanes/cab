@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
+  RetainedEvidenceStore,
   type RetainedEvidenceCandidate,
   type RetainedEvidenceIdentity,
-  RetainedEvidenceStore,
 } from "../../src/core/retained-evidence.js";
 import { transaction } from "../../src/core/store.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";

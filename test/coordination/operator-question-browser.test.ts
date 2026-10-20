@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { type Browser, chromium, webkit } from "playwright";
+import { chromium, webkit, type Browser } from "playwright";
 import {
-  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
-import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
-
 const test = browserSuite("operator-question-browser");
 test("a page refresh does not reread a request whose answer is unconfirmed", async (_t, j) => {
   const f = await j.start("fixture.create", () =>

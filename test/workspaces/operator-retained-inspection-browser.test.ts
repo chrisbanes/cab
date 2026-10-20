@@ -3,11 +3,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import {
+  RetainedEvidenceStore,
   type RetainedEvidenceCandidate,
   type RetainedEvidenceIdentity,
-  RetainedEvidenceStore,
 } from "../../src/core/retained-evidence.js";
 import { transaction } from "../../src/core/store.js";
 import {

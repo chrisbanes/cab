@@ -2,35 +2,35 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { DomainStore } from "../../src/core/domain.js";
 import { defaultExecutionHarness } from "../../src/core/execution-runtime.js";
 import { Store } from "../../src/core/store.js";
+import type { Runtime } from "../../src/standalone/codex.js";
+import type { GitHubSourceReader } from "../../src/standalone/github-source.js";
+import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import {
+  LocalOperatorHttp,
+  LocalOperatorUi,
+} from "../../src/standalone/operator.js";
+import { OperatorPush } from "../../src/standalone/operator-push.js";
+import { OperatorWebBundle } from "../../src/standalone/operator-web.js";
+import {
+  StandaloneService,
+  type BackgroundFailureDiagnostic,
+  type StandaloneServiceOptions,
+} from "../../src/standalone/service.js";
 import {
   main,
   productionRuntimeHarnesses,
   productionService,
   waitForServiceExit,
 } from "../../src/standalone/cli.js";
-import type { Runtime } from "../../src/standalone/codex.js";
-import type { GitHubSourceReader } from "../../src/standalone/github-source.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../src/standalone/operator.js";
-import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import { OperatorPush } from "../../src/standalone/operator-push.js";
-import { OperatorWebBundle } from "../../src/standalone/operator-web.js";
-import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
-import {
-  type BackgroundFailureDiagnostic,
-  StandaloneService,
-  type StandaloneServiceOptions,
-} from "../../src/standalone/service.js";
 import { ServiceLog } from "../../src/standalone/service-log.js";
-import { startedOf } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { startedOf } from "../fixtures/service-internals.js";
 
 function deferred<T = void>(): {
   promise: Promise<T>;

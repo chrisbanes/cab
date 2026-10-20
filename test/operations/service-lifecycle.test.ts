@@ -5,8 +5,8 @@ import {
   appendFileSync,
   chmodSync,
   closeSync,
-  constants,
   copyFileSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -22,24 +22,24 @@ import {
 } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
-import { basename, dirname, join, relative, resolve } from "node:path";
 import { PassThrough } from "node:stream";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
 import {
-  daemonVerifyCommand,
   defaultServiceHost,
+  daemonVerifyCommand,
+  ghTokenStorage,
   type FirstRun,
   type GhTokenStorage,
-  ghTokenStorage,
   type InstallCli,
   installService,
   LIFECYCLE_OPTIONS,
   lifecycleOptions,
   type OperatorConnection,
-  SERVICE_USAGE,
   type ServiceHost,
   type ServiceOptions,
+  SERVICE_USAGE,
   serviceCommand,
   uninstallService,
   upgradeService,

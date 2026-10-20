@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   chmodSync,
-  mkdirSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { tmpdir } from "../fixtures/temp.js";
 import { CodexRuntime } from "../../src/standalone/codex.js";
 import { StandaloneService } from "../../src/standalone/service.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 type FixtureMode =
   | "all-forms"

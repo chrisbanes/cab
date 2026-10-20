@@ -17,12 +17,10 @@ import {
 import type { Runtime } from "../../src/standalone/codex.js";
 import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
 import { gitEnvironment } from "../../src/standalone/git-process.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   type RuntimeSpawnContext,
   StandaloneService,
 } from "../../src/standalone/service.js";
-import { failureNotice } from "../../web/src/execution-runtime.js";
 import {
   fakeSdk,
   init,
@@ -31,6 +29,8 @@ import {
   sessionOf,
 } from "../fixtures/claude-sdk.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { failureNotice } from "../../web/src/execution-runtime.js";
 
 /** Captures the spawn context; never starts a turn. */
 class ContextRuntime implements Runtime {

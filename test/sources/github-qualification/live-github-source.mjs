@@ -4,8 +4,8 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GitHubHttpSourceReader } from "../../../dist/src/standalone/github-source.js";
-import { LocalOperatorUi } from "../../../dist/src/standalone/operator.js";
 import { StandaloneService } from "../../../dist/src/standalone/service.js";
+import { LocalOperatorUi } from "../../../dist/src/standalone/operator.js";
 
 const manifestPath = process.env.ENSEMBLE_S06_FIXTURE_MANIFEST;
 if (!manifestPath)

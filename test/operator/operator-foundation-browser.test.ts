@@ -5,10 +5,8 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
-
 const test = browserSuite("operator-foundation-browser");
-
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 
 test("retained HTML routes share the production foundation and native interactions", async (_t, journey) => {

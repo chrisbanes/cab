@@ -6,6 +6,13 @@ import {
 import type { OperatorClient } from "./api.js";
 import { Button } from "./components.js";
 import {
+  attemptRelease,
+  type DraftStart,
+  PendingReleases,
+  startOf,
+} from "./composer-release.js";
+import type { ComposerState } from "./composer-state.js";
+import {
   type DraftChoice as Choice,
   type DraftField,
   draftingCopy,
@@ -13,17 +20,10 @@ import {
   draftingPollMs,
   draftingReleaseRetryMs,
   formatElapsed,
+  releaseBackoffMs,
   planFill,
   proposedReadDelay,
-  releaseBackoffMs,
 } from "./composer-drafting-model.js";
-import {
-  attemptRelease,
-  type DraftStart,
-  PendingReleases,
-  startOf,
-} from "./composer-release.js";
-import type { ComposerState } from "./composer-state.js";
 import { useOperatorResource } from "./resource.js";
 import { Badge } from "./ui/badge.js";
 import { Textarea } from "./ui/textarea.js";

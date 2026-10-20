@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type TestContext, test } from "node:test";
+import { test, type TestContext } from "node:test";
 import {
   pushCredentialHelper,
   pushTaskCommit,

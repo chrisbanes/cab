@@ -19,6 +19,7 @@ import {
   taskReadiness,
 } from "./task-overview.js";
 import { type TaskTab, taskTabs } from "./task-tabs.js";
+import { useMediaQuery } from "./use-media-query.js";
 import { stateIcons } from "./task-views.js";
 import {
   Dialog,
@@ -28,7 +29,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./ui/dialog.js";
-import { useMediaQuery } from "./use-media-query.js";
 
 /** Plain data the task page reports to the shell header; the shell renders it. */
 export interface TaskHeaderReport {

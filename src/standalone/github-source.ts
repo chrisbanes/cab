@@ -1,21 +1,19 @@
 import { z } from "zod";
 import type {
-  BlockerSnapshot,
   GitHubSelection,
-  IssueReference,
   IssueSnapshot,
-  IssueStatus,
   SelectionSnapshot,
-} from "../core/github-source.js";
-
-export type {
+  IssueStatus,
   BlockerSnapshot,
   IssueReference,
-  IssueSnapshot,
-  IssueStatus,
-  SelectionSnapshot,
 } from "../core/github-source.js";
-
+export type {
+  IssueSnapshot,
+  SelectionSnapshot,
+  IssueStatus,
+  BlockerSnapshot,
+  IssueReference,
+} from "../core/github-source.js";
 import {
   githubApi as api,
   githubFetch,

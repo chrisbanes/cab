@@ -3,11 +3,10 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  ExternalAction,
-  PrDeliveryObservation,
-  ProviderActionObservation,
-} from "../../src/core/delivery.js";
+import {
+  StandaloneService,
+  type RuntimeSpawnContext,
+} from "../../src/standalone/service.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -17,10 +16,11 @@ import type {
   ClosedIssueInspection,
   GitHubDeliveryProvider,
 } from "../../src/standalone/github-delivery.js";
-import {
-  type RuntimeSpawnContext,
-  StandaloneService,
-} from "../../src/standalone/service.js";
+import type {
+  ExternalAction,
+  PrDeliveryObservation,
+  ProviderActionObservation,
+} from "../../src/core/delivery.js";
 
 export async function deliveryFixture(
   mode: "reviewable-pr" | "through-merge" = "reviewable-pr",

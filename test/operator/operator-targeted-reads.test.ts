@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { type TestContext, test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { CoordinationStore } from "../../src/core/coordination.js";
 import type { CoordinationView } from "../../src/standalone/coordination-view.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -8,9 +8,9 @@ import {
   runtimeOperatorRoutes,
   selectAssignmentExecution,
 } from "../../src/standalone/operator-runtime.js";
-import type { RecoveryRecord } from "../../src/standalone/recovery-types.js";
 import type { TurnRequest } from "../../src/standalone/scheduler.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
+import type { RecoveryRecord } from "../../src/standalone/recovery-types.js";
 import { ExecutionState } from "../../src/standalone/state.js";
 import {
   createOperatorFixture,

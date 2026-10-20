@@ -3,9 +3,9 @@ import type {
   Workspace,
 } from "../../src/operator/contracts.js";
 import {
-  addClaudeHref,
   readinessCheckHref,
   settingsSectionHref,
+  addClaudeHref,
 } from "./settings-sections.js";
 import type { ReadinessRead } from "./setup-model.js";
 

@@ -1,39 +1,38 @@
-import { randomUUID } from "node:crypto";
 import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
-import { z } from "zod";
+  questionCommandRawLimit,
+  runtimeSummary,
+} from "../operator/contracts.js";
+import type { OperatorWebBoundary } from "./operator-web.js";
 import {
-  type DomainCommand,
-  DomainCommands,
-  DomainConflictError,
-  type DomainStore,
-} from "../core/domain.js";
-import {
-  type GitHubSourceStore,
-  selectionSchema,
-} from "../core/github-source.js";
-import {
-  closedIssuesSchema,
-  type Readiness,
-} from "../core/github-source-contracts.js";
+  OperatorApiError,
+  type OperatorReviewSessionContext,
+} from "./operator-api.js";
 import {
   apiErrorSchema,
   cliCapabilities,
   cliIdentitySchema,
-  operatorCredentialIssuedSchema,
   operatorCredentialIssueRequestSchema,
+  operatorCredentialIssuedSchema,
   operatorCredentialListSchema,
   pushNotificationsReadSchema,
   pushSubscriptionResultSchema,
   pushTestResultSchema,
-  questionCommandRawLimit,
-  runtimeSummary,
   sessionSchema,
 } from "../operator/contracts.js";
+import {
+  OperatorCredentialError,
+  operatorRouteAuthority,
+  type OperatorCredentialStore,
+  type VerifiedOperatorCredential,
+} from "./operator-credentials.js";
+import type { OperatorPush } from "./operator-push.js";
+import { PushError } from "./web-push.js";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import {
+  closedIssuesSchema,
+  type Readiness,
+} from "../core/github-source-contracts.js";
 import {
   noRuleText,
   ruleText,
@@ -41,35 +40,38 @@ import {
   unmetText,
   zeroMatchWarning,
 } from "../operator/readiness-text.js";
-import { ghEnvironment } from "./gh-credential.js";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import {
+  DomainCommands,
+  DomainConflictError,
+  type DomainCommand,
+  type DomainStore,
+} from "../core/domain.js";
+import type { OperatorAuth, OperatorSession } from "./operator-auth.js";
 import type { GitHubSourceReader } from "./github-source.js";
 import {
   CredentialGitHubSourceReader,
   gitHubSourceCredentialStatus,
-  type SourceCredentialReason,
   sourceCredentialExplanation,
+  type SourceCredentialReason,
 } from "./github-source-credential.js";
+import { ghEnvironment } from "./gh-credential.js";
 import {
-  OperatorApiError,
-  type OperatorReviewSessionContext,
-} from "./operator-api.js";
-import type { OperatorAuth, OperatorSession } from "./operator-auth.js";
-import {
-  OperatorCredentialError,
-  type OperatorCredentialStore,
-  operatorRouteAuthority,
-  type VerifiedOperatorCredential,
-} from "./operator-credentials.js";
-import { escapeHtml, hidden } from "./operator-html.js";
-import type { OperatorPush } from "./operator-push.js";
+  selectionSchema,
+  type GitHubSourceStore,
+} from "../core/github-source.js";
 import {
   containsControlCharacters,
   decodeSegment,
   OperatorRouteRegistry,
   type OperatorRouteResult,
 } from "./operator-routes.js";
-import type { OperatorWebBoundary } from "./operator-web.js";
-import { PushError } from "./web-push.js";
+import { escapeHtml, hidden } from "./operator-html.js";
 
 function field(
   name: string,

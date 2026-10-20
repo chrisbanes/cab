@@ -1,19 +1,20 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { type Browser, chromium, type Page } from "playwright";
-import { type TaskRead, taskSchema } from "../../src/operator/contracts.js";
+import { chromium, type Browser, type Page } from "playwright";
 import {
-  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import {
   addProfile,
   addProject,
   addTask,
   startFirstTurn,
 } from "../fixtures/operator-first-run.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { openMoreFilters, seedCatalog } from "../fixtures/operator-work.js";
 import { choiceForm, guideForm } from "../fixtures/question-data.js";
 import {
@@ -21,7 +22,6 @@ import {
   seedOwnIntervention,
   seedOwnQuestion,
 } from "../fixtures/questions.js";
-import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 
 const test = browserSuite("operator-work-browser");
 const uuidText = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i;

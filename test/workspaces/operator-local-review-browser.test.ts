@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Browser, chromium, type Locator, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
+import {
+  browserSuite,
+  type BrowserJourney,
+  captureBrowserEvidence,
+} from "../fixtures/browser-diagnostics.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   leadAwaitingRecoveryNotice,
   leadResumeNotice,
 } from "../../web/src/lead-feedback.js";
-import {
-  type BrowserJourney,
-  browserSuite,
-  captureBrowserEvidence,
-} from "../fixtures/browser-diagnostics.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-local-review-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */

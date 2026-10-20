@@ -9,8 +9,8 @@ import {
 } from "../../src/standalone/gh-credential.js";
 import {
   createFakeGh,
-  type FakeGhState,
   fakeGhToken,
+  type FakeGhState,
 } from "../fixtures/fake-gh.js";
 
 test("gh detection and token resolution map every state without revealing the token", async (t) => {

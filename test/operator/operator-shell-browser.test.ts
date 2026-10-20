@@ -1,21 +1,19 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
-
 const test = browserSuite("operator-shell-browser");
-
-import { type Browser, chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   addProfile,
   addProject,
   addTask,
   startFirstTurn,
 } from "../fixtures/operator-first-run.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { mixedForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 

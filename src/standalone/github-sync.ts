@@ -1,8 +1,12 @@
+import {
+  selectionSchema,
+  type GitHubSourceStore,
+} from "../core/github-source.js";
 import type { DomainStore } from "../core/domain.js";
 import {
-  type GitHubSourceStore,
-  selectionSchema,
-} from "../core/github-source.js";
+  CredentialGitHubSourceReader,
+  SourceRateLimitPauses,
+} from "./github-source-credential.js";
 import { ghEnvironment } from "./gh-credential.js";
 import type {
   BlockerSnapshot,
@@ -12,10 +16,6 @@ import type {
   IssueStatus,
   SelectionSnapshot,
 } from "./github-source.js";
-import {
-  CredentialGitHubSourceReader,
-  SourceRateLimitPauses,
-} from "./github-source-credential.js";
 
 export type GitHubReaderFactory = (credentialRef: string) => GitHubSourceReader;
 

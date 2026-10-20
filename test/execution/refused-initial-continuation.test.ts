@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { tmpdir } from "../fixtures/temp.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -12,7 +13,6 @@ import type {
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { startedOf } from "../fixtures/service-internals.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 type ToolListener = (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
 

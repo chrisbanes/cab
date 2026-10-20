@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { RuntimeConversationEvent } from "../../src/standalone/codex.js";
+import { join } from "node:path";
 import { GitHubHttpDeliveryProvider } from "../../src/standalone/github-delivery.js";
-import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
+import type { RuntimeConversationEvent } from "../../src/standalone/codex.js";
+import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import type { FixtureLifecycleOptions } from "./fixture-lifecycle.js";
 import {
   createOperatorFixture,

@@ -5,8 +5,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -24,8 +24,8 @@ import type {
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
 import {
-  draftingInstruction,
   draftProposalToolName,
+  draftingInstruction,
   issueDraftingInstruction,
   issueEditProposalOf,
   issueEditProposalToolName,
@@ -36,12 +36,12 @@ import {
   StandaloneService,
 } from "../../src/standalone/service.js";
 import { fakeSdk, init, result, sessionOf } from "../fixtures/claude-sdk.js";
+import { tmpdir } from "../fixtures/temp.js";
 import {
   acquiredOf,
   startedOf,
   unpublish,
 } from "../fixtures/service-internals.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 const processIdentity = {
   processId: "4242",

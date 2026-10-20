@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { CoordinationStore } from "../../src/core/coordination.js";
-import { type DomainCommand, DomainStore } from "../../src/core/domain.js";
+import { DomainStore, type DomainCommand } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { ExecutionState } from "../../src/standalone/state.js";
 

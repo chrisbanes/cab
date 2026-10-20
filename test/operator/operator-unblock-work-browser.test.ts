@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { type Browser, chromium, type Locator, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import {
-  type BrowserJourney,
   browserSuite,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   desktop,
   inFirstViewport,
@@ -12,7 +13,6 @@ import {
   phone,
   signIn,
 } from "../fixtures/operator-settings.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
 
 const test = browserSuite("unblock-work-budget");
 

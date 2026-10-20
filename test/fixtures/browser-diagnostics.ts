@@ -11,21 +11,21 @@ import {
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { test as nodeTest, type TestContext } from "node:test";
 import type { Page } from "playwright";
+import { tmpdir } from "./temp.js";
 import {
-  type BrowserTestOptions,
-  browserEngineTestOptions,
   browserTestEngine,
+  browserEngineTestOptions,
+  type BrowserTestOptions,
 } from "./browser-engines.js";
 import {
   FixtureLifecycle,
-  type FixtureLifecycleOptions,
   FixtureStartupError,
-  type FixtureStep,
   fixtureStepCompleted,
   fixtureStepPending,
   throwFixtureCleanup,
+  type FixtureStep,
+  type FixtureLifecycleOptions,
 } from "./fixture-lifecycle.js";
-import { tmpdir } from "./temp.js";
 
 const defaultBrowserJourneyOverallMs = 90000;
 const browserSuiteTimeoutMarginMs = 5000;

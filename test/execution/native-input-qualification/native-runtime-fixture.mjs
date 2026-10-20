@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
-
 if (process.argv.includes("--version")) {
   console.log(
     process.env.ENSEMBLE_UI01_NATIVE_TRANSPORT_FIXTURE === "unknown-version"

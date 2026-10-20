@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
-import { seedDeliveryCoverage } from "../fixtures/delivery-coverage.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { seedDeliveryCoverage } from "../fixtures/delivery-coverage.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
-
 const test = browserSuite("operator-observation-browser");
 test("bounded retained provider lists disclose partial coverage on desktop and phone without inferring complete success", async (_t, j) => {
   const f = await j.start("fixture.create", () =>

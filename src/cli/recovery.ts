@@ -23,9 +23,9 @@ import { exactCommand, positiveIntFlag, requireOut } from "./configure.js";
 import { CliError } from "./connections.js";
 import { receiptLines } from "./operation.js";
 import {
-  RECOVERY_SCHEMA,
   readEvidenceFile,
   readRecoveryDocument,
+  RECOVERY_SCHEMA,
   writeRecoveryDocument,
 } from "./recovery-document.js";
 import { isoTime, keyValues, table } from "./render.js";

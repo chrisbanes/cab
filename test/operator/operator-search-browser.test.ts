@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { type Browser, chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
-import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { signOutFromSidebar } from "../fixtures/operator-account.js";
+import { markTaskReady, seedReviewTask } from "../fixtures/task-review.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
+import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import {
   openSearchFromSidebar,
   searchDayEnd,
@@ -14,9 +16,6 @@ import {
   searchFieldLabel,
   searchRecords,
 } from "../fixtures/shell-search.js";
-import { markTaskReady, seedReviewTask } from "../fixtures/task-review.js";
-import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
-
 const test = browserSuite("operator-search-browser");
 const backName = "Back to originating workspace";
 

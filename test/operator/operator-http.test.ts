@@ -1,22 +1,23 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { request as httpRequest } from "node:http";
-import { type AddressInfo, createServer } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { tmpdir } from "../fixtures/temp.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../src/standalone/operator.js";
-import {
   OperatorAuth,
   type OperatorSession,
 } from "../../src/standalone/operator-auth.js";
+import {
+  LocalOperatorHttp,
+  LocalOperatorUi,
+} from "../../src/standalone/operator.js";
 import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import {
   type OperatorRoute,
@@ -25,7 +26,6 @@ import {
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { createControlledPasswordDeriver } from "../fixtures/operator-auth-concurrency.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 const password = "test operator password";
 

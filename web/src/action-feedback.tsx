@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "./components.js";
 import type { ReceiptDetails } from "./outcome-copy.js";
 import { Alert } from "./ui/alert.js";

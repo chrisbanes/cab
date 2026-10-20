@@ -57,13 +57,33 @@ import {
 import type { IssueEditReasonCode } from "../operator/github-reasons.js";
 
 type DraftingReceipt = Extract<CommandReceipt, { kind: "drafting" }>;
-
 import { reviewMetadataSchema } from "../core/task-review.js";
 import type {
   HarnessStatus,
   RuntimeRestartFailure,
 } from "../operator/contracts.js";
 import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
+import {
+  type DraftingRun,
+  DraftingRunStore,
+  draftProposalTool,
+  draftProposalToolName,
+  draftingInstruction,
+  issueDraftingInstruction,
+  issueDraftingRequest,
+  issueEditProposalSchema,
+  issueEditProposalTool,
+  issueEditProposalToolName,
+  draftingTimeLimitMs,
+} from "./drafting.js";
+import {
+  type DraftTurnFacts,
+  DraftTurnUnavailableError,
+  draftTurnAvailability,
+  draftTurnInstruction,
+  draftTaskDigest,
+  draftTurnToolDecision,
+} from "./draft-turn.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,
@@ -89,6 +109,7 @@ import {
   prepareExclusions,
   sanitizeConversationText,
 } from "./conversation-history.js";
+import { type SanitizedError, sanitizeError } from "./service-log.js";
 import {
   coordinationTools,
   dispatchCoordinationTool,
@@ -100,28 +121,7 @@ import {
   StandaloneDataDirectory,
 } from "./data-directory.js";
 import { DeliveryCoordinator, unresolvedThreadSummary } from "./delivery.js";
-import {
-  type DraftTurnFacts,
-  DraftTurnUnavailableError,
-  draftTaskDigest,
-  draftTurnAvailability,
-  draftTurnInstruction,
-  draftTurnToolDecision,
-} from "./draft-turn.js";
-import {
-  type DraftingRun,
-  DraftingRunStore,
-  draftingInstruction,
-  draftingTimeLimitMs,
-  draftProposalTool,
-  draftProposalToolName,
-  issueDraftingInstruction,
-  issueDraftingRequest,
-  issueEditProposalSchema,
-  issueEditProposalTool,
-  issueEditProposalToolName,
-} from "./drafting.js";
-import { resolveOnPath } from "./executable-path.js";
+import { verifyTaskPush } from "./push-verification.js";
 import {
   type DiagnosticKind,
   type DiagnosticLimits,
@@ -151,6 +151,7 @@ import {
   gitHubSourceCredentialStatus,
 } from "./github-source-credential.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
+import { resolveOnPath } from "./executable-path.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
 import {
   encodeNativeInputReply,
@@ -180,13 +181,11 @@ import {
   preTurnRecoveryCommandSchema,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
-import { verifyTaskPush } from "./push-verification.js";
 import type {
   RecoveryReceipt,
   RecoveryRecord,
   TerminationVerifier,
 } from "./recovery-types.js";
-import { verifiedRepository } from "./repository-verification.js";
 import {
   captureRetainedResultEvidence,
   captureRetainedReviewAnchor,
@@ -195,6 +194,7 @@ import {
   retainedReviewAnchorMaterialHash,
   retainedReviewAnchorStageRequestSchema,
 } from "./retained-evidence.js";
+import { verifiedRepository } from "./repository-verification.js";
 import {
   RoutingAttemptStore,
   type RoutingChoiceClient,
@@ -206,6 +206,25 @@ import {
   routingClientFromEnvironment,
   routingModel,
 } from "./routing.js";
+import type { RuntimeSafetyPort } from "./runtime-retention.js";
+import {
+  SchedulerStore,
+  type TurnRequest,
+  TurnScheduler,
+} from "./scheduler.js";
+import { SchedulerWakeQueries } from "./scheduler-wake-queries.js";
+import {
+  type CoordinationExecutionBinding,
+  type ExecutionIntent,
+  ExecutionState,
+  harnessRetrySupported,
+  type DraftTurnReceipt,
+  type StopTarget,
+  type TaskControlReceipt,
+  type TaskExecutionBinding,
+  type TaskExecutionBindingRecord,
+  type TaskExecutionContext,
+} from "./state.js";
 import {
   defaultRestartClock,
   newRestartState,
@@ -214,26 +233,6 @@ import {
   runtimeRestartDelaysMs,
   runtimeRestartStableMs,
 } from "./runtime-restart.js";
-import type { RuntimeSafetyPort } from "./runtime-retention.js";
-import {
-  SchedulerStore,
-  type TurnRequest,
-  TurnScheduler,
-} from "./scheduler.js";
-import { SchedulerWakeQueries } from "./scheduler-wake-queries.js";
-import { type SanitizedError, sanitizeError } from "./service-log.js";
-import {
-  type CoordinationExecutionBinding,
-  type DraftTurnReceipt,
-  type ExecutionIntent,
-  ExecutionState,
-  harnessRetrySupported,
-  type StopTarget,
-  type TaskControlReceipt,
-  type TaskExecutionBinding,
-  type TaskExecutionBindingRecord,
-  type TaskExecutionContext,
-} from "./state.js";
 import {
   ExecutionSupervisor,
   type ExecutionSupervisorOptions,

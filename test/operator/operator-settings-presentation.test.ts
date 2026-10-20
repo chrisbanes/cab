@@ -1,21 +1,17 @@
-import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { test } from "node:test";
 import { sourceCredentialExplanation } from "../../src/standalone/github-source-credential.js";
-import { clockLabel } from "../../web/src/presentation.js";
+import { sourceCredentialCopy } from "../../web/src/settings-view.js";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { test } from "node:test";
 import {
   adoptSourceRows,
   capacityChanges,
-  duplicateSourceIds,
   nextSelectionId,
-  type ProfileConfigurationData,
-  type ProjectConfigurationData,
   parseRows,
-  privateField,
   profileChanges,
   projectChanges,
-  type RuntimeSettingsData,
+  privateField,
   removesAllAccess,
   routingChanges,
   routingCommand,
@@ -23,24 +19,28 @@ import {
   sourceCommand,
   sourceRowsFrom,
   staleSourceRows,
+  duplicateSourceIds,
+  type ProfileConfigurationData,
+  type ProjectConfigurationData,
+  type RuntimeSettingsData,
 } from "../../web/src/settings-changes.js";
 import {
+  holdPills,
+  projectStateSummary,
+  recoveryRecordRuns,
+  readinessNextStep,
+  joinNames,
   activationLine,
   draftSourceName,
-  holdPills,
-  joinNames,
   observationLabel,
-  projectStateSummary,
-  readinessNextStep,
-  recoveryRecordRuns,
   savedLine,
   selectionLine,
   settingsHeader,
-  sourceCredentialCopy,
   sourceHeading,
   sourceName,
   sourceStatusLine,
 } from "../../web/src/settings-view.js";
+import { clockLabel } from "../../web/src/presentation.js";
 
 const id = () => randomUUID();
 const mira = id(),

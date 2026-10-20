@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { type Browser, chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
-import { createFakeGh, fakeGhToken } from "../fixtures/fake-gh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { createFakeGh, fakeGhToken } from "../fixtures/fake-gh.js";
 
 const test = browserSuite("operator-source-credential-browser");
 

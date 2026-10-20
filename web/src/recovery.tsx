@@ -1,61 +1,23 @@
-import { Circle, CirclePause, CircleSlash } from "lucide-react";
 import {
   Fragment,
-  type ReactNode,
   useCallback,
   useEffect,
   useId,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
+import { Circle, CirclePause, CircleSlash } from "lucide-react";
 import {
-  assignmentRecoverySchema,
   executionHarnessLabels,
+  runtimeSettingsSchema,
+  assignmentRecoverySchema,
   type HarnessStatus,
   type OperatorCommand,
-  runtimeSettingsSchema,
 } from "../../src/operator/contracts.js";
-import {
-  projectLabel,
-  workspaceLabels,
-} from "../../src/operator/project-labels.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
-import { AddClaudePanel } from "./add-claude.js";
-import {
-  ActionLink,
-  Button,
-  ProjectName,
-  ResourceStatus,
-  StatusBadge,
-} from "./components.js";
-import { ExecutionNotices, RuntimePolicy } from "./execution-notice.js";
-import {
-  disableConfirmation,
-  executableMissingMessage,
-  executionSummary,
-  harnessReason,
-  harnessStateLabel,
-} from "./execution-runtime.js";
 import { failureCause } from "./outcome-copy.js";
-import { useOperatorResource } from "./resource.js";
-import {
-  Aside,
-  ChangeList,
-  DraftCheck,
-  DraftField,
-  DraftOutcome,
-  Panel,
-  reloadDraft,
-  type SettingsProps,
-  submitDraft,
-  useDraft,
-  useHeaderRefresh,
-  useLoadedDraft,
-} from "./settings.js";
-import { capacityChanges, type Values } from "./settings-changes.js";
-import { useFragmentLanding } from "./settings-sections.js";
-import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
-import { Alert } from "./ui/alert.js";
+import { Input } from "./ui/input.js";
 import {
   Dialog,
   DialogClose,
@@ -63,8 +25,45 @@ import {
   DialogDescription,
   DialogTitle,
 } from "./ui/dialog.js";
-import { Input } from "./ui/input.js";
-
+import { AddClaudePanel } from "./add-claude.js";
+import {
+  disableConfirmation,
+  executableMissingMessage,
+  executionSummary,
+  harnessReason,
+  harnessStateLabel,
+} from "./execution-runtime.js";
+import { ExecutionNotices, RuntimePolicy } from "./execution-notice.js";
+import { useOperatorResource } from "./resource.js";
+import {
+  ActionLink,
+  Button,
+  ProjectName,
+  ResourceStatus,
+  StatusBadge,
+} from "./components.js";
+import {
+  projectLabel,
+  workspaceLabels,
+} from "../../src/operator/project-labels.js";
+import { capacityChanges, type Values } from "./settings-changes.js";
+import { useFragmentLanding } from "./settings-sections.js";
+import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
+import { Alert } from "./ui/alert.js";
+import {
+  Aside,
+  ChangeList,
+  DraftField,
+  DraftCheck,
+  DraftOutcome,
+  Panel,
+  reloadDraft,
+  useDraft,
+  useHeaderRefresh,
+  useLoadedDraft,
+  submitDraft,
+  type SettingsProps,
+} from "./settings.js";
 type Outcome = {
   tone: "success" | "error" | "warning";
   message: string;

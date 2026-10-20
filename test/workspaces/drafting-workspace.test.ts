@@ -11,11 +11,11 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { Store } from "../../src/core/store.js";
+import { tmpdir } from "../fixtures/temp.js";
 import {
   SqliteWorkspaceBindingStore,
   WorkspaceManager,
 } from "../../src/standalone/workspaces.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();

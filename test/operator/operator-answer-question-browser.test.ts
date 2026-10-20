@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { type Browser, chromium, type Locator, type Page } from "playwright";
-import { questionReadSchema } from "../../src/operator/contracts.js";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import {
-  type BrowserJourney,
   browserSuite,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   desktop,
   inFirstViewport,
@@ -12,7 +12,7 @@ import {
   phone,
   signIn,
 } from "../fixtures/operator-settings.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { questionReadSchema } from "../../src/operator/contracts.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";

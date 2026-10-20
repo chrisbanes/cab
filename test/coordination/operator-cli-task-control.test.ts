@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { configure } from "../fixtures/completed-lead.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
+import { configure } from "../fixtures/completed-lead.js";
 import {
   failReadAfterPost,
   startCliOperator,

@@ -2,20 +2,20 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   type Browser,
-  chromium,
   type Page,
   type Request,
   type Route,
+  chromium,
 } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
-import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { openSearchFromSidebar } from "../fixtures/shell-search.js";
+import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { seedTaskResult } from "../fixtures/task-review.js";
 import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-comments-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */

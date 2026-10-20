@@ -10,22 +10,22 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { type TestContext, test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { childProcessEnvironment } from "../../src/core/child-environment.js";
 import type { Runtime } from "../../src/standalone/codex.js";
+import {
+  OperatorApi,
+  OperatorApiError,
+} from "../../src/standalone/operator-api.js";
+import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import type {
   GitHubSourceReader,
   SelectionSnapshot,
 } from "../../src/standalone/github-source.js";
 import { sourceCredentialExplanation } from "../../src/standalone/github-source-credential.js";
-import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import {
-  OperatorApi,
-  OperatorApiError,
-} from "../../src/standalone/operator-api.js";
-import {
-  type RuntimeSpawnContext,
   StandaloneService,
+  type RuntimeSpawnContext,
 } from "../../src/standalone/service.js";
 import { createFakeGh, fakeGhToken } from "../fixtures/fake-gh.js";
 import { startCliService } from "../fixtures/operator-cli.js";

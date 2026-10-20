@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  type TaskListSummary,
   taskListSummarySchema,
+  type TaskListSummary,
 } from "../../src/operator/contracts.js";
 
 export type Overrides = {

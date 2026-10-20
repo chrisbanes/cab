@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
-
 const write = (m) => process.stdout.write(`${JSON.stringify(m)}\n`);
 let turns = 0,
   threads = 0;

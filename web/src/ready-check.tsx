@@ -8,12 +8,12 @@ import { readinessSchema } from "../../src/operator/readiness.js";
 import { ActionLink, Button } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { DraftMessage, key, type SettingsProps, useDraft } from "./settings.js";
-import type { ConfigurationDraft } from "./settings-state.js";
 import {
   type ReadinessRead,
   readyCheckItems,
   sourceCredentialLine,
 } from "./setup-model.js";
+import type { ConfigurationDraft } from "./settings-state.js";
 
 /** Frames 146–147: what creation saved, what would make work wait, and Resume or Keep paused. */
 export function ReadyCheck({

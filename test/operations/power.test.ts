@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { PassThrough } from "node:stream";
 import { mock, test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";

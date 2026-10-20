@@ -1,5 +1,5 @@
 import { ArrowUp, Folder } from "lucide-react";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { FolderListing } from "../../src/operator/contracts.js";
 import { ClientError, type OperatorClient } from "./api.js";
 import { Button, StatusBadge } from "./components.js";

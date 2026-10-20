@@ -46,18 +46,16 @@ test("operator policy form exposes current version and grants without credential
   }
 });
 
-import { type AddressInfo, createServer } from "node:net";
+import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
-
 const browserTest = browserSuite("delivery");
-
-import { LocalOperatorHttp } from "../../src/standalone/operator.js";
-import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
-import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
 import { deliveryFixture } from "../fixtures/delivery-fixture.js";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import { LocalOperatorHttp } from "../../src/standalone/operator.js";
+import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
+import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 
 browserTest(
   "authenticated Chromium settlement rejects an externally changed head and escapes feedback",

@@ -3,14 +3,14 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { DomainCommand } from "../../src/core/domain.js";
 import { clockLabel } from "../../src/operator/clock-label.js";
+import { ManualRestartClock, settle } from "../fixtures/restart-clock.js";
+import { tmpdir } from "../fixtures/temp.js";
+import type { DomainCommand } from "../../src/core/domain.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
 import { StandaloneService } from "../../src/standalone/service.js";
-import { ManualRestartClock, settle } from "../fixtures/restart-clock.js";
-import { tmpdir } from "../fixtures/temp.js";
 
 const runtime: Runtime = {
   async start() {},

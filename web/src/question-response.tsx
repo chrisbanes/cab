@@ -1,43 +1,43 @@
-import { CircleSlash } from "lucide-react";
 import {
-  type ComponentProps,
   useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentProps,
 } from "react";
+import { CircleSlash } from "lucide-react";
 import {
-  canSupplyCustomText,
+  questionReadSchema,
+  operatorCommandSchema,
+  type Session,
+  type OperatorCommand,
+  type QuestionRead,
+} from "../../src/operator/contracts.js";
+import {
   nativeQuestionAnswers,
+  canSupplyCustomText,
   type QuestionForm,
 } from "../../src/core/question-forms.js";
-import {
-  type OperatorCommand,
-  operatorCommandSchema,
-  type QuestionRead,
-  questionReadSchema,
-  type Session,
-} from "../../src/operator/contracts.js";
-import { ActionOutcome, detailRows } from "./action-feedback.js";
 import type { OperatorClient } from "./api.js";
+import { useOperatorResource } from "./resource.js";
 import {
   ActionLink,
   Button,
   ResourceStatus,
   StatusBadge,
 } from "./components.js";
-import type { HoldNotice } from "./inbox-presentation.js";
-import { clockLabel } from "./presentation.js";
+import { ActionOutcome, detailRows } from "./action-feedback.js";
+import { Card } from "./ui/card.js";
+import { Textarea } from "./ui/textarea.js";
 import {
   answerCopy,
   answerSummary,
   completedQuestionCount,
   type QuestionResponseStates,
 } from "./question-response-state.js";
-import { useOperatorResource } from "./resource.js";
-import { Card } from "./ui/card.js";
-import { Textarea } from "./ui/textarea.js";
+import type { HoldNotice } from "./inbox-presentation.js";
+import { clockLabel } from "./presentation.js";
 export function QuestionResponse({
   client,
   session,

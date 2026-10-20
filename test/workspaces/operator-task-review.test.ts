@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
-
 test("curated review API retains historical identities and delivery/context gaps, strips private file paths and explicit viewing survives refresh", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

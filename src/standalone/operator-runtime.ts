@@ -6,19 +6,19 @@ import type {
   DomainCommand,
   DomainStore,
 } from "../core/domain.js";
-import { runtimeSummary } from "../core/execution-runtime.js";
+import type { OperatorRoute } from "./operator-routes.js";
+import type { RecoveryRecord } from "./recovery-types.js";
+import type { TurnRequest } from "./scheduler.js";
+import type { ExecutionIntent } from "./state.js";
+import type { StandaloneService } from "./service.js";
+import type { StopObservation } from "./supervisor.js";
+import { escapeHtml, hidden } from "./operator-html.js";
 import { unavailableAlert } from "../operator/runtime-restart-copy.js";
 import {
   type ExecutionHarness,
   executionHarnessLabels,
 } from "./execution-harness.js";
-import { escapeHtml, hidden } from "./operator-html.js";
-import type { OperatorRoute } from "./operator-routes.js";
-import type { RecoveryRecord } from "./recovery-types.js";
-import type { TurnRequest } from "./scheduler.js";
-import type { StandaloneService } from "./service.js";
-import type { ExecutionIntent } from "./state.js";
-import type { StopObservation } from "./supervisor.js";
+import { runtimeSummary } from "../core/execution-runtime.js";
 
 const positiveIntegerString = z
   .string()

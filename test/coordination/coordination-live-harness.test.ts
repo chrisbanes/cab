@@ -13,8 +13,8 @@ import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { tmpdir } from "../fixtures/temp.js";
 import { SqliteLiveCallBudget } from "./live-qualification/live-call-budget.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 test("live journey refuses missing authorization and invalid mode before execution", () => {
   for (const [args, expected] of [

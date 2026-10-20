@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -14,13 +14,13 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { renderLaunchAgent } from "../../../dist/src/standalone/launchd.js";
 import { StandaloneService } from "../../../dist/src/standalone/service.js";
+import { OperatorFixtureRuntime } from "../../../dist/test/fixtures/operator-web.js";
+import { renderLaunchAgent } from "../../../dist/src/standalone/launchd.js";
 import {
   captureProcessIdentity,
   MacProcessTerminationVerifier,
 } from "../../../dist/src/standalone/termination.js";
-import { OperatorFixtureRuntime } from "../../../dist/test/fixtures/operator-web.js";
 
 if (process.argv[2] !== "--qualify" || process.platform !== "darwin")
   throw Error("Requires explicit --qualify on macOS; no skipped qualification");

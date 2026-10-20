@@ -1,20 +1,19 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { CoordinationStore } from "../../src/core/coordination.js";
-import { type DomainCommand, DomainStore } from "../../src/core/domain.js";
-import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
+import { DomainStore, type DomainCommand } from "../../src/core/domain.js";
+import { CoordinationStore } from "../../src/core/coordination.js";
 import {
   sourceSnapshotSchema,
   TaskReviewStore,
 } from "../../src/core/task-review.js";
+import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { ExecutionState } from "../../src/standalone/state.js";
-
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "ui04-review-")),
     file = join(directory, "state.sqlite");
