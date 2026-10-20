@@ -3285,6 +3285,8 @@ export class StandaloneService {
         throw new DomainConflictError(
           "Operation key used with different material or caller",
         );
+      // The refresh that follows a stale refusal may have failed, so a replay tries again.
+      await this.refreshAfterStaleEdit(prior);
       return prior;
     }
     const caller = this.operatorCommentCaller(command.taskId);
@@ -3298,11 +3300,17 @@ export class StandaloneService {
       },
       caller,
     );
-    // The synced copy is what a Redraft starts from, so the change GitHub just showed is read
-    // now rather than at the next poll. A failed read leaves the earlier copy.
-    if (sent.observation?.reason === issueChangedReason)
-      await this.refreshGitHub().catch(() => {});
+    await this.refreshAfterStaleEdit(sent);
     return sent;
+  }
+  /**
+   * The synced copy is what a Redraft starts from, so after GitHub showed a change the source
+   * is read now rather than at the next poll. A failed read leaves the earlier copy, and a
+   * replay of the same send tries again.
+   */
+  private async refreshAfterStaleEdit(record: DeliveryActionRecord) {
+    if (record.observation?.reason === issueChangedReason)
+      await this.refreshGitHub().catch(() => {});
   }
   async refreshGitHub(): Promise<void> {
     const started = this.started();

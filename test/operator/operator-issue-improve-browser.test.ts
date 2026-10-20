@@ -401,3 +401,57 @@ test(
     assert.equal(effects.length, 1);
   },
 );
+
+test("a Redraft refused as out of date keeps the operator's text and works once retried", async (_t, j) => {
+  const ctx = await launch(j, desktop);
+  const { page, commands, open } = ctx;
+  await open();
+  await draftAndLoad(ctx);
+  await page.locator("#issue-improve-title").fill("My own edit");
+  const commandsUrl = "**/api/operator/commands";
+  await page.route(commandsUrl, (route) => {
+    if ((route.request().postData() ?? "").includes('"issue.draft.start"'))
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "conflict", message: "stale" } }),
+      });
+    return route.continue();
+  });
+  await panel(page).getByRole("button", { name: "Redraft" }).click();
+  await panel(page).getByText("The task changed. Try again.").waitFor();
+  assert.equal(
+    await page.locator("#issue-improve-title").inputValue(),
+    "My own edit",
+  );
+  await page.unroute(commandsUrl);
+  await panel(page).getByRole("button", { name: "Redraft" }).click();
+  await panel(page).getByText("Drafting", { exact: true }).waitFor();
+  assert.equal(commands("issue.draft.start").length, 3);
+});
+
+test("a review refused because the task moved reads the task again so Redraft starts from the current version", async (_t, j) => {
+  const ctx = await launch(j, desktop);
+  const { page, f, commands, open, set } = ctx;
+  await open();
+  await draftAndLoad(ctx);
+  // GitHub changed and a sync moved the task before the operator reviews.
+  set({ title: "Moved on GitHub", body: "Moved body" });
+  await f.service.refreshGitHub();
+  const reads = page.waitForResponse(
+    (r) =>
+      r.request().method() === "GET" &&
+      new URL(r.url()).pathname.startsWith("/api/operator/tasks/") &&
+      r.status() === 200,
+  );
+  await panel(page).getByRole("button", { name: "Review changes" }).click();
+  await panel(page)
+    .getByText(/changed on GitHub after this draft started/)
+    .waitFor();
+  await reads;
+  await panel(page).getByRole("button", { name: "Redraft" }).click();
+  await panel(page).getByText("Drafting", { exact: true }).waitFor();
+  assert.equal(commands("issue.draft.start").length, 2);
+  const run = f.service.readDrafting(await runningRun(f, 1));
+  assert.equal(run?.observedTitle, "Moved on GitHub");
+});

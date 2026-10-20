@@ -174,3 +174,21 @@ test("a newer draft shows its progress over the text of an older one until it ar
   assert.equal(improveView({ ...redrafting, run: null }), "starting");
   assert.equal(improveView({ ...redrafting, runLoaded: true }), "editing");
 });
+
+test("a very large many-line body is diffed in bounded time and keeps every line", () => {
+  const lines = (prefix: string) =>
+    Array.from({ length: 30_000 }, (_, i) => `${prefix}${i}`).join("\n");
+  const started = Date.now();
+  const { current, proposed } = lineDiff(lines("old "), lines("new "));
+  assert.ok(Date.now() - started < 2000, "no quadratic table");
+  assert.equal(current.length, 30_000);
+  assert.equal(proposed.length, 30_000);
+  assert.ok(current.every((row) => row.kind === "removed"));
+  assert.ok(proposed.every((row) => row.kind === "added"));
+  // Shared ends are still matched, and a small change in the middle still gets a precise diff.
+  const same = lines("same ");
+  const edited = same.replace("same 15000", "changed");
+  const small = lineDiff(same, edited);
+  assert.equal(small.current.filter((row) => row.kind === "removed").length, 1);
+  assert.equal(small.proposed.filter((row) => row.kind === "added").length, 1);
+});

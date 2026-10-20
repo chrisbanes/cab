@@ -198,6 +198,24 @@ export function useIssueImprove({
     [taskId],
   );
 
+  /** Ends a run that did not start or is gone, keeping the note and any text being edited. */
+  const dropRun = useCallback(
+    (note: string) => {
+      setRun(null);
+      setNotFound(false);
+      setStored((current) => {
+        const next: Stored = {
+          note: current.note,
+          ...(current.edit ? { edit: current.edit } : {}),
+        };
+        writeStored(sessionStore, taskId, next);
+        return next;
+      });
+      setMessage(note);
+    },
+    [taskId],
+  );
+
   const runId = stored.runId ?? null;
   const settled = Boolean(
     run && !["queued", "running", "stopping"].includes(run.state),
@@ -251,14 +269,16 @@ export function useIssueImprove({
       if (result.state === "recorded") return;
       if (result.state === "unknown") setMessage(copy.unconfirmed);
       else {
-        reset(
+        dropRun(
           result.state === "conflict"
             ? "The task changed. Try again."
             : "Couldn’t start the draft.",
         );
+        // A refused version is out of date: read the task so a retry sends the current one.
+        if (result.state === "conflict") latest.current.onChanged();
       }
     },
-    [port, reset, taskId],
+    [port, dropRun, taskId],
   );
 
   // A run the service does not know may be a start that never arrived: send it once more
@@ -282,14 +302,14 @@ export function useIssueImprove({
       note,
       expectedTaskVersion: expectedTaskVersion ?? taskVersion,
     });
-    reset(copy.gone);
+    dropRun(copy.gone);
   }, [
     notFound,
     runId,
     stored.startKey,
     sendStart,
     releaseRun,
-    reset,
+    dropRun,
     taskId,
     taskVersion,
   ]);
@@ -420,8 +440,11 @@ export function useIssueImprove({
       return;
     }
     change({ review: undefined });
-    if (result.state === "conflict") setStaleFlag(true);
-    else if (result.state === "rejected")
+    if (result.state === "conflict") {
+      setStaleFlag(true);
+      // The task moved under the review; read it so Redraft starts from the current version.
+      latest.current.onChanged();
+    } else if (result.state === "rejected")
       setMessage(
         result.code === "forbidden"
           ? copy.refusedDisclosure

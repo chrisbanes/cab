@@ -54,46 +54,73 @@ export const isOpenState = (state: DeliveryState) => openStates.includes(state);
 
 export type DiffRow = { kind: "same" | "removed" | "added"; text: string };
 
-/** Line diff by longest common subsequence: the rows of the current side, then the proposed side. */
+/** The most table cells the diff builds; a larger changed middle is shown as removed then added. */
+const diffCellLimit = 4_000_000;
+
+/**
+ * Line diff: lines both sides share at the start and end are kept, and the changed middle is
+ * matched by longest common subsequence. A middle too large for that is shown whole, as all
+ * removed and all added, so a very long body cannot stall the page.
+ */
 export function lineDiff(
   current: string,
   proposed: string,
 ): { current: DiffRow[]; proposed: DiffRow[] } {
   const a = current.split("\n");
   const b = proposed.split("\n");
-  const width = b.length + 1;
-  // table[i * width + j]: the common length of a[i..] and b[j..].
-  const table = new Array<number>((a.length + 1) * width).fill(0);
-  const common = (i: number, j: number) => table[i * width + j] ?? 0;
-  for (let i = a.length - 1; i >= 0; i--)
-    for (let j = b.length - 1; j >= 0; j--)
-      table[i * width + j] =
-        a[i] === b[j]
-          ? common(i + 1, j + 1) + 1
-          : Math.max(common(i + 1, j), common(i, j + 1));
-  const left: DiffRow[] = [];
-  const right: DiffRow[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < a.length || j < b.length) {
-    const lineA = a[i];
-    const lineB = b[j];
-    if (lineA !== undefined && lineB !== undefined && lineA === lineB) {
-      left.push({ kind: "same", text: lineA });
-      right.push({ kind: "same", text: lineB });
-      i++;
-      j++;
-    } else if (
-      lineA !== undefined &&
-      (lineB === undefined || common(i + 1, j) >= common(i, j + 1))
-    ) {
-      left.push({ kind: "removed", text: lineA });
-      i++;
-    } else if (lineB !== undefined) {
-      right.push({ kind: "added", text: lineB });
-      j++;
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  )
+    tail++;
+  const midA = a.slice(head, a.length - tail);
+  const midB = b.slice(head, b.length - tail);
+  const same = (lines: string[]): DiffRow[] =>
+    lines.map((text) => ({ kind: "same", text }));
+  const left = same(a.slice(0, head));
+  const right = same(b.slice(0, head));
+  if ((midA.length + 1) * (midB.length + 1) > diffCellLimit) {
+    for (const text of midA) left.push({ kind: "removed", text });
+    for (const text of midB) right.push({ kind: "added", text });
+  } else {
+    const width = midB.length + 1;
+    // table[i * width + j]: the common length of midA[i..] and midB[j..].
+    const table = new Uint32Array((midA.length + 1) * width);
+    const common = (i: number, j: number) => table[i * width + j] ?? 0;
+    for (let i = midA.length - 1; i >= 0; i--)
+      for (let j = midB.length - 1; j >= 0; j--)
+        table[i * width + j] =
+          midA[i] === midB[j]
+            ? common(i + 1, j + 1) + 1
+            : Math.max(common(i + 1, j), common(i, j + 1));
+    let i = 0;
+    let j = 0;
+    while (i < midA.length || j < midB.length) {
+      const lineA = midA[i];
+      const lineB = midB[j];
+      if (lineA !== undefined && lineB !== undefined && lineA === lineB) {
+        left.push({ kind: "same", text: lineA });
+        right.push({ kind: "same", text: lineB });
+        i++;
+        j++;
+      } else if (
+        lineA !== undefined &&
+        (lineB === undefined || common(i + 1, j) >= common(i, j + 1))
+      ) {
+        left.push({ kind: "removed", text: lineA });
+        i++;
+      } else if (lineB !== undefined) {
+        right.push({ kind: "added", text: lineB });
+        j++;
+      }
     }
   }
+  left.push(...same(a.slice(a.length - tail)));
+  right.push(...same(b.slice(b.length - tail)));
   return { current: left, proposed: right };
 }
 

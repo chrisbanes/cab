@@ -176,6 +176,23 @@ test("a send refused because GitHub changed writes nothing and is not retried", 
   );
   assert.equal(saved.state, "confirmed-failure");
   assert.equal(saved.observation?.reason, issueChangedReason);
+  // A replay of that refusal reads the source again, in case the first read failed.
+  f.setSourceBody("Changed again on GitHub");
+  assert.equal(
+    (
+      await f.service.postOperatorEdit({
+        key: r.operationId,
+        taskId: f.taskId,
+        reviewId: r.reviewId,
+        expectedTaskVersion: saved.binding.taskVersion,
+      })
+    ).operationId,
+    saved.operationId,
+  );
+  assert.equal(
+    f.service.githubSources().issue("I1")?.observedBody,
+    "Changed again on GitHub",
+  );
   assert.notEqual(saved.observation?.retryable, true);
   assert.equal(f.effects.length, 0);
 });

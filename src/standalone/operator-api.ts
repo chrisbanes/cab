@@ -6519,6 +6519,16 @@ export class OperatorApi {
     });
   }
 
+  /** A refusal the service raises as a domain error is a definite API answer, not an unknown outcome. */
+  private async asApiError<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      throw error instanceof OperatorApiError
+        ? error
+        : (domainApiError(error) ?? error);
+    }
+  }
   /** Review, confirm and send of an operator issue edit, fenced like the comment commands. */
   private async executeIssueEdit(
     c: Extract<
@@ -6627,21 +6637,22 @@ export class OperatorApi {
           await this.service.draftingCommand(c),
         );
       }
-      if (c.type === "issue.draft.start") {
-        const task = this.requireTask(c.taskId),
-          excluded = await this.exclusions(String(task.projectId), c.taskId);
-        if (!this.disclosable(c.note, excluded))
-          throw new OperatorApiError(403, "forbidden");
-        return commandReceiptSchema.parse(
-          await this.service.draftingCommand(c),
-        );
-      }
+      if (c.type === "issue.draft.start")
+        return await this.asApiError(async () => {
+          const task = this.requireTask(c.taskId),
+            excluded = await this.exclusions(String(task.projectId), c.taskId);
+          if (!this.disclosable(c.note, excluded))
+            throw new OperatorApiError(403, "forbidden");
+          return commandReceiptSchema.parse(
+            await this.service.draftingCommand(c),
+          );
+        });
       if (
         c.type === "issue.edit.review" ||
         c.type === "issue.edit.confirm" ||
         c.type === "issue.edit.send"
       )
-        return this.executeIssueEdit(c);
+        return await this.asApiError(() => this.executeIssueEdit(c));
       if (
         c.type === "review.anchor.stage" ||
         c.type === "review.draft.save" ||
