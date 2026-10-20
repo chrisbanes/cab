@@ -355,11 +355,13 @@ export function useIssueImprove({
   }, [run, stored.loadedRunId, change, port]);
   // A run that is gone or used elsewhere releases the panel, keeping any text in the editor.
   useEffect(() => {
-    if (!run || stored.edit) return;
+    // Only the panel's current run counts: after a send the run is cleared, and a late read of the
+    // claimed run must not wipe the outcome.
+    if (!run || !runId || run.runId !== runId || stored.edit) return;
     if (run.state === "expired") reset(copy.expired);
     else if (run.state === "accepted" || run.state === "discarded")
       reset(copy.gone);
-  }, [run, stored.edit, reset]);
+  }, [run, runId, stored.edit, reset]);
 
   const start = async () => {
     const id = crypto.randomUUID();

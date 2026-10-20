@@ -461,3 +461,27 @@ test("a review refused because the task moved reads the task again so Redraft st
   const run = f.service.readDrafting(await runningRun(f, 1));
   assert.equal(run?.observedTitle, "Moved on GitHub");
 });
+
+test("Sent stays shown when the claimed run is read back as accepted before the send", async (_t, j) => {
+  const ctx = await launch(j, desktop);
+  const { page, effects, open } = ctx;
+  await open();
+  // Every read of a drafting run takes a moment, so the read that follows loading the proposal
+  // lands after the proposal was claimed and sees the run as accepted, as it can under load.
+  await page.route("**/api/operator/drafting-runs/*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  const runId = await draftAndLoad(ctx);
+  await until(() => ctx.f.service.readDrafting(runId)?.state === "accepted");
+  // Let the delayed read-back of the accepted run arrive before sending.
+  await page.waitForTimeout(1200);
+  await panel(page).getByRole("button", { name: "Review changes" }).click();
+  await panel(page)
+    .getByRole("button", { name: "Send edit to GitHub" })
+    .click();
+  await panel(page)
+    .getByText(/^Sent\./)
+    .waitFor();
+  assert.equal(effects.length, 1);
+});
