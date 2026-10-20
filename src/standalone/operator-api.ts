@@ -6541,10 +6541,12 @@ export class OperatorApi {
   ) {
     const task = this.requireTask(c.taskId),
       visibility = this.visibilityToken(),
+      workspaceBefore = this.service.taskWorkspaceVisibility(c.taskId),
       excluded = await this.exclusions(String(task.projectId), c.taskId);
     if (
       visibility !== this.visibilityToken() ||
-      this.requireTask(c.taskId).version !== task.version
+      this.requireTask(c.taskId).version !== task.version ||
+      workspaceBefore !== this.service.taskWorkspaceVisibility(c.taskId)
     )
       throw new OperatorApiError(409, "conflict");
     if (c.type === "issue.edit.review") {
