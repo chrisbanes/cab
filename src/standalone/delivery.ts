@@ -19,6 +19,7 @@ import {
 import {
   type GitHubDeliveryProvider,
   GitHubHttpDeliveryProvider,
+  IssueChangedRefusal,
   PublicationRefusal,
   type PublicationContext,
   type PushFunction,
@@ -162,7 +163,11 @@ export class DeliveryCoordinator {
     const request = externalActionArgumentsSchema.parse(input);
     if (
       isOperatorDeliveryCaller(caller) &&
-      (request.action.kind !== "issue.comment" || request.approval)
+      (!(
+        request.action.kind === "issue.comment" ||
+        (request.action.kind === "issue.edit" && request.action.expected)
+      ) ||
+        request.approval)
     )
       throw new DomainPolicyError(
         "forbidden",
@@ -181,7 +186,13 @@ export class DeliveryCoordinator {
           caller,
           this.options.approved(request, caller),
           () => {
-            if (!prior) this.options.authorize(caller);
+            // An operator edit is authorized by its own gate, so that gate needs the action.
+            if (!prior)
+              this.options.authorize(
+                caller,
+                undefined,
+                isOperatorDeliveryCaller(caller) ? request : undefined,
+              );
           },
         );
         if (record.state !== "prepared") return record;
@@ -243,6 +254,13 @@ export class DeliveryCoordinator {
     try {
       before = await provider.preflight(action, policy, publication);
     } catch (error) {
+      // The issue no longer shows the text the operator edit replaces: nothing is written.
+      if (error instanceof IssueChangedRefusal)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: error.reason,
+          receipt: null,
+        });
       if (error instanceof PublicationRefusal) {
         const outside = error.reason === "branch-outside-change";
         return this.store.recordObservation(

@@ -27,6 +27,7 @@ import {
   type DeliveryCaller,
   type DeliveryPolicy,
   DeliveryStore,
+  type ExternalAction,
   isOperatorDeliveryCaller,
   materialDigest,
   type OperatorCommentReview,
@@ -55,28 +56,13 @@ import {
 } from "../operator/contracts.js";
 
 type DraftingReceipt = Extract<CommandReceipt, { kind: "drafting" }>;
+
 import { reviewMetadataSchema } from "../core/task-review.js";
 import type {
   HarnessStatus,
   RuntimeRestartFailure,
 } from "../operator/contracts.js";
 import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
-import {
-  type DraftingRun,
-  DraftingRunStore,
-  draftProposalTool,
-  draftProposalToolName,
-  draftingInstruction,
-  draftingTimeLimitMs,
-} from "./drafting.js";
-import {
-  type DraftTurnFacts,
-  DraftTurnUnavailableError,
-  draftTurnAvailability,
-  draftTurnInstruction,
-  draftTaskDigest,
-  draftTurnToolDecision,
-} from "./draft-turn.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,
@@ -102,7 +88,6 @@ import {
   prepareExclusions,
   sanitizeConversationText,
 } from "./conversation-history.js";
-import { type SanitizedError, sanitizeError } from "./service-log.js";
 import {
   coordinationTools,
   dispatchCoordinationTool,
@@ -114,7 +99,23 @@ import {
   StandaloneDataDirectory,
 } from "./data-directory.js";
 import { DeliveryCoordinator, unresolvedThreadSummary } from "./delivery.js";
-import { verifyTaskPush } from "./push-verification.js";
+import {
+  type DraftTurnFacts,
+  DraftTurnUnavailableError,
+  draftTaskDigest,
+  draftTurnAvailability,
+  draftTurnInstruction,
+  draftTurnToolDecision,
+} from "./draft-turn.js";
+import {
+  type DraftingRun,
+  DraftingRunStore,
+  draftingInstruction,
+  draftingTimeLimitMs,
+  draftProposalTool,
+  draftProposalToolName,
+} from "./drafting.js";
+import { resolveOnPath } from "./executable-path.js";
 import {
   type DiagnosticKind,
   type DiagnosticLimits,
@@ -144,7 +145,6 @@ import {
   gitHubSourceCredentialStatus,
 } from "./github-source-credential.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
-import { resolveOnPath } from "./executable-path.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
 import {
   encodeNativeInputReply,
@@ -174,11 +174,13 @@ import {
   preTurnRecoveryCommandSchema,
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
+import { verifyTaskPush } from "./push-verification.js";
 import type {
   RecoveryReceipt,
   RecoveryRecord,
   TerminationVerifier,
 } from "./recovery-types.js";
+import { verifiedRepository } from "./repository-verification.js";
 import {
   captureRetainedResultEvidence,
   captureRetainedReviewAnchor,
@@ -187,7 +189,6 @@ import {
   retainedReviewAnchorMaterialHash,
   retainedReviewAnchorStageRequestSchema,
 } from "./retained-evidence.js";
-import { verifiedRepository } from "./repository-verification.js";
 import {
   RoutingAttemptStore,
   type RoutingChoiceClient,
@@ -199,25 +200,6 @@ import {
   routingClientFromEnvironment,
   routingModel,
 } from "./routing.js";
-import type { RuntimeSafetyPort } from "./runtime-retention.js";
-import {
-  SchedulerStore,
-  type TurnRequest,
-  TurnScheduler,
-} from "./scheduler.js";
-import { SchedulerWakeQueries } from "./scheduler-wake-queries.js";
-import {
-  type CoordinationExecutionBinding,
-  type ExecutionIntent,
-  ExecutionState,
-  harnessRetrySupported,
-  type DraftTurnReceipt,
-  type StopTarget,
-  type TaskControlReceipt,
-  type TaskExecutionBinding,
-  type TaskExecutionBindingRecord,
-  type TaskExecutionContext,
-} from "./state.js";
 import {
   defaultRestartClock,
   newRestartState,
@@ -226,6 +208,26 @@ import {
   runtimeRestartDelaysMs,
   runtimeRestartStableMs,
 } from "./runtime-restart.js";
+import type { RuntimeSafetyPort } from "./runtime-retention.js";
+import {
+  SchedulerStore,
+  type TurnRequest,
+  TurnScheduler,
+} from "./scheduler.js";
+import { SchedulerWakeQueries } from "./scheduler-wake-queries.js";
+import { type SanitizedError, sanitizeError } from "./service-log.js";
+import {
+  type CoordinationExecutionBinding,
+  type DraftTurnReceipt,
+  type ExecutionIntent,
+  ExecutionState,
+  harnessRetrySupported,
+  type StopTarget,
+  type TaskControlReceipt,
+  type TaskExecutionBinding,
+  type TaskExecutionBindingRecord,
+  type TaskExecutionContext,
+} from "./state.js";
 import {
   ExecutionSupervisor,
   type ExecutionSupervisorOptions,
@@ -929,9 +931,14 @@ export class StandaloneService {
             { deliveryStore, state, domain, coordination },
             caller,
             exceptOperationId,
+            request?.action.kind,
           );
           if (isOperatorDeliveryCaller(caller)) {
-            if (request && request.action.kind !== "issue.comment")
+            if (
+              request &&
+              request.action.kind !== "issue.comment" &&
+              !(request.action.kind === "issue.edit" && request.action.expected)
+            )
               throw new DomainPolicyError(
                 "forbidden",
                 "Operator delivery only permits issue.comment",
@@ -2987,9 +2994,21 @@ export class StandaloneService {
     }: Pick<Started, "deliveryStore" | "state" | "domain" | "coordination">,
     caller: DeliveryCaller,
     exceptOperationId?: string,
+    kind?: ExternalAction["kind"],
   ): void {
     if (isOperatorDeliveryCaller(caller)) {
       deliveryStore.validateOperatorCaller(caller);
+      // The confirmed review is the operator's approval of an edit; like Stop, it does not wait
+      // for admission, so running, unready and held tasks can take one. It needs an open task and
+      // no delivery action whose outcome is still unknown.
+      if (kind === "issue.edit") {
+        if (
+          domain.task(caller.taskId).state !== "open" ||
+          deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
+        )
+          throw new DomainConflictError("Task cannot take an issue edit");
+        return;
+      }
       if (
         state.taskHold(caller.taskId) ||
         domain
@@ -3101,7 +3120,12 @@ export class StandaloneService {
     return this.delivery().confirmOperatorComment(command, () => {
       const record = this.delivery().operatorReview(command.reviewId);
       if (!record) throw new DomainConflictError("Operator review unavailable");
-      this.authorizeDelivery(this.started(), record.caller);
+      this.authorizeDelivery(
+        this.started(),
+        record.caller,
+        undefined,
+        record.action.kind,
+      );
     });
   }
   async postOperatorComment(command: {
@@ -3135,6 +3159,97 @@ export class StandaloneService {
         operationId: command.key,
         action: this.operatorCommentAction(caller, command.body),
         ...(command.reviewId ? { operatorReviewId: command.reviewId } : {}),
+      },
+      caller,
+    );
+  }
+  private operatorEditAction(
+    caller: OperatorDeliveryCaller,
+    edit: {
+      title: string;
+      body: string;
+      expected: { title: string; body: string };
+    },
+  ) {
+    const issue = this.githubSources().issue(caller.sourceNodeId);
+    if (!issue)
+      throw new DomainConflictError("Imported task issue unavailable");
+    return {
+      kind: "issue.edit" as const,
+      target: {
+        nodeId: caller.sourceNodeId,
+        repositoryId: caller.sourceRepositoryId,
+        number: Number(issue.issueNumber),
+      },
+      fields: { title: edit.title, body: edit.body },
+      // The text the draft started from. Review refuses it unless the synced copy still shows it,
+      // and the provider checks it against GitHub again before writing.
+      expected: edit.expected,
+    };
+  }
+  reviewOperatorEdit(command: {
+    key: string;
+    taskId: string;
+    operationId: string;
+    expectedTaskVersion: number;
+    title: string;
+    body: string;
+    expected: { title: string; body: string };
+  }): OperatorCommentReview {
+    const prior = this.delivery().operatorReview(command.key);
+    if (prior) {
+      if (prior.commandHash !== materialDigest(command))
+        throw new DomainConflictError(
+          "Operator review key reused with different material",
+        );
+      return prior;
+    }
+    const caller = this.operatorCommentCaller(command.taskId);
+    return this.delivery().reviewOperatorEdit(
+      command,
+      caller,
+      this.operatorEditAction(caller, command),
+    );
+  }
+  /** Sends the reviewed edit exactly as reviewed; the review's key is its operation id. */
+  async postOperatorEdit(command: {
+    key: string;
+    taskId: string;
+    reviewId: string;
+    expectedTaskVersion: number;
+  }): Promise<DeliveryActionRecord> {
+    const review = this.delivery().operatorReview(command.reviewId);
+    if (
+      !review ||
+      review.taskId !== command.taskId ||
+      review.operationId !== command.key ||
+      review.action.kind !== "issue.edit"
+    )
+      throw new DomainConflictError("Operator review unavailable");
+    const prior = this.delivery()
+      .actions(command.taskId)
+      .find((a) => a.operationId === command.key);
+    if (prior) {
+      if (
+        !isOperatorDeliveryCaller(prior.binding) ||
+        prior.binding.taskVersion !== command.expectedTaskVersion ||
+        prior.request.operatorReviewId !== command.reviewId ||
+        canonicalMaterial(prior.request.action) !==
+          canonicalMaterial(review.action)
+      )
+        throw new DomainConflictError(
+          "Operation key used with different material or caller",
+        );
+      return prior;
+    }
+    const caller = this.operatorCommentCaller(command.taskId);
+    if (caller.taskVersion !== command.expectedTaskVersion)
+      throw new DomainConflictError("Operator task revision conflict");
+    return this.started().deliveryCoordinator.submit(
+      {
+        operationId: command.key,
+        action: review.action,
+        operatorReviewId: command.reviewId,
       },
       caller,
     );

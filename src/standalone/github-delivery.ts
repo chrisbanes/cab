@@ -71,6 +71,14 @@ export class PublicationRefusal extends Error {
     super(reason);
   }
 }
+/** An operator edit whose expected text is no longer what the issue shows on GitHub. */
+export const issueChangedReason = "provider-issue-changed";
+export class IssueChangedRefusal extends Error {
+  readonly reason = issueChangedReason;
+  constructor() {
+    super(issueChangedReason);
+  }
+}
 export interface GitHubDeliveryProvider {
   inspectClosedIssue?(target: {
     repositoryId: string;
@@ -1118,6 +1126,14 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         nodeId: issue.node_id,
         optionId: await this.projectField(action),
       };
+    // GitHub's issue PATCH is not conditional, so this read is the only guard against a stale edit.
+    if (
+      action.kind === "issue.edit" &&
+      action.expected &&
+      (issue.title !== action.expected.title ||
+        (issue.body ?? "") !== action.expected.body)
+    )
+      throw new IssueChangedRefusal();
     return {
       repositoryPath: repo.path,
       nodeId: issue.node_id,
@@ -1132,7 +1148,11 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
   ): Promise<ProviderActionObservation> {
     if (
       isOperatorDeliveryCaller(record.binding) &&
-      (record.request.action.kind !== "issue.comment" ||
+      (!(
+        record.request.action.kind === "issue.comment" ||
+        (record.request.action.kind === "issue.edit" &&
+          record.request.action.expected)
+      ) ||
         record.request.approval ||
         record.request.action.target.nodeId !== record.binding.sourceNodeId ||
         record.request.action.target.repositoryId !==
