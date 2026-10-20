@@ -3001,6 +3001,36 @@ function Changes({
           ))}
         </>
       )}
+      {d?.branches.map((b) => (
+        <p key={`${b.repositoryName}:${b.branch}`}>
+          {b.repositoryName} · branch {b.branch ?? "withheld"} ·{" "}
+          {b.lastPushedSha ? (
+            <>
+              pushed <ShortId value={b.lastPushedSha} />
+            </>
+          ) : (
+            "not pushed yet"
+          )}{" "}
+          {b.outsideHeadSha && (
+            <StatusBadge tone="warning">
+              {/^0+$/.test(b.outsideHeadSha) ? (
+                "Branch deleted"
+              ) : (
+                <>
+                  Outside push <ShortId value={b.outsideHeadSha} />
+                </>
+              )}
+            </StatusBadge>
+          )}
+        </p>
+      ))}
+      {d && d.branches.length > 0 && (
+        <p>
+          Ensemble assigns and pushes these. A head it did not push is flagged,
+          and Ensemble will not push that branch again until it returns to
+          Ensemble's last push.
+        </p>
+      )}
       {d?.binding && (
         <>
           <PullRequestLine binding={d.binding} />

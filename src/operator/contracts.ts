@@ -1250,6 +1250,20 @@ export const deliveryReadSchema = z
     blockers: z.array(text).max(128),
     omittedBlockerCount: z.number().int().nonnegative(),
     omittedActionCount: z.number().int().nonnegative(),
+    /** The task's assigned branches; a name the exclusions withhold reads as null. */
+    branches: z
+      .array(
+        z
+          .object({
+            repositoryName: text,
+            branch: safeText,
+            lastPushedSha: text.nullable(),
+            outsideHeadSha: text.nullable(),
+          })
+          .strict(),
+      )
+      .max(20)
+      .default([]),
     binding: z
       .object({
         revision,

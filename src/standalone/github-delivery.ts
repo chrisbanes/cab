@@ -8,6 +8,7 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
+import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import {
   actionObservationSchema,
   prObservationSchema,
@@ -40,6 +41,36 @@ export type ClosedIssueInspection =
         closerPrNodeId: string | null;
       } | null;
     };
+/** Offline facts about a push's commit in the task worktree, established before any network call. */
+export interface PushVerification {
+  workspacePath: string;
+  /** Changed or untracked worktree entries; they are never pushed. */
+  uncommittedEntries: number;
+  /** Whether the commit descends from the last commit Ensemble pushed; null before the first push. */
+  descendsFromLastPushed: boolean | null;
+}
+export interface PublicationContext extends PushVerification {
+  /** The task's assigned branch, and the commit Ensemble last pushed to it. */
+  branch: string;
+  lastPushedSha: string | null;
+  /** A later attempt of an operation whose earlier attempt may have landed late. */
+  retry: boolean;
+}
+export type PushFunction = (
+  request: Parameters<typeof pushTaskCommit>[0],
+) => Promise<PushOutcome>;
+/** A publication refused at preflight; `outsideHeadSha` names a remote head Ensemble did not push. */
+export class PublicationRefusal extends Error {
+  constructor(
+    readonly reason:
+      | "branch-outside-change"
+      | "branch-not-fast-forward"
+      | "branch-force-push-needs-lease",
+    readonly outsideHeadSha: string | null = null,
+  ) {
+    super(reason);
+  }
+}
 export interface GitHubDeliveryProvider {
   inspectClosedIssue?(target: {
     repositoryId: string;
@@ -52,6 +83,7 @@ export interface GitHubDeliveryProvider {
   preflight(
     action: ExternalAction,
     policy: DeliveryPolicy,
+    publication?: PublicationContext,
   ): Promise<Record<string, z.output<ReturnType<typeof z.json>>>>;
   performAction(
     record: DeliveryActionRecord,
@@ -153,6 +185,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
   constructor(
     private readonly credential: string,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly push: PushFunction = pushTaskCommit,
   ) {}
   private async request(
     path: string,
@@ -273,12 +306,24 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     const value = z
       .object({ ref: name, object: z.object({ sha }) })
       .parse(
-        (await this.request(`${path}/git/ref/heads/${encodeURIComponent(ref)}`))
-          .json,
+        (
+          await this.request(
+            `${path}/git/ref/heads/${ref.split("/").map(encodeURIComponent).join("/")}`,
+          )
+        ).json,
       );
     if (value.ref !== `refs/heads/${ref}`)
       throw new Error("provider-ref-mismatch");
     return value.object.sha;
+  }
+  /** The branch's head, or null when the branch does not exist. */
+  private async optionalRef(path: string, ref: string): Promise<string | null> {
+    try {
+      return await this.ref(path, ref);
+    } catch (error) {
+      if (error instanceof ProviderFailure && error.status === 404) return null;
+      throw error;
+    }
   }
   /** Reads a review thread; `all` pages every comment, otherwise only the first page. */
   private async thread(id: string, all: boolean) {
@@ -974,8 +1019,38 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     )
       throw new Error("provider-thread-mismatch");
   }
-  async preflight(action: ExternalAction, policy: DeliveryPolicy) {
+  async preflight(
+    action: ExternalAction,
+    policy: DeliveryPolicy,
+    publication?: PublicationContext,
+  ) {
     const repo = await this.repository(action.target.repositoryId);
+    if (action.kind === "branch.push" || action.kind === "branch.force-push") {
+      if (!publication) throw new Error("provider-publication-unverified");
+      const remote = await this.optionalRef(repo.path, publication.branch);
+      // A fresh publication needs the remote exactly where Ensemble left it. Only a retry may find it
+      // already at the commit: its earlier push could have landed after the readback.
+      if (
+        remote !== publication.lastPushedSha &&
+        !(publication.retry && remote === action.commitSha)
+      )
+        throw new PublicationRefusal("branch-outside-change", remote);
+      if (action.kind === "branch.force-push") {
+        if (publication.lastPushedSha === null)
+          throw new PublicationRefusal("branch-force-push-needs-lease");
+      } else if (publication.descendsFromLastPushed === false)
+        throw new PublicationRefusal("branch-not-fast-forward");
+      return {
+        repositoryPath: repo.path,
+        repositoryId: action.target.repositoryId,
+        branch: publication.branch,
+        beforeHead: remote,
+        lastPushedSha: publication.lastPushedSha,
+        workspacePath: publication.workspacePath,
+        uncommittedEntries: publication.uncommittedEntries,
+        retry: publication.retry,
+      };
+    }
     if (action.kind === "pr.create") {
       const head = await this.ref(repo.path, action.target.headRef);
       await this.ref(repo.path, action.target.baseRef);
@@ -1068,6 +1143,8 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         "Operator delivery only permits the bound issue.comment",
       );
     const a = record.request.action;
+    if (a.kind === "branch.push" || a.kind === "branch.force-push")
+      return this.publish(record, a);
     try {
       const repo = {
         path: z
@@ -1183,6 +1260,176 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       };
     }
   }
+  /** Pushes the named commit unless the branch already has it, then settles by reading the ref. */
+  private async publish(
+    record: DeliveryActionRecord,
+    a: Extract<ExternalAction, { kind: "branch.push" | "branch.force-push" }>,
+  ): Promise<ProviderActionObservation> {
+    // Once Git reports the push done, the outcome stays unproved (never "not applied") until a read shows it.
+    let pushed = false;
+    const unsettled = (): ProviderActionObservation => ({
+      state: "uncertain",
+      reason: "provider-effect-unproved",
+      receipt: null,
+      ...(pushed ? { pushed: true } : {}),
+    });
+    const failure = (
+      reason: string,
+      extra: Partial<ProviderActionObservation> = {},
+    ): ProviderActionObservation => ({
+      state: "confirmed-failure",
+      reason,
+      receipt: null,
+      ...extra,
+    });
+    try {
+      const before = z
+        .object({
+          repositoryPath: z.string().regex(/^\/repos\/[^/]+\/[^/]+$/),
+          branch: name,
+          beforeHead: sha.nullable(),
+          lastPushedSha: sha.nullable(),
+          workspacePath: name,
+          retry: z.boolean(),
+        })
+        .parse(record.beforeState);
+      // Rejected by Git: unproved only in what the readback shows, never as a push that may have landed.
+      const rejectedUnsettled = (): ProviderActionObservation => ({
+        ...unsettled(),
+        rejected: true,
+      });
+      const outside = (head: string | null) =>
+        failure("branch-outside-change", {
+          receipt: head
+            ? {
+                nodeId: a.target.repositoryId,
+                ref: before.branch,
+                headSha: head,
+              }
+            : null,
+        });
+      // A rejected update leaves the head it found: another writer's, unless an earlier attempt of
+      // this operation may have landed that same commit.
+      const afterRejection = async (
+        outcomeFailure: ProviderActionObservation | null,
+      ): Promise<ProviderActionObservation> => {
+        let head: string | null;
+        try {
+          head = await this.optionalRef(before.repositoryPath, before.branch);
+        } catch {
+          return outcomeFailure ?? rejectedUnsettled();
+        }
+        if (head === before.beforeHead)
+          return outcomeFailure ?? rejectedUnsettled();
+        if (head === a.commitSha)
+          return before.retry ? unsettled() : outside(head);
+        return outside(head);
+      };
+      if (before.beforeHead !== a.commitSha) {
+        const outcome = await this.push({
+          workspacePath: before.workspacePath,
+          nameWithOwner: before.repositoryPath
+            .slice("/repos/".length)
+            .split("/")
+            .map(decodeURIComponent)
+            .join("/"),
+          commitSha: a.commitSha,
+          branch: before.branch,
+          // Every update is leased against the head preflight observed, so a branch another writer
+          // created or advanced since then rejects the push instead of being recorded as ours.
+          lease: before.beforeHead,
+          token: this.credential,
+        });
+        if (outcome === "uncertain") return unsettled();
+        if (outcome === "not-attempted")
+          return failure("push-not-attempted", {
+            retryable: true,
+            resumeAt: Date.now() + 60_000,
+          });
+        if (outcome === "rejected-non-fast-forward")
+          return failure("branch-not-fast-forward");
+        if (outcome === "rejected-remote")
+          return afterRejection(failure("branch-push-rejected"));
+        // Nothing was sent: an equal head is another writer's unless an earlier attempt may have landed.
+        if (outcome === "rejected-lease" || outcome === "up-to-date")
+          return afterRejection(null);
+        pushed = true;
+      }
+      return await this.inspectBranch(record, a, pushed);
+    } catch {
+      return unsettled();
+    }
+  }
+  /** Settles a branch action from the remote ref alone. */
+  private async inspectBranch(
+    record: DeliveryActionRecord,
+    a: Extract<ExternalAction, { kind: "branch.push" | "branch.force-push" }>,
+    pushed: boolean,
+  ): Promise<ProviderActionObservation> {
+    const repo = await this.repository(a.target.repositoryId);
+    const before = z
+      .object({
+        branch: name,
+        beforeHead: sha.nullable(),
+        uncommittedEntries: z.number().int().nonnegative(),
+      })
+      .parse(record.beforeState);
+    const remote = await this.optionalRef(repo.path, before.branch);
+    const at = (headSha: string) => ({
+      nodeId: a.target.repositoryId,
+      ref: before.branch,
+      headSha,
+    });
+    const success = (extra: Partial<ProviderActionObservation> = {}) =>
+      ({
+        state: "confirmed-success",
+        reason: null,
+        receipt: {
+          ...at(a.commitSha),
+          uncommittedEntries: before.uncommittedEntries,
+        },
+        ...extra,
+      }) as ProviderActionObservation;
+    // An update Git rejected cannot own an equal head: that is another writer's.
+    const rejected = record.observation?.rejected === true;
+    if (remote === a.commitSha && !rejected) return success();
+    if (remote === before.beforeHead && rejected)
+      return {
+        state: "confirmed-failure",
+        reason: "branch-push-rejected",
+        receipt: null,
+      };
+    if (remote === before.beforeHead)
+      // Git said done but the read does not show it yet: unproved, never "not applied".
+      return pushed
+        ? {
+            state: "uncertain",
+            reason: "provider-effect-unproved",
+            receipt: null,
+            pushed: true,
+          }
+        : {
+            state: "confirmed-failure",
+            reason: "branch-push-not-applied",
+            receipt: null,
+            retryable: true,
+          };
+    // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved
+    // it, and an ambiguous attempt keeps its possible ownership of the commit it may have landed.
+    const ambiguous =
+      !pushed &&
+      (record.state === "attempting" ||
+        (record.observation?.state === "uncertain" && !rejected) ||
+        record.observation?.ambiguous === true);
+    return pushed
+      ? success(remote ? { outsideHeadSha: remote } : { outsideDeleted: true })
+      : {
+          state: "confirmed-failure",
+          reason: "branch-outside-change",
+          receipt: remote ? at(remote) : null,
+          ...(ambiguous ? { ambiguous: true } : {}),
+        };
+  }
   async inspectAction(
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation> {
@@ -1190,6 +1437,12 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       const a = record.request.action,
         repo = await this.repository(a.target.repositoryId),
         marker = `<!-- ensemble-operation:${record.operationId} -->`;
+      if (a.kind === "branch.push" || a.kind === "branch.force-push")
+        return await this.inspectBranch(
+          record,
+          a,
+          record.observation?.pushed === true,
+        );
       const user = z
         .object({ node_id: name })
         .parse((await this.request("/user")).json);
@@ -1366,6 +1619,10 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         state: "uncertain",
         reason: "provider-readback-unavailable",
         receipt: null,
+        // A readback failure never forgets that Git reported the push done.
+        ...(record.observation?.pushed ? { pushed: true } : {}),
+        ...(record.observation?.rejected ? { rejected: true } : {}),
+        ...(record.observation?.ambiguous ? { ambiguous: true } : {}),
       };
     }
   }

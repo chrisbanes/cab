@@ -108,6 +108,16 @@ export function scriptedDeliveryProvider() {
     },
     threadReplies: 0,
     threadResolves: 0,
+    /** Remote branch heads by name, and the pull request opened from one. */
+    refs: { main: "2".repeat(40) } as Record<string, string>,
+    pushes: [] as Array<{ branch: string; commitSha: string }>,
+    created: null as null | {
+      title: string;
+      body: string;
+      head: string;
+      base: string;
+      draft: boolean;
+    },
     /** The mutation takes effect but its response is lost. */
     lostThreadReply: false,
     lostThreadResolve: false,
@@ -140,6 +150,38 @@ export function scriptedDeliveryProvider() {
       });
       if (state.lostComment) throw Error("scripted lost comment response");
       return Response.json({ id: state.commentWrites });
+    }
+    if (route === "POST /repos/org/repo/pulls") {
+      state.created = JSON.parse(String(init?.body));
+      return Response.json({ number: 7 });
+    }
+    if (url.pathname.startsWith("/repos/org/repo/git/ref/heads/")) {
+      const branch = decodeURIComponent(
+        url.pathname.slice("/repos/org/repo/git/ref/heads/".length),
+      );
+      const head = state.refs[branch];
+      return head
+        ? Response.json({ ref: `refs/heads/${branch}`, object: { sha: head } })
+        : Response.json({ message: "Not Found" }, { status: 404 });
+    }
+    if (route === "GET /repos/org/repo/pulls" && state.created) {
+      const made = state.created;
+      return Response.json([
+        {
+          node_id: "P7",
+          number: 7,
+          title: made.title,
+          body: made.body,
+          draft: made.draft,
+          user: { node_id: "U1" },
+          head: {
+            sha: state.refs[made.head],
+            ref: made.head,
+            repo: { node_id: "R1" },
+          },
+          base: { ref: made.base, repo: { node_id: "R1" } },
+        },
+      ]);
     }
     if (route === "POST /graphql") {
       const query = JSON.parse(String(init?.body)).query as string;
@@ -339,6 +381,14 @@ export function scriptedDeliveryProvider() {
     provider: new GitHubHttpDeliveryProvider(
       "synthetic-release-marker",
       fetcher,
+      async (request) => {
+        state.pushes.push({
+          branch: request.branch,
+          commitSha: request.commitSha,
+        });
+        state.refs[request.branch] = request.commitSha;
+        return "pushed";
+      },
     ),
   };
 }
@@ -348,6 +398,8 @@ export async function createReleaseDeliveryFixture(
   lifecycleOptions: FixtureLifecycleOptions = {},
   localTask = false,
   routingClient: RoutingChoiceClient | null = null,
+  /** A local Git repository to provision as repository R1 (local tasks only). */
+  repositoryPath?: string,
 ) {
   const scripted = scriptedDeliveryProvider();
   const readerFactory: GitHubReaderFactory = () => ({
@@ -472,7 +524,10 @@ export async function createReleaseDeliveryFixture(
     grants: [{ action: "pr.merge", repositoryId: "R1", mode: "allow" }],
     requiredChecks: [{ name: "build", appId: 17 }],
   });
-  await f.service.provisionTask(taskId);
+  await f.service.provisionTask(
+    taskId,
+    repositoryPath ? [{ repositoryId: "R1", path: repositoryPath }] : [],
+  );
   d.execute({
     type: "project.configure",
     actor: "operator",

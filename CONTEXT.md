@@ -143,6 +143,12 @@ _Avoid_: Assignment identity when referring only to an execution session
 The working files allocated to a task, retained independently of its conversations.
 _Avoid_: Conversation when referring to a task's working files
 
+**Task branch**:
+The one branch Ensemble assigns a task in each repository and pushes its commits
+to; agents cannot choose or push it. A PR created for the task uses it as its head.
+A remote head on it that Ensemble did not push is an outside change.
+_Avoid_: Head branch when meaning the assigned, Ensemble-published branch
+
 **Current workspace contents**:
 The files observed in a task workspace at an identified inspection time. They may
 change as work continues and do not represent a historical result.

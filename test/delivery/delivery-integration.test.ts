@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   createReleaseDeliveryFixture,
@@ -980,6 +981,148 @@ test("approval mode refuses thread actions until the operator approves the exact
       false,
     );
     assert.equal(f.scripted.state.threadReplies, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+import {
+  mkdtempSync as makeTemp,
+  writeFileSync as writeFile,
+  realpathSync,
+} from "node:fs";
+import { tmpdir as osTmp } from "node:os";
+import { git as runGit } from "../fixtures/publication.js";
+
+/** A repository with one commit, provisioned as R1 for the task. */
+async function publicationWorld(mode: "allow" | "approval") {
+  const source = realpathSync(makeTemp(join(osTmp(), "ensemble-publish-src-")));
+  runGit(source, "init", "-q", "-b", "main");
+  writeFile(join(source, "a.txt"), "a\n");
+  runGit(source, "add", ".");
+  runGit(source, "commit", "-q", "-m", "base");
+  const f = await createReleaseDeliveryFixture(
+    "reviewable-pr",
+    {},
+    true,
+    null,
+    source,
+  );
+  f.grant(
+    { action: "branch.push", mode },
+    { action: "pr.create", mode: "allow" },
+  );
+  const binding = await f.service.taskWorkspace(f.taskId);
+  const workspace = binding?.repositories[0]?.workspacePath;
+  assert.ok(workspace);
+  const commit = (name: string) => {
+    writeFile(join(workspace, name), `${name}\n`);
+    runGit(workspace, "add", ".");
+    runGit(workspace, "commit", "-q", "-m", name);
+    return runGit(workspace, "rev-parse", "HEAD");
+  };
+  const push = (commitSha: string, index?: number, approval?: object) =>
+    f.call(
+      "ensemble_external_action",
+      {
+        operationId: randomUUID(),
+        action: {
+          kind: "branch.push",
+          target: { repositoryId: "R1" },
+          commitSha,
+        },
+        ...(approval ? { approval } : {}),
+      },
+      index,
+    );
+  const createPr = (headRef: string, expectedHeadSha: string) =>
+    f.call("ensemble_external_action", {
+      operationId: randomUUID(),
+      action: {
+        kind: "pr.create",
+        target: {
+          repositoryId: "R1",
+          baseRef: "main",
+          headRef,
+          expectedHeadSha,
+        },
+        title: "Change",
+        body: "Body",
+        draft: true,
+      },
+    });
+  return { f, commit, push, createPr };
+}
+
+test("an allowed push publishes the lead's commit to the assigned branch and pr.create targets only that branch", async () => {
+  const { f, commit, push, createPr } = await publicationWorld("allow");
+  try {
+    const sha = commit("one.txt");
+    const pushed = await push(sha);
+    assert.equal(pushed.success, true, pushed.text);
+    const branch = f.service.delivery().taskBranch(f.taskId, "R1")?.branch;
+    assert.ok(branch);
+    assert.match(pushed.text, new RegExp(branch));
+    assert.deepEqual(f.scripted.state.pushes, [{ branch, commitSha: sha }]);
+    assert.equal((await createPr("cb/other", sha)).success, false);
+    assert.equal(f.scripted.state.created, null);
+    const created = await createPr(branch, sha);
+    assert.equal(created.success, true, created.text);
+    assert.equal(
+      (f.scripted.state.created as { head: string } | null)?.head,
+      branch,
+    );
+    // The same branch takes a repair push.
+    const repair = commit("two.txt");
+    assert.equal((await push(repair)).success, true);
+    assert.equal(f.scripted.state.refs[branch], repair);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an approval-mode push waits for the operator to approve the exact commit", async () => {
+  const { f, commit, push } = await publicationWorld("approval");
+  try {
+    const sha = commit("one.txt");
+    const action = {
+      kind: "branch.push",
+      target: { repositoryId: "R1" },
+      commitSha: sha,
+    };
+    assert.equal((await push(sha)).success, false);
+    assert.deepEqual(f.scripted.state.pushes, []);
+    const requested = await f.call("ensemble_request_approval", {
+      action: action.kind,
+      target: canonicalMaterial(action.target),
+      material: action,
+    });
+    assert.equal(requested.success, true, requested.text);
+    const interaction = f.service.coordinationView().readTask(f.taskId)
+      .approvals[0];
+    assert.ok(interaction);
+    await f.terminal(1);
+    await f.service.coordinationView().decideApproval({
+      taskId: f.taskId,
+      key: randomUUID(),
+      interactionId: interaction.interactionId,
+      expectedRevision: 1,
+      decision: "approved",
+      action: action.kind,
+      target: canonicalMaterial(action.target),
+      material: action,
+    });
+    await f.waitTurn(2);
+    const approval = {
+      interactionId: interaction.interactionId,
+      expectedRevision: 2,
+    };
+    const other = commit("other.txt");
+    assert.equal((await push(other, 2, approval)).success, false);
+    assert.deepEqual(f.scripted.state.pushes, []);
+    const done = await push(sha, 2, approval);
+    assert.equal(done.success, true, done.text);
+    assert.equal(f.scripted.state.pushes.length, 1);
   } finally {
     await f.close();
   }

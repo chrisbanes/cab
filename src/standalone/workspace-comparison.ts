@@ -327,7 +327,7 @@ type FilterDriverRead =
   | { ok: true; drivers: string[] }
   | { ok: false; reason: "git-failed" | "output-limit" };
 
-function parseFilterDriverNames(output: Buffer): FilterDriverRead {
+export function parseFilterDriverNames(output: Buffer): FilterDriverRead {
   if (output.length > maxFilterConfigBytes)
     return { ok: false, reason: "output-limit" };
   if (output.length === 0) return { ok: true, drivers: [] };

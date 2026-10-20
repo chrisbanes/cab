@@ -17,7 +17,41 @@ export const actionKinds = [
   "issue.close",
   "pr.thread.reply",
   "pr.thread.resolve",
+  "branch.push",
+  "branch.force-push",
 ] as const;
+export const defaultBranchPrefix = "ensemble/";
+/** Git's all-zero id, recorded as the outside head when the remote branch is absent. */
+export const absentBranchHead = "0".repeat(40);
+const branchPrefixMax = 64;
+/** Ref-safety of a name, or of its leading part, which may end mid-segment (`team-`); no length rule. */
+function refSafe(name: string): boolean {
+  return (
+    /^[A-Za-z0-9._/-]*$/.test(name) &&
+    !name.includes("..") &&
+    !name.includes("//") &&
+    name.split("/").every((s) => !/^[.-]|\.lock$/.test(s))
+  );
+}
+/** A project's branch prefix: ref-safe and at most 64 characters. */
+export function validBranchPrefix(prefix: string): boolean {
+  // A leading slash would give every generated name an empty first segment.
+  return (
+    prefix.length <= branchPrefixMax &&
+    !prefix.startsWith("/") &&
+    refSafe(prefix)
+  );
+}
+/** A complete, Ensemble-assigned task branch name. */
+export function safeBranchName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name.length <= 160 &&
+    refSafe(name) &&
+    !/[./-]$/.test(name) &&
+    !name.startsWith("/")
+  );
+}
 export const deliveryPolicySchema = z
   .object({
     mode: z.enum(["reviewable-pr", "through-merge"]),
@@ -25,6 +59,8 @@ export const deliveryPolicySchema = z
       .string()
       .regex(/^env:[A-Z][A-Z0-9_]*$/)
       .nullable(),
+    /** Absent on policies persisted before publication existed; `defaultBranchPrefix` then applies. */
+    branchPrefix: z.string().refine(validBranchPrefix).optional(),
     grants: z
       .array(
         z
@@ -69,6 +105,8 @@ const prTargetSchema = targetSchema
     expectedHeadSha: z.string().regex(/^[0-9a-f]{40}$/),
   })
   .strict();
+const branchTargetSchema = z.object({ repositoryId: identity }).strict();
+const commitSha = z.string().regex(/^[0-9a-f]{40}$/);
 const threadTargetSchema = targetSchema
   .extend({ threadNodeId: identity })
   .strict();
@@ -169,6 +207,20 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       expectedLatestCommentNodeId: identity,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("branch.push"),
+      target: branchTargetSchema,
+      commitSha,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("branch.force-push"),
+      target: branchTargetSchema,
+      commitSha,
+    })
+    .strict(),
 ]);
 export const externalActionArgumentsSchema = z
   .object({
@@ -259,6 +311,10 @@ export const actionObservationSchema = z
     receipt: z
       .object({
         nodeId: identity,
+        /** The branch a publication receipt or outside-change failure names. */
+        ref: identity.optional(),
+        /** Worktree entries a publication left unpushed. */
+        uncommittedEntries: z.number().int().nonnegative().optional(),
         number: z.number().int().positive().optional(),
         headSha: z
           .string()
@@ -270,6 +326,16 @@ export const actionObservationSchema = z
       .strict()
       .nullable(),
     retryable: z.boolean().optional(),
+    /** Git reported the push done; a readback that does not show it yet leaves the outcome unproved. */
+    pushed: z.boolean().optional(),
+    /** The attempt was ambiguous, so its commit may have landed even though a later read showed another head. */
+    ambiguous: z.boolean().optional(),
+    /** Git rejected this attempt's update, so it provably did not land even though the outcome is unproved. */
+    rejected: z.boolean().optional(),
+    /** A head Ensemble did not push, seen alongside this outcome. */
+    outsideHeadSha: commitSha.optional(),
+    /** The branch was deleted by another writer after Ensemble's push. */
+    outsideDeleted: z.boolean().optional(),
     /** Epoch ms before which a retryable failure is not re-attempted. */
     resumeAt: z.number().int().positive().optional(),
   })
@@ -407,6 +473,16 @@ const actionRecordSchema = z
   })
   .strict();
 export type DeliveryActionRecord = z.output<typeof actionRecordSchema>;
+const taskBranchSchema = z
+  .object({
+    repositoryId: identity,
+    branch: identity,
+    lastPushedSha: commitSha.nullable(),
+    outsideHeadSha: commitSha.nullable(),
+    assignedAt: z.number(),
+  })
+  .strict();
+export type TaskBranch = z.output<typeof taskBranchSchema>;
 
 export function canonicalMaterial(value: unknown): string {
   if (Array.isArray(value))
@@ -440,6 +516,10 @@ export class DeliveryStore {
     CREATE TABLE IF NOT EXISTS delivery_approval_bindings (interactionId TEXT PRIMARY KEY REFERENCES coordination_interactions(interactionId),taskId TEXT NOT NULL,assignmentId TEXT NOT NULL,taskVersion INTEGER NOT NULL,assignmentVersion INTEGER NOT NULL,conversationRevision INTEGER NOT NULL,workRevision INTEGER NOT NULL,policyVersion INTEGER NOT NULL,materialHash TEXT NOT NULL,operationId TEXT UNIQUE);
     CREATE TABLE IF NOT EXISTS delivery_waiting_work (workId TEXT PRIMARY KEY,taskId TEXT NOT NULL REFERENCES domain_tasks(id),assignmentId TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS delivery_settlement_receipts (commandKey TEXT PRIMARY KEY,payloadHash TEXT NOT NULL,recordJson TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS delivery_task_branches (
+      taskId TEXT NOT NULL REFERENCES domain_tasks(id), repositoryId TEXT NOT NULL, branch TEXT NOT NULL,
+      lastPushedSha TEXT, outsideHeadSha TEXT, assignedAt INTEGER NOT NULL,
+      PRIMARY KEY(taskId,repositoryId), UNIQUE(repositoryId,branch));
     CREATE TABLE IF NOT EXISTS delivery_attempts (
       operationId TEXT NOT NULL REFERENCES delivery_actions(operationId), attempt INTEGER NOT NULL,
       beforeJson TEXT NOT NULL, observationJson TEXT, PRIMARY KEY(operationId,attempt));
@@ -564,6 +644,25 @@ export class DeliveryStore {
       throw new Error("Exact material approval required");
     if (action.kind === "pr.merge" && policy.mode !== "through-merge")
       throw new Error("Project delivery mode forbids merge");
+    if ("headRef" in action.target) {
+      const branch = this.taskBranch(
+        binding.taskId,
+        action.target.repositoryId,
+      );
+      if (
+        action.kind === "pr.create" &&
+        branch?.branch !== action.target.headRef
+      )
+        throw new Error("PR head is not the task's assigned branch");
+      // A PR from the task branch may only be acted on at the commit Ensemble last pushed there.
+      if (
+        branch?.branch === action.target.headRef &&
+        (branch.lastPushedSha === null ||
+          branch.outsideHeadSha !== null ||
+          action.target.expectedHeadSha !== branch.lastPushedSha)
+      )
+        throw new Error("PR head is not the task branch's last Ensemble push");
+    }
     if (
       action.kind === "pr.thread.reply" ||
       action.kind === "pr.thread.resolve"
@@ -935,6 +1034,11 @@ export class DeliveryStore {
       } catch {
         denied = true;
       }
+      if (!denied && request.action.kind.startsWith("branch."))
+        this.assignTaskBranchWithinTransaction(
+          binding.taskId,
+          request.action.target.repositoryId,
+        );
       const now = Date.now();
       const record: DeliveryActionRecord = {
         operationId: request.operationId,
@@ -996,25 +1100,199 @@ export class DeliveryStore {
       return record;
     });
   }
+  /** `within` runs in the same transaction, e.g. to wake the lead with the recorded outcome. */
   recordObservation(
     operationId: string,
     input: ProviderActionObservation,
+    within?: (record: DeliveryActionRecord) => void,
   ): DeliveryActionRecord {
     const observation = actionObservationSchema.parse(input);
     return this.transaction(() => {
       const record = this.action(operationId);
       if (record.state === "confirmed-success") return record;
+      const previous = record.state;
       record.state = observation.state;
       record.observation = observation;
       record.updatedAt = Date.now();
       this.save(record);
-      this.db
-        .prepare(
-          "UPDATE delivery_attempts SET observationJson=? WHERE operationId=? AND attempt=?",
+      // A failure before a retry's attempt began (a refused preflight) must not overwrite the
+      // earlier attempt's row, which says whether that attempt may have landed.
+      if (previous === "attempting" || previous === "uncertain")
+        this.db
+          .prepare(
+            "UPDATE delivery_attempts SET observationJson=? WHERE operationId=? AND attempt=?",
+          )
+          .run(canonicalMaterial(observation), operationId, record.attempts);
+      const action = record.request.action;
+      if (action.kind.startsWith("branch.")) {
+        const taskId = record.binding.taskId,
+          repositoryId = action.target.repositoryId,
+          owned = observation.state === "confirmed-success",
+          // A branch found absent is held like an outside head, as git's all-zero id.
+          outside =
+            observation.outsideHeadSha ??
+            (observation.outsideDeleted
+              ? absentBranchHead
+              : observation.reason === "branch-outside-change"
+                ? (observation.receipt?.headSha ?? absentBranchHead)
+                : undefined);
+        if (owned && observation.receipt?.headSha)
+          this.db
+            .prepare(
+              "UPDATE delivery_task_branches SET lastPushedSha=?,outsideHeadSha=? WHERE taskId=? AND repositoryId=?",
+            )
+            .run(
+              observation.receipt.headSha,
+              outside ?? null,
+              taskId,
+              repositoryId,
+            );
+        else if (outside)
+          this.db
+            .prepare(
+              "UPDATE delivery_task_branches SET outsideHeadSha=? WHERE taskId=? AND repositoryId=?",
+            )
+            .run(outside, taskId, repositoryId);
+        if (
+          outside ||
+          observation.outsideDeleted ||
+          observation.reason === "branch-outside-change"
         )
-        .run(canonicalMaterial(observation), operationId, record.attempts);
+          this.clearSettlementOnBranch(taskId, repositoryId);
+      }
+      within?.(record);
       return record;
     });
+  }
+  /** An outside change on the PR's task branch invalidates any handback settlement at once. */
+  private clearSettlementOnBranch(taskId: string, repositoryId: string): void {
+    const binding = this.delivery(taskId),
+      branch = this.taskBranch(taskId, repositoryId);
+    if (
+      binding?.settlement &&
+      branch &&
+      binding.observation.repositoryId === repositoryId &&
+      binding.observation.headRef === branch.branch
+    ) {
+      binding.settlement = null;
+      binding.revision++;
+      this.saveDelivery(binding);
+    }
+  }
+  /**
+   * Whether any earlier attempt of the operation may have pushed its commit: one that was never
+   * settled, ended unproved, was reported pushed by Git, or was concluded not applied from a read.
+   * A push that never started or was definitively rejected did not land.
+   */
+  mayHaveLanded(operationId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT observationJson FROM delivery_attempts WHERE operationId=?",
+        )
+        .all(operationId) as { observationJson: string | null }[]
+    ).some((row) => {
+      if (row.observationJson === null) return true;
+      const o = actionObservationSchema.parse(JSON.parse(row.observationJson));
+      return (
+        (o.state === "uncertain" && o.rejected !== true) ||
+        o.pushed === true ||
+        o.ambiguous === true ||
+        o.reason === "branch-push-not-applied"
+      );
+    });
+  }
+  /** The branch head Ensemble last pushed as of the operation's first attempt, or undefined before any. */
+  firstAttemptLastPushed(operationId: string): string | null | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT beforeJson FROM delivery_attempts WHERE operationId=? AND attempt=1",
+      )
+      .get(operationId) as { beforeJson: string } | undefined;
+    if (!row) return undefined;
+    const before = z
+      .object({ lastPushedSha: commitSha.nullable().optional() })
+      .passthrough()
+      .parse(JSON.parse(row.beforeJson));
+    return before.lastPushedSha ?? null;
+  }
+  taskBranch(taskId: string, repositoryId: string): TaskBranch | null {
+    const row = this.db
+      .prepare(
+        "SELECT repositoryId,branch,lastPushedSha,outsideHeadSha,assignedAt FROM delivery_task_branches WHERE taskId=? AND repositoryId=?",
+      )
+      .get(taskId, repositoryId);
+    return row ? taskBranchSchema.parse(row) : null;
+  }
+  taskBranches(taskId: string): TaskBranch[] {
+    return this.db
+      .prepare(
+        "SELECT repositoryId,branch,lastPushedSha,outsideHeadSha,assignedAt FROM delivery_task_branches WHERE taskId=? ORDER BY assignedAt,repositoryId",
+      )
+      .all(taskId)
+      .map((row) => taskBranchSchema.parse(row));
+  }
+  /**
+   * Assigns the task's one branch per repository on first use: `<prefix><task id hex>-<title slug>`,
+   * with the id part lengthened on a collision. Later title or prefix changes never rename it.
+   */
+  assignTaskBranchWithinTransaction(
+    taskId: string,
+    repositoryId: string,
+  ): TaskBranch {
+    const existing = this.taskBranch(taskId, repositoryId);
+    if (existing) return existing;
+    const task = z
+        .object({ projectId: z.string(), title: z.string() })
+        .parse(
+          this.db
+            .prepare("SELECT projectId,title FROM tasks WHERE id=?")
+            .get(taskId),
+        ),
+      prefix =
+        this.configuration(task.projectId).branchPrefix ?? defaultBranchPrefix,
+      slug =
+        task.title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 40)
+          .replace(/-$/, "") || "task",
+      hex = taskId.replaceAll("-", "");
+    for (const length of [8, 12, 16, 32]) {
+      const branch = `${prefix}${hex.slice(0, length)}-${slug}`;
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM delivery_task_branches WHERE repositoryId=? AND branch=?",
+          )
+          .get(repositoryId, branch)
+      )
+        continue;
+      if (!safeBranchName(branch)) throw new Error("Task branch name invalid");
+      this.db
+        .prepare(
+          "INSERT INTO delivery_task_branches VALUES (?,?,?,NULL,NULL,?)",
+        )
+        .run(taskId, repositoryId, branch, Date.now());
+      const assigned = this.taskBranch(taskId, repositoryId);
+      if (assigned) return assigned;
+    }
+    throw new Error("Task branch could not be assigned");
+  }
+  /** Commits Ensemble pushed, or may have pushed (an attempt that may have landed), for the repository. */
+  private pushedShas(taskId: string, repositoryId: string): Set<string> {
+    return new Set(
+      this.actions(taskId).flatMap((a) =>
+        (a.state === "confirmed-success" ||
+          this.mayHaveLanded(a.operationId)) &&
+        a.request.action.kind.startsWith("branch.") &&
+        a.request.action.target.repositoryId === repositoryId &&
+        "commitSha" in a.request.action
+          ? [a.request.action.commitSha]
+          : [],
+      ),
+    );
   }
   delivery(taskId: string): PrDeliveryBinding | null {
     const row = this.db
@@ -1091,7 +1369,13 @@ export class DeliveryStore {
   observePrWithinTransaction(
     taskId: string,
     input: PrDeliveryObservation,
-  ): { binding: PrDeliveryBinding; changed: boolean; firstSeen: boolean } {
+  ): {
+    binding: PrDeliveryBinding;
+    changed: boolean;
+    firstSeen: boolean;
+    /** Newly recorded: the PR's head is on the task branch but is no commit Ensemble pushed. */
+    outsideHead: boolean;
+  } {
     const observation = prObservationSchema.parse(input),
       binding = this.delivery(taskId);
     if (!binding) throw new Error("Unknown PR delivery");
@@ -1123,7 +1407,59 @@ export class DeliveryStore {
     this.db
       .prepare("INSERT OR IGNORE INTO delivery_observations VALUES (?,?,?,?)")
       .run(taskId, digest, canonicalMaterial(observation), Date.now());
-    return { binding, changed, firstSeen };
+    const outsideHead = this.outsideHeadWithinTransaction(taskId, observation);
+    return { binding, changed, firstSeen, outsideHead };
+  }
+  /**
+   * Records a PR head on the task branch that Ensemble did not push; true when newly recorded. A head
+   * back at the last push clears an earlier record. A lagging head showing an earlier push is not outside.
+   */
+  outsideHeadWithinTransaction(
+    taskId: string,
+    observation: PrDeliveryObservation,
+  ): boolean {
+    const branch = this.taskBranch(taskId, observation.repositoryId);
+    if (!branch || branch.branch !== observation.headRef) return false;
+    // A PR keeps its head commit after the branch is deleted: only a ref read proves the branch is back.
+    if (branch.outsideHeadSha === absentBranchHead) return false;
+    if (observation.headSha === branch.lastPushedSha) {
+      if (branch.outsideHeadSha !== null)
+        this.db
+          .prepare(
+            "UPDATE delivery_task_branches SET outsideHeadSha=NULL WHERE taskId=? AND repositoryId=?",
+          )
+          .run(taskId, observation.repositoryId);
+      return false;
+    }
+    if (
+      branch.outsideHeadSha === observation.headSha ||
+      this.pushedShas(taskId, observation.repositoryId).has(observation.headSha)
+    )
+      return false;
+    this.db
+      .prepare(
+        "UPDATE delivery_task_branches SET outsideHeadSha=? WHERE taskId=? AND repositoryId=?",
+      )
+      .run(observation.headSha, taskId, observation.repositoryId);
+    return true;
+  }
+  /** The remote branch was read back at the commit Ensemble last pushed: any outside record is obsolete. */
+  clearOutsideHead(taskId: string, repositoryId: string): void {
+    this.db
+      .prepare(
+        "UPDATE delivery_task_branches SET outsideHeadSha=NULL WHERE taskId=? AND repositoryId=?",
+      )
+      .run(taskId, repositoryId);
+  }
+  /** The PR's head is on the task branch but is not the commit Ensemble last pushed there. */
+  private branchHold(taskId: string, binding: PrDeliveryBinding): boolean {
+    const branch = this.taskBranch(taskId, binding.observation.repositoryId);
+    return (
+      !!branch &&
+      branch.branch === binding.observation.headRef &&
+      (branch.outsideHeadSha !== null ||
+        branch.lastPushedSha !== binding.observation.headSha)
+    );
   }
   recordPrReadFailure(taskId: string): void {
     this.transaction(() => {
@@ -1152,6 +1488,12 @@ export class DeliveryStore {
   ): PrDeliveryBinding {
     const binding = this.delivery(command.taskId);
     if (!binding) throw new Error("Unknown PR delivery");
+    // Closing the outcome does not accept the branch's content, so it stays possible on a closed PR.
+    if (
+      command.decision === "accepted" &&
+      this.branchHold(command.taskId, binding)
+    )
+      throw new Error("Task branch changed outside Ensemble");
     if (
       binding.mode !== "reviewable-pr" ||
       binding.revision !== command.expectedDeliveryRevision ||
@@ -1193,6 +1535,11 @@ export class DeliveryStore {
     const policy = this.configuration(binding.projectId);
     if (binding.mode !== policy.mode) reasons.push("delivery-mode-changed");
     if (binding.observation.merged) return reasons;
+    if (
+      binding.observation.state !== "CLOSED" &&
+      this.branchHold(taskId, binding)
+    )
+      reasons.push("task-branch-outside-change");
     if (binding.mode === "through-merge")
       reasons.push("pr-not-confirmed-merged");
     else if (
@@ -1263,6 +1610,7 @@ export class DeliveryStore {
       policyVersion: configuration.version,
       mode: configuration.mode,
       binding: this.delivery(taskId),
+      branches: this.taskBranches(taskId),
       blockers: this.completionBlockers(taskId, task.version),
       actions: this.actions(taskId).map((a) => ({
         operationId: a.operationId,

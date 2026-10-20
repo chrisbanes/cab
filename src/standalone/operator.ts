@@ -336,6 +336,7 @@ export class LocalOperatorUi {
         ) +
         field("credentialRef") +
         field("clearCredentialRef", "1", "checkbox") +
+        field("branchPrefix", delivery.branchPrefix ?? "") +
         textarea("grants", JSON.stringify(delivery.grants, null, 2)) +
         textarea(
           "requiredChecks",
@@ -608,6 +609,7 @@ export class LocalOperatorUi {
             fields.clearCredentialRef === "1"
               ? null
               : fields.credentialRef || current,
+          ...(fields.branchPrefix ? { branchPrefix: fields.branchPrefix } : {}),
           grants: JSON.parse(required("grants")),
           requiredChecks: JSON.parse(required("requiredChecks")),
         };

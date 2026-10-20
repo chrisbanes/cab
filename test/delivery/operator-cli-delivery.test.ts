@@ -10,6 +10,17 @@ type Json = Record<string, any>;
 test("delivery get shows the PR, actions and comment policy without provider access", async (t) => {
   const w = await deliveryWorld(t);
   await w.f.register();
+  w.f.seedPersistedState((db) =>
+    db
+      .prepare("INSERT INTO delivery_task_branches VALUES (?,?,?,?,?,1)")
+      .run(
+        w.f.taskId,
+        "R1",
+        "ensemble/12345678-fix-it",
+        "a".repeat(40),
+        "b".repeat(40),
+      ),
+  );
   const requests = w.scripted.requests.length;
   const before = databaseDigest(w.s.f);
   const json = await w.ok("ro", ["delivery", "get", w.f.taskId]);
@@ -32,6 +43,11 @@ test("delivery get shows the PR, actions and comment policy without provider acc
   ]);
   assert.match(human.out, /Pull request: +org\/repo#7 OPEN/);
   assert.match(human.out, /Comments: +available \(allow\)/);
+  assert.match(
+    human.out,
+    /Branch: +org\/repo ensemble\/12345678-fix-it pushed a{12}, outside push b{12}/,
+  );
+  assert.equal(json.data.delivery.branches.length, 1);
   assert.match(human.out, /build +success/);
   assert.equal(databaseDigest(w.s.f), before);
   assert.equal(w.scripted.requests.length, requests);

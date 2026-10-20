@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { absentBranchHead } from "../core/delivery.js";
 import {
   type CommandReceipt,
   commandReceiptSchema,
@@ -112,6 +113,10 @@ function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
           ? `${b.repositoryName}#${b.number} ${b.state} head ${b.headSha.slice(0, 12)}, observed ${b.observedAt}${b.readError ? `, last read failed: ${b.readError}` : ""}`
           : "none registered",
       ],
+      ...(d?.branches ?? []).map((r): [string, string] => [
+        "Branch",
+        `${r.repositoryName} ${unavailable(r.branch)} pushed ${r.lastPushedSha?.slice(0, 12) ?? "nothing yet"}${r.outsideHeadSha ? (r.outsideHeadSha === absentBranchHead ? ", branch deleted" : `, outside push ${r.outsideHeadSha.slice(0, 12)}`) : ""}`,
+      ]),
     ]),
     ...(b?.checks.length
       ? [

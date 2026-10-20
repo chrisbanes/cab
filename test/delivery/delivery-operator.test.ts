@@ -30,12 +30,17 @@ test("operator policy form exposes current version and grants without credential
       expectedVersion: "1",
       mode: "reviewable-pr",
       credentialRef: "env:PRIVATE_DELIVERY_KEY",
+      branchPrefix: "team/",
       grants:
         '[{"action":"issue.comment","repositoryId":"R1","mode":"approval"}]',
       requiredChecks: "[]",
     });
     assert.doesNotMatch(ui.project(projectId), /PRIVATE_DELIVERY_KEY/);
     assert.match(ui.project(projectId), /Credential reference configured/);
+    assert.match(
+      ui.project(projectId),
+      /name="branchPrefix"[^>]*value="team\/"/,
+    );
   } finally {
     db.close();
   }
