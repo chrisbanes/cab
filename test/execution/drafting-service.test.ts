@@ -1779,6 +1779,8 @@ for (const harness of harnesses) {
     const taskId = await w.importIssue(service, projectId);
     const watch = w.tracked(service);
     const before = watch.counts();
+    // Import gives the task its lead assignment; the run adds nothing to it.
+    assert.equal(before.assignments, 1);
     script(w, harness, opened, async (api) => {
       const turn = firstTurn(harness, opened);
       assert.ok(turn);

@@ -196,6 +196,15 @@ try {
     if (!taskId) throw new Error("The seeded issue was not imported");
   }
 
+  // An imported task comes with its lead assignment, so what a run creates is measured
+  // against the state just before it starts.
+  const count = () => ({
+    tasks: domain.tasks(projectId).length,
+    assignments: taskId ? domain.assignments(taskId).length : 0,
+    deliveryRecords: service.delivery().actions().length,
+  });
+  const baseline = count();
+
   stage = "drafting";
   const runId = randomUUID();
   const started = Date.now();
@@ -235,10 +244,10 @@ try {
   const copies = join(dataDir, "drafting-workspaces");
   result.worktreeRemoved =
     !existsSync(copies) || readdirSync(copies).length === 0;
-  // The imported task is the one task an issue run may find, never create.
-  result.tasksCreated = domain.tasks(projectId).length - (issueMode ? 1 : 0);
-  result.assignmentsCreated = issueMode ? domain.assignments(taskId).length : 0;
-  result.deliveryRecords = service.delivery().actions().length;
+  const after = count();
+  result.tasksCreated = after.tasks - baseline.tasks;
+  result.assignmentsCreated = after.assignments - baseline.assignments;
+  result.deliveryRecords = after.deliveryRecords - baseline.deliveryRecords;
   if (
     run.state !== "proposed" ||
     !checked.success ||

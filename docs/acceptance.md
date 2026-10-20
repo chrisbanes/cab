@@ -670,7 +670,8 @@ A drafting run proposes a task title and outcome for the composer, or an improve
 title and body for an imported issue (Improve with lead), without creating anything.
 Service, API and composer are covered by these deterministic suites on both
 harnesses; the real-runtime runs are recorded in the
-[live drafting evidence](evidence/2026-10-18-drafting-live-run.md).
+[live drafting evidence](evidence/2026-10-18-drafting-live-run.md) and the
+[live issue drafting evidence](evidence/2026-10-20-issue-drafting-live-run.md).
 
 | Criteria | Deterministic evidence |
 | --- | --- |
