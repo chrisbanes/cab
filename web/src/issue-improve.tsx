@@ -166,6 +166,8 @@ export function useIssueImprove({
   const [run, setRun] = useState<IssueDraftRun | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The run whose start is in flight, which a not-found read does not yet mean was lost.
+  const [startingId, setStartingId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [staleFlag, setStaleFlag] = useState(false);
   const [sendFailure, setSendFailure] = useState<string | null>(null);
@@ -204,9 +206,15 @@ export function useIssueImprove({
       setRun(null);
       setNotFound(false);
       setStored((current) => {
+        // The text being edited keeps the run it came from, so it can still be reviewed.
         const next: Stored = {
           note: current.note,
-          ...(current.edit ? { edit: current.edit } : {}),
+          ...(current.edit
+            ? {
+                edit: current.edit,
+                ...(current.editRunId ? { editRunId: current.editRunId } : {}),
+              }
+            : {}),
         };
         writeStored(sessionStore, taskId, next);
         return next;
@@ -226,7 +234,8 @@ export function useIssueImprove({
     async (signal: AbortSignal) => {
       if (!runId) return;
       const result = await port.readRun(runId, signal);
-      if (signal.aborted) return;
+      // An answer about a run the panel has since dropped is not about the current one.
+      if (signal.aborted || latest.current.stored.runId !== runId) return;
       if (result.state === "ok") {
         setRun(result.run);
         setNotFound(false);
@@ -259,14 +268,21 @@ export function useIssueImprove({
 
   const sendStart = useCallback(
     async (id: string, key: string, note: string, version: number) => {
-      const result = await port.startRun({
-        key,
-        runId: id,
-        taskId,
-        note,
-        expectedTaskVersion: version,
-      });
-      if (result.state === "recorded") return;
+      setStartingId(id);
+      const result = await port
+        .startRun({
+          key,
+          runId: id,
+          taskId,
+          note,
+          expectedTaskVersion: version,
+        })
+        .finally(() => setStartingId(null));
+      if (result.state === "recorded") {
+        // Reads that ran before the start landed said not-found; the next one finds the run.
+        setNotFound(false);
+        return;
+      }
       if (result.state === "unknown") setMessage(copy.unconfirmed);
       else {
         dropRun(
@@ -284,7 +300,7 @@ export function useIssueImprove({
   // A run the service does not know may be a start that never arrived: send it once more
   // under its key; if it is still unknown, the durable release ends it wherever it landed.
   useEffect(() => {
-    if (!notFound || !runId || !stored.startKey) return;
+    if (!notFound || !runId || !stored.startKey || startingId === runId) return;
     const { note, expectedTaskVersion } = latest.current.stored;
     if (!replayed.current.has(runId)) {
       replayed.current.add(runId);
@@ -310,6 +326,7 @@ export function useIssueImprove({
     sendStart,
     releaseRun,
     dropRun,
+    startingId,
     taskId,
     taskVersion,
   ]);
@@ -326,6 +343,7 @@ export function useIssueImprove({
     change({
       edit: { title: run.proposal.title, body: run.proposal.body },
       loadedRunId: run.runId,
+      editRunId: run.runId,
       review: undefined,
     });
     setStaleFlag(false);
@@ -387,7 +405,8 @@ export function useIssueImprove({
   const block = reviewBlock(edit, null);
 
   const review = async () => {
-    if (block || !runId) return;
+    const sourceRunId = stored.editRunId ?? runId;
+    if (block || !sourceRunId) return;
     const title = edit.title.trim();
     const same =
       stored.review?.title === title && stored.review.body === edit.body;
@@ -404,7 +423,7 @@ export function useIssueImprove({
     setMessage("");
     const result = await port.review({
       key: keys.reviewKey,
-      runId,
+      runId: sourceRunId,
       operationId: keys.operationId,
       expectedTaskVersion: taskVersion,
       title,
@@ -508,6 +527,7 @@ export function useIssueImprove({
         if (state === "confirmed-success") {
           change({
             edit: undefined,
+            editRunId: undefined,
             review: undefined,
             runId: undefined,
             startKey: undefined,
@@ -611,7 +631,7 @@ function Compare({
   current: string;
   proposed: string;
 }) {
-  const diff = lineDiff(current, proposed);
+  const diff = useMemo(() => lineDiff(current, proposed), [current, proposed]);
   return (
     <div className="issue-improve-compare">
       <span className="body issue-improve-strong">{name}</span>

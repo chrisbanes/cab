@@ -424,6 +424,10 @@ test("a Redraft refused as out of date keeps the operator's text and works once 
     await page.locator("#issue-improve-title").inputValue(),
     "My own edit",
   );
+  // The kept text is still the draft being edited: it can be reviewed.
+  await panel(page).getByRole("button", { name: "Review changes" }).click();
+  await panel(page).getByText("Review the full replacement.").waitFor();
+  await panel(page).getByRole("button", { name: "Back to editing" }).click();
   await page.unroute(commandsUrl);
   await panel(page).getByRole("button", { name: "Redraft" }).click();
   await panel(page).getByText("Drafting", { exact: true }).waitFor();

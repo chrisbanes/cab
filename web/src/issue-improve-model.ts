@@ -219,6 +219,8 @@ export const storedSchema = z
     expectedTaskVersion: z.number().int().nonnegative().optional(),
     /** The run whose proposal already filled the editor, so a reload does not refill it. */
     loadedRunId: z.string().uuid().optional(),
+    /** The run the text being edited came from, which a review names; a newer draft may not have arrived. */
+    editRunId: z.string().uuid().optional(),
     edit: z
       .object({
         title: z.string().max(issueTitleLimit * 4),
