@@ -619,3 +619,35 @@ test("a branch deleted before a push is refused and recorded as held", async (t)
   assert.equal(again.state, "confirmed-success");
   assert.equal(branchOf(w)?.outsideHeadSha, null);
 });
+
+test("closing the outcome stays possible on a closed PR whose branch was deleted", async (t) => {
+  const w = publicationWorld(t);
+  const { first, branch } = await withPr(w);
+  w.remote.head = null;
+  const refused = await w.submit("branch.push", w.commit());
+  assert.equal(refused.observation?.reason, "branch-outside-change");
+  assert.equal(branchOf(w)?.outsideHeadSha, "0".repeat(40));
+  w.showPr(first, branch).state = "CLOSED";
+  await w.coordinator.refresh();
+  assert.ok(
+    !w.store
+      .completionBlockers(w.taskId, 1)
+      .includes("task-branch-outside-change"),
+  );
+  const binding = w.store.delivery(w.taskId);
+  assert.ok(binding);
+  await w.coordinator.settleHandback({
+    actor: "operator",
+    key: randomUUID(),
+    taskId: w.taskId,
+    expectedTaskVersion: 1,
+    expectedDeliveryRevision: binding.revision,
+    expectedPolicyVersion: w.store.configuration(w.projectId).version,
+    decision: "closed",
+    repositoryId,
+    prNumber: 7,
+    expectedPrNodeId: "P7",
+    expectedHeadSha: first,
+  });
+  assert.ok(w.store.delivery(w.taskId)?.settlement);
+});

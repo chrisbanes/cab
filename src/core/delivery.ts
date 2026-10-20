@@ -1488,7 +1488,11 @@ export class DeliveryStore {
   ): PrDeliveryBinding {
     const binding = this.delivery(command.taskId);
     if (!binding) throw new Error("Unknown PR delivery");
-    if (this.branchHold(command.taskId, binding))
+    // Closing the outcome does not accept the branch's content, so it stays possible on a closed PR.
+    if (
+      command.decision === "accepted" &&
+      this.branchHold(command.taskId, binding)
+    )
       throw new Error("Task branch changed outside Ensemble");
     if (
       binding.mode !== "reviewable-pr" ||
@@ -1531,7 +1535,10 @@ export class DeliveryStore {
     const policy = this.configuration(binding.projectId);
     if (binding.mode !== policy.mode) reasons.push("delivery-mode-changed");
     if (binding.observation.merged) return reasons;
-    if (this.branchHold(taskId, binding))
+    if (
+      binding.observation.state !== "CLOSED" &&
+      this.branchHold(taskId, binding)
+    )
       reasons.push("task-branch-outside-change");
     if (binding.mode === "through-merge")
       reasons.push("pr-not-confirmed-merged");

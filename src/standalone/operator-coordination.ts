@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { CoordinationTaskView } from "./coordination-view.js";
 import type { CoordinationView } from "./coordination-view.js";
+import { absentBranchHead } from "../core/delivery.js";
 import type { DomainStore } from "../core/domain.js";
 import type { OperatorRoute } from "./operator-routes.js";
 import type { RoutingAvailability } from "./service.js";
@@ -122,7 +123,7 @@ export function deliverySection(
     : "<p>No imported issue observation.</p>";
   const fieldFacts = `<p>Project field observations: ${escapeHtml(delivery.projectFieldObservations.map((f) => `${f.projectNodeId}/${f.fieldNodeId}: ${f.optionNodeId}`).join("; ") || "None observed")}.</p>`;
   const branchFacts = delivery.branches.length
-    ? `<p>Task branches: ${escapeHtml(delivery.branches.map((r) => `${r.branch} (${r.repositoryId}) pushed ${r.lastPushedSha ?? "nothing yet"}${r.outsideHeadSha ? (/^0+$/.test(r.outsideHeadSha) ? "; branch deleted" : `; outside push ${r.outsideHeadSha}`) : ""}`).join("; "))}.</p>`
+    ? `<p>Task branches: ${escapeHtml(delivery.branches.map((r) => `${r.branch} (${r.repositoryId}) pushed ${r.lastPushedSha ?? "nothing yet"}${r.outsideHeadSha ? (r.outsideHeadSha === absentBranchHead ? "; branch deleted" : `; outside push ${r.outsideHeadSha}`) : ""}`).join("; "))}.</p>`
     : "";
   const b = delivery.binding,
     p = b?.observation;

@@ -1683,7 +1683,7 @@ head separately. Any head Ensemble does not own, seen at a push or on the task's
 change: the push is refused, the lead is woken and handback settlement is invalidated at once;
 without a PR it is noticed at the next push, as Ensemble does not poll branches. While the branch
 holds an outside head, or the PR's head is not Ensemble's last push, completion is held and
-settlement is refused, and PR actions that name the task branch (`pr.create`, `pr.edit`,
+settlement is refused (closing the outcome of a closed PR stays possible), and PR actions that name the task branch (`pr.create`, `pr.edit`,
 `pr.ready`, `pr.merge`) need `expectedHeadSha` to equal Ensemble's last push. A branch found absent is held the same way and stays held, even while the PR still shows its head commit, until a ref read
 shows it back at that commit. The record clears when
 the branch is read back at that commit or Ensemble pushes again; a PR inspection that still shows the last push while
