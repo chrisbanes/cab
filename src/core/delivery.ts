@@ -1,5 +1,9 @@
 import { TaskReviewStore } from "./task-review.js";
-import { issueBodyLimit, issueTitleLimit } from "./issue-text-limits.js";
+import {
+  issueBodyLimit,
+  issueCurrentBodyLimit,
+  issueTitleLimit,
+} from "./issue-text-limits.js";
 import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -147,7 +151,7 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       expected: z
         .object({
           title: z.string().max(issueTitleLimit),
-          body: z.string().max(issueBodyLimit),
+          body: z.string().max(issueCurrentBodyLimit),
         })
         .strict()
         .optional(),

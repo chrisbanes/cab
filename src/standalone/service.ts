@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import {
+  issueCurrentBodyLimit,
+  issueTitleLimit,
+} from "../core/issue-text-limits.js";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
@@ -4765,6 +4769,38 @@ export class StandaloneService {
       .strict()
       .parse(input);
     const { drafting, schedulerStore } = this.started();
+    // A start that already created its run converges on it before the task and source are
+    // judged again: they may have changed since, and the run must not be orphaned.
+    const earlier = drafting.get(value.runId);
+    if (earlier) {
+      if (
+        earlier.kind !== "issue" ||
+        earlier.taskId !== value.taskId ||
+        earlier.sourceNodeId === null ||
+        earlier.observedTitle === null ||
+        earlier.observedBody === null
+      )
+        throw new DomainConflictError(
+          "Drafting run identity already used with other content",
+        );
+      const issue = {
+        taskId: value.taskId,
+        sourceNodeId: earlier.sourceNodeId,
+        observedTitle: earlier.observedTitle,
+        observedBody: earlier.observedBody,
+      };
+      const replayed = drafting.atomically(() => {
+        const created = drafting.create({
+          ...earlier,
+          idea: value.note,
+          issue,
+        });
+        schedulerStore.ensure(StandaloneService.draftingRequest(created));
+        return created;
+      });
+      await this.wakeScheduler();
+      return drafting.require(replayed.runId);
+    }
     const domain = this.domain();
     const task = domain.task(value.taskId);
     const imported = domain.importedTask(value.taskId);
@@ -4782,18 +4818,21 @@ export class StandaloneService {
       observedTitle: String(source.observedTitle),
       observedBody: String(source.observedBody),
     };
+    // The operator must be able to see all of this text to review a replacement.
+    if (
+      issue.observedTitle.length > issueTitleLimit ||
+      issue.observedBody.length > issueCurrentBodyLimit
+    )
+      throw new DomainConflictError("The issue is too long to rewrite");
     // The run and its turn request commit together: neither can exist without the other.
     const run = drafting.atomically(() => {
-      const existing = drafting.get(value.runId);
-      const created = existing
-        ? drafting.create({ ...existing, idea: value.note, issue })
-        : drafting.create({
-            runId: value.runId,
-            projectId,
-            idea: value.note,
-            ...this.draftingLead(projectId),
-            issue,
-          });
+      const created = drafting.create({
+        runId: value.runId,
+        projectId,
+        idea: value.note,
+        ...this.draftingLead(projectId),
+        issue,
+      });
       schedulerStore.ensure(StandaloneService.draftingRequest(created));
       return created;
     });

@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { issueBodyLimit, issueTitleLimit } from "../core/issue-text-limits.js";
+import {
+  issueBodyLimit,
+  issueCurrentBodyLimit,
+  issueTitleLimit,
+} from "../core/issue-text-limits.js";
 import { commentReasonCodes, issueEditReasonCodes } from "./github-reasons.js";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
@@ -1021,6 +1025,13 @@ export const issueTextSchema = z
   .object({
     title: z.string().max(issueTitleLimit),
     body: z.string().max(issueBodyLimit),
+  })
+  .strict();
+/** The issue text an edit replaces, which may be longer than a replacement can be. */
+const currentIssueTextSchema = z
+  .object({
+    title: z.string().max(issueTitleLimit),
+    body: z.string().max(issueCurrentBodyLimit),
   })
   .strict();
 export const draftingRunReadSchema = envelope(
@@ -3007,7 +3018,7 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       materialHash: hash,
       decision: z.enum(["pending", "approved", "denied"]),
       /** What GitHub showed when the draft started, and what the edit would replace it with. */
-      current: issueTextSchema,
+      current: currentIssueTextSchema,
       proposed: issueTextSchema,
       target: z
         .object({ repositoryId: text, nodeId: text, number: revision })

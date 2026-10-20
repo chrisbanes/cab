@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { issueCurrentBodyLimit } from "../core/issue-text-limits.js";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
@@ -4518,7 +4519,7 @@ export class OperatorApi {
     const shown = (value: string) => this.exact(value, excluded, 64_000);
     const current = {
       title: shown(action.expected.title),
-      body: shown(action.expected.body),
+      body: this.exact(action.expected.body, excluded, issueCurrentBodyLimit),
     };
     const proposed = {
       title: shown(text.title),
@@ -6553,8 +6554,8 @@ export class OperatorApi {
       // The operator must see the whole text being replaced, so hidden text is refused before
       // anything is recorded.
       if (
-        !this.disclosable(run.observedTitle, excluded, 64_000) ||
-        !this.disclosable(run.observedBody, excluded, 64_000)
+        !this.disclosable(run.observedTitle, excluded, issueCurrentBodyLimit) ||
+        !this.disclosable(run.observedBody, excluded, issueCurrentBodyLimit)
       )
         throw new OperatorApiError(403, "forbidden");
       return this.editReviewReceipt(

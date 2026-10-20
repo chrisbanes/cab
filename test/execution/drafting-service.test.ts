@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
 import {
@@ -1926,4 +1927,42 @@ test("an issue run is offered only on an open imported task, replays by run id a
   assert.equal(w.tracked(service).usage(projectId).global, 0);
   assert.equal(w.tracked(service).counts().deliveryActions, 0);
   assert.deepEqual(readdirSync(join(w.dataDir, "drafting-workspaces")), []);
+});
+
+test("a start replayed after its run was created converges even when the task has since closed", async (t) => {
+  const w = world(t);
+  const opened = w.open({ issue: {} });
+  const { service } = opened;
+  await w.start(service, "codex");
+  const { projectId } = await w.project(service, "codex");
+  const taskId = await w.importIssue(service, projectId);
+  // A paused project keeps the run queued, so no runtime is involved.
+  w.execute(service, {
+    type: "project.configure",
+    projectId,
+    expectedVersion: Number(service.domain().project(projectId).version),
+    paused: true,
+  });
+  const runId = randomUUID();
+  const first = await service.startIssueDrafting({ runId, taskId, note: "n" });
+  await service.stop();
+  const db = new DatabaseSync(join(w.dataDir, "standalone.sqlite"));
+  db.prepare(
+    "UPDATE domain_tasks SET state='cancelled', version=version+1 WHERE id=?",
+  ).run(taskId);
+  db.close();
+  await service.start();
+  // The earlier start is answered by the run it made, though a new start would be refused.
+  const again = await service.startIssueDrafting({ runId, taskId, note: "n" });
+  assert.equal(again.runId, first.runId);
+  assert.equal(again.observedBody, first.observedBody);
+  await assert.rejects(
+    service.startIssueDrafting({ runId: randomUUID(), taskId, note: "n" }),
+    DomainConflictError,
+  );
+  await assert.rejects(
+    service.startIssueDrafting({ runId, taskId, note: "different" }),
+    DomainConflictError,
+  );
+  assert.equal(w.tracked(service).runs().length, 1);
 });

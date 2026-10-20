@@ -53,7 +53,11 @@ const version = (f: Fixture) =>
 /** A used draft of the task, as the store would hold it after the operator loaded it. */
 function usedRun(
   f: Fixture,
-  over: { taskId?: string; kind?: "issue" | "brief" } = {},
+  over: {
+    taskId?: string;
+    kind?: "issue" | "brief";
+    observedBody?: string;
+  } = {},
 ) {
   const drafting = startedOf(f.service).drafting;
   const runId = randomUUID();
@@ -72,7 +76,7 @@ function usedRun(
             taskId: over.taskId ?? f.taskId,
             sourceNodeId: "I1",
             observedTitle: "T",
-            observedBody: "O",
+            observedBody: over.observedBody ?? "O",
           },
         }),
   });
@@ -342,4 +346,34 @@ test("text being replaced that would have to be hidden refuses the review before
   const review = reviewCommand(f, runId);
   await assert.rejects(api.execute(review), /forbidden/);
   assert.equal(f.service.delivery().operatorReview(review.key), undefined);
+});
+
+test("an issue body longer than a replacement may be can still be reviewed in full, and one longer than GitHub holds cannot start a draft", async (t) => {
+  const { f, api } = await world(t);
+  // GitHub holds up to 65,536 characters; a replacement is limited to 64,000.
+  const long = "x".repeat(65_000);
+  f.setSourceBody(long);
+  await f.service.refreshGitHub();
+  const reviewed = await api.execute(
+    reviewCommand(f, usedRun(f, { observedBody: long })),
+  );
+  assert.equal(reviewed.kind, "edit-review");
+  if (reviewed.kind === "edit-review") {
+    assert.equal(reviewed.current.body.length, 65_000);
+    assert.deepEqual(reviewed.proposed, edit);
+  }
+  // A body no GitHub issue can hold is refused before a draft is spent on it.
+  f.setSourceBody("y".repeat(65_537));
+  await f.service.refreshGitHub();
+  await assert.rejects(
+    api.execute({
+      type: "issue.draft.start",
+      key: randomUUID(),
+      runId: randomUUID(),
+      taskId: f.taskId,
+      expectedTaskVersion: version(f),
+      note: "",
+    }),
+    conflict,
+  );
 });

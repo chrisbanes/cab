@@ -896,7 +896,8 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   run records the synced title and body it starts from, which the lead is shown with the
   note, and it may run while the task has work running. Its own result tool, not the
   brief tool, proposes a replacement title (1 to 512 characters) and a non-blank body (up
-  to 64,000), the `issue.edit` limits; a brief run is offered only the brief tool and an
+  to 64,000), the `issue.edit` limits; the text it replaces may be up to GitHub's 65,536
+  characters, and a longer issue cannot start a draft; a brief run is offered only the brief tool and an
   issue run only the issue tool. A proposal is validated, checked against the operator's
   exclusions before it is stored, and withheld whole, never shown empty or accepted, if it
   cannot be shown. The operator's edited text is held in the browser session with the run
