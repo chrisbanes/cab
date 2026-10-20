@@ -27,8 +27,6 @@ const proposal = {
   title: "Make the command menu usable with a keyboard and screen reader",
   body: "The menu cannot be operated without a mouse.\n\nAcceptance criteria\n- Focus moves to the search field on open.",
 };
-const credentialName = "FIXTURE_ISSUE_IMPROVE_DELIVERY";
-const sourceName = "FIXTURE_ISSUE_IMPROVE_SOURCE";
 
 /** The sent commands, by type. */
 function recordCommands(page: Page) {
@@ -52,6 +50,10 @@ async function launch(
     outcome?: "confirmed-success" | "uncertain";
   } = {},
 ) {
+  // Names are per launch, so one test's cleanup cannot remove another's credential.
+  const suffix = randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase();
+  const credentialName = `FIXTURE_ISSUE_IMPROVE_DELIVERY_${suffix}`;
+  const sourceName = `FIXTURE_ISSUE_IMPROVE_SOURCE_${suffix}`;
   process.env[sourceName] = "offline-issue-improve-source-value";
   let current = { ...original };
   const effects: ExternalAction[] = [];
