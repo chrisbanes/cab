@@ -6543,8 +6543,7 @@ export class OperatorApi {
       const run = this.service.readDrafting(c.runId);
       // The text the draft started from is what the edit replaces; only a used draft of this task qualifies.
       if (
-        !run ||
-        run.kind !== "issue" ||
+        run?.kind !== "issue" ||
         run.taskId !== c.taskId ||
         !["proposed", "accepted"].includes(run.state) ||
         run.observedTitle === null ||

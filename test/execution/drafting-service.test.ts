@@ -1769,13 +1769,6 @@ const issueProposal = {
   body: `Context\n${"Cover every shortcut. ".repeat(900)}\nDone: reviewed examples.`,
 };
 const issueIdea = "Mention the command menu";
-const issueProposing =
-  (...calls: Array<Record<string, unknown>>): Behavior =>
-  async (api) => {
-    for (const args of calls)
-      await api.callTool(issueEditProposalToolName, args);
-  };
-
 for (const harness of harnesses) {
   test(`${harness}: an issue run proposes a title and body from the synced text and creates nothing`, async (t) => {
     const w = world(t);

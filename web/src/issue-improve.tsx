@@ -237,7 +237,7 @@ export function useIssueImprove({
         );
       }
     },
-    [port, reset],
+    [port, reset, taskId],
   );
 
   // A run the service does not know may be a start that never arrived: send it once more
@@ -269,6 +269,7 @@ export function useIssueImprove({
     sendStart,
     releaseRun,
     reset,
+    taskId,
     taskVersion,
   ]);
 
