@@ -81,14 +81,12 @@ owns delivery scope and status.
   place until Replace or Keep. It counts against capacity, can be stopped, and
   nothing is saved until Save draft or Create and start. It is not a read-only
   sandbox, and the operator CLI does not offer it.
-<<<<<<< HEAD
 - **Draft turns.** On a task that is not Ready, the operator can start one read-only
   turn of the project lead from the task page or `ensemble task draft-turn`. The lead
   can read, investigate, ask questions and, where granted, comment on or label the
   issue; delegation, writes, pull request actions, results and completion are refused,
   and the task stays not Ready. Codex runs it with a read-only sandbox policy and
   command network access off; Ensemble claims no independent sandbox.
-=======
 - **Improve with lead.** On an open imported task, the project lead reads the linked
   repositories in the same throwaway copy and proposes a better title and body for
   the source issue. The operator edits the proposal, reviews the full current and
@@ -96,7 +94,6 @@ owns delivery scope and status.
   `issue.edit` grant. The edit is refused before any write if the issue changed on
   GitHub after the draft started. It cannot be undone from Ensemble, and the
   operator CLI does not offer it.
->>>>>>> 9b2049db (Add the issue drafting run kind, live --issue mode and Improve with lead docs)
 - **Inbox and questions.** The action Inbox lists cross-project questions, approvals
   and recorded interventions by urgency and age. Exact own-tool forms support grouped
   text, single-choice and multiple-choice answers, with preserved drafts and durable
