@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
-import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { ClaudeRuntime } from "../../src/standalone/claude.js";

@@ -1,6 +1,7 @@
-import { useCallback, useEffect } from "react";
 import { CircleCheck } from "lucide-react";
+import { useCallback, useEffect } from "react";
 import {
+  executionHarnessLabels,
   profileConfigurationSchema,
   profilePrivateValuesSchema,
 } from "../../src/operator/contracts.js";
@@ -10,13 +11,7 @@ import {
   ResourceStatus,
   StatusBadge,
 } from "./components.js";
-import { useOperatorResource } from "./resource.js";
-import {
-  privateField,
-  profileChanges,
-  runtimeChanged,
-  type Values,
-} from "./settings-changes.js";
+import { PolicyDisclosure } from "./execution-notice.js";
 import {
   harnessNote,
   runtimeCommand,
@@ -25,32 +20,37 @@ import {
   supportedEfforts,
   supportedModels,
 } from "./execution-runtime.js";
-import { Alert } from "./ui/alert.js";
-import { PolicyDisclosure } from "./execution-notice.js";
-import { executionHarnessLabels } from "../../src/operator/contracts.js";
+import { useOperatorResource } from "./resource.js";
 import {
   Aside,
   ChangeList,
   DraftCheck,
   DraftField,
   DraftOutcome,
-  Panel,
-  PrivateTextField,
+  editable,
   key,
   locked,
+  Panel,
+  PrivateTextField,
   reloadDraft,
   revealedText,
+  type SettingsProps,
   submitDraft,
+  textHold,
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
-  editable,
-  textHold,
   usePrivateValues,
-  type SettingsProps,
 } from "./settings.js";
-import type { ConfigurationDraft } from "./settings-state.js";
+import {
+  privateField,
+  profileChanges,
+  runtimeChanged,
+  type Values,
+} from "./settings-changes.js";
 import { settingsSectionHref } from "./settings-sections.js";
+import type { ConfigurationDraft } from "./settings-state.js";
+import { Alert } from "./ui/alert.js";
 
 /** New profiles start on the first enabled runtime (Codex, then Claude), else Codex. */
 export const defaultHarness = (workspace: SettingsProps["workspace"]) =>

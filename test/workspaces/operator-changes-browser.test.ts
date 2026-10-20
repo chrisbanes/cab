@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { type Browser, chromium } from "playwright";
 import {
-  browserSuite,
   type BrowserJourney,
+  browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import {

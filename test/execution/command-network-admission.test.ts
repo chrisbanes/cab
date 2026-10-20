@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { test } from "node:test";
-import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { test } from "node:test";
 import type { Runtime, RuntimeTurnPolicy } from "../../src/standalone/codex.js";
+import type { ExecutionHarness } from "../../src/standalone/execution-harness.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { coordinationFixture } from "../fixtures/coordination.js";
 import { tmpdir } from "../fixtures/temp.js";

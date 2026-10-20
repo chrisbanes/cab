@@ -7,11 +7,11 @@ import { DatabaseSync } from "node:sqlite";
 import { mock, test } from "node:test";
 import { DeliveryStore } from "../../src/core/delivery.js";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
-import { evaluateReadiness } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
+import { evaluateReadiness } from "../../src/core/github-source-contracts.js";
 import { Store } from "../../src/core/store.js";
-import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import type { IssueSnapshot } from "../../src/standalone/github-source.js";
+import { LocalOperatorUi } from "../../src/standalone/operator.js";
 
 const issue: IssueSnapshot = {
   providerInstance: "github.com",

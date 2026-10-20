@@ -1,6 +1,10 @@
-import { sourceCredentialSummary } from "./settings-view.js";
 import { Circle, CircleCheck, CirclePause } from "lucide-react";
 import { useCallback } from "react";
+import {
+  commandNetworkAppliesNote,
+  commandNetworkDisclosure,
+  projectCommandNetworkLine,
+} from "../../src/operator/command-network-copy.js";
 import {
   projectConfigurationSchema,
   projectPrivateValuesSchema,
@@ -10,50 +14,46 @@ import {
   projectLabel,
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
-import {
-  commandNetworkAppliesNote,
-  commandNetworkDisclosure,
-  projectCommandNetworkLine,
-} from "../../src/operator/command-network-copy.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
+import { readinessAnchor } from "./observation-counts.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
-import {
-  privateField,
-  projectChanges,
-  type ProjectConfigurationData,
-  type Values,
-} from "./settings-changes.js";
-import {
-  plural,
-  projectStateSummary,
-  projectTab,
-  readinessNextStep,
-  projectTabs,
-  savedLine,
-  type ProjectTab,
-} from "./settings-view.js";
 import {
   Aside,
   ChangeList,
   DraftCheck,
   DraftField,
   DraftOutcome,
+  editable,
   Panel,
   PrivateTextField,
   reloadDraft,
   revealedText,
+  type SettingsProps,
   submitDraft,
+  textHold,
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
-  editable,
-  textHold,
   usePrivateValues,
-  type SettingsProps,
 } from "./settings.js";
+import {
+  type ProjectConfigurationData,
+  privateField,
+  projectChanges,
+  type Values,
+} from "./settings-changes.js";
+import {
+  type ProjectTab,
+  plural,
+  projectStateSummary,
+  projectTab,
+  projectTabs,
+  readinessNextStep,
+  savedLine,
+  sourceCredentialSummary,
+} from "./settings-view.js";
 import { SourceTab } from "./source-config.js";
-import { readinessAnchor } from "./observation-counts.js";
 import { SyncTab } from "./sync-placement.js";
 
 export interface TabProps extends SettingsProps {

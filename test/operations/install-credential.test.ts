@@ -3,14 +3,14 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { installCli, saveLogin } from "../../src/cli/main.js";
 import { ConnectionConfig } from "../../src/cli/connections.js";
+import { installCli, saveLogin } from "../../src/cli/main.js";
 import {
   issueInstallCredential,
   type ServiceHost,
 } from "../../src/cli/service.js";
 import type { CliDeps } from "../../src/cli/types.js";
-import { MemoryKeychain, harness } from "../fixtures/cli-harness.js";
+import { harness, MemoryKeychain } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;

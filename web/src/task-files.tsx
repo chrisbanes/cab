@@ -1,3 +1,4 @@
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import {
   Fragment,
   useCallback,
@@ -9,12 +10,12 @@ import {
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  type Session,
   workspaceDirectoryReadSchema,
   workspacePreviewReadSchema,
-  type Session,
 } from "../../src/operator/contracts.js";
-import type { OperatorClient } from "./api.js";
 import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
+import type { OperatorClient } from "./api.js";
 import { comparisonReadKey } from "./comparison-read-match.js";
 import { Button } from "./components.js";
 import {
@@ -22,18 +23,17 @@ import {
   changeMarkers,
   changeWord,
 } from "./file-change-markers.js";
-import type { PDFDocumentProxy, PDFDocumentLoadingTask } from "pdfjs-dist";
-import {
-  TaskFileTabState,
-  type ReviewAnchorCandidate,
-  type TaskChangesState,
-  type TaskFilesState,
-} from "./task-workspace-state.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { clockLabel } from "./presentation.js";
 import { RangeControls } from "./range-controls.js";
 import { useOperatorResource } from "./resource.js";
 import { workspaceFileAnchor } from "./review-anchor.js";
+import {
+  type ReviewAnchorCandidate,
+  type TaskChangesState,
+  type TaskFilesState,
+  TaskFileTabState,
+} from "./task-workspace-state.js";
 
 function requestUrl(
   taskId: string,

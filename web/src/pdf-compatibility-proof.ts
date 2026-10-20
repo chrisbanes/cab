@@ -1,4 +1,4 @@
-import { getDocument, GlobalWorkerOptions, version } from "pdfjs-dist";
+import { GlobalWorkerOptions, getDocument, version } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 GlobalWorkerOptions.workerSrc = workerUrl;

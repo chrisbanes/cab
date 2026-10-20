@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { OperatorClient } from "../../web/src/api.js";
 import { ComposerState, storageKey } from "../../web/src/composer-state.js";
+
 test("frozen recovery persistence is a prerequisite to every task creation POST", async () => {
   let posts = 0;
   const saved = new Map<string, string>();
@@ -100,7 +101,6 @@ function memoryStorage() {
 }
 
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   briefNearLimit,
   byteLength,
@@ -111,6 +111,8 @@ import {
   readRecovery,
   recoveryLimit,
 } from "../../web/src/composer-state.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
+
 test("unknown task creation freezes original command across reload and cannot rekey after authentication failure", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -594,10 +596,12 @@ test("effect reactivation never restores authority to a detached response", asyn
   assert.equal(state.phase, "unknown");
   assert.ok(storage.getItem(storageKey));
 });
-import { DatabaseSync } from "node:sqlite";
+
 import { join } from "node:path";
-import { DomainStore, DomainPolicyError } from "../../src/core/domain.js";
+import { DatabaseSync } from "node:sqlite";
+import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import { OperatorApiError } from "../../src/standalone/operator-api.js";
+
 test("typed post-commit notification failure remains unknown through creation consumer and exact API replay records once", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

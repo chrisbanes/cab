@@ -5,9 +5,9 @@ import { connect } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Browser } from "playwright";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { FixtureCleanupError } from "../fixtures/fixture-lifecycle.js";
 import type { FixtureLifecycle } from "../fixtures/fixture-lifecycle.js";
+import { FixtureCleanupError } from "../fixtures/fixture-lifecycle.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 // These synthetic failures never called the real stop operation. Release only

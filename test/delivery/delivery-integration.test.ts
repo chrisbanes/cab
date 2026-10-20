@@ -3,13 +3,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { canonicalMaterial } from "../../src/core/delivery.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   createReleaseDeliveryFixture,
-  until,
   scriptedDeliveryProvider,
+  until,
 } from "../fixtures/delivery-integration.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { canonicalMaterial } from "../../src/core/delivery.js";
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {
   test(`assembled ${mode} uses production HTTP parsing, own closure, terminal completion and durable reopen`, async () => {
@@ -988,8 +988,8 @@ test("approval mode refuses thread actions until the operator approves the exact
 
 import {
   mkdtempSync as makeTemp,
-  writeFileSync as writeFile,
   realpathSync,
+  writeFileSync as writeFile,
 } from "node:fs";
 import { tmpdir as osTmp } from "node:os";
 import { git as runGit } from "../fixtures/publication.js";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Page } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { addTask } from "../fixtures/operator-first-run.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";

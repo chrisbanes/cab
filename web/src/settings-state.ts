@@ -1,14 +1,14 @@
 import type { z } from "zod";
 import {
-  operatorCommandSchema,
-  type OperatorCommand,
   type CommandReceipt,
+  type OperatorCommand,
+  operatorCommandSchema,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { sameText } from "./settings-changes.js";
-import { sourceCredentialCopy } from "./settings-view.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
 import type { ReceiptDetails } from "./outcome-copy.js";
+import { sameText } from "./settings-changes.js";
+import { sourceCredentialCopy } from "./settings-view.js";
 /** The plain outcome copy of a configuration save. Details, not these lines, carry the codes. */
 export const outcomeCopy = {
   saved: "Saved.",

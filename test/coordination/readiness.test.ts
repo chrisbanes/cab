@@ -1,4 +1,3 @@
-import { clockLabel } from "../../src/operator/clock-label.js";
 import assert from "node:assert/strict";
 import {
   chmodSync,
@@ -15,11 +14,16 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { clockLabel } from "../../src/operator/clock-label.js";
 import {
   claudeTokenCheckSchema,
   readinessCheckIds,
   readinessSchema,
 } from "../../src/operator/readiness.js";
+import {
+  assertCanonicalDirectoryPath,
+  assertExistingCanonicalDirectoryPath,
+} from "../../src/standalone/data-directory.js";
 import {
   Readiness,
   type ReadinessDeps,
@@ -27,10 +31,6 @@ import {
   serviceReadiness,
 } from "../../src/standalone/readiness.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
-import {
-  assertCanonicalDirectoryPath,
-  assertExistingCanonicalDirectoryPath,
-} from "../../src/standalone/data-directory.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const TOKEN = "canary-readiness-token-4417";

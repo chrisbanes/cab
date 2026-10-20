@@ -11,24 +11,24 @@ import {
 } from "./action-feedback.js";
 import { ClientError } from "./api.js";
 import { Button, StatusBadge } from "./components.js";
-import { When } from "./operator-credentials.js";
 import {
+  type BrowserEnvironment,
+  type BrowserSubscription,
   base64UrlToBytes,
   browserLabel,
   bytesToBase64Url,
   closeResolved,
   endpointDigestOf,
   failureText,
+  type NotificationState,
   notificationState,
   revokedLabel,
   testOutcomeText,
-  type BrowserEnvironment,
-  type BrowserSubscription,
-  type NotificationState,
 } from "./notifications-model.js";
+import { When } from "./operator-credentials.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { useOperatorResource } from "./resource.js";
-import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
+import { Panel, type SettingsProps, useHeaderRefresh } from "./settings.js";
 import {
   Dialog,
   DialogClose,

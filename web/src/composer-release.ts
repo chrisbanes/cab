@@ -6,10 +6,21 @@ import type { ComposerInput, RecoveryStorage } from "./composer-state.js";
 /** Draft releases still owed to the service, kept apart from the composer's own input. */
 export const releaseStorageKey = "ensemble.ui03.composer.releases.v1";
 /** The start a release may still have to settle: sent again under its key until known. */
-const startSchema = z
+const briefStartSchema = z
   .object({ key: uuid, projectId: uuid, idea: z.string().min(1).max(16000) })
   .strict();
+/** The start of an Improve with lead run; sent again under its key like a brief's. */
+const issueStartSchema = z
+  .object({
+    key: uuid,
+    taskId: uuid,
+    expectedTaskVersion: z.number().int().positive(),
+    note: z.string().max(16000),
+  })
+  .strict();
+const startSchema = z.union([briefStartSchema, issueStartSchema]);
 export type DraftStart = z.infer<typeof startSchema>;
+export type IssueDraftStart = z.infer<typeof issueStartSchema>;
 const releaseSchema = z
   .object({
     runId: uuid,
@@ -22,7 +33,9 @@ const releasesSchema = z.array(releaseSchema);
 export type DraftRelease = z.infer<typeof releaseSchema>;
 
 /** The start a composer sent for its run, as a release needs it; absent if none was recorded. */
-export function startOf(input: ComposerInput): DraftStart | undefined {
+export function startOf(
+  input: ComposerInput,
+): z.infer<typeof briefStartSchema> | undefined {
   return input.draftingKey && input.draftingStart
     ? { key: input.draftingKey, ...input.draftingStart }
     : undefined;
@@ -103,13 +116,22 @@ export async function attemptRelease(
   const { runId } = release;
   if (release.start) {
     const started = await client.command(
-      {
-        type: "drafting.start",
-        key: release.start.key,
-        runId,
-        projectId: release.start.projectId,
-        idea: release.start.idea,
-      },
+      "taskId" in release.start
+        ? {
+            type: "issue.draft.start",
+            key: release.start.key,
+            runId,
+            taskId: release.start.taskId,
+            expectedTaskVersion: release.start.expectedTaskVersion,
+            note: release.start.note,
+          }
+        : {
+            type: "drafting.start",
+            key: release.start.key,
+            runId,
+            projectId: release.start.projectId,
+            idea: release.start.idea,
+          },
       csrfToken,
     );
     // Only a refusal of the start itself means no run exists; anything else is tried again.

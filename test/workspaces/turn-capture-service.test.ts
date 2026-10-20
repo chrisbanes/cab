@@ -21,8 +21,8 @@ import type {
   WorkspaceComparisonSideContent,
   WorkspaceTurnObservation,
 } from "../../src/standalone/workspace-comparison.js";
-import { tmpdir } from "../fixtures/temp.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 type TurnOutcome = "completed" | "failed";
 

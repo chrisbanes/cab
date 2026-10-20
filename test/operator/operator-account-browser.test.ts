@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
+  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
-  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+
 const test = browserSuite("operator-account-browser");
-import { chromium, type Browser, type Page } from "playwright";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { unpairedBadges } from "../fixtures/operator-settings.js";
-import { settleGhRead } from "../fixtures/setup-browser.js";
+
+import { type Browser, chromium, type Page } from "playwright";
 import {
   addProfile,
   addProject,
@@ -17,6 +16,9 @@ import {
   reenterHome,
   startFirstTurn,
 } from "../fixtures/operator-first-run.js";
+import { unpairedBadges } from "../fixtures/operator-settings.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { settleGhRead } from "../fixtures/setup-browser.js";
 
 const viewports = [
   { name: "desktop", width: 1366, height: 900 },

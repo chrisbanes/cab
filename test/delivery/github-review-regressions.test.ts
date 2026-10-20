@@ -2,27 +2,27 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { DomainStore, type DomainCommand } from "../../src/core/domain.js";
+import { type DomainCommand, DomainStore } from "../../src/core/domain.js";
 import {
-  GitHubSourceStore,
   type GitHubSelection,
+  GitHubSourceStore,
   type IssueSnapshot,
 } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
-import { StandaloneService } from "../../src/standalone/service.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import type { GitHubSourceReader } from "../../src/standalone/github-source.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { StandaloneService } from "../../src/standalone/service.js";
 
 const issue: IssueSnapshot = {
   providerInstance: "github.com",

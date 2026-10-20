@@ -6,12 +6,11 @@
  */
 import type { z } from "zod";
 import type {
+  ProfileRuntime,
   profileConfigurationSchema,
   projectConfigurationSchema,
   runtimeSettingsSchema,
 } from "../../src/operator/contracts.js";
-
-import type { ProfileRuntime } from "../../src/operator/contracts.js";
 import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
 import { plural } from "./settings-view.js";
 

@@ -1,10 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  type WaitCode,
-  waitCodes,
-  waitLabels,
-} from "../../src/operator/wait-reasons.js";
 import type { RuntimeRestart } from "../../src/operator/contracts.js";
 import {
   failureText,
@@ -13,6 +8,11 @@ import {
   settingsFix,
   unavailableAlert,
 } from "../../src/operator/runtime-restart-copy.js";
+import {
+  type WaitCode,
+  waitCodes,
+  waitLabels,
+} from "../../src/operator/wait-reasons.js";
 import { harnessReason } from "../../web/src/execution-runtime.js";
 import {
   clockLabel,

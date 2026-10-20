@@ -1,8 +1,8 @@
 import type { MouseEvent } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { isPlainClick } from "./components.js";
-import { assignmentRow } from "./task-overview.js";
 import { ExecutionNotices } from "./execution-notice.js";
+import { assignmentRow } from "./task-overview.js";
 import "./task-detail.css";
 
 /** Opens the collapsed Overview card that holds a linked record, so a link never lands on a closed one. */

@@ -3,10 +3,9 @@ import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import type { Page } from "playwright";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
+import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
-import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
-import { fakeDiscovery } from "../fixtures/setup-home.js";
 import {
   captureSettingsEvidence as captureBrowserEvidence,
   createCheckout,
@@ -20,6 +19,7 @@ import {
   trail,
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
+import { fakeDiscovery } from "../fixtures/setup-home.js";
 
 const test = browserSuite("operator-project-config-browser");
 const changes = (page: Page) =>

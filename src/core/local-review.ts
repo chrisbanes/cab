@@ -1,13 +1,13 @@
-import { DomainConflictError } from "./domain.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import type { InboxEvent } from "./coordination.js";
 import { materialDigest } from "./delivery.js";
+import { DomainConflictError } from "./domain.js";
 import type {
   RetainedEvidenceStore,
   RetainedReviewAnchorCandidate,
 } from "./retained-evidence.js";
-import { transaction, type Database } from "./store.js";
-import type { InboxEvent } from "./coordination.js";
+import { type Database, transaction } from "./store.js";
 
 const uuid = z.string().uuid();
 const maxReviewItems = 32;

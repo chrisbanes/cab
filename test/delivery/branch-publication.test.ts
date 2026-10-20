@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { deliverySection } from "../../src/standalone/operator-coordination.js";
 import { test } from "node:test";
+import { deliverySection } from "../../src/standalone/operator-coordination.js";
 import {
   git,
   publicationWorld,

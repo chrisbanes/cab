@@ -15,6 +15,7 @@ import {
   settleGhRead,
   setupJourney,
 } from "../fixtures/setup-browser.js";
+
 const test = browserSuite("operator-discovery-credential-browser");
 
 test("Settings uses the GitHub CLI login, then clears it", async (_t, journey) => {

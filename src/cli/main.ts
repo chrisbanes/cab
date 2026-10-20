@@ -3,15 +3,19 @@ import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { readinessSchema } from "../operator/readiness.js";
 import {
   operatorCredentialTokenSchema,
   taskSchema,
 } from "../operator/contracts.js";
+import { readinessSchema } from "../operator/readiness.js";
+import { unmetReason } from "../operator/readiness-text.js";
+import { taskColumnOf } from "../operator/task-presentation.js";
 import { readHiddenPassword } from "../standalone/operator-hidden-password.js";
+import { coverage, uuidArg } from "./browse.js";
+import { browseCommands, writeCommands } from "./commands.js";
 import {
-  CliError,
   type CliConfig,
+  CliError,
   type Connection,
   ConnectionConfig,
   configDirectory,
@@ -19,19 +23,6 @@ import {
   KeychainCredentialStore,
   readTokenFile,
 } from "./connections.js";
-import { coverage, uuidArg } from "./browse.js";
-import { browseCommands, writeCommands } from "./commands.js";
-import {
-  defaultServiceHost,
-  type InstallCli,
-  type OperatorConnection,
-  localHelpArea,
-  SERVICE_USAGE,
-  serviceCommand,
-  serviceHelp,
-  snapshotCommand,
-} from "./service.js";
-import { jsonLine, terminalSafe, unavailable } from "./render.js";
 import {
   DEFAULT_FIX,
   fixLine,
@@ -41,10 +32,19 @@ import {
   shellWord,
   taskHeldLabels,
 } from "./remedy.js";
+import { jsonLine, terminalSafe, unavailable } from "./render.js";
 import { RequestJournal } from "./request-journal.js";
+import {
+  defaultServiceHost,
+  type InstallCli,
+  localHelpArea,
+  type OperatorConnection,
+  SERVICE_USAGE,
+  serviceCommand,
+  serviceHelp,
+  snapshotCommand,
+} from "./service.js";
 import { closureSuffix, waitLines } from "./task-write.js";
-import { unmetReason } from "../operator/readiness-text.js";
-import { taskColumnOf } from "../operator/task-presentation.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";

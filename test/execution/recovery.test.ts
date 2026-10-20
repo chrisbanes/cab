@@ -1,18 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
-import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { Store } from "../../src/core/store.js";
+import { test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
-import { StandaloneService } from "../../src/standalone/service.js";
-import { ExecutionState } from "../../src/standalone/state.js";
-import {
-  SqliteWorkspaceBindingStore,
-  WorkspaceManager,
-} from "../../src/standalone/workspaces.js";
+import { Store } from "../../src/core/store.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -22,18 +15,25 @@ import type {
 import type {
   ExactExecutionIdentity,
   ExecutionInspection,
-  RecoveryRecord,
   RecoveryReceipt,
+  RecoveryRecord,
   RuntimeProcessIdentity,
-  TerminationVerifier,
   TerminationVerification,
+  TerminationVerifier,
 } from "../../src/standalone/recovery-types.js";
+import { StandaloneService } from "../../src/standalone/service.js";
+import { ExecutionState } from "../../src/standalone/state.js";
+import {
+  SqliteWorkspaceBindingStore,
+  WorkspaceManager,
+} from "../../src/standalone/workspaces.js";
 import {
   acquiredOf,
   publishedOf,
   startedOf,
   unpublish,
 } from "../fixtures/service-internals.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 interface RecoveryApi {
   recoveryView(): RecoveryRecord[];

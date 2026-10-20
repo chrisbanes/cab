@@ -8,11 +8,11 @@ import {
 } from "../operator/attention.js";
 import {
   type InboxItem,
+  type inboxReadSchema,
   type PushSubscriptionRecord,
   pushFailureSchema,
   pushRevokedReasonSchema,
   type pushTestOutcomeSchema,
-  type inboxReadSchema,
 } from "../operator/contracts.js";
 import { runtimeInboxHeadline } from "../operator/runtime-restart-copy.js";
 import {
@@ -21,10 +21,10 @@ import {
   fetchPushTransport,
   loadOrCreateVapidKeys,
   PushError,
-  pushHostAllowed,
   type PushResponse,
   type PushTransport,
   pushHeaders,
+  pushHostAllowed,
   type ValidatedSubscription,
   type VapidKeys,
   validatePushEndpoint,

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
+  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
-  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+
 const test = browserSuite("operator-responsive-browser");
-import { chromium, webkit, type Browser, type Page } from "playwright";
+
+import { type Browser, chromium, type Page, webkit } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";

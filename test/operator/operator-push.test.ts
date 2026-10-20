@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
 import { inboxAlertKey } from "../../src/operator/attention.js";
 import {
   type InboxItem,
@@ -13,9 +13,9 @@ import {
 } from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
+  type InboxRead,
   MAX_ACTIVE_SUBSCRIPTIONS,
   MAX_REVOKED_SUBSCRIPTIONS,
-  type InboxRead,
   OperatorPush,
   OperatorPushStore,
   pushPayload,
@@ -30,15 +30,15 @@ import {
   FakePushService,
   ManualPushClock,
 } from "../fixtures/fake-push.js";
+import { serveCli } from "../fixtures/operator-cli.js";
 import {
   createOperatorFixture,
   type FixturePushOptions,
 } from "../fixtures/operator-web.js";
-import { serveCli } from "../fixtures/operator-cli.js";
-import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
 import { mixedAnswers } from "../fixtures/question-data.js";
-import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
+import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
 import { settle } from "../fixtures/restart-clock.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const subscription = (device: FakeDevice) => ({

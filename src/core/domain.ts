@@ -18,7 +18,6 @@ import {
   DomainStaleDispositionError,
   ProjectNameTakenError,
 } from "./domain-errors.js";
-import { projectNameKey } from "./project-names.js";
 import {
   defaultProfileRuntime,
   type ExecutionHarness,
@@ -42,6 +41,7 @@ import {
   closedIssuesSchema,
   setupRepositoriesSchema,
 } from "./github-source-contracts.js";
+import { projectNameKey } from "./project-names.js";
 import { type Database, transaction } from "./store.js";
 import { TaskReviewStore } from "./task-review.js";
 

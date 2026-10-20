@@ -2,25 +2,25 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { serviceReadiness } from "../../src/standalone/readiness.js";
-import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import type { OperatorPush } from "../../src/standalone/operator-push.js";
-import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { Runtime } from "../../src/standalone/codex.js";
-import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
-import {
-  OperatorWebBoundary,
-  OperatorWebBundle,
-} from "../../src/standalone/operator-web.js";
 import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import type { OperatorPush } from "../../src/standalone/operator-push.js";
+import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
+import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
+import {
+  OperatorWebBoundary,
+  OperatorWebBundle,
+} from "../../src/standalone/operator-web.js";
+import { serviceReadiness } from "../../src/standalone/readiness.js";
+import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
 import { harness } from "./cli-harness.js";
-import { createOperatorFixture } from "./operator-web.js";
 import { createReleaseDeliveryFixture } from "./delivery-integration.js";
+import { createOperatorFixture } from "./operator-web.js";
 
 type After = { after(fn: () => unknown): void };
 

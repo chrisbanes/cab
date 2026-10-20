@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -7,11 +8,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
-import { pathToFileURL } from "node:url";
+import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
+import { pathToFileURL } from "node:url";
 
 // Behaviour cases stop at their asserted boundary, so the headroom only covers
 // slow runners. Enforcement cases below stall forever and use isolated budgets.

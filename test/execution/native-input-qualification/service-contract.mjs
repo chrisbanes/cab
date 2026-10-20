@@ -12,8 +12,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import {
-  StandaloneService,
   CodexRuntime,
+  StandaloneService,
 } from "../../../dist/src/standalone/index.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 export const qualificationResource =

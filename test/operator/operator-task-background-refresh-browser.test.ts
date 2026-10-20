@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { chromium, type Browser } from "playwright";
-import { browserSuite } from "../fixtures/browser-diagnostics.js";
+import { type Browser, chromium } from "playwright";
 import {
   failResponses,
   holdResponse,
@@ -8,9 +7,11 @@ import {
   settleReads,
   watchDom,
 } from "../fixtures/background-refresh.js";
+import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+
 const test = browserSuite("task-background-refresh-browser");
 
 test("a task workspace timer poll keeps history, position and status quiet; explicit Refresh still shows progress", async (_t, j) => {

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { holdPills } from "../../web/src/settings-view.js";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
-import { holdPills } from "../../web/src/settings-view.js";
 import {
   noPageOverflow,
   phone,

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
-import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import type { DomainCommand } from "../../src/core/domain.js";
 import type { NativeInputEndpointIdentity } from "../../src/core/structured-questions.js";
 import { CodexRuntime } from "../../src/standalone/codex.js";
+import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
 import type { RuntimeSpawnContext } from "../../src/standalone/service.js";
 import { StandaloneService } from "../../src/standalone/service.js";
-import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
 import { startedOf } from "./service-internals.js";
 
 export const generation = "retention-generation";

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { seedReviewTask } from "./task-review.js";
 import type { startCliService } from "./operator-cli.js";
+import { seedReviewTask } from "./task-review.js";
 
 type Service = Awaited<ReturnType<typeof startCliService>>;
 

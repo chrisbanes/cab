@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { coordinationFixture } from "./coordination.js";
 import type {
   RuntimeUserInputOutcome,
   RuntimeUserInputRequest,
 } from "../../src/standalone/native-input.js";
 import type { RuntimeSafetyPort } from "../../src/standalone/runtime-retention.js";
+import { coordinationFixture } from "./coordination.js";
 
 const assignmentId = "40000000-0000-4000-8000-000000000001";
 const fixtures = new Set<ReturnType<typeof runtimeSafetyFixture>>();

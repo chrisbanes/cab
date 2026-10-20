@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  chromium,
-  webkit,
   type Browser,
+  chromium,
   type Locator,
   type Page,
+  webkit,
 } from "playwright";
 import {
   browserSuite,

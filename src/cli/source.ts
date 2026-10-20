@@ -1,7 +1,3 @@
-import {
-  selectionCountsText,
-  zeroMatchWarning,
-} from "../operator/readiness-text.js";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { z } from "zod";
@@ -19,6 +15,10 @@ import {
   taskSchema,
 } from "../operator/contracts.js";
 import {
+  selectionCountsText,
+  zeroMatchWarning,
+} from "../operator/readiness-text.js";
+import {
   type SourceCredentialReason,
   sourceCredentialExplanation,
 } from "../operator/source-credential.js";
@@ -28,14 +28,14 @@ import {
   type CoverageGap,
   uuidArg,
 } from "./browse.js";
+import { openFailure } from "./change-document.js";
 import {
   type Change,
   checkExpected,
-  positiveIntFlag,
   checkOut,
+  positiveIntFlag,
   writePrepared,
 } from "./configure.js";
-import { openFailure } from "./change-document.js";
 import { readProject } from "./configure-project.js";
 import { CliError } from "./connections.js";
 import { receiptLines } from "./operation.js";

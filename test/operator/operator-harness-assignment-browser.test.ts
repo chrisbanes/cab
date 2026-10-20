@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser } from "playwright";
+import { type Browser, chromium } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -11,8 +11,8 @@ import {
   phone,
   signIn,
 } from "../fixtures/operator-settings.js";
-import { openOverviewCard } from "../fixtures/task-tabs.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { openOverviewCard } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("operator-harness-assignment-browser");
 

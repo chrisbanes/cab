@@ -1,3 +1,4 @@
+import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
 import {
   profileConfigurationSchema,
   projectConfigurationSchema,
@@ -7,7 +8,6 @@ import {
   taskMessagePageSchema,
   workspaceSchema,
 } from "../operator/contracts.js";
-import { commandNetworkDisclosure } from "../operator/command-network-copy.js";
 import { taskColumn } from "../operator/task-presentation.js";
 import {
   anyNull,
@@ -24,8 +24,8 @@ import {
 } from "./browse.js";
 import { CliError } from "./connections.js";
 import { nextLine, nextText } from "./remedy.js";
-import { closureSuffix } from "./task-write.js";
 import { isoTime, keyValues, oneLine, table, unavailable } from "./render.js";
+import { closureSuffix } from "./task-write.js";
 
 const API = "/api/operator";
 const query = (params: Record<string, string | number | undefined>) =>

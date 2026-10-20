@@ -24,6 +24,7 @@ const base: ViewInput = {
   ownOperationId: null,
   runId: null,
   run: null,
+  runLoaded: false,
   hasEdit: false,
   hasReview: false,
   sending: false,
@@ -164,4 +165,12 @@ test("stored state survives a reload, tolerates damage and clears when empty", (
   assert.deepEqual(readStored(storage, taskId), { note: "" });
   map.set(`ensemble.issue-improve.v1.${taskId}`, '{"note":1}');
   assert.deepEqual(readStored(storage, taskId), { note: "" });
+});
+
+test("a newer draft shows its progress over the text of an older one until it arrives", () => {
+  const runId = randomUUID();
+  const redrafting = { ...base, runId, hasEdit: true, run: run("running") };
+  assert.equal(improveView(redrafting), "running");
+  assert.equal(improveView({ ...redrafting, run: null }), "starting");
+  assert.equal(improveView({ ...redrafting, runLoaded: true }), "editing");
 });

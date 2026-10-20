@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chromium, webkit, type Browser, type Page } from "playwright";
+import { type Browser, chromium, type Page, webkit } from "playwright";
 import {
   type ReadinessCheckId,
   readinessCheckIds,

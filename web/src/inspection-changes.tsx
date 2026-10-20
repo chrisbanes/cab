@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  workspaceComparisonReadSchema,
-  workspaceDirectoryReadSchema,
   type Session,
   type WorkspaceComparisonRead,
+  workspaceComparisonReadSchema,
+  workspaceDirectoryReadSchema,
 } from "../../src/operator/contracts.js";
+import { OutcomeDetails } from "./action-feedback.js";
 import { ClientError, type OperatorClient } from "./api.js";
 import {
   comparisonReadKey,
-  matchesWorkspaceComparisonRead,
   type ExpectedWorkspaceComparisonRead,
+  matchesWorkspaceComparisonRead,
 } from "./comparison-read-match.js";
-import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
+import { type Anchor, DiffHunk, DiffLayoutControls } from "./diff-view.js";
+import { CommentAction, ReviewComposer } from "./local-review.js";
 import { failureCause } from "./outcome-copy.js";
 import { codeSentence, shortId } from "./presentation.js";
-import { DiffHunk, DiffLayoutControls, type Anchor } from "./diff-view.js";
-import { CommentAction, ReviewComposer } from "./local-review.js";
 import { RangeControls } from "./range-controls.js";
 import { useOperatorResource } from "./resource.js";
 import { comparisonSideAnchor } from "./review-anchor.js";

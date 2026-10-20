@@ -1,12 +1,5 @@
 /** Pure presentation for the settings routes: headers, index lines, saved lines and holds. */
-import {
-  selectionCountsText,
-  zeroMatchWarning,
-} from "../../src/operator/readiness-text.js";
-import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
-import { sourceStateSentences } from "../../src/operator/github-reasons.js";
-import { clockLabel, codeSentence } from "./presentation.js";
-import type { z } from "zod";
+
 import {
   Circle,
   CircleCheck,
@@ -14,12 +7,20 @@ import {
   CircleQuestionMark,
   type LucideIcon,
 } from "lucide-react";
+import type { z } from "zod";
 import type {
   CommandReceipt,
   OperatorCommand,
   sourceObservationSchema,
   Workspace,
 } from "../../src/operator/contracts.js";
+import { sourceStateSentences } from "../../src/operator/github-reasons.js";
+import {
+  selectionCountsText,
+  zeroMatchWarning,
+} from "../../src/operator/readiness-text.js";
+import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
+import { clockLabel, codeSentence } from "./presentation.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import type { SavedRecord } from "./settings-state.js";
 

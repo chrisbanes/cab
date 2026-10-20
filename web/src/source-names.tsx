@@ -1,19 +1,19 @@
+import type { z } from "zod";
+import type { sourceObservationSchema } from "../../src/operator/contracts.js";
 import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
+import { selectionCountsText } from "../../src/operator/readiness-text.js";
+import type { OutcomeField } from "./action-feedback.js";
+import { clockLabel } from "./presentation.js";
+import type { TabProps } from "./project-config.js";
 import type { projectChoices } from "./readiness-discovery.js";
 import { useReadinessDiscovery } from "./readiness-picker.js";
-import type { SourcePrivate } from "./settings-changes.js";
-import type { TabProps } from "./project-config.js";
 import { usePrivateValues } from "./settings.js";
+import type { SourcePrivate } from "./settings-changes.js";
 import {
   type SourceNaming,
   sourceHeading,
   sourceName,
 } from "./settings-view.js";
-import type { z } from "zod";
-import type { sourceObservationSchema } from "../../src/operator/contracts.js";
-import { selectionCountsText } from "../../src/operator/readiness-text.js";
-import type { OutcomeField } from "./action-feedback.js";
-import { clockLabel } from "./presentation.js";
 
 type Project = z.infer<
   typeof sourceObservationSchema

@@ -1,24 +1,32 @@
-import type { OperatorCommand } from "../../src/operator/contracts.js";
-import type { z } from "zod";
-import type { sourceObservationSchema } from "../../src/operator/contracts.js";
-import { useEffect, useState } from "react";
 import { CircleCheck } from "lucide-react";
-import { Button, ResourceStatus, StatusBadge } from "./components.js";
-import { ObservationCounts } from "./observation-counts.js";
-import type { ResourceState } from "./resource.js";
-import type { TabProps } from "./project-config.js";
-import type { ProjectConfigurationData } from "./settings-changes.js";
+import { useEffect, useState } from "react";
+import type { z } from "zod";
+import type {
+  OperatorCommand,
+  sourceObservationSchema,
+} from "../../src/operator/contracts.js";
 import {
   projectLabel,
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
-import type { ConfigurationDraft } from "./settings-state.js";
 import { OutcomeDetails } from "./action-feedback.js";
+import { Button, ResourceStatus, StatusBadge } from "./components.js";
+import { ObservationCounts } from "./observation-counts.js";
+import type { TabProps } from "./project-config.js";
+import type { ResourceState } from "./resource.js";
 import {
-  SourceHeading,
-  sourceDetails,
-  useSavedSourceNames,
-} from "./source-names.js";
+  DraftField,
+  DraftMessage,
+  DraftOutcome,
+  key,
+  Panel,
+  type SettingsProps,
+  submitDraft,
+  useDraft,
+  useLoadedDraft,
+} from "./settings.js";
+import type { ProjectConfigurationData } from "./settings-changes.js";
+import type { ConfigurationDraft } from "./settings-state.js";
 import {
   activationLine,
   type SourceNaming,
@@ -27,16 +35,10 @@ import {
   sourceStatusLine,
 } from "./settings-view.js";
 import {
-  DraftField,
-  DraftMessage,
-  DraftOutcome,
-  Panel,
-  key,
-  submitDraft,
-  useDraft,
-  useLoadedDraft,
-  type SettingsProps,
-} from "./settings.js";
+  SourceHeading,
+  sourceDetails,
+  useSavedSourceNames,
+} from "./source-names.js";
 
 type Observations = z.infer<typeof sourceObservationSchema>;
 export interface ObservationResource {

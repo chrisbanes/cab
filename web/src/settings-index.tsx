@@ -1,4 +1,10 @@
 import {
+  CircleCheck,
+  CirclePause,
+  CircleQuestionMark,
+  CircleSlash,
+} from "lucide-react";
+import {
   Fragment,
   type ReactNode,
   useCallback,
@@ -7,21 +13,15 @@ import {
   useState,
 } from "react";
 import {
-  CircleCheck,
-  CirclePause,
-  CircleQuestionMark,
-  CircleSlash,
-} from "lucide-react";
-import {
   projectConfigurationSchema,
   runtimeSettingsSchema,
   sourceObservationSchema,
 } from "../../src/operator/contracts.js";
-import type { OperatorClient } from "./api.js";
 import {
   projectLabel,
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
+import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, ProjectName, StatusBadge } from "./components.js";
 import {
   ClaudeTokenRow,
@@ -31,8 +31,9 @@ import { runtimeSummary } from "./execution-runtime.js";
 import { NotificationsSection } from "./notifications.js";
 import { OperatorCredentialsSection } from "./operator-credentials.js";
 import { ReadinessPanel } from "./readiness.js";
-import { useMediaQuery } from "./use-media-query.js";
 import { useOperatorResource } from "./resource.js";
+import { Panel, type SettingsProps, useHeaderRefresh } from "./settings.js";
+import type { ProjectConfigurationData } from "./settings-changes.js";
 import {
   fragmentSection,
   SETTINGS_SECTIONS,
@@ -41,9 +42,6 @@ import {
   settingsSectionOrder,
   useFragmentLanding,
 } from "./settings-sections.js";
-import { NativeSelect } from "./ui/native-select.js";
-import type { ProjectConfigurationData } from "./settings-changes.js";
-import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
 import {
   observationLabel,
   observationSymbol,
@@ -52,6 +50,8 @@ import {
   routingLine,
   selectionLine,
 } from "./settings-view.js";
+import { NativeSelect } from "./ui/native-select.js";
+import { useMediaQuery } from "./use-media-query.js";
 
 /** One project's configuration read: pending, loaded or failed (null). */
 type ConfigState = ProjectConfigurationData | null | undefined;

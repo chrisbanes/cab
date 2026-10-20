@@ -1,24 +1,24 @@
 import assert from "node:assert/strict";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { performance } from "node:perf_hooks";
 import { createConnection } from "node:net";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import { DatabaseSync } from "node:sqlite";
-import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { writeLaunchAgent } from "../../../dist/src/standalone/launchd.js";
+import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 
 const execute = promisify(execFile);
 const digest = (value) => createHash("sha256").update(value).digest("hex");

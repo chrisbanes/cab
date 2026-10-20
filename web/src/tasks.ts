@@ -1,11 +1,11 @@
 import { attentionNext } from "../../src/operator/attention.js";
-import { unmetReason } from "../../src/operator/readiness-text.js";
 import {
-  taskListPageSchema,
-  uuid,
   type TaskListPage,
   type TaskListSummary,
+  taskListPageSchema,
+  uuid,
 } from "../../src/operator/contracts.js";
+import { unmetReason } from "../../src/operator/readiness-text.js";
 import {
   columns,
   nextActor,
@@ -13,8 +13,9 @@ import {
   taskColumn,
 } from "../../src/operator/task-presentation.js";
 import type { OperatorClient } from "./api.js";
-export { columns, nextActor, taskColumn };
+
 export type { TaskColumn };
+export { columns, nextActor, taskColumn };
 /** Everything except the terminal columns: unfinished work, Draft included. */
 export const activeColumns: readonly TaskColumn[] = columns.slice(0, 7);
 export const isActiveColumn = (column: TaskColumn) =>

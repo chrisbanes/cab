@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { DomainStore } from "../../src/core/domain.js";
 import {
   DomainConflictError,
+  DomainStore,
   TaskNotOpenError,
 } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
@@ -17,8 +17,8 @@ import {
   OperatorApi,
   type OperatorApiError,
 } from "../../src/standalone/operator-api.js";
-import { ExecutionState } from "../../src/standalone/state.js";
 import { SchedulerStore } from "../../src/standalone/scheduler.js";
+import { ExecutionState } from "../../src/standalone/state.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { startOwnWork } from "../fixtures/questions.js";

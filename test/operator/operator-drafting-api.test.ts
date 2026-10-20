@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { draftProposalToolName } from "../../src/standalone/drafting.js";
 import { draftingTurn, seedDraftingProject } from "../fixtures/drafting.js";
-import { startedOf } from "../fixtures/service-internals.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { startedOf } from "../fixtures/service-internals.js";
 
 const proposal = {
   title: "Publish a keyboard guide",

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { CoordinationStore } from "../../src/core/coordination.js";
+import type { ReviewMetadata } from "../../src/core/task-review.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionState } from "../../src/standalone/state.js";
-import type { ReviewMetadata } from "../../src/core/task-review.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
-import { uniqueProjectName } from "./project-names.js";
 import type { createOperatorFixture } from "./operator-web.js";
+import { uniqueProjectName } from "./project-names.js";
 /** Links (or unlinks) one GitHub repository on the project without running repository verification. */
 export function setLinkedRepository(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,

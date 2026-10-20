@@ -1,14 +1,14 @@
 import { CircleCheck, Clock, Diamond } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
-import { isPlainClick, ShortId } from "./components.js";
-import { clockLabel } from "./presentation.js";
 import { commentAvailability } from "../../src/operator/github-reasons.js";
-import { holdNoticesBesideRequests } from "./inbox-presentation.js";
+import { isPlainClick, ShortId } from "./components.js";
 import {
   pullRequestReference,
   pullRequestRepository,
 } from "./delivery-presentation.js";
+import { holdNoticesBesideRequests } from "./inbox-presentation.js";
+import { clockLabel } from "./presentation.js";
 import {
   deliveryApplies,
   executionFacts,

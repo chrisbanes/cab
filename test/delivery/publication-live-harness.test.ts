@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -11,8 +11,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type TestContext, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { test, type TestContext } from "node:test";
 import type { PushFunction } from "../../src/standalone/github-delivery.js";
 import { git } from "../fixtures/publication.js";
 import {

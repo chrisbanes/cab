@@ -1,7 +1,7 @@
-import { useCallback, useId, useState, type FormEvent } from "react";
+import { type FormEvent, useCallback, useId, useState } from "react";
 import {
-  operatorCredentialNameSchema,
   type OperatorCredential,
+  operatorCredentialNameSchema,
 } from "../../src/operator/contracts.js";
 import {
   ActionOutcome,
@@ -12,7 +12,7 @@ import { Button, StatusBadge, TextField } from "./components.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { shortId } from "./presentation.js";
 import { useOperatorResource } from "./resource.js";
-import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
+import { Panel, type SettingsProps, useHeaderRefresh } from "./settings.js";
 import {
   Dialog,
   DialogClose,

@@ -13,17 +13,17 @@ import type {
   HarnessStatus,
   RuntimeRestart,
 } from "../operator/contracts.js";
-import { readinessFix } from "../operator/runtime-restart-copy.js";
 import {
   type ClaudeTokenCheckResult,
   claudeTokenCheckSchema,
-  readinessCheckSchema,
   type ReadinessCheck,
   type ReadinessCheckId,
   type ReadinessResult,
   readinessCheckIds,
+  readinessCheckSchema,
   readinessSchema,
 } from "../operator/readiness.js";
+import { readinessFix } from "../operator/runtime-restart-copy.js";
 import { claudeTokenSource, readClaudeToken } from "./claude-token.js";
 import { assertExistingCanonicalDirectoryPath } from "./data-directory.js";
 import { printVersion, resolveOnPath } from "./executable-path.js";

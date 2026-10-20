@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { ExecutionState } from "../../src/standalone/state.js";
 import type { TaskListSummary } from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { ExecutionState } from "../../src/standalone/state.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { uniqueProjectName } from "../fixtures/project-names.js";
 
@@ -299,17 +299,18 @@ test("normal Stop observation stays Work while Stop with actual uncertainty need
   assert.ok(card?.attention.codes.includes("execution-uncertain"));
 });
 
+import { attentionNext } from "../../src/operator/attention.js";
 import { OperatorClient } from "../../web/src/api.js";
 import {
-  loadTaskList,
   filterTasks,
+  loadTaskList,
   parseTaskFilters,
+  reasonLabels,
   taskColumn,
   taskDetailHref,
   taskReasons,
-  reasonLabels,
 } from "../../web/src/tasks.js";
-import { attentionNext } from "../../src/operator/attention.js";
+
 test("a complete task aggregate rejects changing membership and repeated page cursors", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

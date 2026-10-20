@@ -1,10 +1,10 @@
+import { turnCommandNetworkLine } from "../../src/operator/command-network-copy.js";
 import {
-  executionHarnessLabels,
   type ExecutionHarness,
+  executionHarnessLabels,
   type TaskRead,
   type Workspace,
 } from "../../src/operator/contracts.js";
-import { turnCommandNetworkLine } from "../../src/operator/command-network-copy.js";
 import { ActionLink } from "./components.js";
 import { failureNotice, waitRoute } from "./execution-runtime.js";
 

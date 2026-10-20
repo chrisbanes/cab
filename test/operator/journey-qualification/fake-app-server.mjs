@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
+
 if (process.argv.includes("--version")) {
   console.log("codex-cli 0.159.0");
   process.exit(0);

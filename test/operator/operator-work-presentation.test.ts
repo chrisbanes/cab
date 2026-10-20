@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
-  taskSourceSummarySchema,
   type InboxItem,
   type TaskListSummary,
+  taskSourceSummarySchema,
 } from "../../src/operator/contracts.js";
+import {
+  interventionRequester,
+  requestActionLabel,
+  requestHref,
+  requestKindLabel,
+} from "../../web/src/request-presentation.js";
 import {
   activeColumns,
   attentionCandidate,
@@ -22,13 +28,7 @@ import {
   taskRouteSubtitle,
   visibleColumns,
 } from "../../web/src/tasks.js";
-import {
-  interventionRequester,
-  requestActionLabel,
-  requestHref,
-  requestKindLabel,
-} from "../../web/src/request-presentation.js";
-import { summary, type Overrides } from "../fixtures/task-summary.js";
+import { type Overrides, summary } from "../fixtures/task-summary.js";
 
 test("an imported Draft task names its unmet readiness conditions; other tasks keep the generic reason", () => {
   const label = (name: string) => ({ kind: "label", name });

@@ -1,26 +1,18 @@
-import { QuestionHolds, QuestionResponse } from "./question-response.js";
 import {
-  CommandNetworkLine,
-  ExecutionNotices,
-  PolicyDisclosure,
-} from "./execution-notice.js";
-import { executionSummary } from "./execution-runtime.js";
-import type { QuestionResponseStates } from "./question-response-state.js";
-import {
+  type ReactNode,
+  type SyntheticEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
-  type ReactNode,
-  type SyntheticEvent,
 } from "react";
 import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import {
   assignmentHistorySchema,
-  executionHarnessLabels,
   type CommandReceipt,
+  executionHarnessLabels,
   type OperatorCommand,
   operatorCommandSchema,
   questionReadSchema,
@@ -29,7 +21,14 @@ import {
   taskSchema,
   type Workspace,
 } from "../../src/operator/contracts.js";
+import { commentAvailability } from "../../src/operator/github-reasons.js";
 import { holdLines } from "../../src/operator/wait-reasons.js";
+import {
+  ActionOutcome,
+  detailRows,
+  OutcomeDetails,
+  type OutcomeField,
+} from "./action-feedback.js";
 import type { OperatorClient } from "./api.js";
 import {
   ActionLink,
@@ -38,18 +37,6 @@ import {
   ShortId,
   StatusBadge,
 } from "./components.js";
-import { useOperatorResource } from "./resource.js";
-import type {
-  OverviewCard,
-  ReplyOutcome,
-  TaskWorkspaceState,
-} from "./task-workspace-state.js";
-import {
-  ActionOutcome,
-  OutcomeDetails,
-  type OutcomeField,
-  detailRows,
-} from "./action-feedback.js";
 import {
   checkStatusWord,
   deliveryBlockerSentence,
@@ -57,14 +44,19 @@ import {
   pullRequestStateLabel,
   safePullRequestUrl,
 } from "./delivery-presentation.js";
-import { commentAvailability } from "../../src/operator/github-reasons.js";
-import { clockLabel } from "./presentation.js";
-import { failureCause } from "./outcome-copy.js";
-import { NativeSelect } from "./ui/native-select.js";
-import { Textarea } from "./ui/textarea.js";
-import { MarkdownPreview, TaskFiles } from "./task-files.js";
+import {
+  CommandNetworkLine,
+  ExecutionNotices,
+  PolicyDisclosure,
+} from "./execution-notice.js";
+import { executionSummary } from "./execution-runtime.js";
+import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import { TaskWorkspaceChanges } from "./inspection-changes.js";
-import { RetainedResultEvidence } from "./retained-evidence.js";
+import {
+  hasImproveWork,
+  ImproveWithLead,
+  type ReleaseRun,
+} from "./issue-improve.js";
 import {
   draftTurnAccessNotice,
   draftTurnHeading,
@@ -74,25 +66,26 @@ import {
   draftTurnUnavailableNotice,
   leadFeedbackMode,
   leadReceivesNotice,
-  leadUnavailableNotice,
   leadResumeNotice,
+  leadUnavailableNotice,
 } from "./lead-feedback.js";
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
+import { failureCause } from "./outcome-copy.js";
+import { clockLabel } from "./presentation.js";
+import { QuestionHolds, QuestionResponse } from "./question-response.js";
+import type { QuestionResponseStates } from "./question-response-state.js";
+import { useOperatorResource } from "./resource.js";
+import { RetainedResultEvidence } from "./retained-evidence.js";
+import type { ConfigurationDrafts } from "./settings-state.js";
 import { AssignmentRows, openDisclosures, showSection } from "./task-detail.js";
-import { TaskInspector } from "./task-inspector.js";
-import { holdNoticesBesideRequests } from "./inbox-presentation.js";
+import { MarkdownPreview, TaskFiles } from "./task-files.js";
 import {
   type TaskHeaderReport,
   TaskStrip,
   TaskTabs,
   taskHeaderReport,
 } from "./task-header.js";
-import {
-  type TaskTab,
-  tabForLocation,
-  tabForSection,
-  tabIds,
-} from "./task-tabs.js";
+import { TaskInspector } from "./task-inspector.js";
 import {
   assignmentRow,
   briefParts,
@@ -100,7 +93,19 @@ import {
   deliveryApplies,
   taskNextActor,
 } from "./task-overview.js";
-import type { ConfigurationDrafts } from "./settings-state.js";
+import {
+  type TaskTab,
+  tabForLocation,
+  tabForSection,
+  tabIds,
+} from "./task-tabs.js";
+import type {
+  OverviewCard,
+  ReplyOutcome,
+  TaskWorkspaceState,
+} from "./task-workspace-state.js";
+import { NativeSelect } from "./ui/native-select.js";
+import { Textarea } from "./ui/textarea.js";
 import { WaitReasons } from "./wait-reasons.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
@@ -362,6 +367,7 @@ export function TaskWorkspace({
   workspace,
   onHeader,
   drafts,
+  releaseDraft,
 }: {
   client: OperatorClient;
   session: Session;
@@ -375,7 +381,11 @@ export function TaskWorkspace({
   workspace?: Workspace | null;
   /** Receives the shell header's data (title, status line, Back, Stop); null on unmount. */
   onHeader?: (report: TaskHeaderReport | null) => void;
+  /** Hands an Improve with lead run on to the app's durable release. */
+  releaseDraft: ReleaseRun;
 }) {
+  // Improve with lead opens on demand, and again after a reload while it has work to show.
+  const [improveOpen, setImproveOpen] = useState<boolean | null>(null);
   // A Results or Changes outcome, with the write it answers so it shows on that write's tab.
   const [aux, setAux] = useState<
     (ReplyOutcome & { from?: OperatorCommand["type"] }) | null
@@ -1718,6 +1728,10 @@ export function TaskWorkspace({
       )}
     </section>
   );
+  const improvePolicy = data.issueEdit;
+  const improveShown = improvePolicy
+    ? (improveOpen ?? hasImproveWork(taskId, improvePolicy))
+    : false;
   return (
     <LocalReviewProvider
       client={client}
@@ -1749,6 +1763,15 @@ export function TaskWorkspace({
                 <ActionLink variant="secondary" href={data.source.url ?? "#"}>
                   Open GitHub to edit source
                 </ActionLink>
+                {improvePolicy && (
+                  <Button
+                    variant="secondary"
+                    aria-expanded={improveShown}
+                    onClick={() => setImproveOpen(!improveShown)}
+                  >
+                    Improve with lead
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
                   onClick={() => void refreshSource()}
@@ -1762,6 +1785,18 @@ export function TaskWorkspace({
             </Button>
           </div>
         </TaskStrip>
+        {improvePolicy && improveShown && (
+          <ImproveWithLead
+            client={client}
+            csrfToken={session.csrfToken}
+            taskId={taskId}
+            taskVersion={data.task.version}
+            policy={improvePolicy}
+            leadName={leadName}
+            releaseDraft={releaseDraft}
+            onChanged={refreshAll}
+          />
+        )}
         <TaskTabs
           tab={state.tab}
           select={selectTab}

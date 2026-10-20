@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { PassThrough } from "node:stream";
-import { tmpdir } from "../fixtures/temp.js";
 import { test } from "node:test";
 import {
   fixture,
+  type RuntimeInternals,
   receiveTerminal,
   until,
-  type RuntimeInternals,
 } from "../fixtures/runtime-retention.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 test("service bounds settled thread snapshots after held bindings and failed turn startup", {
   timeout: 120_000,

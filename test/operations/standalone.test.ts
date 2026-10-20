@@ -1,41 +1,41 @@
 import assert from "node:assert/strict";
 import {
+  type ChildProcessWithoutNullStreams,
   spawn,
   spawnSync,
-  type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import {
   chmodSync,
   existsSync,
-  mkdtempSync,
   mkdirSync,
-  realpathSync,
+  mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
-import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
 import { type Database, Store } from "../../src/core/store.js";
+import type { Runtime } from "../../src/standalone/codex.js";
+import {
+  CodexRuntime,
+  deniedServerRequest,
+  executionPolicy,
+  type UnexpectedRequest,
+  unexpectedRequest,
+} from "../../src/standalone/codex.js";
 import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
 import {
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
 import { ExecutionState } from "../../src/standalone/state.js";
-import type { Runtime } from "../../src/standalone/codex.js";
-import {
-  CodexRuntime,
-  deniedServerRequest,
-  executionPolicy,
-  unexpectedRequest,
-  type UnexpectedRequest,
-} from "../../src/standalone/codex.js";
 import { startedOf, timersOf } from "../fixtures/service-internals.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 class FakeRuntime implements Runtime {
   onRequest: ((request: UnexpectedRequest) => void) | undefined;

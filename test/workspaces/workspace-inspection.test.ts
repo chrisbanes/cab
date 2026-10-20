@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import {
   appendFile,
@@ -14,28 +13,29 @@ import {
   truncate,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { Store } from "../../src/core/store.js";
+import {
+  inspectionLimits,
+  listWorkspaceDirectory,
+  previewWorkspaceFile,
+  type WorkspaceInspectionCurrent,
+  type WorkspaceInspectionRequest,
+  workspaceInspectionPathExcluded,
+} from "../../src/standalone/workspace-inspection.js";
+import {
+  SqliteWorkspaceBindingStore,
+  type TaskWorkspaceBinding,
+  WorkspaceManager,
+} from "../../src/standalone/workspaces.js";
 import {
   gitEnvironmentProbe,
   hardenedGitEnvironment,
   withHostileGitEnvironment,
 } from "../fixtures/git-environment.js";
-import {
-  SqliteWorkspaceBindingStore,
-  WorkspaceManager,
-  type TaskWorkspaceBinding,
-} from "../../src/standalone/workspaces.js";
-import {
-  inspectionLimits,
-  listWorkspaceDirectory,
-  previewWorkspaceFile,
-  workspaceInspectionPathExcluded,
-  type WorkspaceInspectionCurrent,
-  type WorkspaceInspectionRequest,
-} from "../../src/standalone/workspace-inspection.js";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "ensemble-inspection-"));

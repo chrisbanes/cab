@@ -2,19 +2,19 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { type Browser, chromium } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
-import { openTaskTab } from "../fixtures/task-tabs.js";
 import {
   openSearchFromSidebar,
   searchRecords,
 } from "../fixtures/shell-search.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("operator-inspection-navigation-browser");
 

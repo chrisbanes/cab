@@ -9,9 +9,9 @@ import {
   draftingTurn,
   seedDraftingProject,
 } from "../fixtures/drafting.js";
+import { desktop, phone } from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { until } from "../fixtures/operator-work.js";
-import { desktop, phone } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("ui-composer-drafting");
 

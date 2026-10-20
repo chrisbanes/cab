@@ -4,10 +4,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
-import {
-  IssueChangedRefusal,
-  issueChangedReason,
-} from "../../src/standalone/github-delivery.js";
+import { issueChangedReason } from "../../src/operator/github-reasons.js";
+import { IssueChangedRefusal } from "../../src/standalone/github-delivery.js";
 import { deliveryFixture } from "../fixtures/delivery-fixture.js";
 import { startedOf } from "../fixtures/service-internals.js";
 

@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser } from "playwright";
+import { type Browser, chromium } from "playwright";
 import type { UnexpectedRequest } from "../../src/standalone/codex.js";
-import { openOverviewCard } from "../fixtures/task-tabs.js";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -18,6 +17,7 @@ import {
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
+import { openOverviewCard } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("operator-neutral-copy-browser");
 const reason = "Unexpected runtime request denied: claude/canUseTool:Bash";

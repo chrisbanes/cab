@@ -3,18 +3,18 @@ import {
   attentionBrowseCommands,
   attentionWriteCommands,
 } from "./attention.js";
-import { assignmentCommands } from "./browse-assignment.js";
 import type { BrowseCommand } from "./browse.js";
+import { assignmentCommands } from "./browse-assignment.js";
 import { evidenceCommands } from "./browse-evidence.js";
 import { executionCommands } from "./browse-execution.js";
-import { doctorCommand } from "./doctor.js";
-import { logsCommand } from "./logs-follow.js";
 import { workspaceCommands } from "./browse-workspace.js";
 import { capacityWriteCommands } from "./configure-capacity.js";
 import { profileWriteCommands } from "./configure-profile.js";
 import { projectWriteCommands } from "./configure-project.js";
 import { routingWriteCommands } from "./configure-routing.js";
 import { deliveryBrowseCommands, deliveryWriteCommands } from "./delivery.js";
+import { doctorCommand } from "./doctor.js";
+import { logsCommand } from "./logs-follow.js";
 import { operationCommands } from "./operation.js";
 import { recoveryBrowseCommands, recoveryWriteCommands } from "./recovery.js";
 import { runtimeBrowseCommands, runtimeWriteCommands } from "./runtime.js";

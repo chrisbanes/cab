@@ -1,38 +1,38 @@
 import assert from "node:assert/strict";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  realpathSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import {
-  controlledGit,
-  type ControlledGitEvent,
-} from "../fixtures/controlled-git.js";
-import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { Store } from "../../src/core/store.js";
 import {
+  SqliteWorkspaceBindingStore,
+  type TaskWorkspaceBinding,
+  type TaskWorkspaceRepositoryInput,
+  type WorkspaceBindingStore,
+  type WorkspaceCleanupEvidence,
+  WorkspaceManager,
+  type WorkspaceManagerOptions,
+} from "../../src/standalone/workspaces.js";
+import {
+  type ControlledGitEvent,
+  controlledGit,
+} from "../fixtures/controlled-git.js";
+import {
   gitEnvironmentProbe,
   hardenedGitEnvironment,
   withHostileGitEnvironment,
 } from "../fixtures/git-environment.js";
-import {
-  SqliteWorkspaceBindingStore,
-  WorkspaceManager,
-  type TaskWorkspaceBinding,
-  type TaskWorkspaceRepositoryInput,
-  type WorkspaceCleanupEvidence,
-  type WorkspaceBindingStore,
-  type WorkspaceManagerOptions,
-} from "../../src/standalone/workspaces.js";
 
 function fixture(options: WorkspaceManagerOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-workspaces-"));

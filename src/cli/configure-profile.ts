@@ -10,12 +10,12 @@ import {
   boolFlag,
   type Change,
   checkExpected,
+  checkOut,
   consistentRead,
   inlineText,
+  positiveIntFlag,
   readImpact,
   readTextFile,
-  checkOut,
-  positiveIntFlag,
   writePrepared,
 } from "./configure.js";
 import { CliError } from "./connections.js";

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  operatorCommandSchema,
   type CommandReceipt,
+  operatorCommandSchema,
 } from "../../src/operator/contracts.js";
 import { CommandLifecycle } from "../../web/src/command-lifecycle.js";
+
 const command = operatorCommandSchema.options[0].parse({
   type: "task.create",
   key: "00000000-0000-4000-8000-000000000001",

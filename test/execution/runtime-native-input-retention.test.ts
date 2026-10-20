@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "../fixtures/temp.js";
 import { test } from "node:test";
-import { nativeEndpointKey } from "../../src/core/structured-questions.js";
 import type { NativeInputEndpointIdentity } from "../../src/core/structured-questions.js";
+import { nativeEndpointKey } from "../../src/core/structured-questions.js";
 import {
   assertSettledRuntimeCounts,
   createNativeWork,
@@ -13,13 +12,14 @@ import {
   fixture,
   generation,
   nativeRequest,
+  type RuntimeInternals,
   receiveTerminal,
   runtimeCollectionSizes,
   settledRuntimeCounts,
   timeIterations,
   until,
-  type RuntimeInternals,
 } from "../fixtures/runtime-retention.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 test("production service settles 2,000 native waiters and callbacks with SQLite authority", {
   timeout: 180_000,

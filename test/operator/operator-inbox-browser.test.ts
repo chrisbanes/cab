@@ -1,27 +1,28 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Page } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
+import { clockLabel } from "../../src/operator/clock-label.js";
+import { type TaskRead, taskSchema } from "../../src/operator/contracts.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
+  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
-  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
-import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
-import { clockLabel } from "../../src/operator/clock-label.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   noPageOverflow,
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { choiceForm } from "../fixtures/question-data.js";
-import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   seedOwnApproval,
   seedOwnIntervention,
   seedOwnQuestion,
 } from "../fixtures/questions.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
+
 const test = browserSuite("operator-inbox-browser");
 
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;

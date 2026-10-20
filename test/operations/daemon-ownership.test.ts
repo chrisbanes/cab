@@ -4,8 +4,8 @@ import {
   type DaemonFacts,
   daemonDecision,
   type Observed,
-  parseLsofListeners,
   type ProcessIdentity,
+  parseLsofListeners,
   refineObserved,
   type Seen,
 } from "../../src/cli/daemon-ownership.js";

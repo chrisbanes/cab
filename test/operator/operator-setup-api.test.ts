@@ -28,11 +28,11 @@ import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
+import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
 import {
   listHomeFolders,
   verifyCheckout,
 } from "../../src/standalone/operator-setup.js";
-import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { createFakeGh, fakeGhToken } from "../fixtures/fake-gh.js";
 import {

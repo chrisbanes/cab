@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
 import {
-  DomainStore,
   type DomainCommand,
+  DomainStore,
   ProjectNameTakenError,
 } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";

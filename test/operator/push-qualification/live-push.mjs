@@ -8,22 +8,22 @@ import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { tmpdir } from "../../../dist/test/fixtures/temp.js";
-import { createOperatorFixture } from "../../../dist/test/fixtures/operator-web.js";
-import { seedOwnQuestion } from "../../../dist/test/fixtures/questions.js";
-import { exhaustibleRuntime } from "../../../dist/test/fixtures/runtime-exhaustion.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import {
   fetchPushTransport,
   pushHostAllowed,
 } from "../../../dist/src/standalone/web-push.js";
+import { createOperatorFixture } from "../../../dist/test/fixtures/operator-web.js";
+import { seedOwnQuestion } from "../../../dist/test/fixtures/questions.js";
+import { exhaustibleRuntime } from "../../../dist/test/fixtures/runtime-exhaustion.js";
+import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 
 const args = process.argv.slice(2);
 if (!args.includes("--live")) {

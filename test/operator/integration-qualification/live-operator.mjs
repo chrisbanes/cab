@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 import {
   CodexRuntime,
   StandaloneService,
@@ -15,10 +14,11 @@ import {
   LocalOperatorUi,
 } from "../../../dist/src/standalone/operator.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
 import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
+import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
+import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 
 if (!process.argv.slice(2).includes("--live")) {
   process.stderr.write(

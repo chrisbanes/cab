@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID, createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
   FixtureGuard,
@@ -244,6 +244,7 @@ test("live guard permits only exact recorded progress, status, merge and separat
 });
 
 import { spawnSync } from "node:child_process";
+
 test("live waiting checkpoint joins requests to executions and rejects unfinished work", () => {
   const requests = [{ taskId: "task", workId: "work", state: "completed" }];
   assert.equal(

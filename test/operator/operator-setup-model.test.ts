@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
-  operatorCommandSchema,
   type HarnessStatus,
+  operatorCommandSchema,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import {
@@ -26,9 +26,9 @@ import {
   pickerStart,
   type ReadinessRead,
   readyCheckItems,
-  type SetupDraftPhase,
   rowsFromDraft,
   rowsToDraft,
+  type SetupDraftPhase,
   setupSourceCredentialCopy,
   sourceCredentialLine,
   typedRepositoryId,

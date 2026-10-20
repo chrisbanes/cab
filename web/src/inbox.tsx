@@ -1,5 +1,4 @@
-import { NativeSelect } from "./ui/native-select.js";
-import { Card } from "./ui/card.js";
+import { ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
 import {
   Fragment,
   type ReactNode,
@@ -9,9 +8,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { inboxSelectionHref } from "../../src/operator/attention.js";
 import {
-  inboxReadSchema,
   type InboxItem,
+  inboxReadSchema,
   type Session,
   type Workspace,
 } from "../../src/operator/contracts.js";
@@ -20,10 +20,15 @@ import {
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
 import type { OperatorClient } from "./api.js";
-import { ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
 import { ActionLink, Button, ResourceStatus } from "./components.js";
-import { Badge } from "./ui/badge.js";
-import { useMediaQuery } from "./use-media-query.js";
+import { InboxContext } from "./inbox-context.js";
+import {
+  ApprovalDetail,
+  answerHolds,
+  InterventionDetail,
+  RuntimeDetail,
+  useInboxTask,
+} from "./inbox-detail.js";
 import {
   ageLabel,
   filterCounts,
@@ -33,21 +38,16 @@ import {
   requestIdentity,
   requestKindLabel,
 } from "./inbox-presentation.js";
-import { clockLabel } from "./presentation.js";
-import { inboxSummaryOf, requestKindIcons } from "./request-presentation.js";
-import { useOperatorResource } from "./resource.js";
-import {
-  answerHolds,
-  ApprovalDetail,
-  InterventionDetail,
-  RuntimeDetail,
-  useInboxTask,
-} from "./inbox-detail.js";
-import { InboxContext } from "./inbox-context.js";
-import { inboxSelectionHref } from "../../src/operator/attention.js";
 import { closeResolvedNotifications } from "./notifications.js";
+import { clockLabel } from "./presentation.js";
 import { QuestionResponse } from "./question-response.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
+import { inboxSummaryOf, requestKindIcons } from "./request-presentation.js";
+import { useOperatorResource } from "./resource.js";
+import { Badge } from "./ui/badge.js";
+import { Card } from "./ui/card.js";
+import { NativeSelect } from "./ui/native-select.js";
+import { useMediaQuery } from "./use-media-query.js";
 import "./inbox.css";
 export class InboxState {
   project = "";

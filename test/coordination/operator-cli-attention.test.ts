@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { nativeQuestionForm } from "../../src/core/question-forms.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
-import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliOperator } from "../fixtures/operator-cli.js";
 import { mixedAnswers } from "../fixtures/question-data.js";
@@ -16,6 +15,7 @@ import {
   seedOwnQuestion,
   startOwnWork,
 } from "../fixtures/questions.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 
 type Operator = Awaited<ReturnType<typeof startCliOperator>>;
 const posts = (o: Operator) =>

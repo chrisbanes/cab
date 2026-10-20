@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { RetainedEvidenceStore } from "../../src/core/retained-evidence.js";
+import { SqliteWorkspaceComparisonStore } from "../../src/standalone/comparison-store.js";
 import {
   createSnapshot,
   restoreSnapshot,
   verifySnapshot,
 } from "../../src/standalone/operations.js";
-import { SqliteWorkspaceComparisonStore } from "../../src/standalone/comparison-store.js";
 import type {
   WorkspaceTurnCaptureRecord,
   WorkspaceTurnComparisonSnapshot,

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
+
 const test = browserSuite("private-access");
-import { chromium, type Browser } from "playwright";
+
+import { type Browser, chromium } from "playwright";
 import { postWithoutFollowingRedirects } from "./private-access-qualification/private-access-requests.js";
 
 test("private proof observes the capacity redirect without following it", async (_t, journey) => {

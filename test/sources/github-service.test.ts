@@ -9,8 +9,6 @@ import { DeliveryStore } from "../../src/core/delivery.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
-import { GitHubSynchronizer } from "../../src/standalone/github-sync.js";
-import { StandaloneService } from "../../src/standalone/service.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -20,6 +18,8 @@ import type {
   GitHubSourceReader,
   IssueSnapshot,
 } from "../../src/standalone/github-source.js";
+import { GitHubSynchronizer } from "../../src/standalone/github-sync.js";
+import { StandaloneService } from "../../src/standalone/service.js";
 
 const issue: IssueSnapshot = {
   providerInstance: "github.com",

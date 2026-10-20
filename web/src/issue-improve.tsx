@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, StatusBadge } from "./components.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type CommandReceipt,
+  draftingRunReadSchema,
+  type OperatorCommand,
+} from "../../src/operator/contracts.js";
+import { ClientError, type OperatorClient } from "./api.js";
+import { Button, StatusBadge } from "./components.js";
+import type { IssueDraftStart } from "./composer-release.js";
+import {
+  issueImproveCopy as copy,
   type DeliveryState,
   type DiffRow,
   emptyStored,
@@ -10,8 +18,8 @@ import {
   type IssueImproveView,
   type IssueText,
   improveView,
+  isOpenState,
   issueBodyLimit,
-  issueImproveCopy as copy,
   issueImprovePollMs,
   issueNoteLimit,
   issueTitleLimit,
@@ -46,6 +54,7 @@ export interface IssueImprovePort {
   startRun(input: {
     key: string;
     runId: string;
+    taskId: string;
     note: string;
     expectedTaskVersion: number;
   }): Promise<Outcome>;
@@ -101,10 +110,18 @@ const newKeys = () => ({
 });
 
 /** Hands a run on to the app's durable release; see `useDraftReleases`. */
-export type ReleaseRun = (
-  runId: string,
-  start?: { key: string; note: string; expectedTaskVersion: number },
-) => void;
+export type ReleaseRun = (runId: string, start?: IssueDraftStart) => void;
+
+/** Whether the panel has work to show again after a reload: a draft, an edit or an unsettled send. */
+export function hasImproveWork(taskId: string, policy: IssueEditPolicy) {
+  const stored = readStored(sessionStorage, taskId);
+  return Boolean(
+    stored.runId ||
+      stored.edit ||
+      stored.sentOperationId ||
+      (policy.latest && isOpenState(policy.latest.state)),
+  );
+}
 
 export function useIssueImprove({
   taskId,
@@ -206,6 +223,7 @@ export function useIssueImprove({
       const result = await port.startRun({
         key,
         runId: id,
+        taskId,
         note,
         expectedTaskVersion: version,
       });
@@ -239,6 +257,7 @@ export function useIssueImprove({
     }
     releaseRun(runId, {
       key: stored.startKey,
+      taskId,
       note,
       expectedTaskVersion: expectedTaskVersion ?? taskVersion,
     });
@@ -474,6 +493,7 @@ export function useIssueImprove({
       stored.sentOperationId ?? stored.review?.operationId ?? null,
     runId,
     run,
+    runLoaded: stored.loadedRunId === runId,
     hasEdit: Boolean(stored.edit),
     hasReview: Boolean(stored.review?.receipt),
     sending,
@@ -904,4 +924,129 @@ function EditFields({
       </label>
     </>
   );
+}
+
+/** The panel for one task: its port, release and state, shown while the task page has it open. */
+export function ImproveWithLead({
+  client,
+  csrfToken,
+  taskId,
+  taskVersion,
+  policy,
+  leadName,
+  releaseDraft,
+  onChanged,
+}: {
+  client: OperatorClient;
+  csrfToken: string;
+  taskId: string;
+  taskVersion: number;
+  policy: IssueEditPolicy;
+  leadName: string;
+  releaseDraft: ReleaseRun;
+  onChanged: () => void;
+}) {
+  const port = useMemo(
+    () => createIssueImprovePort(client, csrfToken, taskId),
+    [client, csrfToken, taskId],
+  );
+  const s = useIssueImprove({
+    taskId,
+    taskVersion,
+    policy,
+    port,
+    releaseRun: releaseDraft,
+    onChanged,
+  });
+  return <IssueImprovePanel s={s} policy={policy} leadName={leadName} />;
+}
+
+/** Adapts the operator client to the panel's port. */
+export function createIssueImprovePort(
+  client: OperatorClient,
+  csrfToken: string,
+  taskId: string,
+): IssueImprovePort {
+  /** `pick` returns the answer wrapped, or null for a receipt that is not this command's. */
+  const send = async <T,>(
+    command: OperatorCommand,
+    pick: (receipt: CommandReceipt) => { value: T } | null,
+  ): Promise<Outcome<T>> => {
+    const result = await client.command(command, csrfToken);
+    if (result.state === "recorded") {
+      const answer = pick(result.receipt);
+      return answer
+        ? { state: "recorded", receipt: answer.value }
+        : { state: "unknown" };
+    }
+    if (result.state === "rejected")
+      return { state: "rejected", code: result.code };
+    return { state: result.state };
+  };
+  const drafting = (receipt: CommandReceipt) =>
+    receipt.kind === "drafting" ? { value: undefined } : null;
+  const review = (receipt: CommandReceipt) =>
+    receipt.kind === "edit-review" ? { value: receipt } : null;
+  return {
+    async readRun(runId, signal) {
+      try {
+        const { data } = await client.read(
+          `/api/operator/drafting-runs/${runId}`,
+          draftingRunReadSchema,
+          signal,
+        );
+        if (data.kind !== "issue") return { state: "error" };
+        return {
+          state: "ok",
+          run: {
+            runId: data.runId,
+            state: data.state,
+            reason: data.reason,
+            proposal: data.issueProposal,
+            proposalWithheld: data.proposalWithheld,
+            leadName: data.leadName,
+            createdAt: data.createdAt,
+            expiresAt: data.expiresAt,
+          },
+        };
+      } catch (error) {
+        return {
+          state:
+            error instanceof ClientError && error.code === "not-found"
+              ? "not-found"
+              : "error",
+        };
+      }
+    },
+    startRun: (input) =>
+      send({ type: "issue.draft.start", ...input }, drafting),
+    stopRun: (runId) =>
+      send(
+        { type: "drafting.stop", key: crypto.randomUUID(), runId },
+        drafting,
+      ),
+    settleRun: (runId, disposition) =>
+      send(
+        {
+          type: "drafting.settle",
+          key: crypto.randomUUID(),
+          runId,
+          disposition,
+        },
+        drafting,
+      ),
+    review: (input) =>
+      send({ type: "issue.edit.review", ...input, taskId }, review),
+    confirm: (input) =>
+      send(
+        { type: "issue.edit.confirm", ...input, taskId, decision: "approved" },
+        review,
+      ),
+    send: (input) =>
+      send({ type: "issue.edit.send", ...input, taskId }, (receipt) =>
+        receipt.kind === "delivery" && receipt.operationId === input.key
+          ? { value: { state: receipt.state, reason: receipt.reason } }
+          : null,
+      ),
+  };
 }

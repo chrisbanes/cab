@@ -12,12 +12,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { test, type TestContext } from "node:test";
+import { type TestContext, test } from "node:test";
 import type { StandaloneService } from "../../src/standalone/service.js";
 import {
   createInspectionJourneyHarness,
-  type InspectionJourneyHarness,
   InspectionJourneyGuard,
+  type InspectionJourneyHarness,
   inspectionJourneyBudgets,
   inspectionJourneyMarkers as markers,
   sha256,

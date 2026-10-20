@@ -9,8 +9,8 @@ import type { OperatorClient } from "./api.js";
 import { Button, ShortId, StatusBadge } from "./components.js";
 import {
   DiffHunk,
-  DiffLayoutControls,
   type DiffHunkData,
+  DiffLayoutControls,
 } from "./diff-view.js";
 import { codeSentence } from "./presentation.js";
 import { useOperatorResource } from "./resource.js";

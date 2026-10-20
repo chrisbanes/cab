@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { holdPills } from "../../web/src/settings-view.js";
 import { taskStatusLines, waitLines } from "../../src/cli/task-write.js";
 import {
   cliFix,
@@ -11,6 +10,7 @@ import {
   waitCodes,
   waitSchema,
 } from "../../src/operator/wait-reasons.js";
+import { holdPills } from "../../web/src/settings-view.js";
 
 const projectId = "00000000-0000-4000-8000-000000000001",
   profileId = "00000000-0000-4000-8000-000000000002",

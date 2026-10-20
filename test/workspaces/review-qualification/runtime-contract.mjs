@@ -2,35 +2,35 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  mkdtempSync,
-  writeFileSync,
-  readFileSync,
   chmodSync,
-  realpathSync,
-  openSync,
   closeSync,
   fsyncSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import {
-  StandaloneService,
   CodexRuntime,
+  StandaloneService,
 } from "../../../dist/src/standalone/index.js";
-import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
-import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../../dist/src/standalone/operator.js";
 import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
+import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 import {
-  OperatorWebBundle,
   OperatorWebBoundary,
+  OperatorWebBundle,
 } from "../../../dist/src/standalone/operator-web.js";
+import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 export const resource = "existing-login:codex-app-server:qualification";
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const rootDir = fileURLToPath(new URL("../../../", import.meta.url));

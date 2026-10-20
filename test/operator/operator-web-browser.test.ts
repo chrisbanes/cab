@@ -1,21 +1,24 @@
-import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import { browserTest } from "../fixtures/browser-engines.js";
+
 const test = browserSuite("operator-web-browser");
-import { chromium, type Browser, type Page } from "playwright";
+
+import { type Browser, chromium, type Page } from "playwright";
 import { clockLabel } from "../../src/operator/clock-label.js";
-import { ManualRestartClock } from "../fixtures/restart-clock.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { expireWithRead, reenterHome } from "../fixtures/operator-first-run.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
+import { expireWithRead, reenterHome } from "../fixtures/operator-first-run.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { ManualRestartClock } from "../fixtures/restart-clock.js";
+
 async function screenshot(page: Page, name: string) {
   return captureBrowserEvidence(page, name);
 }

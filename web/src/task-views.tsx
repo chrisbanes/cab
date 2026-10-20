@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  ChevronRight,
   CircleCheck,
   CircleDot,
   CircleQuestionMark,
@@ -7,54 +8,53 @@ import {
   Clock,
   FilePen,
   LoaderCircle,
+  type LucideIcon,
   Pause,
   Square,
-  ChevronRight,
-  type LucideIcon,
 } from "lucide-react";
-import { useState, useRef, useLayoutEffect, useCallback } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   InboxItem,
-  Workspace,
   TaskListSummary,
+  Workspace,
 } from "../../src/operator/contracts.js";
 import { ResourceStatus } from "./components.js";
-import { ProjectPausedBanner, type WaitProps } from "./wait-reasons.js";
-import { Button } from "./ui/button.js";
-import { Card } from "./ui/card.js";
-import type { ResourceState } from "./resource.js";
-import { requestActionLabel, requestHref } from "./request-presentation.js";
-import { updatedLabel } from "./presentation.js";
 import {
   CompletedPanel,
   NeedsYou,
+  type OverviewOperator,
   OverviewStats,
   ProjectsPanel,
-  type OverviewOperator,
 } from "./overview-attention.js";
+import { updatedLabel } from "./presentation.js";
+import { requestActionLabel, requestHref } from "./request-presentation.js";
+import type { ResourceState } from "./resource.js";
 import { AttentionBar, type Requests } from "./task-attention.js";
 import { TaskToolbar } from "./task-filters.js";
-import { useMediaQuery } from "./use-media-query.js";
 import {
   columns as allColumns,
+  capacityNotice,
   columnCounts,
   filterTasks,
-  parseTaskFilters,
-  capacityNotice,
-  taskColumn,
-  taskDetailHref,
-  taskFiltersUrl,
   isUncertain,
-  operatorNext,
-  readyButBlocked,
   nextActor,
-  taskReasons,
-  visibleColumns,
+  operatorNext,
+  parseTaskFilters,
+  readyButBlocked,
   type TaskAggregate,
   type TaskColumn,
   type TaskFilters,
+  taskColumn,
+  taskDetailHref,
+  taskFiltersUrl,
+  taskReasons,
+  visibleColumns,
 } from "./tasks.js";
+import { Button } from "./ui/button.js";
+import { Card } from "./ui/card.js";
+import { useMediaQuery } from "./use-media-query.js";
+import { ProjectPausedBanner, type WaitProps } from "./wait-reasons.js";
 import "./work.css";
 
 export const stateIcons: Record<TaskColumn, LucideIcon> = {

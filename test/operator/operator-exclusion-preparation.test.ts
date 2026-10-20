@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { seedExecutionDiagnostics } from "../fixtures/execution-diagnostics.js";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
+import { seedExecutionDiagnostics } from "../fixtures/execution-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 
 test("list, project, Inbox and composer reads traverse retained instruction revisions once per request", async (t) => {

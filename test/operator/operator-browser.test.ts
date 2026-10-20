@@ -1,21 +1,23 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer, type AddressInfo } from "node:net";
-import { tmpdir } from "../fixtures/temp.js";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { type AddressInfo, createServer } from "node:net";
+import { join } from "node:path";
 import {
-  browserSuite,
   type BrowserJourney,
+  browserSuite,
 } from "../fixtures/browser-diagnostics.js";
+import { tmpdir } from "../fixtures/temp.js";
+
 const test = browserSuite("operator");
+
 import {
-  chromium,
+  type APIResponse,
   type Browser,
   type BrowserContext,
+  chromium,
   type Locator,
   type Page,
-  type APIResponse,
   type Response as PlaywrightResponse,
 } from "playwright";
 import type {

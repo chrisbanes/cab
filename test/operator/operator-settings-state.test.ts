@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { test } from "node:test";
 import { OperatorClient } from "../../web/src/api.js";
 import {
   ConfigurationDraft,
   ConfigurationDrafts,
   outcomeCopy,
 } from "../../web/src/settings-state.js";
+
 test("unknown private configuration remains frozen after later rejection and deliberate reconciliation uses original bytes", async () => {
   const calls: string[] = [];
   let attempt = 0;

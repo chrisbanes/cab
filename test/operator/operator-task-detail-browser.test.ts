@@ -2,38 +2,38 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import {
-  chromium,
-  webkit,
   type Browser,
+  chromium,
   type Locator,
   type Page,
+  webkit,
 } from "playwright";
+import { orderWaits, type Wait } from "../../src/operator/wait-reasons.js";
 import {
+  leadReceivesNotice,
+  leadResumeNotice,
+  leadUnavailableNotice,
+} from "../../web/src/lead-feedback.js";
+import { clockLabel } from "../../web/src/presentation.js";
+import {
+  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
-  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
-import { orderWaits, type Wait } from "../../src/operator/wait-reasons.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { seedCatalog } from "../fixtures/operator-work.js";
 import { guideForm } from "../fixtures/question-data.js";
 import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
-import { seedCatalog } from "../fixtures/operator-work.js";
 import {
   seedImportedCommentTask,
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import {
-  leadReceivesNotice,
-  leadResumeNotice,
-  leadUnavailableNotice,
-} from "../../web/src/lead-feedback.js";
-import {
   openOverviewCard,
   openTaskTab,
   overviewCard,
 } from "../fixtures/task-tabs.js";
-import { clockLabel } from "../../web/src/presentation.js";
 
 const test = browserSuite("ui-task-detail");
 const testForEngine = (

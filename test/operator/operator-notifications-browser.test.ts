@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import { type Browser, chromium, type Locator, type Page } from "playwright";
 import {
-  browserSuite,
   type BrowserJourney,
+  browserSuite,
 } from "../fixtures/browser-diagnostics.js";
 import { FakePushService, ManualPushClock } from "../fixtures/fake-push.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signIn } from "../fixtures/operator-settings.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 

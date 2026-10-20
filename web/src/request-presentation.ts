@@ -1,17 +1,18 @@
 import {
   CircleQuestionMark,
   Diamond,
+  type LucideIcon,
   ServerOff,
   TriangleAlert,
-  type LucideIcon,
 } from "lucide-react";
+import { inboxSelectionHref } from "../../src/operator/attention.js";
 import type {
   InboxItem,
   RuntimeInboxItem,
   TaskInboxItem,
 } from "../../src/operator/contracts.js";
-import { inboxSelectionHref } from "../../src/operator/attention.js";
 import { requestActionLabel, requestKindLabel } from "./inbox-presentation.js";
+
 export { requestActionLabel, requestKindLabel };
 /** One symbol per request kind, shared by the Inbox and the Overview cards. */
 export const requestKindIcons: Record<InboxItem["kind"], LucideIcon> = {

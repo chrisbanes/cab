@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { deliveryFixture } from "../fixtures/delivery-fixture.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { DomainPolicyError } from "../../src/core/domain.js";
 import { runtimeDeliveryCallerSchema } from "../../src/core/delivery.js";
+import { DomainPolicyError } from "../../src/core/domain.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { deliveryFixture } from "../fixtures/delivery-fixture.js";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
 import { startedOf } from "../fixtures/service-internals.js";
+
 const policy = (
   f: Awaited<ReturnType<typeof deliveryFixture>>,
   mode: "allow" | "approval" | null,

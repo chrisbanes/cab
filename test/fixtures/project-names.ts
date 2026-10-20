@@ -1,5 +1,5 @@
-import { projectNameKey } from "../../src/core/project-names.js";
 import type { DomainStore } from "../../src/core/domain.js";
+import { projectNameKey } from "../../src/core/project-names.js";
 
 /** Project names are unique by their name key, so a repeated fixture name gets a counter. */
 export function uniqueProjectName(domain: DomainStore, name: string) {

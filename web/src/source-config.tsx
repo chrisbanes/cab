@@ -1,9 +1,32 @@
+import { CircleCheck } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
 import { noRuleText } from "../../src/operator/readiness-text.js";
-import { useEffect, useState, type ReactNode } from "react";
-import { CircleCheck } from "lucide-react";
+import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
+import { ghLoginCopy } from "./discovery-credential.js";
+import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
 import type { TabProps } from "./project-config.js";
+import {
+  ProjectFieldPicker,
+  useReadinessDiscovery,
+} from "./readiness-picker.js";
+import {
+  Aside,
+  ChangeList,
+  DraftCheck,
+  DraftField,
+  DraftOutcome,
+  key,
+  locked,
+  Panel,
+  reloadDraft,
+  sourceHold,
+  submitDraft,
+  useDraft,
+  useLoadedDraft,
+  usePrivateValues,
+} from "./settings.js";
 import {
   adoptSourceRows,
   closedIssueLabels,
@@ -11,55 +34,32 @@ import {
   nextSelectionId,
   parseRows,
   removesAllAccess,
+  type SourceRow,
   sourceChanges,
   sourceCommand,
   sourceRowsFrom,
   staleSourceRows,
-  type SourceRow,
   type Values,
 } from "./settings-changes.js";
 import {
-  Aside,
-  ChangeList,
-  DraftCheck,
-  DraftField,
-  DraftOutcome,
-  Panel,
-  key,
-  locked,
-  reloadDraft,
-  submitDraft,
-  useDraft,
-  sourceHold,
-  useLoadedDraft,
-  usePrivateValues,
-} from "./settings.js";
-import { ghLoginCopy } from "./discovery-credential.js";
-import {
   draftSourceName,
   type SourceNaming,
+  savedLine,
   sourceCredentialCopy,
   sourceCredentialSummary,
-  savedLine,
   sourceStatusLine,
 } from "./settings-view.js";
-import { OutcomeDetails } from "./action-feedback.js";
 import { credentialReasonId, ImportPanel } from "./source-import.js";
 import {
   hasProjectSource,
-  savedSourceName,
   SourceHeading,
+  savedSourceName,
   sourceDetails,
 } from "./source-names.js";
+import type { ObservationResource } from "./sync-placement.js";
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
-import {
-  ProjectFieldPicker,
-  useReadinessDiscovery,
-} from "./readiness-picker.js";
-import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
-import type { ObservationResource } from "./sync-placement.js";
 
 const withKeys = (rows: object[]) =>
   JSON.stringify(rows.map((r) => ({ ...r, rowKey: key() })));

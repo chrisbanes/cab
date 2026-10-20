@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { webkit, type Locator } from "playwright";
+import { type Locator, webkit } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,

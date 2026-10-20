@@ -9,13 +9,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { test, type TestContext } from "node:test";
-import { StandaloneService } from "../../src/standalone/service.js";
+import { type TestContext, test } from "node:test";
+import type { Runtime } from "../../src/standalone/codex.js";
 import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
-import type { Runtime } from "../../src/standalone/codex.js";
+import { StandaloneService } from "../../src/standalone/service.js";
 import { createFakeGh, fakeGhToken } from "../fixtures/fake-gh.js";
 import { tmpdir } from "../fixtures/temp.js";
 

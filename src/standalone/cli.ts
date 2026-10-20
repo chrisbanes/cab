@@ -1,22 +1,22 @@
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
 import { ROOT_REFUSAL } from "./launchd.js";
-import { OperatorApi } from "./operator-api.js";
-import { OperatorWebBundle, OperatorWebBoundary } from "./operator-web.js";
-import { serviceReadiness } from "./readiness.js";
-import { ServiceLog } from "./service-log.js";
-import {
-  StandaloneService,
-  type BackgroundFailureDiagnostic,
-} from "./service.js";
 import { LocalOperatorHttp, LocalOperatorUi } from "./operator.js";
+import { OperatorApi } from "./operator-api.js";
 import { OperatorAuth } from "./operator-auth.js";
-import { OperatorPush } from "./operator-push.js";
-import { dirname, join } from "node:path";
 import { coordinationOperatorRoutes } from "./operator-coordination.js";
+import { OperatorPush } from "./operator-push.js";
 import { OperatorRouteRegistry } from "./operator-routes.js";
 import { runtimeOperatorRoutes } from "./operator-runtime.js";
+import { OperatorWebBoundary, OperatorWebBundle } from "./operator-web.js";
+import { serviceReadiness } from "./readiness.js";
+import {
+  type BackgroundFailureDiagnostic,
+  StandaloneService,
+} from "./service.js";
+import { ServiceLog } from "./service-log.js";
 
 export type ServiceExitReason = "signal" | "background-failure";
 

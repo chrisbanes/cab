@@ -1,8 +1,8 @@
 import {
   executionHarnessLabels,
-  runtimeSummary,
   type HarnessStatus,
   type ProfileRuntime,
+  runtimeSummary,
   type SupportedRuntimeSettings,
   type TaskRead,
   unsupportedRuntimeField,
@@ -12,7 +12,9 @@ import {
   unavailableAlert as unavailableAlertText,
   unavailableNote,
 } from "../../src/operator/runtime-restart-copy.js";
+
 export { runtimeSummary };
+
 import type { Values } from "./settings-changes.js";
 import { settingsSectionHref } from "./settings-sections.js";
 

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { codexNativeInputQualificationSchema } from "../../src/standalone/codex.js";
 import {
-  parseNativeInputRequest,
   encodeNativeInputReply,
   type NativeInputProtocolQualification,
+  parseNativeInputRequest,
 } from "../../src/standalone/native-input.js";
-import { codexNativeInputQualificationSchema } from "../../src/standalone/codex.js";
+
 const qualification: NativeInputProtocolQualification = {
   codexVersion: "codex-cli 0.159.0",
   executableHash: "a".repeat(64),

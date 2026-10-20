@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import { type Browser, chromium, type Locator, type Page } from "playwright";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { taskReadiness } from "../../web/src/task-overview.js";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -8,9 +10,8 @@ import {
   createReleaseDeliveryFixture,
   until,
 } from "../fixtures/delivery-integration.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { taskReadiness } from "../../web/src/task-overview.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+
 const test = browserSuite("operator-delivery-integration-browser");
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {

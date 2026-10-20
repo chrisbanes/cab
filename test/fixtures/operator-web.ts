@@ -15,22 +15,21 @@ import type {
   Runtime,
   RuntimeToolCall,
   RuntimeToolDefinition,
+  RuntimeToolResult,
   RuntimeTurnPolicy,
   RuntimeTurnSettings,
-  RuntimeToolResult,
 } from "../../src/standalone/codex.js";
 import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import {
   OperatorPush,
   type OperatorPushOptions,
 } from "../../src/standalone/operator-push.js";
-import { serviceReadiness } from "../../src/standalone/readiness.js";
-import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
@@ -38,13 +37,13 @@ import {
   OperatorWebBoundary,
   OperatorWebBundle,
 } from "../../src/standalone/operator-web.js";
+import { serviceReadiness } from "../../src/standalone/readiness.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import {
   type RuntimeSpawnContext,
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
-import { tmpdir } from "./temp.js";
 import {
   FixtureLifecycle,
   type FixtureLifecycleOptions,
@@ -53,6 +52,7 @@ import {
   fixtureStepPending,
   throwFixtureCleanup,
 } from "./fixture-lifecycle.js";
+import { tmpdir } from "./temp.js";
 
 const operatorFixtureThreadSequence = new WeakMap<
   OperatorFixtureRuntime,

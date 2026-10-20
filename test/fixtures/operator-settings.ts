@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import {
-  captureBrowserEvidence,
-  type BrowserJourney,
-} from "./browser-diagnostics.js";
+import { type Browser, chromium, type Locator, type Page } from "playwright";
 import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import type {
   RuntimeSpawnContext,
   StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
+import {
+  type BrowserJourney,
+  captureBrowserEvidence,
+} from "./browser-diagnostics.js";
 import {
   createOperatorFixture,
   type OperatorFixtureRuntime,

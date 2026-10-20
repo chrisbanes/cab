@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { COVERAGE_GAPS, cursorQuery } from "../../src/cli/browse.js";
+import { taskColumnOf } from "../../src/operator/task-presentation.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliService } from "../fixtures/operator-cli.js";
-import { taskColumnOf } from "../../src/operator/task-presentation.js";
-import { seedOwnQuestion } from "../fixtures/questions.js";
 import { seedBrowseWorkspace } from "../fixtures/operator-cli-browse.js";
+import { seedOwnQuestion } from "../fixtures/questions.js";
 
 type After = { after(fn: () => unknown): void };
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally

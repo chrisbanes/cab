@@ -45,16 +45,16 @@ import {
 import { connectionNameSchema } from "./connections.js";
 import {
   type DaemonFacts,
+  daemonDecision,
   type Job,
   type Listener,
-  type Observed,
-  daemonDecision,
   MAX_OBSERVED_PROCESSES,
-  refineObserved,
+  type Observed,
   type ProcessIdentity as ObservedIdentity,
-  sameIdentity,
-  type Seen,
   parseLsofListeners,
+  refineObserved,
+  type Seen,
+  sameIdentity,
 } from "./daemon-ownership.js";
 import { DEFAULT_FIX, fixLine, shellWord } from "./remedy.js";
 import type { CliDeps } from "./types.js";

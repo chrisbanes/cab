@@ -1,4 +1,23 @@
 import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
+import type { TabProps } from "./project-config.js";
+import {
+  Aside,
+  ChangeList,
+  DraftCheck,
+  DraftOutcome,
+  editable,
+  locked,
+  Panel,
+  PrivateTextField,
+  ReferenceInput,
+  reloadDraft,
+  revealedText,
+  submitDraft,
+  textHold,
+  useDraft,
+  useLoadedDraft,
+  usePrivateValues,
+} from "./settings.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import {
   routingChanges,
@@ -6,28 +25,9 @@ import {
   savedCandidates,
   type Values,
 } from "./settings-changes.js";
+import { joinNames } from "./settings-view.js";
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
-import type { TabProps } from "./project-config.js";
-import { joinNames } from "./settings-view.js";
-import {
-  Aside,
-  ChangeList,
-  DraftCheck,
-  DraftOutcome,
-  Panel,
-  PrivateTextField,
-  ReferenceInput,
-  locked,
-  reloadDraft,
-  revealedText,
-  submitDraft,
-  useDraft,
-  useLoadedDraft,
-  editable,
-  textHold,
-  usePrivateValues,
-} from "./settings.js";
 
 const profileLabel = (r: ProjectConfigurationData["profiles"][number]) =>
   [r.name ?? "Name unavailable", r.summary].filter(Boolean).join(" · ");

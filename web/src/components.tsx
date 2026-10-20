@@ -1,13 +1,3 @@
-import {
-  forwardRef,
-  useRef,
-  type AnchorHTMLAttributes,
-  type ButtonHTMLAttributes,
-  type InputHTMLAttributes,
-  type MouseEvent,
-  type ReactNode,
-} from "react";
-import type { ResourceState } from "./resource.js";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   ChevronLeft,
@@ -16,12 +6,22 @@ import {
   CircleAlert,
   CircleCheck,
   CircleX,
-  Menu,
   type LucideIcon,
+  Menu,
 } from "lucide-react";
+import {
+  type AnchorHTMLAttributes,
+  type ButtonHTMLAttributes,
+  forwardRef,
+  type InputHTMLAttributes,
+  type MouseEvent,
+  type ReactNode,
+  useRef,
+} from "react";
 import type { ProjectLabel } from "../../src/operator/project-labels.js";
 import { cn } from "./lib/utils.js";
 import { shortId } from "./presentation.js";
+import type { ResourceState } from "./resource.js";
 import { Alert, AlertDescription } from "./ui/alert.js";
 import { Badge } from "./ui/badge.js";
 import { Button as PrimitiveButton } from "./ui/button.js";

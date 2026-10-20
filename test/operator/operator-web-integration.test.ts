@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+
 test("built React assets, JSON and retained routes share one service listener and receipts survive restart", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

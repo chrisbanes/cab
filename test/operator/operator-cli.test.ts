@@ -21,6 +21,7 @@ import {
   KeychainCredentialStore,
   readTokenFile,
 } from "../../src/cli/connections.js";
+import { logsCommand } from "../../src/cli/logs-follow.js";
 import { type CliDeps, EXIT } from "../../src/cli/main.js";
 import {
   CATEGORY_FIX,
@@ -29,7 +30,6 @@ import {
   nextText,
   remedyFor,
 } from "../../src/cli/remedy.js";
-import { logsCommand } from "../../src/cli/logs-follow.js";
 import {
   fakeServer,
   harness,

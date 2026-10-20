@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { waitFixHref } from "../../web/src/wait-fix-href.js";
 import {
   addClaudeHref,
   readinessCheckHref,
@@ -8,6 +7,7 @@ import {
   settingsSectionHref,
   settingsSectionOrder,
 } from "../../web/src/settings-sections.js";
+import { waitFixHref } from "../../web/src/wait-fix-href.js";
 
 const designed = [
   "projects",

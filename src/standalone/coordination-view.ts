@@ -1,19 +1,3 @@
-import {
-  questionAnswersSchema,
-  type QuestionAnswers,
-} from "../core/question-forms.js";
-import { feedbackReferenceSchema } from "../core/task-review.js";
-import {
-  handbackSettlementSchema,
-  type HandbackSettlement,
-  type TaskDeliveryView,
-} from "../core/delivery.js";
-import {
-  runtimeQuestionAnswerCommandSchema,
-  type RuntimeQuestionAnswerReceipt,
-  type RuntimeQuestionRecord,
-} from "../core/coordination.js";
-import type { StructuredQuestionAnswers } from "../core/structured-questions.js";
 import { z } from "zod";
 import type {
   AssignmentResult,
@@ -25,10 +9,26 @@ import type {
   UnresolvedResultDestination,
 } from "../core/coordination.js";
 import {
+  type RuntimeQuestionAnswerReceipt,
+  type RuntimeQuestionRecord,
+  runtimeQuestionAnswerCommandSchema,
+} from "../core/coordination.js";
+import {
+  type HandbackSettlement,
+  handbackSettlementSchema,
+  type TaskDeliveryView,
+} from "../core/delivery.js";
+import {
   DomainOperationError,
   DomainPolicyError,
   type DomainStore,
 } from "../core/domain.js";
+import {
+  type QuestionAnswers,
+  questionAnswersSchema,
+} from "../core/question-forms.js";
+import type { StructuredQuestionAnswers } from "../core/structured-questions.js";
+import { feedbackReferenceSchema } from "../core/task-review.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import type {
   RoutingAttempt,

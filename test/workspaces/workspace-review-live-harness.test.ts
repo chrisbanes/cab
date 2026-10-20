@@ -1,15 +1,15 @@
-import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { readFileSync, mkdtempSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { OperatorFixtureRuntime } from "../fixtures/operator-web.js";
+import { join, resolve } from "node:path";
+import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { browserTest } from "../fixtures/browser-engines.js";
+import { OperatorFixtureRuntime } from "../fixtures/operator-web.js";
+
 const module = await import(
   pathToFileURL(
     resolve("test/workspaces/review-qualification/runtime-contract.mjs"),

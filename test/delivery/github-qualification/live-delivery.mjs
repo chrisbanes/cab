@@ -8,33 +8,33 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join } from "node:path";
-import { tmpdir } from "node:os";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { chromium } from "playwright";
 import { z } from "zod";
+import { canonicalMaterial } from "../../../dist/src/core/delivery.js";
+import { DomainStore } from "../../../dist/src/core/domain.js";
+import { GitHubSourceStore } from "../../../dist/src/core/github-source.js";
+import { Store } from "../../../dist/src/core/store.js";
+import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
+import { StandaloneDataDirectory } from "../../../dist/src/standalone/data-directory.js";
+import {
+  LocalOperatorHttp,
+  LocalOperatorUi,
+} from "../../../dist/src/standalone/operator.js";
+import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
+import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
+import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
+import { verifiedRepository } from "../../../dist/src/standalone/repository-verification.js";
+import { StandaloneService } from "../../../dist/src/standalone/service.js";
+import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 import {
   FixtureGuard,
   qualificationDisposition,
   qualificationTaskIdle,
 } from "../../../dist/test/delivery/github-qualification/fixture.js";
-import { StandaloneDataDirectory } from "../../../dist/src/standalone/data-directory.js";
-import { DomainStore } from "../../../dist/src/core/domain.js";
-import { Store } from "../../../dist/src/core/store.js";
-import { GitHubSourceStore } from "../../../dist/src/core/github-source.js";
-import { verifiedRepository } from "../../../dist/src/standalone/repository-verification.js";
-import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
-import { StandaloneService } from "../../../dist/src/standalone/service.js";
-import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import {
-  LocalOperatorHttp,
-  LocalOperatorUi,
-} from "../../../dist/src/standalone/operator.js";
-import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
-import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
-import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
-import { canonicalMaterial } from "../../../dist/src/core/delivery.js";
 
 const args = process.argv.slice(2);
 function argument(flag) {

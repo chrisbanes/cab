@@ -1,10 +1,10 @@
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
-import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
-import { executionSummary } from "./execution-runtime.js";
-import { pullRequestReference } from "./delivery-presentation.js";
-import { midSentence, shortId } from "./presentation.js";
 import { taskColumnOf } from "../../src/operator/task-presentation.js";
+import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
+import { pullRequestReference } from "./delivery-presentation.js";
+import { executionSummary } from "./execution-runtime.js";
+import { midSentence, shortId } from "./presentation.js";
 import { nextActor, reasonLabels } from "./tasks.js";
 
 export { taskColumnOf };

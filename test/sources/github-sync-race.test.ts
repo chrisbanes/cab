@@ -4,12 +4,12 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { StandaloneService } from "../../src/standalone/service.js";
+import type { Runtime } from "../../src/standalone/codex.js";
 import type {
   GitHubSourceReader,
   IssueSnapshot,
 } from "../../src/standalone/github-source.js";
-import type { Runtime } from "../../src/standalone/codex.js";
+import { StandaloneService } from "../../src/standalone/service.js";
 
 const issue: IssueSnapshot = {
   providerInstance: "github.com",

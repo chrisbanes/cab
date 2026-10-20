@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
 import {
   SchedulerStore,
-  TurnScheduler,
   type TurnRequestInput,
+  TurnScheduler,
 } from "../../src/standalone/scheduler.js";
 
 function deferred(): {

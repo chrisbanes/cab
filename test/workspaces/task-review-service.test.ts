@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
-import { randomUUID, createHash } from "node:crypto";
-import { mkdtemp, writeFile, symlink, rename, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { CoordinationStore } from "../../src/core/coordination.js";
+import { ExecutionState } from "../../src/standalone/state.js";
+import {
+  type PreviewBinding,
+  previewRecordedArtifact,
+} from "../../src/standalone/task-review.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
-import { ExecutionState } from "../../src/standalone/state.js";
-import { CoordinationStore } from "../../src/core/coordination.js";
-import {
-  previewRecordedArtifact,
-  type PreviewBinding,
-} from "../../src/standalone/task-review.js";
+
 async function until(check: () => boolean) {
   for (let n = 0; n < 100; n++) {
     if (check()) return;

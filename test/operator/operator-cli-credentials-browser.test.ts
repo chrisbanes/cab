@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { Locator, Page } from "playwright";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { setupJourney } from "../fixtures/setup-browser.js";
+
 const test = browserSuite("operator-cli-credentials");
 
 const DAY = 24 * 60 * 60 * 1000;

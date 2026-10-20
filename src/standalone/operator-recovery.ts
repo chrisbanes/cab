@@ -9,8 +9,8 @@ import {
   type CommandReceipt,
   commandReceiptSchema,
   type OperatorCommand,
-  recoveryOptionsSchema,
   type recoveryBlockerSchema,
+  recoveryOptionsSchema,
 } from "../operator/contracts.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import type { StandaloneService } from "./service.js";

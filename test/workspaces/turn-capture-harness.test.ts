@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { DatabaseSync } from "node:sqlite";
 import {
   chmodSync,
   existsSync,
@@ -11,9 +10,10 @@ import {
   rmSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { tmpdir } from "../fixtures/temp.js";
 import type { RuntimeSpawnContext } from "../../src/standalone/service.js";
+import { tmpdir } from "../fixtures/temp.js";
 import {
   createTurnCaptureHarness,
   markerSha256,

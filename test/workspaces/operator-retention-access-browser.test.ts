@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
-import { randomUUID, createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { type Browser, chromium } from "playwright";
+import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import {
+  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
-  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { searchRecords } from "../fixtures/shell-search.js";
 import { seedRetainedReviewWindow } from "../fixtures/task-review.js";
 import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
-import { searchRecords } from "../fixtures/shell-search.js";
-import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
+
 // Retained-history seeding shares the startup deadline with web/browser launch.
 // These journeys assert no deadline of their own, so every budget is wide
 // headroom for a loaded runner: with 24 concurrent copies on 10 cores, setup

@@ -12,11 +12,11 @@ import {
   claudeTokenCheckSchema,
   readinessSchema,
 } from "../../src/operator/readiness.js";
-import { CodexRuntime } from "../../src/standalone/codex.js";
 import type { Runtime } from "../../src/standalone/codex.js";
+import { CodexRuntime } from "../../src/standalone/codex.js";
 import { StandaloneService } from "../../src/standalone/service.js";
-import { databaseDigest } from "../fixtures/database-digest.js";
 import { harness } from "../fixtures/cli-harness.js";
+import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 import {
   ClaudeShapedFixtureRuntime,

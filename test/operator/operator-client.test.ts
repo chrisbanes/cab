@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { OperatorClient, ClientError } from "../../web/src/api.js";
-import { ResourceController } from "../../web/src/resource.js";
 import {
-  workspaceSchema,
   type Workspace,
+  workspaceSchema,
 } from "../../src/operator/contracts.js";
+import { ClientError, OperatorClient } from "../../web/src/api.js";
+import { ResourceController } from "../../web/src/resource.js";
+
 const good: Workspace = {
   data: {
     projects: [],
@@ -196,8 +197,10 @@ test("captured session callbacks discard old success and error while current obs
     assert.equal(session, "r".repeat(43));
   }
 });
-import { ConfigurationDrafts } from "../../web/src/settings-state.js";
+
 import { ComposerState, storageKey } from "../../web/src/composer-state.js";
+import { ConfigurationDrafts } from "../../web/src/settings-state.js";
+
 test("request authentication scope preserves replacement private draft and durable composer owner after old 401", async () => {
   const saved = new Map<string, string>();
   const storage = {

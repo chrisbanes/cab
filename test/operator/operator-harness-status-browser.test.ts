@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { type Browser, type Page, webkit } from "playwright";
+import { clockLabel } from "../../src/operator/clock-label.js";
+import { claudePolicyLimits } from "../../src/standalone/claude.js";
+import { codexPolicyDisclosure } from "../../src/standalone/execution-policy.js";
 import {
-  browserSuite,
   type BrowserJourney,
+  browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import {
@@ -11,18 +16,13 @@ import {
   startSettings,
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
-import { randomUUID } from "node:crypto";
-import { webkit, type Browser, type Page } from "playwright";
 import {
   ClaudeShapedFixtureRuntime,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
-import { openSearchFromSidebar } from "../fixtures/shell-search.js";
-import { clockLabel } from "../../src/operator/clock-label.js";
-import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { ManualRestartClock } from "../fixtures/restart-clock.js";
-import { claudePolicyLimits } from "../../src/standalone/claude.js";
-import { codexPolicyDisclosure } from "../../src/standalone/execution-policy.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-harness-status-browser");
 

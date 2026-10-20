@@ -8,22 +8,22 @@ import {
 } from "react";
 import { z } from "zod";
 import {
+  type CommandReceipt,
   localReviewDraftReadSchema,
   localReviewListReadSchema,
   localReviewOperationReadSchema,
   retainedReviewAnchorReadSchema,
-  type CommandReceipt,
   type Session,
 } from "../../src/operator/contracts.js";
-import type { CommandState, OperatorClient } from "./api.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
-import { Button, StatusBadge, isPlainClick } from "./components.js";
-import { failureCause } from "./outcome-copy.js";
+import type { CommandState, OperatorClient } from "./api.js";
+import { Button, isPlainClick, StatusBadge } from "./components.js";
 import {
+  type LeadFeedbackMode,
   leadAwaitingRecoveryNotice,
   leadResumeNotice,
-  type LeadFeedbackMode,
 } from "./lead-feedback.js";
+import { failureCause } from "./outcome-copy.js";
 import { useOperatorResource } from "./resource.js";
 import type {
   DraftWrite,

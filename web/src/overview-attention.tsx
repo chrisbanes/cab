@@ -1,11 +1,11 @@
 import { ArrowRight, CircleAlert } from "lucide-react";
-import { useCallback, useState, type ReactNode } from "react";
+import { type ReactNode, useCallback, useState } from "react";
 import {
-  questionReadSchema,
   type InboxItem,
+  questionReadSchema,
   type RuntimeInboxItem,
-  type TaskInboxItem,
   type Session,
+  type TaskInboxItem,
   type TaskListSummary,
   type Workspace,
 } from "../../src/operator/contracts.js";
@@ -13,7 +13,6 @@ import type { OperatorClient } from "./api.js";
 import { ActionLink, ProjectName, ResourceStatus } from "./components.js";
 import { ApprovalFacts, InboxQuestion, useInboxTask } from "./inbox-detail.js";
 import { ageLabel, holdNotices } from "./inbox-presentation.js";
-import { clockLabel } from "./presentation.js";
 import {
   completedWork,
   furtherRequests,
@@ -23,6 +22,7 @@ import {
   overviewStats,
   projectRows,
 } from "./overview-model.js";
+import { clockLabel } from "./presentation.js";
 import { QuestionHolds } from "./question-response.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {

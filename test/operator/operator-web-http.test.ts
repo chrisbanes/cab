@@ -1,22 +1,23 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { mkdir, readFile, writeFile, symlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  OperatorWebBundle,
-  OperatorWebBoundary,
-} from "../../src/standalone/operator-web.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import { test } from "node:test";
 import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import {
+  OperatorWebBoundary,
+  OperatorWebBundle,
+} from "../../src/standalone/operator-web.js";
 import { createControlledPasswordDeriver } from "../fixtures/operator-auth-concurrency.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
+
 test("one guarded listener serves shell and authenticated JSON with rotated CSRF", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

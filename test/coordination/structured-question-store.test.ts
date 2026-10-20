@@ -1,9 +1,10 @@
-import { DatabaseSync } from "node:sqlite";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
 import { coordinationFixture } from "../fixtures/coordination.js";
-import { mixedForm, mixedAnswers } from "../fixtures/question-data.js";
+import { mixedAnswers, mixedForm } from "../fixtures/question-data.js";
+
 const task = "20000000-0000-4000-8000-000000000001",
   assignment = "40000000-0000-4000-8000-000000000001";
 const call = {

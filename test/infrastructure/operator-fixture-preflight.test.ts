@@ -1,14 +1,14 @@
-import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   createTestEvidenceDirectory,
   writeTestEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import { browserTest } from "../fixtures/browser-engines.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 interface ProbeResult {

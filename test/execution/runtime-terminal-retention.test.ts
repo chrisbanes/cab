@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "../fixtures/temp.js";
 import { test } from "node:test";
 import { ExecutionState } from "../../src/standalone/state.js";
 import {
@@ -12,10 +11,11 @@ import {
   generation,
   receiveTerminal,
   runtimeCollectionSizes,
+  type ServiceInternals,
   seedTerminalRows,
   timeIterations,
-  type ServiceInternals,
 } from "../fixtures/runtime-retention.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 test("production adapter terminal evidence remains SQLite-backed past cache limits", {
   timeout: 120_000,

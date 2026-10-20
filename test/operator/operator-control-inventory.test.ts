@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { actionKinds } from "../../src/core/delivery.js";
+import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
+import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import {
   createOperatorFixture,
   seedOperatorDelivery,
 } from "../fixtures/operator-web.js";
-import { actionKinds } from "../../src/core/delivery.js";
-import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
+
 test("retained rendered form actions, fields and mounted route controls match documented owners", async (t) => {
   let providerCalls = 0;
   const unexpectedProviderCall = async () => {

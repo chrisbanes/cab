@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import { randomUUID, createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   seedRetainedReviewWindow,
   seedReviewTask,
 } from "../fixtures/task-review.js";
+
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aK1cAAAAASUVORK5CYII=",
   "base64",

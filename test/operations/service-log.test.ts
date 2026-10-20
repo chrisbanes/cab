@@ -5,8 +5,8 @@ import {
   maxErrorMessageBytes,
   maxErrorStackFrameBytes,
   maxErrorStackFrames,
-  sanitizeError,
   ServiceLog,
+  sanitizeError,
 } from "../../src/standalone/service-log.js";
 
 const secret = "fixture-secret-value-1185";

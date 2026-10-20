@@ -11,11 +11,11 @@ import {
 import { join } from "node:path";
 import { CodexRuntime } from "../../../dist/src/standalone/index.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
+import { CaptureObserver } from "../../../dist/test/coordination/live-qualification/capture-observer.js";
 import {
   closeRuntimeSafetyFixtures,
   runtimeSafetyFixture,
 } from "../../../dist/test/fixtures/runtime-safety.js";
-import { CaptureObserver } from "../../../dist/test/coordination/live-qualification/capture-observer.js";
 import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 
 const args = process.argv.slice(2);

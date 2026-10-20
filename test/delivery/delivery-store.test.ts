@@ -7,9 +7,9 @@ import {
   externalActionArgumentsSchema,
   type PrDeliveryObservation,
 } from "../../src/core/delivery.js";
-import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
+import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
 
 test("immutable intents precede effects and reject denied, readiness, and changed-key material", () => {
   const db = new DatabaseSync(":memory:");

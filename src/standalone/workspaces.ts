@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { realpathSync } from "node:fs";
 import { z } from "zod";
-import { transaction, type Database } from "../core/store.js";
+import { type Database, transaction } from "../core/store.js";
 import { runGit } from "./git-process.js";
 
 const maxGitOutputBytes = 1024 * 1024;

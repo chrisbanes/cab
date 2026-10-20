@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { derivedUuid } from "../../src/cli/write.js";
 import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { completedLead, configure, until } from "../fixtures/completed-lead.js";
 import { stdinOf } from "../fixtures/cli-harness.js";
+import { completedLead, configure, until } from "../fixtures/completed-lead.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import {
   failReadAfterPost,

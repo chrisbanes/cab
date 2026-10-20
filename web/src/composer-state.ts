@@ -1,9 +1,9 @@
 import { z } from "zod";
 import {
+  type CommandReceipt,
+  type OperatorCommand,
   operatorCommandSchema,
   uuid,
-  type OperatorCommand,
-  type CommandReceipt,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { CommandLifecycle } from "./command-lifecycle.js";

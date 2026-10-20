@@ -13,8 +13,8 @@ import {
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { z } from "zod";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import {
   ClaudeRuntime,
   claudeSdkVersion,
@@ -22,18 +22,14 @@ import {
   claudeToolShape,
   releaseClaudeTemporaryBase,
 } from "../../src/standalone/claude.js";
-import { coordinationTools } from "../../src/standalone/coordination-tools.js";
 import {
   type RuntimeConversationEvent,
   RuntimeNotEnabledError,
   type RuntimeToolCall,
   type UnexpectedRequest,
 } from "../../src/standalone/codex.js";
+import { coordinationTools } from "../../src/standalone/coordination-tools.js";
 import type { ClaudeTurnEnvironment } from "../../src/standalone/service.js";
-import {
-  closeRuntimeSafetyFixtures,
-  runtimeSafetyFixture,
-} from "../fixtures/runtime-safety.js";
 import {
   fakeSdk,
   init,
@@ -41,6 +37,10 @@ import {
   type Script,
   sessionOf,
 } from "../fixtures/claude-sdk.js";
+import {
+  closeRuntimeSafetyFixtures,
+  runtimeSafetyFixture,
+} from "../fixtures/runtime-safety.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 test.after(closeRuntimeSafetyFixtures);

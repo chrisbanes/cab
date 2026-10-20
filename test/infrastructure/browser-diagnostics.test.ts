@@ -1,11 +1,11 @@
-import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { setTimeout, clearTimeout } from "node:timers";
+import { clearTimeout, setTimeout } from "node:timers";
 import { chromium } from "playwright";
 import { runBrowserJourney } from "../fixtures/browser-diagnostics.js";
+import { browserTest } from "../fixtures/browser-engines.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
 

@@ -4,7 +4,8 @@ import {
   questionFormSchema,
   validateQuestionAnswers,
 } from "../../src/core/question-forms.js";
-import { mixedForm, mixedAnswers } from "../fixtures/question-data.js";
+import { mixedAnswers, mixedForm } from "../fixtures/question-data.js";
+
 test("full form retains exact labels, recommendations and explicit empty optional answers", () => {
   assert.deepEqual(questionFormSchema.parse(mixedForm), mixedForm);
   assert.deepEqual(

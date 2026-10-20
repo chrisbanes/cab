@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { CoordinationStore } from "../../src/core/coordination.js";
-import { DomainStore, type DomainCommand } from "../../src/core/domain.js";
+import { type DomainCommand, DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { ExecutionState } from "../../src/standalone/state.js";
 

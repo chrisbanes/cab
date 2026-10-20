@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
-  DeliveryStore,
   type DeliveryCaller,
+  DeliveryStore,
   type PrDeliveryObservation,
 } from "../../src/core/delivery.js";
 import { DomainStore } from "../../src/core/domain.js";
@@ -148,6 +148,7 @@ test("handback settlement inspects provider-only head changes and rechecks local
 });
 
 import { deliveryFixture } from "../fixtures/delivery-fixture.js";
+
 for (const mode of ["reviewable-pr", "through-merge"] as const)
   test(`${mode} issue close cannot bypass the configured PR delivery boundary`, async () => {
     const f = await deliveryFixture(mode, true);
@@ -478,6 +479,7 @@ import {
   GitHubSourceStore,
   type IssueSnapshot,
 } from "../../src/core/github-source.js";
+
 for (const readiness of [
   { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
   null,

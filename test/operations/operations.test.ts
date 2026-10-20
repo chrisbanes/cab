@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import {
-  existsSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
-  readdirSync,
   realpathSync,
   rmSync,
   statSync,
@@ -20,7 +20,6 @@ import {
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { tmpdir } from "../fixtures/temp.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -28,19 +27,20 @@ import type {
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
 import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
-import { StandaloneService } from "../../src/standalone/service.js";
+import {
+  createSnapshot,
+  restoreSnapshot,
+  verifySnapshot,
+} from "../../src/standalone/operations.js";
 import type {
   RecoveryReceipt,
   RuntimeProcessIdentity,
   TerminationVerifier,
 } from "../../src/standalone/recovery-types.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
-import {
-  createSnapshot,
-  restoreSnapshot,
-  verifySnapshot,
-} from "../../src/standalone/operations.js";
+import { StandaloneService } from "../../src/standalone/service.js";
 import { publishedOf } from "../fixtures/service-internals.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 const digest = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");

@@ -4,14 +4,17 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+
 const test = browserSuite("operator-task-browser");
-import { chromium, type Browser, type Page } from "playwright";
+
+import { type Browser, chromium, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   openMoreFilters,
   seedCatalog,
   until,
 } from "../fixtures/operator-work.js";
+
 async function screenshot(page: Page, name: string) {
   return captureBrowserEvidence(page, name);
 }
@@ -879,6 +882,7 @@ test("committed lost-response creation survives reload expiry and exact reconcil
 });
 
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+
 async function visibleControl(page: Page, name: string) {
   const control = page.getByRole("button", { name, exact: true });
   await control.scrollIntoViewIfNeeded();

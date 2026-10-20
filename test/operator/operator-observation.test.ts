@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { seedDeliveryCoverage } from "../fixtures/delivery-coverage.js";
-import {
-  OperatorApi,
-  githubPullUrl,
-} from "../../src/standalone/operator-api.js";
 import { deliveryReadSchema } from "../../src/operator/contracts.js";
+import {
+  githubPullUrl,
+  OperatorApi,
+} from "../../src/standalone/operator-api.js";
+import { seedDeliveryCoverage } from "../fixtures/delivery-coverage.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
+
 test("curated retained delivery coverage remains bounded with exact omission counts and unchanged authority", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

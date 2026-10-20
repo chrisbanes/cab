@@ -2,20 +2,20 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
 import {
   SchedulerStore,
   TurnScheduler,
 } from "../../src/standalone/scheduler.js";
+import { StandaloneService } from "../../src/standalone/service.js";
 import {
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
 import { until } from "../fixtures/questions.js";
-import { StandaloneService } from "../../src/standalone/service.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
 
 test("initial local Ready task automatically binds one repository-free workspace, replay and restart never duplicate initial dispatch", async () => {
   const f = await createOperatorFixture();

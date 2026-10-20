@@ -85,6 +85,9 @@ export const issueEditReasonCodes = [
 ] as const;
 export type IssueEditReasonCode = (typeof issueEditReasonCodes)[number];
 
+/** The delivery reason recorded when an operator edit finds the issue changed on GitHub. */
+export const issueChangedReason = "provider-issue-changed";
+
 export const issueEditReasonSentences: Record<IssueEditReasonCode, string> = {
   "no-source-issue": "This task isn’t imported from a GitHub issue.",
   "task-not-open": "Improve with lead needs an open task.",

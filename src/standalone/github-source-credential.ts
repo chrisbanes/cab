@@ -1,20 +1,20 @@
-import { sourceCredentialReference } from "../core/credential-reference.js";
-import type { GitHubSelection } from "../core/github-source-contracts.js";
-import type { IssueReference } from "../core/github-source.js";
 import { createHash } from "node:crypto";
+import { sourceCredentialReference } from "../core/credential-reference.js";
+import type { IssueReference } from "../core/github-source.js";
+import type { GitHubSelection } from "../core/github-source-contracts.js";
+import type { SourceCredentialReason } from "../operator/source-credential.js";
 import {
   detectGh,
-  ghToken,
-  ghTokenAfterDetection,
   type GhLoginScope,
   type GhOptions,
+  ghToken,
+  ghTokenAfterDetection,
 } from "./gh-credential.js";
 import {
   GitHubHttpSourceReader,
   type GitHubSourceReader,
 } from "./github-source.js";
 
-import type { SourceCredentialReason } from "../operator/source-credential.js";
 export {
   type SourceCredentialReason,
   sourceCredentialExplanation,

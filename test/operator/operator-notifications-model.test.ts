@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  type BrowserEnvironment,
   base64UrlToBytes,
   browserLabel,
   bytesToBase64Url,
@@ -10,7 +11,6 @@ import {
   notificationState,
   revokedLabel,
   testOutcomeText,
-  type BrowserEnvironment,
 } from "../../web/src/notifications-model.js";
 
 const environment = (overrides: Partial<BrowserEnvironment> = {}) => ({

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -8,19 +8,19 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
-import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { controlledGit } from "../fixtures/controlled-git.js";
-import { StandaloneService } from "../../src/standalone/service.js";
+import { test } from "node:test";
 import type {
   Runtime,
   RuntimeToolCall,
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
+import { StandaloneService } from "../../src/standalone/service.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
+import { controlledGit } from "../fixtures/controlled-git.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 class GatedRuntime implements Runtime {
   starts = 0;

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { browserTest as test } from "../fixtures/browser-engines.js";
-import { chromium, type Browser } from "playwright";
+import { type Browser, chromium } from "playwright";
 import { build } from "vite";
+import { browserTest as test } from "../fixtures/browser-engines.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 test("production Vite bundle renders a synthetic PDF in its local worker without export or external fetch", async (t) => {

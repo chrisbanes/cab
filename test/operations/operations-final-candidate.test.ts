@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import { StandaloneService } from "../../src/standalone/service.js";
-import { OperatorFixtureRuntime } from "../fixtures/operator-web.js";
 import {
   createReleaseDeliveryFixture,
   until,
@@ -16,7 +16,7 @@ import {
   fixtureStepCompleted,
   throwFixtureCleanup,
 } from "../fixtures/fixture-lifecycle.js";
-import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
+import { OperatorFixtureRuntime } from "../fixtures/operator-web.js";
 
 const hash = (bytes: Buffer | string) =>
   createHash("sha256").update(bytes).digest("hex");

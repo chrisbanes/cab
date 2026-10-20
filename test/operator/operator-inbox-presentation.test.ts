@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { test } from "node:test";
+import type {
+  RuntimeInboxItem,
+  TaskInboxItem,
+  TaskRead,
+} from "../../src/operator/contracts.js";
+import { orderWaits } from "../../src/operator/wait-reasons.js";
 import {
   ageLabel,
   assignmentChain,
@@ -14,12 +20,6 @@ import {
   requestKindLabel,
   taskContext,
 } from "../../web/src/inbox-presentation.js";
-import type {
-  RuntimeInboxItem,
-  TaskInboxItem,
-  TaskRead,
-} from "../../src/operator/contracts.js";
-import { orderWaits } from "../../src/operator/wait-reasons.js";
 
 const minute = 60_000;
 test("relative age reads at the largest useful unit and never goes negative", () => {

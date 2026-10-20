@@ -1,6 +1,11 @@
-// Pure state for the Improve with lead panel. The contract types below mirror the
-// planned operator API and are local until the operator contract adopts them.
+// Pure state for the Improve with lead panel.
 import { z } from "zod";
+import type {
+  CommandReceipt,
+  DraftingRunRead,
+  TaskRead,
+} from "../../src/operator/contracts.js";
+import { issueChangedReason } from "../../src/operator/github-reasons.js";
 
 export const issueNoteLimit = 16_000;
 export const issueTitleLimit = 512;
@@ -12,44 +17,10 @@ export interface IssueText {
   body: string;
 }
 
-export type IssueEditReasonCode =
-  | "no-source-issue"
-  | "task-not-open"
-  | "no-edit-grant"
-  | "no-project-lead"
-  | "action-unresolved"
-  | "no-delivery-credential";
-
-export type DeliveryState =
-  | "prepared"
-  | "attempting"
-  | "uncertain"
-  | "confirmed-success"
-  | "confirmed-failure"
-  | "denied";
-
 /** The task read's `issueEdit` field. */
-export interface IssueEditPolicy {
-  available: boolean;
-  reasonCode: IssueEditReasonCode | null;
-  reason: string | null;
-  latest: {
-    operationId: string;
-    state: DeliveryState;
-    reason: string | null;
-  } | null;
-}
-
-export type IssueRunState =
-  | "queued"
-  | "running"
-  | "stopping"
-  | "proposed"
-  | "interrupted"
-  | "failed"
-  | "accepted"
-  | "discarded"
-  | "expired";
+export type IssueEditPolicy = NonNullable<TaskRead["data"]["issueEdit"]>;
+export type DeliveryState = NonNullable<IssueEditPolicy["latest"]>["state"];
+export type IssueRunState = DraftingRunRead["data"]["state"];
 
 export interface IssueDraftRun {
   runId: string;
@@ -64,18 +35,10 @@ export interface IssueDraftRun {
 }
 
 /** The review the service recorded: the current text, the proposal and what approves it. */
-export interface IssueEditReview {
-  reviewId: string;
-  operationId: string;
-  revision: number;
-  materialHash: string;
-  decision: "pending" | "approved" | "denied";
-  current: IssueText;
-  proposed: IssueText;
-}
+export type IssueEditReview = Extract<CommandReceipt, { kind: "edit-review" }>;
 
 /** The provider reason the preflight records when the issue moved since the draft. */
-export const staleProviderReason = "provider-issue-changed";
+export const staleProviderReason = issueChangedReason;
 
 /** A delivery state the service has not settled: the edit may or may not be on GitHub. */
 export const openStates: readonly DeliveryState[] = [
@@ -175,6 +138,8 @@ export interface ViewInput {
   ownOperationId: string | null;
   runId: string | null;
   run: IssueDraftRun | null;
+  /** The run's proposal already filled the editor, so the editor outranks the run. */
+  runLoaded: boolean;
   hasEdit: boolean;
   hasReview: boolean;
   sending: boolean;
@@ -199,7 +164,8 @@ export function improveView(input: ViewInput): IssueImproveView {
   if (input.sending) return "sending";
   if (input.sendFailure) return "send-failed";
   if (input.hasReview) return "reviewing";
-  if (input.hasEdit) return "editing";
+  // A newer draft outranks the text of an older one until its proposal arrives.
+  if (input.hasEdit && (!input.runId || input.runLoaded)) return "editing";
   if (input.runId) {
     if (!input.run) return "starting";
     if (input.run.state === "proposed")
