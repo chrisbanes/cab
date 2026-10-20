@@ -1,9 +1,11 @@
-# Issue drafting run: bounded live run, 20 October 2026
+# Issue drafting run: bounded live runs, 20 October 2026
 
-One live Improve with lead run on the real Codex runtime, made with
+Two live Improve with lead runs on the real Codex runtime, one attempt each. The first
+failed the harness's own check and is kept below as a failed checkpoint; the second, with
+the corrected check, passed. Both were made with
 `npm run build && npm run drafting:live -- --live --issue` from
-`test/execution/drafting-qualification/live-drafting.mjs`. It made exactly one attempt
-and was not retried. It belongs to issue #1182; CI does not repeat it. The Codex
+`test/execution/drafting-qualification/live-drafting.mjs`. Each made exactly one attempt
+and was not retried. Both belong to issue #1182; CI does not repeat it. The Codex
 launcher was the approved ChatGPT application's `codex-cli/bin/codex`, put first on
 `PATH` for the run.
 
@@ -46,11 +48,32 @@ imported task already has its lead assignment when it is imported, so the count 
 an assignment the run did not create: this was a defect in the harness's check, not
 evidence that the run created one. The check now compares against a count taken just
 before the run starts, for tasks, assignments and delivery records. The corrected check
-has not been run live: the single approved attempt is spent. The deterministic suite
+was run live once more, with the maintainer's authorization for exactly one further
+attempt (second run, below). The deterministic suite
 `drafting-service.test.ts` measures the same three counts before and after an issue run
 and finds no change.
 
 The harness prints states, counts and validity only, never the model's text or a path.
+
+## Second run, with the corrected check
+
+One further attempt, authorized by the maintainer on 20 October 2026, with the same
+launcher, prerequisites (`codex login status` reported `Logged in using ChatGPT`), fixed
+issue and limits. It was not retried.
+
+| Check | Result |
+| --- | --- |
+| Source revision | `49c4727efc18fe6f6cf2509847c2974a6f47d398` (built `dist`) |
+| Run states | `running`, then `proposed` |
+| Elapsed | 31.2 s of the 600 s limit |
+| Proposal validates against the issue edit schema | Yes (title 37 characters, body 857) |
+| Capacity after the run | 0 |
+| Disposable copy | Removed |
+| Tasks, assignments and delivery records created, against the pre-run baseline | 0, 0, 0 |
+| Harness exit status | 0 |
+| Service stopped; temporary root removed | Yes |
+
+All finite pass conditions held on this one run, so the live qualification is complete.
 
 ## Limits
 
