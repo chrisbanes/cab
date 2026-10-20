@@ -416,7 +416,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | --- | --- |
 | 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `02b-inbox-runtime-exhausted`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
 | 02 Inbox & questions | `06-inbox-question-audience`, `08-inbox-empty`, `19-inbox-grouped-questions`, `20-task-answering-grouped-request`, `32-inbox-approved-dependency-held`, `22-question-states-specimen`, `17-imported-source-overview-inbox`, `21-phone-grouped-questions`, `21b-phone-grouped-questions-scrolled`, `27-phone-question-evidence`, `28-phone-question-failed-answer`, `29-phone-question-stale-read`, `30-phone-question-answer-sent`, `31-phone-inbox-anchored-return`, `33-phone-exact-approval-source-hold`, `800g-phone-grouped-question-short` |
-| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `47b-phone-task-actions-open`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation`, `198-task-draft-turn-available`, `200-task-draft-turn-queued`, `202-task-draft-turn-sent`, `204-task-draft-turn-unavailable`, `199-phone-task-draft-turn-available`, `201-phone-task-draft-turn-queued`, `203-phone-task-draft-turn-sent`, `205-phone-task-draft-turn-unavailable` |
+| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `47b-phone-task-actions-open`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation`, `198-task-draft-turn-available`, `200-task-draft-turn-queued`, `202-task-draft-turn-sent`, `204-task-draft-turn-unavailable`, `199-phone-task-draft-turn-available`, `201-phone-task-draft-turn-queued`, `203-phone-task-draft-turn-sent`, `205-phone-task-draft-turn-unavailable`, `206-task-improve-issue-available`, `208-task-improve-issue-running`, `210-task-improve-issue-proposal`, `212-task-improve-issue-review`, `214-task-improve-issue-sent`, `216-task-improve-issue-stale`, `218-task-improve-issue-held`, `220-task-improve-issue-unavailable`, `207-phone-task-improve-issue-available`, `209-phone-task-improve-issue-running`, `211-phone-task-improve-issue-proposal`, `213-phone-task-improve-issue-review`, `215-phone-task-improve-issue-sent`, `217-phone-task-improve-issue-stale`, `219-phone-task-improve-issue-held`, `221-phone-task-improve-issue-unavailable` |
 | 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
@@ -1766,6 +1766,39 @@ Interaction notes:
 - A Ready task, and a task whose lead is missing or has started, keep the ordinary reply.
 - Nothing here changes the task's readiness; the context panel states "A draft turn
   never makes a task Ready."
+
+### Improve with lead
+
+On an open imported task, **Improve with lead** in the task tools row (beside Open GitHub to
+edit source) opens a panel above the task tabs where the project lead proposes a better title
+and body for the source issue ([specification](../docs/SPEC.md#imported-issues-and-source-ownership)).
+The button is always available on an imported task so the panel can state why it cannot start.
+Desktop frames are 1366 wide and phone frames 390 × 844; the page is **03 Task views**.
+
+| State | Desktop | Phone | What it shows |
+| --- | --- | --- | --- |
+| Available | `206-task-improve-issue-available` | `207-phone-task-improve-issue-available` | An optional note for the lead, **Improve with lead**, the capacity and 10 minute notes, and the access disclosure: a throwaway copy with network off, not a read-only sandbox, nothing sent until reviewed. |
+| Drafting | `208-task-improve-issue-running` | `209-phone-task-improve-issue-running` | "Mira is reading the repositories", elapsed time against the limit and Stop. The note is locked and the task keeps running. |
+| Proposal | `210-task-improve-issue-proposal` | `211-phone-task-improve-issue-proposal` | Editable Title and Body with character counts, **Review changes**, Redraft and Discard draft. |
+| Review changes | `212-task-improve-issue-review` | `213-phone-task-improve-issue-review` | Current on GitHub beside Proposed for the title and for the body, removed and added lines marked with − and + as well as colour, a note that sending cannot be undone from Ensemble, and **Send edit to GitHub**. Back to editing returns to the fields. |
+| Sent | `214-task-improve-issue-sent` | `215-phone-task-improve-issue-sent` | "✓ Sent." GitHub confirmed both fields; the title and outcome here update after the next sync. |
+| Issue changed | `216-task-improve-issue-stale` | `217-phone-task-improve-issue-stale` | "The issue changed on GitHub after this draft started. Nothing was sent." with Redraft; the operator's text stays on screen, read-only, until the new draft arrives. |
+| Held | `218-task-improve-issue-held` | `219-phone-task-improve-issue-held` | "Held: we couldn't confirm whether GitHub applied the edit." with a link to the issue. There is no resend; another edit waits until the outcome is known. It survives a reload. |
+| Unavailable | `220-task-improve-issue-unavailable` | `221-phone-task-improve-issue-unavailable` | One specimen listing each reason in the order the server reports it: `no-source-issue`, `task-not-open`, `no-edit-grant`, `no-project-lead`, `action-unresolved`, `no-delivery-credential`. The phone frame shows the panel with a disabled **Improve with lead**. |
+
+Interaction notes:
+
+- The panel buttons are 44px high on phone.
+  Sending approves the reviewed text and sends it in one step; the
+  review's keys are kept so a retry after an unknown answer repeats the same operation.
+- Status changes (drafting, ready, held, sent) are announced as status or alert regions
+  without moving focus. A proposal the service withholds shows "holds text that cannot be
+  shown" with Discard draft and is never filled or edited.
+- The run id and the edited text are kept in the browser session, so a reload or a locked
+  phone reattaches; the service's own record of the newest edit decides the Held state.
+- If the current title or body would have to be hidden, the review is refused rather than
+  shown altered.
+- Not drawn: the CLI offers none of this (see [Operator CLI](../docs/design/operator-cli.md)).
 
 ### Task detail and updates
 
