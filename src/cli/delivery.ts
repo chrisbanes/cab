@@ -114,7 +114,7 @@ function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
       ],
       ...(d?.branches ?? []).map((r): [string, string] => [
         "Branch",
-        `${r.repositoryName} ${unavailable(r.branch)} pushed ${r.lastPushedSha?.slice(0, 12) ?? "nothing yet"}${r.outsideHeadSha ? `, outside push ${r.outsideHeadSha.slice(0, 12)}` : ""}`,
+        `${r.repositoryName} ${unavailable(r.branch)} pushed ${r.lastPushedSha?.slice(0, 12) ?? "nothing yet"}${r.outsideHeadSha ? (/^0+$/.test(r.outsideHeadSha) ? ", branch deleted" : `, outside push ${r.outsideHeadSha.slice(0, 12)}`) : ""}`,
       ]),
     ]),
     ...(b?.checks.length

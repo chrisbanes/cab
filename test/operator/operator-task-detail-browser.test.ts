@@ -3237,6 +3237,12 @@ test("The delivery block links the PR, says its state and blockers in words, and
     .waitFor();
   reads.set(a.taskId, {
     ...read({}),
+    branches: [{ ...branch, outsideHeadSha: "0".repeat(40) }],
+  });
+  await refreshTask(page, a.taskId);
+  await branchLine.getByText("Branch deleted", { exact: true }).waitFor();
+  reads.set(a.taskId, {
+    ...read({}),
     branches: [{ ...branch, branch: null, lastPushedSha: null }],
   });
   await refreshTask(page, a.taskId);

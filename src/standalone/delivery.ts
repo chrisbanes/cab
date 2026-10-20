@@ -274,6 +274,12 @@ export class DeliveryCoordinator {
         receipt: null,
       });
     }
+    if (
+      assigned?.outsideHeadSha &&
+      before.beforeHead !== undefined &&
+      before.beforeHead === assigned.lastPushedSha
+    )
+      this.store.clearOutsideHead(caller.taskId, assigned.repositoryId);
     // Reuse final-completion evidence under the already-held task serialization.
     // The action's own prepared intent is the only delivery effect excluded.
     const closureGuard =

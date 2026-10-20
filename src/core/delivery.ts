@@ -21,6 +21,8 @@ export const actionKinds = [
   "branch.force-push",
 ] as const;
 export const defaultBranchPrefix = "ensemble/";
+/** Git's all-zero id, recorded as the outside head when the remote branch is absent. */
+export const absentBranchHead = "0".repeat(40);
 const branchPrefixMax = 64;
 /** Ref-safety of a name, or of its leading part, which may end mid-segment (`team-`); no length rule. */
 function refSafe(name: string): boolean {
@@ -33,7 +35,12 @@ function refSafe(name: string): boolean {
 }
 /** A project's branch prefix: ref-safe and at most 64 characters. */
 export function validBranchPrefix(prefix: string): boolean {
-  return prefix.length <= branchPrefixMax && refSafe(prefix);
+  // A leading slash would give every generated name an empty first segment.
+  return (
+    prefix.length <= branchPrefixMax &&
+    !prefix.startsWith("/") &&
+    refSafe(prefix)
+  );
 }
 /** A complete, Ensemble-assigned task branch name. */
 export function safeBranchName(name: string): boolean {
@@ -1121,11 +1128,14 @@ export class DeliveryStore {
         const taskId = record.binding.taskId,
           repositoryId = action.target.repositoryId,
           owned = observation.state === "confirmed-success",
+          // A branch found absent is held like an outside head, as git's all-zero id.
           outside =
             observation.outsideHeadSha ??
-            (observation.reason === "branch-outside-change"
-              ? observation.receipt?.headSha
-              : undefined);
+            (observation.outsideDeleted
+              ? absentBranchHead
+              : observation.reason === "branch-outside-change"
+                ? (observation.receipt?.headSha ?? absentBranchHead)
+                : undefined);
         if (owned && observation.receipt?.headSha)
           this.db
             .prepare(
@@ -1410,6 +1420,8 @@ export class DeliveryStore {
   ): boolean {
     const branch = this.taskBranch(taskId, observation.repositoryId);
     if (!branch || branch.branch !== observation.headRef) return false;
+    // A PR keeps its head commit after the branch is deleted: only a ref read proves the branch is back.
+    if (branch.outsideHeadSha === absentBranchHead) return false;
     if (observation.headSha === branch.lastPushedSha) {
       if (branch.outsideHeadSha !== null)
         this.db
@@ -1430,6 +1442,14 @@ export class DeliveryStore {
       )
       .run(observation.headSha, taskId, observation.repositoryId);
     return true;
+  }
+  /** The remote branch was read back at the commit Ensemble last pushed: any outside record is obsolete. */
+  clearOutsideHead(taskId: string, repositoryId: string): void {
+    this.db
+      .prepare(
+        "UPDATE delivery_task_branches SET outsideHeadSha=NULL WHERE taskId=? AND repositoryId=?",
+      )
+      .run(taskId, repositoryId);
   }
   /** The PR's head is on the task branch but is not the commit Ensemble last pushed there. */
   private branchHold(taskId: string, binding: PrDeliveryBinding): boolean {

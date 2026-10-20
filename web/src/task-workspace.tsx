@@ -3013,7 +3013,13 @@ function Changes({
           )}{" "}
           {b.outsideHeadSha && (
             <StatusBadge tone="warning">
-              Outside push <ShortId value={b.outsideHeadSha} />
+              {/^0+$/.test(b.outsideHeadSha) ? (
+                "Branch deleted"
+              ) : (
+                <>
+                  Outside push <ShortId value={b.outsideHeadSha} />
+                </>
+              )}
             </StatusBadge>
           )}
         </p>

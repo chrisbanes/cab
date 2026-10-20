@@ -127,6 +127,8 @@ test("unsafe branch prefixes are rejected and an older policy still parses", (t)
   const world = publicationWorld(t);
   for (const bad of [
     "-x/",
+    "/",
+    "/team/",
     "a..b/",
     "a.lock/",
     ".hidden/",

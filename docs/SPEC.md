@@ -1684,8 +1684,9 @@ change: the push is refused, the lead is woken and handback settlement is invali
 without a PR it is noticed at the next push, as Ensemble does not poll branches. While the branch
 holds an outside head, or the PR's head is not Ensemble's last push, completion is held and
 settlement is refused, and PR actions that name the task branch (`pr.create`, `pr.edit`,
-`pr.ready`, `pr.merge`) need `expectedHeadSha` to equal Ensemble's last push. The record clears when
-the branch is back at that commit or Ensemble pushes again; a PR inspection that still shows the last push while
+`pr.ready`, `pr.merge`) need `expectedHeadSha` to equal Ensemble's last push. A branch found absent is held the same way and stays held, even while the PR still shows its head commit, until a ref read
+shows it back at that commit. The record clears when
+the branch is read back at that commit or Ensemble pushes again; a PR inspection that still shows the last push while
 the PR head lags behind a later Ensemble push also clears it until the PR catches up. A rewritten history means the next review
 covers the whole new head. Success needs a read of the remote ref equal to the pushed commit; a
 timeout, cancellation or unobserved exit is uncertain, is settled by reading the ref and is never

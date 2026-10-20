@@ -1101,7 +1101,7 @@ newer work appears; it does not silently retarget.
   Delivery section lists each task branch Ensemble assigned, one line per
   repository, as `<repository> · branch <name> · pushed <short commit>`, or
   `not pushed yet`; a name the redaction rules withhold reads `withheld`. A head
-  Ensemble did not push adds an `Outside push <short commit>` warning badge. One
+  Ensemble did not push adds an `Outside push <short commit>` warning badge, or `Branch deleted` when the remote branch is absent. One
   line under the list says Ensemble assigns and pushes these branches, flags a head
   it did not push and will not push that branch again until it returns to
   Ensemble's last push. `69-changes-delivery` and

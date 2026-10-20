@@ -574,3 +574,48 @@ test("an ambiguous push keeps its possible ownership when a later read shows a t
   );
   assert.equal(branchOf(w)?.outsideHeadSha, third);
 });
+
+test("a deleted branch keeps holding completion until a ref read proves it is back", async (t) => {
+  const w = publicationWorld(t);
+  const { branch } = await withPr(w);
+  const second = w.commit();
+  w.setPush("applied-then-deleted");
+  const record = await w.submit("branch.push", second);
+  assert.equal(record.state, "confirmed-success");
+  assert.equal(branchOf(w)?.outsideHeadSha, "0".repeat(40));
+  // The PR keeps its head commit after the branch is deleted: inspecting it proves nothing.
+  w.showPr(second, branch);
+  await w.coordinator.refresh();
+  assert.equal(branchOf(w)?.outsideHeadSha, "0".repeat(40));
+  assert.ok(
+    w.store
+      .completionBlockers(w.taskId, 1)
+      .includes("task-branch-outside-change"),
+  );
+  await assert.rejects(settle(w, second), /outside Ensemble/);
+  // The branch comes back where Ensemble left it; the next push reads that and clears the hold.
+  w.remote.head = second;
+  w.setPush("apply");
+  const third = w.commit();
+  assert.equal(
+    (await w.submit("branch.push", third)).state,
+    "confirmed-success",
+  );
+  assert.equal(branchOf(w)?.outsideHeadSha, null);
+  assert.equal(branchOf(w)?.lastPushedSha, third);
+});
+
+test("a branch deleted before a push is refused and recorded as held", async (t) => {
+  const w = publicationWorld(t);
+  const first = w.commit();
+  await w.submit("branch.push", first);
+  w.remote.head = null;
+  const refused = await w.submit("branch.push", w.commit());
+  assert.equal(refused.observation?.reason, "branch-outside-change");
+  assert.equal(branchOf(w)?.outsideHeadSha, "0".repeat(40));
+  // Back at the last push: the next preflight reads it and clears the record before pushing.
+  w.remote.head = first;
+  const again = await w.submit("branch.push", w.commit());
+  assert.equal(again.state, "confirmed-success");
+  assert.equal(branchOf(w)?.outsideHeadSha, null);
+});
