@@ -198,7 +198,7 @@ export function seedImportedConflict(
     ).run(nodeId, taskId, issueNumber);
     for (const projectId of projectIds)
       db.prepare(
-        "INSERT INTO github_memberships VALUES (?,'selection',?,'[]')",
+        "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?,'selection',?,'[]')",
       ).run(projectId, nodeId);
   });
 }

@@ -1309,7 +1309,7 @@ test("mounted reference and placement fields have unique associated controls", a
     ).run(second);
     for (const projectId of [ids.projectId, target])
       db.prepare(
-        "INSERT INTO github_memberships VALUES (?,'selection','I_SECOND','[]')",
+        "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?,'selection','I_SECOND','[]')",
       ).run(projectId);
   });
   const web = await journey.start("fixture.web", () => f.startWeb());

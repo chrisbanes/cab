@@ -3826,7 +3826,9 @@ test("Status mapping saves each event's Status option, naming options and markin
   grantStatusOptions(f, ids.atlas, ["PVTSSO_ready"]);
   await page.reload();
   const panel = statusPanel(page);
-  await panel.getByRole("heading", { name: "Status mapping" }).waitFor();
+  await panel
+    .getByRole("heading", { name: "Status mapping", exact: true })
+    .waitFor();
   const turn = panel.getByLabel("First turn started", { exact: true });
   await turn.selectOption({ label: "Ready" });
   assert.deepEqual(await optionNames(panel, "First turn started"), [
@@ -3838,7 +3840,7 @@ test("Status mapping saves each event's Status option, naming options and markin
     .getByLabel("Stopped, uncertain or blocked", { exact: true })
     .selectOption({ label: "Ready" });
   await panel
-    .getByRole("region", { name: "Changes to save" })
+    .getByRole("region", { name: "Status mapping changes" })
     .getByText("First turn started: sets Status to Ready.")
     .waitFor();
   await captureBrowserEvidence(page, "status-mapping");

@@ -2532,7 +2532,7 @@ test("a task read reports source review, hold and unknown source as source-held"
       "INSERT INTO github_external_issues VALUES ('github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]')",
     ).run(taskId);
     db.prepare(
-      "INSERT INTO github_memberships VALUES (?,'repo','I1','[]')",
+      "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?,'repo','I1','[]')",
     ).run(projectId);
     db.prepare("INSERT INTO github_source_reviews VALUES (?,?,?,?,NULL)").run(
       "I1",

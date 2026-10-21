@@ -119,10 +119,10 @@ test("retained rendered form actions, fields and mounted route controls match do
       "INSERT INTO github_external_issues VALUES ('github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]')",
     ).run(importedId);
     db.prepare(
-      "INSERT INTO github_memberships VALUES (?,'repo','I1','[]')",
+      "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?,'repo','I1','[]')",
     ).run(projectId);
     db.prepare(
-      "INSERT INTO github_memberships VALUES (?,'repo','I1','[]')",
+      "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?,'repo','I1','[]')",
     ).run(otherProject);
     db.prepare("INSERT INTO github_source_reviews VALUES (?,?,?,?,NULL)").run(
       "I1",

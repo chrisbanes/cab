@@ -15,7 +15,6 @@ import { Alert } from "./ui/alert.js";
 import { Button } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
-  ChangeList,
   DraftField,
   DraftOutcome,
   Panel,
@@ -282,7 +281,25 @@ export function StatusMappingPanel(
               ))}
             </ul>
           )}
-          <ChangeList lines={lines} />
+          <section
+            className="settings-changes"
+            aria-label="Status mapping changes"
+          >
+            <h3 className="small-heading">
+              Status mapping changes{lines.length ? ` · ${lines.length}` : ""}
+            </h3>
+            {lines.length ? (
+              <ul className="body">
+                {lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="metadata muted">
+                No changes yet. Save is available once something changes.
+              </p>
+            )}
+          </section>
           <DraftOutcome
             draft={d}
             client={p.client}
