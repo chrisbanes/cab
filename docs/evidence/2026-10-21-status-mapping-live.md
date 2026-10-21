@@ -1,6 +1,7 @@
 # Status mapping: bounded live run
 
-Status: **bounded live Project write qualified at the coordinator level.** On a scratch
+Status: **bounded live Project write qualified at the coordinator level, on an earlier revision of
+the candidate; the attempt on the final head failed in the harness's own setup.** On a scratch
 user-owned Project, the real status-mapping writer, delivery coordinator and provider wrote the
 Status for `turnStarted` and `handedBack` and read each back, and `gh` read both back
 independently. It is not a service or lead-turn run: the harness drove the writer directly with
@@ -17,11 +18,12 @@ Contract: [ADR-1017](../adr/1017-non-agent-readiness-writes.md) and the issue
 v24.22.0. Later commits changed the live path: status writes run in their own queue with a time
 limit, freshness is tracked per membership, handed back no longer ends when the PR closes, and Done
 is also written for a done task whose issue is closed. They also changed tests, docs and this record.
-Deterministic tests cover those changes; the live allowance is spent, so this run did not exercise them.
+Deterministic tests cover those changes; this run did not exercise them. Decision 9 then allowed one
+more attempt on the final head (attempt 3, below).
 
 ## Authority
 
-Maintainer decision 5 and the approved plan allow at most **2 attempts** and **0 model turns**,
+Maintainer decision 5 and the approved plan allowed at most **2 attempts** and **0 model turns**,
 each creating and deleting its own scratch user-owned Project linked to
 `chrisbanes/ensemble-s07a-fixture`. The ticket agent wrote the manifest and grant outside the
 repository: manifest SHA-256 `0d4d98c95edad0b2aa5035cce750c2b8088bd269c123f3e4f421f291128eca99`, naming exactly `project.field`, no model turns, `maxAttempts: 2`, a 12-hour grant, and
@@ -86,6 +88,19 @@ Pass conditions, each checked by the harness:
 - A further pass with no transition wrote nothing (two Status mutations in all).
 - The credential does not appear in the result.
 
+**Attempt 3 (run `78410597`, failed in the harness setup, on the final head).** Maintainer decision 9
+allowed one further attempt on the final head with the same limits (0 model turns, a scratch
+Project created and deleted, Project 6 never used). It ran from `beddebd6793056287e955db6087857edeb5fee23`
+under a new manifest (SHA-256 `9aeea720d5a698df4753d276226765733ec0f2384ff50b6f8453fcab7d3bab0a`,
+`maxAttempts: 3`, a 12-hour grant; the only difference from the first manifest). The harness created
+Project 16 (node `PVT_kwHOAAN4ns4BoIO6`) and linked it, set the Status options and created fixture
+issue #9; then `gh project item-add` failed with GitHub's "Your attempt to move this item created a
+temporary conflict. Please try again." No product code had run, so nothing was written to the Project's
+Status. Cleanup closed the issue and deleted the Project, and the harness verified both
+(`cleanup: verified`); an independent `gh` read afterwards shows Project 16 absent, its node not found,
+and issues #7, #8 and #9 `CLOSED`. The allowance is spent. The harness has no retry for a transient
+setup error.
+
 ## Cleanup proof
 
 The harness closed issue #8 and deleted Project 15, then read both back. An independent `gh` read
@@ -95,6 +110,7 @@ and shows issues #7 and #8 `CLOSED`. Project 6 was never read or written.
 
 ## Limits
 
-Two attempts were used; none remain. The run exercised the re-read with a matching
+Three attempts were used; none remain, and the only passing one (attempt 2) ran on an earlier
+revision than the final head. The run exercised the re-read with a matching
 Status, so a mismatch is covered only by the deterministic provider and service tests. The fixture
-repository keeps two closed issues (#7, #8) from the two attempts.
+repository keeps three closed issues (#7, #8, #9) from the three attempts.

@@ -392,8 +392,8 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   `operator-project-config-browser`, `status-mapping-live-harness`). One bounded live run on a
   scratch user-owned Project wrote `turnStarted` and `handedBack` through the real writer,
   coordinator and provider, each read back by the provider and independently by `gh`, with 0
-  model turns, and deleted the Project with verified cleanup; the first of its two attempts failed in
-  the harness. A skipped write, `held`, `done` and a Codex lead turn were not exercised live.
+  model turns, and deleted the Project with verified cleanup; the first and a later attempt on the final head failed in the
+  harness, and the passing run predates later changes to the live path. A skipped write, `held`, `done` and a Codex lead turn were not exercised live.
   Evidence: [status mapping live run](evidence/2026-10-21-status-mapping-live.md).
 - **Operations, recovery and cutover** (R06) — **Bounded.** A disposable launchd
   service lifecycle with database backup/restore passed, and current-schema backup,
