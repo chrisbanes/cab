@@ -481,10 +481,24 @@ export async function runStatusMappingJourney(
   } finally {
     // The harness owns cleanup: close the issue, delete the Project, then prove both.
     try {
-      if (issue !== undefined && project !== undefined)
-        gh(["issue", "close", String(issue), "--repo", fullName]);
+      // Each step is attempted whatever the others did; the proofs below decide the outcome.
+      const attempts: string[] = [];
+      const attempt = (run: () => void) => {
+        try {
+          run();
+        } catch (error) {
+          attempts.push(redact(String(error)));
+        }
+      };
+      if (issue !== undefined)
+        attempt(() =>
+          gh(["issue", "close", String(issue), "--repo", fullName]),
+        );
       if (project)
-        gh(["project", "delete", String(project.number), "--owner", owner]);
+        attempt(() =>
+          gh(["project", "delete", String(project?.number), "--owner", owner]),
+        );
+      if (attempts.length) evidence.cleanupErrors = attempts;
       // A deleted Project no longer resolves: GitHub answers the read with a not-found error.
       const gone = project
         ? (() => {

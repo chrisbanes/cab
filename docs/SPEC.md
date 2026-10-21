@@ -1713,11 +1713,15 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 
 - **Authority.** Every mapped option must be covered by an `allow` `project.field` grant for
   the exact Project, field and option. A save naming an uncovered option, or one whose only
-  grant needs approval, is refused, and the write checks the grant again; a revoked grant
-  records `delivery-authority-denied` on the task. Agents and the operator keep the refusal of
+  grant needs approval, is refused, and the write checks the grant again; a grant revoked before the write is
+  denied (`delivery-authority-denied`, or `delivery-authority-stale-or-held` once the write was
+  prepared) and shows on the task. Agents and the operator keep the refusal of
   readiness labels and fields.
 - **Readiness.** The service writes only for a task that is Ready when it writes, so the
-  mapping never makes work Ready. An in-flight event may name only an option the readiness
+  mapping never makes work Ready. Done is therefore written only while the task is still
+  Ready: a task whose issue is already closed (provider closure, `issue.close`, a closing-keyword
+  merge) writes nothing for Done, and the Project's own workflow covers it when enabled. An
+  in-flight event may name only an option the readiness
   rule accepts, checked at save and again at write against the task's stored facts with only
   that value replaced. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
@@ -1727,9 +1731,10 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   facts in the order Done, held, handed back, turn started. A write is due when the event
   changes to a mapped one, once per transition; leaving an event and re-entering it is a new
   transition. The operation id is stored before the write, so a restart resumes the same
-  operation. It runs after every GitHub refresh, when a turn binds and on scheduler wake.
-  An unknown dependency read is not a block. A write needs the issue's current item in the
-  mapped Project selection.
+  operation. It runs after every GitHub refresh, when a turn binds and on scheduler wake. A
+  PR stays handed back, merged or not, until the task is Done. An unknown dependency read (a
+  partial read) is not a block and keeps a held task held. A write needs the issue's current
+  item in the mapped Project selection.
 - **Conditional write.** Immediately before writing, the provider reads the item's Status. If
   it is not what Ensemble last observed (its last confirmed write, unless a later source read
   replaced it, else the stored membership value) it records `provider-project-field-changed`,
@@ -1738,8 +1743,9 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   mutation is an accepted race: readback then shows another option and the action stays
   uncertain.
 - **No hold.** Status-mapping records are excluded from the task's action blockers. An unproved
-  write shows on the task, never holds admission, completion, edits or agent actions, and defers
-  only the next status write for that task until it resolves.
+  write shows on the task and never holds admission, completion, edits or agent actions. A status
+  write still in flight serializes the next one for that task; an unproved one does not, because
+  the next write re-reads the Status and is skipped when the card moved.
 
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or

@@ -636,16 +636,24 @@ export class DeliveryStore {
       exceptOperationId,
     );
   }
-  /** Unresolved status-mapping writes on the task; they defer the next one. */
+  /**
+   * Status-mapping writes still in flight: they serialize the task's next status write. An
+   * `uncertain` one does not: it waits for a readback that a human move can make impossible,
+   * and the next write's re-read of the Status already refuses to overwrite a moved card.
+   */
   serviceActionBlockers(taskId: string): string[] {
-    return this.unresolvedReasons(taskId, (record) =>
-      isServiceDeliveryCaller(record.binding),
+    return this.unresolvedReasons(
+      taskId,
+      (record) => isServiceDeliveryCaller(record.binding),
+      undefined,
+      ["prepared", "attempting"],
     );
   }
   private unresolvedReasons(
     taskId: string,
     include: (record: DeliveryActionRecord) => boolean,
     exceptOperationId?: string,
+    states: readonly string[] = ["prepared", "attempting", "uncertain"],
   ): string[] {
     return [
       ...new Set(
@@ -654,7 +662,7 @@ export class DeliveryStore {
             (record) =>
               include(record) &&
               record.operationId !== exceptOperationId &&
-              ["prepared", "attempting", "uncertain"].includes(record.state),
+              states.includes(record.state),
           )
           .map((record) => `external-action-${record.state}`),
       ),
@@ -715,6 +723,8 @@ export class DeliveryStore {
     const action = request.action;
     const grant = policy.grants.find(
       (g) =>
+        // The service cannot obtain an approval, so only an `allow` grant can cover it.
+        (!isServiceDeliveryCaller(binding) || g.mode === "allow") &&
         g.action === action.kind &&
         g.repositoryId === action.target.repositoryId &&
         (action.kind !== "project.field" ||
@@ -1420,7 +1430,15 @@ export class DeliveryStore {
       if (
         isServiceDeliveryCaller(record.binding) &&
         observation.state === "confirmed-success" &&
-        record.request.action.kind === "project.field"
+        record.request.action.kind === "project.field" &&
+        // A late proof of an older write must not replace what a newer one wrote.
+        (
+          this.db
+            .prepare(
+              "SELECT operationId FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.binding.actor')='service' ORDER BY rowid DESC LIMIT 1",
+            )
+            .get(record.binding.taskId) as { operationId: string }
+        ).operationId === operationId
       )
         new StatusMappingStore(this.db).observed(
           record.binding.taskId,

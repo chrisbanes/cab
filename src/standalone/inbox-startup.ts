@@ -169,7 +169,7 @@ export class InboxStartupReconciliation {
           UNION ALL SELECT 1 FROM execution_stop_targets WHERE taskId=?
           UNION ALL SELECT 1 FROM execution_intents i JOIN task_execution_bindings b ON b.workId=i.workId
             WHERE b.taskId=? AND i.workId<>? AND i.state IN ('held','submitting','running','capacity-waiting','ready')
-          UNION ALL SELECT 1 FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.state') IN ('prepared','attempting','uncertain') LIMIT 1`)
+          UNION ALL SELECT 1 FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.state') IN ('prepared','attempting','uncertain') AND json_extract(recordJson,'$.binding.actor') IS NOT 'service' LIMIT 1`)
           .get(
             request.taskId,
             request.taskId,

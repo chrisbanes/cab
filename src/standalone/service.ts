@@ -502,6 +502,7 @@ interface Started {
   deliveryStore: DeliveryStore;
   deliveryCoordinator: DeliveryCoordinator;
   statusMappingWriter: StatusMappingWriter;
+  statusMappings: StatusMappingStore;
   routingAttempts: RoutingAttemptStore;
   workspaces: WorkspaceManager;
   workspaceBindings: SqliteWorkspaceBindingStore;
@@ -934,6 +935,7 @@ export class StandaloneService {
       });
       const deliveryStore = new DeliveryStore(db);
       deliveryStore.migrate();
+      const statusMappings = new StatusMappingStore(db);
       // Read by activationAllowed and the Claude turn environment; set by spawnEnvironment.
       let runtimeSpawnSnapshot: NodeJS.ProcessEnv | undefined;
       const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
@@ -945,7 +947,7 @@ export class StandaloneService {
           : {}),
         authorize: (caller, exceptOperationId, request) => {
           this.authorizeDelivery(
-            { deliveryStore, state, domain, coordination },
+            { deliveryStore, state, domain, coordination, statusMappings },
             caller,
             exceptOperationId,
             request?.action.kind,
@@ -1066,7 +1068,7 @@ export class StandaloneService {
         "statusMappingWriter",
         new StatusMappingWriter(
           { domain, state, deliveryStore },
-          new StatusMappingStore(db),
+          statusMappings,
           githubSources,
           deliveryCoordinator,
         ),
@@ -1353,6 +1355,7 @@ export class StandaloneService {
         deliveryStore,
         deliveryCoordinator,
         statusMappingWriter,
+        statusMappings,
         routingAttempts,
         workspaces,
         workspaceBindings,
@@ -3021,7 +3024,11 @@ export class StandaloneService {
       state,
       domain,
       coordination,
-    }: Pick<Started, "deliveryStore" | "state" | "domain" | "coordination">,
+      statusMappings,
+    }: Pick<
+      Started,
+      "deliveryStore" | "state" | "domain" | "coordination" | "statusMappings"
+    >,
     caller: DeliveryCaller,
     exceptOperationId?: string,
     kind?: ExternalAction["kind"],
@@ -3053,8 +3060,11 @@ export class StandaloneService {
     if (isServiceDeliveryCaller(caller)) {
       // The event it was minted for must still be the task's: a task that moved on writes later.
       if (
-        statusMappingEvent({ domain, state, deliveryStore }, caller.taskId) !==
-        caller.event
+        statusMappingEvent(
+          { domain, state, deliveryStore },
+          caller.taskId,
+          statusMappings.taskState(caller.taskId).lastEvent,
+        ) !== caller.event
       )
         throw new DomainConflictError("Task is no longer in the mapped event");
       return;
@@ -3353,8 +3363,8 @@ export class StandaloneService {
     await started.githubSynchronizer.refresh();
     this.completeSettledProviderClosures(started);
     this.emitSourceHoldNotices(started);
+    // The wake starts the status-mapping pass; this call does not wait for its network writes.
     await this.wakeScheduler();
-    await started.statusMappingWriter.run();
   }
 
   /** Writes mapped Project Status for the tasks' current events; resolves when the pass ends. */

@@ -16,7 +16,7 @@ export const statusEventHints: Record<StatusMappingEvent, string> = {
   turnStarted: "In flight: the Status must still make the task Ready.",
   handedBack: "In flight: the Status must still make the task Ready.",
   held: "May remove readiness: the task then waits until it is Ready again.",
-  done: "May remove readiness: the task then waits until it is Ready again.",
+  done: "Written only while the task is still Ready, so not once its issue is closed. May remove readiness.",
 };
 
 /** Why a mapped option cannot be saved, naming the event and the option. */
@@ -37,6 +37,14 @@ export const statusMappingRefusalSentence = (
       return `${named}: the readiness rule does not accept this option, so Ensemble's own write would make the task not Ready.`;
   }
 };
+
+/** What the mapping does and does not do, beside its editor. */
+export const statusMappingBoundary = [
+  "Ensemble writes the Status, not an agent. Each mapped option needs an Allow grant for that Project field; options without one are marked (no grant).",
+  "It writes only for tasks that are already Ready and never makes a task Ready. In-flight events must name an option the readiness rule accepts.",
+  "Immediately before writing it reads the Status again. If the card moved on GitHub since Ensemble last saw it, the write is skipped and the task says so.",
+  "A write whose result is not proved shows on the task but does not hold it or block the next write.",
+];
 
 export const statusMappingCaveat =
   "Ensemble writes only for tasks that are already Ready. If a Project filter excludes an in-flight Status, the task leaves the source on the next sync and is held.";

@@ -40,7 +40,8 @@ caller type, so a new one is a new decision that extends this record, not a flag
     mutation is an accepted race, detected on readback.
   - Its records do not hold the task. Unresolved status-mapping actions are excluded
     from the task's action blockers, so they never hold admission, completion, operator
-    edits or agent actions, and they serialize only among themselves.
+    edits or agent actions, and a write still in flight serializes only the next status
+    write. An unproved write defers nothing, because that write re-reads the Status.
 - **The ticket that publishes tasks** ([#1167](https://github.com/chrisbanes/ensemble/issues/1167))
   extends this record with its caller if it writes a readiness field.
 
@@ -53,6 +54,7 @@ caller type, so a new one is a new decision that extends this record, not a flag
   options, not events, and would let any caller remove or add readiness.
 - Exempt terminal and in-flight events alike. Rejected: an in-flight write that removed
   readiness would stop the work it reports.
-- Hold the task while a status write is unresolved. Rejected: after a human moves the
-  card the write stays uncertain indefinitely, and a board reflection is independent of
-  the work.
+- Hold the task, or the task's mapping, while a status write is unproved. Rejected: after a
+  human moves the card the write stays uncertain indefinitely, a board reflection is
+  independent of the work, and the next write's re-read already refuses to overwrite a
+  moved card.

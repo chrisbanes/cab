@@ -33,7 +33,6 @@ export class StatusMappingRefusal extends DomainPolicyError {
 
 export interface StatusMappingTaskState {
   lastEvent: StatusMappingEvent | "none";
-  transition: number;
   operationId: string | null;
   /** The Status option Ensemble last wrote and read back, with when. */
   observedOptionNodeId: string | null;
@@ -49,7 +48,7 @@ export class StatusMappingStore {
       mappingJson TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS status_mapping_task_state (
       taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id), lastEvent TEXT NOT NULL,
-      transition INTEGER NOT NULL, operationId TEXT,
+      operationId TEXT,
       observedOptionNodeId TEXT, observedAt INTEGER);`);
   }
   /** Version 1 with no mapping until the first save, like the delivery policy. */
@@ -165,13 +164,12 @@ export class StatusMappingStore {
   taskState(taskId: string): StatusMappingTaskState {
     const row = this.db
       .prepare(
-        "SELECT lastEvent, transition, operationId, observedOptionNodeId, observedAt FROM status_mapping_task_state WHERE taskId = ?",
+        "SELECT lastEvent, operationId, observedOptionNodeId, observedAt FROM status_mapping_task_state WHERE taskId = ?",
       )
       .get(taskId) as StatusMappingTaskState | undefined;
     return (
       row ?? {
         lastEvent: "none",
-        transition: 0,
         operationId: null,
         observedOptionNodeId: null,
         observedAt: null,
@@ -186,10 +184,10 @@ export class StatusMappingStore {
   ): void {
     this.db
       .prepare(
-        `INSERT INTO status_mapping_task_state (taskId, lastEvent, transition, operationId)
-        VALUES (?, ?, 1, ?)
+        `INSERT INTO status_mapping_task_state (taskId, lastEvent, operationId)
+        VALUES (?, ?, ?)
         ON CONFLICT(taskId) DO UPDATE SET lastEvent = excluded.lastEvent,
-          transition = transition + 1, operationId = excluded.operationId`,
+          operationId = excluded.operationId`,
       )
       .run(taskId, lastEvent, operationId);
   }
@@ -197,8 +195,8 @@ export class StatusMappingStore {
   observed(taskId: string, optionNodeId: string): void {
     this.db
       .prepare(
-        `INSERT INTO status_mapping_task_state (taskId, lastEvent, transition, observedOptionNodeId, observedAt)
-        VALUES (?, 'none', 0, ?, ?)
+        `INSERT INTO status_mapping_task_state (taskId, lastEvent, observedOptionNodeId, observedAt)
+        VALUES (?, 'none', ?, ?)
         ON CONFLICT(taskId) DO UPDATE SET observedOptionNodeId = excluded.observedOptionNodeId,
           observedAt = excluded.observedAt`,
       )

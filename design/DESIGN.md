@@ -540,7 +540,8 @@ names the event and the option; the other selects and the draft stay.
 - The boundary list states what the mapping does not do: Ensemble writes, not an
   agent; only for tasks already Ready; never makes a task Ready; skips a write when
   the Status moved on GitHub since Ensemble last saw it; an unproved write shows on
-  the task without holding it. The caveat line says a Project filter that excludes an
+  the task without holding it or blocking the next write; Done is written only while the
+  task is still Ready. The caveat line says a Project filter that excludes an
   in-flight Status drops the task from the source on the next sync.
 - On a task, a mapped write is a delivery action labelled "Status mapping" with its
   event; a write skipped because the Status moved reads "Skipped: Status changed on

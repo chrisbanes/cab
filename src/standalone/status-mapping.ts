@@ -2,8 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { DeliveryStore } from "../core/delivery.js";
 import type { DomainStore } from "../core/domain.js";
 import type { GitHubSourceStore } from "../core/github-source.js";
-import type { StatusMappingStore } from "../core/status-mapping.js";
-import type { StatusMappingEvent } from "../core/status-mapping-contracts.js";
+import type {
+  StatusMappingStore,
+  StatusMappingTaskState,
+} from "../core/status-mapping.js";
+import type {
+  StatusMapping,
+  StatusMappingEvent,
+} from "../core/status-mapping-contracts.js";
 import type { DeliveryCoordinator } from "./delivery.js";
 import type { ExecutionState } from "./state.js";
 
@@ -15,29 +21,34 @@ export interface StatusMappingFacts {
 
 /**
  * The event a task is in now, from durable facts, in precedence `done > held > handedBack >
- * turnStarted`. A pure read, so a missed trigger is caught by the next pass.
+ * turnStarted`. A pure read, so a missed trigger is caught by the next pass. `previous` is the event
+ * last recorded: an unknown dependency read (a partial read) keeps a held task held instead of
+ * flapping, and is not itself a block.
  */
 export function statusMappingEvent(
   { domain, state, deliveryStore }: StatusMappingFacts,
   taskId: string,
+  previous: StatusMappingEvent | "none" = "none",
 ): StatusMappingEvent | "none" {
   const task = domain.task(taskId);
   if (task.state === "done") return "done";
-  // Stopped, ambiguous or archived work, an uncertain agent or operator action, or a
-  // dependency known to block. An unknown dependency read is not a block: it would flap.
+  // Stopped, ambiguous or archived work, an uncertain agent or operator action, or a dependency
+  // known to block.
   if (
     state.taskHold(taskId) !== undefined ||
     deliveryStore
       .actionBlockers(taskId)
       .includes("external-action-uncertain") ||
     task.importedBlockers === "blocked" ||
+    (task.importedBlockers === "unknown" && previous === "held") ||
     domain.blockingDependencies(taskId).length
   )
     return "held";
   const binding = deliveryStore.delivery(taskId);
+  // Handed back until the task is Done: a merged PR or an accepted settlement stays handed back.
   if (
     binding?.mode === "reviewable-pr" &&
-    binding.observation.state === "OPEN" &&
+    binding.observation.state !== "CLOSED" &&
     !binding.observation.draft &&
     binding.settlement?.decision !== "closed"
   )
@@ -91,38 +102,52 @@ export class StatusMappingWriter {
     const { domain } = this.facts;
     for (const project of domain.projects()) {
       const projectId = String(project.id);
-      const { mapping } = this.mappings.current(projectId);
+      const { version, mapping } = this.mappings.current(projectId);
       if (!mapping || this.mappings.availability(projectId) !== "available")
         continue;
       for (const task of domain.tasks(projectId)) {
         if (this.stopped) return;
-        if (task.state === "cancelled" || !domain.importedTask(String(task.id)))
+        const taskId = String(task.id);
+        if (
+          task.state === "cancelled" ||
+          // Done and recorded: nothing more to write.
+          (task.state === "done" &&
+            this.mappings.taskState(taskId).lastEvent === "done")
+        )
           continue;
-        await this.task(projectId, String(task.id), task.ready === 1);
+        const imported = domain.importedTask(taskId);
+        if (!imported) continue;
+        try {
+          await this.task(
+            projectId,
+            version,
+            mapping,
+            taskId,
+            String(imported.nodeId),
+            task.ready === 1,
+          );
+        } catch {
+          // One task's failure leaves it to the next pass and does not stop the others.
+        }
       }
     }
   }
 
   private async task(
     projectId: string,
+    version: number,
+    mapping: StatusMapping,
     taskId: string,
+    nodeId: string,
     ready: boolean,
   ): Promise<void> {
-    const { domain, deliveryStore } = this.facts;
-    const { version, mapping } = this.mappings.current(projectId);
-    if (!mapping) return;
-    const event = statusMappingEvent(this.facts, taskId);
+    const { deliveryStore } = this.facts;
     const state = this.mappings.taskState(taskId);
+    const event = statusMappingEvent(this.facts, taskId, state.lastEvent);
     const option = event === "none" ? null : mapping.events[event];
-    const issue = this.sources.issue(
-      String(domain.importedTask(taskId)?.nodeId),
-    );
+    const issue = this.sources.issue(nodeId);
     const item = issue
-      ? this.sources.membershipItem(
-          projectId,
-          mapping.selectionId,
-          String(issue.nodeId),
-        )
+      ? this.sources.membershipItem(projectId, mapping.selectionId, nodeId)
       : null;
     const request = (operationId: string) => ({
       operationId,
@@ -131,13 +156,20 @@ export class StatusMappingWriter {
         target: {
           repositoryId: String(issue?.repositoryId),
           number: Number(issue?.issueNumber),
-          nodeId: String(issue?.nodeId),
+          nodeId,
         },
         projectNodeId: mapping.projectNodeId,
         itemNodeId: item?.itemNodeId ?? "",
         fieldNodeId: mapping.fieldNodeId,
         optionNodeId: option ?? "",
-        expected: { optionNodeId: this.lastObserved(projectId, taskId) },
+        expected: {
+          optionNodeId: this.lastObserved(
+            projectId,
+            mapping,
+            state,
+            item?.projectFields,
+          ),
+        },
       },
     });
     const caller = (event: StatusMappingEvent) => ({
@@ -163,7 +195,7 @@ export class StatusMappingWriter {
         await this.submit(request(state.operationId), caller(event));
       return;
     }
-    // An unresolved status write defers the next one: the event is left to a later pass.
+    // A status write still in flight serializes the next one: the event is left to a later pass.
     if (deliveryStore.serviceActionBlockers(taskId).length) return;
     if (event === "none" || !option || !item || !ready) {
       this.mappings.enter(taskId, event, null);
@@ -178,14 +210,16 @@ export class StatusMappingWriter {
    * The Status Ensemble last observed on the item: its last confirmed write, unless a later
    * source read replaced it, else the stored membership value (`null` is no value).
    */
-  private lastObserved(projectId: string, taskId: string): string | null {
-    const { domain } = this.facts;
-    const { mapping } = this.mappings.current(projectId);
-    const issue = this.sources.issue(
-      String(domain.importedTask(taskId)?.nodeId),
-    );
-    if (!mapping || !issue) return null;
-    const state = this.mappings.taskState(taskId);
+  private lastObserved(
+    projectId: string,
+    mapping: StatusMapping,
+    state: StatusMappingTaskState,
+    fields: {
+      projectNodeId: string;
+      fieldNodeId: string;
+      optionNodeId: string;
+    }[] = [],
+  ): string | null {
     const refreshed = Date.parse(
       String(
         this.sources.syncState(projectId, mapping.selectionId)?.refreshedAt,
@@ -194,13 +228,11 @@ export class StatusMappingWriter {
     if (state.observedAt !== null && !(state.observedAt < refreshed))
       return state.observedOptionNodeId;
     return (
-      this.sources
-        .membershipItem(projectId, mapping.selectionId, String(issue.nodeId))
-        ?.projectFields.find(
-          (f) =>
-            f.projectNodeId === mapping.projectNodeId &&
-            f.fieldNodeId === mapping.fieldNodeId,
-        )?.optionNodeId ?? null
+      fields.find(
+        (f) =>
+          f.projectNodeId === mapping.projectNodeId &&
+          f.fieldNodeId === mapping.fieldNodeId,
+      )?.optionNodeId ?? null
     );
   }
 

@@ -183,7 +183,7 @@ test("a Status that moved on GitHub since Ensemble last saw it skips the write a
   }
 });
 
-test("a move that lands with the write stays uncertain, never holds the task and defers the next write", async () => {
+test("a move that lands with the write stays uncertain and never holds the task; the next write re-reads and does not overwrite the moved card", async () => {
   const f = await started();
   try {
     f.moveStatusAfterWrite(todo);
@@ -207,6 +207,8 @@ test("a move that lands with the write stays uncertain, never holds the task and
     );
     assert.deepEqual(f.service.delivery().actionBlockers(f.taskId), []);
 
+    // The uncertain write does not stop the mapping: the next event is written against the
+    // Status Ensemble last confirmed, so it is skipped rather than overwriting the moved card.
     f.moveStatusAfterWrite(undefined);
     await f.service.controlTask({
       type: "task.stop",
@@ -214,16 +216,51 @@ test("a move that lands with the write stays uncertain, never holds the task and
       taskId: f.taskId,
     });
     await f.service.runStatusMapping();
-    // The handback write has not resolved, so the stop waits.
-    assert.equal(writes(f).length, 2);
+    assert.equal(writes(f).length, 3);
+    assert.equal(writes(f)[2]?.observation?.reason, projectFieldChangedReason);
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
+    assert.equal(f.status(), todo);
 
-    // The card shows what Ensemble wrote: the readback now proves it.
+    // A late proof of the older write does not replace what Ensemble last confirmed.
     f.setStatus(inReview);
     await startedOf(f.service).deliveryCoordinator.reconcile();
     assert.equal(writes(f)[1]?.state, "confirmed-success");
+    assert.equal(
+      startedOf(f.service).statusMappings.taskState(f.taskId)
+        .observedOptionNodeId,
+      inProgress,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("a merged PR stays handed back, and a partial read does not release a held task", async () => {
+  const f = await started();
+  try {
+    await registerPr(f);
     await f.service.runStatusMapping();
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
+    f.setPr({ ...f.getPr(), state: "MERGED", merged: true });
+    await startedOf(f.service).deliveryCoordinator.refresh();
+    await f.service.runStatusMapping();
+    // Merged but not yet Done: the card is not moved back to In Progress.
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
+
+    await f.service.controlTask({
+      type: "task.stop",
+      key: randomUUID(),
+      taskId: f.taskId,
+    });
+    await f.service.runStatusMapping();
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview, todo]);
+    // A partial source read makes the imported blockers unknown; the task stays held.
+    databaseOf(f.service).exec(
+      "UPDATE domain_tasks SET importedBlockers='unknown'",
+    );
+    await f.service.runStatusMapping();
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview, todo]);
     assert.equal(writes(f).length, 3);
-    assert.equal(optionsWritten(f).at(-1), todo);
   } finally {
     await f.close();
   }

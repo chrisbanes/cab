@@ -520,7 +520,7 @@ test("agent and operator callers still cannot write a readiness field", () => {
   }
 });
 
-test("an unresolved status write never blocks the task but defers the next status write", () => {
+test("a status write in flight defers the next one, an unproved one does not hold the task or the mapping", () => {
   const f = setup();
   try {
     f.save(mapping());
@@ -528,6 +528,15 @@ test("an unresolved status write never blocks the task but defers the next statu
       f.write(PROGRESS),
       f.caller("turnStarted"),
       false,
+    );
+    // Still prepared: the next status write waits for it.
+    assert.deepEqual(f.delivery.serviceActionBlockers(f.taskId), [
+      "external-action-prepared",
+    ]);
+    assert.equal(
+      f.delivery.prepareAction(f.write(REVIEW), f.caller("handedBack"), false)
+        .state,
+      "denied",
     );
     f.delivery.beginAttempt(first.operationId, {});
     f.delivery.recordObservation(first.operationId, {
@@ -537,31 +546,80 @@ test("an unresolved status write never blocks the task but defers the next statu
     });
     assert.deepEqual(f.delivery.actionBlockers(f.taskId), []);
     assert.deepEqual(f.delivery.completionBlockers(f.taskId), []);
-    assert.deepEqual(f.domain.admission(f.taskId).reasons, [
-      ...f.domain
+    assert.deepEqual(
+      f.domain
         .admission(f.taskId)
-        .reasons.filter((reason) => !reason.startsWith("external-action-")),
-    ]);
-    assert.deepEqual(f.delivery.serviceActionBlockers(f.taskId), [
-      "external-action-uncertain",
-    ]);
-    assert.equal(
-      f.delivery.prepareAction(f.write(REVIEW), f.caller("handedBack"), false)
-        .state,
-      "denied",
+        .reasons.filter((reason) => reason.startsWith("external-action-")),
+      [],
     );
-    // Resolved, it no longer defers; a confirmed write is the newest observation.
+    assert.deepEqual(f.delivery.serviceActionBlockers(f.taskId), []);
+    // The next write's own re-read of the Status guards against a moved card.
+    const second = f.delivery.prepareAction(
+      f.write(REVIEW),
+      f.caller("handedBack"),
+      false,
+    );
+    assert.equal(second.state, "prepared");
+    // Proof of the older write after the newer one exists does not become the observed Status.
     f.delivery.recordObservation(first.operationId, {
       state: "confirmed-success",
       reason: null,
       receipt: { nodeId: "I_1" },
     });
-    assert.equal(f.status.taskState(f.taskId).observedOptionNodeId, PROGRESS);
+    assert.equal(f.status.taskState(f.taskId).observedOptionNodeId, null);
+    f.delivery.beginAttempt(second.operationId, {});
+    f.delivery.recordObservation(second.operationId, {
+      state: "confirmed-success",
+      reason: null,
+      receipt: { nodeId: "I_1" },
+    });
+    assert.equal(f.status.taskState(f.taskId).observedOptionNodeId, REVIEW);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("the service uses an allow grant even when an approval grant for the option is listed first", () => {
+  const f = setup();
+  try {
+    f.configureGrants([
+      f.grant([TODO, PROGRESS, REVIEW, DONE], "approval"),
+      f.grant([TODO, PROGRESS, REVIEW, DONE], "allow"),
+    ]);
+    f.save(mapping());
     assert.equal(
-      f.delivery.prepareAction(f.write(REVIEW), f.caller("handedBack"), false)
-        .state,
+      f.delivery.prepareAction(
+        f.write(PROGRESS),
+        f.caller("turnStarted"),
+        false,
+      ).state,
       "prepared",
     );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("with an any rule that names the Status, an in-flight option must be one it names", () => {
+  const f = setup();
+  try {
+    reconfigureReadiness(f, {
+      mode: "any",
+      conditions: [
+        { kind: "label", name: "ready" },
+        {
+          kind: "project-field",
+          projectNodeId: P,
+          fieldNodeId: F,
+          optionNodeId: TODO,
+        },
+      ],
+    });
+    assert.throws(
+      () => f.save(mapping({ turnStarted: PROGRESS })),
+      StatusMappingRefusal,
+    );
+    f.save(mapping({ turnStarted: TODO, handedBack: null }));
   } finally {
     f.db.close();
   }
