@@ -1,10 +1,10 @@
 # Status mapping: bounded live run
 
-Status: **bounded live Project write qualified at the coordinator level, on an earlier revision of
-the candidate; the attempt on the final head failed in the harness's own setup.** On a scratch
+Status: **bounded live Project write qualified at the coordinator level, on the final head
+(attempt 4).** On a scratch
 user-owned Project, the real status-mapping writer, delivery coordinator and provider wrote the
 Status for `turnStarted` and `handedBack` and read each back, and `gh` read both back
-independently. It is not a service or lead-turn run: the harness drove the writer directly with
+independently, in attempt 2 and again in attempt 4. It is not a service or lead-turn run: the harness drove the writer directly with
 **0 model turns**, and induced the two events in local state (a stub for "a turn has bound", and a
 local PR binding). The deterministic `status-mapping-service` tests cover event origin through the
 service. This run covers the real Project write, the provider's re-read of the Status before the
@@ -98,8 +98,34 @@ issue #9; then `gh project item-add` failed with GitHub's "Your attempt to move 
 temporary conflict. Please try again." No product code had run, so nothing was written to the Project's
 Status. Cleanup closed the issue and deleted the Project, and the harness verified both
 (`cleanup: verified`); an independent `gh` read afterwards shows Project 16 absent, its node not found,
-and issues #7, #8 and #9 `CLOSED`. The allowance is spent. The harness has no retry for a transient
-setup error.
+and issues #7, #8 and #9 `CLOSED`. The harness had no retry for a transient setup error.
+
+**Attempt 4 (run `14d70cf0`, passed, on the final head).** After attempt 3, the maintainer allowed one
+more attempt and a bounded retry of the harness's `gh` setup commands (at most three tries, only for
+GitHub's transient "temporary conflict" or 502/503/504 answers, never for `project create` or
+`issue create`, with a test). It ran from `b65ac9784be85d2e4d24fdc66a72c4b0724b34f4` (the product code
+is unchanged from attempt 3) under a manifest with `maxAttempts: 4` (SHA-256
+`9fd3a149bc20bc9671d8e2bf2521674f5e149851f92941d58004f6bdc99207ee`, a 12-hour grant), 0 model turns.
+Project 17 (node `PVT_kwHOAAN4ns4BoIrE`) and fixture issue #10 were created and cleaned up. The result:
+
+```json
+{
+  "turns": 0,
+  "qualification": "passed",
+  "cleanup": "verified",
+  "project": { "nodeId": "PVT_kwHOAAN4ns4BoIrE", "number": 17 },
+  "projectReads": { "reads": 2, "filter": "is:issue", "complete": true, "reason": null, "issues": 1 },
+  "turnStarted": { "state": "confirmed-success", "providerReadback": "confirmed", "independentReadback": "In Progress" },
+  "handedBack": { "state": "confirmed-success", "providerReadback": "confirmed", "independentReadback": "In review" },
+  "credentialExposures": 0,
+  "deletedProject": { "nodeId": "PVT_kwHOAAN4ns4BoIrE", "number": 17, "deleted": true }
+}
+```
+
+The same pass conditions held. An independent `gh` read afterwards lists no Project 17 (the list shows
+Verity, Ensemble S07a qualification, Ensemble S06 qualification, Portico, Haze and Ensemble), reads the
+node as not found, and shows issue #10 `CLOSED`. Project 6 was never read or written. The allowance
+is spent.
 
 ## Cleanup proof
 
@@ -110,7 +136,7 @@ and shows issues #7 and #8 `CLOSED`. Project 6 was never read or written.
 
 ## Limits
 
-Three attempts were used; none remain, and the only passing one (attempt 2) ran on an earlier
-revision than the final head. The run exercised the re-read with a matching
+Four attempts were used; none remain. Attempts 2 and 4 passed; attempt 4 ran on the final product
+code. The runs exercised the re-read with a matching
 Status, so a mismatch is covered only by the deterministic provider and service tests. The fixture
-repository keeps three closed issues (#7, #8, #9) from the three attempts.
+repository keeps four closed issues (#7, #8, #9, #10) from the four attempts.
