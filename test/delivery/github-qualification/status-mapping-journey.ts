@@ -21,6 +21,7 @@ import {
 import {
   harnessDocuments,
   issueTitle,
+  projectFilters,
   projectTitle,
   type StatusMappingGuard,
   statusOptionNames,
@@ -35,7 +36,12 @@ export interface StatusMappingJourneyOptions {
   gh(args: string[]): string;
   /** The raw HTTP transport the guard wraps; tests pass a fake GitHub. */
   fetcher?: typeof fetch;
+  /** Milliseconds between reads of a Project that does not list the new item yet; tests pass 0. */
+  readRetryMs?: number;
 }
+
+/** A Project lists a new item a little after it is added: read it again for at most this many times. */
+const projectReads = 10;
 
 const owner = "chrisbanes";
 
@@ -50,6 +56,7 @@ export async function runStatusMappingJourney(
   options: StatusMappingJourneyOptions,
 ) {
   const { guard, token } = options;
+  const readRetryMs = options.readRetryMs ?? 5000;
   const manifest = guard.manifest;
   const fullName = manifest.repository.fullName;
   const repositoryId = manifest.repository.nodeId;
@@ -236,7 +243,7 @@ export async function runStatusMappingJourney(
       id: "project",
       kind: "project" as const,
       projectNodeId: project.nodeId,
-      filter: "",
+      filter: projectFilters[0],
     };
     domain.execute({
       type: "github.configure",
@@ -305,14 +312,44 @@ export async function runStatusMappingJourney(
     });
 
     // 6. One real sync of the Project.
-    const snapshot = await new GitHubHttpSourceReader(
-      token,
-      guardedFetch,
-    ).readSelection(selection);
-    if (!snapshot.complete || snapshot.issues.length !== 1)
+    const reader = new GitHubHttpSourceReader(token, guardedFetch);
+    // Reads alternate between the granted filters until the Project lists its one item.
+    let snapshot = await reader.readSelection(selection);
+    let reads = 1;
+    while (
+      reads < projectReads &&
+      (!snapshot.complete || snapshot.issues.length !== 1)
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, readRetryMs));
+      snapshot = await reader.readSelection({
+        ...selection,
+        filter: projectFilters[reads % projectFilters.length] ?? "",
+      });
+      reads++;
+    }
+    evidence.projectReads = {
+      reads,
+      filter: projectFilters[(reads - 1) % projectFilters.length],
+      complete: snapshot.complete,
+      reason: snapshot.reason,
+      issues: snapshot.issues.length,
+    };
+    if (!snapshot.complete || snapshot.issues.length !== 1) {
+      // Whether GitHub itself lists the item, to tell a read problem from a late listing.
+      const listed = json([
+        "project",
+        "item-list",
+        String(project.number),
+        "--owner",
+        owner,
+        "--format",
+        "json",
+      ]) as { items: unknown[] };
+      evidence.itemsListedByGh = listed.items.length;
       throw new Error(
-        `The Project read was ${snapshot.reason ?? "unexpected"}`,
+        `The Project read was ${snapshot.complete ? `${snapshot.issues.length} issues` : snapshot.reason}`,
       );
+    }
     sources.reconcileSelection(projectId, "project", snapshot);
     const imported = snapshot.issues[0];
     const taskId = String(sources.issue(imported?.nodeId ?? "")?.taskId);
@@ -448,19 +485,28 @@ export async function runStatusMappingJourney(
         gh(["issue", "close", String(issue), "--repo", fullName]);
       if (project)
         gh(["project", "delete", String(project.number), "--owner", owner]);
+      // A deleted Project no longer resolves: GitHub answers the read with a not-found error.
       const gone = project
-        ? (
-            JSON.parse(
-              gh([
-                "api",
-                "graphql",
-                "-f",
-                `query=${harnessDocuments.projectExists}`,
-                "-f",
-                `project=${project.nodeId}`,
-              ]),
-            ) as { data: { node: unknown } }
-          ).data.node === null
+        ? (() => {
+            try {
+              return (
+                (
+                  JSON.parse(
+                    gh([
+                      "api",
+                      "graphql",
+                      "-f",
+                      `query=${harnessDocuments.projectExists}`,
+                      "-f",
+                      `project=${project.nodeId}`,
+                    ]),
+                  ) as { data: { node: unknown } }
+                ).data.node === null
+              );
+            } catch (error) {
+              return /Could not resolve to a node/.test(String(error));
+            }
+          })()
         : true;
       const closed =
         issue === undefined ||

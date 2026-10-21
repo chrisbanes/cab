@@ -62,6 +62,8 @@ export const statusOptionNames = [
   "Done",
 ] as const;
 
+/** The filters a scratch Project source may use: none, or issues only. */
+export const projectFilters = ["", "is:issue"] as const;
 export const projectTitle = (runId: string) => `ensemble-1194-${runId}`;
 export const issueTitle = (runId: string) =>
   `Status mapping qualification ${runId}`;
@@ -207,8 +209,11 @@ export class StatusMappingGuard {
         if (
           typeof value === "string" &&
           key !== "after" &&
-          // The Project filter is empty: the scratch Project holds one issue.
-          !(key === "query" && value === "") &&
+          // The Project filter: the scratch Project holds one issue.
+          !(
+            key === "query" &&
+            (projectFilters as readonly string[]).includes(value)
+          ) &&
           !this.ids.has(value)
         )
           throw new Error(`guard: unexpected id ${key}`);

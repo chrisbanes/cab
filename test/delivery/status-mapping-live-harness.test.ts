@@ -279,7 +279,7 @@ test("the guard allows only the product's documents on the recorded resources an
   g.assertRequest(
     ...post("query EnsembleProjectPage($id:ID!)", {
       id: "PVT_9",
-      query: "",
+      query: "is:issue",
       after: null,
     }),
   );
@@ -299,7 +299,7 @@ test("the guard allows only the product's documents on the recorded resources an
     post("mutation { deleteProjectV2(input:{}) { clientMutationId } }"),
     post("query EnsembleProjectPage($id:ID!)", {
       id: "PVT_6",
-      query: "",
+      query: "is:issue",
       after: null,
     }),
     post("mutation EnsembleDeliveryProject($project:ID!)", {
@@ -327,7 +327,15 @@ test("the guard allows only the product's documents on the recorded resources an
 });
 
 /** A fake GitHub holding one scratch Project, its Status options and one issue. */
-function fakeGitHub(fail: { link?: boolean } = {}) {
+function fakeGitHub(
+  fail: {
+    link?: boolean;
+    /** Project reads that list no item yet. */
+    emptyReads?: number;
+    /** A deleted Project answers with a not-found error, as GitHub does, not a null node. */
+    notFoundAfterDelete?: boolean;
+  } = {},
+) {
   const options = [
     ["O_todo", "Todo"],
     ["O_prog", "In Progress"],
@@ -341,6 +349,7 @@ function fakeGitHub(fail: { link?: boolean } = {}) {
     issueClosed: false,
     fetches: [] as string[],
     ghCalls: [] as string[],
+    projectReads: 0,
   };
   const name = (id: string) => options.find(([o]) => o === id)?.[1] ?? null;
   const gh = (args: string[]): string => {
@@ -402,6 +411,10 @@ function fakeGitHub(fail: { link?: boolean } = {}) {
             },
           },
         });
+      if (state.projectDeleted && fail.notFoundAfterDelete)
+        throw new Error(
+          "gh: Could not resolve to a node with the global id of 'PVT_scratch'.",
+        );
       return JSON.stringify({
         data: { node: state.projectDeleted ? null : { id: "PVT_scratch" } },
       });
@@ -464,28 +477,34 @@ function fakeGitHub(fail: { link?: boolean } = {}) {
           },
         },
       });
-    if (query.startsWith("query EnsembleProjectPage"))
+    if (query.startsWith("query EnsembleProjectPage")) {
+      const listed = state.projectReads++ >= (fail.emptyReads ?? 0);
       return Response.json({
         data: {
           node: {
             id: "PVT_scratch",
             items: {
-              nodes: [
-                {
-                  id: "ITEM_1",
-                  content: {
-                    __typename: "Issue",
-                    id: "I_9",
-                    number: 9,
-                    title: issueTitle("x"),
-                    body: "b",
-                    state: "OPEN",
-                    repository: { id: repositoryNode, nameWithOwner: fullName },
-                    labels: { nodes: [], pageInfo: page },
-                  },
-                  fieldValues: { nodes: [value], pageInfo: page },
-                },
-              ],
+              nodes: !listed
+                ? []
+                : [
+                    {
+                      id: "ITEM_1",
+                      content: {
+                        __typename: "Issue",
+                        id: "I_9",
+                        number: 9,
+                        title: issueTitle("x"),
+                        body: "b",
+                        state: "OPEN",
+                        repository: {
+                          id: repositoryNode,
+                          nameWithOwner: fullName,
+                        },
+                        labels: { nodes: [], pageInfo: page },
+                      },
+                      fieldValues: { nodes: [value], pageInfo: page },
+                    },
+                  ],
               pageInfo: page,
             },
             fields: {
@@ -501,6 +520,7 @@ function fakeGitHub(fail: { link?: boolean } = {}) {
           },
         },
       });
+    }
     throw new Error(`unexpected request ${query.slice(0, 40)}`);
   };
   return { state, gh, fetcher };
@@ -516,6 +536,7 @@ test("a run writes both events through the real writer, reads each back independ
     attempt: 1,
     gh: fake.gh,
     fetcher: fake.fetcher,
+    readRetryMs: 0,
   });
   assert.equal(evidence.failure, undefined, JSON.stringify(evidence));
   assert.equal(evidence.qualification, "passed");
@@ -585,4 +606,46 @@ test("a login without the project scope stops before anything is created", async
   assert.match(String(evidence.failure), /project scope/);
   assert.equal(fake.state.projectCreated, false);
   assert.equal(evidence.cleanup, "verified");
+});
+
+test("a Project that lists its item late is read again, and a deleted Project that answers not-found is proved gone", async () => {
+  const f = files();
+  const fake = fakeGitHub({ emptyReads: 2, notFoundAfterDelete: true });
+  const evidence = await runStatusMappingJourney({
+    guard: new StatusMappingGuard(f.raw, f.grant),
+    token,
+    attempt: 1,
+    gh: fake.gh,
+    fetcher: fake.fetcher,
+    readRetryMs: 0,
+  });
+  assert.equal(evidence.failure, undefined, JSON.stringify(evidence));
+  assert.equal(evidence.qualification, "passed");
+  assert.equal((evidence.projectReads as { reads: number }).reads, 3);
+  assert.equal(evidence.cleanup, "verified");
+});
+
+test("a Project that never lists its item fails with the read counts and still cleans up", async () => {
+  const f = files();
+  const fake = fakeGitHub({ emptyReads: 99 });
+  const evidence = await runStatusMappingJourney({
+    guard: new StatusMappingGuard(f.raw, f.grant),
+    token,
+    attempt: 1,
+    gh: fake.gh,
+    fetcher: fake.fetcher,
+    readRetryMs: 0,
+  });
+  assert.equal(evidence.qualification, "failed");
+  assert.match(String(evidence.failure), /0 issues/);
+  assert.equal(evidence.itemsListedByGh, 1);
+  assert.deepEqual(evidence.projectReads, {
+    reads: 10,
+    filter: "is:issue",
+    complete: true,
+    reason: null,
+    issues: 0,
+  });
+  assert.equal(evidence.cleanup, "verified");
+  assert.equal(fake.state.projectDeleted, true);
 });
