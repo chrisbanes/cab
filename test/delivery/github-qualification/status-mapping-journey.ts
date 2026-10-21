@@ -362,9 +362,9 @@ export async function runStatusMappingJourney(
     let started = false;
     const state = {
       taskHold: () => undefined,
-      taskHasStartedTurn: () => started,
+      taskStartedTurnCount: () => (started ? 1 : 0),
     } as unknown as ExecutionState;
-    const facts = { domain, state, deliveryStore: store };
+    const facts = { domain, state, deliveryStore: store, mappings };
     const coordinator = new DeliveryCoordinator(store, {
       providerFactory: () =>
         new GitHubHttpDeliveryProvider(token, guardedFetch),

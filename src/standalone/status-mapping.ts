@@ -23,7 +23,16 @@ export interface StatusMappingFacts {
   domain: DomainStore;
   state: ExecutionState;
   deliveryStore: DeliveryStore;
+  mappings: StatusMappingStore;
 }
+
+type Binding = ReturnType<DeliveryStore["delivery"]>;
+const isHandedBack = (binding: Binding) =>
+  binding?.mode === "reviewable-pr" && !binding.observation.draft;
+/** The operator settled the handback as closed, or the PR closed without merging. */
+const isSentBack = (binding: Binding) =>
+  binding?.settlement?.decision === "closed" ||
+  (binding?.observation.state === "CLOSED" && !binding.observation.merged);
 
 /**
  * The event a task is in now, from durable facts, in precedence `done > held > handedBack >
@@ -32,7 +41,7 @@ export interface StatusMappingFacts {
  * flapping, and is not itself a block.
  */
 export function statusMappingEvent(
-  { domain, state, deliveryStore }: StatusMappingFacts,
+  { domain, state, deliveryStore, mappings }: StatusMappingFacts,
   taskId: string,
   previous: StatusMappingEvent | "none" = "none",
 ): StatusMappingEvent | "none" {
@@ -52,15 +61,17 @@ export function statusMappingEvent(
     return "held";
   const binding = deliveryStore.delivery(taskId);
   // Handed back until the task is Done, merged or accepted included. A handback the operator
-  // settles as closed, or a PR that closes without merging, is sent back: work resumes.
-  if (
-    binding?.mode === "reviewable-pr" &&
-    !binding.observation.draft &&
-    binding.settlement?.decision !== "closed" &&
-    !(binding.observation.state === "CLOSED" && !binding.observation.merged)
-  )
-    return "handedBack";
-  return state.taskHasStartedTurn(taskId) ? "turnStarted" : "none";
+  // settles as closed, or a PR that closes without merging, is sent back; the next turn after it
+  // moves the card back, so it stays handed back until a turn starts.
+  if (isHandedBack(binding)) {
+    const baseline = mappings.taskState(taskId).sentBackTurns;
+    return isSentBack(binding) &&
+      baseline !== null &&
+      state.taskStartedTurnCount(taskId) > baseline
+      ? "turnStarted"
+      : "handedBack";
+  }
+  return state.taskStartedTurnCount(taskId) > 0 ? "turnStarted" : "none";
 }
 
 /**
@@ -130,7 +141,6 @@ export class StatusMappingWriter {
             mapping,
             taskId,
             String(imported.nodeId),
-            task.ready === 1,
           );
         } catch {
           // One task's failure leaves it to the next pass and does not stop the others.
@@ -156,10 +166,23 @@ export class StatusMappingWriter {
     mapping: StatusMapping,
     taskId: string,
     nodeId: string,
-    ready: boolean,
   ): Promise<void> {
-    const { deliveryStore } = this.facts;
+    const { domain, deliveryStore, state: execution } = this.facts;
+    // Read now, with the item below: the pass may have waited on the network since it listed tasks.
+    const fresh = domain.task(taskId);
+    if (fresh.state === "cancelled") return;
+    const ready = fresh.ready === 1;
     let state = this.mappings.taskState(taskId);
+    // A handback sent back waits for the next turn: note how many turns had started when it was.
+    const binding = deliveryStore.delivery(taskId);
+    const sentBack = isHandedBack(binding) && isSentBack(binding);
+    if (sentBack && state.sentBackTurns === null) {
+      this.mappings.setSentBack(taskId, execution.taskStartedTurnCount(taskId));
+      state = this.mappings.taskState(taskId);
+    } else if (!sentBack && state.sentBackTurns !== null) {
+      this.mappings.setSentBack(taskId, null);
+      state = this.mappings.taskState(taskId);
+    }
     const event = statusMappingEvent(this.facts, taskId, state.lastEvent);
     if (event !== "done" && !state.watched) {
       this.mappings.watch(taskId);

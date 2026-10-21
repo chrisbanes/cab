@@ -429,9 +429,18 @@ test("Done is written for a done task whose issue is closed, never for another n
       reason: null,
     });
     assert.equal(f.domain.task(f.taskId).ready, 0);
-    const attempt = (event: "turnStarted" | "done", option: string) => {
+    const attempt = (
+      event: "turnStarted" | "done",
+      option: string,
+      expected?: string | null,
+    ) => {
       const record = f.delivery.prepareAction(
-        f.write(option),
+        f.write(
+          option,
+          expected === undefined
+            ? {}
+            : { expected: { optionNodeId: expected } },
+        ),
         f.caller(event),
         false,
       );
@@ -457,12 +466,18 @@ test("Done is written for a done task whose issue is closed, never for another n
     // Done and closed, but first seen that way: not worked on under the mapping.
     assert.equal(attempt("done", DONE), "denied");
     f.status.watch(f.taskId);
-    // Done and closed: the mapped Done option is written; no other event is.
-    assert.equal(attempt("done", DONE), "prepared");
+    // Nothing observed yet, or a Status other than the one Ensemble last wrote: a human moved it.
+    assert.equal(attempt("done", DONE, PROGRESS), "denied");
+    f.status.observed(f.taskId, PROGRESS);
+    assert.equal(attempt("done", DONE), "denied");
+    assert.equal(attempt("done", DONE, null), "denied");
+    assert.equal(attempt("done", DONE, TODO), "denied");
+    // Done and closed, against the Status Ensemble last wrote: the mapped Done option is written.
+    assert.equal(attempt("done", DONE, PROGRESS), "prepared");
     assert.equal(attempt("turnStarted", PROGRESS), "denied");
     // An option the readiness rule accepts is a Ready option: never written for a not-Ready task.
     f.save(mapping({ done: REVIEW }));
-    assert.equal(attempt("done", REVIEW), "denied");
+    assert.equal(attempt("done", REVIEW, PROGRESS), "denied");
     // Done, not Ready, but the issue is still open: nothing.
     f.save(mapping());
     f.sources.reconcileSelection(f.projectId, f.selectionId, {
@@ -471,7 +486,7 @@ test("Done is written for a done task whose issue is closed, never for another n
       reason: null,
     });
     assert.equal(f.domain.task(f.taskId).ready, 0);
-    assert.equal(attempt("done", DONE), "denied");
+    assert.equal(attempt("done", DONE, PROGRESS), "denied");
   } finally {
     f.db.close();
   }

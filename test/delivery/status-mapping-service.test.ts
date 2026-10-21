@@ -570,22 +570,30 @@ test("Done is not written for a done task that is not Ready while its issue is s
   }
 });
 
-test("a handback stays handed back, merged or accepted, until Done; a closed settlement or an unmerged closed PR sends it back", () => {
+test("a handback stays handed back, merged or accepted, until Done; sent back, it waits for the next turn", () => {
   const binding = (change: Record<string, unknown>) => ({
     mode: "reviewable-pr",
     observation: { state: "OPEN", draft: false, merged: false },
     settlement: null,
     ...change,
   });
-  const event = (value: unknown) =>
+  const event = (
+    value: unknown,
+    sentBackTurns: number | null = null,
+    turns = 1,
+  ) =>
     statusMappingEvent(
       {
         domain: {
           task: () => ({ state: "open", importedBlockers: "clear" }),
           blockingDependencies: () => [],
         },
-        state: { taskHold: () => undefined, taskHasStartedTurn: () => true },
+        state: {
+          taskHold: () => undefined,
+          taskStartedTurnCount: () => turns,
+        },
         deliveryStore: { actionBlockers: () => [], delivery: () => value },
+        mappings: { taskState: () => ({ sentBackTurns }) },
       } as never,
       "task",
     );
@@ -600,19 +608,17 @@ test("a handback stays handed back, merged or accepted, until Done; a closed set
     event(binding({ settlement: { decision: "accepted" } })),
     "handedBack",
   );
-  // Sent back: the settlement is closed, or the PR closed without merging.
-  assert.equal(
-    event(binding({ settlement: { decision: "closed" } })),
-    "turnStarted",
-  );
-  assert.equal(
-    event(
-      binding({
-        observation: { state: "CLOSED", draft: false, merged: false },
-      }),
-    ),
-    "turnStarted",
-  );
+  // Sent back: the operator settled it as closed, or the PR closed without merging. The card
+  // stays put until a turn starts after that.
+  const closedSettlement = binding({ settlement: { decision: "closed" } });
+  const closedPr = binding({
+    observation: { state: "CLOSED", draft: false, merged: false },
+  });
+  for (const sent of [closedSettlement, closedPr]) {
+    assert.equal(event(sent, null, 1), "handedBack");
+    assert.equal(event(sent, 1, 1), "handedBack");
+    assert.equal(event(sent, 1, 2), "turnStarted");
+  }
   assert.equal(
     event(
       binding({ observation: { state: "OPEN", draft: true, merged: false } }),
@@ -621,6 +627,32 @@ test("a handback stays handed back, merged or accepted, until Done; a closed set
   );
   assert.equal(event(null), "turnStarted");
   assert.equal(event(binding({ mode: "through-merge" })), "turnStarted");
+});
+
+test("a sent-back handback keeps the card in review until the next turn starts", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    await registerPr(f);
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
+    // The PR closes without merging: sent back, but no new turn has started.
+    f.setPr({ ...f.getPr(), state: "CLOSED", merged: false });
+    await startedOf(f.service).deliveryCoordinator.refresh();
+    await run();
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
+    const sentBack = startedOf(f.service).statusMappings.taskState(
+      f.taskId,
+    ).sentBackTurns;
+    assert.ok(sentBack !== null);
+    // A turn starts after it: the card moves back.
+    startedOf(f.service).statusMappings.setSentBack(f.taskId, sentBack - 1);
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview, inProgress]);
+  } finally {
+    await f.close();
+  }
 });
 
 test("a task first seen done and closed was not worked on under the mapping and writes nothing", async () => {

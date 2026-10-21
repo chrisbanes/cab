@@ -39,6 +39,8 @@ export interface StatusMappingTaskState {
   observedAt: number | null;
   /** The mapping has seen the task before it was done (a task first seen done was not worked on under it). */
   watched: boolean;
+  /** Turns started when a sent-back handback was first seen; the next turn after it moves the card back. */
+  sentBackTurns: number | null;
 }
 
 /** Per-project status mapping and, per task, the transition last written. */
@@ -51,7 +53,7 @@ export class StatusMappingStore {
     CREATE TABLE IF NOT EXISTS status_mapping_task_state (
       taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id), lastEvent TEXT NOT NULL,
       operationId TEXT,
-      observedOptionNodeId TEXT, observedAt INTEGER, watched INTEGER NOT NULL DEFAULT 0);`);
+      observedOptionNodeId TEXT, observedAt INTEGER, watched INTEGER NOT NULL DEFAULT 0, sentBackTurns INTEGER);`);
   }
   /** Version 1 with no mapping until the first save, like the delivery policy. */
   current(projectId: string): {
@@ -166,7 +168,7 @@ export class StatusMappingStore {
   taskState(taskId: string): StatusMappingTaskState {
     const row = this.db
       .prepare(
-        "SELECT lastEvent, operationId, observedOptionNodeId, observedAt, watched FROM status_mapping_task_state WHERE taskId = ?",
+        "SELECT lastEvent, operationId, observedOptionNodeId, observedAt, watched, sentBackTurns FROM status_mapping_task_state WHERE taskId = ?",
       )
       .get(taskId) as
       | (Omit<StatusMappingTaskState, "watched"> & { watched: number })
@@ -179,7 +181,17 @@ export class StatusMappingStore {
           observedOptionNodeId: null,
           observedAt: null,
           watched: false,
+          sentBackTurns: null,
         };
+  }
+  /** Records, or with `null` clears, the turns started when a handback was sent back. */
+  setSentBack(taskId: string, turns: number | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO status_mapping_task_state (taskId, lastEvent, sentBackTurns) VALUES (?, 'none', ?)
+        ON CONFLICT(taskId) DO UPDATE SET sentBackTurns = excluded.sentBackTurns`,
+      )
+      .run(taskId, turns);
   }
   /** Marks a task the mapping has seen before it was done. */
   watch(taskId: string): void {

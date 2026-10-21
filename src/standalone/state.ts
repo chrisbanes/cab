@@ -1188,17 +1188,19 @@ export class ExecutionState {
     return this.firstTaskHoldReason(taskId, false);
   }
 
-  /** Whether a turn of the task's assignments (not a read-only draft turn) has bound to a runtime turn. */
-  taskHasStartedTurn(taskId: string): boolean {
-    return (
-      this.hasTurnRequests &&
-      this.db
-        .prepare(
-          `SELECT 1 FROM turn_requests request JOIN execution_intents intent ON intent.workId = request.workId
+  /** How many turns of the task's assignments (not read-only draft turns) have bound to a runtime turn. */
+  taskStartedTurnCount(taskId: string): number {
+    if (!this.hasTurnRequests) return 0;
+    return Number(
+      (
+        this.db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM turn_requests request JOIN execution_intents intent ON intent.workId = request.workId
           WHERE request.taskId = ? AND request.draftTurn = 0 AND request.kind = 'assignment'
-            AND intent.turnId IS NOT NULL LIMIT 1`,
-        )
-        .get(taskId) !== undefined
+            AND intent.turnId IS NOT NULL`,
+          )
+          .get(taskId) as { count: number }
+      ).count,
     );
   }
 

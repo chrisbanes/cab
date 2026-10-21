@@ -561,6 +561,18 @@ export function materialDigest(value: unknown): string {
   return createHash("sha256").update(canonicalMaterial(value)).digest("hex");
 }
 
+/** On closure, only the Status Ensemble last wrote or saw while the task was Ready may be expected. */
+function closureExpectedHolds(
+  state: { observedAt: number | null; observedOptionNodeId: string | null },
+  expected: { optionNodeId: string | null } | undefined,
+): boolean {
+  return (
+    state.observedAt !== null &&
+    expected !== undefined &&
+    expected.optionNodeId === state.observedOptionNodeId
+  );
+}
+
 /** Methods suffixed WithinTransaction compose with existing SQLite command transactions. */
 export class DeliveryStore {
   constructor(private readonly db: Database) {}
@@ -953,6 +965,11 @@ export class DeliveryStore {
         caller.event !== "done" ||
         task.state !== "done" ||
         task.observedState !== "closed" ||
+        // Skip-if-changed: the Status sent as expected must be the one Ensemble last wrote or saw.
+        !closureExpectedHolds(
+          new StatusMappingStore(this.db).taskState(caller.taskId),
+          action.expected,
+        ) ||
         keepsReady()
       )
         throw refusal();

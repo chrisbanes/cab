@@ -1074,7 +1074,7 @@ export class StandaloneService {
       const statusMappingWriter = acquire(
         "statusMappingWriter",
         new StatusMappingWriter(
-          { domain, state, deliveryStore },
+          { domain, state, deliveryStore, mappings: statusMappings },
           statusMappings,
           githubSources,
           deliveryCoordinator,
@@ -3068,7 +3068,7 @@ export class StandaloneService {
       // The event it was minted for must still be the task's: a task that moved on writes later.
       if (
         statusMappingEvent(
-          { domain, state, deliveryStore },
+          { domain, state, deliveryStore, mappings: statusMappings },
           caller.taskId,
           statusMappings.taskState(caller.taskId).lastEvent,
         ) !== caller.event
