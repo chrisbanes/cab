@@ -2,6 +2,7 @@ import { credentialFreeEnvironment } from "../core/child-environment.js";
 import {
   isOperatorAction,
   isOperatorDeliveryCaller,
+  isRuntimeDeliveryCaller,
 } from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
 import type { z } from "zod";
@@ -390,8 +391,8 @@ export class DeliveryCoordinator {
     );
   }
   async registerPr(input: unknown, caller: DeliveryCaller) {
-    if (isOperatorDeliveryCaller(caller))
-      throw Error("Operator caller cannot register a PR");
+    if (!isRuntimeDeliveryCaller(caller))
+      throw Error("Only an agent caller can register a PR");
     const identity = registerPrArgumentsSchema.parse(input);
     return this.serialize([`task:${caller.taskId}`], async () => {
       this.options.authorize(caller);

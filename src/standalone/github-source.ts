@@ -501,6 +501,7 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
             state: content.state.toLowerCase() as "open" | "closed",
             labels: content.labels.nodes.map((label) => label.name),
             projectFields,
+            projectItemNodeId: item.id,
           });
         }
         if (!result.data.node.items.pageInfo.hasNextPage) break;

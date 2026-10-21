@@ -95,6 +95,15 @@ const cases = {
     candidateProfileIds: "[]",
   },
   "github.configure": github,
+  "status-mapping.configure": {
+    version: 2,
+    mapping: {
+      selectionId: "selection",
+      projectNodeId: "P1",
+      fieldNodeId: "F1",
+      events: { turnStarted: "O1", handedBack: null, held: null, done: null },
+    },
+  },
   "github.activate": {
     projectId,
     selectionId: "selection",

@@ -1,0 +1,207 @@
+import { z } from "zod";
+import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
+import { readinessSchema, selectionSchema } from "./github-source-contracts.js";
+import {
+  isInFlightEvent,
+  readinessAccepts,
+  type StatusMapping,
+  type StatusMappingEvent,
+  statusMappingEvents,
+  statusMappingSchema,
+} from "./status-mapping-contracts.js";
+import type { Database } from "./store.js";
+import type { DeliveryPolicy } from "./delivery.js";
+
+/** Why a mapped option cannot be saved. */
+export type StatusMappingRefusalReason =
+  | "no-selection"
+  | "ungranted"
+  | "approval-only"
+  | "readiness";
+export class StatusMappingRefusal extends DomainPolicyError {
+  constructor(
+    readonly reason: StatusMappingRefusalReason,
+    readonly event: StatusMappingEvent | null,
+    readonly optionNodeId: string | null,
+  ) {
+    super("invalid-input", `Status mapping refused: ${reason}`, [
+      event ? `mapping.events.${event}` : "mapping.selectionId",
+    ]);
+    this.name = "StatusMappingRefusal";
+  }
+}
+
+export interface StatusMappingTaskState {
+  lastEvent: StatusMappingEvent | "none";
+  transition: number;
+  operationId: string | null;
+  /** The Status option Ensemble last wrote and read back, with when. */
+  observedOptionNodeId: string | null;
+  observedAt: number | null;
+}
+
+/** Per-project status mapping and, per task, the transition last written. */
+export class StatusMappingStore {
+  constructor(private readonly db: Database) {}
+  migrate(): void {
+    this.db.exec(`CREATE TABLE IF NOT EXISTS status_mappings (
+      projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
+      mappingJson TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS status_mapping_task_state (
+      taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id), lastEvent TEXT NOT NULL,
+      transition INTEGER NOT NULL, operationId TEXT,
+      observedOptionNodeId TEXT, observedAt INTEGER);`);
+  }
+  /** Version 1 with no mapping until the first save, like the delivery policy. */
+  current(projectId: string): {
+    version: number;
+    mapping: StatusMapping | null;
+  } {
+    const row = this.db
+      .prepare(
+        "SELECT version, mappingJson FROM status_mappings WHERE projectId = ?",
+      )
+      .get(projectId) as { version: number; mappingJson: string } | undefined;
+    if (!row) return { version: 1, mapping: null };
+    return {
+      version: z.number().int().positive().parse(row.version),
+      mapping: statusMappingSchema
+        .nullable()
+        .parse(JSON.parse(row.mappingJson)),
+    };
+  }
+  /** The project's `project` selections: what a mapping can bind to. */
+  projectSelections(projectId: string) {
+    const row = this.db
+      .prepare(
+        "SELECT selections FROM project_github_sources WHERE projectId=?",
+      )
+      .get(projectId) as { selections: string } | undefined;
+    return z
+      .array(selectionSchema)
+      .parse(row ? JSON.parse(row.selections) : [])
+      .flatMap((s) => (s.kind === "project" ? [s] : []));
+  }
+  /** `unavailable` while the mapping's Project is no longer a `project` selection of the source. */
+  availability(projectId: string): "available" | "unavailable" {
+    const { mapping } = this.current(projectId);
+    const selections = this.projectSelections(projectId);
+    return mapping
+      ? selections.some(
+          (s) =>
+            s.id === mapping.selectionId &&
+            s.projectNodeId === mapping.projectNodeId,
+        )
+        ? "available"
+        : "unavailable"
+      : selections.length
+        ? "available"
+        : "unavailable";
+  }
+  /** Saves (or clears) the mapping after checking its selection, grants and in-flight readiness. */
+  configureWithinTransaction(
+    projectId: string,
+    expectedVersion: number,
+    input: unknown,
+    policy: DeliveryPolicy,
+  ) {
+    const current = this.current(projectId);
+    if (current.version !== expectedVersion)
+      throw new DomainConflictError("Version conflict");
+    const mapping = statusMappingSchema.nullable().parse(input);
+    if (mapping) this.validate(projectId, mapping, policy);
+    this.db
+      .prepare(
+        "INSERT INTO status_mappings VALUES (?, ?, ?) ON CONFLICT(projectId) DO UPDATE SET version=excluded.version, mappingJson=excluded.mappingJson",
+      )
+      .run(projectId, current.version + 1, JSON.stringify(mapping));
+    return this.current(projectId);
+  }
+  private validate(
+    projectId: string,
+    mapping: StatusMapping,
+    policy: DeliveryPolicy,
+  ): void {
+    if (
+      !this.projectSelections(projectId).some(
+        (s) =>
+          s.id === mapping.selectionId &&
+          s.projectNodeId === mapping.projectNodeId,
+      )
+    )
+      throw new StatusMappingRefusal("no-selection", null, null);
+    const row = this.db
+      .prepare("SELECT readiness FROM project_github_sources WHERE projectId=?")
+      .get(projectId) as { readiness: string };
+    const rule = readinessSchema.nullable().parse(JSON.parse(row.readiness));
+    for (const event of statusMappingEvents) {
+      const option = mapping.events[event];
+      if (option === null) continue;
+      const covering = policy.grants.filter(
+        (g) =>
+          g.action === "project.field" &&
+          g.projectNodeId === mapping.projectNodeId &&
+          g.fieldNodeId === mapping.fieldNodeId &&
+          g.optionNodeIds?.includes(option),
+      );
+      if (!covering.length)
+        throw new StatusMappingRefusal("ungranted", event, option);
+      // The service cannot obtain an approval.
+      if (!covering.some((g) => g.mode === "allow"))
+        throw new StatusMappingRefusal("approval-only", event, option);
+      if (
+        isInFlightEvent(event) &&
+        !readinessAccepts(
+          rule,
+          mapping.projectNodeId,
+          mapping.fieldNodeId,
+          option,
+        )
+      )
+        throw new StatusMappingRefusal("readiness", event, option);
+    }
+  }
+
+  taskState(taskId: string): StatusMappingTaskState {
+    const row = this.db
+      .prepare(
+        "SELECT lastEvent, transition, operationId, observedOptionNodeId, observedAt FROM status_mapping_task_state WHERE taskId = ?",
+      )
+      .get(taskId) as StatusMappingTaskState | undefined;
+    return (
+      row ?? {
+        lastEvent: "none",
+        transition: 0,
+        operationId: null,
+        observedOptionNodeId: null,
+        observedAt: null,
+      }
+    );
+  }
+  /** Records the event a task is now in, and the operation minted for entering it. */
+  enter(
+    taskId: string,
+    lastEvent: StatusMappingEvent | "none",
+    operationId: string | null,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO status_mapping_task_state (taskId, lastEvent, transition, operationId)
+        VALUES (?, ?, 1, ?)
+        ON CONFLICT(taskId) DO UPDATE SET lastEvent = excluded.lastEvent,
+          transition = transition + 1, operationId = excluded.operationId`,
+      )
+      .run(taskId, lastEvent, operationId);
+  }
+  /** A confirmed write is the newest observation of the item's Status. */
+  observed(taskId: string, optionNodeId: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO status_mapping_task_state (taskId, lastEvent, transition, observedOptionNodeId, observedAt)
+        VALUES (?, 'none', 0, ?, ?)
+        ON CONFLICT(taskId) DO UPDATE SET observedOptionNodeId = excluded.observedOptionNodeId,
+          observedAt = excluded.observedAt`,
+      )
+      .run(taskId, optionNodeId, Date.now());
+  }
+}

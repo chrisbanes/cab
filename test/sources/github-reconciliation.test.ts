@@ -1762,3 +1762,105 @@ test("an unproved own closure over lost readiness is never provider-completed", 
     w.close();
   }
 });
+
+test("a Project selection keeps its item id apart from the readiness facts, and an old database gains the column", () => {
+  const db = new DatabaseSync(":memory:");
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    const sources = new GitHubSourceStore(db);
+    sources.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [
+        {
+          id: "repo",
+          kind: "repository",
+          repositoryId: "R_1",
+          owner: "org",
+          name: "repo",
+        },
+        { id: "project", kind: "project", projectNodeId: "P_1", filter: "" },
+      ],
+      readiness: {
+        mode: "any",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [],
+    });
+    for (const selectionId of ["repo", "project"])
+      domain.execute({
+        type: "github.activate",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        selectionId,
+        expectedVersion: 2,
+      });
+    sources.reconcileSelection(projectId, "repo", {
+      complete: true,
+      issues: [issue],
+      reason: null,
+    });
+    const withoutItem = String(sources.review("I_1")?.observedDigest);
+    sources.reconcileSelection(projectId, "project", {
+      complete: true,
+      issues: [{ ...issue, projectItemNodeId: "ITEM_1" }],
+      reason: null,
+    });
+    // Only a Project selection knows the item; neither the source digest nor readiness changes.
+    assert.equal(sources.membershipItem(projectId, "repo", "I_1"), null);
+    assert.deepEqual(sources.membershipItem(projectId, "project", "I_1"), {
+      itemNodeId: "ITEM_1",
+      projectFields: issue.projectFields,
+    });
+    assert.equal(sources.review("I_1")?.observedDigest, withoutItem);
+    const taskId = String(sources.issue("I_1")?.taskId);
+    assert.equal(domain.task(taskId).ready, 1);
+    // The item moves: the next read replaces it.
+    sources.reconcileSelection(projectId, "project", {
+      complete: true,
+      issues: [{ ...issue, projectItemNodeId: "ITEM_2" }],
+      reason: null,
+    });
+    assert.equal(
+      sources.membershipItem(projectId, "project", "I_1")?.itemNodeId,
+      "ITEM_2",
+    );
+
+    // A database created before the column existed gains it, keeping its rows.
+    const old = new DatabaseSync(":memory:");
+    old.exec(
+      "CREATE TABLE github_memberships (projectId TEXT NOT NULL, selectionId TEXT NOT NULL, nodeId TEXT NOT NULL, projectFields TEXT NOT NULL, PRIMARY KEY(projectId, selectionId, nodeId))",
+    );
+    old
+      .prepare("INSERT INTO github_memberships VALUES ('p', 's', 'n', '[]')")
+      .run();
+    new GitHubSourceStore(old).migrate();
+    assert.deepEqual(
+      old
+        .prepare("SELECT nodeId, itemNodeId FROM github_memberships")
+        .all()
+        .map((row) => ({ ...row })),
+      [{ nodeId: "n", itemNodeId: null }],
+    );
+    old.close();
+  } finally {
+    db.close();
+  }
+});

@@ -8,6 +8,16 @@ import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
+import { StatusMappingStore } from "./status-mapping.js";
+import {
+  isInFlightEvent,
+  statusMappingEvents,
+} from "./status-mapping-contracts.js";
+import {
+  evaluateReadiness,
+  projectFieldsSchema,
+  readinessSchema,
+} from "./github-source-contracts.js";
 
 const identity = z.string().trim().min(1).max(512);
 export const actionKinds = [
@@ -165,6 +175,11 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       itemNodeId: identity,
       fieldNodeId: identity,
       optionNodeId: identity,
+      // The Status the item must still show: the provider refuses the write otherwise (`null` is no value).
+      expected: z
+        .object({ optionNodeId: identity.nullable() })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -286,16 +301,42 @@ export const operatorDeliveryCallerSchema = z
 export type OperatorDeliveryCaller = z.output<
   typeof operatorDeliveryCallerSchema
 >;
+/** The service writing a mapped Project Status for one event; it may submit only that `project.field`. */
+export const serviceDeliveryCallerSchema = z
+  .object({
+    actor: z.literal("service"),
+    purpose: z.literal("status-mapping"),
+    projectId: z.string().uuid(),
+    taskId: z.string().uuid(),
+    mappingVersion: z.number().int().positive(),
+    event: z.enum(statusMappingEvents),
+  })
+  .strict();
+export type ServiceDeliveryCaller = z.output<
+  typeof serviceDeliveryCallerSchema
+>;
 // The first branch explicitly preserves the historical persisted runtime shape and its material hash.
 const bindingSchema = z.union([
   runtimeDeliveryCallerSchema,
   operatorDeliveryCallerSchema,
+  serviceDeliveryCallerSchema,
 ]);
 export type DeliveryCaller = z.output<typeof bindingSchema>;
 export function isOperatorDeliveryCaller(
   caller: DeliveryCaller,
 ): caller is OperatorDeliveryCaller {
   return "actor" in caller && caller.actor === "operator";
+}
+export function isServiceDeliveryCaller(
+  caller: DeliveryCaller,
+): caller is ServiceDeliveryCaller {
+  return "actor" in caller && caller.actor === "service";
+}
+/** The agent callers: those with an assignment, work and conversation behind them. */
+export function isRuntimeDeliveryCaller(
+  caller: DeliveryCaller,
+): caller is RuntimeDeliveryCaller {
+  return !("actor" in caller);
 }
 /** The two actions an operator may take on the bound issue: a comment, or an edit that names what it replaces. */
 export function isOperatorAction(
@@ -583,12 +624,35 @@ export class DeliveryStore {
     ) as { operationId: string }[];
     return rows.map((row) => this.action(row.operationId));
   }
+  /**
+   * What holds the task's work: unresolved agent and operator actions. A status-mapping write
+   * reflects the board and is independent of the work, so it never holds admission, completion,
+   * edits or agent actions; `serviceActionBlockers` serializes it against itself.
+   */
   actionBlockers(taskId: string, exceptOperationId?: string): string[] {
+    return this.unresolvedReasons(
+      taskId,
+      (record) => !isServiceDeliveryCaller(record.binding),
+      exceptOperationId,
+    );
+  }
+  /** Unresolved status-mapping writes on the task; they defer the next one. */
+  serviceActionBlockers(taskId: string): string[] {
+    return this.unresolvedReasons(taskId, (record) =>
+      isServiceDeliveryCaller(record.binding),
+    );
+  }
+  private unresolvedReasons(
+    taskId: string,
+    include: (record: DeliveryActionRecord) => boolean,
+    exceptOperationId?: string,
+  ): string[] {
     return [
       ...new Set(
         this.actions(taskId)
           .filter(
             (record) =>
+              include(record) &&
               record.operationId !== exceptOperationId &&
               ["prepared", "attempting", "uncertain"].includes(record.state),
           )
@@ -641,6 +705,11 @@ export class DeliveryStore {
         approved = this.operatorApprovalCurrent(request, binding);
     } else if (request.operatorReviewId)
       throw Error("Runtime caller cannot use an operator confirmation");
+    if (isServiceDeliveryCaller(binding)) {
+      this.validateServiceCaller(request, binding);
+      // The service cannot obtain an approval, so an approval-mode grant fails closed.
+      approved = false;
+    }
     if (policyVersion !== undefined && policy.version !== policyVersion)
       throw new Error("Delivery policy changed");
     const action = request.action;
@@ -706,20 +775,7 @@ export class DeliveryStore {
       .prepare("SELECT readiness FROM project_github_sources WHERE projectId=?")
       .get(binding.projectId) as { readiness: string } | undefined;
     if (source) {
-      const readiness = z
-        .object({
-          conditions: z.array(
-            z.discriminatedUnion("kind", [
-              z.object({ kind: z.literal("label"), name: identity }),
-              z.object({
-                kind: z.literal("project-field"),
-                projectNodeId: identity,
-                fieldNodeId: identity,
-                optionNodeId: identity,
-              }),
-            ]),
-          ),
-        })
+      const readiness = readinessSchema
         .nullable()
         .parse(JSON.parse(source.readiness));
       // No readiness rule protects no label or field.
@@ -733,8 +789,10 @@ export class DeliveryStore {
         )
       )
         throw new Error("Agent cannot change readiness labels");
+      // The service status-mapping caller is the one exemption; `validateServiceCaller` bounds it.
       if (
         readiness &&
+        !isServiceDeliveryCaller(binding) &&
         action.kind === "project.field" &&
         readiness.conditions.some(
           (c) =>
@@ -745,6 +803,118 @@ export class DeliveryStore {
       )
         throw new Error("Agent cannot change readiness fields");
     }
+  }
+  /**
+   * A status-mapping write names the mapping's exact Project, field and option for the event, on
+   * the item of a Ready imported task. In-flight events must leave the task Ready; no write can make
+   * a non-Ready task Ready, because only a task that is Ready now qualifies.
+   */
+  private validateServiceCaller(
+    request: ExternalActionArguments,
+    caller: ServiceDeliveryCaller,
+  ): void {
+    const action = request.action,
+      refusal = () =>
+        new DomainPolicyError(
+          "forbidden",
+          "Status mapping caller only permits its mapped project.field",
+        );
+    if (
+      action.kind !== "project.field" ||
+      request.approval ||
+      request.operatorReviewId
+    )
+      throw refusal();
+    const { version, mapping } = new StatusMappingStore(this.db).current(
+      caller.projectId,
+    );
+    if (
+      !mapping ||
+      version !== caller.mappingVersion ||
+      action.optionNodeId !== mapping.events[caller.event] ||
+      action.projectNodeId !== mapping.projectNodeId ||
+      action.fieldNodeId !== mapping.fieldNodeId
+    )
+      throw refusal();
+    const task = this.db
+      .prepare(
+        `SELECT t.projectId, t.ready, t.state, e.nodeId, e.repositoryId, e.issueNumber, e.labels
+        FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
+      )
+      .get(caller.taskId) as
+      | {
+          projectId: string;
+          ready: number;
+          state: string;
+          nodeId: string;
+          repositoryId: string;
+          issueNumber: number;
+          labels: string;
+        }
+      | undefined;
+    const membership = task
+      ? this.db
+          .prepare(
+            "SELECT selectionId, itemNodeId, projectFields FROM github_memberships WHERE projectId = ? AND nodeId = ?",
+          )
+          .all(task.projectId, task.nodeId)
+      : [];
+    const items = z
+      .array(
+        z.object({
+          selectionId: z.string(),
+          itemNodeId: z.string().nullable(),
+          projectFields: z.string(),
+        }),
+      )
+      .parse(membership);
+    const mapped = items.find((m) => m.selectionId === mapping.selectionId);
+    if (
+      !task ||
+      task.projectId !== caller.projectId ||
+      task.ready !== 1 ||
+      task.state === "cancelled" ||
+      task.nodeId !== action.target.nodeId ||
+      task.repositoryId !== action.target.repositoryId ||
+      task.issueNumber !== action.target.number ||
+      !mapped?.itemNodeId ||
+      mapped.itemNodeId !== action.itemNodeId
+    )
+      throw refusal();
+    if (!isInFlightEvent(caller.event)) return;
+    const row = this.db
+      .prepare("SELECT readiness FROM project_github_sources WHERE projectId=?")
+      .get(caller.projectId) as { readiness: string };
+    const fields = items
+      .flatMap((m) => projectFieldsSchema.parse(JSON.parse(m.projectFields)))
+      .filter(
+        (f) =>
+          !(
+            f.projectNodeId === action.projectNodeId &&
+            f.fieldNodeId === action.fieldNodeId
+          ),
+      );
+    // The stored facts with only the target Status substituted.
+    if (
+      !evaluateReadiness(
+        readinessSchema.nullable().parse(JSON.parse(row.readiness)),
+        {
+          labels: z.array(z.string()).parse(JSON.parse(task.labels)),
+          fields: [
+            ...fields,
+            {
+              projectNodeId: action.projectNodeId,
+              fieldNodeId: action.fieldNodeId,
+              optionNodeId: action.optionNodeId,
+            },
+          ],
+        },
+      ).satisfied
+    )
+      throw new DomainPolicyError(
+        "forbidden",
+        "Status mapping write would remove the task's readiness",
+      );
   }
   validateOperatorCaller(input: OperatorDeliveryCaller): void {
     const caller = operatorDeliveryCallerSchema.parse(input),
@@ -1091,13 +1261,14 @@ export class DeliveryStore {
       try {
         admission();
         this.authorize(request, binding, approved);
-        if (this.actionBlockers(binding.taskId).length)
-          throw new Error("Task has unresolved external action");
         if (
-          approved &&
-          request.approval &&
-          !isOperatorDeliveryCaller(binding)
-        ) {
+          (isServiceDeliveryCaller(binding)
+            ? this.serviceActionBlockers(binding.taskId)
+            : this.actionBlockers(binding.taskId)
+          ).length
+        )
+          throw new Error("Task has unresolved external action");
+        if (approved && request.approval && isRuntimeDeliveryCaller(binding)) {
           if (
             !this.approvalCurrent(
               request.approval.interactionId,
@@ -1246,6 +1417,15 @@ export class DeliveryStore {
         )
           this.clearSettlementOnBranch(taskId, repositoryId);
       }
+      if (
+        isServiceDeliveryCaller(record.binding) &&
+        observation.state === "confirmed-success" &&
+        record.request.action.kind === "project.field"
+      )
+        new StatusMappingStore(this.db).observed(
+          record.binding.taskId,
+          record.request.action.optionNodeId,
+        );
       within?.(record);
       return record;
     });
@@ -1701,6 +1881,12 @@ export class DeliveryStore {
       actions: this.actions(taskId).map((a) => ({
         operationId: a.operationId,
         kind: a.request.action.kind,
+        caller: isServiceDeliveryCaller(a.binding)
+          ? ("service" as const)
+          : isOperatorDeliveryCaller(a.binding)
+            ? ("operator" as const)
+            : ("agent" as const),
+        event: isServiceDeliveryCaller(a.binding) ? a.binding.event : null,
         target: a.request.action.target,
         state: a.state,
         attempts: a.attempts,

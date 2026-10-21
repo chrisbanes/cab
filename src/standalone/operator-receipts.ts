@@ -78,6 +78,20 @@ export function commandReceipt(
             credentialConfigured: outcome.result.credentialAvailable === 1,
           },
         };
+      case "status-mapping.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId,
+            version: outcome.result.version,
+            mappedEventCount: Object.values(
+              outcome.result.mapping?.events ?? {},
+            ).filter((option) => option !== null).length,
+          },
+        };
       case "github.configure":
         return {
           kind: "configuration" as const,

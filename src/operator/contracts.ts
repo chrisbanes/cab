@@ -8,6 +8,7 @@ import { commentReasonCodes, issueEditReasonCodes } from "./github-reasons.js";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
+import { statusMappingSchema } from "../core/status-mapping-contracts.js";
 import {
   closedIssuesSchema,
   githubConfigurationSchema,
@@ -2040,6 +2041,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...domainBase,
+      type: z.literal("status-mapping.configure"),
+      expectedVersion: revision,
+      mapping: statusMappingSchema.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
       type: z.literal("github.configure"),
       expectedVersion: revision,
       ...githubConfigurationCommandSchema.shape,
@@ -2326,6 +2335,14 @@ export const configurationReceiptSchema = z
           version: revision,
           enabled: z.boolean(),
           credentialConfigured: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("status-mapping.configure"),
+          resourceId: uuid,
+          version: revision,
+          mappedEventCount: z.number().int().min(0).max(4),
         })
         .strict(),
       z
@@ -3573,6 +3590,7 @@ export const operationTypeSchema = z.enum([
   "runtime.configure",
   "assignment.apply",
   "github.configure",
+  "status-mapping.configure",
   "github.preview",
   "recovery.pre-turn.adopt",
   "recovery.pre-turn.recover",

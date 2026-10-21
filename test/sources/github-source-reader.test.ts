@@ -307,6 +307,11 @@ test("Project filter is passed unchanged and nested field/definition pages must 
       ],
     ],
   );
+  // The Project item holding the issue travels beside, not inside, its field values.
+  assert.deepEqual(
+    complete.issues.map((entry) => entry.projectItemNodeId),
+    ["PVTI_1"],
+  );
   assert.equal(calls[0]?.variables.query, "status:ready");
   assert.deepEqual(
     calls.map((call) => call.operationName),

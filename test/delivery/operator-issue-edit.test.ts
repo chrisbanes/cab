@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { isOperatorDeliveryCaller } from "../../src/core/delivery.js";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
 import { issueChangedReason } from "../../src/operator/github-reasons.js";
 import { IssueChangedRefusal } from "../../src/standalone/github-delivery.js";
@@ -178,6 +179,7 @@ test("a send refused because GitHub changed writes nothing and is not retried", 
   assert.equal(saved.observation?.reason, issueChangedReason);
   // A replay of that refusal reads the source again, in case the first read failed.
   f.setSourceBody("Changed again on GitHub");
+  assert.ok(isOperatorDeliveryCaller(saved.binding));
   assert.equal(
     (
       await f.service.postOperatorEdit({

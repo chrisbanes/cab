@@ -34,6 +34,7 @@ import {
   type ExternalAction,
   isOperatorAction,
   isOperatorDeliveryCaller,
+  isServiceDeliveryCaller,
   materialDigest,
   type OperatorCommentReview,
   type OperatorDeliveryCaller,
@@ -954,6 +955,8 @@ export class StandaloneService {
               );
             return;
           }
+          // Its mapping, task and readiness are checked by `DeliveryStore.authorize`.
+          if (isServiceDeliveryCaller(caller)) return;
           if (
             request &&
             (request.action.kind === "pr.merge" ||
@@ -1028,24 +1031,26 @@ export class StandaloneService {
             : null;
         },
         approved: (request, caller) =>
-          isOperatorDeliveryCaller(caller)
-            ? deliveryStore.operatorApprovalCurrent(request, caller)
-            : Boolean(
-                request.approval &&
-                  deliveryStore.approvalCurrent(
-                    request.approval.interactionId,
-                    caller,
-                    request.action,
-                    request.operationId,
-                  ) &&
-                  coordination.authorizationFor({
-                    assignmentId: caller.assignmentId,
-                    ...request.approval,
-                    action: request.action.kind,
-                    target: canonicalMaterial(request.action.target),
-                    material: request.action,
-                  }),
-              ),
+          isServiceDeliveryCaller(caller)
+            ? false
+            : isOperatorDeliveryCaller(caller)
+              ? deliveryStore.operatorApprovalCurrent(request, caller)
+              : Boolean(
+                  request.approval &&
+                    deliveryStore.approvalCurrent(
+                      request.approval.interactionId,
+                      caller,
+                      request.action,
+                      request.operationId,
+                    ) &&
+                    coordination.authorizationFor({
+                      assignmentId: caller.assignmentId,
+                      ...request.approval,
+                      action: request.action.kind,
+                      target: canonicalMaterial(request.action.target),
+                      material: request.action,
+                    }),
+                ),
         activationAllowed: (policy) =>
           !policy.credentialRef ||
           (!runtimeSpawnSnapshot?.[policy.credentialRef.slice(4)] &&
@@ -3027,6 +3032,11 @@ export class StandaloneService {
         deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
       )
         throw new DomainConflictError("Task admission is held");
+      return;
+    }
+    if (isServiceDeliveryCaller(caller)) {
+      if (!["open", "done"].includes(String(domain.task(caller.taskId).state)))
+        throw new DomainConflictError("Task is cancelled");
       return;
     }
     const intent = state.byWorkId(caller.workId);
