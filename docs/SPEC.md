@@ -1720,11 +1720,12 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   prepared) and shows on the task. Agents and the operator keep the refusal of
   readiness labels and fields.
 - **Readiness.** The service writes only for a task that is Ready when it writes, so the
-  mapping never makes work Ready. Done is therefore written only while the task is still
-  Ready: a task whose issue is already closed (provider closure, `issue.close`, a closing-keyword
-  merge) writes nothing for Done, and the Project's own workflow covers it when enabled. An
-  in-flight event may name only an option the readiness
-  rule accepts, checked at save and again at write against the task's stored facts with only
+  mapping never makes work Ready. The one exception is Done on closure: a done task whose issue
+  is observed closed (provider closure, `issue.close`, a closing-keyword merge) is no longer
+  Ready, but its mapped Done option is still written, because a closed issue cannot be Ready.
+  It is refused if that option is one the readiness rule accepts, and a done task that is not
+  Ready while its issue is open writes nothing. An in-flight event may name only an option the
+  readiness rule accepts, checked at save and again at write against the task's stored facts with only
   that value replaced. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
   an in-flight Status drops the item from the selection on the next sync and the ordinary
@@ -1734,11 +1735,12 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   changes to a mapped one, once per transition; leaving an event and re-entering it is a new
   transition. The operation id is stored before the write, so a restart resumes the same
   operation. It runs after every GitHub refresh, when a turn binds and on scheduler wake. A
-  PR stays handed back, merged or not, until the task is Done. An unknown dependency read (a
+  reviewable PR stays handed back, whether it is open, merged or closed and whatever its
+  settlement, until the task is Done. An unknown dependency read (a
   partial read) is not a block and keeps a held task held. A write needs the issue's current
   item in the mapped Project selection.
 - **Conditional write.** Immediately before writing, the provider reads the item's Status. If
-  it is not what Ensemble last observed (its last confirmed write, unless a later source read
+  it is not what Ensemble last observed (its last confirmed write, unless a later read of that item
   replaced it, else the stored membership value) it records `provider-project-field-changed`,
   writes nothing, does not retry, and the task shows "Skipped: Status changed on GitHub since
   Ensemble last saw it". GitHub has no conditional update, so a move between that read and the
@@ -1747,7 +1749,9 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 - **No hold.** Status-mapping records are excluded from the task's action blockers. An unproved
   write shows on the task and never holds admission, completion, edits or agent actions. A status
   write still in flight serializes the next one for that task; an unproved one does not, because
-  the next write re-reads the Status and is skipped when the card moved.
+  the next write re-reads the Status and is skipped when the card moved. Status writes run in
+  their own queue with a time limit on each provider call, so a slow or hung GitHub call never
+  delays the task's agent actions or completion checks.
 
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or

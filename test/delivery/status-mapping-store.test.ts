@@ -418,6 +418,62 @@ test("the service caller cannot write for a task that is not Ready, and cannot m
   }
 });
 
+test("Done is written for a done task whose issue is closed, never for another not-Ready task, and never an option the rule accepts", () => {
+  const f = setup();
+  try {
+    f.save(mapping());
+    const closed = { ...issue(TODO), state: "closed" as const };
+    f.sources.reconcileSelection(f.projectId, f.selectionId, {
+      complete: true,
+      issues: [closed],
+      reason: null,
+    });
+    assert.equal(f.domain.task(f.taskId).ready, 0);
+    const attempt = (event: "turnStarted" | "done", option: string) => {
+      const record = f.delivery.prepareAction(
+        f.write(option),
+        f.caller(event),
+        false,
+      );
+      if (record.state === "prepared")
+        f.delivery.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "test",
+          receipt: null,
+        });
+      return record.state;
+    };
+    // Closed but not done: nothing.
+    assert.equal(attempt("done", DONE), "denied");
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    // Done and closed: the mapped Done option is written; no other event is.
+    assert.equal(attempt("done", DONE), "prepared");
+    assert.equal(attempt("turnStarted", PROGRESS), "denied");
+    // An option the readiness rule accepts is a Ready option: never written for a not-Ready task.
+    f.save(mapping({ done: REVIEW }));
+    assert.equal(attempt("done", REVIEW), "denied");
+    // Done, not Ready, but the issue is still open: nothing.
+    f.save(mapping());
+    f.sources.reconcileSelection(f.projectId, f.selectionId, {
+      complete: true,
+      issues: [issue(DONE)],
+      reason: null,
+    });
+    assert.equal(f.domain.task(f.taskId).ready, 0);
+    assert.equal(attempt("done", DONE), "denied");
+  } finally {
+    f.db.close();
+  }
+});
+
 test("an in-flight write is checked against the readiness rule at write time", () => {
   const f = setup();
   try {

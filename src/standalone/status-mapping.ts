@@ -13,6 +13,12 @@ import type {
 import type { DeliveryCoordinator } from "./delivery.js";
 import type { ExecutionState } from "./state.js";
 
+type StatusMappingFields = {
+  projectNodeId: string;
+  fieldNodeId: string;
+  optionNodeId: string;
+}[];
+
 export interface StatusMappingFacts {
   domain: DomainStore;
   state: ExecutionState;
@@ -45,13 +51,8 @@ export function statusMappingEvent(
   )
     return "held";
   const binding = deliveryStore.delivery(taskId);
-  // Handed back until the task is Done: a merged PR or an accepted settlement stays handed back.
-  if (
-    binding?.mode === "reviewable-pr" &&
-    binding.observation.state !== "CLOSED" &&
-    !binding.observation.draft &&
-    binding.settlement?.decision !== "closed"
-  )
+  // Handed back until the task is Done: a merged or closed PR and a closed settlement do not end it.
+  if (binding?.mode === "reviewable-pr" && !binding.observation.draft)
     return "handedBack";
   return state.taskHasStartedTurn(taskId) ? "turnStarted" : "none";
 }
@@ -146,6 +147,9 @@ export class StatusMappingWriter {
     const event = statusMappingEvent(this.facts, taskId, state.lastEvent);
     const option = event === "none" ? null : mapping.events[event];
     const issue = this.sources.issue(nodeId);
+    // Done on closure: a done task whose issue is observed closed is not Ready but may still be written.
+    const writable =
+      ready || (event === "done" && issue?.observedState === "closed");
     const item = issue
       ? this.sources.membershipItem(projectId, mapping.selectionId, nodeId)
       : null;
@@ -163,12 +167,7 @@ export class StatusMappingWriter {
         fieldNodeId: mapping.fieldNodeId,
         optionNodeId: option ?? "",
         expected: {
-          optionNodeId: this.lastObserved(
-            projectId,
-            mapping,
-            state,
-            item?.projectFields,
-          ),
+          optionNodeId: this.lastObserved(mapping, state, item),
         },
       },
     });
@@ -186,7 +185,7 @@ export class StatusMappingWriter {
         event !== "none" &&
         option &&
         item &&
-        ready &&
+        writable &&
         state.operationId &&
         !deliveryStore
           .actions(taskId)
@@ -197,7 +196,7 @@ export class StatusMappingWriter {
     }
     // A status write still in flight serializes the next one: the event is left to a later pass.
     if (deliveryStore.serviceActionBlockers(taskId).length) return;
-    if (event === "none" || !option || !item || !ready) {
+    if (event === "none" || !option || !item || !writable) {
       this.mappings.enter(taskId, event, null);
       return;
     }
@@ -207,28 +206,19 @@ export class StatusMappingWriter {
   }
 
   /**
-   * The Status Ensemble last observed on the item: its last confirmed write, unless a later
-   * source read replaced it, else the stored membership value (`null` is no value).
+   * The Status Ensemble last observed on the item: its last confirmed write, unless this item
+   * was read after it (a partial read leaves an unread item's fields alone), else the stored
+   * membership value (`null` is no value).
    */
   private lastObserved(
-    projectId: string,
     mapping: StatusMapping,
     state: StatusMappingTaskState,
-    fields: {
-      projectNodeId: string;
-      fieldNodeId: string;
-      optionNodeId: string;
-    }[] = [],
+    item: { projectFields: StatusMappingFields; readAt: number | null } | null,
   ): string | null {
-    const refreshed = Date.parse(
-      String(
-        this.sources.syncState(projectId, mapping.selectionId)?.refreshedAt,
-      ),
-    );
-    if (state.observedAt !== null && !(state.observedAt < refreshed))
+    if (state.observedAt !== null && !((item?.readAt ?? 0) > state.observedAt))
       return state.observedOptionNodeId;
     return (
-      fields.find(
+      item?.projectFields.find(
         (f) =>
           f.projectNodeId === mapping.projectNodeId &&
           f.fieldNodeId === mapping.fieldNodeId,

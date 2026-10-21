@@ -3,6 +3,7 @@ import {
   isOperatorAction,
   isOperatorDeliveryCaller,
   isRuntimeDeliveryCaller,
+  isServiceDeliveryCaller,
 } from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
 import type { z } from "zod";
@@ -84,11 +85,16 @@ export interface DeliveryCoordinatorOptions {
   /** Test seam for the HTTPS push; production uses `pushTaskCommit`. */
   push?: PushFunction;
   activationAllowed?: (policy: DeliveryPolicy) => boolean;
+  /** How long a status-mapping write's provider call may take before it is given up as unproved. */
+  statusWriteTimeoutMs?: number;
 }
 function actionKeys(record: {
   binding: DeliveryCaller;
   request: ExternalActionArguments;
 }): string[] {
+  // A status-mapping write has its own queue, so a slow provider never delays the task's work.
+  if (isServiceDeliveryCaller(record.binding))
+    return [`status:${record.binding.taskId}`];
   const target = record.request.action.target;
   return [
     `task:${record.binding.taskId}`,
@@ -126,6 +132,21 @@ export class DeliveryCoordinator {
       this.options.fetcher,
       this.options.push,
     );
+  }
+  /** A status-mapping write's provider call gives up after a time; other callers wait as before. */
+  private bounded<T>(caller: DeliveryCaller, call: Promise<T>): Promise<T> {
+    if (!isServiceDeliveryCaller(caller)) return call;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([
+      call,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("status-write-timeout")),
+          this.options.statusWriteTimeoutMs ?? 30_000,
+        );
+        timer.unref();
+      }),
+    ]).finally(() => clearTimeout(timer));
   }
   /** Wakes the lead when a push found, or the PR shows, a branch head Ensemble did not push. */
   private outsidePush(
@@ -253,7 +274,10 @@ export class DeliveryCoordinator {
     }
     let before: Record<string, z.output<ReturnType<typeof z.json>>>;
     try {
-      before = await provider.preflight(action, policy, publication);
+      before = await this.bounded(
+        caller,
+        provider.preflight(action, policy, publication),
+      );
     } catch (error) {
       // The issue no longer shows the text the operator edit replaces, or the item the Status
       // the mapped write expected: nothing is written.
@@ -351,7 +375,10 @@ export class DeliveryCoordinator {
     }
     let observation: ProviderActionObservation;
     try {
-      observation = await provider.performAction(attempting);
+      observation = await this.bounded(
+        caller,
+        provider.performAction(attempting),
+      );
     } catch {
       observation = {
         state: "uncertain" as const,
@@ -665,9 +692,10 @@ export class DeliveryCoordinator {
         if (!["attempting", "uncertain"].includes(current.state)) return;
         let observation: ProviderActionObservation;
         try {
-          observation = await this.provider(
-            current.binding.projectId,
-          ).inspectAction(current);
+          observation = await this.bounded(
+            current.binding,
+            this.provider(current.binding.projectId).inspectAction(current),
+          );
         } catch {
           observation = {
             state: "uncertain" as const,

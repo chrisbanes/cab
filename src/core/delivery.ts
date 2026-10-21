@@ -817,7 +817,8 @@ export class DeliveryStore {
   /**
    * A status-mapping write names the mapping's exact Project, field and option for the event, on
    * the item of a Ready imported task. In-flight events must leave the task Ready; no write can make
-   * a non-Ready task Ready, because only a task that is Ready now qualifies.
+   * a non-Ready task Ready: only a Ready task qualifies, or Done for a done task whose issue is closed,
+   * and then never an option the readiness rule accepts.
    */
   private validateServiceCaller(
     request: ExternalActionArguments,
@@ -848,7 +849,7 @@ export class DeliveryStore {
       throw refusal();
     const task = this.db
       .prepare(
-        `SELECT t.projectId, t.ready, t.state, e.nodeId, e.repositoryId, e.issueNumber, e.labels
+        `SELECT t.projectId, t.ready, t.state, e.nodeId, e.repositoryId, e.issueNumber, e.labels, e.observedState
         FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
       )
       .get(caller.taskId) as
@@ -860,6 +861,7 @@ export class DeliveryStore {
           repositoryId: string;
           issueNumber: number;
           labels: string;
+          observedState: string;
         }
       | undefined;
     const membership = task
@@ -882,7 +884,6 @@ export class DeliveryStore {
     if (
       !task ||
       task.projectId !== caller.projectId ||
-      task.ready !== 1 ||
       task.state === "cancelled" ||
       task.nodeId !== action.target.nodeId ||
       task.repositoryId !== action.target.repositoryId ||
@@ -891,7 +892,6 @@ export class DeliveryStore {
       mapped.itemNodeId !== action.itemNodeId
     )
       throw refusal();
-    if (!isInFlightEvent(caller.event)) return;
     const row = this.db
       .prepare("SELECT readiness FROM project_github_sources WHERE projectId=?")
       .get(caller.projectId) as { readiness: string };
@@ -905,8 +905,8 @@ export class DeliveryStore {
           ),
       );
     // The stored facts with only the target Status substituted.
-    if (
-      !evaluateReadiness(
+    const keepsReady = () =>
+      evaluateReadiness(
         readinessSchema.nullable().parse(JSON.parse(row.readiness)),
         {
           labels: z.array(z.string()).parse(JSON.parse(task.labels)),
@@ -919,8 +919,20 @@ export class DeliveryStore {
             },
           ],
         },
-      ).satisfied
-    )
+      ).satisfied;
+    if (task.ready !== 1) {
+      // Done on closure: a done task whose issue is observed closed is not Ready and a closed issue
+      // cannot be, so Done may still be written, but never an option the rule would accept.
+      if (
+        caller.event !== "done" ||
+        task.state !== "done" ||
+        task.observedState !== "closed" ||
+        keepsReady()
+      )
+        throw refusal();
+      return;
+    }
+    if (isInFlightEvent(caller.event) && !keepsReady())
       throw new DomainPolicyError(
         "forbidden",
         "Status mapping write would remove the task's readiness",

@@ -39,6 +39,8 @@ export async function deliveryFixture(
   imported = false,
   /** An imported task read from a Project selection whose Status the fake GitHub holds. */
   projectStatus = false,
+  /** How long a status-mapping write's provider call may take before it is given up. */
+  statusWriteTimeoutMs?: number,
 ) {
   const root = realpathSync(
       mkdtempSync(join(tmpdir(), "ensemble-delivery-bound-")),
@@ -134,6 +136,7 @@ export async function deliveryFixture(
   // The Status of the fixture issue's Project item (null is no value) and a human move landing with our write.
   let status: string | null = fixtureProject.todo;
   let movedAfterWrite: string | undefined;
+  let statusHold: Promise<void> | undefined;
   const provider: GitHubDeliveryProvider = {
     async inspectClosedIssue() {
       if (closedIssue instanceof Error) throw closedIssue;
@@ -163,6 +166,7 @@ export async function deliveryFixture(
       preflightHook?.();
       if (preflightWait) await preflightWait;
       if (action.kind === "project.field") {
+        if (statusHold) await statusHold;
         if (action.expected && action.expected.optionNodeId !== status)
           throw new ProjectFieldChangedRefusal();
         return { nodeId: "target", optionId: status };
@@ -241,7 +245,10 @@ export async function deliveryFixture(
     },
     undefined,
     {
-      delivery: { providerFactory: () => provider },
+      delivery: {
+        providerFactory: () => provider,
+        ...(statusWriteTimeoutMs ? { statusWriteTimeoutMs } : {}),
+      },
       github: {
         readerFactory: () => ({
           async readSelection() {
@@ -494,6 +501,10 @@ export async function deliveryFixture(
     /** A human move that lands with our next Status write, so its readback shows their option. */
     moveStatusAfterWrite: (value: string | undefined) => {
       movedAfterWrite = value;
+    },
+    /** Status writes' provider reads wait on this; other actions are unaffected. */
+    holdStatusWrites: (value: Promise<void> | undefined) => {
+      statusHold = value;
     },
     getPr: () => pr,
     setPr: (value: PrDeliveryObservation) => {

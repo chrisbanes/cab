@@ -97,7 +97,7 @@ owns delivery scope and status.
 - **Status mapping.** A project can map four of Ensemble's work events (first turn
   started, PR handed back, stopped or blocked, Done) to options of its linked GitHub
   Project's Status, set on the GitHub source tab. The service writes them through the
-  delivery lifecycle under `allow` Project field grants, only for tasks already Ready,
+  delivery lifecycle under `allow` Project field grants, only for tasks already Ready (or Done once the issue is closed),
   and skips a write when the card moved on GitHub since Ensemble last saw it. The
   operator CLI cannot edit the mapping; the writes show on the task and never hold it
   ([ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).

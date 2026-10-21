@@ -270,6 +270,13 @@ export class GitHubSourceStore {
       ).some((c) => c.name === "itemNodeId")
     )
       this.db.exec("ALTER TABLE github_memberships ADD COLUMN itemNodeId TEXT");
+    // When this membership's Project fields were last read; a partial read leaves an unread item's alone.
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(github_memberships)").all() as Row[]
+      ).some((c) => c.name === "readAt")
+    )
+      this.db.exec("ALTER TABLE github_memberships ADD COLUMN readAt INTEGER");
     const closureColumns = this.db
       .prepare("PRAGMA table_info(github_delivery_closures)")
       .all() as Row[];
@@ -303,10 +310,12 @@ export class GitHubSourceStore {
   ): {
     itemNodeId: string;
     projectFields: z.output<typeof projectFieldsSchema>;
+    /** Epoch ms of the read that last set these fields, or null before it was recorded. */
+    readAt: number | null;
   } | null {
     const row = this.db
       .prepare(
-        "SELECT itemNodeId, projectFields FROM github_memberships WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
+        "SELECT itemNodeId, projectFields, readAt FROM github_memberships WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
       )
       .get(projectId, selectionId, nodeId) as Row | undefined;
     if (!row?.itemNodeId) return null;
@@ -315,6 +324,7 @@ export class GitHubSourceStore {
       projectFields: projectFieldsSchema.parse(
         JSON.parse(String(row.projectFields)),
       ),
+      readAt: row.readAt === null ? null : Number(row.readAt),
     };
   }
 
@@ -851,7 +861,7 @@ export class GitHubSourceStore {
         }
         this.db
           .prepare(
-            "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId) VALUES (?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId, nodeId) DO UPDATE SET projectFields = excluded.projectFields, itemNodeId = excluded.itemNodeId",
+            "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId, nodeId) DO UPDATE SET projectFields = excluded.projectFields, itemNodeId = excluded.itemNodeId, readAt = excluded.readAt",
           )
           .run(
             projectId,
@@ -859,6 +869,7 @@ export class GitHubSourceStore {
             issue.nodeId,
             JSON.stringify(issue.projectFields),
             issue.projectItemNodeId ?? null,
+            Date.now(),
           );
         sourceCaptures.push({
           taskId,

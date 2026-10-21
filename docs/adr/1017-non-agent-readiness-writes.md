@@ -28,7 +28,10 @@ caller type, so a new one is a new decision that extends this record, not a flag
     grant for the exact Project, field and option. It never has an approval, so a grant
     in `approval` mode fails closed, at save and at write.
   - The task is Ready when the write is authorized. No write can make a non-Ready task
-    Ready, because only a task that already is qualifies.
+    Ready, because only a task that already is qualifies. The one exception is Done on
+    closure: a done task whose issue is observed closed may have its mapped Done option
+    written although it is no longer Ready, since a closed issue cannot be Ready; the write
+    is refused if the option is one the readiness rule accepts.
   - An in-flight event (first turn started, PR handed back) may write only an option
     that keeps the task Ready: the readiness rule is evaluated on the task's stored
     facts with only that field's value replaced by the target, at save against the
@@ -40,8 +43,9 @@ caller type, so a new one is a new decision that extends this record, not a flag
     mutation is an accepted race, detected on readback.
   - Its records do not hold the task. Unresolved status-mapping actions are excluded
     from the task's action blockers, so they never hold admission, completion, operator
-    edits or agent actions, and a write still in flight serializes only the next status
-    write. An unproved write defers nothing, because that write re-reads the Status.
+    edits or agent actions, and they run in their own queue with a time limit on each
+    provider call, so a hung call never delays the task's work. A write still in flight
+    serializes only the next status write. An unproved write defers nothing, because that write re-reads the Status.
 - **The ticket that publishes tasks** ([#1167](https://github.com/chrisbanes/ensemble/issues/1167))
   extends this record with its caller if it writes a readiness field.
 

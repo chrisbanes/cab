@@ -393,6 +393,84 @@ test("startup waits for complete provider/source revalidation before superseding
   }
 });
 
+test("an unproved status-mapping write does not stop startup from superseding paused inbox work, unlike an agent action", async () => {
+  for (const actor of ["service", "agent"] as const) {
+    const f = await createReleaseDeliveryFixture();
+    try {
+      const queued = await pausedFeedback(f);
+      const operationId = randomUUID();
+      const caller =
+        actor === "service"
+          ? {
+              actor: "service",
+              purpose: "status-mapping",
+              projectId: f.projectId,
+              taskId: f.taskId,
+              mappingVersion: 1,
+              event: "turnStarted",
+            }
+          : {
+              projectId: f.projectId,
+              taskId: f.taskId,
+              taskVersion: 1,
+              assignmentId: randomUUID(),
+              assignmentVersion: 1,
+              workId: "work",
+              workRevision: 1,
+              conversationRevision: 1,
+            };
+      f.seedPersistedState((db) =>
+        db.prepare("INSERT INTO delivery_actions VALUES (?,?,?,?)").run(
+          operationId,
+          f.taskId,
+          "0".repeat(64),
+          JSON.stringify({
+            operationId,
+            request: {
+              operationId,
+              action: {
+                kind: "issue.comment",
+                target: { repositoryId: "R1", number: 1, nodeId: "I1" },
+                body: "Unproved",
+              },
+            },
+            binding: caller,
+            policyVersion: 1,
+            state: "uncertain",
+            attempts: 1,
+            beforeState: {},
+            observation: {
+              state: "uncertain",
+              reason: "provider-effect-unproved",
+              receipt: null,
+            },
+            createdAt: 1,
+            updatedAt: 1,
+          }),
+        ),
+      );
+      assert.ok(queued);
+      await f.reopen();
+      assert.equal(
+        f.readDb(
+          (db) =>
+            (
+              db
+                .prepare(
+                  "SELECT COUNT(*) AS n FROM inbox_request_supersessions",
+                )
+                .get() as { n: number }
+            ).n,
+        ),
+        actor === "service" ? 1 : 0,
+        actor,
+      );
+    } finally {
+      await f.close();
+    }
+  }
+});
+
 for (const fault of [
   "source",
   "permission",

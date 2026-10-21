@@ -419,6 +419,8 @@ export interface StandaloneServiceOptions {
       projectId: string,
       policy: DeliveryPolicy,
     ) => GitHubDeliveryProvider;
+    /** Test-only: how long a status-mapping write's provider call may take. */
+    statusWriteTimeoutMs?: number;
   };
   github?: { readerFactory?: GitHubReaderFactory; intervalMs?: number };
   routingClient?: RoutingChoiceClient | null;
@@ -944,6 +946,11 @@ export class StandaloneService {
           : {}),
         ...(this.options.delivery?.providerFactory
           ? { providerFactory: this.options.delivery.providerFactory }
+          : {}),
+        ...(this.options.delivery?.statusWriteTimeoutMs
+          ? {
+              statusWriteTimeoutMs: this.options.delivery.statusWriteTimeoutMs,
+            }
           : {}),
         authorize: (caller, exceptOperationId, request) => {
           this.authorizeDelivery(

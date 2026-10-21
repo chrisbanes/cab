@@ -8,6 +8,7 @@ import {
 import { StatusMappingStore } from "../../src/core/status-mapping.js";
 import type { StatusMapping } from "../../src/core/status-mapping-contracts.js";
 import { projectFieldChangedReason } from "../../src/operator/github-reasons.js";
+import { statusMappingEvent } from "../../src/standalone/status-mapping.js";
 import {
   deliveryFixture,
   fixtureProject,
@@ -34,8 +35,16 @@ const mapping = (
 });
 
 /** An imported task in a Project selection, mapped and with its lead turn already started. */
-async function mapped(events?: Partial<StatusMapping["events"]>) {
-  const f = await deliveryFixture("reviewable-pr", true, true);
+async function mapped(
+  events?: Partial<StatusMapping["events"]>,
+  statusWriteTimeoutMs?: number,
+) {
+  const f = await deliveryFixture(
+    "reviewable-pr",
+    true,
+    true,
+    statusWriteTimeoutMs,
+  );
   save(f, mapping(events));
   return f;
 }
@@ -451,4 +460,150 @@ test("a prepared status write left by a crash is attempted once by reconcile", a
   } finally {
     await f.close();
   }
+});
+
+test("a hung status write is given up and never delays an agent action or completion qualification", async () => {
+  const f = await mapped(undefined, 2000);
+  try {
+    await f.service.runStatusMapping();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    f.holdStatusWrites(new Promise<void>(() => {}));
+    await registerPr(f);
+    let settled = false;
+    const run = f.service.runStatusMapping().then(() => {
+      settled = true;
+    });
+    const deadline = Date.now() + 3000;
+    while (writes(f).length < 2) {
+      assert.ok(Date.now() < deadline, "the status write was never prepared");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const comment = await f.call("ensemble_external_action", {
+      operationId: randomUUID(),
+      action: {
+        kind: "issue.comment",
+        target: { repositoryId: "R1", nodeId: "I1", number: 1 },
+        body: "While the status write hangs",
+      },
+    });
+    assert.equal(comment.success, true, comment.text);
+    await startedOf(f.service).deliveryCoordinator.qualifyCompletion(f.taskId);
+    // Both finished while the status write was still waiting on GitHub.
+    assert.equal(settled, false);
+    await run;
+    // Given up before any effect: refused, never sent, and not held.
+    assert.equal(writes(f)[1]?.state, "confirmed-failure");
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a partial source read that did not read the item does not make a stale Status look newer than a confirmed write", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    await registerPr(f);
+    startedOf(f.service).githubSources.reconcileSelection(f.projectId, "repo", {
+      complete: false,
+      issues: [],
+      reason: "http-403",
+    });
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
+    assert.equal(writes(f)[1]?.state, "confirmed-success");
+  } finally {
+    await f.close();
+  }
+});
+
+test("Done is written for a done task whose issue is observed closed, though it is no longer Ready", async () => {
+  const f = await started();
+  try {
+    // GitHub closes the issue: the next read makes the task not Ready.
+    f.setIssueOpen(false);
+    await f.service.refreshGitHub();
+    assert.equal(f.domain.task(f.taskId).ready, 0);
+    await f.service.runStatusMapping();
+    // Not done yet: nothing is written.
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    await f.service.runStatusMapping();
+    assert.deepEqual(optionsWritten(f), [inProgress, done]);
+    assert.equal(f.domain.task(f.taskId).ready, 0);
+    assert.equal(writes(f)[1]?.state, "confirmed-success");
+  } finally {
+    await f.close();
+  }
+});
+
+test("Done is not written for a done task that is not Ready while its issue is still open", async () => {
+  const f = await started();
+  try {
+    // A human moved the card to Done: outside the readiness rule, the open issue is not Ready.
+    f.setStatus(done);
+    await f.service.refreshGitHub();
+    assert.equal(f.domain.task(f.taskId).ready, 0);
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    await f.service.runStatusMapping();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    assert.equal(writes(f).length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a handed-back PR stays handed back when it closes, merges or is settled closed, until Done", () => {
+  const binding = (change: Record<string, unknown>) => ({
+    mode: "reviewable-pr",
+    observation: { state: "OPEN", draft: false },
+    settlement: null,
+    ...change,
+  });
+  const event = (value: unknown) =>
+    statusMappingEvent(
+      {
+        domain: {
+          task: () => ({ state: "open", importedBlockers: "clear" }),
+          blockingDependencies: () => [],
+        },
+        state: { taskHold: () => undefined, taskHasStartedTurn: () => true },
+        deliveryStore: { actionBlockers: () => [], delivery: () => value },
+      } as never,
+      "task",
+    );
+  assert.equal(event(binding({})), "handedBack");
+  for (const state of ["CLOSED", "MERGED"])
+    assert.equal(
+      event(binding({ observation: { state, draft: false } })),
+      "handedBack",
+      state,
+    );
+  assert.equal(
+    event(binding({ settlement: { decision: "closed" } })),
+    "handedBack",
+  );
+  assert.equal(
+    event(binding({ observation: { state: "OPEN", draft: true } })),
+    "turnStarted",
+  );
+  assert.equal(event(null), "turnStarted");
+  assert.equal(event(binding({ mode: "through-merge" })), "turnStarted");
 });
