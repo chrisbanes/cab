@@ -13,6 +13,7 @@ import {
 } from "./comparison-read-match.js";
 import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
+import { changeLineCounts } from "./file-change-markers.js";
 import { failureCause } from "./outcome-copy.js";
 import { codeSentence, shortId } from "./presentation.js";
 import { DiffHunk, DiffLayoutControls, type Anchor } from "./diff-view.js";
@@ -578,11 +579,6 @@ export function TaskWorkspaceChanges({
       aria-labelledby="workspace-changes-heading"
     >
       <h4 id="workspace-changes-heading">Workspace comparisons</h4>
-      <p>
-        Current workspace snapshots stay fixed until Refresh. Last turn is a
-        separate actual runtime capture; recorded result and delivery changes
-        remain below.
-      </p>
       <div className="task-actions changes-controls">
         <label htmlFor="changes-target">
           Comparison target
@@ -799,7 +795,26 @@ export function TaskWorkspaceChanges({
             data-mobile-hidden={state.mobileView === "preview"}
             aria-label="Changed files"
           >
-            <h5>Changed files</h5>
+            <h5>
+              {(() => {
+                const counts = changeLineCounts(
+                  snapshot.entries,
+                  snapshot.truncated,
+                );
+                return (
+                  <>
+                    Changes · {counts.files}
+                    {counts.added !== undefined && (
+                      <>
+                        {" "}
+                        <span>+{counts.added}</span>{" "}
+                        <span>−{counts.removed}</span>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
+            </h5>
             <ul
               className="changes-entry-list"
               aria-label="Workspace comparison files"
@@ -945,6 +960,11 @@ export function TaskWorkspaceChanges({
           </div>
         </div>
       )}
+      <p>
+        Current workspace snapshots stay fixed until Refresh. Last turn is a
+        separate actual runtime capture; recorded result and delivery changes
+        remain below.
+      </p>
     </section>
   );
 }

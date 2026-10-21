@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceComparisonRead } from "../../src/operator/contracts.js";
-import { changeMarkers } from "../../web/src/file-change-markers.js";
+import {
+  changeLineCounts,
+  changeMarkers,
+} from "../../web/src/file-change-markers.js";
 
 const taskId = "cee1f027-8169-46de-84a6-9c7e70ef91e3";
 const comparisonId = "f6d207ea-dd9d-423a-ae70-cde35c65f1f1";
@@ -139,4 +142,42 @@ test("a read that is not a complete Branch comparison of this repository yields 
     changeMarkers(read(entries, { target: "uncommitted" }), "alpha", []),
     null,
   );
+});
+
+const withPatch = (
+  patch: string,
+  state: "text" | "binary" | "unsupported" | "gap" = "text",
+) => ({ state, hunks: [{ patch }] });
+
+test("the heading counts files and the added and removed lines of every hunk", () => {
+  const entries = [
+    withPatch("@@ -1,3 +1,4 @@\n one\n-two\n+TWO\n three\n+four"),
+    withPatch("@@ -0,0 +1 @@\n+new"),
+  ];
+  assert.deepEqual(changeLineCounts(entries, false), {
+    files: 2,
+    added: 3,
+    removed: 1,
+  });
+});
+
+test("a no-newline marker and a binary entry add no lines", () => {
+  const entries = [
+    withPatch("@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b"),
+    { state: "binary" as const, hunks: [] },
+  ];
+  assert.deepEqual(changeLineCounts(entries, false), {
+    files: 2,
+    added: 1,
+    removed: 1,
+  });
+});
+
+test("a truncated, gapped or unsupported comparison shows the file count alone", () => {
+  const text = withPatch("@@ -0,0 +1 @@\n+new");
+  assert.deepEqual(changeLineCounts([text], true), { files: 1 });
+  for (const state of ["gap", "unsupported"] as const)
+    assert.deepEqual(changeLineCounts([text, withPatch("", state)], false), {
+      files: 2,
+    });
 });

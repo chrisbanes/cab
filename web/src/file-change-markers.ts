@@ -87,3 +87,35 @@ export function changeMarkers(
   }
   return markers;
 }
+
+/**
+ * The totals the Changes rail heading shows. Line counts follow the diff view's rule (every `+` and
+ * `-` line of every hunk) and appear only when the comparison is complete: a truncated one, or one
+ * with a gap or unsupported entry, shows the file count alone so a partial total never reads as whole.
+ */
+export function changeLineCounts(
+  entries: ReadonlyArray<{
+    state: "text" | "binary" | "unsupported" | "gap";
+    hunks: ReadonlyArray<{ patch: string }>;
+  }>,
+  truncated: boolean,
+): { files: number; added?: number; removed?: number } {
+  const files = entries.length;
+  if (
+    truncated ||
+    entries.some(
+      (entry) => entry.state === "gap" || entry.state === "unsupported",
+    )
+  )
+    return { files };
+  let added = 0;
+  let removed = 0;
+  for (const entry of entries)
+    for (const hunk of entry.hunks)
+      for (const line of hunk.patch.split("\n")) {
+        if (line.startsWith("@@") || line.startsWith("\\ No newline")) continue;
+        if (line.startsWith("+")) added++;
+        else if (line.startsWith("-")) removed++;
+      }
+  return { files, added, removed };
+}
