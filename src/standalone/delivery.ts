@@ -694,19 +694,15 @@ export class DeliveryCoordinator {
           return;
         }
         if (!["attempting", "uncertain"].includes(current.state)) return;
-        // An older unproved status write is settled once a newer one has been sent: the newer
-        // write re-read the Status, and re-inspecting history would grow without end.
+        // An older unproved status write is not inspected again once a newer one has been sent: the
+        // newer write re-read the Status, and re-inspecting history would grow without end. It stays
+        // uncertain, since its effect may have landed.
         if (
           current.state === "uncertain" &&
           isServiceDeliveryCaller(current.binding) &&
           this.store.latestSentServiceOperation(current.binding.taskId) !==
             current.operationId
         ) {
-          this.store.recordObservation(current.operationId, {
-            state: "confirmed-failure",
-            reason: "status-write-superseded",
-            receipt: null,
-          });
           return;
         }
         let observation: ProviderActionObservation;

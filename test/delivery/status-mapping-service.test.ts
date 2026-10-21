@@ -654,7 +654,7 @@ test("Done recorded while the issue was open and the task not Ready is written o
   }
 });
 
-test("an older unproved status write is settled as superseded once a newer one has been sent, not inspected again", async () => {
+test("an older unproved status write is not inspected again once a newer one has been sent, and stays uncertain", async () => {
   const f = await started();
   try {
     f.moveStatusAfterWrite(todo);
@@ -671,12 +671,10 @@ test("an older unproved status write is settled as superseded once a newer one h
     });
     await f.service.runStatusMapping();
     assert.equal(writes(f)[2]?.state, "confirmed-success");
+    // Were it inspected, the card showing the written option would prove it.
+    f.setStatus(inReview);
     await startedOf(f.service).deliveryCoordinator.reconcile();
-    assert.equal(writes(f)[1]?.state, "confirmed-failure");
-    assert.equal(writes(f)[1]?.observation?.reason, "status-write-superseded");
-    // Settled: a later pass leaves it alone.
-    await startedOf(f.service).deliveryCoordinator.reconcile();
-    assert.equal(writes(f)[1]?.observation?.reason, "status-write-superseded");
+    assert.equal(writes(f)[1]?.state, "uncertain");
   } finally {
     await f.close();
   }
