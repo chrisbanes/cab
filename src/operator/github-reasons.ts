@@ -69,3 +69,34 @@ export const sourceStateSentences: Record<SourceState, string> = {
   never: "Not synced yet",
   unavailable: "Sync state can't be read right now",
 };
+
+/**
+ * Why an imported task's issue cannot be improved and edited by the operator, in the order the
+ * server reports them. The first reason that applies wins. Running work, an unready task and a
+ * held task are not reasons: an edit does not wait for admission.
+ */
+export const issueEditReasonCodes = [
+  "no-source-issue",
+  "task-not-open",
+  "no-edit-grant",
+  "no-project-lead",
+  "action-unresolved",
+  "no-delivery-credential",
+] as const;
+export type IssueEditReasonCode = (typeof issueEditReasonCodes)[number];
+
+/** The delivery reason recorded when an operator edit finds the issue changed on GitHub. */
+export const issueChangedReason = "provider-issue-changed";
+
+export const issueEditReasonSentences: Record<IssueEditReasonCode, string> = {
+  "no-source-issue": "This task isn’t imported from a GitHub issue.",
+  "task-not-open": "Improve with lead needs an open task.",
+  "no-edit-grant":
+    "This repository doesn’t allow Ensemble to edit issues. Allow issue edits in project configuration.",
+  "no-project-lead":
+    "Improve with lead needs a project lead. Choose a lead in project configuration.",
+  "action-unresolved":
+    "An earlier GitHub action on this task has an unknown outcome. Resolve it first.",
+  "no-delivery-credential":
+    "No GitHub credential is available for delivery. Add one in project configuration.",
+};

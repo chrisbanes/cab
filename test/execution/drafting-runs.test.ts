@@ -5,6 +5,8 @@ import { DatabaseSync } from "node:sqlite";
 import {
   DraftingRunStore,
   draftingProposalTtlMs,
+  issueDraftingRequest,
+  issueEditProposalOf,
 } from "../../src/standalone/drafting.js";
 import { SchedulerStore } from "../../src/standalone/scheduler.js";
 
@@ -227,4 +229,126 @@ test("a reused run id with other content is refused", () => {
     () => store.create({ ...run, idea: "different" }),
     /other content/,
   );
+});
+
+const issue = {
+  taskId: randomUUID(),
+  sourceNodeId: "I_1",
+  observedTitle: "Thin title",
+  observedBody: "Thin body",
+};
+
+function newIssueRun(store: DraftingRunStore, idea = "") {
+  return store.create({
+    runId: randomUUID(),
+    projectId: randomUUID(),
+    idea,
+    harness: "codex",
+    profileId: randomUUID(),
+    profileRevision: 1,
+    instructionsRevision: 1,
+    issue,
+  });
+}
+
+test("a table written before issue runs gains the columns and its rows read as briefs", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE drafting_runs (
+    runId TEXT PRIMARY KEY, projectId TEXT NOT NULL, idea TEXT NOT NULL,
+    harness TEXT NOT NULL, profileId TEXT NOT NULL, profileRevision INTEGER NOT NULL,
+    instructionsRevision INTEGER NOT NULL, state TEXT NOT NULL, reason TEXT,
+    title TEXT, outcome TEXT, createdAt INTEGER NOT NULL, proposedAt INTEGER)`);
+  const runId = randomUUID();
+  // A run mid-flight across the upgrade.
+  db.prepare(
+    `INSERT INTO drafting_runs
+    (runId, projectId, idea, harness, profileId, profileRevision, instructionsRevision, state, createdAt)
+    VALUES (?, ?, 'old idea', 'codex', ?, 1, 1, 'running', 1)`,
+  ).run(runId, randomUUID(), randomUUID());
+  const store = new DraftingRunStore(db);
+  new DraftingRunStore(db); // idempotent
+  const run = store.require(runId);
+  assert.equal(run.kind, "brief");
+  assert.equal(run.taskId, null);
+  store.recordProposal(runId, proposal);
+  store.transition(runId, "proposed");
+  assert.deepEqual(store.require(runId).proposal, proposal);
+  assert.equal(issueEditProposalOf(store.require(runId)), null);
+});
+
+test("an issue run records its source and returns a title and body beyond the brief limit", () => {
+  const { store } = draftingStore();
+  const run = newIssueRun(store, "mention the API");
+  assert.equal(run.kind, "issue");
+  assert.equal(run.observedBody, "Thin body");
+  store.transition(run.runId, "running");
+  const body = "x".repeat(40_000);
+  store.recordProposal(run.runId, { title: "  Better  ", body });
+  assert.equal(
+    store.require(run.runId).proposal,
+    null,
+    "hidden until proposed",
+  );
+  store.transition(run.runId, "proposed");
+  assert.deepEqual(issueEditProposalOf(store.require(run.runId)), {
+    title: "Better",
+    body,
+  });
+  store.transition(run.runId, "accepted");
+  assert.equal(issueEditProposalOf(store.require(run.runId)), null);
+});
+
+test("an issue run refuses blank or oversize proposals and keeps the earlier one", () => {
+  const { store } = draftingStore();
+  const run = newIssueRun(store);
+  store.transition(run.runId, "running");
+  store.recordProposal(run.runId, { title: "Kept", body: "Kept body" });
+  for (const bad of [
+    { title: "  ", body: "b" },
+    { title: "t", body: "   " },
+    { title: "t".repeat(513), body: "b" },
+    { title: "t", body: "b".repeat(64_001) },
+    { title: "t", outcome: "o" },
+  ])
+    assert.throws(() => store.recordProposal(run.runId, bad as never));
+  store.transition(run.runId, "proposed");
+  assert.deepEqual(issueEditProposalOf(store.require(run.runId)), {
+    title: "Kept",
+    body: "Kept body",
+  });
+});
+
+test("an issue run cannot take a brief proposal and a brief run cannot take a body", () => {
+  const { store } = draftingStore();
+  const issueRun = newIssueRun(store);
+  store.transition(issueRun.runId, "running");
+  assert.throws(() => store.recordProposal(issueRun.runId, proposal));
+  const brief = newRun(store);
+  store.transition(brief.runId, "running");
+  assert.throws(() =>
+    store.recordProposal(brief.runId, { title: "t", body: "b" } as never),
+  );
+});
+
+test("a reused issue run id with another task is refused and an empty note is allowed", () => {
+  const { store } = draftingStore();
+  const run = newIssueRun(store);
+  assert.equal(run.idea, "");
+  assert.throws(
+    () =>
+      store.create({
+        ...run,
+        issue: { ...issue, taskId: randomUUID() },
+      }),
+    /other content/,
+  );
+  assert.equal(store.create({ ...run, issue }).runId, run.runId);
+});
+
+test("the issue request shows the observed text and the operator note", () => {
+  const { store } = draftingStore();
+  const text = issueDraftingRequest(newIssueRun(store, "mention the API"));
+  assert.match(text, /Thin title/);
+  assert.match(text, /Thin body/);
+  assert.match(text, /mention the API/);
 });

@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import {
+  issueCurrentBodyLimit,
+  issueTitleLimit,
+} from "../core/issue-text-limits.js";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
@@ -27,6 +31,8 @@ import {
   type DeliveryCaller,
   type DeliveryPolicy,
   DeliveryStore,
+  type ExternalAction,
+  isOperatorAction,
   isOperatorDeliveryCaller,
   materialDigest,
   type OperatorCommentReview,
@@ -53,6 +59,10 @@ import {
   draftProposalSchema,
   type OperatorCommand,
 } from "../operator/contracts.js";
+import {
+  type IssueEditReasonCode,
+  issueChangedReason,
+} from "../operator/github-reasons.js";
 
 type DraftingReceipt = Extract<CommandReceipt, { kind: "drafting" }>;
 import { reviewMetadataSchema } from "../core/task-review.js";
@@ -67,6 +77,11 @@ import {
   draftProposalTool,
   draftProposalToolName,
   draftingInstruction,
+  issueDraftingInstruction,
+  issueDraftingRequest,
+  issueEditProposalSchema,
+  issueEditProposalTool,
+  issueEditProposalToolName,
   draftingTimeLimitMs,
 } from "./drafting.js";
 import {
@@ -929,9 +944,10 @@ export class StandaloneService {
             { deliveryStore, state, domain, coordination },
             caller,
             exceptOperationId,
+            request?.action.kind,
           );
           if (isOperatorDeliveryCaller(caller)) {
-            if (request && request.action.kind !== "issue.comment")
+            if (request && !isOperatorAction(request.action))
               throw new DomainPolicyError(
                 "forbidden",
                 "Operator delivery only permits issue.comment",
@@ -2987,9 +3003,21 @@ export class StandaloneService {
     }: Pick<Started, "deliveryStore" | "state" | "domain" | "coordination">,
     caller: DeliveryCaller,
     exceptOperationId?: string,
+    kind?: ExternalAction["kind"],
   ): void {
     if (isOperatorDeliveryCaller(caller)) {
       deliveryStore.validateOperatorCaller(caller);
+      // The confirmed review is the operator's approval of an edit; like Stop, it does not wait
+      // for admission, so running, unready and held tasks can take one. It needs an open task and
+      // no delivery action whose outcome is still unknown.
+      if (kind === "issue.edit") {
+        if (
+          domain.task(caller.taskId).state !== "open" ||
+          deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
+        )
+          throw new DomainConflictError("Task cannot take an issue edit");
+        return;
+      }
       if (
         state.taskHold(caller.taskId) ||
         domain
@@ -3101,7 +3129,12 @@ export class StandaloneService {
     return this.delivery().confirmOperatorComment(command, () => {
       const record = this.delivery().operatorReview(command.reviewId);
       if (!record) throw new DomainConflictError("Operator review unavailable");
-      this.authorizeDelivery(this.started(), record.caller);
+      this.authorizeDelivery(
+        this.started(),
+        record.caller,
+        undefined,
+        record.action.kind,
+      );
     });
   }
   async postOperatorComment(command: {
@@ -3138,6 +3171,150 @@ export class StandaloneService {
       },
       caller,
     );
+  }
+  private operatorEditAction(
+    caller: OperatorDeliveryCaller,
+    edit: {
+      title: string;
+      body: string;
+      expected: { title: string; body: string };
+    },
+  ) {
+    const issue = this.githubSources().issue(caller.sourceNodeId);
+    if (!issue)
+      throw new DomainConflictError("Imported task issue unavailable");
+    return {
+      kind: "issue.edit" as const,
+      target: {
+        nodeId: caller.sourceNodeId,
+        repositoryId: caller.sourceRepositoryId,
+        number: Number(issue.issueNumber),
+      },
+      fields: { title: edit.title, body: edit.body },
+      // The text the draft started from. Review refuses it unless the synced copy still shows it,
+      // and the provider checks it against GitHub again before writing.
+      expected: edit.expected,
+    };
+  }
+  reviewOperatorEdit(command: {
+    key: string;
+    taskId: string;
+    operationId: string;
+    expectedTaskVersion: number;
+    title: string;
+    body: string;
+    expected: { title: string; body: string };
+  }): OperatorCommentReview {
+    const prior = this.delivery().operatorReview(command.key);
+    if (prior) {
+      if (prior.commandHash !== materialDigest(command))
+        throw new DomainConflictError(
+          "Operator review key reused with different material",
+        );
+      return prior;
+    }
+    const caller = this.operatorCommentCaller(command.taskId);
+    return this.delivery().reviewOperatorEdit(
+      command,
+      caller,
+      this.operatorEditAction(caller, command),
+    );
+  }
+  /**
+   * Whether the operator can improve and edit an imported task's issue, and the first reason
+   * that applies if not. Running work, an unready task and a held task do not count: an edit
+   * waits for none of them.
+   */
+  issueEditAvailability(taskId: string): {
+    available: boolean;
+    reasonCode: IssueEditReasonCode | null;
+  } {
+    const d = this.domain();
+    const task = d.task(taskId);
+    const imported = d.importedTask(taskId);
+    const policy = this.delivery().configuration(String(task.projectId));
+    const hasLead = (() => {
+      try {
+        this.draftingLead(String(task.projectId));
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    const reasonCode: IssueEditReasonCode | null = !imported
+      ? "no-source-issue"
+      : task.state !== "open"
+        ? "task-not-open"
+        : !policy.grants.some(
+              (g) =>
+                g.action === "issue.edit" &&
+                g.repositoryId === String(imported.repositoryId),
+            )
+          ? "no-edit-grant"
+          : !hasLead
+            ? "no-project-lead"
+            : this.delivery().actionBlockers(taskId).length
+              ? "action-unresolved"
+              : policy.credentialRef === null
+                ? "no-delivery-credential"
+                : null;
+    return { available: reasonCode === null, reasonCode };
+  }
+  /** Sends the reviewed edit exactly as reviewed; the review's key is its operation id. */
+  async postOperatorEdit(command: {
+    key: string;
+    taskId: string;
+    reviewId: string;
+    expectedTaskVersion: number;
+  }): Promise<DeliveryActionRecord> {
+    const review = this.delivery().operatorReview(command.reviewId);
+    if (
+      !review ||
+      review.taskId !== command.taskId ||
+      review.operationId !== command.key ||
+      review.action.kind !== "issue.edit"
+    )
+      throw new DomainConflictError("Operator review unavailable");
+    const prior = this.delivery()
+      .actions(command.taskId)
+      .find((a) => a.operationId === command.key);
+    if (prior) {
+      if (
+        !isOperatorDeliveryCaller(prior.binding) ||
+        prior.binding.taskVersion !== command.expectedTaskVersion ||
+        prior.request.operatorReviewId !== command.reviewId ||
+        canonicalMaterial(prior.request.action) !==
+          canonicalMaterial(review.action)
+      )
+        throw new DomainConflictError(
+          "Operation key used with different material or caller",
+        );
+      // The refresh that follows a stale refusal may have failed, so a replay tries again.
+      await this.refreshAfterStaleEdit(prior);
+      return prior;
+    }
+    const caller = this.operatorCommentCaller(command.taskId);
+    if (caller.taskVersion !== command.expectedTaskVersion)
+      throw new DomainConflictError("Operator task revision conflict");
+    const sent = await this.started().deliveryCoordinator.submit(
+      {
+        operationId: command.key,
+        action: review.action,
+        operatorReviewId: command.reviewId,
+      },
+      caller,
+    );
+    await this.refreshAfterStaleEdit(sent);
+    return sent;
+  }
+  /**
+   * The synced copy is what a Redraft starts from, so after GitHub showed a change the source
+   * is read now rather than at the next poll. A failed read leaves the earlier copy, and a
+   * replay of the same send tries again.
+   */
+  private async refreshAfterStaleEdit(record: DeliveryActionRecord) {
+    if (record.observation?.reason === issueChangedReason)
+      await this.refreshGitHub().catch(() => {});
   }
   async refreshGitHub(): Promise<void> {
     const started = this.started();
@@ -4197,7 +4374,10 @@ export class StandaloneService {
 
   private handleToolCall(call: RuntimeToolCall): Promise<RuntimeToolResult> {
     const { coordination, state } = this.started();
-    if (call.tool === draftProposalToolName)
+    if (
+      call.tool === draftProposalToolName ||
+      call.tool === issueEditProposalToolName
+    )
       return Promise.resolve(this.handleDraftProposal(call));
     if (!isCoordinationTool(call.tool))
       return Promise.resolve({
@@ -4571,6 +4751,96 @@ export class StandaloneService {
   }
 
   /**
+   * Starts a project-owned run that proposes a better title and body for an imported task's
+   * issue. It starts from the synced text, which it records, changes nothing, and works while
+   * the task has work running.
+   */
+  async startIssueDrafting(input: {
+    runId: string;
+    taskId: string;
+    note: string;
+  }): Promise<DraftingRun> {
+    const value = z
+      .object({
+        runId: z.string().uuid(),
+        taskId: z.string().uuid(),
+        note: z.string().max(16_000),
+      })
+      .strict()
+      .parse(input);
+    const { drafting, schedulerStore } = this.started();
+    // A start that already created its run converges on it before the task and source are
+    // judged again: they may have changed since, and the run must not be orphaned.
+    const earlier = drafting.get(value.runId);
+    if (earlier) {
+      if (
+        earlier.kind !== "issue" ||
+        earlier.taskId !== value.taskId ||
+        earlier.sourceNodeId === null ||
+        earlier.observedTitle === null ||
+        earlier.observedBody === null
+      )
+        throw new DomainConflictError(
+          "Drafting run identity already used with other content",
+        );
+      const issue = {
+        taskId: value.taskId,
+        sourceNodeId: earlier.sourceNodeId,
+        observedTitle: earlier.observedTitle,
+        observedBody: earlier.observedBody,
+      };
+      const replayed = drafting.atomically(() => {
+        const created = drafting.create({
+          ...earlier,
+          idea: value.note,
+          issue,
+        });
+        schedulerStore.ensure(StandaloneService.draftingRequest(created));
+        return created;
+      });
+      await this.wakeScheduler();
+      return drafting.require(replayed.runId);
+    }
+    const domain = this.domain();
+    const task = domain.task(value.taskId);
+    const imported = domain.importedTask(value.taskId);
+    const source = imported
+      ? this.githubSources().issue(String(imported.nodeId))
+      : undefined;
+    if (!imported || !source)
+      throw new DomainConflictError("Only an imported task has an issue");
+    if (task.state !== "open")
+      throw new DomainConflictError("Improve with lead needs an open task");
+    const projectId = String(task.projectId);
+    const issue = {
+      taskId: value.taskId,
+      sourceNodeId: String(imported.nodeId),
+      observedTitle: String(source.observedTitle),
+      observedBody: String(source.observedBody),
+    };
+    // The operator must be able to see all of this text to review a replacement.
+    if (
+      issue.observedTitle.length > issueTitleLimit ||
+      issue.observedBody.length > issueCurrentBodyLimit
+    )
+      throw new DomainConflictError("The issue is too long to rewrite");
+    // The run and its turn request commit together: neither can exist without the other.
+    const run = drafting.atomically(() => {
+      const created = drafting.create({
+        runId: value.runId,
+        projectId,
+        idea: value.note,
+        ...this.draftingLead(projectId),
+        issue,
+      });
+      schedulerStore.ensure(StandaloneService.draftingRequest(created));
+      return created;
+    });
+    await this.wakeScheduler();
+    return drafting.require(run.runId);
+  }
+
+  /**
    * The private paths of the copy a run was built from, kept with the run after the
    * project unlinks the repository or the copy is removed.
    */
@@ -4602,7 +4872,7 @@ export class StandaloneService {
       assignmentVersion: null,
       instructionsRevision: run.instructionsRevision,
       profileRevision: run.profileRevision,
-      prompt: run.idea,
+      prompt: run.kind === "issue" ? issueDraftingRequest(run) : run.idea,
       workspace: null,
       previousWorkId: null,
     };
@@ -4650,7 +4920,13 @@ export class StandaloneService {
   draftingCommand(
     command: Extract<
       OperatorCommand,
-      { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
+      {
+        type:
+          | "drafting.start"
+          | "drafting.stop"
+          | "drafting.settle"
+          | "issue.draft.start";
+      }
     >,
   ): Promise<DraftingReceipt> {
     // One command per key at a time: a second with the same key waits, then finds the
@@ -4671,7 +4947,13 @@ export class StandaloneService {
   private async applyDraftingCommand(
     command: Extract<
       OperatorCommand,
-      { type: "drafting.start" | "drafting.stop" | "drafting.settle" }
+      {
+        type:
+          | "drafting.start"
+          | "drafting.stop"
+          | "drafting.settle"
+          | "issue.draft.start";
+      }
     >,
   ): Promise<DraftingReceipt> {
     const { drafting } = this.started();
@@ -4699,6 +4981,29 @@ export class StandaloneService {
         );
         return drafting.recordReceipt(key, content, receipt);
       });
+    if (command.type === "issue.draft.start") {
+      // A run that already exists converges without the fences: the receipt is only missing
+      // because the service stopped between creating the run and recording it.
+      if (drafting.get(command.runId)?.taskId !== command.taskId) {
+        const task = this.domain().task(command.taskId);
+        if (Number(task.version) !== command.expectedTaskVersion)
+          throw new DomainConflictError("The task changed");
+        if (!this.issueEditAvailability(command.taskId).available)
+          throw new DomainConflictError("Improve with lead is unavailable");
+      }
+      return drafting.recordReceipt(
+        key,
+        content,
+        receiptOf(
+          "start",
+          await this.startIssueDrafting({
+            runId: command.runId,
+            taskId: command.taskId,
+            note: command.note,
+          }),
+        ),
+      );
+    }
     const receipt =
       command.type === "drafting.start"
         ? receiptOf(
@@ -4794,8 +5099,23 @@ export class StandaloneService {
         (control.turnId !== undefined && control.turnId !== call.turnId)
       )
         continue;
-      if (drafting.get(runId)?.state !== "running") break;
-      const parsed = draftProposalSchema.safeParse(call.arguments);
+      const run = drafting.get(runId);
+      if (run?.state !== "running") break;
+      // Each kind of run is offered one tool and no other.
+      if (
+        call.tool !==
+        (run.kind === "issue"
+          ? issueEditProposalToolName
+          : draftProposalToolName)
+      )
+        return {
+          success: false,
+          text: "This tool is not offered to this drafting run",
+        };
+      const parsed =
+        run.kind === "issue"
+          ? issueEditProposalSchema.safeParse(call.arguments)
+          : draftProposalSchema.safeParse(call.arguments);
       if (!parsed.success)
         return {
           success: false,
@@ -4808,7 +5128,6 @@ export class StandaloneService {
             .slice(0, 1000),
         };
       // The operator could not be shown text the exclusions would change, so it is refused now.
-      const run = drafting.require(runId);
       const domain = this.domain();
       const failure = this.failureExclusions();
       // Including the instructions this run was given, which the operator's reads also redact,
@@ -4829,7 +5148,9 @@ export class StandaloneService {
       const shown = (text: string) =>
         excluded !== undefined &&
         sanitizeConversationText(text, excluded) === text;
-      if (!shown(parsed.data.title) || !shown(parsed.data.outcome))
+      const body =
+        "body" in parsed.data ? parsed.data.body : parsed.data.outcome;
+      if (!shown(parsed.data.title) || !shown(body))
         return {
           success: false,
           text: "The draft holds text that cannot be shown to the operator, such as a private path or credential. Remove it and call the tool again.",
@@ -5746,10 +6067,19 @@ export class StandaloneService {
           revision: run.instructionsRevision,
           text: `Captured project instructions (revision ${run.instructionsRevision}):\n${projectInstructions || "(none)"}`,
         },
-        { name: "drafting-instruction", text: draftingInstruction },
+        {
+          name: "drafting-instruction",
+          text:
+            run.kind === "issue"
+              ? issueDraftingInstruction
+              : draftingInstruction,
+        },
         {
           name: "request",
-          text: `Rough idea from the operator:\n${request.prompt}`,
+          text:
+            run.kind === "issue"
+              ? request.prompt
+              : `Rough idea from the operator:\n${request.prompt}`,
         },
       ];
     }
@@ -6366,7 +6696,12 @@ export class StandaloneService {
       let threadId: string;
       const tools =
         request.kind === "drafting"
-          ? [draftProposalTool]
+          ? [
+              this.started().drafting.require(this.draftingRunIdOf(request))
+                .kind === "issue"
+                ? issueEditProposalTool
+                : draftProposalTool,
+            ]
           : request.kind === "assignment" && request.assignmentId
             ? coordinationTools
             : undefined;

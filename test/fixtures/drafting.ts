@@ -2,7 +2,10 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { draftProposalToolName } from "../../src/standalone/drafting.js";
+import {
+  draftProposalToolName,
+  issueEditProposalToolName,
+} from "../../src/standalone/drafting.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
 import type { createOperatorFixture } from "./operator-web.js";
 
@@ -113,6 +116,24 @@ export async function answerDraft(
     ...turn,
     callId: randomUUID(),
     tool: draftProposalToolName,
+    arguments: proposal,
+  });
+  if (!outcome.success) throw new Error(outcome.text);
+  f.runtime.complete(Number(turn.turnId.replace("fixture-turn-", "")));
+}
+
+/** The lead's side of an Improve with lead run: it proposes a replacement, then its turn ends. */
+export async function answerIssueDraft(
+  f: Fixture,
+  runId: string,
+  proposal: { title: string; body: string },
+) {
+  const turn = draftingTurn(f.service, runId);
+  if (!turn) throw new Error("The drafting turn is not running");
+  const outcome = await f.runtime.callTool({
+    ...turn,
+    callId: randomUUID(),
+    tool: issueEditProposalToolName,
     arguments: proposal,
   });
   if (!outcome.success) throw new Error(outcome.text);

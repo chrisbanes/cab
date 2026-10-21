@@ -87,6 +87,13 @@ owns delivery scope and status.
   issue; delegation, writes, pull request actions, results and completion are refused,
   and the task stays not Ready. Codex runs it with a read-only sandbox policy and
   command network access off; Ensemble claims no independent sandbox.
+- **Improve with lead.** On an open imported task, the project lead reads the linked
+  repositories in the same throwaway copy and proposes a better title and body for
+  the source issue. The operator edits the proposal, reviews the full current and
+  proposed text, and sends it as one GitHub issue edit under the repository's
+  `issue.edit` grant. The edit is refused before any write if the issue changed on
+  GitHub after the draft started. It cannot be undone from Ensemble, and the
+  operator CLI does not offer it.
 - **Inbox and questions.** The action Inbox lists cross-project questions, approvals
   and recorded interventions by urgency and age. Exact own-tool forms support grouped
   text, single-choice and multiple-choice answers, with preserved drafts and durable

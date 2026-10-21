@@ -1,4 +1,8 @@
-import { isOperatorDeliveryCaller } from "../core/delivery.js";
+import { issueChangedReason } from "../operator/github-reasons.js";
+import {
+  isOperatorAction,
+  isOperatorDeliveryCaller,
+} from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
 import { z } from "zod";
 import {
@@ -69,6 +73,13 @@ export class PublicationRefusal extends Error {
     readonly outsideHeadSha: string | null = null,
   ) {
     super(reason);
+  }
+}
+/** An operator edit whose expected text is no longer what the issue shows on GitHub. */
+export class IssueChangedRefusal extends Error {
+  readonly reason = issueChangedReason;
+  constructor() {
+    super(issueChangedReason);
   }
 }
 export interface GitHubDeliveryProvider {
@@ -1118,6 +1129,14 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         nodeId: issue.node_id,
         optionId: await this.projectField(action),
       };
+    // GitHub's issue PATCH is not conditional, so this read is the only guard against a stale edit.
+    if (
+      action.kind === "issue.edit" &&
+      action.expected &&
+      (issue.title !== action.expected.title ||
+        (issue.body ?? "") !== action.expected.body)
+    )
+      throw new IssueChangedRefusal();
     return {
       repositoryPath: repo.path,
       nodeId: issue.node_id,
@@ -1132,7 +1151,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
   ): Promise<ProviderActionObservation> {
     if (
       isOperatorDeliveryCaller(record.binding) &&
-      (record.request.action.kind !== "issue.comment" ||
+      (!isOperatorAction(record.request.action) ||
         record.request.approval ||
         record.request.action.target.nodeId !== record.binding.sourceNodeId ||
         record.request.action.target.repositoryId !==

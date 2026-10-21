@@ -1279,6 +1279,7 @@ export function App() {
               onRefresh={refreshAll}
               workspace={workspace.state.data}
               onHeader={setTaskHeader}
+              releaseDraft={releaseDraft}
               questionStates={questionStates.current}
               state={taskStates.current.forTask(
                 pathname.split("/")[3] ?? "",

@@ -236,7 +236,8 @@ for (const [name, viewport] of viewports) {
       .click();
     await panel(page).getByText("Stopping", { exact: true }).waitFor();
     // The runtime is seen to end only now.
-    assert.equal(f.service.readDrafting(runId)?.state, "stopping");
+    // The command is recorded when it is sent; the run is stopping once the service applies it.
+    await until(() => f.service.readDrafting(runId)?.state === "stopping");
     f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
     await panel(page).getByText("Draft interrupted", { exact: true }).waitFor();
     await panel(page)
@@ -276,7 +277,8 @@ for (const [name, viewport] of viewports) {
       .getByText(/the draft for the previous project was ended/)
       .waitFor();
     await until(() => commands("drafting.stop").length === 1);
-    assert.equal(f.service.readDrafting(runId)?.state, "stopping");
+    // The command is recorded when it is sent; the run is stopping once the service applies it.
+    await until(() => f.service.readDrafting(runId)?.state === "stopping");
     // The old run ends, and nothing of it reaches the new project's composer.
     f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
     await until(() => f.service.readDrafting(runId)?.state === "interrupted");
@@ -305,7 +307,8 @@ for (const [name, viewport] of viewports) {
       .getByRole("button", { name: "Discard unfinished input" })
       .click();
     await until(() => commands("drafting.stop").length === 1);
-    assert.equal(f.service.readDrafting(runId)?.state, "stopping");
+    // The command is recorded when it is sent; the run is stopping once the service applies it.
+    await until(() => f.service.readDrafting(runId)?.state === "stopping");
     f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
     await until(() => f.service.readDrafting(runId)?.state === "interrupted");
   });

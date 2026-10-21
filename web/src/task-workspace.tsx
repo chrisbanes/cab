@@ -66,6 +66,11 @@ import { MarkdownPreview, TaskFiles } from "./task-files.js";
 import { TaskWorkspaceChanges } from "./inspection-changes.js";
 import { RetainedResultEvidence } from "./retained-evidence.js";
 import {
+  hasImproveWork,
+  ImproveWithLead,
+  type ReleaseRun,
+} from "./issue-improve.js";
+import {
   draftTurnAccessNotice,
   draftTurnHeading,
   draftTurnQueueNotice,
@@ -362,6 +367,7 @@ export function TaskWorkspace({
   workspace,
   onHeader,
   drafts,
+  releaseDraft,
 }: {
   client: OperatorClient;
   session: Session;
@@ -375,7 +381,11 @@ export function TaskWorkspace({
   workspace?: Workspace | null;
   /** Receives the shell header's data (title, status line, Back, Stop); null on unmount. */
   onHeader?: (report: TaskHeaderReport | null) => void;
+  /** Hands an Improve with lead run on to the app's durable release. */
+  releaseDraft: ReleaseRun;
 }) {
+  // Improve with lead opens on demand, and again after a reload while it has work to show.
+  const [improveOpen, setImproveOpen] = useState<boolean | null>(null);
   // A Results or Changes outcome, with the write it answers so it shows on that write's tab.
   const [aux, setAux] = useState<
     (ReplyOutcome & { from?: OperatorCommand["type"] }) | null
@@ -1718,6 +1728,10 @@ export function TaskWorkspace({
       )}
     </section>
   );
+  const improvePolicy = data.issueEdit;
+  const improveShown = improvePolicy
+    ? (improveOpen ?? hasImproveWork(taskId, improvePolicy))
+    : false;
   return (
     <LocalReviewProvider
       client={client}
@@ -1749,6 +1763,15 @@ export function TaskWorkspace({
                 <ActionLink variant="secondary" href={data.source.url ?? "#"}>
                   Open GitHub to edit source
                 </ActionLink>
+                {improvePolicy && (
+                  <Button
+                    variant="secondary"
+                    aria-expanded={improveShown}
+                    onClick={() => setImproveOpen(!improveShown)}
+                  >
+                    Improve with lead
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
                   onClick={() => void refreshSource()}
@@ -1762,6 +1785,18 @@ export function TaskWorkspace({
             </Button>
           </div>
         </TaskStrip>
+        {improvePolicy && improveShown && (
+          <ImproveWithLead
+            client={client}
+            csrfToken={session.csrfToken}
+            taskId={taskId}
+            taskVersion={data.task.version}
+            policy={improvePolicy}
+            leadName={leadName}
+            releaseDraft={releaseDraft}
+            onChanged={refreshAll}
+          />
+        )}
         <TaskTabs
           tab={state.tab}
           select={selectTab}

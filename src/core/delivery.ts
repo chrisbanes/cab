@@ -1,4 +1,9 @@
 import { TaskReviewStore } from "./task-review.js";
+import {
+  issueBodyLimit,
+  issueCurrentBodyLimit,
+  issueTitleLimit,
+} from "./issue-text-limits.js";
 import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -111,8 +116,8 @@ const threadTargetSchema = targetSchema
   .extend({ threadNodeId: identity })
   .strict();
 const textFields = {
-  title: z.string().trim().min(1).max(512).optional(),
-  body: z.string().max(64000).optional(),
+  title: z.string().trim().min(1).max(issueTitleLimit).optional(),
+  body: z.string().max(issueBodyLimit).optional(),
 };
 const edits = z
   .object(textFields)
@@ -142,6 +147,14 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("issue.edit"),
       target: targetSchema,
       fields: edits,
+      // The text an operator edit replaces; the provider refuses if GitHub no longer shows it.
+      expected: z
+        .object({
+          title: z.string().max(issueTitleLimit),
+          body: z.string().max(issueCurrentBodyLimit),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -284,6 +297,15 @@ export function isOperatorDeliveryCaller(
 ): caller is OperatorDeliveryCaller {
   return "actor" in caller && caller.actor === "operator";
 }
+/** The two actions an operator may take on the bound issue: a comment, or an edit that names what it replaces. */
+export function isOperatorAction(
+  action: ExternalAction,
+): action is Extract<ExternalAction, { kind: "issue.comment" | "issue.edit" }> {
+  return (
+    action.kind === "issue.comment" ||
+    (action.kind === "issue.edit" && action.expected !== undefined)
+  );
+}
 export const operatorCommentReviewSchema = z
   .object({
     reviewId: z.string().uuid(),
@@ -300,7 +322,7 @@ export const operatorCommentReviewSchema = z
     updatedAt: z.number(),
   })
   .strict()
-  .refine((r) => r.action.kind === "issue.comment");
+  .refine((r) => isOperatorAction(r.action));
 export type OperatorCommentReview = z.output<
   typeof operatorCommentReviewSchema
 >;
@@ -584,7 +606,7 @@ export class DeliveryStore {
     if (isOperatorDeliveryCaller(binding)) {
       this.validateOperatorCaller(binding);
       if (
-        request.action.kind !== "issue.comment" ||
+        !isOperatorAction(request.action) ||
         request.approval ||
         request.action.target.nodeId !== binding.sourceNodeId ||
         request.action.target.repositoryId !== binding.sourceRepositoryId ||
@@ -608,6 +630,7 @@ export class DeliveryStore {
       )
         approved = false;
       if (
+        request.action.kind === "issue.edit" ||
         policy.grants.some(
           (g) =>
             g.action === "issue.comment" &&
@@ -774,6 +797,68 @@ export class DeliveryStore {
     caller: OperatorDeliveryCaller,
     action: ExternalAction,
   ): OperatorCommentReview {
+    return this.reviewOperatorAction(
+      command,
+      caller,
+      action,
+      action.kind === "issue.comment" && action.body === command.body,
+    );
+  }
+  /** An edit is reviewable only against the text the synced copy shows now. */
+  reviewOperatorEdit(
+    command: {
+      key: string;
+      taskId: string;
+      operationId: string;
+      expectedTaskVersion: number;
+      title: string;
+      body: string;
+      /** The text the draft started from. */
+      expected: { title: string; body: string };
+    },
+    caller: OperatorDeliveryCaller,
+    action: ExternalAction,
+  ): OperatorCommentReview {
+    return this.reviewOperatorAction(
+      command,
+      caller,
+      action,
+      action.kind === "issue.edit" &&
+        action.expected?.title === command.expected.title &&
+        action.expected.body === command.expected.body &&
+        action.fields.title === command.title &&
+        action.fields.body === command.body,
+      (edit) => {
+        const synced = this.db
+          .prepare(
+            "SELECT observedTitle, observedBody FROM github_external_issues WHERE nodeId=?",
+          )
+          .get(caller.sourceNodeId) as
+          | { observedTitle: string; observedBody: string }
+          | undefined;
+        if (
+          edit.kind !== "issue.edit" ||
+          synced?.observedTitle !== edit.expected?.title ||
+          synced?.observedBody !== edit.expected?.body
+        )
+          throw new DomainConflictError(
+            "The issue changed after the draft started",
+          );
+      },
+    );
+  }
+  private reviewOperatorAction(
+    command: {
+      key: string;
+      taskId: string;
+      operationId: string;
+      expectedTaskVersion: number;
+    },
+    caller: OperatorDeliveryCaller,
+    action: ExternalAction,
+    materialMatches: boolean,
+    guard?: (action: ExternalAction) => void,
+  ): OperatorCommentReview {
     const prior = this.operatorReview(command.key),
       commandHash = materialDigest(command);
     if (prior) {
@@ -785,8 +870,8 @@ export class DeliveryStore {
     }
     this.validateOperatorCaller(caller);
     if (
-      action.kind !== "issue.comment" ||
-      action.body !== command.body ||
+      !materialMatches ||
+      !isOperatorAction(action) ||
       action.target.nodeId !== caller.sourceNodeId ||
       action.target.repositoryId !== caller.sourceRepositoryId ||
       action.target.number !==
@@ -803,6 +888,7 @@ export class DeliveryStore {
       caller.taskId !== command.taskId
     )
       throw new DomainConflictError("Operator review material mismatch");
+    guard?.(action);
     const record = operatorCommentReviewSchema.parse({
       reviewId: command.key,
       key: command.key,
@@ -879,7 +965,7 @@ export class DeliveryStore {
         if (
           !policy.grants.some(
             (g) =>
-              g.action === "issue.comment" &&
+              g.action === record.action.kind &&
               g.repositoryId === record.caller.sourceRepositoryId,
           )
         )

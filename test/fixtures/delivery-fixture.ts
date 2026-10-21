@@ -33,7 +33,9 @@ export async function deliveryFixture(
     profileId = randomUUID();
   let taskId: string = randomUUID();
   let sourceLabels = ["ready"];
+  let sourceTitle = "T";
   let sourceBody = "O";
+  let applyIssueEdits = false;
   let tool: ((call: RuntimeToolCall) => Promise<RuntimeToolResult>) | undefined;
   let stopped = false;
   const turns: Array<{
@@ -127,7 +129,7 @@ export async function deliveryFixture(
           repositoryId: "R1",
           repositoryName: "org/repo",
           number: 1,
-          title: "T",
+          title: sourceTitle,
           body: sourceBody,
           state: "closed",
           labels: sourceLabels,
@@ -155,6 +157,11 @@ export async function deliveryFixture(
     async performAction(record) {
       effects.push(record.request.action);
       if (actionOutcome) return actionOutcome;
+      // As GitHub would: a confirmed edit changes what the next source read shows.
+      if (applyIssueEdits && record.request.action.kind === "issue.edit") {
+        sourceTitle = record.request.action.fields.title ?? sourceTitle;
+        sourceBody = record.request.action.fields.body ?? sourceBody;
+      }
       if (record.request.action.kind === "pr.merge")
         pr = {
           ...pr,
@@ -215,7 +222,7 @@ export async function deliveryFixture(
                         repositoryId: "R1",
                         repositoryName: "org/repo",
                         number: 1,
-                        title: "T",
+                        title: sourceTitle,
                         body: sourceBody,
                         state: issueOpen === false ? "closed" : "open",
                         labels: sourceLabels,
@@ -385,6 +392,13 @@ export async function deliveryFixture(
     spawn: () => spawnContext,
     setSourceBody: (body: string) => {
       sourceBody = body;
+    },
+    setSourceTitle: (title: string) => {
+      sourceTitle = title;
+    },
+    /** A confirmed issue.edit effect updates the fake source, so a following sync observes it. */
+    applyIssueEdits: (value: boolean) => {
+      applyIssueEdits = value;
     },
     setSourceLabels: (labels: string[]) => {
       sourceLabels = labels;

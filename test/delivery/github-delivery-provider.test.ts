@@ -60,7 +60,10 @@ test("actual classic queue, strict status, deployments and app identity hold mer
 });
 
 import { randomUUID } from "node:crypto";
-import { GitHubHttpDeliveryProvider } from "../../src/standalone/github-delivery.js";
+import {
+  GitHubHttpDeliveryProvider,
+  IssueChangedRefusal,
+} from "../../src/standalone/github-delivery.js";
 import type { DeliveryActionRecord } from "../../src/core/delivery.js";
 import { DomainPolicyError } from "../../src/core/domain.js";
 function commentRecord(): DeliveryActionRecord {
@@ -1235,4 +1238,86 @@ test("thread write failures are uncertain unless the provider definitively rejec
         "confirmed-success",
       );
   }
+});
+
+function issueEditProvider(issue: { title: string; body: string | null }) {
+  const requests: string[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
+    if (url.pathname === "/graphql")
+      return Response.json({
+        data: { node: { id: "R1", nameWithOwner: "org/repo" } },
+      });
+    if (url.pathname === "/repos/org/repo")
+      return Response.json({
+        node_id: "R1",
+        full_name: "org/repo",
+        allow_merge_commit: true,
+        allow_squash_merge: true,
+        allow_rebase_merge: false,
+      });
+    if (url.pathname.endsWith("/issues/7"))
+      return Response.json({
+        node_id: "I7",
+        number: 7,
+        state: "open",
+        labels: [],
+        ...issue,
+      });
+    throw new Error("unexpected route");
+  };
+  return {
+    requests,
+    provider: new GitHubHttpDeliveryProvider("non-secret-marker", fetcher),
+  };
+}
+const editAction = (expected: { title: string; body: string }) =>
+  ({
+    kind: "issue.edit",
+    target: { repositoryId: "R1", number: 7, nodeId: "I7" },
+    fields: { title: "New title", body: "New body" },
+    expected,
+  }) as const;
+const noPolicy = {} as Parameters<GitHubHttpDeliveryProvider["preflight"]>[1];
+
+test("an operator edit is refused before any write when GitHub no longer shows the expected text", async () => {
+  const mismatches = [
+    { title: "Changed", body: "B" },
+    { title: "T", body: "Changed" },
+    // GitHub reports an empty body as null; the expectation is the synced "".
+    { title: "T", body: null },
+  ];
+  for (const issue of mismatches) {
+    const { provider, requests } = issueEditProvider(issue);
+    await assert.rejects(
+      provider.preflight(editAction({ title: "T", body: "B" }), noPolicy),
+      (error) => error instanceof IssueChangedRefusal,
+    );
+    assert.ok(!requests.some((r) => r.startsWith("PATCH")), requests.join());
+  }
+});
+
+test("an operator edit proceeds when GitHub shows the expected text, including an empty body", async () => {
+  const same = issueEditProvider({ title: "T", body: "B" });
+  assert.equal(
+    (
+      await same.provider.preflight(
+        editAction({ title: "T", body: "B" }),
+        noPolicy,
+      )
+    ).title,
+    "T",
+  );
+  const empty = issueEditProvider({ title: "T", body: null });
+  await empty.provider.preflight(
+    editAction({ title: "T", body: "" }),
+    noPolicy,
+  );
+  // An edit with nothing expected (the runtime path) is not compared.
+  const runtime = issueEditProvider({ title: "Other", body: "Other" });
+  await runtime.provider.preflight(
+    { ...editAction({ title: "x", body: "y" }), expected: undefined },
+    noPolicy,
+  );
 });

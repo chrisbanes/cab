@@ -890,13 +890,27 @@ keeps its meaning ([ADR-1013](adr/1013-project-owned-drafting-runs.md)).
   operator accepts or discards it, or it expires 24 hours after it arrived. A draft
   belongs to the project it was started for: changing the composer's project, or
   discarding recovered input, stops or discards it, and the composer says so.
-- **Operator CLI.** The CLI does not offer drafting; see
+- **Issue runs.** Improve with lead is a second kind of drafting run with the same
+  profile, access, capacity, Stop, cap, restart and reattach rules. `issue.draft.start`
+  names an open imported task and an optional operator note (up to 16,000 characters). The
+  run records the synced title and body it starts from, which the lead is shown with the
+  note, and it may run while the task has work running. Its own result tool, not the
+  brief tool, proposes a replacement title (1 to 512 characters) and a non-blank body (up
+  to 64,000), the `issue.edit` limits; the text it replaces may be up to GitHub's 65,536
+  characters, and a longer issue cannot start a draft; a brief run is offered only the brief tool and an
+  issue run only the issue tool. A proposal is validated, checked against the operator's
+  exclusions before it is stored, and withheld whole, never shown empty or accepted, if it
+  cannot be shown. The operator's edited text is held in the browser session with the run
+  id until it is reviewed or discarded; Redraft starts a new run from the current text.
+  An issue run creates no task, assignment, result or delivery record.
+- **Operator CLI.** The CLI does not offer drafting or Improve with lead; see
   [Operator CLI](design/operator-cli.md).
 
 Status: implemented, on Codex and Claude with fake-host tests and on Codex in one
 bounded live run ([evidence](evidence/2026-10-18-drafting-live-run.md); [acceptance plan](acceptance.md#drafting-runs)).
 The operator API carries `drafting.start`, `drafting.stop` and `drafting.settle`
-commands, receipted by key, and one read of a run by id. A run that is held because its
+commands, plus `issue.draft.start` for an issue run, receipted by key, and one read of a
+run by id that says its kind and carries a brief or an issue proposal. A run that is held because its
 end cannot be verified stays held until a later start verifies it; there is no operator
 recovery for drafting.
 
@@ -912,6 +926,19 @@ For the MVP, imported titles and descriptions are read-only in the operator UI,
 with Edit on GitHub linking to the source. The local task composer does not edit
 imported issue content or create a competing local brief. This UI restriction does
 not replace the separate approval required for any integration title/body edit.
+
+**Improve with lead.** On an open imported task the operator can ask the project lead to
+draft a better title and body, edit the draft, review it against the issue's current text
+and send it as one GitHub issue edit ([drafting runs](#drafting-runs), [operator issue
+edit](#github-and-completion)). It is offered on any open imported task, including one
+with running work, one that is not Ready and a held one: an edit waits for none of them.
+It needs the repository's `issue.edit` grant, a project lead and a delivery credential,
+and is unavailable while an earlier GitHub action on the task has an unknown outcome. The
+task read gives the first reason that applies, in that order: no source issue, task not
+open, no edit grant, no project lead, an unresolved action, no delivery credential.
+Ensemble keeps no copy of the edited text and no local override: the edit goes to
+GitHub, and the next sync observes the new title and body like a hand edit, including
+any source review that raises. Nothing is sent without the operator reviewing it.
 
 Label native GitHub dependencies as source-owned and link to the source; do not
 offer local overrides. Distinguish Message lead from any permitted Post comment to
@@ -1652,6 +1679,25 @@ Readback requires exactly one submitted marker reply by the credential user, or 
 thread resolved by that user; a lost response stays uncertain and is not replayed.
 Unresolving threads, editing or deleting comments and submitting reviews are not
 supported, and the operator comment path is unchanged.
+
+The operator can edit the bound issue's title and body through `issue.edit` on the same
+lifecycle as an operator comment. `issue.edit.review` records the exact material: the
+reviewed title and body and the title and body the draft started from. `issue.edit.confirm`
+approves it, and `issue.edit.send`, keyed by the review's operation id, makes one PATCH.
+The confirmed review is the approval and the repository's `issue.edit` grant is required in
+either mode; agent callers cannot use this path, and `issue.edit` without a review keeps its
+exact-material agent approval. A review is refused when the synced copy no longer shows the
+text the draft started from, or when the operator could not be shown all of the text being
+replaced because an exclusion would alter it. Before writing, the provider reads the issue
+and refuses with `provider-issue-changed`, writing nothing and not retrying, if GitHub no
+longer shows that text. GitHub has no conditional issue update, so a change between that
+read and the PATCH is an accepted race. After that refusal the source is read again, so a
+Redraft starts from what GitHub shows. Read-back requires both fields, an unknown outcome
+stays uncertain and blocks further GitHub actions on the task until resolved, and nothing is
+resent. The edit is irreversible from Ensemble: the replaced text is kept only in the
+review record and no restore action exists. Sending needs an open task, a current task
+version and source revision, no unresolved action and an allowed credential activation, but
+not task admission.
 
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or

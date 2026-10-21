@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { issueCurrentBodyLimit } from "../core/issue-text-limits.js";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
@@ -14,7 +15,7 @@ import type {
   TaskCompletionRequest,
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
-import { materialDigest } from "../core/delivery.js";
+import { isOperatorDeliveryCaller, materialDigest } from "../core/delivery.js";
 import {
   type DomainCommand,
   DomainCommands,
@@ -119,7 +120,10 @@ import {
   workspacePreviewReadSchema,
   workspaceSchema,
 } from "../operator/contracts.js";
-import type { CommentReasonCode } from "../operator/github-reasons.js";
+import {
+  type CommentReasonCode,
+  issueEditReasonSentences,
+} from "../operator/github-reasons.js";
 import { deriveWaits } from "../operator/wait-reasons.js";
 import {
   type AttentionCode,
@@ -748,23 +752,29 @@ export class OperatorApi {
   private safe(
     value: unknown,
     excluded: readonly string[] | undefined,
+    limit = 16000,
   ): string | null {
     if (value === null || value === undefined) return null;
     const prose = String(value);
-    if (prose.length > 16000) return null;
+    if (prose.length > limit) return null;
     const sanitized = excluded
       ? sanitizeConversationText(prose, excluded)
       : null;
-    return sanitized && sanitized.length > 16000 ? null : (sanitized ?? null);
+    return sanitized && sanitized.length > limit ? null : (sanitized ?? null);
   }
   private disclosable(
     value: unknown,
     excluded: readonly string[] | undefined,
+    limit = 16000,
   ): boolean {
-    return this.safe(value, excluded) === value;
+    return this.safe(value, excluded, limit) === value;
   }
-  private exact(value: unknown, excluded: readonly string[] | undefined) {
-    const safe = this.safe(value, excluded);
+  private exact(
+    value: unknown,
+    excluded: readonly string[] | undefined,
+    limit = 16000,
+  ) {
+    const safe = this.safe(value, excluded, limit);
     return safe === String(value) ? safe : null;
   }
   async retainedEvidencePolicy(taskId: string) {
@@ -2724,8 +2734,12 @@ export class OperatorApi {
       ...this.service.draftingGrantPaths(runId),
     ]);
     // Text the exclusions would change is withheld whole, never shown altered or empty.
+    // An issue run keeps its body in `outcome`; it is read with the issue body's limit.
+    const issueRun = run.kind === "issue";
     const title = run.proposal && this.exact(run.proposal.title, excluded);
-    const outcome = run.proposal && this.exact(run.proposal.outcome, excluded);
+    const outcome =
+      run.proposal &&
+      this.exact(run.proposal.outcome, excluded, issueRun ? 64_000 : 16000);
     const shown =
       run.proposal && title !== null && outcome !== null
         ? { title, outcome }
@@ -2736,7 +2750,12 @@ export class OperatorApi {
         projectId: run.projectId,
         state: run.state,
         reason: run.reason,
-        proposal: shown,
+        kind: run.kind,
+        proposal: shown && !issueRun ? shown : null,
+        issueProposal:
+          shown && issueRun
+            ? { title: shown.title, body: shown.outcome }
+            : null,
         proposalWithheld: run.proposal !== null && shown === null,
         leadName: this.safe(
           this.domain().profileRevision(run.profileId, run.profileRevision)
@@ -3483,6 +3502,7 @@ export class OperatorApi {
       review: await this.reviewProjection(taskId, excluded, selection),
       delivery: this.deliveryProjection(taskId, excluded),
       commentPolicy: this.commentPolicy(taskId),
+      issueEdit: this.issueEditPolicy(taskId, excluded),
       repositoryLinked:
         this.domain().githubConfiguration(String(t.projectId)).repositories
           .length > 0,
@@ -4453,6 +4473,96 @@ export class OperatorApi {
       // the code lets the web refuse the send instead.
       reasonCode,
     };
+  }
+  /** Whether the operator can improve and edit the issue, with the newest such edit. */
+  private issueEditPolicy(
+    taskId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const { available, reasonCode } =
+      this.service.issueEditAvailability(taskId);
+    const latest = this.service
+      .delivery()
+      .actions(taskId)
+      .filter(
+        (a) =>
+          isOperatorDeliveryCaller(a.binding) &&
+          a.request.action.kind === "issue.edit",
+      )
+      .at(-1);
+    return {
+      available,
+      reasonCode,
+      reason: reasonCode ? issueEditReasonSentences[reasonCode] : null,
+      latest: latest
+        ? {
+            operationId: latest.operationId,
+            state: latest.state,
+            reason: this.safe(latest.observation?.reason, excluded),
+          }
+        : null,
+    };
+  }
+  /**
+   * The text an edit replaces and the text it sends, each exactly as the exclusions leave it, or
+   * undefined when any of it would have to be hidden or altered.
+   */
+  private shownEditTexts(
+    action: OperatorCommentReview["action"],
+    excluded: readonly string[] | undefined,
+  ) {
+    if (action.kind !== "issue.edit" || !action.expected) return undefined;
+    const shown = (value: string, limit = 64_000) =>
+      this.exact(value, excluded, limit);
+    const current = {
+      title: shown(action.expected.title),
+      body: shown(action.expected.body, issueCurrentBodyLimit),
+    };
+    const proposed = {
+      title: shown(action.fields.title ?? action.expected.title),
+      body: shown(action.fields.body ?? action.expected.body),
+    };
+    return current.title === null ||
+      current.body === null ||
+      proposed.title === null ||
+      proposed.body === null
+      ? undefined
+      : {
+          current: { title: current.title, body: current.body },
+          proposed: { title: proposed.title, body: proposed.body },
+        };
+  }
+  private editReviewReceipt(
+    key: string,
+    review: OperatorCommentReview,
+    excluded: readonly string[] | undefined,
+  ) {
+    const action = review.action;
+    if (action.kind !== "issue.edit" || !action.expected)
+      throw new OperatorApiError(403, "forbidden");
+    const texts = this.shownEditTexts(action, excluded);
+    // The operator cannot review a replacement of text that would have to be hidden.
+    if (!texts) throw new OperatorApiError(403, "forbidden");
+    const { current, proposed } = texts;
+    return commandReceiptSchema.parse({
+      kind: "edit-review",
+      key,
+      recorded: true,
+      taskId: review.taskId,
+      reviewId: review.reviewId,
+      operationId: review.operationId,
+      revision: review.revision,
+      materialHash: review.materialHash,
+      decision: review.decision,
+      current,
+      proposed,
+      target: action.target,
+      taskVersion: review.caller.taskVersion,
+      sourceId: review.caller.sourceId,
+      sourceRevision: review.caller.sourceRevision,
+      sourceDigest: review.caller.sourceDigest,
+      policyVersion: review.caller.policyVersion,
+    });
   }
   private commentReviewReceipt(
     key: string,
@@ -6422,6 +6532,128 @@ export class OperatorApi {
     });
   }
 
+  /** Review, confirm and send of an operator issue edit, fenced like the comment commands. */
+  private async executeIssueEdit(
+    c: Extract<
+      z.output<typeof operatorCommandSchema>,
+      { type: "issue.edit.review" | "issue.edit.confirm" | "issue.edit.send" }
+    >,
+  ) {
+    const task = this.requireTask(c.taskId),
+      visibility = this.visibilityToken(),
+      workspaceBefore = this.service.taskWorkspaceVisibility(c.taskId),
+      excluded = await this.exclusions(String(task.projectId), c.taskId);
+    if (
+      visibility !== this.visibilityToken() ||
+      this.requireTask(c.taskId).version !== task.version ||
+      workspaceBefore !== this.service.taskWorkspaceVisibility(c.taskId)
+    )
+      throw new OperatorApiError(409, "conflict");
+    if (c.type === "issue.edit.review") {
+      if (
+        !this.disclosable(c.title, excluded) ||
+        !this.disclosable(c.body, excluded, 64_000)
+      )
+        throw new OperatorApiError(403, "forbidden");
+      // A replay is answered from the review it recorded, whatever the draft's state is now.
+      const recorded = this.service.delivery().operatorReview(c.key);
+      let expected =
+        recorded?.action.kind === "issue.edit"
+          ? recorded.action.expected
+          : undefined;
+      if (!expected) {
+        const run = this.service.readDrafting(c.runId);
+        // The text the draft started from is what the edit replaces; only a used draft of this task qualifies.
+        if (
+          run?.kind !== "issue" ||
+          run.taskId !== c.taskId ||
+          !["proposed", "accepted"].includes(run.state) ||
+          run.observedTitle === null ||
+          run.observedBody === null
+        )
+          throw new OperatorApiError(409, "conflict");
+        // The operator must see the whole text being replaced, so hidden text is refused before
+        // anything is recorded.
+        if (
+          !this.disclosable(
+            run.observedTitle,
+            excluded,
+            issueCurrentBodyLimit,
+          ) ||
+          !this.disclosable(run.observedBody, excluded, issueCurrentBodyLimit)
+        )
+          throw new OperatorApiError(403, "forbidden");
+        expected = { title: run.observedTitle, body: run.observedBody };
+      }
+      return this.editReviewReceipt(
+        c.key,
+        this.service.reviewOperatorEdit({
+          key: c.key,
+          taskId: c.taskId,
+          operationId: c.operationId,
+          expectedTaskVersion: c.expectedTaskVersion,
+          title: c.title,
+          body: c.body,
+          expected,
+        }),
+        excluded,
+      );
+    }
+    const review = this.service.delivery().operatorReview(c.reviewId);
+    if (
+      !review ||
+      review.taskId !== c.taskId ||
+      review.action.kind !== "issue.edit"
+    )
+      throw new OperatorApiError(403, "forbidden");
+    if (c.type === "issue.edit.confirm") {
+      // Approval is recorded only for text the operator can still be shown in full.
+      if (!this.shownEditTexts(review.action, excluded))
+        throw new OperatorApiError(403, "forbidden");
+      return this.editReviewReceipt(
+        c.key,
+        this.service.confirmOperatorComment(c),
+        excluded,
+      );
+    }
+    // One send per review: its key is the review's operation id.
+    if (c.key !== review.operationId)
+      throw new OperatorApiError(409, "conflict");
+    // Before anything is dispatched, the text is checked against the exclusions as they are now.
+    // A replay of a send that was already made returns its record and exposes no text.
+    const dispatched = this.service
+      .delivery()
+      .actions(c.taskId)
+      .some((a) => a.operationId === c.key);
+    if (!dispatched && !this.shownEditTexts(review.action, excluded))
+      throw new OperatorApiError(403, "forbidden");
+    const saved = await this.service.postOperatorEdit({
+      key: c.key,
+      taskId: c.taskId,
+      reviewId: c.reviewId,
+      expectedTaskVersion: c.expectedTaskVersion,
+    });
+    const receiptVisibility = this.visibilityToken(),
+      receiptTask = this.requireTask(c.taskId),
+      workspace = this.service.taskWorkspaceVisibility(c.taskId),
+      receiptExcluded = await this.exclusions(String(task.projectId), c.taskId);
+    if (
+      receiptVisibility !== this.visibilityToken() ||
+      this.requireTask(c.taskId).version !== receiptTask.version ||
+      workspace !== this.service.taskWorkspaceVisibility(c.taskId)
+    )
+      throw new OperatorApiError(409, "conflict");
+    return commandReceiptSchema.parse({
+      kind: "delivery",
+      key: c.key,
+      recorded: true,
+      taskId: c.taskId,
+      operationId: saved.operationId,
+      state: saved.state,
+      reason: this.safe(saved.observation?.reason, receiptExcluded),
+    });
+  }
+
   async execute(input: unknown, reviewSession?: OperatorReviewSessionContext) {
     const c = operatorCommandSchema.parse(input);
     try {
@@ -6437,6 +6669,28 @@ export class OperatorApi {
           await this.service.draftingCommand(c),
         );
       }
+      if (c.type === "issue.draft.start") {
+        const task = this.requireTask(c.taskId),
+          visibility = this.visibilityToken(),
+          excluded = await this.exclusions(String(task.projectId), c.taskId);
+        // The note was checked against exclusions that must still hold when the run starts.
+        if (
+          visibility !== this.visibilityToken() ||
+          this.requireTask(c.taskId).version !== task.version
+        )
+          throw new OperatorApiError(409, "conflict");
+        if (!this.disclosable(c.note, excluded))
+          throw new OperatorApiError(403, "forbidden");
+        return commandReceiptSchema.parse(
+          await this.service.draftingCommand(c),
+        );
+      }
+      if (
+        c.type === "issue.edit.review" ||
+        c.type === "issue.edit.confirm" ||
+        c.type === "issue.edit.send"
+      )
+        return await this.executeIssueEdit(c);
       if (
         c.type === "review.anchor.stage" ||
         c.type === "review.draft.save" ||

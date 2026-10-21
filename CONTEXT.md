@@ -77,7 +77,9 @@ _Avoid_: Board sync or column mapping
 
 **Drafting run**:
 A run belonging to a project rather than a task, in which the project lead
-proposes a task title and outcome from the operator's rough idea.
+proposes either a task title and outcome from the operator's rough idea, or an
+improved title and body for an imported issue from the text it was synced with.
+It changes nothing until the operator accepts and sends the result.
 _Avoid_: Draft task, which is an unready task
 
 **Draft turn**:
