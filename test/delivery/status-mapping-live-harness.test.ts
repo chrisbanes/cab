@@ -27,7 +27,7 @@ const manifest = () => ({
   credential: "gh-cli",
   actions: ["project.field"],
   runtimeTurnLimit: 0,
-  maxAttempts: 2,
+  maxAttempts: 3,
 });
 function files(
   change: Record<string, unknown> = {},
@@ -76,7 +76,8 @@ test("the grant must match the manifest, be unexpired and stay inside the attemp
     { credential: "env:S07A_GITHUB_TOKEN" },
     { actions: ["project.field", "pr.merge"] },
     { runtimeTurnLimit: 1 },
-    { maxAttempts: 3 },
+    { maxAttempts: 2 },
+    { maxAttempts: 4 },
   ])
     assert.equal(
       statusMappingManifestSchema.safeParse({ ...manifest(), ...change })
@@ -85,10 +86,10 @@ test("the grant must match the manifest, be unexpired and stay inside the attemp
       JSON.stringify(change),
     );
   const g = new StatusMappingGuard(f.raw, f.grant);
-  assert.throws(() => g.begin("aaaaaaaa", 3), /allowance/);
+  assert.throws(() => g.begin("aaaaaaaa", 4), /allowance/);
   assert.throws(() => g.begin("aaaaaaaa", 0), /allowance/);
   assert.throws(() => g.begin("not-a-run", 1), /run id/);
-  g.begin("aaaaaaaa", 2);
+  g.begin("aaaaaaaa", 3);
 });
 
 test("only the Project this run created may be used: never Project 6, never one linked to the product repository", () => {
