@@ -579,6 +579,43 @@ test("a status write in flight defers the next one, an unproved one does not hol
   }
 });
 
+test("a late proof of the last write that may have landed is observed even after a later record that sent nothing", () => {
+  const f = setup();
+  try {
+    f.save(mapping());
+    const first = f.delivery.prepareAction(
+      f.write(PROGRESS),
+      f.caller("turnStarted"),
+      false,
+    );
+    f.delivery.beginAttempt(first.operationId, {});
+    f.delivery.recordObservation(first.operationId, {
+      state: "uncertain",
+      reason: "provider-readback-unavailable",
+      receipt: null,
+    });
+    // The next write was refused at its re-read before any attempt.
+    const second = f.delivery.prepareAction(
+      f.write(REVIEW),
+      f.caller("handedBack"),
+      false,
+    );
+    f.delivery.recordObservation(second.operationId, {
+      state: "confirmed-failure",
+      reason: "provider-project-field-changed",
+      receipt: null,
+    });
+    f.delivery.recordObservation(first.operationId, {
+      state: "confirmed-success",
+      reason: null,
+      receipt: { nodeId: "I_1" },
+    });
+    assert.equal(f.status.taskState(f.taskId).observedOptionNodeId, PROGRESS);
+  } finally {
+    f.db.close();
+  }
+});
+
 test("the service uses an allow grant even when an approval grant for the option is listed first", () => {
   const f = setup();
   try {

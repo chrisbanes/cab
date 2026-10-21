@@ -221,14 +221,14 @@ test("a move that lands with the write stays uncertain and never holds the task;
     assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
     assert.equal(f.status(), todo);
 
-    // A late proof of the older write does not replace what Ensemble last confirmed.
+    // The skipped record sent nothing, so the late proof of the write that did land is observed.
     f.setStatus(inReview);
     await startedOf(f.service).deliveryCoordinator.reconcile();
     assert.equal(writes(f)[1]?.state, "confirmed-success");
     assert.equal(
       startedOf(f.service).statusMappings.taskState(f.taskId)
         .observedOptionNodeId,
-      inProgress,
+      inReview,
     );
   } finally {
     await f.close();

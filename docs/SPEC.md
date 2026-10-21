@@ -1712,7 +1712,9 @@ an agent, writes it as a distinct caller through the same delivery lifecycle, la
 records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 
 - **Authority.** Every mapped option must be covered by an `allow` `project.field` grant for
-  the exact Project, field and option. A save naming an uncovered option, or one whose only
+  the exact Project, field and option, and the grant's repository: it covers only that
+  repository's issues, so an issue of another repository is denied at write time and shows on
+  the task. A save naming an uncovered option, or one whose only
   grant needs approval, is refused, and the write checks the grant again; a grant revoked before the write is
   denied (`delivery-authority-denied`, or `delivery-authority-stale-or-held` once the write was
   prepared) and shows on the task. Agents and the operator keep the refusal of

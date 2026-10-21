@@ -1431,11 +1431,11 @@ export class DeliveryStore {
         isServiceDeliveryCaller(record.binding) &&
         observation.state === "confirmed-success" &&
         record.request.action.kind === "project.field" &&
-        // A late proof of an older write must not replace what a newer one wrote.
+        // A late proof of an older write must not replace what a newer one wrote; a later record that sent nothing (denied, or refused before any attempt) wrote nothing.
         (
           this.db
             .prepare(
-              "SELECT operationId FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.binding.actor')='service' ORDER BY rowid DESC LIMIT 1",
+              "SELECT operationId FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.binding.actor')='service' AND json_extract(recordJson,'$.state')<>'denied' AND NOT (json_extract(recordJson,'$.state')='confirmed-failure' AND json_extract(recordJson,'$.attempts')=0) ORDER BY rowid DESC LIMIT 1",
             )
             .get(record.binding.taskId) as { operationId: string }
         ).operationId === operationId
