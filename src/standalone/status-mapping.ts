@@ -111,9 +111,8 @@ export class StatusMappingWriter {
         const taskId = String(task.id);
         if (
           task.state === "cancelled" ||
-          // Done and recorded: nothing more to write.
-          (task.state === "done" &&
-            this.mappings.taskState(taskId).lastEvent === "done")
+          // Done and settled: written, or never worked on under the mapping.
+          (task.state === "done" && this.doneSettled(taskId))
         )
           continue;
         const imported = domain.importedTask(taskId);
@@ -134,6 +133,14 @@ export class StatusMappingWriter {
     }
   }
 
+  private doneSettled(taskId: string): boolean {
+    const state = this.mappings.taskState(taskId);
+    return (
+      state.lastEvent === "done" &&
+      (state.operationId !== null || !state.watched)
+    );
+  }
+
   private async task(
     projectId: string,
     version: number,
@@ -143,13 +150,18 @@ export class StatusMappingWriter {
     ready: boolean,
   ): Promise<void> {
     const { deliveryStore } = this.facts;
-    const state = this.mappings.taskState(taskId);
+    let state = this.mappings.taskState(taskId);
     const event = statusMappingEvent(this.facts, taskId, state.lastEvent);
+    if (event !== "done" && !state.watched) {
+      this.mappings.watch(taskId);
+      state = this.mappings.taskState(taskId);
+    }
     const option = event === "none" ? null : mapping.events[event];
     const issue = this.sources.issue(nodeId);
     // Done on closure: a done task whose issue is observed closed is not Ready but may still be written.
     const writable =
-      ready || (event === "done" && issue?.observedState === "closed");
+      ready ||
+      (event === "done" && issue?.observedState === "closed" && state.watched);
     const item = issue
       ? this.sources.membershipItem(projectId, mapping.selectionId, nodeId)
       : null;
@@ -179,7 +191,15 @@ export class StatusMappingWriter {
       mappingVersion: version,
       event,
     });
-    if (event === state.lastEvent) {
+    // Done recorded while the task was not writable (issue still open): written once it closes.
+    const lateDone =
+      event === "done" &&
+      state.lastEvent === "done" &&
+      state.operationId === null &&
+      writable &&
+      option &&
+      item;
+    if (event === state.lastEvent && !lateDone) {
       // Persisted before its write, but the write was never prepared (a crash between): resume it.
       if (
         event !== "none" &&

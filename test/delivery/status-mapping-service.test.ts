@@ -607,3 +607,77 @@ test("a handed-back PR stays handed back when it closes, merges or is settled cl
   assert.equal(event(null), "turnStarted");
   assert.equal(event(binding({ mode: "through-merge" })), "turnStarted");
 });
+
+test("a task first seen done and closed was not worked on under the mapping and writes nothing", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    databaseOf(f.service).exec(
+      "UPDATE domain_tasks SET state='done', ready=0; UPDATE github_external_issues SET observedState='closed'",
+    );
+    await run();
+    await run();
+    assert.deepEqual(writes(f), []);
+    assert.deepEqual(f.effects, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Done recorded while the issue was open and the task not Ready is written once the issue closes", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    // The card loses its Status: the open issue is no longer Ready.
+    f.setStatus(null);
+    await f.service.refreshGitHub();
+    assert.equal(f.domain.task(f.taskId).ready, 0);
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    await run();
+    assert.equal(writes(f).length, 1);
+    f.setIssueOpen(false);
+    await f.service.refreshGitHub();
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress, done]);
+    await run();
+    assert.equal(writes(f).length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an older unproved status write is settled as superseded once a newer one has been sent, not inspected again", async () => {
+  const f = await started();
+  try {
+    f.moveStatusAfterWrite(todo);
+    await registerPr(f);
+    await f.service.runStatusMapping();
+    assert.equal(writes(f)[1]?.state, "uncertain");
+    // The card is back where Ensemble expects it, so the next write is sent.
+    f.moveStatusAfterWrite(undefined);
+    f.setStatus(inProgress);
+    await f.service.controlTask({
+      type: "task.stop",
+      key: randomUUID(),
+      taskId: f.taskId,
+    });
+    await f.service.runStatusMapping();
+    assert.equal(writes(f)[2]?.state, "confirmed-success");
+    await startedOf(f.service).deliveryCoordinator.reconcile();
+    assert.equal(writes(f)[1]?.state, "confirmed-failure");
+    assert.equal(writes(f)[1]?.observation?.reason, "status-write-superseded");
+    // Settled: a later pass leaves it alone.
+    await startedOf(f.service).deliveryCoordinator.reconcile();
+    assert.equal(writes(f)[1]?.observation?.reason, "status-write-superseded");
+  } finally {
+    await f.close();
+  }
+});

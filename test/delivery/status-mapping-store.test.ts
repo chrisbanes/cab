@@ -454,6 +454,9 @@ test("Done is written for a done task whose issue is closed, never for another n
       expectedVersion: Number(f.domain.task(f.taskId).version),
       state: "done",
     });
+    // Done and closed, but first seen that way: not worked on under the mapping.
+    assert.equal(attempt("done", DONE), "denied");
+    f.status.watch(f.taskId);
     // Done and closed: the mapped Done option is written; no other event is.
     assert.equal(attempt("done", DONE), "prepared");
     assert.equal(attempt("turnStarted", PROGRESS), "denied");

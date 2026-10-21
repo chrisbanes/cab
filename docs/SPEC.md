@@ -1723,8 +1723,10 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   mapping never makes work Ready. The one exception is Done on closure: a done task whose issue
   is observed closed (provider closure, `issue.close`, a closing-keyword merge) is no longer
   Ready, but its mapped Done option is still written, because a closed issue cannot be Ready.
-  It is refused if that option is one the readiness rule accepts, and a done task that is not
-  Ready while its issue is open writes nothing. An in-flight event may name only an option the
+  It is refused if that option is one the readiness rule accepts, a done task that is not Ready
+  while its issue is open writes nothing until the issue closes, and a task first seen already
+  done (for example a closed issue a Done-mode source imports) was not worked on under the
+  mapping and writes nothing. An in-flight event may name only an option the
   readiness rule accepts, checked at save and again at write against the task's stored facts with only
   that value replaced. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
@@ -1751,7 +1753,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   write still in flight serializes the next one for that task; an unproved one does not, because
   the next write re-reads the Status and is skipped when the card moved. Status writes run in
   their own queue with a time limit on each provider call, so a slow or hung GitHub call never
-  delays the task's agent actions or completion checks.
+  delays the task's agent actions or completion checks. Once a newer status write has been sent,
+  an older unproved one is settled as superseded instead of being inspected again.
 
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or

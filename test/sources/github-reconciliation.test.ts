@@ -1825,10 +1825,16 @@ test("a Project selection keeps its item id apart from the readiness facts, and 
     });
     // Only a Project selection knows the item; neither the source digest nor readiness changes.
     assert.equal(sources.membershipItem(projectId, "repo", "I_1"), null);
-    assert.deepEqual(sources.membershipItem(projectId, "project", "I_1"), {
-      itemNodeId: "ITEM_1",
-      projectFields: issue.projectFields,
-    });
+    const item = sources.membershipItem(projectId, "project", "I_1");
+    assert.ok(item?.readAt && item.readAt <= Date.now());
+    assert.deepEqual(
+      { ...item, readAt: null },
+      {
+        itemNodeId: "ITEM_1",
+        projectFields: issue.projectFields,
+        readAt: null,
+      },
+    );
     assert.equal(sources.review("I_1")?.observedDigest, withoutItem);
     const taskId = String(sources.issue("I_1")?.taskId);
     assert.equal(domain.task(taskId).ready, 1);

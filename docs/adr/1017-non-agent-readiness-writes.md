@@ -31,7 +31,8 @@ caller type, so a new one is a new decision that extends this record, not a flag
     Ready, because only a task that already is qualifies. The one exception is Done on
     closure: a done task whose issue is observed closed may have its mapped Done option
     written although it is no longer Ready, since a closed issue cannot be Ready; the write
-    is refused if the option is one the readiness rule accepts.
+    is refused if the option is one the readiness rule accepts, and only for a task the mapping saw
+    before it was done, so closed issues a source imports already done are never written.
   - An in-flight event (first turn started, PR handed back) may write only an option
     that keeps the task Ready: the readiness rule is evaluated on the task's stored
     facts with only that field's value replaced by the target, at save against the

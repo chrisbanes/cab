@@ -14,7 +14,10 @@ Contract: [ADR-1017](../adr/1017-non-agent-readiness-writes.md) and the issue
 [#1194](https://github.com/chrisbanes/ensemble/issues/1194). Harness:
 `test/delivery/github-qualification/live-status-mapping.mjs`, run from candidate
 `b15fb387571ca0ea1bd205ee0e13a36fe609f296` (branch `cb/issue-1194-status-mapping`) on Node
-v24.22.0. Later commits on the branch change only this record and `docs/acceptance.md`.
+v24.22.0. Later commits changed the live path: status writes run in their own queue with a time
+limit, freshness is tracked per membership, handed back no longer ends when the PR closes, and Done
+is also written for a done task whose issue is closed. They also changed tests, docs and this record.
+Deterministic tests cover those changes; the live allowance is spent, so this run did not exercise them.
 
 ## Authority
 

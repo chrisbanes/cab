@@ -133,7 +133,11 @@ export class DeliveryCoordinator {
       this.options.push,
     );
   }
-  /** A status-mapping write's provider call gives up after a time; other callers wait as before. */
+  /**
+   * A status-mapping write's provider call gives up after a time; other callers wait as before. The
+   * limit exceeds the provider's 15 s request limit, so the mutation, the first request of a write,
+   * has finished or been aborted before the write is given up and the next one can start.
+   */
   private bounded<T>(caller: DeliveryCaller, call: Promise<T>): Promise<T> {
     if (!isServiceDeliveryCaller(caller)) return call;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -690,6 +694,21 @@ export class DeliveryCoordinator {
           return;
         }
         if (!["attempting", "uncertain"].includes(current.state)) return;
+        // An older unproved status write is settled once a newer one has been sent: the newer
+        // write re-read the Status, and re-inspecting history would grow without end.
+        if (
+          current.state === "uncertain" &&
+          isServiceDeliveryCaller(current.binding) &&
+          this.store.latestSentServiceOperation(current.binding.taskId) !==
+            current.operationId
+        ) {
+          this.store.recordObservation(current.operationId, {
+            state: "confirmed-failure",
+            reason: "status-write-superseded",
+            receipt: null,
+          });
+          return;
+        }
         let observation: ProviderActionObservation;
         try {
           observation = await this.bounded(

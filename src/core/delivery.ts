@@ -649,6 +649,19 @@ export class DeliveryStore {
       ["prepared", "attempting"],
     );
   }
+  /**
+   * The task's newest status write that sent something. A later record that sent nothing (denied,
+   * or refused before any attempt) wrote nothing and does not supersede an earlier one.
+   */
+  latestSentServiceOperation(taskId: string): string | undefined {
+    return (
+      this.db
+        .prepare(
+          "SELECT operationId FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.binding.actor')='service' AND json_extract(recordJson,'$.state')<>'denied' AND NOT (json_extract(recordJson,'$.state')='confirmed-failure' AND json_extract(recordJson,'$.attempts')=0) ORDER BY rowid DESC LIMIT 1",
+        )
+        .get(taskId) as { operationId: string } | undefined
+    )?.operationId;
+  }
   private unresolvedReasons(
     taskId: string,
     include: (record: DeliveryActionRecord) => boolean,
@@ -927,6 +940,8 @@ export class DeliveryStore {
         caller.event !== "done" ||
         task.state !== "done" ||
         task.observedState !== "closed" ||
+        // A task first seen done was not worked on under the mapping.
+        !new StatusMappingStore(this.db).taskState(caller.taskId).watched ||
         keepsReady()
       )
         throw refusal();
@@ -1443,14 +1458,8 @@ export class DeliveryStore {
         isServiceDeliveryCaller(record.binding) &&
         observation.state === "confirmed-success" &&
         record.request.action.kind === "project.field" &&
-        // A late proof of an older write must not replace what a newer one wrote; a later record that sent nothing (denied, or refused before any attempt) wrote nothing.
-        (
-          this.db
-            .prepare(
-              "SELECT operationId FROM delivery_actions WHERE taskId=? AND json_extract(recordJson,'$.binding.actor')='service' AND json_extract(recordJson,'$.state')<>'denied' AND NOT (json_extract(recordJson,'$.state')='confirmed-failure' AND json_extract(recordJson,'$.attempts')=0) ORDER BY rowid DESC LIMIT 1",
-            )
-            .get(record.binding.taskId) as { operationId: string }
-        ).operationId === operationId
+        // A late proof of an older write must not replace what a newer one wrote.
+        this.latestSentServiceOperation(record.binding.taskId) === operationId
       )
         new StatusMappingStore(this.db).observed(
           record.binding.taskId,

@@ -37,6 +37,8 @@ export interface StatusMappingTaskState {
   /** The Status option Ensemble last wrote and read back, with when. */
   observedOptionNodeId: string | null;
   observedAt: number | null;
+  /** The mapping has seen the task before it was done (a task first seen done was not worked on under it). */
+  watched: boolean;
 }
 
 /** Per-project status mapping and, per task, the transition last written. */
@@ -49,7 +51,7 @@ export class StatusMappingStore {
     CREATE TABLE IF NOT EXISTS status_mapping_task_state (
       taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id), lastEvent TEXT NOT NULL,
       operationId TEXT,
-      observedOptionNodeId TEXT, observedAt INTEGER);`);
+      observedOptionNodeId TEXT, observedAt INTEGER, watched INTEGER NOT NULL DEFAULT 0);`);
   }
   /** Version 1 with no mapping until the first save, like the delivery policy. */
   current(projectId: string): {
@@ -164,17 +166,29 @@ export class StatusMappingStore {
   taskState(taskId: string): StatusMappingTaskState {
     const row = this.db
       .prepare(
-        "SELECT lastEvent, operationId, observedOptionNodeId, observedAt FROM status_mapping_task_state WHERE taskId = ?",
+        "SELECT lastEvent, operationId, observedOptionNodeId, observedAt, watched FROM status_mapping_task_state WHERE taskId = ?",
       )
-      .get(taskId) as StatusMappingTaskState | undefined;
-    return (
-      row ?? {
-        lastEvent: "none",
-        operationId: null,
-        observedOptionNodeId: null,
-        observedAt: null,
-      }
-    );
+      .get(taskId) as
+      | (Omit<StatusMappingTaskState, "watched"> & { watched: number })
+      | undefined;
+    return row
+      ? { ...row, watched: row.watched === 1 }
+      : {
+          lastEvent: "none",
+          operationId: null,
+          observedOptionNodeId: null,
+          observedAt: null,
+          watched: false,
+        };
+  }
+  /** Marks a task the mapping has seen before it was done. */
+  watch(taskId: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO status_mapping_task_state (taskId, lastEvent, watched) VALUES (?, 'none', 1)
+        ON CONFLICT(taskId) DO UPDATE SET watched = 1`,
+      )
+      .run(taskId);
   }
   /** Records the event a task is now in, and the operation minted for entering it. */
   enter(
