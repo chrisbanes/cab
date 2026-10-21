@@ -24,6 +24,7 @@ import {
   type GitHubDeliveryProvider,
   GitHubHttpDeliveryProvider,
   IssueChangedRefusal,
+  ProjectFieldChangedRefusal,
   PublicationRefusal,
   type PublicationContext,
   type PushFunction,
@@ -254,8 +255,12 @@ export class DeliveryCoordinator {
     try {
       before = await provider.preflight(action, policy, publication);
     } catch (error) {
-      // The issue no longer shows the text the operator edit replaces: nothing is written.
-      if (error instanceof IssueChangedRefusal)
+      // The issue no longer shows the text the operator edit replaces, or the item the Status
+      // the mapped write expected: nothing is written.
+      if (
+        error instanceof IssueChangedRefusal ||
+        error instanceof ProjectFieldChangedRefusal
+      )
         return this.store.recordObservation(record.operationId, {
           state: "confirmed-failure",
           reason: error.reason,

@@ -1188,6 +1188,20 @@ export class ExecutionState {
     return this.firstTaskHoldReason(taskId, false);
   }
 
+  /** Whether a turn of the task's assignments (not a read-only draft turn) has bound to a runtime turn. */
+  taskHasStartedTurn(taskId: string): boolean {
+    return (
+      this.hasTurnRequests &&
+      this.db
+        .prepare(
+          `SELECT 1 FROM turn_requests request JOIN execution_intents intent ON intent.workId = request.workId
+          WHERE request.taskId = ? AND request.draftTurn = 0 AND request.kind = 'assignment'
+            AND intent.turnId IS NOT NULL LIMIT 1`,
+        )
+        .get(taskId) !== undefined
+    );
+  }
+
   /** The reason of a task hold other than the operator Stop, which the task shows on its own line. */
   nonStopTaskHoldReason(taskId: string): string | undefined {
     return this.firstTaskHoldReason(taskId, true);

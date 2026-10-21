@@ -12,9 +12,10 @@ import type {
   RuntimeToolCall,
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
-import type {
-  ClosedIssueInspection,
-  GitHubDeliveryProvider,
+import {
+  type ClosedIssueInspection,
+  type GitHubDeliveryProvider,
+  ProjectFieldChangedRefusal,
 } from "../../src/standalone/github-delivery.js";
 import type {
   ExternalAction,
@@ -22,9 +23,22 @@ import type {
   ProviderActionObservation,
 } from "../../src/core/delivery.js";
 
+/** The fixture Project: Ready while its Status is Todo, In progress or In review. */
+export const fixtureProject = {
+  projectNodeId: "PRJ1",
+  fieldNodeId: "FLD1",
+  itemNodeId: "ITEM1",
+  todo: "O_TODO",
+  inProgress: "O_PROGRESS",
+  inReview: "O_REVIEW",
+  done: "O_DONE",
+} as const;
+
 export async function deliveryFixture(
   mode: "reviewable-pr" | "through-merge" = "reviewable-pr",
   imported = false,
+  /** An imported task read from a Project selection whose Status the fake GitHub holds. */
+  projectStatus = false,
 ) {
   const root = realpathSync(
       mkdtempSync(join(tmpdir(), "ensemble-delivery-bound-")),
@@ -117,6 +131,9 @@ export async function deliveryFixture(
     | Error
     | undefined;
   let issueOpen: boolean | undefined;
+  // The Status of the fixture issue's Project item (null is no value) and a human move landing with our write.
+  let status: string | null = fixtureProject.todo;
+  let movedAfterWrite: string | undefined;
   const provider: GitHubDeliveryProvider = {
     async inspectClosedIssue() {
       if (closedIssue instanceof Error) throw closedIssue;
@@ -145,6 +162,11 @@ export async function deliveryFixture(
     async preflight(action) {
       preflightHook?.();
       if (preflightWait) await preflightWait;
+      if (action.kind === "project.field") {
+        if (action.expected && action.expected.optionNodeId !== status)
+          throw new ProjectFieldChangedRefusal();
+        return { nodeId: "target", optionId: status };
+      }
       if (action.kind === "pr.merge" && pr.mergeBlockers.length)
         throw new Error("held");
       return action.kind === "issue.close"
@@ -156,6 +178,12 @@ export async function deliveryFixture(
     },
     async performAction(record) {
       effects.push(record.request.action);
+      if (record.request.action.kind === "project.field") {
+        status = movedAfterWrite ?? record.request.action.optionNodeId;
+        // The real provider reads the item back before it reports the outcome.
+        if (!actionOutcome && status !== record.request.action.optionNodeId)
+          return { state: "uncertain", reason: "unproved", receipt: null };
+      }
       if (actionOutcome) return actionOutcome;
       // As GitHub would: a confirmed edit changes what the next source read shows.
       if (applyIssueEdits && record.request.action.kind === "issue.edit") {
@@ -180,7 +208,15 @@ export async function deliveryFixture(
         },
       };
     },
-    async inspectAction() {
+    async inspectAction(record) {
+      if (record.request.action.kind === "project.field")
+        return status === record.request.action.optionNodeId
+          ? {
+              state: "confirmed-success",
+              reason: null,
+              receipt: { nodeId: "target" },
+            }
+          : { state: "uncertain", reason: "unproved", receipt: null };
       return (
         inspectOutcome ?? {
           state: "uncertain",
@@ -226,7 +262,19 @@ export async function deliveryFixture(
                         body: sourceBody,
                         state: issueOpen === false ? "closed" : "open",
                         labels: sourceLabels,
-                        projectFields: [],
+                        projectFields:
+                          projectStatus && status
+                            ? [
+                                {
+                                  projectNodeId: fixtureProject.projectNodeId,
+                                  fieldNodeId: fixtureProject.fieldNodeId,
+                                  optionNodeId: status,
+                                },
+                              ]
+                            : [],
+                        ...(projectStatus
+                          ? { projectItemNodeId: fixtureProject.itemNodeId }
+                          : {}),
                       },
                     ],
               reason: null,
@@ -281,17 +329,35 @@ export async function deliveryFixture(
       expectedVersion: 1,
       credentialRef: "env:FIXTURE_SOURCE",
       selections: [
-        {
-          id: "repo",
-          kind: "repository",
-          repositoryId: "R1",
-          owner: "org",
-          name: "repo",
-        },
+        projectStatus
+          ? {
+              id: "repo",
+              kind: "project",
+              projectNodeId: fixtureProject.projectNodeId,
+              filter: "",
+            }
+          : {
+              id: "repo",
+              kind: "repository",
+              repositoryId: "R1",
+              owner: "org",
+              name: "repo",
+            },
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: projectStatus
+          ? [
+              fixtureProject.todo,
+              fixtureProject.inProgress,
+              fixtureProject.inReview,
+            ].map((optionNodeId) => ({
+              kind: "project-field" as const,
+              projectNodeId: fixtureProject.projectNodeId,
+              fieldNodeId: fixtureProject.fieldNodeId,
+              optionNodeId,
+            }))
+          : [{ kind: "label", name: "ready" }],
       },
       repositories: [],
     });
@@ -329,6 +395,23 @@ export async function deliveryFixture(
       { action: "issue.edit", repositoryId: "R1", mode: "allow" },
       { action: "issue.close", repositoryId: "R1", mode: "allow" },
       { action: "pr.merge", repositoryId: "R1", mode: "allow" },
+      ...(projectStatus
+        ? [
+            {
+              action: "project.field" as const,
+              repositoryId: "R1",
+              mode: "allow" as const,
+              projectNodeId: fixtureProject.projectNodeId,
+              fieldNodeId: fixtureProject.fieldNodeId,
+              optionNodeIds: [
+                fixtureProject.todo,
+                fixtureProject.inProgress,
+                fixtureProject.inReview,
+                fixtureProject.done,
+              ],
+            },
+          ]
+        : []),
     ],
     requiredChecks: [],
   });
@@ -402,6 +485,15 @@ export async function deliveryFixture(
     },
     setSourceLabels: (labels: string[]) => {
       sourceLabels = labels;
+    },
+    /** The fixture issue's Project Status on the fake GitHub; the next source read observes it. */
+    status: () => status,
+    setStatus: (value: string | null) => {
+      status = value;
+    },
+    /** A human move that lands with our next Status write, so its readback shows their option. */
+    moveStatusAfterWrite: (value: string | undefined) => {
+      movedAfterWrite = value;
     },
     getPr: () => pr,
     setPr: (value: PrDeliveryObservation) => {

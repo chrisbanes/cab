@@ -30,3 +30,11 @@ export function unpublish(service: StandaloneService): void {
   // biome-ignore lint/complexity/useLiteralKeys: private member access for tests
   service["current"] = undefined;
 }
+
+/** The service's open database, for tests that seed or inspect persisted rows. */
+export function databaseOf(service: StandaloneService) {
+  // biome-ignore lint/complexity/useLiteralKeys: private member access for tests
+  const db = service["db"];
+  if (!db) throw new Error("Service database is not open");
+  return db;
+}

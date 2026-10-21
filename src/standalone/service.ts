@@ -130,6 +130,8 @@ import {
   StandaloneDataDirectory,
 } from "./data-directory.js";
 import { DeliveryCoordinator, unresolvedThreadSummary } from "./delivery.js";
+import { StatusMappingStore } from "../core/status-mapping.js";
+import { StatusMappingWriter, statusMappingEvent } from "./status-mapping.js";
 import { verifyTaskPush } from "./push-verification.js";
 import {
   type DiagnosticKind,
@@ -499,6 +501,7 @@ interface Started {
   coordination: CoordinationStore;
   deliveryStore: DeliveryStore;
   deliveryCoordinator: DeliveryCoordinator;
+  statusMappingWriter: StatusMappingWriter;
   routingAttempts: RoutingAttemptStore;
   workspaces: WorkspaceManager;
   workspaceBindings: SqliteWorkspaceBindingStore;
@@ -1059,6 +1062,15 @@ export class StandaloneService {
             )),
       });
       acquire("deliveryCoordinator", deliveryCoordinator);
+      const statusMappingWriter = acquire(
+        "statusMappingWriter",
+        new StatusMappingWriter(
+          { domain, state, deliveryStore },
+          new StatusMappingStore(db),
+          githubSources,
+          deliveryCoordinator,
+        ),
+      );
       const deliveryCredentialNames = () =>
         domain.projects().flatMap((p) => {
           const ref = deliveryStore.configuration(String(p.id)).credentialRef;
@@ -1340,6 +1352,7 @@ export class StandaloneService {
         coordination,
         deliveryStore,
         deliveryCoordinator,
+        statusMappingWriter,
         routingAttempts,
         workspaces,
         workspaceBindings,
@@ -1401,6 +1414,7 @@ export class StandaloneService {
           await this.acquired?.power?.stop().catch(() => {});
           this.acquired?.supervisor?.cancelObservations();
           await this.acquired?.githubSynchronizer?.stop().catch(() => {});
+          await this.acquired?.statusMappingWriter?.stop().catch(() => {});
           await this.acquired?.deliveryCoordinator?.stop().catch(() => {});
           // An attempt may be mid-start: let it land in `runtimes` so it is stopped below.
           await Promise.all([...this.runtimeToggles.values()]);
@@ -2205,6 +2219,7 @@ export class StandaloneService {
       supervisor,
       githubSynchronizer: synchronizer,
       deliveryCoordinator: delivery,
+      statusMappingWriter: statusMapping,
       power,
       workspaces,
       draftingWorkspaces,
@@ -2243,6 +2258,7 @@ export class StandaloneService {
     }
 
     await attempt("GitHub synchronization stop", () => synchronizer?.stop());
+    await attempt("status mapping stop", () => statusMapping?.stop());
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
       if (this.db?.isOpen && this.cache?.isOpen)
@@ -3035,8 +3051,12 @@ export class StandaloneService {
       return;
     }
     if (isServiceDeliveryCaller(caller)) {
-      if (!["open", "done"].includes(String(domain.task(caller.taskId).state)))
-        throw new DomainConflictError("Task is cancelled");
+      // The event it was minted for must still be the task's: a task that moved on writes later.
+      if (
+        statusMappingEvent({ domain, state, deliveryStore }, caller.taskId) !==
+        caller.event
+      )
+        throw new DomainConflictError("Task is no longer in the mapped event");
       return;
     }
     const intent = state.byWorkId(caller.workId);
@@ -3334,6 +3354,12 @@ export class StandaloneService {
     this.completeSettledProviderClosures(started);
     this.emitSourceHoldNotices(started);
     await this.wakeScheduler();
+    await started.statusMappingWriter.run();
+  }
+
+  /** Writes mapped Project Status for the tasks' current events; resolves when the pass ends. */
+  async runStatusMapping(): Promise<void> {
+    await this.started().statusMappingWriter.run();
   }
 
   /** Takes its components because start-up reconciles before publication. */
@@ -5508,6 +5534,8 @@ export class StandaloneService {
       return;
     // Unpublished during start-up, so start-up wakes cannot admit work.
     if (!this.current) return;
+    // Never rejects; a pass already running runs once more after it.
+    void this.current.statusMappingWriter.run();
     // Every settled turn and resolved hold wakes the scheduler: a drained runtime stops here.
     this.stopDrainedRuntimes();
     const {
@@ -6788,6 +6816,7 @@ export class StandaloneService {
       let turnBound = runtimeGeneration
         ? state.bindTurn(intent.id, turnId, runtimeGeneration)
         : state.bindTurn(intent.id, turnId);
+      if (turnBound) void this.current?.statusMappingWriter.run();
       let nativeRejected = false;
       if (!turnBound) {
         const reconciliation = state.reconcileNativeTurnStartResponse({
