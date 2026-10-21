@@ -205,8 +205,8 @@ export class StatusMappingStore {
       )
       .run(taskId, lastEvent, operationId);
   }
-  /** A confirmed write is the newest observation of the item's Status. */
-  observed(taskId: string, optionNodeId: string): void {
+  /** The newest observation of the item's Status (`null` is no value): a confirmed write, or a read of the item while the task was Ready. */
+  observed(taskId: string, optionNodeId: string | null, at = Date.now()): void {
     this.db
       .prepare(
         `INSERT INTO status_mapping_task_state (taskId, lastEvent, observedOptionNodeId, observedAt)
@@ -214,6 +214,6 @@ export class StatusMappingStore {
         ON CONFLICT(taskId) DO UPDATE SET observedOptionNodeId = excluded.observedOptionNodeId,
           observedAt = excluded.observedAt`,
       )
-      .run(taskId, optionNodeId, Date.now());
+      .run(taskId, optionNodeId, at);
   }
 }

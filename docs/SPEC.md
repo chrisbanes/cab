@@ -1723,6 +1723,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   mapping never makes work Ready. The one exception is Done on closure: a done task whose issue
   is observed closed (provider closure, `issue.close`, a closing-keyword merge) is no longer
   Ready, but its mapped Done option is still written, because a closed issue cannot be Ready.
+  It follows the conditional-write rule below against the last Status Ensemble wrote, or read while
+  the task was Ready, so a Status a human set since is never overwritten and the skip is recorded.
   It is refused if that option is one the readiness rule accepts, a done task that is not Ready
   while its issue is open writes nothing until the issue closes, and a task first seen already
   done (for example a closed issue a Done-mode source imports) was not worked on under the
@@ -1737,8 +1739,9 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   changes to a mapped one, once per transition; leaving an event and re-entering it is a new
   transition. The operation id is stored before the write, so a restart resumes the same
   operation. It runs after every GitHub refresh, when a turn binds and on scheduler wake. A
-  reviewable PR stays handed back, whether it is open, merged or closed and whatever its
-  settlement, until the task is Done. An unknown dependency read (a
+  reviewable PR stays handed back, open, merged or accepted, until the task is Done; a handback the
+  operator settles as closed, or a PR that closes without merging, is sent back, and the event falls
+  back to turn started. An unknown dependency read (a
   partial read) is not a block and keeps a held task held. A write needs the issue's current
   item in the mapped Project selection.
 - **Conditional write.** Immediately before writing, the provider reads the item's Status. If

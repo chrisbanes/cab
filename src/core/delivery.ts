@@ -649,6 +649,13 @@ export class DeliveryStore {
       ["prepared", "attempting"],
     );
   }
+  hasAction(operationId: string): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM delivery_actions WHERE operationId=?")
+        .get(operationId) !== undefined
+    );
+  }
   /**
    * The task's newest status write that sent something. A later record that sent nothing (denied,
    * or refused before any attempt) wrote nothing and does not supersede an earlier one.

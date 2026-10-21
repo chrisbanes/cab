@@ -51,8 +51,14 @@ export function statusMappingEvent(
   )
     return "held";
   const binding = deliveryStore.delivery(taskId);
-  // Handed back until the task is Done: a merged or closed PR and a closed settlement do not end it.
-  if (binding?.mode === "reviewable-pr" && !binding.observation.draft)
+  // Handed back until the task is Done, merged or accepted included. A handback the operator
+  // settles as closed, or a PR that closes without merging, is sent back: work resumes.
+  if (
+    binding?.mode === "reviewable-pr" &&
+    !binding.observation.draft &&
+    binding.settlement?.decision !== "closed" &&
+    !(binding.observation.state === "CLOSED" && !binding.observation.merged)
+  )
     return "handedBack";
   return state.taskHasStartedTurn(taskId) ? "turnStarted" : "none";
 }
@@ -137,7 +143,10 @@ export class StatusMappingWriter {
     const state = this.mappings.taskState(taskId);
     return (
       state.lastEvent === "done" &&
-      (state.operationId !== null || !state.watched)
+      (state.operationId === null
+        ? !state.watched
+        : // An operation id stored before a crash may never have been persisted.
+          this.facts.deliveryStore.hasAction(state.operationId))
     );
   }
 
@@ -158,13 +167,31 @@ export class StatusMappingWriter {
     }
     const option = event === "none" ? null : mapping.events[event];
     const issue = this.sources.issue(nodeId);
-    // Done on closure: a done task whose issue is observed closed is not Ready but may still be written.
-    const writable =
-      ready ||
-      (event === "done" && issue?.observedState === "closed" && state.watched);
     const item = issue
       ? this.sources.membershipItem(projectId, mapping.selectionId, nodeId)
       : null;
+    // While the task is Ready, a newer read of the item is what Ensemble last observed.
+    if (ready && item && (item.readAt ?? 0) > (state.observedAt ?? 0)) {
+      this.mappings.observed(
+        taskId,
+        item.projectFields.find(
+          (f) =>
+            f.projectNodeId === mapping.projectNodeId &&
+            f.fieldNodeId === mapping.fieldNodeId,
+        )?.optionNodeId ?? null,
+        item.readAt ?? Date.now(),
+      );
+      state = this.mappings.taskState(taskId);
+    }
+    // Done on closure: a done task whose issue is observed closed is not Ready but may still be
+    // written, against the Status Ensemble last observed or wrote, never one a human set since.
+    const closing =
+      !ready &&
+      event === "done" &&
+      issue?.observedState === "closed" &&
+      state.watched &&
+      state.observedAt !== null;
+    const writable = ready || closing;
     const request = (operationId: string) => ({
       operationId,
       action: {
@@ -179,7 +206,9 @@ export class StatusMappingWriter {
         fieldNodeId: mapping.fieldNodeId,
         optionNodeId: option ?? "",
         expected: {
-          optionNodeId: this.lastObserved(mapping, state, item),
+          optionNodeId: closing
+            ? state.observedOptionNodeId
+            : this.lastObserved(mapping, state, item),
         },
       },
     });

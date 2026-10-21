@@ -570,10 +570,10 @@ test("Done is not written for a done task that is not Ready while its issue is s
   }
 });
 
-test("a handed-back PR stays handed back when it closes, merges or is settled closed, until Done", () => {
+test("a handback stays handed back, merged or accepted, until Done; a closed settlement or an unmerged closed PR sends it back", () => {
   const binding = (change: Record<string, unknown>) => ({
     mode: "reviewable-pr",
-    observation: { state: "OPEN", draft: false },
+    observation: { state: "OPEN", draft: false, merged: false },
     settlement: null,
     ...change,
   });
@@ -590,18 +590,33 @@ test("a handed-back PR stays handed back when it closes, merges or is settled cl
       "task",
     );
   assert.equal(event(binding({})), "handedBack");
-  for (const state of ["CLOSED", "MERGED"])
-    assert.equal(
-      event(binding({ observation: { state, draft: false } })),
-      "handedBack",
-      state,
-    );
   assert.equal(
-    event(binding({ settlement: { decision: "closed" } })),
+    event(
+      binding({ observation: { state: "MERGED", draft: false, merged: true } }),
+    ),
     "handedBack",
   );
   assert.equal(
-    event(binding({ observation: { state: "OPEN", draft: true } })),
+    event(binding({ settlement: { decision: "accepted" } })),
+    "handedBack",
+  );
+  // Sent back: the settlement is closed, or the PR closed without merging.
+  assert.equal(
+    event(binding({ settlement: { decision: "closed" } })),
+    "turnStarted",
+  );
+  assert.equal(
+    event(
+      binding({
+        observation: { state: "CLOSED", draft: false, merged: false },
+      }),
+    ),
+    "turnStarted",
+  );
+  assert.equal(
+    event(
+      binding({ observation: { state: "OPEN", draft: true, merged: false } }),
+    ),
     "turnStarted",
   );
   assert.equal(event(null), "turnStarted");
@@ -628,8 +643,40 @@ test("Done recorded while the issue was open and the task not Ready is written o
   try {
     await run();
     assert.deepEqual(optionsWritten(f), [inProgress]);
-    // The card loses its Status: the open issue is no longer Ready.
+    // Not Ready, issue still open (the Status on GitHub is unchanged).
+    databaseOf(f.service).exec("UPDATE domain_tasks SET ready=0");
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    await run();
+    assert.equal(writes(f).length, 1);
+    databaseOf(f.service).exec(
+      "UPDATE github_external_issues SET observedState='closed'",
+    );
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress, done]);
+    await run();
+    assert.equal(writes(f).length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Done on closure is skipped, and the skip recorded, when a human set the Status since Ensemble last saw it", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    // A human sets a Status outside the rule ("Won't do") and closes the issue: one sync stores both.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     f.setStatus(null);
+    f.setIssueOpen(false);
     await f.service.refreshGitHub();
     assert.equal(f.domain.task(f.taskId).ready, 0);
     f.domain.execute({
@@ -642,10 +689,35 @@ test("Done recorded while the issue was open and the task not Ready is written o
       state: "done",
     });
     await run();
-    assert.equal(writes(f).length, 1);
-    f.setIssueOpen(false);
-    await f.service.refreshGitHub();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    assert.equal(writes(f)[1]?.state, "confirmed-failure");
+    assert.equal(writes(f)[1]?.observation?.reason, projectFieldChangedReason);
+    assert.equal(f.status(), null);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a Done operation stored before a crash, with no action persisted, is written after the restart", async () => {
+  const { f, run } = await mappedManually();
+  try {
     await run();
+    databaseOf(f.service).exec(
+      "UPDATE domain_tasks SET state='done', ready=0; UPDATE github_external_issues SET observedState='closed'",
+    );
+    const operationId = randomUUID();
+    new StatusMappingStore(databaseOf(f.service)).enter(
+      f.taskId,
+      "done",
+      operationId,
+    );
+    await run();
+    assert.deepEqual(
+      writes(f)
+        .map((w) => w.operationId)
+        .slice(1),
+      [operationId],
+    );
     assert.deepEqual(optionsWritten(f), [inProgress, done]);
     await run();
     assert.equal(writes(f).length, 2);
