@@ -27,7 +27,7 @@ const manifest = () => ({
   credential: "gh-cli",
   actions: ["project.field"],
   runtimeTurnLimit: 0,
-  maxAttempts: 3,
+  maxAttempts: 4,
 });
 function files(
   change: Record<string, unknown> = {},
@@ -77,7 +77,7 @@ test("the grant must match the manifest, be unexpired and stay inside the attemp
     { actions: ["project.field", "pr.merge"] },
     { runtimeTurnLimit: 1 },
     { maxAttempts: 2 },
-    { maxAttempts: 4 },
+    { maxAttempts: 5 },
   ])
     assert.equal(
       statusMappingManifestSchema.safeParse({ ...manifest(), ...change })
@@ -86,7 +86,7 @@ test("the grant must match the manifest, be unexpired and stay inside the attemp
       JSON.stringify(change),
     );
   const g = new StatusMappingGuard(f.raw, f.grant);
-  assert.throws(() => g.begin("aaaaaaaa", 4), /allowance/);
+  assert.throws(() => g.begin("aaaaaaaa", 5), /allowance/);
   assert.throws(() => g.begin("aaaaaaaa", 0), /allowance/);
   assert.throws(() => g.begin("not-a-run", 1), /run id/);
   g.begin("aaaaaaaa", 3);

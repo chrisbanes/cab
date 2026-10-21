@@ -28,7 +28,7 @@ export const statusMappingManifestSchema = z
     /** The run drives the real writer and coordinator directly, so it grants no model turns. */
     runtimeTurnLimit: z.literal(0),
     /** Each attempt creates and deletes its own scratch Project. */
-    maxAttempts: z.literal(3),
+    maxAttempts: z.literal(4),
   })
   .strict();
 const statusMappingGrantSchema = z
