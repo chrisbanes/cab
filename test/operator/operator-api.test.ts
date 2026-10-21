@@ -3951,3 +3951,200 @@ test("runtime.configure refuses a missing executable, asks to confirm bound work
     { harness: "claude", enabled: false, boundTasks: 2 },
   ]);
 });
+
+test("the status mapping is read with its Project selections and granted options, saved only against a Status field GitHub lists, and conflicts on a stale version", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const projectId = randomUUID();
+  const domain = f.service.domain();
+  domain.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Mapped",
+    leadProfileId: null,
+  });
+  const selection = {
+    id: "S-1",
+    kind: "project" as const,
+    projectNodeId: "PVT_1",
+    filter: "",
+  };
+  domain.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "env:FIXTURE_GITHUB",
+    selections: [selection],
+    readiness: {
+      mode: "any",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "PVT_1",
+          fieldNodeId: "F_status",
+          optionNodeId: "O_todo",
+        },
+      ],
+    },
+    repositories: [],
+  });
+  const grant = (options: string[]) =>
+    domain.execute({
+      type: "delivery.configure",
+      key: randomUUID(),
+      actor: "operator",
+      projectId,
+      expectedVersion: f.service.delivery().configuration(projectId).version,
+      mode: "reviewable-pr",
+      credentialRef: null,
+      grants: [
+        {
+          action: "project.field",
+          repositoryId: "R_1",
+          mode: "allow",
+          projectNodeId: "PVT_1",
+          fieldNodeId: "F_status",
+          optionNodeIds: options,
+        },
+      ],
+      requiredChecks: [],
+    });
+  grant(["O_todo", "O_done"]);
+  let fields: Array<{
+    fieldNodeId: string;
+    name: string;
+    options: Array<{ optionNodeId: string; name: string }>;
+  }> = [
+    {
+      fieldNodeId: "F_status",
+      name: "Status",
+      options: [
+        { optionNodeId: "O_todo", name: "Todo" },
+        { optionNodeId: "O_done", name: "Done" },
+      ],
+    },
+  ];
+  let unreadable = false;
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+    discovery: () =>
+      ({
+        async projectFields() {
+          if (unreadable) throw new Error("denied");
+          return { fields, truncated: false };
+        },
+      }) as never,
+  });
+  await api.execute({
+    type: "discovery.configure",
+    key: randomUUID(),
+    credentialRef: "env:FIXTURE_DISCOVERY",
+  });
+  const read = async () =>
+    (await api.readProjectConfiguration(projectId)).data.statusMapping;
+  assert.deepEqual(await read(), {
+    version: 1,
+    availability: "available",
+    mapping: null,
+    selections: [{ id: "S-1", projectNodeId: "PVT_1", active: false }],
+    granted: [
+      {
+        projectNodeId: "PVT_1",
+        fieldNodeId: "F_status",
+        optionNodeIds: ["O_todo", "O_done"],
+      },
+    ],
+  });
+  const mapping = (
+    events: Record<string, string | null>,
+    field = "F_status",
+  ) => ({
+    selectionId: "S-1",
+    projectNodeId: "PVT_1",
+    fieldNodeId: field,
+    events: {
+      turnStarted: null,
+      handedBack: null,
+      held: null,
+      done: null,
+      ...events,
+    },
+  });
+  const save = (
+    value: ReturnType<typeof mapping> | null,
+    expectedVersion = 1,
+  ) =>
+    api.execute({
+      type: "status-mapping.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion,
+      mapping: value,
+    });
+  const refused = async (run: Promise<unknown>) => {
+    try {
+      await run;
+    } catch (error) {
+      assert.ok(error instanceof OperatorApiError);
+      return error;
+    }
+    return assert.fail("expected a refusal");
+  };
+
+  // GitHub cannot be read: nothing is saved, and no GitHub detail is repeated.
+  unreadable = true;
+  assert.equal((await refused(save(mapping({ done: "O_done" })))).status, 503);
+  unreadable = false;
+  // The field must be the one named Status, and each option one of its own.
+  fields = [{ ...fields[0]!, name: "Priority" }];
+  assert.deepEqual(
+    (await refused(save(mapping({ done: "O_done" })))).fieldPaths,
+    ["mapping.fieldNodeId"],
+  );
+  fields = [{ ...fields[0]!, name: "Status" }];
+  assert.deepEqual(
+    (await refused(save(mapping({ done: "O_missing" })))).fieldPaths,
+    ["mapping.events.done"],
+  );
+  // The in-flight option the readiness rule does not accept is refused in words naming it.
+  const unaccepted = await refused(save(mapping({ turnStarted: "O_done" })));
+  assert.equal(unaccepted.status, 400);
+  assert.deepEqual(unaccepted.fieldPaths, ["mapping.events.turnStarted"]);
+  assert.match(
+    unaccepted.publicMessage ?? "",
+    /First turn started → Done: the readiness rule does not accept/,
+  );
+  assert.equal((await read())?.mapping, null);
+
+  const receipt = await save(mapping({ held: "O_done", done: "O_done" }));
+  assert.equal(receipt.kind, "configuration");
+  assert.deepEqual(receipt.result, {
+    commandType: "status-mapping.configure",
+    resourceId: projectId,
+    version: 2,
+    mappedEventCount: 2,
+  });
+  assert.equal((await read())?.version, 2);
+  assert.equal((await read())?.mapping?.events.held, "O_done");
+  // A save prepared against the old version conflicts and changes nothing.
+  assert.equal((await refused(save(null, 1))).status, 409);
+  assert.equal((await read())?.version, 2);
+  // An exact replay returns its recorded receipt even when GitHub cannot be read now.
+  const key = randomUUID();
+  const command = {
+    type: "status-mapping.configure" as const,
+    key,
+    projectId,
+    expectedVersion: 2,
+    mapping: mapping({ done: "O_todo" }),
+  };
+  const first = await api.execute(command);
+  unreadable = true;
+  assert.deepEqual(await api.execute(command), first);
+  unreadable = false;
+  assert.equal((await save(null, 3)).kind, "configuration");
+  assert.equal((await read())?.mapping, null);
+});

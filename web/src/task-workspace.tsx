@@ -52,6 +52,7 @@ import {
 } from "./action-feedback.js";
 import {
   checkStatusWord,
+  deliveryActionLine,
   deliveryBlockerSentence,
   pullRequestReference,
   pullRequestStateLabel,
@@ -3169,10 +3170,7 @@ function Changes({
       )}
       {delivers &&
         d?.actions.map((a) => (
-          <p key={a.operationId}>
-            {a.kind}: {a.state} · {a.reason ?? "receipt recorded"} · operation{" "}
-            {a.operationId}
-          </p>
+          <p key={a.operationId}>{deliveryActionLine(a)}</p>
         ))}
     </section>
   );

@@ -59,6 +59,7 @@ import {
   useReadinessDiscovery,
 } from "./readiness-picker.js";
 import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
+import { StatusMappingPanel } from "./status-mapping-config.js";
 import type { ObservationResource } from "./sync-placement.js";
 
 const withKeys = (rows: object[]) =>
@@ -372,565 +373,596 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   // Nothing unsaved: the form is clean, so what is saved is what the page shows.
   const quiet = !isLocked && !d.dirty && lines.length === 0;
   return (
-    <form
-      onSubmit={(e) =>
-        void submitDraft(
-          e,
-          d,
-          p.client,
-          p.session,
-          sourceCommand(projectId, v, known),
-          p.refreshConfiguration,
-          {},
-          holdSave,
-        )
-      }
-    >
-      {stale.length > 0 && (
-        <Alert variant="destructive" role="alert">
-          {stale.join(", ")} {stale.length === 1 ? "is" : "are"} no longer
-          saved. Review the changes made elsewhere, or discard yours, before
-          saving.
-          {!locked(d) && d.phase !== "conflict" && (
-            <Button type="button" variant="secondary" onClick={adopt}>
-              Review changes
-            </Button>
-          )}
-        </Alert>
-      )}
-      {duplicates.length > 0 && (
-        <Alert variant="destructive" role="alert">
-          {duplicates.join(", ")} {duplicates.length === 1 ? "is" : "are"}{" "}
-          linked twice. Remove one of the rows before saving: remove the new row
-          to keep the saved link, or remove the saved link to replace it.
-        </Alert>
-      )}
-      {loaded.incomplete && (
-        <Alert variant="destructive" role="alert">
-          A saved source or repository link cannot be shown here, so this form
-          cannot keep it. Use the advanced source editor.
-        </Alert>
-      )}
-      <div className="settings-split">
-        <div className="settings-column">
-          <Panel
-            title="1 · Discovery sources"
-            description="Sources are named by what they read. Search queries and local paths show here for you to edit; GitHub Project filters stay hidden."
-          >
-            <fieldset disabled={isLocked} className="settings-rows">
-              <legend className="sr-only">Discovery sources</legend>
-              {errorText(
-                "selections",
-                "source-selections-error",
-                "Check the new source fields.",
-              )}
-              {selections.map((r, i) =>
-                r.keep ? (
-                  <div className="settings-row" key={String(r.rowKey)}>
-                    <div className="settings-row-heading">
-                      <div>
-                        <h3 className="small-heading">
-                          <SourceHeading naming={savedNaming(r)} />
-                        </h3>
-                        <p className="body">
-                          {sourceStatusLine(
-                            observedRow(r.id),
-                            observed?.readiness ?? { kind: "none" },
-                          )}
-                        </p>
-                        {r.kind === "project" && (
-                          <p className="metadata muted">
-                            Filter kept · private
+    <>
+      <form
+        onSubmit={(e) =>
+          void submitDraft(
+            e,
+            d,
+            p.client,
+            p.session,
+            sourceCommand(projectId, v, known),
+            p.refreshConfiguration,
+            {},
+            holdSave,
+          )
+        }
+      >
+        {stale.length > 0 && (
+          <Alert variant="destructive" role="alert">
+            {stale.join(", ")} {stale.length === 1 ? "is" : "are"} no longer
+            saved. Review the changes made elsewhere, or discard yours, before
+            saving.
+            {!locked(d) && d.phase !== "conflict" && (
+              <Button type="button" variant="secondary" onClick={adopt}>
+                Review changes
+              </Button>
+            )}
+          </Alert>
+        )}
+        {duplicates.length > 0 && (
+          <Alert variant="destructive" role="alert">
+            {duplicates.join(", ")} {duplicates.length === 1 ? "is" : "are"}{" "}
+            linked twice. Remove one of the rows before saving: remove the new
+            row to keep the saved link, or remove the saved link to replace it.
+          </Alert>
+        )}
+        {loaded.incomplete && (
+          <Alert variant="destructive" role="alert">
+            A saved source or repository link cannot be shown here, so this form
+            cannot keep it. Use the advanced source editor.
+          </Alert>
+        )}
+        <div className="settings-split">
+          <div className="settings-column">
+            <Panel
+              title="1 · Discovery sources"
+              description="Sources are named by what they read. Search queries and local paths show here for you to edit; GitHub Project filters stay hidden."
+            >
+              <fieldset disabled={isLocked} className="settings-rows">
+                <legend className="sr-only">Discovery sources</legend>
+                {errorText(
+                  "selections",
+                  "source-selections-error",
+                  "Check the new source fields.",
+                )}
+                {selections.map((r, i) =>
+                  r.keep ? (
+                    <div className="settings-row" key={String(r.rowKey)}>
+                      <div className="settings-row-heading">
+                        <div>
+                          <h3 className="small-heading">
+                            <SourceHeading naming={savedNaming(r)} />
+                          </h3>
+                          <p className="body">
+                            {sourceStatusLine(
+                              observedRow(r.id),
+                              observed?.readiness ?? { kind: "none" },
+                            )}
                           </p>
-                        )}
+                          {r.kind === "project" && (
+                            <p className="metadata muted">
+                              Filter kept · private
+                            </p>
+                          )}
+                        </div>
+                        <StatusBadge
+                          tone={r.removed ? "warning" : "idle"}
+                          icon={
+                            r.active && !r.removed ? CircleCheck : undefined
+                          }
+                        >
+                          {r.removed
+                            ? "Will be removed"
+                            : r.active
+                              ? "Active"
+                              : "Inactive"}
+                        </StatusBadge>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          aria-label={`${r.removed ? "Undo remove" : "Remove"} ${rowName(
+                            savedNaming(r),
+                            r.id,
+                          )}`}
+                          onClick={() => toggleRemoved("selections", i)}
+                        >
+                          {r.removed ? "Undo remove" : "Remove"}
+                        </Button>
                       </div>
-                      <StatusBadge
-                        tone={r.removed ? "warning" : "idle"}
-                        icon={r.active && !r.removed ? CircleCheck : undefined}
-                      >
-                        {r.removed
-                          ? "Will be removed"
-                          : r.active
-                            ? "Active"
-                            : "Inactive"}
-                      </StatusBadge>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        aria-label={`${r.removed ? "Undo remove" : "Remove"} ${rowName(
-                          savedNaming(r),
-                          r.id,
-                        )}`}
-                        onClick={() => toggleRemoved("selections", i)}
-                      >
-                        {r.removed ? "Undo remove" : "Remove"}
-                      </Button>
+                      <OutcomeDetails fields={details(r, savedNaming(r))} />
+                      {r.kind === "search" && !r.removed && (
+                        <div className="settings-fields">
+                          {savedValue(
+                            "selections",
+                            i,
+                            "query",
+                            "Search query",
+                            "Query unavailable",
+                            known?.searches.find((x) => x.id === r.id)?.query,
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <OutcomeDetails fields={details(r, savedNaming(r))} />
-                    {r.kind === "search" && !r.removed && (
+                  ) : (
+                    <div className="settings-row" key={String(r.rowKey)}>
+                      <div className="settings-row-heading">
+                        <h3 className="small-heading">
+                          <SourceHeading naming={draftSourceName(r)} />
+                        </h3>
+                        <StatusBadge tone="idle">Not saved yet</StatusBadge>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          aria-label={`Remove ${rowName(draftSourceName(r), r.id)}`}
+                          onClick={() => drop("selections", i)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                      <OutcomeDetails
+                        fields={[
+                          ["Source ID", String(r.id)],
+                          ["Kind", draftSourceName(r).kind],
+                        ]}
+                      />
                       <div className="settings-fields">
-                        {savedValue(
-                          "selections",
-                          i,
-                          "query",
-                          "Search query",
-                          "Query unavailable",
-                          known?.searches.find((x) => x.id === r.id)?.query,
+                        <label
+                          className="field body"
+                          htmlFor={`selection-kind-${i}`}
+                        >
+                          Selection kind
+                          <NativeSelect
+                            className="control"
+                            id={`selection-kind-${i}`}
+                            aria-label="Selection kind"
+                            value={String(r.kind)}
+                            onChange={(e) => {
+                              const kind = e.target.value;
+                              const rows = parseRows(v.selections);
+                              rows[i] = {
+                                id: String(r.id),
+                                rowKey: String(r.rowKey),
+                                ...(kind === "repository"
+                                  ? {
+                                      kind,
+                                      repositoryId: "",
+                                      owner: "",
+                                      name: "",
+                                    }
+                                  : kind === "project"
+                                    ? { kind, projectNodeId: "", filter: "" }
+                                    : { kind, query: "" }),
+                              };
+                              setRows("selections", rows);
+                            }}
+                          >
+                            <option value="repository">Repository</option>
+                            <option value="search">Search</option>
+                            <option value="project">GitHub Project</option>
+                          </NativeSelect>
+                        </label>
+                        {r.kind === "repository" ? (
+                          <>
+                            {input(
+                              "selections",
+                              i,
+                              "repositoryId",
+                              "Repository ID",
+                            )}
+                            {input(
+                              "selections",
+                              i,
+                              "owner",
+                              "Repository owner",
+                            )}
+                            {input("selections", i, "name", "Repository name")}
+                          </>
+                        ) : r.kind === "project" ? (
+                          <>
+                            {input(
+                              "selections",
+                              i,
+                              "projectNodeId",
+                              "GitHub Project node ID",
+                            )}
+                            {input("selections", i, "filter", "Project filter")}
+                          </>
+                        ) : (
+                          input("selections", i, "query", "Search query")
                         )}
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="settings-row" key={String(r.rowKey)}>
-                    <div className="settings-row-heading">
-                      <h3 className="small-heading">
-                        <SourceHeading naming={draftSourceName(r)} />
-                      </h3>
-                      <StatusBadge tone="idle">Not saved yet</StatusBadge>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        aria-label={`Remove ${rowName(draftSourceName(r), r.id)}`}
-                        onClick={() => drop("selections", i)}
-                      >
-                        Remove
-                      </Button>
                     </div>
-                    <OutcomeDetails
-                      fields={[
-                        ["Source ID", String(r.id)],
-                        ["Kind", draftSourceName(r).kind],
-                      ]}
-                    />
+                  ),
+                )}
+                <div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      add("selections", {
+                        id: nextSelectionId(
+                          data.source.selections.flatMap((s) =>
+                            s.id ? [s.id] : [],
+                          ),
+                          selections.map((s) => String(s.id)),
+                        ),
+                        kind: "repository",
+                        repositoryId: "",
+                        owner: "",
+                        name: "",
+                      })
+                    }
+                  >
+                    Add source
+                  </Button>
+                </div>
+                <p className="metadata muted">
+                  New sources are added inactive.
+                </p>
+              </fieldset>
+            </Panel>
+            <Panel
+              title="2 · Readiness matching"
+              description="Readiness admits work; it never grants repository access."
+            >
+              {observed?.selections.map((s, i) => {
+                const saved = data.source.selections.find(
+                  (x) => x.id === s.selectionId,
+                );
+                return (
+                  <ObservationCounts
+                    key={s.selectionId ?? i}
+                    warningOnly
+                    label={saved ? naming(saved).name : "A source"}
+                    private={saved ? naming(saved).private : false}
+                    projectId={projectId}
+                    rule={observed.readiness}
+                    counts={s.counts}
+                    sameTab
+                  />
+                );
+              })}
+              <fieldset
+                id={readinessAnchor}
+                disabled={isLocked}
+                className="settings-rows"
+                tabIndex={-1}
+                aria-invalid={Boolean(d.errors["readiness.conditions"])}
+                aria-describedby={
+                  d.errors["readiness.conditions"]
+                    ? "source-conditions-error"
+                    : undefined
+                }
+              >
+                <legend className="sr-only">Readiness conditions</legend>
+                {errorText(
+                  "readiness",
+                  "source-conditions-error",
+                  "Check readiness mode and complete conditions.",
+                )}
+                {data.source.readiness.kind === "unavailable" ? (
+                  <p className="metadata muted">
+                    Saved readiness is unavailable; add a condition to replace
+                    it.
+                  </p>
+                ) : (
+                  conditions.length === 0 && (
+                    <p className="metadata muted">
+                      {noRuleText} Matching applies once a condition is added.
+                    </p>
+                  )
+                )}
+                <DraftField
+                  draft={d}
+                  field="mode"
+                  errorField="readiness.mode"
+                  label="Readiness matching"
+                >
+                  <option value="all">All conditions</option>
+                  <option value="any">Any condition</option>
+                </DraftField>
+                {conditions.map((r, i) => (
+                  <div className="settings-row" key={String(r.rowKey)}>
                     <div className="settings-fields">
                       <label
                         className="field body"
-                        htmlFor={`selection-kind-${i}`}
+                        htmlFor={`condition-kind-${i}`}
                       >
-                        Selection kind
+                        Condition kind
                         <NativeSelect
                           className="control"
-                          id={`selection-kind-${i}`}
-                          aria-label="Selection kind"
+                          id={`condition-kind-${i}`}
+                          aria-label="Condition kind"
+                          aria-invalid={Boolean(
+                            rowError("conditions", i, "kind"),
+                          )}
+                          aria-describedby={
+                            rowError("conditions", i, "kind")
+                              ? "source-conditions-error"
+                              : undefined
+                          }
                           value={String(r.kind)}
                           onChange={(e) => {
-                            const kind = e.target.value;
-                            const rows = parseRows(v.selections);
+                            const kind = e.target.value,
+                              rows = parseRows(v.conditions);
                             rows[i] = {
-                              id: String(r.id),
-                              rowKey: String(r.rowKey),
-                              ...(kind === "repository"
-                                ? {
+                              ...(kind === "label"
+                                ? { kind, name: "" }
+                                : {
                                     kind,
-                                    repositoryId: "",
-                                    owner: "",
-                                    name: "",
-                                  }
-                                : kind === "project"
-                                  ? { kind, projectNodeId: "", filter: "" }
-                                  : { kind, query: "" }),
+                                    projectNodeId: "",
+                                    fieldNodeId: "",
+                                    optionNodeId: "",
+                                  }),
+                              rowKey: String(r.rowKey),
                             };
-                            setRows("selections", rows);
+                            setRows("conditions", rows);
                           }}
                         >
-                          <option value="repository">Repository</option>
-                          <option value="search">Search</option>
-                          <option value="project">GitHub Project</option>
+                          <option value="label">Label</option>
+                          <option value="project-field">Project field</option>
                         </NativeSelect>
                       </label>
-                      {r.kind === "repository" ? (
-                        <>
-                          {input(
-                            "selections",
-                            i,
-                            "repositoryId",
-                            "Repository ID",
-                          )}
-                          {input("selections", i, "owner", "Repository owner")}
-                          {input("selections", i, "name", "Repository name")}
-                        </>
-                      ) : r.kind === "project" ? (
-                        <>
-                          {input(
-                            "selections",
-                            i,
-                            "projectNodeId",
-                            "GitHub Project node ID",
-                          )}
-                          {input("selections", i, "filter", "Project filter")}
-                        </>
+                      {r.kind === "label" ? (
+                        input("conditions", i, "name", "Ready label")
                       ) : (
-                        input("selections", i, "query", "Search query")
+                        <ProjectFieldPicker
+                          index={i}
+                          row={r}
+                          discovery={readinessDiscovery}
+                          invalid={(name) =>
+                            Boolean(rowError("conditions", i, name))
+                          }
+                          onChange={(patch) => update("conditions", i, patch)}
+                          typed={
+                            <>
+                              {input(
+                                "conditions",
+                                i,
+                                "projectNodeId",
+                                "Readiness Project node ID",
+                              )}
+                              {input(
+                                "conditions",
+                                i,
+                                "fieldNodeId",
+                                "Readiness field node ID",
+                              )}
+                              {input(
+                                "conditions",
+                                i,
+                                "optionNodeId",
+                                "Readiness option node ID",
+                              )}
+                            </>
+                          }
+                        />
                       )}
                     </div>
+                    <div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => drop("conditions", i)}
+                      >
+                        Remove condition {i + 1}
+                      </Button>
+                    </div>
                   </div>
-                ),
-              )}
-              <div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
-                    add("selections", {
-                      id: nextSelectionId(
-                        data.source.selections.flatMap((s) =>
-                          s.id ? [s.id] : [],
-                        ),
-                        selections.map((s) => String(s.id)),
-                      ),
-                      kind: "repository",
-                      repositoryId: "",
-                      owner: "",
-                      name: "",
-                    })
-                  }
-                >
-                  Add source
-                </Button>
-              </div>
-              <p className="metadata muted">New sources are added inactive.</p>
-            </fieldset>
-          </Panel>
-          <Panel
-            title="2 · Readiness matching"
-            description="Readiness admits work; it never grants repository access."
-          >
-            {observed?.selections.map((s, i) => {
-              const saved = data.source.selections.find(
-                (x) => x.id === s.selectionId,
-              );
-              return (
-                <ObservationCounts
-                  key={s.selectionId ?? i}
-                  warningOnly
-                  label={saved ? naming(saved).name : "A source"}
-                  private={saved ? naming(saved).private : false}
-                  projectId={projectId}
-                  rule={observed.readiness}
-                  counts={s.counts}
-                  sameTab
-                />
-              );
-            })}
-            <fieldset
-              id={readinessAnchor}
-              disabled={isLocked}
-              className="settings-rows"
-              tabIndex={-1}
-              aria-invalid={Boolean(d.errors["readiness.conditions"])}
-              aria-describedby={
-                d.errors["readiness.conditions"]
-                  ? "source-conditions-error"
-                  : undefined
-              }
-            >
-              <legend className="sr-only">Readiness conditions</legend>
-              {errorText(
-                "readiness",
-                "source-conditions-error",
-                "Check readiness mode and complete conditions.",
-              )}
-              {data.source.readiness.kind === "unavailable" ? (
-                <p className="metadata muted">
-                  Saved readiness is unavailable; add a condition to replace it.
-                </p>
-              ) : (
-                conditions.length === 0 && (
-                  <p className="metadata muted">
-                    {noRuleText} Matching applies once a condition is added.
-                  </p>
-                )
-              )}
+                ))}
+                <div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      add("conditions", { kind: "label", name: "" })
+                    }
+                  >
+                    Add readiness condition
+                  </Button>
+                </div>
+              </fieldset>
               <DraftField
                 draft={d}
-                field="mode"
-                errorField="readiness.mode"
-                label="Readiness matching"
+                field="closedIssues"
+                label="Closed GitHub issues"
               >
-                <option value="all">All conditions</option>
-                <option value="any">Any condition</option>
+                {Object.entries(closedIssueLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
               </DraftField>
-              {conditions.map((r, i) => (
-                <div className="settings-row" key={String(r.rowKey)}>
-                  <div className="settings-fields">
-                    <label
-                      className="field body"
-                      htmlFor={`condition-kind-${i}`}
-                    >
-                      Condition kind
-                      <NativeSelect
-                        className="control"
-                        id={`condition-kind-${i}`}
-                        aria-label="Condition kind"
-                        aria-invalid={Boolean(
-                          rowError("conditions", i, "kind"),
-                        )}
-                        aria-describedby={
-                          rowError("conditions", i, "kind")
-                            ? "source-conditions-error"
-                            : undefined
-                        }
-                        value={String(r.kind)}
-                        onChange={(e) => {
-                          const kind = e.target.value,
-                            rows = parseRows(v.conditions);
-                          rows[i] = {
-                            ...(kind === "label"
-                              ? { kind, name: "" }
-                              : {
-                                  kind,
-                                  projectNodeId: "",
-                                  fieldNodeId: "",
-                                  optionNodeId: "",
-                                }),
-                            rowKey: String(r.rowKey),
-                          };
-                          setRows("conditions", rows);
-                        }}
-                      >
-                        <option value="label">Label</option>
-                        <option value="project-field">Project field</option>
-                      </NativeSelect>
-                    </label>
-                    {r.kind === "label" ? (
-                      input("conditions", i, "name", "Ready label")
-                    ) : (
-                      <ProjectFieldPicker
-                        index={i}
-                        row={r}
-                        discovery={readinessDiscovery}
-                        invalid={(name) =>
-                          Boolean(rowError("conditions", i, name))
-                        }
-                        onChange={(patch) => update("conditions", i, patch)}
-                        typed={
-                          <>
-                            {input(
-                              "conditions",
-                              i,
-                              "projectNodeId",
-                              "Readiness Project node ID",
-                            )}
-                            {input(
-                              "conditions",
-                              i,
-                              "fieldNodeId",
-                              "Readiness field node ID",
-                            )}
-                            {input(
-                              "conditions",
-                              i,
-                              "optionNodeId",
-                              "Readiness option node ID",
-                            )}
-                          </>
-                        }
-                      />
-                    )}
-                  </div>
-                  <div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => drop("conditions", i)}
-                    >
-                      Remove condition {i + 1}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              <div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => add("conditions", { kind: "label", name: "" })}
-                >
-                  Add readiness condition
-                </Button>
-              </div>
-            </fieldset>
-            <DraftField
-              draft={d}
-              field="closedIssues"
-              label="Closed GitHub issues"
+              <p className="metadata muted">
+                Treat closure as Done marks the task closed on GitHub, not
+                delivered by Ensemble, once its work has stopped.
+              </p>
+            </Panel>
+            <Panel
+              title="3 · Repository access"
+              description="Every change is listed for review before saving. Removing all access asks for confirmation."
             >
-              {Object.entries(closedIssueLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </DraftField>
-            <p className="metadata muted">
-              Treat closure as Done marks the task closed on GitHub, not
-              delivered by Ensemble, once its work has stopped.
-            </p>
-          </Panel>
-          <Panel
-            title="3 · Repository access"
-            description="Every change is listed for review before saving. Removing all access asks for confirmation."
-          >
-            <fieldset
-              disabled={isLocked}
-              className="settings-rows"
-              aria-describedby={
-                d.errors.repositories ? "source-repositories-error" : undefined
-              }
-            >
-              <legend className="sr-only">Repository access</legend>
-              {repositories.map((r, i) => {
-                const name = String(r.repositoryId || `row ${i + 1}`);
-                return (
-                  <div className="settings-row" key={String(r.rowKey)}>
-                    {r.keep ? (
-                      <div className="settings-row-heading">
-                        <div>
-                          <h3 className="small-heading">{name}</h3>
+              <fieldset
+                disabled={isLocked}
+                className="settings-rows"
+                aria-describedby={
+                  d.errors.repositories
+                    ? "source-repositories-error"
+                    : undefined
+                }
+              >
+                <legend className="sr-only">Repository access</legend>
+                {repositories.map((r, i) => {
+                  const name = String(r.repositoryId || `row ${i + 1}`);
+                  return (
+                    <div className="settings-row" key={String(r.rowKey)}>
+                      {r.keep ? (
+                        <div className="settings-row-heading">
+                          <div>
+                            <h3 className="small-heading">{name}</h3>
+                          </div>
+                          {r.removed && (
+                            <StatusBadge tone="warning">
+                              Will be removed
+                            </StatusBadge>
+                          )}
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => toggleRemoved("repositories", i)}
+                          >
+                            {r.removed
+                              ? `Undo remove repository ${name}`
+                              : `Remove repository ${name}`}
+                          </Button>
                         </div>
-                        {r.removed && (
-                          <StatusBadge tone="warning">
-                            Will be removed
-                          </StatusBadge>
-                        )}
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => toggleRemoved("repositories", i)}
-                        >
-                          {r.removed
-                            ? `Undo remove repository ${name}`
-                            : `Remove repository ${name}`}
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="settings-row-heading">
-                        <StatusBadge>New repository link</StatusBadge>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => drop("repositories", i)}
-                        >
-                          Remove new repository {name}
-                        </Button>
-                      </div>
-                    )}
-                    {!r.removed && (
-                      <div className="settings-fields">
-                        {!r.keep &&
-                          input(
+                      ) : (
+                        <div className="settings-row-heading">
+                          <StatusBadge>New repository link</StatusBadge>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => drop("repositories", i)}
+                          >
+                            Remove new repository {name}
+                          </Button>
+                        </div>
+                      )}
+                      {!r.removed && (
+                        <div className="settings-fields">
+                          {!r.keep &&
+                            input(
+                              "repositories",
+                              i,
+                              "repositoryId",
+                              "Linked repository ID",
+                            )}
+                          {input(
                             "repositories",
                             i,
-                            "repositoryId",
-                            "Linked repository ID",
+                            "ref",
+                            "Linked repository ref",
                           )}
-                        {input(
-                          "repositories",
-                          i,
-                          "ref",
-                          "Linked repository ref",
-                        )}
-                        {r.keep
-                          ? savedValue(
-                              "repositories",
-                              i,
-                              "path",
-                              "Local repository path",
-                              "Local path unavailable",
-                              known?.repositories.find(
-                                (x) => x.repositoryId === r.repositoryId,
-                              )?.path,
-                            )
-                          : input(
-                              "repositories",
-                              i,
-                              "path",
-                              "New local repository path",
-                            )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
-                    add("repositories", {
-                      repositoryId: "",
-                      path: "",
-                      ref: "main",
-                    })
-                  }
-                >
-                  Add repository
-                </Button>
-              </div>
-              {errorText(
-                "repositories",
-                "source-repositories-error",
-                "Check linked repository IDs, paths and refs.",
+                          {r.keep
+                            ? savedValue(
+                                "repositories",
+                                i,
+                                "path",
+                                "Local repository path",
+                                "Local path unavailable",
+                                known?.repositories.find(
+                                  (x) => x.repositoryId === r.repositoryId,
+                                )?.path,
+                              )
+                            : input(
+                                "repositories",
+                                i,
+                                "path",
+                                "New local repository path",
+                              )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      add("repositories", {
+                        repositoryId: "",
+                        path: "",
+                        ref: "main",
+                      })
+                    }
+                  >
+                    Add repository
+                  </Button>
+                </div>
+                {errorText(
+                  "repositories",
+                  "source-repositories-error",
+                  "Check linked repository IDs, paths and refs.",
+                )}
+              </fieldset>
+            </Panel>
+          </div>
+          <div className="settings-column">
+            <SourceCredential draft={d} source={data.source} />
+            <ChangeList
+              lines={
+                removesAll
+                  ? [
+                      ...lines,
+                      `Removes every repository from ${data.project.name ?? "this project"}.`,
+                    ]
+                  : lines
+              }
+            >
+              {removesAll && (
+                <DraftCheck
+                  draft={d}
+                  field="removeAll"
+                  label="Remove all repository access"
+                />
               )}
-            </fieldset>
-          </Panel>
+              <p className="metadata muted">
+                Saving imports nothing. After saving, Preview and import now
+                appears here.
+              </p>
+            </ChangeList>
+            <ImportPanel
+              {...p}
+              naming={naming}
+              quiet={quiet}
+              saved={
+                savedLine(data.source.version, p.drafts.saved(draftKey)) !==
+                null
+              }
+              savePhase={d.phase}
+            />
+            <Aside
+              title="Source boundary"
+              items={[
+                "Saving replaces configuration only. It imports no tasks, activates no selection and resumes no work.",
+                "Preview and import now previews and activates the saved sources, then refreshes them from GitHub. Sync & placement keeps later refreshes and placement.",
+                "GitHub Project filters stay hidden; remove a source and add a new one to change them.",
+                <a key="advanced" href={`/project/${projectId}`}>
+                  Open advanced source editor
+                </a>,
+              ]}
+            />
+          </div>
         </div>
-        <div className="settings-column">
-          <SourceCredential draft={d} source={data.source} />
-          <ChangeList
-            lines={
-              removesAll
-                ? [
-                    ...lines,
-                    `Removes every repository from ${data.project.name ?? "this project"}.`,
-                  ]
-                : lines
-            }
-          >
-            {removesAll && (
-              <DraftCheck
-                draft={d}
-                field="removeAll"
-                label="Remove all repository access"
-              />
-            )}
-            <p className="metadata muted">
-              Saving imports nothing. After saving, Preview and import now
-              appears here.
-            </p>
-          </ChangeList>
-          <ImportPanel
-            {...p}
-            naming={naming}
-            quiet={quiet}
-            saved={
-              savedLine(data.source.version, p.drafts.saved(draftKey)) !== null
-            }
-            savePhase={d.phase}
-          />
-          <Aside
-            title="Source boundary"
-            items={[
-              "Saving replaces configuration only. It imports no tasks, activates no selection and resumes no work.",
-              "Preview and import now previews and activates the saved sources, then refreshes them from GitHub. Sync & placement keeps later refreshes and placement.",
-              "GitHub Project filters stay hidden; remove a source and add a new one to change them.",
-              <a key="advanced" href={`/project/${projectId}`}>
-                Open advanced source editor
-              </a>,
-            ]}
-          />
-        </div>
-      </div>
-      <DraftOutcome
-        draft={d}
-        client={p.client}
-        session={p.session}
-        label="Save changes"
-        saveDisabled={blocked}
-        hold={holdSave ? sourceHold : undefined}
-        discard={() => reloadDraft(d, initial)}
-        refresh={p.refreshConfiguration}
-        review={adopt}
-      />
-    </form>
+        <DraftOutcome
+          draft={d}
+          client={p.client}
+          session={p.session}
+          label="Save changes"
+          saveDisabled={blocked}
+          hold={holdSave ? sourceHold : undefined}
+          discard={() => reloadDraft(d, initial)}
+          refresh={p.refreshConfiguration}
+          review={adopt}
+        />
+      </form>
+      {data.statusMapping && (
+        <StatusMappingPanel
+          {...p}
+          view={data.statusMapping}
+          selectionName={(s) =>
+            naming({
+              id: s.id,
+              kind: "project",
+              descriptor: s.projectNodeId,
+              active: s.active,
+            }).name
+          }
+        />
+      )}
+    </>
   );
 }
 

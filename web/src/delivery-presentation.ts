@@ -1,4 +1,10 @@
 // Delivery wording for the Changes tab: design/DESIGN.md -> Task detail -> Implementation status.
+import {
+  statusEventLabels,
+  statusMappingActionLabel,
+  statusMappingActionNote,
+} from "../../src/operator/status-mapping-copy.js";
+import type { StatusMappingEvent } from "../../src/core/status-mapping-contracts.js";
 import { codeSentence } from "./presentation.js";
 
 const blockerSentences = {
@@ -72,3 +78,17 @@ export function pullRequestReference(binding: PullRequestBinding) {
     ? `${repository}#${binding.number}`
     : `PR #${binding.number}`;
 }
+
+/**
+ * One retained delivery action as a line. A status-mapping write is named for what it is, and a
+ * write skipped because the Status moved on GitHub says so instead of showing its code.
+ */
+export const deliveryActionLine = (a: {
+  kind: string;
+  caller: "agent" | "operator" | "service";
+  event: StatusMappingEvent | null;
+  state: string;
+  reason: string | null;
+  operationId: string;
+}) =>
+  `${a.caller === "service" && a.event ? `${statusMappingActionLabel} (${statusEventLabels[a.event]}) · ` : ""}${a.kind}: ${a.state} · ${statusMappingActionNote(a.reason) ?? a.reason ?? "receipt recorded"} · operation ${a.operationId}`;

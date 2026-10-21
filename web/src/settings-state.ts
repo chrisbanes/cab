@@ -543,8 +543,18 @@ export class ConfigurationDraft {
         fieldPaths[0] === "name"
           ? result.message
           : undefined;
+      // A refused status mapping names the event and the option in the service's own words.
+      const mappingRefusal =
+        result.state !== "recorded" &&
+        c.type === "status-mapping.configure" &&
+        result.code === "invalid-input"
+          ? result.message
+          : undefined;
       this.errors = Object.fromEntries(
-        fieldPaths.map((p) => [p, nameTaken ?? "Check this field."]),
+        fieldPaths.map((p) => [
+          p,
+          nameTaken ?? mappingRefusal ?? "Check this field.",
+        ]),
       );
       this.credentialRefusal =
         result.state !== "recorded" &&

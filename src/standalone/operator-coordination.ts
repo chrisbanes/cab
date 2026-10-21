@@ -1,3 +1,4 @@
+import { statusMappingActionLabel } from "../operator/status-mapping-copy.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { CoordinationTaskView } from "./coordination-view.js";
@@ -130,7 +131,7 @@ export function deliverySection(
   const actions = delivery.actions
     .map(
       (a) =>
-        `<li>${escapeHtml(a.kind)}: ${escapeHtml(a.state)}; attempts ${a.attempts}; ${escapeHtml(a.reason ?? "")}<time>${escapeHtml(new Date(a.updatedAt).toISOString())}</time>${a.receipt ? ` — confirmed identity ${escapeHtml(a.receipt.nodeId)}` : ""}</li>`,
+        `<li>${a.caller === "service" ? `${escapeHtml(statusMappingActionLabel)} · ` : ""}${escapeHtml(a.kind)}: ${escapeHtml(a.state)}; attempts ${a.attempts}; ${escapeHtml(a.reason ?? "")}<time>${escapeHtml(new Date(a.updatedAt).toISOString())}</time>${a.receipt ? ` — confirmed identity ${escapeHtml(a.receipt.nodeId)}` : ""}</li>`,
     )
     .join("");
   const pr = p
