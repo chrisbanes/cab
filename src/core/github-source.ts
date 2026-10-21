@@ -32,6 +32,8 @@ export interface IssueSnapshot {
   }>;
   /** The Project item holding this issue; set only by Project selections. */
   projectItemNodeId?: string;
+  /** When the read that produced this Project item began (epoch ms); a later write is newer than it. */
+  projectReadAt?: number;
 }
 /** `resumeAt` (epoch ms) marks a rate-limited read: do not read again before then. */
 export type SelectionSnapshot =
@@ -869,7 +871,7 @@ export class GitHubSourceStore {
             issue.nodeId,
             JSON.stringify(issue.projectFields),
             issue.projectItemNodeId ?? null,
-            Date.now(),
+            issue.projectReadAt ?? Date.now(),
           );
         sourceCaptures.push({
           taskId,

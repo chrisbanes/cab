@@ -312,6 +312,14 @@ test("Project filter is passed unchanged and nested field/definition pages must 
     complete.issues.map((entry) => entry.projectItemNodeId),
     ["PVTI_1"],
   );
+  // The read is stamped with when it began.
+  assert.ok(
+    complete.issues.every(
+      (entry) =>
+        typeof entry.projectReadAt === "number" &&
+        entry.projectReadAt <= Date.now(),
+    ),
+  );
   assert.equal(calls[0]?.variables.query, "status:ready");
   assert.deepEqual(
     calls.map((call) => call.operationName),

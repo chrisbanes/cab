@@ -1727,8 +1727,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   the task was Ready, so a Status a human set since is never overwritten and the skip is recorded.
   It is refused if that option is one the readiness rule accepts, a done task that is not Ready
   while its issue is open writes nothing until the issue closes, and a task first seen already
-  done (for example a closed issue a Done-mode source imports) was not worked on under the
-  mapping and writes nothing. An in-flight event may name only an option the
+  done (for example a closed issue a Done-mode source imports, or a Ready task done before the
+  mapping was saved) was not worked on under the mapping and writes nothing for Done. An in-flight event may name only an option the
   readiness rule accepts, checked at save and again at write against the task's stored facts with only
   that value replaced. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
@@ -1738,7 +1738,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   facts in the order Done, held, handed back, turn started. A write is due when the event
   changes to a mapped one, once per transition; leaving an event and re-entering it is a new
   transition. The operation id is stored before the write, so a restart resumes the same
-  operation. It runs after every GitHub refresh, when a turn binds and on scheduler wake. A
+  operation, once any older status write still in flight has settled. It runs after every GitHub refresh, when a turn binds and on scheduler wake. A
   reviewable PR stays handed back, open, merged or accepted, until the task is Done; a handback the
   operator settles as closed, or a PR that closes without merging, is sent back, and the event falls
   back to turn started. An unknown dependency read (a
@@ -1746,7 +1746,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   item in the mapped Project selection.
 - **Conditional write.** Immediately before writing, the provider reads the item's Status. If
   it is not what Ensemble last observed (its last confirmed write, unless a later read of that item
-  replaced it, else the stored membership value) it records `provider-project-field-changed`,
+  replaced it, else the stored membership value; a read counts from when it began) it records `provider-project-field-changed`,
   writes nothing, does not retry, and the task shows "Skipped: Status changed on GitHub since
   Ensemble last saw it". GitHub has no conditional update, so a move between that read and the
   mutation is an accepted race: readback then shows another option and the action stays

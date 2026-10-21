@@ -859,6 +859,12 @@ export class DeliveryStore {
     const { version, mapping } = new StatusMappingStore(this.db).current(
       caller.projectId,
     );
+    // A task first seen done was not worked on under the mapping: never written, Ready or not.
+    if (
+      caller.event === "done" &&
+      !new StatusMappingStore(this.db).taskState(caller.taskId).watched
+    )
+      throw refusal();
     if (
       !mapping ||
       version !== caller.mappingVersion ||
@@ -947,8 +953,6 @@ export class DeliveryStore {
         caller.event !== "done" ||
         task.state !== "done" ||
         task.observedState !== "closed" ||
-        // A task first seen done was not worked on under the mapping.
-        !new StatusMappingStore(this.db).taskState(caller.taskId).watched ||
         keepsReady()
       )
         throw refusal();

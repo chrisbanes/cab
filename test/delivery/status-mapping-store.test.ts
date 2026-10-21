@@ -507,7 +507,8 @@ test("an in-flight write is checked against the readiness rule at write time", (
       ).state,
       "denied",
     );
-    // A terminal event may still remove readiness.
+    // A terminal event may still remove readiness, for a task the mapping has watched.
+    f.status.watch(f.taskId);
     assert.equal(
       f.delivery.prepareAction(f.write(DONE), f.caller("done"), false).state,
       "prepared",

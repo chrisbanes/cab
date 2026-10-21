@@ -751,3 +751,154 @@ test("an older unproved status write is not inspected again once a newer one has
     await f.close();
   }
 });
+
+test("a Done operation stored before a crash, task still Ready, is written after the restart", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    assert.equal(f.domain.task(f.taskId).ready, 1);
+    const operationId = randomUUID();
+    new StatusMappingStore(databaseOf(f.service)).enter(
+      f.taskId,
+      "done",
+      operationId,
+    );
+    await run();
+    assert.deepEqual(
+      writes(f)
+        .map((w) => w.operationId)
+        .slice(1),
+      [operationId],
+    );
+    assert.deepEqual(optionsWritten(f), [inProgress, done]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a task that was already done and Ready when the mapping was saved was not worked on under it and writes nothing", async () => {
+  const f = await deliveryFixture("reviewable-pr", true, true);
+  try {
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    assert.equal(f.domain.task(f.taskId).ready, 1);
+    save(f, mapping());
+    await f.service.runStatusMapping();
+    await f.service.runStatusMapping();
+    assert.deepEqual(writes(f), []);
+    assert.deepEqual(f.effects, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a read that began before a confirmed write is stamped with its start, so it does not look newer than the write", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    await registerPr(f);
+    // A sync that fetched Todo before the write landed is stored after it.
+    startedOf(f.service).githubSources.reconcileSelection(f.projectId, "repo", {
+      complete: true,
+      issues: [
+        {
+          providerInstance: "github.com",
+          nodeId: "I1",
+          repositoryId: "R1",
+          repositoryName: "org/repo",
+          number: 1,
+          title: "T",
+          body: "O",
+          state: "open",
+          labels: ["ready"],
+          projectFields: [
+            {
+              projectNodeId,
+              fieldNodeId,
+              optionNodeId: todo,
+            },
+          ],
+          projectItemNodeId: fixtureProject.itemNodeId,
+          projectReadAt: Date.now() - 60_000,
+        },
+      ],
+      reason: null,
+    });
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress, inReview]);
+    assert.equal(writes(f)[1]?.state, "confirmed-success");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a new event is not submitted while an older status write is still in flight, and is written once it settles", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    const { deliveryStore } = startedOf(f.service);
+    const older = randomUUID();
+    deliveryStore.prepareAction(
+      {
+        operationId: older,
+        action: {
+          kind: "project.field",
+          target: { repositoryId: "R1", number: 1, nodeId: "I1" },
+          projectNodeId,
+          itemNodeId: fixtureProject.itemNodeId,
+          fieldNodeId,
+          optionNodeId: inProgress,
+          expected: { optionNodeId: inProgress },
+        },
+      },
+      {
+        actor: "service",
+        purpose: "status-mapping",
+        projectId: f.projectId,
+        taskId: f.taskId,
+        mappingVersion: f.domain.statusMapping(f.projectId).version,
+        event: "turnStarted",
+      },
+      false,
+    );
+    // A restart left an operation recorded for the current event but never prepared.
+    const stored = randomUUID();
+    new StatusMappingStore(databaseOf(f.service)).enter(
+      f.taskId,
+      "turnStarted",
+      stored,
+    );
+    await run();
+    assert.deepEqual(
+      writes(f).map((w) => w.state),
+      ["confirmed-success", "prepared"],
+    );
+    deliveryStore.recordObservation(older, {
+      state: "confirmed-failure",
+      reason: "test",
+      receipt: null,
+    });
+    await run();
+    assert.equal(writes(f).at(-1)?.operationId, stored);
+    assert.equal(writes(f).at(-1)?.state, "confirmed-success");
+  } finally {
+    await f.close();
+  }
+});

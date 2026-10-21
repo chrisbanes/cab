@@ -191,7 +191,8 @@ export class StatusMappingWriter {
       issue?.observedState === "closed" &&
       state.watched &&
       state.observedAt !== null;
-    const writable = ready || closing;
+    // A task first seen done was not worked on under the mapping: no Done write, Ready or not.
+    const writable = (ready && (event !== "done" || state.watched)) || closing;
     const request = (operationId: string) => ({
       operationId,
       action: {
@@ -229,8 +230,10 @@ export class StatusMappingWriter {
       option &&
       item;
     if (event === state.lastEvent && !lateDone) {
-      // Persisted before its write, but the write was never prepared (a crash between): resume it.
+      // Persisted before its write, but the write was never prepared (a crash between): resume it,
+      // once an older status write still in flight has settled.
       if (
+        !deliveryStore.serviceActionBlockers(taskId).length &&
         event !== "none" &&
         option &&
         item &&

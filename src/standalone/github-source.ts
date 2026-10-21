@@ -422,6 +422,8 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
     selection: Extract<GitHubSelection, { kind: "project" }>,
   ): Promise<SelectionSnapshot> {
     const issues: IssueSnapshot[] = [];
+    // Stamped at the start: a write confirmed while this read ran is newer than what it fetched.
+    const startedAt = Date.now();
     try {
       let itemCursor: string | null = null;
       const seenItems = new Set<string>();
@@ -502,6 +504,7 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
             labels: content.labels.nodes.map((label) => label.name),
             projectFields,
             projectItemNodeId: item.id,
+            projectReadAt: startedAt,
           });
         }
         if (!result.data.node.items.pageInfo.hasNextPage) break;
