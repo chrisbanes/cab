@@ -331,6 +331,8 @@ test("the guard allows only the product's documents on the recorded resources an
 function fakeGitHub(
   fail: {
     link?: boolean;
+    /** The next `item-add` calls fail with GitHub's transient "temporary conflict" answer. */
+    transientItemAdds?: number;
     /** Project reads that list no item yet. */
     emptyReads?: number;
     /** A deleted Project answers with a not-found error, as GitHub does, not a null node. */
@@ -347,6 +349,7 @@ function fakeGitHub(
     status: "O_todo" as string,
     projectDeleted: false,
     projectCreated: false,
+    itemAddCalls: 0,
     issueClosed: false,
     fetches: [] as string[],
     ghCalls: [] as string[],
@@ -370,8 +373,13 @@ function fakeGitHub(
       return JSON.stringify({ fields: [{ id: "F_status", name: "Status" }] });
     if (a === "issue" && b === "create")
       return `https://github.com/${fullName}/issues/9\n`;
-    if (a === "project" && b === "item-add")
+    if (a === "project" && b === "item-add") {
+      if ((fail.transientItemAdds ?? 0) > state.itemAddCalls++)
+        throw new Error(
+          "GraphQL: Your attempt to move this item created a temporary conflict. Please try again.",
+        );
       return JSON.stringify({ id: "ITEM_1" });
+    }
     if (a === "project" && b === "item-edit") {
       state.status = args[9] ?? "";
       return "";
@@ -649,4 +657,26 @@ test("a Project that never lists its item fails with the read counts and still c
   });
   assert.equal(evidence.cleanup, "verified");
   assert.equal(fake.state.projectDeleted, true);
+});
+
+test("a transient GitHub error in setup is retried at most three tries, and a persistent one fails the run with cleanup", async () => {
+  for (const [transientItemAdds, passes] of [
+    [2, true],
+    [3, false],
+  ] as const) {
+    const f = files();
+    const fake = fakeGitHub({ transientItemAdds });
+    const evidence = await runStatusMappingJourney({
+      guard: new StatusMappingGuard(f.raw, f.grant),
+      token,
+      attempt: 1,
+      gh: fake.gh,
+      fetcher: fake.fetcher,
+      readRetryMs: 0,
+      ghRetryMs: 0,
+    });
+    assert.equal(evidence.qualification, passes ? "passed" : "failed");
+    assert.equal(fake.state.itemAddCalls, Math.min(transientItemAdds + 1, 3));
+    assert.equal(evidence.cleanup, "verified");
+  }
 });
