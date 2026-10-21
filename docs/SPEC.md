@@ -1729,7 +1729,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   It is refused if that option is one the readiness rule accepts, a done task that is not Ready
   while its issue is open writes nothing until the issue closes, and a task first seen already
   done (for example a closed issue a Done-mode source imports, or a Ready task done before the
-  mapping was saved) was not worked on under the mapping and writes nothing for Done. An in-flight event may name only an option the
+  mapping was saved) was not worked on under the mapping and writes nothing for Done. Clearing the mapping, rebinding it to another Project or Status field, or a pass while its Project is no longer a source selection forgets what it watched, so a task that finishes in between writes nothing when a mapping returns. An in-flight event may name only an option the
   readiness rule accepts, checked at save and again at write against the task's stored facts with only
   that value replaced. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes

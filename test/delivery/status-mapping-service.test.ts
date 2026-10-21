@@ -655,6 +655,59 @@ test("a sent-back handback keeps the card in review until the next turn starts",
   }
 });
 
+test("a task watched under one mapping that finishes while the mapping is cleared writes nothing under the next", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    save(f, null);
+    await run();
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    databaseOf(f.service).exec(
+      "UPDATE domain_tasks SET ready=0; UPDATE github_external_issues SET observedState='closed'",
+    );
+    save(f, mapping());
+    await run();
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress]);
+    assert.equal(writes(f).length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a task watched under the current mapping still writes Done on closure after the mapping is saved again", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    await run();
+    save(f, mapping({ held: inProgress }));
+    f.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: f.taskId,
+      expectedVersion: Number(f.domain.task(f.taskId).version),
+      state: "done",
+    });
+    databaseOf(f.service).exec(
+      "UPDATE domain_tasks SET ready=0; UPDATE github_external_issues SET observedState='closed'",
+    );
+    await run();
+    assert.deepEqual(optionsWritten(f), [inProgress, done]);
+  } finally {
+    await f.close();
+  }
+});
+
 test("a task first seen done and closed was not worked on under the mapping and writes nothing", async () => {
   const { f, run } = await mappedManually();
   try {

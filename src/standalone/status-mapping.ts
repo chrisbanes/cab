@@ -121,8 +121,11 @@ export class StatusMappingWriter {
     for (const project of domain.projects()) {
       const projectId = String(project.id);
       const { version, mapping } = this.mappings.current(projectId);
-      if (!mapping || this.mappings.availability(projectId) !== "available")
+      if (!mapping || this.mappings.availability(projectId) !== "available") {
+        // Tasks that finish while the mapping cannot write were not worked on under it when it returns.
+        this.mappings.forget(projectId);
         continue;
+      }
       for (const task of domain.tasks(projectId)) {
         if (this.stopped) return;
         const taskId = String(task.id);

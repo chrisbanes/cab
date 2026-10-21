@@ -113,6 +113,16 @@ export class StatusMappingStore {
       throw new DomainConflictError("Version conflict");
     const mapping = statusMappingSchema.nullable().parse(input);
     if (mapping) this.validate(projectId, mapping, policy);
+    // A task seen under one mapping was not worked on under another: clearing or rebinding starts afresh.
+    const before = current.mapping;
+    if (
+      before &&
+      (!mapping ||
+        before.selectionId !== mapping.selectionId ||
+        before.projectNodeId !== mapping.projectNodeId ||
+        before.fieldNodeId !== mapping.fieldNodeId)
+    )
+      this.forget(projectId);
     this.db
       .prepare(
         "INSERT INTO status_mappings VALUES (?, ?, ?) ON CONFLICT(projectId) DO UPDATE SET version=excluded.version, mappingJson=excluded.mappingJson",
@@ -163,6 +173,15 @@ export class StatusMappingStore {
       )
         throw new StatusMappingRefusal("readiness", event, option);
     }
+  }
+
+  /** Drops what the mapping knows about the project's tasks: what it watched, wrote and observed. */
+  forget(projectId: string): void {
+    this.db
+      .prepare(
+        "DELETE FROM status_mapping_task_state WHERE taskId IN (SELECT id FROM domain_tasks WHERE projectId = ?)",
+      )
+      .run(projectId);
   }
 
   taskState(taskId: string): StatusMappingTaskState {
