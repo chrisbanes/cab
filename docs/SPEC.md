@@ -1742,7 +1742,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   operation, once any older status write still in flight has settled. It runs after every GitHub refresh, when a turn binds and on scheduler wake. A
   reviewable PR stays handed back, open, merged or accepted, until the task is Done; a handback the
   operator settles as closed, or a PR that closes without merging, is sent back: the card stays
-  handed back until a turn starts after that, and then the event falls back to turn started. A
+  handed back until a turn starts after the writer first sees it sent back (a turn that binds before
+  that pass counts as already started), and then the event falls back to turn started. A
   reworked PR whose new head clears the settlement counts as handed back again, so a rework cycle can
   move the card back to the handed-back option before the lead hands it back. An unknown dependency read (a
   partial read) is not a block and keeps a held task held. A write needs the issue's current
