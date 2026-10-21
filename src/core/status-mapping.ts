@@ -177,9 +177,19 @@ export class StatusMappingStore {
 
   /** Drops what the mapping knows about the project's tasks: what it watched, wrote and observed. */
   forget(projectId: string): void {
+    const tasks = "SELECT id FROM domain_tasks WHERE projectId = ?";
+    // Checked first: a delete that matches nothing still takes the write lock, and passes are frequent.
+    if (
+      !this.db
+        .prepare(
+          `SELECT 1 FROM status_mapping_task_state WHERE taskId IN (${tasks}) LIMIT 1`,
+        )
+        .get(projectId)
+    )
+      return;
     this.db
       .prepare(
-        "DELETE FROM status_mapping_task_state WHERE taskId IN (SELECT id FROM domain_tasks WHERE projectId = ?)",
+        `DELETE FROM status_mapping_task_state WHERE taskId IN (${tasks})`,
       )
       .run(projectId);
   }

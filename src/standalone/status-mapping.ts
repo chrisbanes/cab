@@ -171,6 +171,8 @@ export class StatusMappingWriter {
     nodeId: string,
   ): Promise<void> {
     const { domain, deliveryStore, state: execution } = this.facts;
+    // The mapping changed while this pass waited: its tasks are left to the next pass, under the new one.
+    if (this.mappings.current(projectId).version !== version) return;
     // Read now, with the item below: the pass may have waited on the network since it listed tasks.
     const fresh = domain.task(taskId);
     if (fresh.state === "cancelled") return;

@@ -684,6 +684,32 @@ test("a task watched under one mapping that finishes while the mapping is cleare
   }
 });
 
+test("a pass that began under an older mapping version leaves its tasks to the next pass", async () => {
+  const { f } = await mappedManually();
+  try {
+    const { statusMappingWriter, statusMappings } = startedOf(f.service);
+    const stale = statusMappings.current(f.projectId);
+    save(f, mapping({ turnStarted: inReview }));
+    const imported = f.domain.importedTask(f.taskId);
+    await (
+      statusMappingWriter as unknown as {
+        task(...args: unknown[]): Promise<void>;
+      }
+    ).task(
+      f.projectId,
+      stale.version,
+      stale.mapping,
+      f.taskId,
+      String(imported?.nodeId),
+    );
+    assert.equal(statusMappings.taskState(f.taskId).watched, false);
+    assert.equal(statusMappings.taskState(f.taskId).lastEvent, "none");
+    assert.deepEqual(writes(f), []);
+  } finally {
+    await f.close();
+  }
+});
+
 test("a task watched under the current mapping still writes Done on closure after the mapping is saved again", async () => {
   const { f, run } = await mappedManually();
   try {
