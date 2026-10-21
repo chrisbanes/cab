@@ -383,6 +383,18 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   verified cleanup; it was coordinator-level with no model turns, and a real foreign
   push, force-push and approval mode were not exercised live. Evidence:
   [branch publication](evidence/2026-10-19-branch-publication.md).
+- **Status mapping** (#1194, ADR-1017) — **Bounded.** Deterministic tests cover the
+  mapping save rules (grants, in-flight readiness, unavailable source, versions), the service
+  caller's authority and its readiness exemption, each event's write once per transition, the
+  conditional re-read and its skipped write, uncertain and non-holding records, restart
+  resumption, and the editor and task presentation (`status-mapping-store`,
+  `status-mapping-service`, `github-delivery-provider`, `operator-api`,
+  `operator-project-config-browser`, `status-mapping-live-harness`). One bounded live run on a
+  scratch user-owned Project wrote `turnStarted` and `handedBack` through the real writer,
+  coordinator and provider, each read back by the provider and independently by `gh`, with 0
+  model turns, and deleted the Project with verified cleanup; the first of its two attempts failed in
+  the harness. A skipped write, `held`, `done` and a Codex lead turn were not exercised live.
+  Evidence: [status mapping live run](evidence/2026-10-21-status-mapping-live.md).
 - **Operations, recovery and cutover** (R06) — **Bounded.** A disposable launchd
   service lifecycle with database backup/restore passed, and current-schema backup,
   verify and restore with exact owned-process recovery passed locally. Deterministic
