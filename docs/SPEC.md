@@ -593,7 +593,8 @@ Board columns describe Ensemble work, not GitHub issue state or Project fields.
 The board does not grant arbitrary status changes or require drag-and-drop for the
 MVP. Any offered transition must use an existing permitted command and preserve
 readiness, dependency, approval and source-ownership rules; moving a card cannot
-bypass a hold or silently write to GitHub.
+bypass a hold or silently write to GitHub. A project's [status mapping](#github-and-completion)
+reflects Ensemble's work onto a Project's Status without changing these columns.
 
 ### Task creation and project setup
 
@@ -1698,6 +1699,47 @@ resent. The edit is irreversible from Ensemble: the replaced text is kept only i
 review record and no restore action exists. Sending needs an open task, a current task
 version and source revision, no unresolved action and an allowed credential activation, but
 not task admission.
+
+A project's **status mapping** reflects Ensemble's work onto one GitHub Project's Status.
+It is operator-owned and versioned, with one mapping per project, bound to one `project`
+selection of the project's source and that Project's single-select field named `Status`
+(`status-mapping.configure`; a source without a `project` selection reads the mapping as
+unavailable and nothing is written). Four events each map to a Status option or to
+nothing: the first turn started (not a draft turn), the PR handed back for operator review,
+the task stopped, uncertain or blocked by a dependency, and the task Done. The service, not
+an agent, writes it as a distinct caller through the same delivery lifecycle, labelled
+"Status mapping" on the task; projects without a mapping and unmapped events create no
+records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
+
+- **Authority.** Every mapped option must be covered by an `allow` `project.field` grant for
+  the exact Project, field and option. A save naming an uncovered option, or one whose only
+  grant needs approval, is refused, and the write checks the grant again; a revoked grant
+  records `delivery-authority-denied` on the task. Agents and the operator keep the refusal of
+  readiness labels and fields.
+- **Readiness.** The service writes only for a task that is Ready when it writes, so the
+  mapping never makes work Ready. An in-flight event may name only an option the readiness
+  rule accepts, checked at save and again at write against the task's stored facts with only
+  that value replaced. A terminal event may name an option that removes readiness, and the
+  ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
+  an in-flight Status drops the item from the selection on the next sync and the ordinary
+  leave-selection hold applies: Ensemble validates the readiness rule, not filter text.
+- **Transitions.** The service derives each Ready imported task's current event from durable
+  facts in the order Done, held, handed back, turn started. A write is due when the event
+  changes to a mapped one, once per transition; leaving an event and re-entering it is a new
+  transition. The operation id is stored before the write, so a restart resumes the same
+  operation. It runs after every GitHub refresh, when a turn binds and on scheduler wake.
+  An unknown dependency read is not a block. A write needs the issue's current item in the
+  mapped Project selection.
+- **Conditional write.** Immediately before writing, the provider reads the item's Status. If
+  it is not what Ensemble last observed (its last confirmed write, unless a later source read
+  replaced it, else the stored membership value) it records `provider-project-field-changed`,
+  writes nothing, does not retry, and the task shows "Skipped: Status changed on GitHub since
+  Ensemble last saw it". GitHub has no conditional update, so a move between that read and the
+  mutation is an accepted race: readback then shows another option and the action stays
+  uncertain.
+- **No hold.** Status-mapping records are excluded from the task's action blockers. An unproved
+  write shows on the task, never holds admission, completion, edits or agent actions, and defers
+  only the next status write for that task until it resolves.
 
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or
