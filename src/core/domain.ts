@@ -20,6 +20,7 @@ import {
 } from "./domain-errors.js";
 import { projectNameKey } from "./project-names.js";
 import { StatusMappingStore } from "./status-mapping.js";
+import { TaskPublicationStore } from "./task-publication.js";
 import { statusMappingSchema } from "./status-mapping-contracts.js";
 import {
   defaultProfileRuntime,
@@ -456,6 +457,7 @@ export class DomainStore {
     new TaskReviewStore(this.db).migrate();
     new DeliveryStore(this.db).migrate();
     new StatusMappingStore(this.db).migrate();
+    new TaskPublicationStore(this.db).migrate();
     transaction(this.db, () => {
       this.db.exec(`CREATE TABLE IF NOT EXISTS domain_schema (version INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS domain_projects (
@@ -1132,6 +1134,24 @@ export class DomainStore {
         "forbidden",
         "Imported provider fields and readiness are provider-owned",
       );
+    if (
+      (command.title !== undefined ||
+        command.outcome !== undefined ||
+        command.ready !== undefined ||
+        command.state !== undefined) &&
+      this.publicationSending(command.taskId)
+    )
+      throw new DomainConflictError("Task is being published to GitHub");
+  }
+
+  /** Whether the task is being published: its text, Ready and dependencies are frozen until that ends. */
+  private publicationSending(taskId: string): boolean {
+    return (
+      this.one(
+        "SELECT 1 AS present FROM task_publications WHERE taskId = ? AND state = 'sending'",
+        id.parse(taskId),
+      ) !== undefined
+    );
   }
 
   /**
@@ -1709,6 +1729,8 @@ export class DomainStore {
     const project = this.project(String(task.projectId));
     const reasons: string[] = [
       ...new DeliveryStore(this.db).actionBlockers(taskId),
+      // Between a publication's steps no action is unresolved, but the task is still held.
+      ...(this.publicationSending(taskId) ? ["task-publication-pending"] : []),
     ];
     if (project.paused) reasons.push("project-paused");
     const lead = project.leadProfileId
@@ -2631,6 +2653,8 @@ export class DomainStore {
             throw new DomainConflictError(
               "Imported dependent cannot own a local dependency edge",
             );
+          if (this.publicationSending(command.taskId))
+            throw new DomainConflictError("Task is being published to GitHub");
           const cycle = this.one(
             "WITH RECURSIVE walk(id) AS (SELECT blockerTaskId FROM local_dependencies WHERE taskId = ? UNION SELECT d.blockerTaskId FROM local_dependencies d JOIN walk w ON d.taskId = w.id) SELECT id FROM walk WHERE id = ?",
             command.blockerTaskId,

@@ -2,10 +2,12 @@ import { credentialFreeEnvironment } from "../core/child-environment.js";
 import {
   isOperatorAction,
   isOperatorDeliveryCaller,
+  isOperatorPublicationCaller,
   isRuntimeDeliveryCaller,
   isServiceDeliveryCaller,
 } from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
+import { DomainConflictError } from "../core/domain-errors.js";
 import type { z } from "zod";
 import {
   type DeliveryStore,
@@ -199,6 +201,14 @@ export class DeliveryCoordinator {
         "forbidden",
         "Operator delivery only permits issue.comment",
       );
+    if (
+      isOperatorPublicationCaller(caller) &&
+      (request.approval || request.operatorReviewId)
+    )
+      throw new DomainPolicyError(
+        "forbidden",
+        "A publication is approved by its own confirmed review",
+      );
     return this.serialize(
       actionKeys({ binding: caller, request }),
       async () => {
@@ -217,7 +227,10 @@ export class DeliveryCoordinator {
               this.options.authorize(
                 caller,
                 undefined,
-                isOperatorDeliveryCaller(caller) ? request : undefined,
+                isOperatorDeliveryCaller(caller) ||
+                  isOperatorPublicationCaller(caller)
+                  ? request
+                  : undefined,
               );
           },
         );
@@ -225,6 +238,39 @@ export class DeliveryCoordinator {
         return this.attempt(record);
       },
     );
+  }
+  /**
+   * Records the operator's resolution of an unproved action under the action's own queue, so a
+   * read-back already in flight cannot overwrite it; refused unless the action is still unproved.
+   */
+  resolveUnproved(
+    operationId: string,
+    observation: ProviderActionObservation,
+    within?: (record: DeliveryActionRecord) => void,
+  ): Promise<DeliveryActionRecord> {
+    return this.serialize(
+      actionKeys(this.store.action(operationId)),
+      async () => {
+        if (this.store.action(operationId).state !== "uncertain")
+          throw new DomainConflictError(
+            "The action does not have an unknown outcome",
+          );
+        return this.store.recordObservation(operationId, observation, within);
+      },
+    );
+  }
+  /** What GitHub shows for an issue named to Link a publication; the caller judges it. */
+  inspectPublishedIssue(
+    projectId: string,
+    target: { repositoryId: string; number: number },
+    operationId: string,
+  ) {
+    return this.serialize([`task:${projectId}:${operationId}`], async () => {
+      const provider = this.provider(projectId);
+      if (!provider.inspectPublishedIssue)
+        throw new Error("Published issue inspection unavailable");
+      return provider.inspectPublishedIssue(target, operationId);
+    });
   }
   private async attempt(
     record: DeliveryActionRecord,

@@ -18,6 +18,7 @@ import {
   StatusMappingWriter,
   statusMappingEvent,
 } from "../../../src/standalone/status-mapping.js";
+import { retryingGh } from "./gh-retry.js";
 import {
   harnessDocuments,
   issueTitle,
@@ -41,14 +42,6 @@ export interface StatusMappingJourneyOptions {
   /** Milliseconds between tries of a `gh` command that hit a transient GitHub error; tests pass 0. */
   ghRetryMs?: number;
 }
-
-/** GitHub's own "try again" answers: the command did not take effect. */
-const transientGhError =
-  /temporary conflict|Please try again|HTTP 50[234]|Bad Gateway|Service Unavailable|Gateway Time-?out/i;
-const ghTries = 3;
-/** Creates are not repeated: an answer lost after the write would leave a second, unrecorded resource. */
-const notRepeated = (args: string[]) =>
-  args[1] === "create" && (args[0] === "project" || args[0] === "issue");
 
 /** A Project lists a new item a little after it is added: read it again for at most this many times. */
 const projectReads = 10;
@@ -83,23 +76,7 @@ export async function runStatusMappingJourney(
   };
   guard.begin(runId, options.attempt);
   const ghRetryMs = options.ghRetryMs ?? 2000;
-  const gh = (args: string[]) => {
-    guard.assertGh(args);
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return options.gh(args);
-      } catch (error) {
-        if (
-          attempt >= ghTries ||
-          notRepeated(args) ||
-          !transientGhError.test(String((error as Error).message))
-        )
-          throw error;
-        // shortcut: blocks the thread, which is fine in a single-run script; upgrade if the harness goes concurrent.
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ghRetryMs);
-      }
-    }
-  };
+  const gh = retryingGh((args) => guard.assertGh(args), options.gh, ghRetryMs);
   const json = (args: string[]) => JSON.parse(gh(args)) as unknown;
   const raw = options.fetcher ?? fetch;
   const guardedFetch: typeof fetch = async (input, init) => {

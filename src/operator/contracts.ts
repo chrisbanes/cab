@@ -4,7 +4,13 @@ import {
   issueCurrentBodyLimit,
   issueTitleLimit,
 } from "../core/issue-text-limits.js";
-import { commentReasonCodes, issueEditReasonCodes } from "./github-reasons.js";
+import {
+  commentReasonCodes,
+  issueEditReasonCodes,
+  publicationReasonCodes,
+  publicationTargetReasonCodes,
+} from "./github-reasons.js";
+import { publicationStates } from "../core/task-publication-contracts.js";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
@@ -1269,6 +1275,81 @@ const source = z
   .strict()
   .nullable();
 export const reviewReadSchema = envelope(taskReviewReadSchema);
+const publicationStepStateSchema = z.enum([
+  "prepared",
+  "attempting",
+  "uncertain",
+  "confirmed-success",
+  "confirmed-failure",
+  "denied",
+]);
+const publicationProjectFieldsSchema = z.array(
+  z
+    .object({
+      projectNodeId: text,
+      fieldNodeId: text,
+      optionNodeId: text,
+    })
+    .strict(),
+);
+/** Where a local task can be published, and why a target cannot take it. */
+export const publicationPolicySchema = z
+  .object({
+    available: z.boolean(),
+    reasonCode: z.enum(publicationReasonCodes).nullable(),
+    reason: safeText,
+    targets: z
+      .array(
+        z
+          .object({
+            id: text,
+            repository: safeText,
+            selectionKind: z.enum(["repository", "project", "search"]),
+            enabled: z.boolean(),
+            reasonCode: z.enum(publicationTargetReasonCodes).nullable(),
+            reason: safeText,
+            labels: z.array(safeText),
+            projectFields: publicationProjectFieldsSchema,
+            predictedSelected: z.boolean(),
+            predictedReady: z.boolean(),
+          })
+          .strict(),
+      )
+      // Every unfiltered Project selection (30) crossed with every linked repository (20).
+      .max(600),
+    /** The task's newest publication, whatever its state. */
+    latest: z
+      .object({
+        publicationId: uuid,
+        state: z.enum(publicationStates),
+        revision,
+        materialHash: hash,
+        repository: safeText,
+        issueNumber: revision.nullable(),
+        steps: z
+          .array(
+            z
+              .object({
+                operationId: uuid,
+                kind: z.enum([
+                  "issue.create",
+                  "project.item.add",
+                  "project.field",
+                ]),
+                state: publicationStepStateSchema,
+                /** A failure GitHub allows retrying, with attempts left: the step waits for a retry. */
+                retrying: z.boolean(),
+                reason: safeText,
+              })
+              .strict(),
+          )
+          .max(24),
+        createdAt: time,
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
 export const deliveryReadSchema = z
   .object({
     mode: z.enum(["reviewable-pr", "through-merge"]),
@@ -1538,6 +1619,8 @@ export const taskSchema = envelope(
         })
         .strict()
         .optional(),
+      /** Whether the operator can publish this local task as a GitHub issue, to where, and its newest publication. */
+      publication: publicationPolicySchema.optional(),
       /** True when the task's project links at least one GitHub repository; no names or paths. */
       repositoryLinked: z.boolean().optional(),
       contentUnavailable: z.boolean(),
@@ -2222,6 +2305,54 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       taskId: uuid,
       reviewId: uuid,
       expectedTaskVersion: revision,
+    })
+    .strict(),
+  // Publish a local task as a GitHub issue. The key of a review is the publication's id and its
+  // `issue.create` operation id; confirm is the approval and send is one publication.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.publish.review"),
+      taskId: uuid,
+      targetId: z.string().min(1).max(1100),
+      expectedTaskVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.publish.confirm"),
+      taskId: uuid,
+      reviewId: uuid,
+      expectedRevision: revision,
+      materialHash: hash,
+      decision: z.enum(["approved", "denied"]),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.publish.send"),
+      taskId: uuid,
+      reviewId: uuid,
+      expectedTaskVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.publish.link"),
+      taskId: uuid,
+      reviewId: uuid,
+      issueNumber: revision,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.publish.abandon"),
+      taskId: uuid,
+      reviewId: uuid,
     })
     .strict(),
   // Queues one read-only turn of the project lead on an open task that is not Ready.
@@ -3081,6 +3212,61 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       sourceRevision: revision,
       sourceDigest: hash,
       policyVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("publication-review"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      reviewId: uuid,
+      revision,
+      materialHash: hash,
+      decision: z.enum(["pending", "approved", "denied"]),
+      /** The destination, named so the operator confirms where the issue is created. */
+      repository: safeText,
+      selectionKind: z.enum(["repository", "project", "search"]),
+      /** The task text that becomes the issue, exactly as it will be sent. */
+      title: z.string().max(issueTitleLimit),
+      body: z.string().max(issueBodyLimit),
+      labels: z.array(safeText),
+      projectFields: publicationProjectFieldsSchema,
+      /** Whether the new issue is added to a GitHub Project. */
+      addsToProject: z.boolean(),
+      predictedSelected: z.boolean(),
+      predictedReady: z.boolean(),
+      taskVersion: revision,
+      policyVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("publication"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      publicationId: uuid,
+      state: z.enum(publicationStates),
+      issueNumber: revision.nullable(),
+      steps: z
+        .array(
+          z
+            .object({
+              operationId: uuid,
+              kind: z.enum([
+                "issue.create",
+                "project.item.add",
+                "project.field",
+              ]),
+              state: publicationStepStateSchema,
+              /** A failure GitHub allows retrying, with attempts left: the step waits for a retry. */
+              retrying: z.boolean(),
+              reason: safeText,
+            })
+            .strict(),
+        )
+        .max(24),
     })
     .strict(),
   z

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   DeliveryStore,
   externalActionArgumentsSchema,
+  materialDigest,
   type PrDeliveryObservation,
 } from "../../src/core/delivery.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
@@ -511,5 +512,493 @@ test("review thread actions are granted per repository and bound to the task's o
       );
   } finally {
     db.close();
+  }
+});
+
+const PUB_P = "P_1",
+  PUB_F = "F_1",
+  PUB_READY = "O_READY",
+  PUB_OTHER = "O_OTHER";
+
+/** A project whose readiness is the `ready` label or the Project field set to Ready, with grants for a publication. */
+function publicationWorld(options: { ready: boolean; grants?: boolean }) {
+  const db = new DatabaseSync(":memory:");
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const delivery = new DeliveryStore(db);
+  const projectId = randomUUID(),
+    taskId = randomUUID();
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "A",
+    leadProfileId: null,
+  });
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "env:TEST_GITHUB",
+    selections: [
+      { id: "project", kind: "project", projectNodeId: PUB_P, filter: "" },
+    ],
+    readiness: {
+      mode: "any",
+      conditions: [
+        { kind: "label", name: "ready" },
+        {
+          kind: "project-field",
+          projectNodeId: PUB_P,
+          fieldNodeId: PUB_F,
+          optionNodeId: PUB_READY,
+        },
+      ],
+    },
+    repositories: [],
+  });
+  domain.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "Publish me",
+    outcome: "Do the thing",
+  });
+  if (options.ready)
+    domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      expectedVersion: 1,
+      ready: true,
+    });
+  const grants =
+    options.grants === false
+      ? []
+      : [
+          {
+            action: "issue.create" as const,
+            repositoryId: "R_1",
+            mode: "allow" as const,
+          },
+          {
+            action: "project.item.add" as const,
+            repositoryId: "R_1",
+            mode: "approval" as const,
+            projectNodeId: PUB_P,
+          },
+          {
+            action: "project.field" as const,
+            repositoryId: "R_1",
+            mode: "allow" as const,
+            projectNodeId: PUB_P,
+            fieldNodeId: PUB_F,
+            optionNodeIds: [PUB_READY, PUB_OTHER],
+          },
+          {
+            action: "issue.labels" as const,
+            repositoryId: "R_1",
+            mode: "allow" as const,
+          },
+        ];
+  domain.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants,
+    requiredChecks: [],
+  });
+  const sourceId = String(
+    (
+      db
+        .prepare("SELECT sourceId FROM task_review_sources WHERE taskId=?")
+        .get(taskId) as {
+        sourceId: string;
+      }
+    ).sourceId,
+  );
+  const publicationId = randomUUID();
+  const caller = {
+    actor: "operator" as const,
+    principal: "installation-operator" as const,
+    purpose: "task-publication" as const,
+    projectId,
+    taskId,
+    publicationId,
+    sourceId,
+    selectionId: "project",
+    repositoryId: "R_1",
+    policyVersion: delivery.configuration(projectId).version,
+  };
+  const runtime = {
+    projectId,
+    taskId,
+    taskVersion: 1,
+    assignmentId: randomUUID(),
+    assignmentVersion: 1,
+    workId: "work",
+    workRevision: 1,
+    conversationRevision: 1,
+  };
+  const create = (labels: string[]) => ({
+    operationId: publicationId,
+    action: {
+      kind: "issue.create" as const,
+      target: { repositoryId: "R_1" },
+      title: "Publish me",
+      body: "Do the thing",
+      labels,
+    },
+  });
+  return {
+    db,
+    domain,
+    delivery,
+    projectId,
+    taskId,
+    caller,
+    runtime,
+    create,
+    publicationId,
+  };
+}
+
+test("agent and service callers can never create an issue or add a Project item, even with grants", () => {
+  const w = publicationWorld({ ready: false });
+  try {
+    const target = { repositoryId: "R_1", number: 1, nodeId: "I_1" };
+    const item = () => ({
+      operationId: randomUUID(),
+      action: {
+        kind: "project.item.add" as const,
+        target,
+        projectNodeId: PUB_P,
+      },
+    });
+    for (const caller of [
+      w.runtime,
+      {
+        actor: "service" as const,
+        purpose: "status-mapping" as const,
+        projectId: w.projectId,
+        taskId: w.taskId,
+        mappingVersion: 1,
+        event: "turnStarted" as const,
+      },
+    ])
+      for (const request of [
+        { ...w.create([]), operationId: randomUUID() },
+        item(),
+      ]) {
+        assert.throws(
+          () => w.delivery.authorize(request, caller, true),
+          /Only the operator's task publication|Status mapping caller only permits/,
+        );
+        assert.equal(
+          w.delivery.prepareAction(request, caller, true).state,
+          "denied",
+        );
+      }
+  } finally {
+    w.db.close();
+  }
+});
+
+test("the publication caller needs its grant and the confirmed review, and is bound to its repository and text", () => {
+  const noGrant = publicationWorld({ ready: false, grants: false });
+  try {
+    assert.throws(
+      () =>
+        noGrant.delivery.authorize(noGrant.create([]), noGrant.caller, true),
+      /denied by project policy/,
+    );
+  } finally {
+    noGrant.db.close();
+  }
+  const w = publicationWorld({ ready: false });
+  try {
+    // Without the confirmed review there is no approval, in either grant mode.
+    assert.throws(
+      () => w.delivery.authorize(w.create([]), w.caller, false),
+      /approval required/,
+    );
+    w.delivery.authorize(w.create([]), w.caller, true);
+    assert.throws(
+      () =>
+        w.delivery.authorize(
+          {
+            ...w.create([]),
+            action: { ...w.create([]).action, target: { repositoryId: "R_2" } },
+          },
+          w.caller,
+          true,
+        ),
+      /another repository/,
+    );
+    assert.throws(
+      () =>
+        w.delivery.authorize(
+          {
+            ...w.create([]),
+            action: { ...w.create([]).action, title: "Changed" },
+          },
+          w.caller,
+          true,
+        ),
+      /material changed/,
+    );
+    // The create is the publication's own operation.
+    assert.throws(
+      () =>
+        w.delivery.authorize(
+          { ...w.create([]), operationId: randomUUID() },
+          w.caller,
+          true,
+        ),
+      /material changed/,
+    );
+    assert.throws(
+      () =>
+        w.delivery.authorize(
+          w.create([]),
+          { ...w.caller, policyVersion: 99 },
+          true,
+        ),
+      /authority changed/,
+    );
+  } finally {
+    w.db.close();
+  }
+});
+
+test("a Project item is added only to the created issue and to the granted Project", () => {
+  const w = publicationWorld({ ready: false });
+  try {
+    const target = { repositoryId: "R_1", number: 7, nodeId: "I_7" };
+    const item = (projectNodeId: string) => ({
+      operationId: randomUUID(),
+      action: { kind: "project.item.add" as const, target, projectNodeId },
+    });
+    // Before the create is confirmed there is no issue to add.
+    assert.throws(
+      () => w.delivery.authorize(item(PUB_P), w.caller, true),
+      /Unknown delivery action/,
+    );
+    w.delivery.prepareAction(w.create([]), w.caller, true);
+    w.delivery.beginAttempt(w.publicationId, {});
+    w.delivery.recordObservation(w.publicationId, {
+      state: "confirmed-success",
+      reason: null,
+      receipt: { nodeId: "I_7", number: 7 },
+    });
+    // An approval-mode grant is satisfied by the confirmed review.
+    w.delivery.authorize(item(PUB_P), w.caller, true);
+    assert.throws(
+      () => w.delivery.authorize(item(PUB_P), w.caller, false),
+      /approval required/,
+    );
+    assert.throws(
+      () => w.delivery.authorize(item("P_2"), w.caller, true),
+      /denied by project policy/,
+    );
+    assert.throws(
+      () =>
+        w.delivery.authorize(
+          {
+            ...item(PUB_P),
+            action: {
+              ...item(PUB_P).action,
+              target: { ...target, nodeId: "I_other" },
+            },
+          },
+          w.caller,
+          true,
+        ),
+      /did not create/,
+    );
+  } finally {
+    w.db.close();
+  }
+});
+
+test("only the publication of a Ready task may write exactly the readiness label or option the rule names", () => {
+  const label = (
+    w: ReturnType<typeof publicationWorld>,
+    caller = w.caller as never,
+  ) => w.delivery.authorize({ ...w.create(["ready"]) }, caller, true);
+  const confirmedCreate = (w: ReturnType<typeof publicationWorld>) => {
+    w.delivery.prepareAction(w.create([]), w.caller, true);
+    w.delivery.beginAttempt(w.publicationId, {});
+    w.delivery.recordObservation(w.publicationId, {
+      state: "confirmed-success",
+      reason: null,
+      receipt: { nodeId: "I_7", number: 7 },
+    });
+  };
+  const field = (optionNodeId: string) => ({
+    operationId: randomUUID(),
+    action: {
+      kind: "project.field" as const,
+      target: { repositoryId: "R_1", number: 7, nodeId: "I_7" },
+      projectNodeId: PUB_P,
+      itemNodeId: "ITEM_1",
+      fieldNodeId: PUB_F,
+      optionNodeId,
+    },
+  });
+  const ready = publicationWorld({ ready: true });
+  try {
+    label(ready);
+    confirmedCreate(ready);
+    ready.delivery.authorize(field(PUB_READY), ready.caller, true);
+    // A granted option the rule does not name is not exempt.
+    assert.throws(
+      () => ready.delivery.authorize(field(PUB_OTHER), ready.caller, true),
+      /readiness fields/,
+    );
+    // A label the rule does not name is not a readiness label, but it is not what a publication writes either.
+    ready.delivery.authorize(
+      {
+        ...ready.create(["other"]),
+        action: { ...ready.create(["other"]).action },
+      },
+      ready.caller,
+      true,
+    );
+  } finally {
+    ready.db.close();
+  }
+  const draft = publicationWorld({ ready: false });
+  try {
+    assert.throws(() => label(draft), /readiness labels/);
+    confirmedCreate(draft);
+    assert.throws(
+      () => draft.delivery.authorize(field(PUB_READY), draft.caller, true),
+      /readiness fields/,
+    );
+    // The agent and bound-issue refusals are unchanged.
+    assert.throws(
+      () =>
+        draft.delivery.authorize(
+          {
+            operationId: randomUUID(),
+            action: {
+              kind: "issue.labels",
+              target: { repositoryId: "R_1", number: 7, nodeId: "I_7" },
+              add: ["ready"],
+              remove: [],
+            },
+          },
+          draft.runtime,
+          false,
+        ),
+      /readiness labels/,
+    );
+    assert.throws(
+      () => draft.delivery.authorize(field(PUB_READY), draft.runtime, false),
+      /readiness fields/,
+    );
+  } finally {
+    draft.db.close();
+  }
+});
+
+test("persisted runtime, operator and service records parse and hash as they always did", () => {
+  const w = publicationWorld({ ready: false });
+  try {
+    const target = { repositoryId: "R_1", number: 7, nodeId: "I_7" };
+    const records = [
+      {
+        binding: {
+          projectId: "11111111-1111-4111-8111-111111111111",
+          taskId: "22222222-2222-4222-8222-222222222222",
+          taskVersion: 1,
+          assignmentId: "33333333-3333-4333-8333-333333333333",
+          assignmentVersion: 1,
+          workId: "work",
+          workRevision: 1,
+          conversationRevision: 1,
+        },
+        hash: "223f46e35a19dc0e5156e4705091a8980c67ff29cadf42351d599d4647fe362d",
+      },
+      {
+        binding: {
+          actor: "operator",
+          principal: "installation-operator",
+          projectId: "11111111-1111-4111-8111-111111111111",
+          taskId: "22222222-2222-4222-8222-222222222222",
+          taskVersion: 2,
+          sourceId: "44444444-4444-4444-8444-444444444444",
+          sourceRevision: 1,
+          sourceDigest: "a".repeat(64),
+          sourceNodeId: "I_7",
+          sourceRepositoryId: "R_1",
+          policyVersion: 1,
+        },
+        hash: "cf2e4fe1a1e84ca854ce21351f29cce8db2b1be11f297ba6401f7da779bc7e5c",
+      },
+      {
+        binding: {
+          actor: "service",
+          purpose: "status-mapping",
+          projectId: "11111111-1111-4111-8111-111111111111",
+          taskId: "22222222-2222-4222-8222-222222222222",
+          mappingVersion: 1,
+          event: "turnStarted",
+        },
+        hash: "dfbff2aefed2fe3a89c7e83a065148b469e8d51f6c9ea6f92d230155ac5912c1",
+      },
+    ];
+    for (const [index, { binding, hash }] of records.entries()) {
+      const operationId = "55555555-5555-4555-8555-555555555555",
+        request = {
+          operationId,
+          action: { kind: "issue.comment" as const, target, body: "Hello" },
+        },
+        record = {
+          operationId,
+          request,
+          binding,
+          policyVersion: 1,
+          state: "prepared",
+          attempts: 0,
+          beforeState: null,
+          observation: null,
+          createdAt: 1,
+          updatedAt: 1,
+        };
+      w.db
+        .prepare("INSERT INTO delivery_actions VALUES (?,?,?,?)")
+        .run(operationId, w.taskId, hash, JSON.stringify(record));
+      // The digest is pinned: the union gains no key and changes no earlier record's hash.
+      assert.equal(materialDigest({ request, binding }), hash, `hash ${index}`);
+      // Each record still parses as the branch it was written as, and gains no key.
+      assert.deepEqual(
+        w.delivery.action(operationId).binding,
+        binding,
+        `record ${index}`,
+      );
+      assert.equal(
+        w.delivery.prepareAction(request, binding as never, false).state,
+        "prepared",
+      );
+      w.db
+        .prepare("DELETE FROM delivery_actions WHERE operationId=?")
+        .run(operationId);
+    }
+  } finally {
+    w.db.close();
   }
 });

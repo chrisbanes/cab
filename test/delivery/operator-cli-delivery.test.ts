@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { deliveryWorld } from "../fixtures/operator-cli.js";
+import { deliveryWorld, publicationWorld } from "../fixtures/operator-cli.js";
+import { labelAndFieldReady } from "../fixtures/task-publication.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
@@ -196,4 +197,194 @@ test("delivery get lists thread reply and resolve actions with their outcomes", 
     human.out,
     /pr\.thread\.resolve +confirmed-failure +provider-preflight-held/,
   );
+});
+
+test("delivery publish reviews, confirms and sends a local task as an issue, and a replay creates nothing more", async (t) => {
+  const w = await publicationWorld(t);
+  const taskId = w.f.task(true, "Ship it", "Do the work");
+  const target = w.f.target(taskId, "repo").id;
+  const version = w.f.version(taskId);
+  const denied = await w.cli("ro", [
+    "delivery",
+    "publish-review",
+    taskId,
+    "--target",
+    target,
+    "--expected-task-version",
+    String(version),
+  ]);
+  assert.notEqual(denied.code, 0);
+  assert.equal(w.f.gh.posts, 0);
+
+  const review = await w.ok("rw", [
+    "delivery",
+    "publish-review",
+    taskId,
+    "--target",
+    target,
+    "--expected-task-version",
+    String(version),
+  ]);
+  const r = review.data.receipt as Json;
+  assert.equal(r.kind, "publication-review");
+  assert.equal(r.repository, "org/repo");
+  assert.equal(r.decision, "pending");
+  assert.equal(w.f.gh.posts, 0);
+  const human = await w.h.run([
+    "delivery",
+    "publish-review",
+    taskId,
+    "--target",
+    target,
+    "--expected-task-version",
+    String(version),
+    "--connection",
+    "rw",
+  ]);
+  assert.match(human.out, /Nothing was created on GitHub/);
+  assert.match(human.out, /cannot delete or take back/);
+  assert.match(human.out, /delivery publish-confirm/);
+
+  const confirmArgs = [
+    "delivery",
+    "publish-confirm",
+    taskId,
+    "--review-id",
+    r.reviewId,
+    "--expected-revision",
+    String(r.revision),
+    "--material-hash",
+    r.materialHash,
+    "--decision",
+    "approved",
+  ];
+  const confirmed = await w.ok("rw", confirmArgs);
+  assert.equal(confirmed.data.receipt.decision, "approved");
+
+  const sendArgs = [
+    "delivery",
+    "publish-send",
+    taskId,
+    "--review-id",
+    r.reviewId,
+    "--expected-task-version",
+    String(version),
+    "--request-id",
+    "11111111-1111-4111-8111-111111111111",
+  ];
+  const sent = await w.ok("rw", sendArgs);
+  assert.equal(sent.data.receipt.kind, "publication");
+  assert.equal(sent.data.state, "converted");
+  assert.equal(sent.data.issueNumber, 1);
+  assert.equal(w.f.gh.posts, 1);
+  // The same request replays the recorded outcome and posts nothing.
+  const replay = await w.ok("rw", sendArgs);
+  assert.equal(replay.data.state, "converted");
+  assert.equal(w.f.gh.posts, 1);
+  const read = await w.h.run(["task", "get", taskId, "--connection", "ro"]);
+  assert.equal(read.code, 0, read.err);
+});
+
+test("delivery publish names the reason a task or target is unavailable and sends nothing", async (t) => {
+  const w = await publicationWorld(t, {
+    selections: ["repo", "search"],
+    grants: ["create"],
+  });
+  const taskId = w.f.task(false);
+  const search = w.f.target(taskId, "search").id;
+  const base = [
+    "delivery",
+    "publish-review",
+    taskId,
+    "--expected-task-version",
+  ];
+  const version = String(w.f.version(taskId));
+  const disabled = await w.h.run([
+    ...base,
+    version,
+    "--target",
+    search,
+    "--connection",
+    "rw",
+  ]);
+  assert.notEqual(disabled.code, 0);
+  assert.match(disabled.err, /can't tell whether a new issue would match/);
+  const missing = await w.h.run([...base, version, "--connection", "rw"]);
+  assert.notEqual(missing.code, 0);
+  assert.match(missing.err, /Name the target with --target ID/);
+  assert.equal(w.f.gh.posts, 0);
+});
+
+test("delivery publish-link refuses an issue without the marker, and publish-abandon warns about a duplicate", async (t) => {
+  const w = await publicationWorld(t);
+  w.f.gh.createMode = "lost-unseen";
+  const taskId = w.f.task(false);
+  const { review } = await w.f.publish(taskId);
+  const stranger = w.f.gh.add("x", "no marker");
+  const link = await w.h.run([
+    "delivery",
+    "publish-link",
+    taskId,
+    "--publication-id",
+    review.publicationId,
+    "--issue",
+    String(stranger.number),
+    "--connection",
+    "rw",
+  ]);
+  assert.notEqual(link.code, 0);
+  assert.match(link.err, /does not carry this publication's marker/);
+  const abandoned = await w.h.run([
+    "delivery",
+    "publish-abandon",
+    taskId,
+    "--publication-id",
+    review.publicationId,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(abandoned.code, 0, abandoned.err);
+  assert.match(abandoned.out, /may still have created the issue/);
+  assert.match(abandoned.out, /State: +abandoned|abandoned/);
+  assert.equal(w.f.gh.posts, 1);
+});
+
+test("delivery publish-send says a later step is waiting, not that the create is unknown, when only an item add waits for a retry", async (t) => {
+  const w = await publicationWorld(t, {
+    selections: ["project"],
+    readiness: labelAndFieldReady,
+  });
+  w.f.gh.itemMode = "retry";
+  const taskId = w.f.task(true);
+  const review = w.f.service.reviewTaskPublication({
+    key: randomUUID(),
+    taskId,
+    targetId: w.f.target(taskId, "project").id,
+    expectedTaskVersion: w.f.version(taskId),
+  });
+  w.f.service.confirmTaskPublication({
+    key: randomUUID(),
+    taskId,
+    reviewId: review.publicationId,
+    expectedRevision: review.revision,
+    materialHash: review.materialHash,
+    decision: "approved",
+  });
+  const sent = await w.h.run([
+    "delivery",
+    "publish-send",
+    taskId,
+    "--review-id",
+    review.publicationId,
+    "--expected-task-version",
+    String(w.f.version(taskId)),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(sent.code, 0, sent.err);
+  assert.match(sent.out, /Issue #1 was created/);
+  assert.match(sent.out, /Link and Abandon do not apply/);
+  assert.doesNotMatch(sent.out, /outcome is not known/);
+  assert.doesNotMatch(sent.out, /publish-link|publish-abandon/);
+  assert.equal(w.f.gh.posts, 1);
 });

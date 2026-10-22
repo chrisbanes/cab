@@ -279,6 +279,15 @@ export class GitHubSourceStore {
       ).some((c) => c.name === "readAt")
     )
       this.db.exec("ALTER TABLE github_memberships ADD COLUMN readAt INTEGER");
+    // Complete reads that omitted a just-published issue in a row; null for every other membership.
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(github_memberships)").all() as Row[]
+      ).some((c) => c.name === "missedReads")
+    )
+      this.db.exec(
+        "ALTER TABLE github_memberships ADD COLUMN missedReads INTEGER",
+      );
     const closureColumns = this.db
       .prepare("PRAGMA table_info(github_delivery_closures)")
       .all() as Row[];
@@ -761,6 +770,8 @@ export class GitHubSourceStore {
         seen.add(issue.nodeId);
         const existing = this.issue(issue.nodeId);
         let taskId: string;
+        // An issue Ensemble is publishing is not new: its task is converted when the create resolves.
+        if (!existing && this.publishingIssue(issue)) continue;
         if (!existing) {
           // A closed issue is imported, as Done, only by a Done-mode source on a complete read.
           const importClosed =
@@ -863,7 +874,7 @@ export class GitHubSourceStore {
         }
         this.db
           .prepare(
-            "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId, nodeId) DO UPDATE SET projectFields = excluded.projectFields, itemNodeId = excluded.itemNodeId, readAt = excluded.readAt",
+            "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId, nodeId) DO UPDATE SET projectFields = excluded.projectFields, itemNodeId = excluded.itemNodeId, readAt = excluded.readAt, missedReads = NULL",
           )
           .run(
             projectId,
@@ -879,21 +890,40 @@ export class GitHubSourceStore {
           supplied: { title: issue.title, body: issue.body },
         });
         this.updateReadiness(taskId);
+        this.releasePublishedWithdrawal(taskId);
       }
       new TaskReviewStore(this.db).captureSources(sourceCaptures);
       if (snapshot.complete) {
         const old = this.db
           .prepare(
-            "SELECT nodeId FROM github_memberships WHERE projectId = ? AND selectionId = ?",
+            "SELECT nodeId, missedReads FROM github_memberships WHERE projectId = ? AND selectionId = ?",
           )
           .all(projectId, selectionId) as Row[];
         for (const membership of old)
           if (!seen.has(String(membership.nodeId))) {
+            // GitHub's lists trail a create: a just-published issue survives one complete read that omits it.
+            if (membership.missedReads === 0) {
+              this.db
+                .prepare(
+                  "UPDATE github_memberships SET missedReads = 1 WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
+                )
+                .run(projectId, selectionId, String(membership.nodeId));
+              continue;
+            }
             this.db
               .prepare(
                 "DELETE FROM github_memberships WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
               )
               .run(projectId, selectionId, String(membership.nodeId));
+            // Written from the omission's kind, so an ordinary omission always resets an earlier flag.
+            this.db
+              .prepare(
+                "UPDATE task_publications SET omittedWithdrawal = ? WHERE state = 'converted' AND taskId = (SELECT taskId FROM github_external_issues WHERE nodeId = ?)",
+              )
+              .run(
+                membership.missedReads === 1 ? 1 : 0,
+                String(membership.nodeId),
+              );
             const external = this.issue(String(membership.nodeId));
             if (external) this.updateReadiness(String(external.taskId));
           }
@@ -954,6 +984,133 @@ export class GitHubSourceStore {
           .run(projectId, selectionId);
       return true;
     });
+  }
+
+  /**
+   * A just-published task withdrawn because two complete reads in a row omitted its issue is no longer
+   * withdrawn once a later read lists it again and it is Ready: those reads omitted a real issue. Any
+   * other withdrawal, including one taken later for an issue that was listed in between, stays for the
+   * operator, as on any imported task.
+   */
+  private releasePublishedWithdrawal(taskId: string): void {
+    const row = this.db
+      .prepare(
+        "SELECT e.nodeId, t.ready FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId JOIN task_publications p ON p.taskId = e.taskId AND p.state = 'converted' AND p.omittedWithdrawal = 1 WHERE e.taskId = ?",
+      )
+      .get(taskId) as Row | undefined;
+    if (!row || Number(row.ready) !== 1) return;
+    const released = this.db
+      .prepare(
+        "UPDATE github_source_holds SET active = 0 WHERE nodeId = ? AND active = 1 AND reason = 'withdrawn'",
+      )
+      .run(String(row.nodeId)) as { changes: number | bigint };
+    this.db
+      .prepare(
+        "UPDATE task_publications SET omittedWithdrawal = 0 WHERE taskId = ? AND state = 'converted'",
+      )
+      .run(taskId);
+    if (Number(released.changes) > 0)
+      this.db
+        .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
+        .run(taskId);
+  }
+
+  /**
+   * Whether `body` carries the marker of a task publication whose create is unresolved. Such an
+   * issue belongs to that task, so a racing sync must not import it as a second one.
+   */
+  private publishingIssue(issue: { nodeId: string; body: string }): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT publicationId,issueNodeId FROM task_publications WHERE state='sending'",
+        )
+        .all() as Row[]
+    ).some(
+      (row) =>
+        // The create's confirmed issue is known by identity; one still unproved only by its marker.
+        row.issueNodeId === issue.nodeId ||
+        issue.body.includes(
+          `<!-- ensemble-operation:${String(row.publicationId)} -->`,
+        ),
+    );
+  }
+
+  /**
+   * Turns a published local task into the imported task of the issue it created, writing what the
+   * sync would have written for it. Ready is kept, as the next sync recomputes it from GitHub.
+   */
+  convertPublishedTaskWithinTransaction(input: {
+    taskId: string;
+    projectId: string;
+    selectionId: string;
+    repositoryId: string;
+    repositoryName: string;
+    nodeId: string;
+    number: number;
+    title: string;
+    /** The body as created, marker included. */
+    body: string;
+    labels: string[];
+    itemNodeId: string | null;
+    projectFields: z.output<typeof projectFieldsSchema>;
+  }): void {
+    const digest = sourceTextDigest(input.title, input.body),
+      now = Date.now();
+    this.db
+      .prepare(
+        "INSERT INTO github_imported_tasks (taskId, providerInstance, nodeId, repositoryId) VALUES (?, 'github.com', ?, ?)",
+      )
+      .run(input.taskId, input.nodeId, input.repositoryId);
+    this.db
+      .prepare(
+        "INSERT INTO github_external_issues (providerInstance, nodeId, taskId, repositoryId, repositoryName, issueNumber, observedTitle, observedBody, observedState, labels) VALUES ('github.com', ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+      )
+      .run(
+        input.nodeId,
+        input.taskId,
+        input.repositoryId,
+        input.repositoryName,
+        input.number,
+        input.title,
+        input.body,
+        JSON.stringify(input.labels),
+      );
+    this.db
+      .prepare(
+        "INSERT INTO github_source_reviews (nodeId, observedDigest, acceptedDigest) VALUES (?, ?, ?)",
+      )
+      .run(input.nodeId, digest, digest);
+    // Local dependents keep treating the task as an open blocker, not an unknown one.
+    this.db
+      .prepare(
+        "INSERT INTO github_issue_status (nodeId, status, reason, refreshedAt) VALUES (?, 'open', NULL, ?) ON CONFLICT(nodeId) DO UPDATE SET status = 'open', reason = NULL, refreshedAt = excluded.refreshedAt",
+      )
+      .run(input.nodeId, new Date(now).toISOString());
+    this.db
+      .prepare(
+        "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt, missedReads) VALUES (?, ?, ?, ?, ?, ?, 0)",
+      )
+      .run(
+        input.projectId,
+        input.selectionId,
+        input.nodeId,
+        JSON.stringify(input.projectFields),
+        input.itemNodeId,
+        now,
+      );
+    this.db
+      .prepare(
+        "UPDATE domain_tasks SET readinessRule = ?, importedBlockers = 'unknown', version = version + 1 WHERE id = ?",
+      )
+      .run(this.readinessRuleText(input.projectId) ?? "null", input.taskId);
+    new TaskReviewStore(this.db).captureSources([
+      {
+        taskId: input.taskId,
+        kind: "github",
+        supplied: { title: input.title, body: input.body },
+      },
+    ]);
   }
 
   recordDeliveryClosure(

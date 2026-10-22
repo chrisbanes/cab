@@ -1,3 +1,15 @@
+import type {
+  PublicationReasonCode,
+  PublicationTargetReasonCode,
+} from "../core/task-publication-contracts.js";
+
+export {
+  publicationReasonCodes,
+  publicationTargetReasonCodes,
+  type PublicationReasonCode,
+  type PublicationTargetReasonCode,
+} from "../core/task-publication-contracts.js";
+
 /**
  * Why a task's GitHub comment cannot be posted, as the server decides it. Shared by the task
  * read's schema and the web, like `wait-reasons.ts`. The state of a source's last read has its
@@ -101,4 +113,40 @@ export const issueEditReasonSentences: Record<IssueEditReasonCode, string> = {
     "An earlier GitHub action on this task has an unknown outcome. Resolve it first.",
   "no-delivery-credential":
     "No GitHub credential is available for delivery. Add one in project configuration.",
+};
+
+/** Why a local task cannot be published to GitHub at all. */
+export const publicationReasonSentences: Record<PublicationReasonCode, string> =
+  {
+    "task-imported": "This task already is a GitHub issue.",
+    "task-not-open": "Only an open task can be published.",
+    "task-started":
+      "Work has already started on this task, so it can no longer be published.",
+    "local-dependencies":
+      "This task waits on other tasks here, and a GitHub issue follows GitHub dependencies only. Remove its dependencies to publish it.",
+    "publication-unresolved":
+      "An earlier publish of this task has not finished. Resolve it first.",
+    "no-github-source":
+      "This project has no GitHub source and linked repository to publish to. Set them up in project configuration.",
+    "no-delivery-credential":
+      "No GitHub credential is available for delivery. Add one in project configuration.",
+  };
+
+/** Why one target cannot take the publication. */
+export const publicationTargetReasonSentences: Record<
+  PublicationTargetReasonCode,
+  string
+> = {
+  "selection-unpredictable":
+    "Ensemble can't tell whether a new issue would match this selection, so it can't publish here.",
+  "no-create-grant":
+    "This repository doesn't allow Ensemble to create issues. Allow issue creation in project configuration.",
+  "no-item-grant":
+    "This project doesn't allow adding issues to this GitHub Project. Allow it in project configuration.",
+  "no-field-grant":
+    "This project doesn't allow setting the Project field the readiness rule needs. Allow it in project configuration.",
+  "readiness-unsatisfiable":
+    "The readiness rule needs a Project field that publishing here can't set. Choose a Project target or a Draft task.",
+  "would-become-ready":
+    "With no readiness rule, a new issue here would make a Draft task Ready. Mark the task Ready or add a readiness rule.",
 };

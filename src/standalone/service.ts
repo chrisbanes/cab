@@ -26,6 +26,17 @@ import {
 } from "../core/coordination.js";
 import { CachedDatabase } from "../core/database-cache.js";
 import {
+  type Publication,
+  type PublicationAvailability,
+  type PublicationReview,
+  TaskPublicationStore,
+} from "../core/task-publication.js";
+import {
+  publicationAbandonedReason,
+  publicationMarker,
+} from "../core/task-publication-contracts.js";
+import { TaskPublicationDriver } from "./task-publication.js";
+import {
   canonicalMaterial,
   type DeliveryActionRecord,
   type DeliveryCaller,
@@ -34,6 +45,7 @@ import {
   type ExternalAction,
   isOperatorAction,
   isOperatorDeliveryCaller,
+  isOperatorPublicationCaller,
   isServiceDeliveryCaller,
   materialDigest,
   type OperatorCommentReview,
@@ -505,6 +517,8 @@ interface Started {
   deliveryCoordinator: DeliveryCoordinator;
   statusMappingWriter: StatusMappingWriter;
   statusMappings: StatusMappingStore;
+  taskPublications: TaskPublicationStore;
+  publicationDriver: TaskPublicationDriver;
   routingAttempts: RoutingAttemptStore;
   workspaces: WorkspaceManager;
   workspaceBindings: SqliteWorkspaceBindingStore;
@@ -527,6 +541,18 @@ interface Started {
   diagnostics: ExecutionDiagnosticsStore | undefined;
   /** Status reads use it without spawning anything. */
   claude: RuntimeSpawnContext["claude"];
+}
+
+/** Whether any work ever started on the task: a task that did is no longer a local draft to publish. */
+function taskStarted(
+  state: ExecutionState,
+  workspaceBindings: SqliteWorkspaceBindingStore,
+  taskId: string,
+): boolean {
+  return (
+    state.hasTaskWorkspaceEvidence(taskId) ||
+    workspaceBindings.get(taskId) !== undefined
+  );
 }
 
 /** The task as a prompt names it: its revision, title and outcome now. */
@@ -938,6 +964,7 @@ export class StandaloneService {
       const deliveryStore = new DeliveryStore(db);
       deliveryStore.migrate();
       const statusMappings = new StatusMappingStore(db);
+      const taskPublications = new TaskPublicationStore(db);
       // Read by activationAllowed and the Claude turn environment; set by spawnEnvironment.
       let runtimeSpawnSnapshot: NodeJS.ProcessEnv | undefined;
       const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
@@ -954,7 +981,15 @@ export class StandaloneService {
           : {}),
         authorize: (caller, exceptOperationId, request) => {
           this.authorizeDelivery(
-            { deliveryStore, state, domain, coordination, statusMappings },
+            {
+              deliveryStore,
+              state,
+              domain,
+              coordination,
+              statusMappings,
+              taskPublications,
+              workspaceBindings,
+            },
             caller,
             exceptOperationId,
             request?.action.kind,
@@ -967,6 +1002,8 @@ export class StandaloneService {
               );
             return;
           }
+          // Its repository, issue and readiness are checked by `DeliveryStore.authorize`.
+          if (isOperatorPublicationCaller(caller)) return;
           // Its mapping, task and readiness are checked by `DeliveryStore.authorize`.
           if (isServiceDeliveryCaller(caller)) return;
           if (
@@ -1045,24 +1082,26 @@ export class StandaloneService {
         approved: (request, caller) =>
           isServiceDeliveryCaller(caller)
             ? false
-            : isOperatorDeliveryCaller(caller)
-              ? deliveryStore.operatorApprovalCurrent(request, caller)
-              : Boolean(
-                  request.approval &&
-                    deliveryStore.approvalCurrent(
-                      request.approval.interactionId,
-                      caller,
-                      request.action,
-                      request.operationId,
-                    ) &&
-                    coordination.authorizationFor({
-                      assignmentId: caller.assignmentId,
-                      ...request.approval,
-                      action: request.action.kind,
-                      target: canonicalMaterial(request.action.target),
-                      material: request.action,
-                    }),
-                ),
+            : isOperatorPublicationCaller(caller)
+              ? taskPublications.actionApproved(request, caller)
+              : isOperatorDeliveryCaller(caller)
+                ? deliveryStore.operatorApprovalCurrent(request, caller)
+                : Boolean(
+                    request.approval &&
+                      deliveryStore.approvalCurrent(
+                        request.approval.interactionId,
+                        caller,
+                        request.action,
+                        request.operationId,
+                      ) &&
+                      coordination.authorizationFor({
+                        assignmentId: caller.assignmentId,
+                        ...request.approval,
+                        action: request.action.kind,
+                        target: canonicalMaterial(request.action.target),
+                        material: request.action,
+                      }),
+                  ),
         activationAllowed: (policy) =>
           !policy.credentialRef ||
           (!runtimeSpawnSnapshot?.[policy.credentialRef.slice(4)] &&
@@ -1071,6 +1110,11 @@ export class StandaloneService {
             )),
       });
       acquire("deliveryCoordinator", deliveryCoordinator);
+      const publicationDriver = new TaskPublicationDriver(
+        taskPublications,
+        deliveryStore,
+        deliveryCoordinator,
+      );
       const statusMappingWriter = acquire(
         "statusMappingWriter",
         new StatusMappingWriter(
@@ -1284,6 +1328,7 @@ export class StandaloneService {
         supervisor,
       });
       await deliveryCoordinator.refresh();
+      await publicationDriver.advanceAll();
       await this.reconcileOwnDeliveryClosures({
         domain,
         deliveryStore,
@@ -1363,6 +1408,8 @@ export class StandaloneService {
         deliveryCoordinator,
         statusMappingWriter,
         statusMappings,
+        taskPublications,
+        publicationDriver,
         routingAttempts,
         workspaces,
         workspaceBindings,
@@ -3032,9 +3079,17 @@ export class StandaloneService {
       domain,
       coordination,
       statusMappings,
+      taskPublications,
+      workspaceBindings,
     }: Pick<
       Started,
-      "deliveryStore" | "state" | "domain" | "coordination" | "statusMappings"
+      | "deliveryStore"
+      | "state"
+      | "domain"
+      | "coordination"
+      | "statusMappings"
+      | "taskPublications"
+      | "workspaceBindings"
     >,
     caller: DeliveryCaller,
     exceptOperationId?: string,
@@ -3062,6 +3117,19 @@ export class StandaloneService {
         deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
       )
         throw new DomainConflictError("Task admission is held");
+      return;
+    }
+    if (isOperatorPublicationCaller(caller)) {
+      // A publication writes before its task is imported, and like an edit it does not wait for
+      // admission. It needs a publication being sent, no unknown outcome beyond its own steps and,
+      // for the create, a task no work ever started on.
+      if (
+        taskPublications.get(caller.publicationId)?.state !== "sending" ||
+        deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length ||
+        (kind === "issue.create" &&
+          taskStarted(state, workspaceBindings, caller.taskId))
+      )
+        throw new DomainConflictError("Task cannot take this publication");
       return;
     }
     if (isServiceDeliveryCaller(caller)) {
@@ -3354,6 +3422,193 @@ export class StandaloneService {
     await this.refreshAfterStaleEdit(sent);
     return sent;
   }
+  private publicationContext(taskId: string) {
+    const started = this.started();
+    return {
+      started: taskStarted(started.state, started.workspaceBindings, taskId),
+    };
+  }
+  /** Where the task can be published, and why not. */
+  publicationAvailability(taskId: string): PublicationAvailability {
+    return this.started().taskPublications.availability(
+      taskId,
+      this.publicationContext(taskId),
+    );
+  }
+  publication(publicationId: string): Publication | undefined {
+    return this.started().taskPublications.get(publicationId);
+  }
+  /** The task's newest publication with what each of its steps has recorded. */
+  latestPublication(taskId: string) {
+    const started = this.started(),
+      publication = started.taskPublications.latest(taskId);
+    if (!publication) return null;
+    const { review } = publication,
+      records = new Map(
+        started.deliveryStore
+          .actions(taskId)
+          .map((record) => [record.operationId, record]),
+      ),
+      step = (kind: string, operationId: string | undefined) => {
+        const record = operationId ? records.get(operationId) : undefined;
+        return record
+          ? {
+              kind,
+              operationId: record.operationId,
+              state: record.state,
+              reason: record.observation?.reason ?? null,
+              // The driver's own signal: a failure GitHub allows retrying, with attempts left.
+              retrying:
+                record.state === "confirmed-failure" &&
+                record.observation?.retryable === true &&
+                record.attempts < 3,
+            }
+          : null;
+      };
+    return {
+      publication,
+      steps: [
+        step("issue.create", review.publicationId),
+        step("project.item.add", review.item?.operationId),
+        ...review.fields.map((f) => step("project.field", f.operationId)),
+      ].filter((s) => s !== null),
+    };
+  }
+  reviewTaskPublication(command: {
+    key: string;
+    taskId: string;
+    targetId: string;
+    expectedTaskVersion: number;
+  }): PublicationReview {
+    return this.started().taskPublications.review(
+      command,
+      this.publicationContext(command.taskId),
+    );
+  }
+  confirmTaskPublication(command: {
+    key: string;
+    taskId: string;
+    reviewId: string;
+    expectedRevision: number;
+    materialHash: string;
+    decision: "approved" | "denied";
+  }): PublicationReview {
+    const { taskPublications } = this.started();
+    return taskPublications.confirm(command, () => {
+      const publication = taskPublications.get(command.reviewId);
+      if (!publication)
+        throw new DomainConflictError("Publication unavailable");
+      taskPublications.assertCurrent(
+        publication,
+        this.publicationContext(command.taskId),
+      );
+    });
+  }
+  /** Starts a confirmed publication and sends as far as it can; a replay returns where it is. */
+  async sendTaskPublication(command: {
+    taskId: string;
+    publicationId: string;
+    expectedTaskVersion: number;
+  }): Promise<Publication> {
+    const started = this.started();
+    const begun = started.taskPublications.begin(
+      command,
+      this.publicationContext(command.taskId),
+    );
+    return (
+      (await started.publicationDriver.advance(command.publicationId)) ?? begun
+    );
+  }
+  /**
+   * Accepts a named issue as the publication's create when it carries the create's marker and
+   * the exact material, then continues the steps and converts the task.
+   */
+  async linkTaskPublication(command: {
+    taskId: string;
+    publicationId: string;
+    issueNumber: number;
+  }): Promise<Publication> {
+    const started = this.started(),
+      known = started.taskPublications.get(command.publicationId);
+    // A replay of a link that went through answers where the publication is.
+    if (
+      known?.review.taskId === command.taskId &&
+      known.issueNumber === command.issueNumber
+    )
+      return known;
+    const publication = this.unresolvedCreate(command),
+      { review } = publication.publication,
+      inspected = await started.deliveryCoordinator.inspectPublishedIssue(
+        review.caller.projectId,
+        {
+          repositoryId: review.caller.repositoryId,
+          number: command.issueNumber,
+        },
+        command.publicationId,
+      );
+    // The same proof the automatic read-back asks for: marker, exact text, every label, the credential user.
+    if (
+      !inspected.hasMarker ||
+      !inspected.byCredentialUser ||
+      inspected.title !== review.issue.title ||
+      inspected.body !==
+        `${review.issue.body}\n\n${publicationMarker(command.publicationId)}` ||
+      !review.issue.labels.every((l) => inspected.labels.includes(l))
+    )
+      throw new DomainConflictError(
+        "That issue does not carry this publication's marker",
+      );
+    await started.deliveryCoordinator.resolveUnproved(command.publicationId, {
+      state: "confirmed-success",
+      reason: null,
+      receipt: { nodeId: inspected.nodeId, number: inspected.number },
+    });
+    return (
+      (await started.publicationDriver.advance(command.publicationId)) ??
+      publication.publication
+    );
+  }
+  /** Gives up on an unproved create: the task is local again, and a duplicate issue may exist. */
+  async abandonTaskPublication(command: {
+    taskId: string;
+    publicationId: string;
+  }): Promise<Publication> {
+    const started = this.started(),
+      known = started.taskPublications.get(command.publicationId);
+    if (known?.review.taskId === command.taskId && known.state === "abandoned")
+      return known;
+    this.unresolvedCreate(command);
+    await started.deliveryCoordinator.resolveUnproved(
+      command.publicationId,
+      {
+        state: "confirmed-failure",
+        reason: publicationAbandonedReason,
+        receipt: null,
+      },
+      () => started.taskPublications.end(command.publicationId, "abandoned"),
+    );
+    const publication = started.taskPublications.get(command.publicationId);
+    if (!publication) throw new DomainConflictError("Publication unavailable");
+    return publication;
+  }
+  /** The sending publication whose create has an unknown outcome, which is all Link and Abandon act on. */
+  private unresolvedCreate(command: { taskId: string; publicationId: string }) {
+    const started = this.started(),
+      publication = started.taskPublications.get(command.publicationId),
+      create = started.deliveryStore
+        .actions(command.taskId)
+        .find((a) => a.operationId === command.publicationId);
+    if (
+      !publication ||
+      publication.review.taskId !== command.taskId ||
+      publication.state !== "sending" ||
+      create?.state !== "uncertain"
+    )
+      throw new DomainConflictError(
+        "The publication's create does not have an unknown outcome",
+      );
+    return { publication, create };
+  }
   /**
    * The synced copy is what a Redraft starts from, so after GitHub showed a change the source
    * is read now rather than at the next poll. A failed read leaves the earlier copy, and a
@@ -3366,6 +3621,8 @@ export class StandaloneService {
   async refreshGitHub(): Promise<void> {
     const started = this.started();
     await started.deliveryCoordinator.refresh();
+    // A create the refresh just proved converts its task before the sync, which then matches it.
+    await started.publicationDriver.advanceAll();
     await this.reconcileOwnDeliveryClosures(started);
     await started.githubSynchronizer.refresh();
     this.completeSettledProviderClosures(started);

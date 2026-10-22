@@ -71,6 +71,8 @@ import {
   ImproveWithLead,
   type ReleaseRun,
 } from "./issue-improve.js";
+import { PublishToGitHub } from "./task-publish.js";
+import { hasPublishWork } from "./task-publish-model.js";
 import {
   draftTurnAccessNotice,
   draftTurnHeading,
@@ -387,6 +389,7 @@ export function TaskWorkspace({
 }) {
   // Improve with lead opens on demand, and again after a reload while it has work to show.
   const [improveOpen, setImproveOpen] = useState<boolean | null>(null);
+  const [publishOpen, setPublishOpen] = useState<boolean | null>(null);
   // A Results or Changes outcome, with the write it answers so it shows on that write's tab.
   const [aux, setAux] = useState<
     (ReplyOutcome & { from?: OperatorCommand["type"] }) | null
@@ -513,6 +516,13 @@ export function TaskWorkspace({
       loader,
     ),
     data = resource.state.data?.data;
+  const publishWork = data?.publication
+    ? hasPublishWork(data.publication)
+    : false;
+  // Work found on load opens the panel and keeps it open, so how it ends is read there.
+  useEffect(() => {
+    if (publishWork) setPublishOpen((open) => open ?? true);
+  }, [publishWork]);
   const headerReport =
     data &&
     JSON.stringify(
@@ -1729,6 +1739,8 @@ export function TaskWorkspace({
       )}
     </section>
   );
+  const publishPolicy = data.publication;
+  const publishShown = publishPolicy ? (publishOpen ?? publishWork) : false;
   const improvePolicy = data.issueEdit;
   const improveShown = improvePolicy
     ? (improveOpen ?? hasImproveWork(taskId, improvePolicy))
@@ -1781,11 +1793,31 @@ export function TaskWorkspace({
                 </Button>
               </>
             )}
+            {!data.source && publishPolicy && (
+              <Button
+                variant="secondary"
+                aria-expanded={publishShown}
+                onClick={() => setPublishOpen(!publishShown)}
+              >
+                Publish to GitHub
+              </Button>
+            )}
             <Button variant="secondary" onClick={refreshAll}>
               Refresh task
             </Button>
           </div>
         </TaskStrip>
+        {publishPolicy && publishShown && (
+          <PublishToGitHub
+            client={client}
+            csrfToken={session.csrfToken}
+            taskId={taskId}
+            taskVersion={data.task.version}
+            policy={publishPolicy}
+            onChanged={refreshAll}
+            onClose={() => setPublishOpen(false)}
+          />
+        )}
         {improvePolicy && improveShown && (
           <ImproveWithLead
             client={client}

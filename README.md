@@ -101,6 +101,15 @@ owns delivery scope and status.
   and skips a write when the card moved on GitHub since Ensemble last saw it. The
   operator CLI cannot edit the mapping; the writes show on the task and never hold it
   ([ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
+- **Publish to GitHub.** The operator can turn a never-started local task into a GitHub
+  issue from task detail or the CLI (`delivery publish-review|publish-confirm|publish-send`),
+  choosing a linked repository, or an unfiltered GitHub Project, after seeing the
+  destination, the text and that nothing reverses it. The same task becomes the issue's
+  imported task, so the next sync does not import a duplicate. An unknown outcome holds the
+  task and is never resent; the operator can link the issue or abandon the attempt. It needs
+  `issue.create`, and for a Project target `project.item.add` and `project.field`, grants
+  ([ADR-1018](docs/adr/1018-task-publication-in-place.md),
+  [ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
 - **Inbox and questions.** The action Inbox lists cross-project questions, approvals
   and recorded interventions by urgency and age. Exact own-tool forms support grouped
   text, single-choice and multiple-choice answers, with preserved drafts and durable

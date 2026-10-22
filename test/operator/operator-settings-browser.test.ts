@@ -1574,7 +1574,9 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
     mode: "approval" as const,
     ...(action === "project.field"
       ? { projectNodeId: "P1", fieldNodeId: "F1", optionNodeIds: ["O1"] }
-      : {}),
+      : action === "project.item.add"
+        ? { projectNodeId: "P1" }
+        : {}),
   }));
   d.execute({
     type: "delivery.configure",
