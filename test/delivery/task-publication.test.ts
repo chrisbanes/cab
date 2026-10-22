@@ -684,8 +684,12 @@ test("a list that trails the create keeps the task Ready, and a later read clear
   assert.deepEqual(holds(f, taskId), []);
   assert.equal(Boolean(f.domain().task(taskId).ready), true);
   assert.equal(f.taskCount(), 1);
-  // Having been listed, it is an ordinary member: one omission now withdraws it.
+  // Having been listed, it is an ordinary member: one omission now withdraws it, and a listing
+  // afterwards leaves that hold for the operator, as on any imported task.
   f.gh.snapshots = () => [];
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  f.gh.snapshots = shown;
   await f.service.refreshGitHub();
   assert.deepEqual(holds(f, taskId), ["withdrawn"]);
 });

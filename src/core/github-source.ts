@@ -915,6 +915,12 @@ export class GitHubSourceStore {
                 "DELETE FROM github_memberships WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
               )
               .run(projectId, selectionId, String(membership.nodeId));
+            if (membership.missedReads === 1)
+              this.db
+                .prepare(
+                  "UPDATE task_publications SET omittedWithdrawal = 1 WHERE state = 'converted' AND taskId = (SELECT taskId FROM github_external_issues WHERE nodeId = ?)",
+                )
+                .run(String(membership.nodeId));
             const external = this.issue(String(membership.nodeId));
             if (external) this.updateReadiness(String(external.taskId));
           }
@@ -978,22 +984,28 @@ export class GitHubSourceStore {
   }
 
   /**
-   * A just-published task whose issue a later read lists again, and that is Ready, is no longer
-   * withdrawn: the hold came from reads that omitted a real issue. Every other source hold stays for
-   * the operator, as on any imported task.
+   * A just-published task withdrawn because two complete reads in a row omitted its issue is no longer
+   * withdrawn once a later read lists it again and it is Ready: those reads omitted a real issue. Any
+   * other withdrawal, including one taken later for an issue that was listed in between, stays for the
+   * operator, as on any imported task.
    */
   private releasePublishedWithdrawal(taskId: string): void {
-    const external = this.db
+    const row = this.db
       .prepare(
-        "SELECT e.nodeId, t.ready FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ? AND EXISTS (SELECT 1 FROM task_publications p WHERE p.taskId = e.taskId AND p.state = 'converted')",
+        "SELECT e.nodeId, t.ready FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId JOIN task_publications p ON p.taskId = e.taskId AND p.state = 'converted' AND p.omittedWithdrawal = 1 WHERE e.taskId = ?",
       )
       .get(taskId) as Row | undefined;
-    if (!external || Number(external.ready) !== 1) return;
+    if (!row || Number(row.ready) !== 1) return;
     const released = this.db
       .prepare(
         "UPDATE github_source_holds SET active = 0 WHERE nodeId = ? AND active = 1 AND reason = 'withdrawn'",
       )
-      .run(String(external.nodeId)) as { changes: number | bigint };
+      .run(String(row.nodeId)) as { changes: number | bigint };
+    this.db
+      .prepare(
+        "UPDATE task_publications SET omittedWithdrawal = 0 WHERE taskId = ? AND state = 'converted'",
+      )
+      .run(taskId);
     if (Number(released.changes) > 0)
       this.db
         .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
