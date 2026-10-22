@@ -19,6 +19,8 @@ import {
   ProjectNameTakenError,
 } from "./domain-errors.js";
 import { projectNameKey } from "./project-names.js";
+import { StatusMappingStore } from "./status-mapping.js";
+import { statusMappingSchema } from "./status-mapping-contracts.js";
 import {
   defaultProfileRuntime,
   type ExecutionHarness,
@@ -71,6 +73,16 @@ const commandSchema = z.discriminatedUnion("type", [
       projectId: id,
       expectedVersion: z.number().int().positive(),
       ...deliveryPolicySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("status-mapping.configure"),
+      projectId: id,
+      expectedVersion: z.number().int().positive(),
+      /** `null` clears the mapping. */
+      mapping: statusMappingSchema.nullable(),
     })
     .strict(),
   z
@@ -443,6 +455,7 @@ export class DomainStore {
   migrate(): void {
     new TaskReviewStore(this.db).migrate();
     new DeliveryStore(this.db).migrate();
+    new StatusMappingStore(this.db).migrate();
     transaction(this.db, () => {
       this.db.exec(`CREATE TABLE IF NOT EXISTS domain_schema (version INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS domain_projects (
@@ -1045,6 +1058,14 @@ export class DomainStore {
   deliveryConfiguration(projectId: string) {
     this.project(projectId);
     return new DeliveryStore(this.db).publicConfiguration(projectId);
+  }
+  statusMapping(projectId: string) {
+    this.project(projectId);
+    const store = new StatusMappingStore(this.db);
+    return {
+      ...store.current(projectId),
+      availability: store.availability(projectId),
+    };
   }
   deliveryCredentialReference(projectId: string): string | null {
     this.project(projectId);
@@ -2242,6 +2263,16 @@ export class DomainStore {
           projectId,
           expectedVersion,
           policy,
+        );
+      }
+      case "status-mapping.configure": {
+        this.operator(command);
+        this.project(command.projectId);
+        return new StatusMappingStore(this.db).configureWithinTransaction(
+          command.projectId,
+          command.expectedVersion,
+          command.mapping,
+          new DeliveryStore(this.db).configuration(command.projectId),
         );
       }
       case "github.configure": {

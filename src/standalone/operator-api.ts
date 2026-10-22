@@ -16,6 +16,9 @@ import type {
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
 import { isOperatorDeliveryCaller, materialDigest } from "../core/delivery.js";
+import { StatusMappingRefusal } from "../core/status-mapping.js";
+import type { StatusMapping } from "../core/status-mapping-contracts.js";
+import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
 import {
   type DomainCommand,
   DomainCommands,
@@ -23,6 +26,7 @@ import {
   DomainNotFoundError,
   DomainOperationError,
   DomainPolicyError,
+  type DomainStore,
   ProjectNameTakenError,
   TaskNotOpenError,
 } from "../core/domain.js";
@@ -4760,6 +4764,8 @@ export class OperatorApi {
       actions: v.actions.slice(-128).map((a) => ({
         operationId: a.operationId,
         kind: a.kind,
+        caller: a.caller,
+        event: a.event,
         state: a.state,
         reason: this.safe(a.reason, excluded),
         createdAt: a.createdAt,
@@ -5306,6 +5312,7 @@ export class OperatorApi {
           availability:
             this.service.routingAvailability(projectId).reason ?? "available",
         },
+        statusMapping: this.statusMappingView(projectId, g.selections, active),
         source: {
           version: g.version,
           credentialConfigured: g.credentialRef !== null,
@@ -5333,6 +5340,86 @@ export class OperatorApi {
       },
       observedAt: Date.now(),
     });
+  }
+  /**
+   * Reads the Project's single-select fields afresh and requires the mapped field to be the one
+   * named `Status` and every mapped option to belong to it. Returns the options' names.
+   */
+  private async verifyStatusField(mapping: StatusMapping) {
+    const read = await this.readDiscoveryProjectFields(
+      new URLSearchParams({ project: mapping.projectNodeId }),
+    );
+    if (read.data.state !== "ready")
+      throw new OperatorApiError(
+        503,
+        "unavailable",
+        undefined,
+        undefined,
+        "GitHub could not confirm the Project's Status field. Try again.",
+      );
+    const field = read.data.fields.find(
+      (f) => f.fieldNodeId === mapping.fieldNodeId,
+    );
+    if (field?.name !== "Status")
+      throw new OperatorApiError(
+        400,
+        "invalid-input",
+        ["mapping.fieldNodeId"],
+        undefined,
+        "The mapping must use the Project's Status field.",
+      );
+    for (const [event, option] of Object.entries(mapping.events))
+      if (option && !field.options.some((o) => o.optionNodeId === option))
+        throw new OperatorApiError(
+          400,
+          "invalid-input",
+          [`mapping.events.${event}`],
+          undefined,
+          "That option is not a Status option of the Project.",
+        );
+    return new Map(field.options.map((o) => [o.optionNodeId, o.name]));
+  }
+  /** The saved status mapping, its Project selections and the options the delivery grants allow. */
+  private statusMappingView(
+    projectId: string,
+    selections: ReturnType<DomainStore["githubConfiguration"]>["selections"],
+    active: string[],
+  ) {
+    const d = this.domain(),
+      view = d.statusMapping(projectId);
+    return {
+      version: view.version,
+      availability: view.availability,
+      mapping: view.mapping,
+      selections: selections.flatMap((s) =>
+        s.kind === "project"
+          ? [
+              {
+                id: s.id,
+                projectNodeId: s.projectNodeId,
+                active: active.includes(s.id),
+              },
+            ]
+          : [],
+      ),
+      granted: this.service
+        .delivery()
+        .configuration(projectId)
+        .grants.flatMap((g) =>
+          g.action === "project.field" &&
+          g.mode === "allow" &&
+          g.projectNodeId &&
+          g.fieldNodeId
+            ? [
+                {
+                  projectNodeId: g.projectNodeId,
+                  fieldNodeId: g.fieldNodeId,
+                  optionNodeIds: g.optionNodeIds ?? [],
+                },
+              ]
+            : [],
+        ),
+    };
   }
   async readRuntimeSettings() {
     return this.readWithExclusionFence(() => this.readRuntimeSettingsOnce());
@@ -6851,6 +6938,40 @@ export class OperatorApi {
           parseDomainCommandOutcome("discovery.configure", outcome),
           c.key,
           "system:discovery",
+        );
+      }
+      if (c.type === "status-mapping.configure") {
+        this.requireProject(c.projectId);
+        const command = { ...c, actor: "operator" as const };
+        // An exact replay returns its recorded receipt whatever GitHub shows now.
+        const names =
+          c.mapping && this.domain().recordedCommand(command) === undefined
+            ? await this.verifyStatusField(c.mapping)
+            : new Map<string, string>();
+        let raw: Awaited<ReturnType<typeof this.executeDomain>>;
+        try {
+          raw = await this.commands.execute(command);
+        } catch (error) {
+          if (error instanceof StatusMappingRefusal)
+            throw new OperatorApiError(
+              400,
+              "invalid-input",
+              error.fieldPaths,
+              undefined,
+              statusMappingRefusalSentence(
+                error.reason,
+                error.event,
+                names.get(error.optionNodeId ?? "") ??
+                  error.optionNodeId ??
+                  "that option",
+              ),
+            );
+          throw domainApiError(error) ?? error;
+        }
+        return commandReceipt(
+          parseDomainCommandOutcome("status-mapping.configure", raw),
+          c.key,
+          c.projectId,
         );
       }
       if (c.type === "github.preview")

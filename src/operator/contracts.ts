@@ -9,6 +9,10 @@ import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
+  statusMappingEvents,
+  statusMappingSchema,
+} from "../core/status-mapping-contracts.js";
+import {
   closedIssuesSchema,
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
@@ -1335,6 +1339,10 @@ export const deliveryReadSchema = z
           .object({
             operationId: uuid,
             kind: text,
+            /** Who submitted it; a status-mapping write is the service's, not an agent's or the operator's. */
+            caller: z.enum(["agent", "operator", "service"]),
+            /** The mapped event of a service write. */
+            event: z.enum(statusMappingEvents).nullable(),
             state: text,
             reason: safeText,
             createdAt: time,
@@ -2040,6 +2048,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...domainBase,
+      type: z.literal("status-mapping.configure"),
+      expectedVersion: revision,
+      mapping: statusMappingSchema.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
       type: z.literal("github.configure"),
       expectedVersion: revision,
       ...githubConfigurationCommandSchema.shape,
@@ -2326,6 +2342,14 @@ export const configurationReceiptSchema = z
           version: revision,
           enabled: z.boolean(),
           credentialConfigured: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("status-mapping.configure"),
+          resourceId: uuid,
+          version: revision,
+          mappedEventCount: z.number().int().min(0).max(4),
         })
         .strict(),
       z
@@ -2699,6 +2723,33 @@ export const profileConfigurationSchema = envelope(
     })
     .strict(),
 );
+/** The status mapping with what its editor needs: the Project selections and the granted options. */
+export const statusMappingViewSchema = z
+  .object({
+    version: revision,
+    availability: z.enum(["available", "unavailable"]),
+    mapping: statusMappingSchema.nullable(),
+    selections: z
+      .array(
+        z
+          .object({ id: text, projectNodeId: text, active: z.boolean() })
+          .strict(),
+      )
+      .max(30),
+    /** Options an `allow` project field grant covers, per Project field. */
+    granted: z
+      .array(
+        z
+          .object({
+            projectNodeId: text,
+            fieldNodeId: text,
+            optionNodeIds: z.array(text).max(256),
+          })
+          .strict(),
+      )
+      .max(256),
+  })
+  .strict();
 export const projectConfigurationSchema = envelope(
   z
     .object({
@@ -2734,6 +2785,8 @@ export const projectConfigurationSchema = envelope(
           })
           .strict(),
       ),
+      /** Optional so older services still parse; absent means not reported. */
+      statusMapping: statusMappingViewSchema.optional(),
       source: z
         .object({
           version: revision,
@@ -3573,6 +3626,7 @@ export const operationTypeSchema = z.enum([
   "runtime.configure",
   "assignment.apply",
   "github.configure",
+  "status-mapping.configure",
   "github.preview",
   "recovery.pre-turn.adopt",
   "recovery.pre-turn.recover",

@@ -4,6 +4,7 @@ import type { DomainCommand } from "./domain.js";
 import { executionHarnessSchema } from "./execution-runtime.js";
 import { linkedRepositorySchema } from "./github-source.js";
 import { githubConfigurationSchema } from "./github-source-contracts.js";
+import { statusMappingSchema } from "./status-mapping-contracts.js";
 
 const id = z.string().uuid();
 const positiveInteger = z.number().int().positive();
@@ -120,6 +121,13 @@ export const deliveryCommandResultSchema = deliveryPolicySchema
   .extend({ version: positiveInteger, credentialConfigured: z.boolean() })
   .strict();
 
+export const statusMappingCommandResultSchema = z
+  .object({
+    version: positiveInteger,
+    mapping: statusMappingSchema.nullable(),
+  })
+  .strict();
+
 export const githubConfigurationCommandResultSchema = githubConfigurationSchema
   .extend({
     version: positiveInteger,
@@ -186,6 +194,7 @@ export const runtimeEnablementCommandResultSchema = z
 
 export interface DomainCommandResultMap {
   "delivery.configure": z.output<typeof deliveryCommandResultSchema>;
+  "status-mapping.configure": z.output<typeof statusMappingCommandResultSchema>;
   "project.create": z.output<typeof projectCommandResultSchema>;
   "project.configure": z.output<typeof projectCommandResultSchema>;
   "task.create": z.output<typeof taskCommandResultSchema>;
@@ -293,6 +302,11 @@ function parseCommandOutcome(
       return {
         type,
         result: parseUnchanged(deliveryCommandResultSchema, value),
+      };
+    case "status-mapping.configure":
+      return {
+        type,
+        result: parseUnchanged(statusMappingCommandResultSchema, value),
       };
     case "project.create":
     case "project.configure":

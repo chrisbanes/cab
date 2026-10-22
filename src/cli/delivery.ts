@@ -1,3 +1,4 @@
+import { statusMappingActionLabel } from "../operator/status-mapping-copy.js";
 import { createHash } from "node:crypto";
 import { absentBranchHead } from "../core/delivery.js";
 import {
@@ -79,7 +80,14 @@ function deliveryGaps(read: TaskRead): CoverageGap[] {
 const actionRows = (actions: Action[]) =>
   table(
     ["Operation", "Kind", "State", "Reason"],
-    actions.map((a) => [a.operationId, a.kind, a.state, a.reason ?? "-"]),
+    actions.map((a) => [
+      a.operationId,
+      a.caller === "service" && a.event
+        ? `${a.kind} (${statusMappingActionLabel}: ${a.event})`
+        : a.kind,
+      a.state,
+      a.reason ?? "-",
+    ]),
   );
 
 function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {

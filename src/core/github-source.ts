@@ -30,6 +30,10 @@ export interface IssueSnapshot {
     fieldNodeId: string;
     optionNodeId: string;
   }>;
+  /** The Project item holding this issue; set only by Project selections. */
+  projectItemNodeId?: string;
+  /** When the read that produced this Project item began (epoch ms); a later write is newer than it. */
+  projectReadAt?: number;
 }
 /** `resumeAt` (epoch ms) marks a rate-limited read: do not read again before then. */
 export type SelectionSnapshot =
@@ -261,6 +265,20 @@ export class GitHubSourceStore {
       this.db.exec(
         "ALTER TABLE github_sync_state ADD COLUMN skippedClosedNodeIds TEXT NOT NULL DEFAULT '[]'",
       );
+    // The item id stays out of `projectFields` and every digest, so it never changes readiness or review.
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(github_memberships)").all() as Row[]
+      ).some((c) => c.name === "itemNodeId")
+    )
+      this.db.exec("ALTER TABLE github_memberships ADD COLUMN itemNodeId TEXT");
+    // When this membership's Project fields were last read; a partial read leaves an unread item's alone.
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(github_memberships)").all() as Row[]
+      ).some((c) => c.name === "readAt")
+    )
+      this.db.exec("ALTER TABLE github_memberships ADD COLUMN readAt INTEGER");
     const closureColumns = this.db
       .prepare("PRAGMA table_info(github_delivery_closures)")
       .all() as Row[];
@@ -284,6 +302,32 @@ export class GitHubSourceStore {
         "SELECT projectId, selectionId, nodeId, projectFields FROM github_memberships WHERE nodeId = ? ORDER BY selectionId, projectId",
       )
       .all(nodeId) as Row[];
+  }
+
+  /** An issue's current item in one Project selection, with its stored Project field values. */
+  membershipItem(
+    projectId: string,
+    selectionId: string,
+    nodeId: string,
+  ): {
+    itemNodeId: string;
+    projectFields: z.output<typeof projectFieldsSchema>;
+    /** Epoch ms of the read that last set these fields, or null before it was recorded. */
+    readAt: number | null;
+  } | null {
+    const row = this.db
+      .prepare(
+        "SELECT itemNodeId, projectFields, readAt FROM github_memberships WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
+      )
+      .get(projectId, selectionId, nodeId) as Row | undefined;
+    if (!row?.itemNodeId) return null;
+    return {
+      itemNodeId: String(row.itemNodeId),
+      projectFields: projectFieldsSchema.parse(
+        JSON.parse(String(row.projectFields)),
+      ),
+      readAt: row.readAt === null ? null : Number(row.readAt),
+    };
   }
 
   syncState(projectId: string, selectionId: string): Row | undefined {
@@ -819,13 +863,15 @@ export class GitHubSourceStore {
         }
         this.db
           .prepare(
-            "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?, ?, ?, ?) ON CONFLICT(projectId, selectionId, nodeId) DO UPDATE SET projectFields = excluded.projectFields",
+            "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId, nodeId) DO UPDATE SET projectFields = excluded.projectFields, itemNodeId = excluded.itemNodeId, readAt = excluded.readAt",
           )
           .run(
             projectId,
             selectionId,
             issue.nodeId,
             JSON.stringify(issue.projectFields),
+            issue.projectItemNodeId ?? null,
+            issue.projectReadAt ?? Date.now(),
           );
         sourceCaptures.push({
           taskId,

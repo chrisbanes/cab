@@ -94,6 +94,13 @@ owns delivery scope and status.
   `issue.edit` grant. The edit is refused before any write if the issue changed on
   GitHub after the draft started. It cannot be undone from Ensemble, and the
   operator CLI does not offer it.
+- **Status mapping.** A project can map four of Ensemble's work events (first turn
+  started, PR handed back, stopped or blocked, Done) to options of its linked GitHub
+  Project's Status, set on the GitHub source tab. The service writes them through the
+  delivery lifecycle under `allow` Project field grants, only for tasks already Ready (or Done once the issue is closed),
+  and skips a write when the card moved on GitHub since Ensemble last saw it. The
+  operator CLI cannot edit the mapping; the writes show on the task and never hold it
+  ([ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
 - **Inbox and questions.** The action Inbox lists cross-project questions, approvals
   and recorded interventions by urgency and age. Exact own-tool forms support grouped
   text, single-choice and multiple-choice answers, with preserved drafts and durable

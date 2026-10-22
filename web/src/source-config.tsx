@@ -59,6 +59,7 @@ import {
   useReadinessDiscovery,
 } from "./readiness-picker.js";
 import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
+import { StatusMappingPanel } from "./status-mapping-config.js";
 import type { ObservationResource } from "./sync-placement.js";
 
 const withKeys = (rows: object[]) =>
@@ -371,7 +372,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     );
   // Nothing unsaved: the form is clean, so what is saved is what the page shows.
   const quiet = !isLocked && !d.dirty && lines.length === 0;
-  return (
+  const form = (
     <form
       onSubmit={(e) =>
         void submitDraft(
@@ -931,6 +932,25 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         review={adopt}
       />
     </form>
+  );
+  return (
+    <>
+      {form}
+      {data.statusMapping && (
+        <StatusMappingPanel
+          {...p}
+          view={data.statusMapping}
+          selectionName={(s) =>
+            naming({
+              id: s.id,
+              kind: "project",
+              descriptor: s.projectNodeId,
+              active: s.active,
+            }).name
+          }
+        />
+      )}
+    </>
   );
 }
 

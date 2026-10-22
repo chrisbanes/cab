@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mergeGateReasons } from "../../src/standalone/github-delivery.js";
+import {
+  mergeGateReasons,
+  ProjectFieldChangedRefusal,
+} from "../../src/standalone/github-delivery.js";
 
 test("actual classic queue, strict status, deployments and app identity hold merge", () => {
   const baseline: Parameters<typeof mergeGateReasons>[0] = {
@@ -1320,4 +1323,141 @@ test("an operator edit proceeds when GitHub shows the expected text, including a
     { ...editAction({ title: "x", body: "y" }), expected: undefined },
     noPolicy,
   );
+});
+
+/** A Project item whose Status the fake GitHub holds; `movedAfterWrite` models a human move that lands with our write. */
+function projectStatusFixture(
+  initial: string | null,
+  movedAfterWrite?: string,
+) {
+  let status = initial;
+  const mutations: unknown[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/user") return Response.json({ node_id: "U1" });
+    if (url.pathname === "/repos/org/repo") return repositoryJson();
+    if (url.pathname === "/repos/org/repo/issues/7")
+      return Response.json({
+        node_id: "I7",
+        number: 7,
+        state: "open",
+        title: "T",
+        body: "B",
+        labels: [],
+      });
+    const { query, variables } = JSON.parse(String(init?.body)) as {
+      query: string;
+      variables: Record<string, string>;
+    };
+    if (query.includes("EnsembleDeliveryRepository"))
+      return Response.json({
+        data: { node: { id: "R1", nameWithOwner: "org/repo" } },
+      });
+    if (query.includes("mutation EnsembleDeliveryProject")) {
+      mutations.push(variables);
+      status = movedAfterWrite ?? variables.option ?? null;
+      return Response.json({ data: {} });
+    }
+    return Response.json({
+      data: {
+        node: {
+          id: "ITEM1",
+          project: { id: "P1" },
+          content: { id: "I7", repository: { id: "R1" } },
+          fieldValues: {
+            nodes: status
+              ? [
+                  {
+                    __typename: "ProjectV2ItemFieldSingleSelectValue",
+                    optionId: status,
+                    field: { id: "F1" },
+                  },
+                ]
+              : [],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+        field: {
+          id: "F1",
+          options: [{ id: "O1" }, { id: "O2" }, { id: "O3" }],
+          project: { id: "P1" },
+        },
+      },
+    });
+  };
+  const action = (expected?: {
+    optionNodeId: string | null;
+  }): Extract<ExternalAction, { kind: "project.field" }> => ({
+    kind: "project.field",
+    target: { repositoryId: "R1", nodeId: "I7", number: 7 },
+    projectNodeId: "P1",
+    itemNodeId: "ITEM1",
+    fieldNodeId: "F1",
+    optionNodeId: "O2",
+    ...(expected ? { expected } : {}),
+  });
+  return {
+    provider: new GitHubHttpDeliveryProvider("fixture-marker", fetcher),
+    mutations,
+    action,
+    status: () => status,
+  };
+}
+const projectPolicy = {
+  version: 1,
+  mode: "reviewable-pr" as const,
+  credentialRef: null,
+  grants: [],
+  requiredChecks: [],
+};
+
+test("a project.field write whose expected Status no longer holds makes no mutation", async () => {
+  const f = projectStatusFixture("O3");
+  await assert.rejects(
+    () => f.provider.preflight(f.action({ optionNodeId: "O1" }), projectPolicy),
+    ProjectFieldChangedRefusal,
+  );
+  assert.equal(f.mutations.length, 0);
+  assert.equal(f.status(), "O3");
+  // An item with no value is a different expectation from one holding an option.
+  const empty = projectStatusFixture(null);
+  await assert.rejects(
+    () =>
+      empty.provider.preflight(
+        empty.action({ optionNodeId: "O1" }),
+        projectPolicy,
+      ),
+    ProjectFieldChangedRefusal,
+  );
+});
+
+test("a project.field write whose expected Status holds proceeds and is confirmed by readback", async () => {
+  for (const [initial, expected] of [
+    ["O1", "O1"],
+    [null, null],
+  ] as const) {
+    const f = projectStatusFixture(initial);
+    const action = f.action({ optionNodeId: expected });
+    const before = await f.provider.preflight(action, projectPolicy);
+    assert.equal(before.optionId, initial);
+    const record = commentRecord();
+    record.request.action = action;
+    record.beforeState = before;
+    const observation = await f.provider.performAction(record);
+    assert.equal(observation.state, "confirmed-success");
+    assert.equal(f.mutations.length, 1);
+    assert.equal(f.status(), "O2");
+  }
+});
+
+test("a move between the re-read and the write is detected on readback and stays uncertain", async () => {
+  const f = projectStatusFixture("O1", "O3");
+  const action = f.action({ optionNodeId: "O1" });
+  const record = commentRecord();
+  record.request.action = action;
+  record.beforeState = await f.provider.preflight(action, projectPolicy);
+  const observation = await f.provider.performAction(record);
+  assert.equal(f.mutations.length, 1);
+  assert.equal(observation.state, "uncertain");
+  assert.equal(observation.reason, "provider-effect-unproved");
 });

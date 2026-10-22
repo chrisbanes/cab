@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   checkStatusWord,
+  deliveryActionLine,
   deliveryBlockerSentence,
   pullRequestReference,
   pullRequestRepository,
@@ -78,4 +79,34 @@ test("a pull request is named by its repository only when the server verified th
     assert.equal(pullRequestRepository(binding), null);
     assert.equal(pullRequestReference(binding), "PR #12");
   }
+});
+
+test("a status-mapping write is named and a skipped one says why, while agent actions read as before", () => {
+  const base = {
+    kind: "project.field",
+    caller: "agent",
+    event: null,
+    state: "confirmed-success",
+    reason: null,
+    operationId: "op-1",
+  } as const;
+  assert.equal(
+    deliveryActionLine(base),
+    "project.field: confirmed-success · receipt recorded · operation op-1",
+  );
+  assert.equal(
+    deliveryActionLine({
+      ...base,
+      caller: "service",
+      event: "handedBack",
+      state: "confirmed-failure",
+      reason: "provider-project-field-changed",
+    }),
+    "Status mapping (PR handed back for review) · project.field: confirmed-failure · Skipped: Status changed on GitHub since Ensemble last saw it. · operation op-1",
+  );
+  // The same code on an agent action keeps its raw reason.
+  assert.match(
+    deliveryActionLine({ ...base, reason: "provider-http-404" }),
+    /provider-http-404/,
+  );
 });

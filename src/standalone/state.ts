@@ -1188,6 +1188,22 @@ export class ExecutionState {
     return this.firstTaskHoldReason(taskId, false);
   }
 
+  /** How many turns of the task's assignments (not read-only draft turns) have bound to a runtime turn. */
+  taskStartedTurnCount(taskId: string): number {
+    if (!this.hasTurnRequests) return 0;
+    return Number(
+      (
+        this.db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM turn_requests request JOIN execution_intents intent ON intent.workId = request.workId
+          WHERE request.taskId = ? AND request.draftTurn = 0 AND request.kind = 'assignment'
+            AND intent.turnId IS NOT NULL`,
+          )
+          .get(taskId) as { count: number }
+      ).count,
+    );
+  }
+
   /** The reason of a task hold other than the operator Stop, which the task shows on its own line. */
   nonStopTaskHoldReason(taskId: string): string | undefined {
     return this.firstTaskHoldReason(taskId, true);

@@ -34,6 +34,7 @@ import {
   type ExternalAction,
   isOperatorAction,
   isOperatorDeliveryCaller,
+  isServiceDeliveryCaller,
   materialDigest,
   type OperatorCommentReview,
   type OperatorDeliveryCaller,
@@ -129,6 +130,8 @@ import {
   StandaloneDataDirectory,
 } from "./data-directory.js";
 import { DeliveryCoordinator, unresolvedThreadSummary } from "./delivery.js";
+import { StatusMappingStore } from "../core/status-mapping.js";
+import { StatusMappingWriter, statusMappingEvent } from "./status-mapping.js";
 import { verifyTaskPush } from "./push-verification.js";
 import {
   type DiagnosticKind,
@@ -416,6 +419,8 @@ export interface StandaloneServiceOptions {
       projectId: string,
       policy: DeliveryPolicy,
     ) => GitHubDeliveryProvider;
+    /** Test-only: how long a status-mapping write's provider call may take. */
+    statusWriteTimeoutMs?: number;
   };
   github?: { readerFactory?: GitHubReaderFactory; intervalMs?: number };
   routingClient?: RoutingChoiceClient | null;
@@ -498,6 +503,8 @@ interface Started {
   coordination: CoordinationStore;
   deliveryStore: DeliveryStore;
   deliveryCoordinator: DeliveryCoordinator;
+  statusMappingWriter: StatusMappingWriter;
+  statusMappings: StatusMappingStore;
   routingAttempts: RoutingAttemptStore;
   workspaces: WorkspaceManager;
   workspaceBindings: SqliteWorkspaceBindingStore;
@@ -930,6 +937,7 @@ export class StandaloneService {
       });
       const deliveryStore = new DeliveryStore(db);
       deliveryStore.migrate();
+      const statusMappings = new StatusMappingStore(db);
       // Read by activationAllowed and the Claude turn environment; set by spawnEnvironment.
       let runtimeSpawnSnapshot: NodeJS.ProcessEnv | undefined;
       const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
@@ -939,9 +947,14 @@ export class StandaloneService {
         ...(this.options.delivery?.providerFactory
           ? { providerFactory: this.options.delivery.providerFactory }
           : {}),
+        ...(this.options.delivery?.statusWriteTimeoutMs
+          ? {
+              statusWriteTimeoutMs: this.options.delivery.statusWriteTimeoutMs,
+            }
+          : {}),
         authorize: (caller, exceptOperationId, request) => {
           this.authorizeDelivery(
-            { deliveryStore, state, domain, coordination },
+            { deliveryStore, state, domain, coordination, statusMappings },
             caller,
             exceptOperationId,
             request?.action.kind,
@@ -954,6 +967,8 @@ export class StandaloneService {
               );
             return;
           }
+          // Its mapping, task and readiness are checked by `DeliveryStore.authorize`.
+          if (isServiceDeliveryCaller(caller)) return;
           if (
             request &&
             (request.action.kind === "pr.merge" ||
@@ -1028,24 +1043,26 @@ export class StandaloneService {
             : null;
         },
         approved: (request, caller) =>
-          isOperatorDeliveryCaller(caller)
-            ? deliveryStore.operatorApprovalCurrent(request, caller)
-            : Boolean(
-                request.approval &&
-                  deliveryStore.approvalCurrent(
-                    request.approval.interactionId,
-                    caller,
-                    request.action,
-                    request.operationId,
-                  ) &&
-                  coordination.authorizationFor({
-                    assignmentId: caller.assignmentId,
-                    ...request.approval,
-                    action: request.action.kind,
-                    target: canonicalMaterial(request.action.target),
-                    material: request.action,
-                  }),
-              ),
+          isServiceDeliveryCaller(caller)
+            ? false
+            : isOperatorDeliveryCaller(caller)
+              ? deliveryStore.operatorApprovalCurrent(request, caller)
+              : Boolean(
+                  request.approval &&
+                    deliveryStore.approvalCurrent(
+                      request.approval.interactionId,
+                      caller,
+                      request.action,
+                      request.operationId,
+                    ) &&
+                    coordination.authorizationFor({
+                      assignmentId: caller.assignmentId,
+                      ...request.approval,
+                      action: request.action.kind,
+                      target: canonicalMaterial(request.action.target),
+                      material: request.action,
+                    }),
+                ),
         activationAllowed: (policy) =>
           !policy.credentialRef ||
           (!runtimeSpawnSnapshot?.[policy.credentialRef.slice(4)] &&
@@ -1054,6 +1071,15 @@ export class StandaloneService {
             )),
       });
       acquire("deliveryCoordinator", deliveryCoordinator);
+      const statusMappingWriter = acquire(
+        "statusMappingWriter",
+        new StatusMappingWriter(
+          { domain, state, deliveryStore, mappings: statusMappings },
+          statusMappings,
+          githubSources,
+          deliveryCoordinator,
+        ),
+      );
       const deliveryCredentialNames = () =>
         domain.projects().flatMap((p) => {
           const ref = deliveryStore.configuration(String(p.id)).credentialRef;
@@ -1335,6 +1361,8 @@ export class StandaloneService {
         coordination,
         deliveryStore,
         deliveryCoordinator,
+        statusMappingWriter,
+        statusMappings,
         routingAttempts,
         workspaces,
         workspaceBindings,
@@ -1396,6 +1424,7 @@ export class StandaloneService {
           await this.acquired?.power?.stop().catch(() => {});
           this.acquired?.supervisor?.cancelObservations();
           await this.acquired?.githubSynchronizer?.stop().catch(() => {});
+          await this.acquired?.statusMappingWriter?.stop().catch(() => {});
           await this.acquired?.deliveryCoordinator?.stop().catch(() => {});
           // An attempt may be mid-start: let it land in `runtimes` so it is stopped below.
           await Promise.all([...this.runtimeToggles.values()]);
@@ -2200,6 +2229,7 @@ export class StandaloneService {
       supervisor,
       githubSynchronizer: synchronizer,
       deliveryCoordinator: delivery,
+      statusMappingWriter: statusMapping,
       power,
       workspaces,
       draftingWorkspaces,
@@ -2238,6 +2268,7 @@ export class StandaloneService {
     }
 
     await attempt("GitHub synchronization stop", () => synchronizer?.stop());
+    await attempt("status mapping stop", () => statusMapping?.stop());
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
       if (this.db?.isOpen && this.cache?.isOpen)
@@ -3000,7 +3031,11 @@ export class StandaloneService {
       state,
       domain,
       coordination,
-    }: Pick<Started, "deliveryStore" | "state" | "domain" | "coordination">,
+      statusMappings,
+    }: Pick<
+      Started,
+      "deliveryStore" | "state" | "domain" | "coordination" | "statusMappings"
+    >,
     caller: DeliveryCaller,
     exceptOperationId?: string,
     kind?: ExternalAction["kind"],
@@ -3027,6 +3062,18 @@ export class StandaloneService {
         deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
       )
         throw new DomainConflictError("Task admission is held");
+      return;
+    }
+    if (isServiceDeliveryCaller(caller)) {
+      // The event it was minted for must still be the task's: a task that moved on writes later.
+      if (
+        statusMappingEvent(
+          { domain, state, deliveryStore, mappings: statusMappings },
+          caller.taskId,
+          statusMappings.taskState(caller.taskId).lastEvent,
+        ) !== caller.event
+      )
+        throw new DomainConflictError("Task is no longer in the mapped event");
       return;
     }
     const intent = state.byWorkId(caller.workId);
@@ -3323,7 +3370,13 @@ export class StandaloneService {
     await started.githubSynchronizer.refresh();
     this.completeSettledProviderClosures(started);
     this.emitSourceHoldNotices(started);
+    // The wake starts the status-mapping pass; this call does not wait for its network writes.
     await this.wakeScheduler();
+  }
+
+  /** Writes mapped Project Status for the tasks' current events; resolves when the pass ends. */
+  async runStatusMapping(): Promise<void> {
+    await this.started().statusMappingWriter.run();
   }
 
   /** Takes its components because start-up reconciles before publication. */
@@ -5498,6 +5551,8 @@ export class StandaloneService {
       return;
     // Unpublished during start-up, so start-up wakes cannot admit work.
     if (!this.current) return;
+    // Never rejects; a pass already running runs once more after it.
+    void this.current.statusMappingWriter.run();
     // Every settled turn and resolved hold wakes the scheduler: a drained runtime stops here.
     this.stopDrainedRuntimes();
     const {
@@ -6778,6 +6833,7 @@ export class StandaloneService {
       let turnBound = runtimeGeneration
         ? state.bindTurn(intent.id, turnId, runtimeGeneration)
         : state.bindTurn(intent.id, turnId);
+      if (turnBound) void this.current?.statusMappingWriter.run();
       let nativeRejected = false;
       if (!turnBound) {
         const reconciliation = state.reconcileNativeTurnStartResponse({

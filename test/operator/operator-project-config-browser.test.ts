@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
@@ -2712,7 +2712,7 @@ const addProjectFieldCondition = async (page: Page) => {
     .last()
     .selectOption({ label: "Project field" });
 };
-const optionNames = (page: Page, label: string) =>
+const optionNames = (page: Page | Locator, label: string) =>
   page
     .getByLabel(label, { exact: true })
     .locator("option")
@@ -3788,4 +3788,289 @@ test("command network access is a switch with its disclosure that saves as a ver
   assert.equal((await back).commandNetworkAccess, false);
   await savedOutcome(page);
   assert.equal(d.commandNetworkAccess(ids.atlas), false);
+});
+
+type SettingsFixture = Awaited<ReturnType<typeof startDiscovery>>["f"];
+const statusField = "PVTSSF_status";
+/** An `allow` project field grant for Atlas's Project Status, covering the named options. */
+const grantStatusOptions = (
+  f: SettingsFixture,
+  projectId: string,
+  options: string[],
+) =>
+  f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: f.service.delivery().configuration(projectId).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [
+      {
+        action: "project.field",
+        repositoryId: "acme/atlas",
+        mode: "allow",
+        projectNodeId: "PVT_atlas",
+        fieldNodeId: statusField,
+        optionNodeIds: options,
+      },
+    ],
+    requiredChecks: [],
+  });
+const statusPanel = (page: Page) => page.locator("#status-mapping");
+
+test("Status mapping saves each event's Status option, naming options and marking ungranted ones", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, {});
+  const d = f.service.domain();
+  grantStatusOptions(f, ids.atlas, ["PVTSSO_ready"]);
+  await page.reload();
+  const panel = statusPanel(page);
+  await panel
+    .getByRole("heading", { name: "Status mapping", exact: true })
+    .waitFor();
+  const turn = panel.getByLabel("First turn started", { exact: true });
+  await turn.selectOption({ label: "Ready" });
+  assert.deepEqual(await optionNames(panel, "First turn started"), [
+    "Nothing",
+    "Todo (no grant)",
+    "Ready",
+  ]);
+  await panel
+    .getByLabel("Stopped, uncertain or blocked", { exact: true })
+    .selectOption({ label: "Ready" });
+  await panel
+    .getByRole("region", { name: "Status mapping changes" })
+    .getByText("First turn started: sets Status to Ready.")
+    .waitFor();
+  await captureBrowserEvidence(page, "status-mapping");
+  const body = commandBody(page);
+  await panel
+    .getByRole("button", { name: "Save status mapping", exact: true })
+    .click();
+  const command = (await body) as { mapping: unknown; expectedVersion: number };
+  await savedOutcome(panel);
+  const mapping = {
+    selectionId: "S-3",
+    projectNodeId: "PVT_atlas",
+    fieldNodeId: statusField,
+    events: {
+      turnStarted: "PVTSSO_ready",
+      handedBack: null,
+      held: "PVTSSO_ready",
+      done: null,
+    },
+  };
+  assert.deepEqual(command.mapping, mapping);
+  assert.deepEqual(d.statusMapping(ids.atlas).mapping, mapping);
+  assert.equal(d.statusMapping(ids.atlas).version, 2);
+});
+
+test("an in-flight Status the readiness rule does not accept is refused naming the option, and the draft stays", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, {});
+  const d = f.service.domain();
+  grantStatusOptions(f, ids.atlas, ["PVTSSO_todo", "PVTSSO_ready"]);
+  // Only Ready tasks are Ready: an in-flight write of Todo would remove readiness.
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: ["S-1", "S-2", "S-3"].map((id) => ({
+      id,
+      keep: true as const,
+    })),
+    readiness: {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "PVT_atlas",
+          fieldNodeId: statusField,
+          optionNodeId: "PVTSSO_ready",
+        },
+      ],
+    },
+    repositories: [],
+  });
+  await page.reload();
+  const panel = statusPanel(page);
+  await panel
+    .getByLabel("First turn started", { exact: true })
+    .selectOption({ label: "Todo" });
+  await panel
+    .getByLabel("Stopped, uncertain or blocked", { exact: true })
+    .selectOption({ label: "Todo" });
+  await panel
+    .getByRole("button", { name: "Save status mapping", exact: true })
+    .click();
+  const refusal = panel.getByRole("alert").filter({
+    hasText: "First turn started → Todo: the readiness rule does not accept",
+  });
+  await refusal.waitFor();
+  assert.equal(
+    await panel
+      .getByLabel("First turn started", { exact: true })
+      .getAttribute("aria-invalid"),
+    "true",
+  );
+  // The terminal event is not the one refused, and nothing was saved.
+  assert.equal(
+    await panel
+      .getByLabel("Stopped, uncertain or blocked", { exact: true })
+      .getAttribute("aria-invalid"),
+    "false",
+  );
+  assert.equal(
+    await panel.getByLabel("First turn started", { exact: true }).inputValue(),
+    "PVTSSO_todo",
+  );
+  assert.equal(d.statusMapping(ids.atlas).mapping, null);
+  // Choosing an accepted option and saving works from the same draft.
+  await panel
+    .getByLabel("First turn started", { exact: true })
+    .selectOption({ label: "Ready" });
+  await panel
+    .getByRole("button", { name: "Save status mapping", exact: true })
+    .click();
+  await savedOutcome(panel);
+  assert.equal(
+    d.statusMapping(ids.atlas).mapping?.events.turnStarted,
+    "PVTSSO_ready",
+  );
+});
+
+test("choosing another Project starts from Nothing, cannot be saved until its Status field is listed, and is never a clear", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, {});
+  const d = f.service.domain();
+  grantStatusOptions(f, ids.atlas, ["PVTSSO_ready"]);
+  d.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.statusMapping(ids.atlas).version,
+    mapping: {
+      selectionId: "S-3",
+      projectNodeId: "PVT_atlas",
+      fieldNodeId: statusField,
+      events: {
+        turnStarted: "PVTSSO_ready",
+        handedBack: null,
+        held: null,
+        done: null,
+      },
+    },
+  });
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true as const },
+      { id: "S-2", keep: true as const },
+      { id: "S-3", keep: true as const },
+      { id: "S-4", kind: "project", projectNodeId: "PVT_other", filter: "" },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  } as Parameters<OperatorApi["execute"]>[0]);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(
+    "**/discovery/project-fields?project=PVT_other",
+    async (route) => {
+      await gate;
+      await route.continue();
+    },
+  );
+  await page.reload();
+  const panel = statusPanel(page);
+  const turn = panel.getByLabel("First turn started", { exact: true });
+  const save = panel.getByRole("button", {
+    name: "Save status mapping",
+    exact: true,
+  });
+  await turn
+    .locator("option", { hasText: "Ready" })
+    .waitFor({ state: "attached" });
+  assert.equal(await turn.inputValue(), "PVTSSO_ready");
+  await panel.getByLabel("Project source", { exact: true }).selectOption("S-4");
+  // The other Project's field is loading: nothing carries over, nothing is cleared, nothing saves.
+  await panel.getByText("Reading this Project's Status options").waitFor();
+  assert.equal(await turn.inputValue(), "");
+  assert.equal(await save.isDisabled(), true);
+  assert.equal(await panel.getByText("Clears the status mapping").count(), 0);
+  release();
+  await panel
+    .getByText("This Project has no single-select field named Status")
+    .waitFor();
+  assert.equal(await save.isDisabled(), true);
+  assert.equal(await panel.getByText("Clears the status mapping").count(), 0);
+  assert.notEqual(d.statusMapping(ids.atlas).mapping, null);
+  // Back on the saved Project its mapping returns, unchanged; Nothing everywhere is the explicit clear.
+  await panel.getByLabel("Project source", { exact: true }).selectOption("S-3");
+  await turn
+    .locator("option", { hasText: "Ready" })
+    .waitFor({ state: "attached" });
+  assert.equal(await turn.inputValue(), "PVTSSO_ready");
+  assert.equal(await save.isDisabled(), true);
+  await turn.selectOption({ label: "Nothing" });
+  await panel.getByText("Clears the status mapping").waitFor();
+  assert.equal(await save.isDisabled(), false);
+});
+
+test("a project without a Project source shows the mapping as unavailable", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=github",
+  );
+  const panel = statusPanel(page);
+  await panel
+    .getByText("Status mapping needs a GitHub Project source")
+    .waitFor();
+  assert.equal(await panel.getByRole("combobox").count(), 0);
+  assert.equal(await panel.getByRole("button").count(), 0);
+});
+
+test("Status mapping is keyboard operable at phone width", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+    phone,
+    undefined,
+    { setup: { discovery: fakeDiscovery({}) } },
+  );
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "discovery.configure",
+    key: randomUUID(),
+    credentialRef: "env:FIXTURE_DISCOVERY",
+  });
+  grantStatusOptions(f, ids.atlas, ["PVTSSO_todo", "PVTSSO_ready"]);
+  await page.reload();
+  const panel = statusPanel(page);
+  const done = panel.getByLabel("Done", { exact: true });
+  await done.locator("option", { hasText: "Ready" }).waitFor({
+    state: "attached",
+  });
+  await done.focus();
+  // Typing the option's first letter picks it, as it does on a focused select.
+  await page.keyboard.type("R");
+  assert.equal(await done.inputValue(), "PVTSSO_ready");
+  await panel
+    .getByRole("button", { name: "Save status mapping", exact: true })
+    .focus();
+  await page.keyboard.press("Enter");
+  await savedOutcome(panel);
+  assert.equal(
+    f.service.domain().statusMapping(ids.atlas).mapping?.events.done,
+    "PVTSSO_ready",
+  );
+  const box = await done.boundingBox();
+  assert.ok((box?.height ?? 0) >= 32);
+  await noPageOverflow(page);
 });

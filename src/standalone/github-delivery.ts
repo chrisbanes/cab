@@ -1,4 +1,7 @@
-import { issueChangedReason } from "../operator/github-reasons.js";
+import {
+  issueChangedReason,
+  projectFieldChangedReason,
+} from "../operator/github-reasons.js";
 import {
   isOperatorAction,
   isOperatorDeliveryCaller,
@@ -80,6 +83,13 @@ export class IssueChangedRefusal extends Error {
   readonly reason = issueChangedReason;
   constructor() {
     super(issueChangedReason);
+  }
+}
+/** A Project item whose Status is no longer what the write expected: nothing is written. */
+export class ProjectFieldChangedRefusal extends Error {
+  readonly reason = projectFieldChangedReason;
+  constructor() {
+    super(projectFieldChangedReason);
   }
 }
 export interface GitHubDeliveryProvider {
@@ -1123,12 +1133,13 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     if (!("number" in action.target))
       throw new Error("provider-target-invalid");
     const issue = await this.issue(repo.path, action.target);
-    if (action.kind === "project.field")
-      return {
-        repositoryPath: repo.path,
-        nodeId: issue.node_id,
-        optionId: await this.projectField(action),
-      };
+    if (action.kind === "project.field") {
+      const optionId = await this.projectField(action);
+      // The mutation is not conditional, so this read is the guard; a move after it is the accepted race.
+      if (action.expected && action.expected.optionNodeId !== optionId)
+        throw new ProjectFieldChangedRefusal();
+      return { repositoryPath: repo.path, nodeId: issue.node_id, optionId };
+    }
     // GitHub's issue PATCH is not conditional, so this read is the only guard against a stale edit.
     if (
       action.kind === "issue.edit" &&
