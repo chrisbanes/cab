@@ -1073,6 +1073,7 @@ test("coordination histories and keyed controls stay scoped and durable", async 
       /Revoked candidate — capabilities: historical review; unavailable: profile revoked/,
     );
     assert.match(page.body, /APPROVAL_MATERIAL_SENTINEL/);
+    assert.ok(page.body.includes(`<li id="${approval.interactionId}">`));
     assert.doesNotMatch(
       page.body,
       /PRIVATE_(?:RUNTIME_PROMPT|TASK_OUTCOME|ASSIGNMENT_BRIEF|ROUTING_CREDENTIAL)_SENTINEL|OTHER_TASK_(?:TITLE|OUTCOME)_SENTINEL|OTHER_PROJECT_ROUTING_GUIDANCE_SENTINEL|Other project candidate/,
@@ -1124,7 +1125,7 @@ test("coordination histories and keyed controls stay scoped and durable", async 
   });
   assert.deepEqual(await approvalRoute.handler(approvalContext), {
     kind: "redirect",
-    location: `/coordination/task/${taskId}`,
+    location: `/coordination/task/${taskId}#${approval.interactionId}`,
   });
   runtime.complete(leadIntent.turnId);
   await waitUntil(() =>
@@ -1212,11 +1213,11 @@ test("coordination histories and keyed controls stay scoped and durable", async 
   });
   assert.deepEqual(await approvalRoute.handler(approvalContext), {
     kind: "redirect",
-    location: `/coordination/task/${taskId}`,
+    location: `/coordination/task/${taskId}#${approval.interactionId}`,
   });
   assert.deepEqual(await approvalRoute.handler(approvalContext), {
     kind: "redirect",
-    location: `/coordination/task/${taskId}`,
+    location: `/coordination/task/${taskId}#${approval.interactionId}`,
   });
   const unresolved = service.coordinationView().readTask(taskId)
     .unresolvedResults[0];
@@ -1274,7 +1275,10 @@ test("coordination histories and keyed controls stay scoped and durable", async 
       "POST",
       "/coordination/control/approval/decision",
     ).handler(approvalContext),
-    { kind: "redirect", location: `/coordination/task/${taskId}` },
+    {
+      kind: "redirect",
+      location: `/coordination/task/${taskId}#${approval.interactionId}`,
+    },
   );
   assert.deepEqual(
     await route(

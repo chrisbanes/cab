@@ -350,7 +350,7 @@ function approvalSection(
           approval.status === "open"
             ? `<p>Legacy approval: original material was not retained, so it cannot be approved. It may only be denied.</p>${approvalForm(taskId, approval, "denied", csrfToken)}`
             : "";
-        return `<li><p>${escapeHtml(approval.prompt)} — ${status} (pre-material record).</p>${action}</li>`;
+        return `<li id="${escapeHtml(approval.interactionId)}"><p>${escapeHtml(approval.prompt)} — ${status} (pre-material record).</p>${action}</li>`;
       }
       let validMaterial = true;
       try {
@@ -359,12 +359,12 @@ function approvalSection(
         validMaterial = false;
       }
       if (!validMaterial)
-        return `<li><p>${escapeHtml(approval.action)} — ${status}; stored approval material is invalid and no decision is available.</p></li>`;
+        return `<li id="${escapeHtml(approval.interactionId)}"><p>${escapeHtml(approval.action)} — ${status}; stored approval material is invalid and no decision is available.</p></li>`;
       const actions =
         approval.status === "open"
           ? `${approvalForm(taskId, approval, "approved", csrfToken)}${approvalForm(taskId, approval, "denied", csrfToken)}`
           : `<p>Decision: ${status}.</p>`;
-      return `<li><p>Approval requested: ${escapeHtml(approval.action)}${approval.target === null ? "" : ` on ${escapeHtml(approval.target)}`} — ${status}. Requested by <a href="${assignmentHref(approval.requestingAssignmentId)}">the task-scoped assignment</a>.</p><pre>${escapeHtml(approval.materialJson)}</pre>${actions}</li>`;
+      return `<li id="${escapeHtml(approval.interactionId)}"><p>Approval requested: ${escapeHtml(approval.action)}${approval.target === null ? "" : ` on ${escapeHtml(approval.target)}`} — ${status}. Requested by <a href="${assignmentHref(approval.requestingAssignmentId)}">the task-scoped assignment</a>.</p><pre>${escapeHtml(approval.materialJson)}</pre>${actions}</li>`;
     })
     .join("");
   return `<section><h2>Approvals</h2>${rows ? `<ul>${rows}</ul>` : "<p>No approval requests.</p>"}</section>`;
@@ -767,7 +767,10 @@ export class CoordinationOperatorRoutes {
             ...(input.target === undefined ? {} : { target: input.target }),
             ...(input.materialJson === undefined ? {} : { material }),
           });
-          return { kind: "redirect", location: taskHref(input.taskId) };
+          return {
+            kind: "redirect",
+            location: `${taskHref(input.taskId)}#${encodeURIComponent(input.interactionId)}`,
+          };
         },
       },
       {
