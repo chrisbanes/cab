@@ -733,20 +733,26 @@ test("a flag left by two lagging reads cannot release a later ordinary withdrawa
   const f = await publicationFixture();
   t.after(() => f.close());
   const taskId = f.task(true);
-  await f.publish(taskId);
+  const { review } = await f.publish(taskId);
+  const issue = f.gh.byMarker(review.publicationId)[0];
+  assert.ok(issue);
   const shown = f.gh.snapshots.bind(f.gh);
-  // Two omissions withdraw it, and the listing releases that hold.
+  // Two omissions withdraw it.
   f.gh.snapshots = () => [];
   await f.service.refreshGitHub();
-  await f.service.refreshGitHub();
-  f.gh.snapshots = shown;
-  await f.service.refreshGitHub();
-  assert.deepEqual(holds(f, taskId), []);
-  // An ordinary withdrawal afterwards stays for the operator, however it is listed again.
-  f.gh.snapshots = () => [];
   await f.service.refreshGitHub();
   assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  // It is listed again without its readiness label, so the task is not Ready and nothing is released.
   f.gh.snapshots = shown;
+  issue.labels = [];
   await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  // An ordinary omission, then a Ready listing: the hold stays for the operator.
+  f.gh.snapshots = () => [];
+  await f.service.refreshGitHub();
+  f.gh.snapshots = shown;
+  issue.labels = ["ready"];
+  await f.service.refreshGitHub();
+  assert.equal(Boolean(f.domain().task(taskId).ready), true);
   assert.deepEqual(holds(f, taskId), ["withdrawn"]);
 });
