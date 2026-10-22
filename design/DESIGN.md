@@ -2511,8 +2511,9 @@ as follows:
   are in History, Changes and Review." The latest-result card keeps its summary, a
   "Changes · N files" link to the Changes tab (the result's changed-file count, or plain
   "Changes" when the result supplies none; `70-phone-changes-delivery`), the first three
-  criterion rows (a native "N more" disclosure holds the rest; `03-task-detail` and
-  `47-phone-task-overview` draw "1 more"), the viewing reference and the Result revision select visible; the
+  criterion rows (a native "N more" disclosure follows the third row and holds the rest; it may sit just
+  below the first screen, which promises the summary and up to three outcomes;
+  `03-task-detail` and `47-phone-task-overview` draw "1 more"), the viewing reference and the Result revision select visible; the
   disclosures hold their content mounted, so closing one loses no read, selection or
   focus target. Open cards belong to the history entry, are written only by their
   own toggles and links, and a task opened fresh starts with all three closed. The decision card leads

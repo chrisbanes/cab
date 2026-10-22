@@ -38,6 +38,10 @@ to say to the lead.
 | Task detail | 1 (Evidence) | the result summary and at most three criterion outcomes, with "N more" for the rest |
 | Home Completed work | 2 (the task, Evidence) | the task in Completed work; after the first interaction, the result summary on the task page |
 
+The "N more" disclosure follows the third outcome. The first screen promises the
+summary and up to three outcomes, so "N more" may sit just below it (about 40px at
+a 1366 × 900 desktop, one row on a phone); reaching it is a scroll, not an interaction.
+
 Home's Completed work lists the task title only, so the summary is not on Home. On a
 phone the panel sits below Home's first screen; scrolling is not an interaction.
 

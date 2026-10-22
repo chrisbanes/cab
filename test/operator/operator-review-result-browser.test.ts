@@ -155,6 +155,22 @@ for (const [label, viewport] of [
     );
     const more = s.page.locator("#review .criteria-more > summary");
     assert.equal(await more.textContent(), "1 more");
+    // "N more" directly follows the third row and is reachable; it may sit just below the
+    // first screen (about 40px at desktop, one 44px row on the phone).
+    assert.equal(
+      await more.evaluate(
+        (e) =>
+          e.parentElement?.previousElementSibling?.getAttribute(
+            "data-record-id",
+          ) ===
+          document
+            .querySelectorAll("#review .criterion-row")[2]
+            ?.getAttribute("data-record-id"),
+      ),
+      true,
+      "N more directly follows the third row",
+    );
+    await more.scrollIntoViewIfNeeded();
     assert.equal(
       await s.page.locator("#review .criterion-row:visible").count(),
       3,
