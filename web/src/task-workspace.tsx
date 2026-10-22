@@ -1985,7 +1985,7 @@ export function TaskWorkspace({
                     <p className="metadata">
                       <ActionLink
                         variant="secondary"
-                        href={`/app/tasks/${taskId}?section=changes${state.selectedResult ? `&result=${selected.resultId}` : ""}`}
+                        href={`/app/tasks/${taskId}?section=changes&result=${selected.resultId}`}
                       >
                         {meta?.metadata.changes
                           ? `Changes · ${meta.metadata.changes.files.length} ${meta.metadata.changes.files.length === 1 ? "file" : "files"}`

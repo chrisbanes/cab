@@ -207,9 +207,14 @@ for (const [label, viewport] of [
       link,
     ]);
     let interactions = 0;
+    // The link names the result it was shown for, so a newer result cannot rebind it.
+    assert.match(
+      (await link.getAttribute("href")) ?? "",
+      /\?section=changes&result=[0-9a-f-]{36}$/,
+    );
     await link.click();
     interactions++;
-    await s.page.waitForURL(/section=changes/);
+    await s.page.waitForURL(/section=changes&result=[0-9a-f-]{36}$/);
     const tab = s.page
       .getByRole("tablist", { name: "Task sections" })
       .getByRole("tab", { name: "Changes" });
