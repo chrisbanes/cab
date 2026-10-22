@@ -175,11 +175,23 @@ export function ApprovalDetail({
 }
 
 /** An intervention in the Inbox: the recorded reason and its attention code's action. */
-export function InterventionDetail({ item }: { item: TaskInboxItem }) {
+export function InterventionDetail({
+  item,
+  leftQueue = false,
+}: {
+  item: TaskInboxItem;
+  /** The request is no longer current, so it no longer asserts that ownership is held. */
+  leftQueue?: boolean;
+}) {
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">
         <p>Review the exact execution state before acting.</p>
+        {!leftQueue && item.attentionCode === "execution-uncertain" && (
+          <p className="metadata">
+            <strong>Ownership stays held</strong>
+          </p>
+        )}
       </div>
       <div className="inbox-decision">
         <ActionLink href={item.destination}>

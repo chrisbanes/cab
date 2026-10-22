@@ -15,7 +15,11 @@ import {
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
-import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
+import {
+  inboxReadSchema,
+  taskSchema,
+  type TaskRead,
+} from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   seedOwnApproval,
@@ -1086,6 +1090,16 @@ test("an intervention shows its recorded reason and links to the execution", asy
     await aside.getByText("Execution ownership is uncertain").count(),
     0,
   );
+  // Ownership stays held is stated once, in the request pane, as on the Home card.
+  assert.equal(
+    await detail.getByText("Ownership stays held", { exact: true }).count(),
+    1,
+  );
+  for (const text of [
+    await page.locator(".inbox-row").innerText(),
+    await aside.innerText(),
+  ])
+    assert.doesNotMatch(text, /Ownership stays held/);
   const inspect = detail.getByRole("link", {
     name: "Inspect execution",
     exact: true,
@@ -1112,9 +1126,72 @@ test("an intervention shows its recorded reason and links to the execution", asy
   assert.ok(box && viewport && box.y >= 0 && box.y < viewport.height);
   assert.deepEqual(
     await card
-      .getByRole("link", { name: "Execution details", exact: true })
+      .getByRole("link", { name: "Recovery evidence", exact: true })
       .evaluateAll((a) => a.map((x) => x.getAttribute("href"))),
-    Array(3).fill(`/runtime/task/${held.taskId}`),
+    Array(3).fill(`/app/assignments/${held.assignmentId}/recovery`),
+  );
+});
+
+test("an intervention that leaves the queue stops saying ownership stays held", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnIntervention(f),
+  );
+  const detail = page.getByRole("region", { name: "Selected request" });
+  await page.locator(".inbox-row").click();
+  await detail.getByText("Ownership stays held", { exact: true }).waitFor();
+  // The execution is resolved: the next read no longer lists the intervention.
+  await page.route("**/api/operator/inbox", async (route) => {
+    const body = inboxReadSchema.parse(await (await route.fetch()).json());
+    body.data.items = [];
+    await route.fulfill({ json: body });
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page
+    .getByText(
+      "This request has left the current queue. Its exact detail remains selected.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(
+    await detail.getByText("Ownership stays held", { exact: true }).count(),
+    0,
+  );
+  await detail.getByText("Execution ownership is uncertain").waitFor();
+});
+
+test("an incomplete refresh that omits an intervention keeps saying ownership stays held", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnIntervention(f),
+  );
+  const detail = page.getByRole("region", { name: "Selected request" });
+  await page.locator(".inbox-row").click();
+  await detail.getByText("Ownership stays held", { exact: true }).waitFor();
+  // The read could not cover every task, so the omission does not show the hold resolved.
+  await page.route("**/api/operator/inbox", async (route) => {
+    const body = inboxReadSchema.parse(await (await route.fetch()).json());
+    body.data.items = [];
+    body.data.complete = false;
+    await route.fulfill({ json: body });
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page
+    .getByText("Queue coverage is incomplete. Unavailable requests may remain.")
+    .waitFor();
+  assert.equal(
+    await detail.getByText("Ownership stays held", { exact: true }).count(),
+    1,
+  );
+  assert.equal(
+    await page.getByText("This request has left the current queue.").count(),
+    0,
   );
 });
 

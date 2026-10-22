@@ -2004,6 +2004,7 @@ export function TaskWorkspace({
                   onChanged={refreshAll}
                   holds={holdLines(data.execution.holds, data.taskHold)}
                   executionHref={`/runtime/task/${taskId}`}
+                  assignments={data.assignments}
                 />
               </section>
               <section id="review">

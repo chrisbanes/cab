@@ -1,8 +1,8 @@
 # Triage an uncertain execution
 
-**Status:** planned. The Inbox intervention, task holds and assignment recovery
-page exist; the links between them and the budget below are not yet implemented or
-asserted.
+**Status:** built. The Inbox intervention and task holds link to the assignment
+recovery page, and `test/operator/operator-triage-uncertainty-browser.test.ts`
+asserts the budget below at 1366 × 900 and 390 × 844.
 
 ## Goal
 
@@ -25,9 +25,13 @@ Recovery that releases a generation needs the evidence-bearing operations whose
 
 ## Steps
 
-1. The card or row says what is uncertain, which task and assignment, when it was
-   last observed, and Inspect execution.
-2. Inspect execution opens the assignment recovery page: the holds grid, the held
+1. The card or row says what is uncertain and names the task. The Home card, or
+   the Inbox's request pane once the row is selected, also says that ownership stays
+   held and offers Inspect execution. It shows no last-observed time.
+2. Inspect execution opens the task's decision card, where each hold line links
+   the assignment recovery page: "Recovery evidence" for one assignment,
+   "<profile>: recovery evidence" for each of several, or "Execution details"
+   for a task with no assignment. The page shows the holds grid, the held
    generation with its last observation, and the next supported step.
 3. Older generations in the same state are collapsed under one line with a count.
 4. The next supported step is the only primary action; advanced destinations are
@@ -37,8 +41,9 @@ Recovery that releases a generation needs the evidence-bearing operations whose
 
 | Entry point | Interactions to the recovery page | First screen must show |
 | --- | --- | --- |
-| Home card or Inbox row | 1 (Inspect execution) | what is uncertain and when it was last observed |
-| Task detail | 1 (the hold line) | the hold named with a link |
+| Home card | 2 (Inspect execution, then the hold line) | what is uncertain and "Ownership stays held" |
+| Inbox row | 3 (row, Inspect execution, then the hold line) | what is uncertain and "Ownership stays held" |
+| Task detail | 1 (the hold line) | the hold named with a recovery link |
 
 Settings → Runtime → Task recovery destinations is the fallback list and is
 outside the budget.
