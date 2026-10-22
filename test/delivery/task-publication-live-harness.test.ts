@@ -33,8 +33,8 @@ const manifest = () => ({
   credential: "gh-cli",
   actions,
   runtimeTurnLimit: 0,
-  maxAttempts: 2,
-  maxIssues: 4,
+  maxAttempts: 3,
+  maxIssues: 6,
 });
 function files(
   change: Record<string, unknown> = {},
@@ -91,8 +91,10 @@ test("the grant must match the manifest, be unexpired, last at most a day and st
     { actions: [...actions, "pr.merge"] },
     { actions: ["project.field", "issue.create", "project.item.add"] },
     { runtimeTurnLimit: 1 },
-    { maxAttempts: 3 },
-    { maxIssues: 5 },
+    { maxAttempts: 2 },
+    { maxAttempts: 4 },
+    { maxIssues: 4 },
+    { maxIssues: 7 },
   ])
     assert.equal(
       taskPublicationManifestSchema.safeParse({ ...manifest(), ...change })
@@ -101,10 +103,10 @@ test("the grant must match the manifest, be unexpired, last at most a day and st
       JSON.stringify(change),
     );
   const g = new TaskPublicationGuard(f.raw, f.grant);
-  assert.throws(() => g.begin(run, 3), /allowance/);
+  assert.throws(() => g.begin(run, 4), /allowance/);
   assert.throws(() => g.begin(run, 0), /allowance/);
   assert.throws(() => g.begin("not-a-run", 1), /run id/);
-  g.begin(run, 2);
+  g.begin(run, 3);
 });
 
 test("only the Project this run created may be used: never Project 6, never one linked to the product repository", () => {

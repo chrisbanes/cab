@@ -33,8 +33,8 @@ export const taskPublicationManifestSchema = z
     /** The run drives the real service directly, so it grants no model turns. */
     runtimeTurnLimit: z.literal(0),
     /** Each attempt creates and deletes its own scratch Project and creates two fixture issues. */
-    maxAttempts: z.literal(2),
-    maxIssues: z.literal(4),
+    maxAttempts: z.literal(3),
+    maxIssues: z.literal(6),
   })
   .strict();
 const taskPublicationGrantSchema = z
