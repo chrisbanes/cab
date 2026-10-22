@@ -537,6 +537,14 @@ names the event and the option; the other selects and the draft stay.
   source of this project" with no controls. A saved mapping whose Project is no
   longer a source reads unavailable and offers Clear only.
 - With more than one Project source the panel adds a Project source select.
+  Choosing another Project resets the four selects to Nothing (choosing the saved
+  Project again restores its mapping). While that Project's Status field is unknown
+  (loading, unreadable, or absent) the panel reads "Reading this Project's Status
+  options. Nothing can be saved until they are listed." while loading, or the existing
+  unavailable or no-Status-field alert, and Save is held with no change line: an unread
+  field is never a clear. A mapping is cleared only by setting every event to Nothing on
+  a listed field, or by Clear when the saved Project is no longer a source. No artboard
+  draws the loading or switching state.
 - The boundary list states what the mapping does not do: Ensemble writes, not an
   agent; only for tasks already Ready, or Done once the task is done and its issue is closed; never makes a task Ready; skips a write when
   the Status moved on GitHub since Ensemble last saw it; an unproved write shows on
