@@ -120,6 +120,15 @@ forgiveness rule is **not** qualified live. Whether the Project never listed the
 known; attempt 2 listed it on the first read. Cleanup closed #15 and #16, deleted the Project and the label,
 and the harness verified it.
 
+**Live gap and allowance overrun (disclosure).** The forgiveness rule and the release of a withdrawal are covered
+only by deterministic tests: attempt 3 stopped before the sync because the Project did not list the item within
+about 45 seconds. The maintainer allowed one more *attempt*, not more issues. The ticket agent raised the issue cap in
+the manifest and in the harness's schema literals from 4 to 6 (two per attempt) on its own initiative, which was
+outside the approved limits: six fixture issues (#11 to #16) were created in all instead of four. Every issue was closed
+and every Project deleted, and the cleanup is verified. The general behaviour that a `withdrawn` source hold on any
+imported task never clears when the issue is listed again is tracked as
+[#1218](https://github.com/chrisbanes/ensemble/issues/1218).
+
 ## Cleanup proof
 
 The harness closed both issues, deleted the Project and the label, and read them back
