@@ -90,3 +90,15 @@ test("another Project's Status field is unknown while loading, unreadable, unava
     "F_two",
   );
 });
+
+test("another Project with nothing chosen is not a clear of the saved mapping, even once its field is listed", () => {
+  const plan = statusMappingPlan({
+    saved,
+    clearing: false,
+    values: { turnStarted: "", handedBack: "", held: "", done: "" },
+    selection: other,
+    fieldNodeId: "F_two",
+    ...names,
+  });
+  assert.deepEqual([plan.mapping, plan.lines, plan.ready], [null, [], false]);
+});

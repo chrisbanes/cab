@@ -100,6 +100,13 @@ export function statusMappingPlan(i: {
   if (!i.selection || !i.fieldNodeId)
     return { mapping: null, lines: [], ready: false };
   const mapping = draftMapping(i.values, i.selection, i.fieldNodeId);
+  // Another Project starts from Nothing: that is not a choice to clear the saved mapping.
+  if (
+    !mapping &&
+    i.saved &&
+    i.saved.projectNodeId !== i.selection.projectNodeId
+  )
+    return { mapping: null, lines: [], ready: false };
   return {
     mapping,
     lines: statusMappingChanges(
