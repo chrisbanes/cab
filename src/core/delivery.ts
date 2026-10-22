@@ -24,6 +24,8 @@ export const actionKinds = [
   "issue.comment",
   "issue.labels",
   "issue.edit",
+  "issue.create",
+  "project.item.add",
   "project.field",
   "pr.create",
   "pr.edit",
@@ -136,6 +138,11 @@ const edits = z
     (v) => v.title !== undefined || v.body !== undefined,
     "Edit requires title or body",
   );
+/** Actions only the operator's task publication may take; agents and the service never can. */
+const publicationKinds: readonly string[] = [
+  "issue.create",
+  "project.item.add",
+];
 export const externalActionSchema = z.discriminatedUnion("kind", [
   z
     .object({
@@ -165,6 +172,22 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
         })
         .strict()
         .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("issue.create"),
+      target: branchTargetSchema,
+      title: z.string().trim().min(1).max(issueTitleLimit),
+      body: z.string().max(issueBodyLimit),
+      labels: z.array(identity).max(100),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("project.item.add"),
+      target: targetSchema,
+      projectNodeId: identity,
     })
     .strict(),
   z
@@ -315,17 +338,53 @@ export const serviceDeliveryCallerSchema = z
 export type ServiceDeliveryCaller = z.output<
   typeof serviceDeliveryCallerSchema
 >;
-// The first branch explicitly preserves the historical persisted runtime shape and its material hash.
+/**
+ * The operator publishing a local task: it has no imported issue to bind to, so it names the
+ * publication, the target selection and the repository instead.
+ */
+export const operatorPublicationCallerSchema = z
+  .object({
+    actor: z.literal("operator"),
+    principal: z.literal("installation-operator"),
+    purpose: z.literal("task-publication"),
+    projectId: z.string().uuid(),
+    taskId: z.string().uuid(),
+    publicationId: z.string().uuid(),
+    sourceId: z.string().uuid(),
+    selectionId: identity,
+    repositoryId: identity,
+    policyVersion: z.number().int().positive(),
+  })
+  .strict();
+export type OperatorPublicationCaller = z.output<
+  typeof operatorPublicationCallerSchema
+>;
+// The first branch explicitly preserves the historical persisted runtime shape and its material hash;
+// later branches are strict, so each persisted record still parses as the branch it always did.
 const bindingSchema = z.union([
   runtimeDeliveryCallerSchema,
   operatorDeliveryCallerSchema,
   serviceDeliveryCallerSchema,
+  operatorPublicationCallerSchema,
 ]);
 export type DeliveryCaller = z.output<typeof bindingSchema>;
+/** The operator acting on a task's bound issue; a publication caller has its own guard. */
 export function isOperatorDeliveryCaller(
   caller: DeliveryCaller,
 ): caller is OperatorDeliveryCaller {
-  return "actor" in caller && caller.actor === "operator";
+  return (
+    "actor" in caller && caller.actor === "operator" && !("purpose" in caller)
+  );
+}
+export function isOperatorPublicationCaller(
+  caller: DeliveryCaller,
+): caller is OperatorPublicationCaller {
+  return (
+    "actor" in caller &&
+    caller.actor === "operator" &&
+    "purpose" in caller &&
+    caller.purpose === "task-publication"
+  );
 }
 export function isServiceDeliveryCaller(
   caller: DeliveryCaller,
@@ -750,6 +809,14 @@ export class DeliveryStore {
       // The service cannot obtain an approval, so an approval-mode grant fails closed.
       approved = false;
     }
+    if (isOperatorPublicationCaller(binding))
+      this.validatePublicationCaller(request, binding);
+    else if (publicationKinds.some((kind) => kind === request.action.kind))
+      // Agents and the service can never create an issue or add a Project item.
+      throw new DomainPolicyError(
+        "forbidden",
+        "Only the operator's task publication may use this action",
+      );
     if (policyVersion !== undefined && policy.version !== policyVersion)
       throw new Error("Delivery policy changed");
     const action = request.action;
@@ -759,10 +826,12 @@ export class DeliveryStore {
         (!isServiceDeliveryCaller(binding) || g.mode === "allow") &&
         g.action === action.kind &&
         g.repositoryId === action.target.repositoryId &&
-        (action.kind !== "project.field" ||
-          (g.projectNodeId === action.projectNodeId &&
-            g.fieldNodeId === action.fieldNodeId &&
-            g.optionNodeIds?.includes(action.optionNodeId))),
+        (action.kind === "project.item.add"
+          ? g.projectNodeId === action.projectNodeId
+          : action.kind !== "project.field" ||
+            (g.projectNodeId === action.projectNodeId &&
+              g.fieldNodeId === action.fieldNodeId &&
+              g.optionNodeIds?.includes(action.optionNodeId))),
     );
     if (!grant)
       throw new DomainPolicyError(
@@ -772,7 +841,9 @@ export class DeliveryStore {
     if (
       (grant.mode === "approval" ||
         action.kind === "issue.edit" ||
-        action.kind === "pr.edit") &&
+        action.kind === "pr.edit" ||
+        // The confirmed publication review is the approval in either grant mode.
+        isOperatorPublicationCaller(binding)) &&
       !approved
     )
       throw new Error("Exact material approval required");
@@ -821,22 +892,28 @@ export class DeliveryStore {
         .nullable()
         .parse(JSON.parse(source.readiness));
       // No readiness rule protects no label or field.
+      const exempt = readiness
+        ? this.readinessWriteExempt(binding, action, readiness)
+        : true;
+      const readinessLabels = new Set(
+        (readiness?.conditions ?? []).flatMap((c) =>
+          c.kind === "label" ? [c.name] : [],
+        ),
+      );
       if (
-        readiness &&
-        action.kind === "issue.labels" &&
-        readiness.conditions.some(
-          (c) =>
-            c.kind === "label" &&
-            [...action.add, ...action.remove].includes(c.name),
-        )
+        !exempt &&
+        ((action.kind === "issue.labels" &&
+          [...action.add, ...action.remove].some((l) =>
+            readinessLabels.has(l),
+          )) ||
+          (action.kind === "issue.create" &&
+            action.labels.some((l) => readinessLabels.has(l))))
       )
         throw new Error("Agent cannot change readiness labels");
-      // The service status-mapping caller is the one exemption; `validateServiceCaller` bounds it.
       if (
-        readiness &&
-        !isServiceDeliveryCaller(binding) &&
+        !exempt &&
         action.kind === "project.field" &&
-        readiness.conditions.some(
+        readiness?.conditions.some(
           (c) =>
             c.kind === "project-field" &&
             c.projectNodeId === action.projectNodeId &&
@@ -845,6 +922,107 @@ export class DeliveryStore {
       )
         throw new Error("Agent cannot change readiness fields");
     }
+  }
+  /**
+   * Whether a caller is named to write the readiness labels or fields of `action` (ADR-1017). The
+   * service status-mapping caller, bounded by `validateServiceCaller`, may write a Project field. The
+   * operator publishing a task that is Ready may set exactly the readiness label or option the rule
+   * names; for a Draft task nothing is exempt, so no publication can make it Ready. Every other
+   * caller, including the operator on a bound issue, keeps the refusal.
+   */
+  private readinessWriteExempt(
+    binding: DeliveryCaller,
+    action: ExternalAction,
+    readiness: z.output<typeof readinessSchema>,
+  ): boolean {
+    if (isServiceDeliveryCaller(binding))
+      return action.kind === "project.field";
+    if (!isOperatorPublicationCaller(binding)) return false;
+    const ready = this.db
+      .prepare("SELECT ready FROM domain_tasks WHERE id=?")
+      .get(binding.taskId) as { ready: number } | undefined;
+    if (ready?.ready !== 1) return false;
+    if (action.kind === "project.field")
+      return readiness.conditions.some(
+        (c) =>
+          c.kind === "project-field" &&
+          c.projectNodeId === action.projectNodeId &&
+          c.fieldNodeId === action.fieldNodeId &&
+          c.optionNodeId === action.optionNodeId,
+      );
+    if (action.kind === "issue.create")
+      return action.labels.every((l) =>
+        readiness.conditions.some((c) => c.kind === "label" && c.name === l),
+      );
+    return false;
+  }
+  /**
+   * A publication names its recorded repository and, after the create, only the issue it created.
+   * The create is the publication's own operation on the task's current text, and the task must still
+   * be an open local task. The review's approval binds the remaining material.
+   */
+  private validatePublicationCaller(
+    request: ExternalActionArguments,
+    caller: OperatorPublicationCaller,
+  ): void {
+    const action = request.action,
+      refusal = (message: string) =>
+        new DomainPolicyError("forbidden", message);
+    if (
+      request.approval ||
+      request.operatorReviewId ||
+      !(
+        publicationKinds.some((k) => k === action.kind) ||
+        action.kind === "project.field"
+      )
+    )
+      throw refusal(
+        "Publication caller only permits issue.create, project.item.add and project.field",
+      );
+    if (action.target.repositoryId !== caller.repositoryId)
+      throw refusal("Publication names another repository");
+    const task = this.db
+      .prepare(
+        "SELECT t.projectId,t.state,t.outcome,b.title,(SELECT 1 FROM github_imported_tasks i WHERE i.taskId=t.id) AS imported FROM domain_tasks t JOIN tasks b ON b.id=t.id WHERE t.id=?",
+      )
+      .get(caller.taskId) as
+      | {
+          projectId: string;
+          state: string;
+          outcome: string;
+          title: string;
+          imported: number | null;
+        }
+      | undefined;
+    if (
+      !task ||
+      task.projectId !== caller.projectId ||
+      task.state !== "open" ||
+      task.imported ||
+      this.configuration(caller.projectId).version !== caller.policyVersion
+    )
+      throw new DomainConflictError("Operator publication authority changed");
+    if (action.kind === "issue.create") {
+      if (
+        request.operationId !== caller.publicationId ||
+        action.title !== task.title ||
+        action.body !== task.outcome ||
+        new TaskReviewStore(this.db).sources(caller.taskId).at(-1)?.sourceId !==
+          caller.sourceId
+      )
+        throw new DomainConflictError("Operator publication material changed");
+      return;
+    }
+    if (action.kind !== "project.item.add" && action.kind !== "project.field")
+      throw refusal("Publication caller cannot take this action");
+    const receipt = this.action(caller.publicationId);
+    if (
+      receipt.request.action.kind !== "issue.create" ||
+      receipt.state !== "confirmed-success" ||
+      receipt.observation?.receipt?.nodeId !== action.target.nodeId ||
+      receipt.observation?.receipt?.number !== action.target.number
+    )
+      throw refusal("Publication names an issue it did not create");
   }
   /**
    * A status-mapping write names the mapping's exact Project, field and option for the event, on
@@ -1954,7 +2132,8 @@ export class DeliveryStore {
         kind: a.request.action.kind,
         caller: isServiceDeliveryCaller(a.binding)
           ? ("service" as const)
-          : isOperatorDeliveryCaller(a.binding)
+          : isOperatorDeliveryCaller(a.binding) ||
+              isOperatorPublicationCaller(a.binding)
             ? ("operator" as const)
             : ("agent" as const),
         event: isServiceDeliveryCaller(a.binding) ? a.binding.event : null,
@@ -2071,6 +2250,8 @@ export class DeliveryStore {
           !grant.optionNodeIds?.length)
       )
         throw new Error("Project field grant requires exact field and options");
+      if (grant.action === "project.item.add" && !grant.projectNodeId)
+        throw new Error("Project item grant requires an exact Project");
     }
     this.db
       .prepare(

@@ -5,7 +5,9 @@ import {
 import {
   isOperatorAction,
   isOperatorDeliveryCaller,
+  isOperatorPublicationCaller,
 } from "../core/delivery.js";
+import { publicationMarker } from "../core/task-publication-contracts.js";
 import { DomainPolicyError } from "../core/domain.js";
 import { z } from "zod";
 import {
@@ -92,7 +94,21 @@ export class ProjectFieldChangedRefusal extends Error {
     super(projectFieldChangedReason);
   }
 }
+/** An issue named to Link a publication: what GitHub shows, and whether it carries the create's marker. */
+export interface PublishedIssueInspection {
+  nodeId: string;
+  number: number;
+  title: string;
+  body: string;
+  labels: string[];
+  authorNodeId: string;
+  hasMarker: boolean;
+}
 export interface GitHubDeliveryProvider {
+  inspectPublishedIssue?(
+    target: { repositoryId: string; number: number },
+    operationId: string,
+  ): Promise<PublishedIssueInspection>;
   inspectClosedIssue?(target: {
     repositoryId: string;
     nodeId: string;
@@ -120,6 +136,8 @@ export const deliveryDocuments = {
   EnsembleDeliveryClosure: `query EnsembleDeliveryClosure($id:ID!){node(id:$id){... on Issue{id repository{id} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{id closer{__typename ... on PullRequest{id}}}}}}}}`,
   EnsembleDeliveryField: `query EnsembleDeliveryField($item:ID!,$field:ID!,$after:String){node(id:$item){... on ProjectV2Item{id project{id} content{... on Issue{id repository{id}}} fieldValues(first:100,after:$after){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}}} field:node(id:$field){... on ProjectV2SingleSelectField{id options{id} project{id}}}}`,
   EnsembleDeliveryProject: `mutation EnsembleDeliveryProject($project:ID!,$item:ID!,$field:ID!,$option:String!){updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
+  EnsembleDeliveryItemAdd: `mutation EnsembleDeliveryItemAdd($project:ID!,$content:ID!){addProjectV2ItemById(input:{projectId:$project,contentId:$content}){item{id}}}`,
+  EnsembleDeliveryIssueItems: `query EnsembleDeliveryIssueItems($id:ID!,$after:String){node(id:$id){... on Issue{id repository{id} projectItems(first:100,after:$after){nodes{id project{id}} pageInfo{hasNextPage endCursor}}}}}`,
   EnsembleDeliveryThread: `query EnsembleDeliveryThread($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{id isResolved resolvedBy{id} pullRequest{id number repository{id}} latestComment:comments(last:1){nodes{id}} comments(first:100,after:$after){nodes{id body state author{__typename ... on User{id}}} pageInfo{hasNextPage endCursor}}}}}`,
   EnsembleDeliveryThreadReply: `mutation EnsembleDeliveryThreadReply($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{id}}}`,
   EnsembleDeliveryThreadResolve: `mutation EnsembleDeliveryThreadResolve($thread:ID!){resolveReviewThread(input:{threadId:$thread}){thread{id isResolved}}}`,
@@ -492,6 +510,79 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
               closer?.__typename === "PullRequest" ? (closer.id ?? null) : null,
           }
         : null,
+    };
+  }
+  /** The issue's item in the Project, or null; more than one is unproved. */
+  private async projectItem(
+    action: Extract<ExternalAction, { kind: "project.item.add" }>,
+  ): Promise<string | null> {
+    let cursor: string | null = null;
+    const seen = new Set<string>();
+    const items: string[] = [];
+    for (let count = 0; count < 100; count++) {
+      const data = z
+        .object({
+          node: z.object({
+            id: name,
+            repository: z.object({ id: name }),
+            projectItems: z.object({
+              nodes: z.array(
+                z.object({ id: name, project: z.object({ id: name }) }),
+              ),
+              pageInfo: page,
+            }),
+          }),
+        })
+        .parse(
+          await this.graph(deliveryDocuments.EnsembleDeliveryIssueItems, {
+            id: action.target.nodeId,
+            after: cursor,
+          }),
+        );
+      if (
+        data.node.id !== action.target.nodeId ||
+        data.node.repository.id !== action.target.repositoryId
+      )
+        throw new Error("provider-project-item-unproved");
+      for (const item of data.node.projectItems.nodes)
+        if (item.project.id === action.projectNodeId) items.push(item.id);
+      if (!data.node.projectItems.pageInfo.hasNextPage) {
+        if (items.length > 1) throw new Error("provider-project-item-unproved");
+        return items[0] ?? null;
+      }
+      cursor = data.node.projectItems.pageInfo.endCursor;
+      if (!cursor || seen.has(cursor)) break;
+      seen.add(cursor);
+    }
+    throw new Error("provider-item-pagination-incomplete");
+  }
+  /** What GitHub shows for an issue the operator names to Link a publication, and whether it carries the marker. */
+  async inspectPublishedIssue(
+    target: { repositoryId: string; number: number },
+    operationId: string,
+  ): Promise<PublishedIssueInspection> {
+    const repo = await this.repository(target.repositoryId);
+    const value = z
+      .object({
+        node_id: name,
+        number: z.number().int().positive(),
+        title: z.string(),
+        body: z.string().nullable(),
+        labels: z.array(z.object({ name })),
+        user: z.object({ node_id: name }),
+        pull_request: z.unknown().optional(),
+      })
+      .parse((await this.request(`${repo.path}/issues/${target.number}`)).json);
+    if (value.number !== target.number || value.pull_request)
+      throw new Error("provider-issue-mismatch");
+    return {
+      nodeId: value.node_id,
+      number: value.number,
+      title: value.title,
+      body: value.body ?? "",
+      labels: value.labels.map((l) => l.name),
+      authorNodeId: value.user.node_id,
+      hasMarker: (value.body ?? "").includes(publicationMarker(operationId)),
     };
   }
   private async projectField(
@@ -1046,6 +1137,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     publication?: PublicationContext,
   ) {
     const repo = await this.repository(action.target.repositoryId);
+    if (action.kind === "issue.create") return { repositoryPath: repo.path };
     if (action.kind === "branch.push" || action.kind === "branch.force-push") {
       if (!publication) throw new Error("provider-publication-unverified");
       const remote = await this.optionalRef(repo.path, publication.branch);
@@ -1133,6 +1225,8 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     if (!("number" in action.target))
       throw new Error("provider-target-invalid");
     const issue = await this.issue(repo.path, action.target);
+    if (action.kind === "project.item.add")
+      return { repositoryPath: repo.path, nodeId: issue.node_id };
     if (action.kind === "project.field") {
       const optionId = await this.projectField(action);
       // The mutation is not conditional, so this read is the guard; a move after it is the accepted race.
@@ -1173,6 +1267,18 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         "Operator delivery only permits the bound issue.comment",
       );
     const a = record.request.action;
+    // Defence in depth behind `DeliveryStore.authorize`: only the publication creates or adds.
+    if (
+      isOperatorPublicationCaller(record.binding)
+        ? !["issue.create", "project.item.add", "project.field"].includes(
+            a.kind,
+          ) || a.target.repositoryId !== record.binding.repositoryId
+        : a.kind === "issue.create" || a.kind === "project.item.add"
+    )
+      throw new DomainPolicyError(
+        "forbidden",
+        "Publication delivery only permits its own issue.create, project.item.add and project.field",
+      );
     if (a.kind === "branch.push" || a.kind === "branch.force-push")
       return this.publish(record, a);
     try {
@@ -1184,6 +1290,19 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       };
       const marker = `<!-- ensemble-operation:${record.operationId} -->`;
       switch (a.kind) {
+        case "issue.create":
+          await this.request(`${repo.path}/issues`, "POST", {
+            title: a.title,
+            body: `${a.body}\n\n${marker}`,
+            labels: a.labels,
+          });
+          break;
+        case "project.item.add":
+          await this.graph(deliveryDocuments.EnsembleDeliveryItemAdd, {
+            project: a.projectNodeId,
+            content: a.target.nodeId,
+          });
+          break;
         case "issue.comment":
           await this.request(
             `${repo.path}/issues/${a.target.number}/comments`,
@@ -1474,10 +1593,54 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           record.observation?.pushed === true,
         );
       const user = z
-        .object({ node_id: name })
+        .object({ node_id: name, login: name.optional() })
         .parse((await this.request("/user")).json);
       let receipt: ProviderActionObservation["receipt"] = null;
-      if (a.kind === "issue.comment") {
+      if (a.kind === "issue.create") {
+        // The search index lags, so this lists the credential user's issues instead. A list that
+        // shows no marker proves nothing: the outcome then stays unproved.
+        if (!user.login) throw new Error("provider-user-unreadable");
+        const since = new Date(record.createdAt - 60_000).toISOString();
+        const issues = (
+          await this.pages(
+            `${repo.path}/issues?creator=${encodeURIComponent(user.login)}&state=all&since=${encodeURIComponent(since)}&per_page=100`,
+          )
+        )
+          .filter((v) => {
+            const row = z
+              .object({
+                body: z.string().nullable(),
+                pull_request: z.unknown().optional(),
+              })
+              .safeParse(v).data;
+            return row && !row.pull_request && row.body?.includes(marker);
+          })
+          .map((v) =>
+            z
+              .object({
+                node_id: name,
+                number: z.number().int().positive(),
+                title: z.string(),
+                body: z.string(),
+                labels: z.array(z.object({ name })),
+                user: z.object({ node_id: name }),
+              })
+              .parse(v),
+          );
+        const found = issues[0];
+        if (
+          issues.length === 1 &&
+          found &&
+          found.body === `${a.body}\n\n${marker}` &&
+          found.title === a.title &&
+          a.labels.every((l) => found.labels.some((v) => v.name === l)) &&
+          found.user.node_id === user.node_id
+        )
+          receipt = { nodeId: found.node_id, number: found.number };
+      } else if (a.kind === "project.item.add") {
+        const itemId = await this.projectItem(a);
+        if (itemId) receipt = { nodeId: itemId };
+      } else if (a.kind === "issue.comment") {
         await this.issue(repo.path, a.target);
         const comments = (
           await this.pages(

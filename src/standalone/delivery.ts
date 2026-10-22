@@ -2,6 +2,7 @@ import { credentialFreeEnvironment } from "../core/child-environment.js";
 import {
   isOperatorAction,
   isOperatorDeliveryCaller,
+  isOperatorPublicationCaller,
   isRuntimeDeliveryCaller,
   isServiceDeliveryCaller,
 } from "../core/delivery.js";
@@ -199,6 +200,14 @@ export class DeliveryCoordinator {
         "forbidden",
         "Operator delivery only permits issue.comment",
       );
+    if (
+      isOperatorPublicationCaller(caller) &&
+      (request.approval || request.operatorReviewId)
+    )
+      throw new DomainPolicyError(
+        "forbidden",
+        "A publication is approved by its own confirmed review",
+      );
     return this.serialize(
       actionKeys({ binding: caller, request }),
       async () => {
@@ -217,7 +226,10 @@ export class DeliveryCoordinator {
               this.options.authorize(
                 caller,
                 undefined,
-                isOperatorDeliveryCaller(caller) ? request : undefined,
+                isOperatorDeliveryCaller(caller) ||
+                  isOperatorPublicationCaller(caller)
+                  ? request
+                  : undefined,
               );
           },
         );
@@ -225,6 +237,19 @@ export class DeliveryCoordinator {
         return this.attempt(record);
       },
     );
+  }
+  /** What GitHub shows for an issue named to Link a publication; the caller judges it. */
+  inspectPublishedIssue(
+    projectId: string,
+    target: { repositoryId: string; number: number },
+    operationId: string,
+  ) {
+    return this.serialize([`task:${projectId}:${operationId}`], async () => {
+      const provider = this.provider(projectId);
+      if (!provider.inspectPublishedIssue)
+        throw new Error("Published issue inspection unavailable");
+      return provider.inspectPublishedIssue(target, operationId);
+    });
   }
   private async attempt(
     record: DeliveryActionRecord,

@@ -1461,3 +1461,243 @@ test("a move between the re-read and the write is detected on readback and stays
   assert.equal(observation.state, "uncertain");
   assert.equal(observation.reason, "provider-effect-unproved");
 });
+
+function publicationCaller(projectId = randomUUID()) {
+  return {
+    actor: "operator" as const,
+    principal: "installation-operator" as const,
+    purpose: "task-publication" as const,
+    projectId,
+    taskId: randomUUID(),
+    publicationId: randomUUID(),
+    sourceId: randomUUID(),
+    selectionId: "repo",
+    repositoryId: "R1",
+    policyVersion: 1,
+  };
+}
+function createRecord(): DeliveryActionRecord {
+  const caller = publicationCaller();
+  return {
+    operationId: caller.publicationId,
+    request: {
+      operationId: caller.publicationId,
+      action: {
+        kind: "issue.create",
+        target: { repositoryId: "R1" },
+        title: "Publish me",
+        body: "Do the thing",
+        labels: ["ready"],
+      },
+    },
+    binding: caller,
+    policyVersion: 1,
+    state: "attempting",
+    attempts: 1,
+    beforeState: { repositoryPath: "/repos/org/repo" },
+    observation: null,
+    createdAt: Date.parse("2026-10-21T10:00:00Z"),
+    updatedAt: 1,
+  };
+}
+
+/** A fake GitHub holding the issues listed for the credential user, and counting create POSTs. */
+function issueFetcher(state: {
+  posts: number;
+  listed: unknown[];
+  lists: string[];
+  items?: { id: string; project: { id: string } }[];
+  itemAdds?: number;
+  login?: string;
+}): typeof fetch {
+  return async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/graphql") {
+      const query = String(JSON.parse(String(init?.body)).query);
+      if (query.includes("EnsembleDeliveryRepository"))
+        return Response.json({
+          data: { node: { id: "R1", nameWithOwner: "org/repo" } },
+        });
+      if (query.includes("EnsembleDeliveryItemAdd")) {
+        state.itemAdds = (state.itemAdds ?? 0) + 1;
+        return Response.json({
+          data: { addProjectV2ItemById: { item: { id: "ITEM1" } } },
+        });
+      }
+      if (query.includes("EnsembleDeliveryIssueItems"))
+        return Response.json({
+          data: {
+            node: {
+              id: "I7",
+              repository: { id: "R1" },
+              projectItems: {
+                nodes: state.items ?? [],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        });
+    }
+    if (url.pathname === "/repos/org/repo")
+      return Response.json({
+        node_id: "R1",
+        full_name: "org/repo",
+        allow_merge_commit: true,
+        allow_squash_merge: true,
+        allow_rebase_merge: false,
+      });
+    if (url.pathname === "/user")
+      return Response.json({ node_id: "U1", login: state.login ?? "bot" });
+    if (init?.method === "POST" && url.pathname === "/repos/org/repo/issues") {
+      state.posts++;
+      throw new Error("lost response");
+    }
+    if (url.pathname === "/repos/org/repo/issues") {
+      state.lists.push(url.search);
+      return Response.json(state.listed);
+    }
+    if (url.pathname === "/repos/org/repo/issues/7")
+      return Response.json({
+        node_id: "I7",
+        number: 7,
+        state: "open",
+        title: "Publish me",
+        body: `Do the thing\n\n<!-- ensemble-operation:${state.lists.length ? "x" : "y"} -->`,
+        labels: [{ name: "ready" }],
+        user: { node_id: "U1" },
+      });
+    throw new Error(`unexpected route ${url.pathname}`);
+  };
+}
+const markerIssue = (
+  record: DeliveryActionRecord,
+  patch: Record<string, unknown> = {},
+) => ({
+  node_id: "I7",
+  number: 7,
+  title: "Publish me",
+  body: `Do the thing\n\n<!-- ensemble-operation:${record.operationId} -->`,
+  labels: [{ name: "ready" }],
+  user: { node_id: "U1" },
+  ...patch,
+});
+
+test("a lost issue create is confirmed only by exactly one marker issue by the credential user", async () => {
+  const record = createRecord();
+  const state = { posts: 0, listed: [] as unknown[], lists: [] as string[] };
+  const provider = new GitHubHttpDeliveryProvider(
+    "non-secret-marker",
+    issueFetcher(state),
+  );
+  // The POST posts once, with the response lost.
+  assert.equal((await provider.performAction(record)).state, "uncertain");
+  assert.equal(state.posts, 1);
+  // Nothing listed proves nothing: it stays unproved and nothing is sent again.
+  assert.equal((await provider.inspectAction(record)).state, "uncertain");
+  assert.equal(state.posts, 1);
+  // The list is the credential user's, from before the record was made.
+  assert.match(state.lists[0] ?? "", /creator=bot/);
+  assert.match(state.lists[0] ?? "", /state=all/);
+  assert.match(
+    decodeURIComponent(state.lists[0] ?? ""),
+    /since=2026-10-21T09:59:00/,
+  );
+  state.listed = [markerIssue(record)];
+  assert.deepEqual(await provider.inspectAction(record), {
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "I7", number: 7 },
+  });
+  // Two marker issues cannot both be the one request.
+  state.listed = [
+    markerIssue(record),
+    markerIssue(record, { node_id: "I8", number: 8 }),
+  ];
+  assert.equal((await provider.inspectAction(record)).state, "uncertain");
+  // Another user's issue does not confirm.
+  state.listed = [markerIssue(record, { user: { node_id: "U2" } })];
+  assert.equal((await provider.inspectAction(record)).state, "uncertain");
+  // Neither does changed text or a missing label.
+  state.listed = [markerIssue(record, { title: "Other" })];
+  assert.equal((await provider.inspectAction(record)).state, "uncertain");
+  state.listed = [markerIssue(record, { labels: [] })];
+  assert.equal((await provider.inspectAction(record)).state, "uncertain");
+  // A pull request in the list is ignored, even with the marker.
+  state.listed = [
+    markerIssue(record, { node_id: "PR1", number: 9, pull_request: {} }),
+    markerIssue(record),
+  ];
+  assert.equal(
+    (await provider.inspectAction(record)).state,
+    "confirmed-success",
+  );
+});
+
+test("an item add is confirmed by the Project's item on the issue and no other Project's", async () => {
+  const caller = publicationCaller();
+  const record: DeliveryActionRecord = {
+    ...createRecord(),
+    operationId: randomUUID(),
+    request: {
+      operationId: randomUUID(),
+      action: {
+        kind: "project.item.add",
+        target: { repositoryId: "R1", number: 7, nodeId: "I7" },
+        projectNodeId: "P1",
+      },
+    },
+    binding: caller,
+  };
+  const state = {
+    posts: 0,
+    listed: [],
+    lists: [],
+    items: [{ id: "ITEM_OTHER", project: { id: "P2" } }],
+    itemAdds: 0,
+  };
+  const provider = new GitHubHttpDeliveryProvider(
+    "non-secret-marker",
+    issueFetcher(state),
+  );
+  assert.equal((await provider.inspectAction(record)).state, "uncertain");
+  state.items = [
+    { id: "ITEM_OTHER", project: { id: "P2" } },
+    { id: "ITEM1", project: { id: "P1" } },
+  ];
+  assert.deepEqual(await provider.inspectAction(record), {
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "ITEM1" },
+  });
+});
+
+test("Link reads the named issue and reports whether it carries the create's marker", async () => {
+  const record = createRecord();
+  const state = { posts: 0, listed: [], lists: [] as string[] };
+  const provider = new GitHubHttpDeliveryProvider(
+    "non-secret-marker",
+    issueFetcher(state),
+  );
+  const inspected = await provider.inspectPublishedIssue(
+    { repositoryId: "R1", number: 7 },
+    record.operationId,
+  );
+  assert.equal(inspected.hasMarker, false);
+  assert.equal(inspected.nodeId, "I7");
+});
+
+test("only the publication may create an issue or add an item at the provider", async () => {
+  const provider = new GitHubHttpDeliveryProvider("x", async () => {
+    throw new Error("provider should not be called");
+  });
+  const wrong = createRecord();
+  wrong.binding = { ...publicationCaller(), repositoryId: "R2" };
+  const runtime = commentRecord();
+  runtime.request.action = createRecord().request.action;
+  for (const record of [wrong, runtime])
+    await assert.rejects(
+      provider.performAction(record),
+      (error) =>
+        error instanceof DomainPolicyError && error.code === "forbidden",
+    );
+});

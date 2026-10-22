@@ -761,6 +761,8 @@ export class GitHubSourceStore {
         seen.add(issue.nodeId);
         const existing = this.issue(issue.nodeId);
         let taskId: string;
+        // An issue Ensemble is publishing is not new: its task is converted when the create resolves.
+        if (!existing && this.publishingMarker(issue.body)) continue;
         if (!existing) {
           // A closed issue is imported, as Done, only by a Done-mode source on a complete read.
           const importClosed =
@@ -954,6 +956,99 @@ export class GitHubSourceStore {
           .run(projectId, selectionId);
       return true;
     });
+  }
+
+  /**
+   * Whether `body` carries the marker of a task publication whose create is unresolved. Such an
+   * issue belongs to that task, so a racing sync must not import it as a second one.
+   */
+  private publishingMarker(body: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT publicationId FROM task_publications WHERE state='sending'",
+        )
+        .all() as Row[]
+    ).some((row) =>
+      body.includes(`<!-- ensemble-operation:${String(row.publicationId)} -->`),
+    );
+  }
+
+  /**
+   * Turns a published local task into the imported task of the issue it created, writing what the
+   * sync would have written for it. Ready is kept, as the next sync recomputes it from GitHub.
+   */
+  convertPublishedTaskWithinTransaction(input: {
+    taskId: string;
+    projectId: string;
+    selectionId: string;
+    repositoryId: string;
+    repositoryName: string;
+    nodeId: string;
+    number: number;
+    title: string;
+    /** The body as created, marker included. */
+    body: string;
+    labels: string[];
+    itemNodeId: string | null;
+    projectFields: z.output<typeof projectFieldsSchema>;
+  }): void {
+    const digest = sourceTextDigest(input.title, input.body),
+      now = Date.now();
+    this.db
+      .prepare(
+        "INSERT INTO github_imported_tasks (taskId, providerInstance, nodeId, repositoryId) VALUES (?, 'github.com', ?, ?)",
+      )
+      .run(input.taskId, input.nodeId, input.repositoryId);
+    this.db
+      .prepare(
+        "INSERT INTO github_external_issues (providerInstance, nodeId, taskId, repositoryId, repositoryName, issueNumber, observedTitle, observedBody, observedState, labels) VALUES ('github.com', ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+      )
+      .run(
+        input.nodeId,
+        input.taskId,
+        input.repositoryId,
+        input.repositoryName,
+        input.number,
+        input.title,
+        input.body,
+        JSON.stringify(input.labels),
+      );
+    this.db
+      .prepare(
+        "INSERT INTO github_source_reviews (nodeId, observedDigest, acceptedDigest) VALUES (?, ?, ?)",
+      )
+      .run(input.nodeId, digest, digest);
+    // Local dependents keep treating the task as an open blocker, not an unknown one.
+    this.db
+      .prepare(
+        "INSERT INTO github_issue_status (nodeId, status, reason, refreshedAt) VALUES (?, 'open', NULL, ?) ON CONFLICT(nodeId) DO UPDATE SET status = 'open', reason = NULL, refreshedAt = excluded.refreshedAt",
+      )
+      .run(input.nodeId, new Date(now).toISOString());
+    this.db
+      .prepare(
+        "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        input.projectId,
+        input.selectionId,
+        input.nodeId,
+        JSON.stringify(input.projectFields),
+        input.itemNodeId,
+        now,
+      );
+    this.db
+      .prepare(
+        "UPDATE domain_tasks SET readinessRule = ?, importedBlockers = 'unknown', version = version + 1 WHERE id = ?",
+      )
+      .run(this.readinessRuleText(input.projectId) ?? "null", input.taskId);
+    new TaskReviewStore(this.db).captureSources([
+      {
+        taskId: input.taskId,
+        kind: "github",
+        supplied: { title: input.title, body: input.body },
+      },
+    ]);
   }
 
   recordDeliveryClosure(

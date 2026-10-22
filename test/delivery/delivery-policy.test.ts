@@ -58,3 +58,54 @@ test("delivery defaults deny and only the operator can configure versioned grant
     db.close();
   }
 });
+
+test("a project item grant names its Project, like a project field grant", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    const projectId = randomUUID();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "A",
+      leadProfileId: null,
+    });
+    const configure = (grant: Record<string, unknown>, expectedVersion = 1) =>
+      domain.execute({
+        type: "delivery.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion,
+        mode: "reviewable-pr",
+        credentialRef: null,
+        grants: [grant],
+        requiredChecks: [],
+      } as never);
+    assert.throws(
+      () =>
+        configure({
+          action: "project.item.add",
+          repositoryId: "R1",
+          mode: "allow",
+        }),
+      /exact Project/,
+    );
+    configure({
+      action: "project.item.add",
+      repositoryId: "R1",
+      mode: "allow",
+      projectNodeId: "P1",
+    });
+    assert.equal(
+      new DeliveryStore(db).configuration(projectId).grants[0]?.action,
+      "project.item.add",
+    );
+  } finally {
+    db.close();
+  }
+});
