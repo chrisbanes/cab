@@ -254,8 +254,12 @@ export function Inbox({
     heading = selected
       ? `${requestKindLabel(selected.kind)}${position >= 0 ? ` · ${position + 1} of ${rows.length}` : ""}`
       : null,
+    // Only a complete read shows a request has left: an incomplete one may simply omit it.
     leftQueue = Boolean(
-      selected && !current && resource.state.status === "fresh",
+      selected &&
+        !current &&
+        resource.state.status === "fresh" &&
+        resource.state.data?.complete,
     ),
     recorded = Boolean(
       selected &&

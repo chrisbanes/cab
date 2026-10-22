@@ -1163,6 +1163,38 @@ test("an intervention that leaves the queue stops saying ownership stays held", 
   await detail.getByText("Execution ownership is uncertain").waitFor();
 });
 
+test("an incomplete refresh that omits an intervention keeps saying ownership stays held", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnIntervention(f),
+  );
+  const detail = page.getByRole("region", { name: "Selected request" });
+  await page.locator(".inbox-row").click();
+  await detail.getByText("Ownership stays held", { exact: true }).waitFor();
+  // The read could not cover every task, so the omission does not show the hold resolved.
+  await page.route("**/api/operator/inbox", async (route) => {
+    const body = inboxReadSchema.parse(await (await route.fetch()).json());
+    body.data.items = [];
+    body.data.complete = false;
+    await route.fulfill({ json: body });
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page
+    .getByText("Queue coverage is incomplete. Unavailable requests may remain.")
+    .waitFor();
+  assert.equal(
+    await detail.getByText("Ownership stays held", { exact: true }).count(),
+    1,
+  );
+  assert.equal(
+    await page.getByText("This request has left the current queue.").count(),
+    0,
+  );
+});
+
 test("returning to the Inbox restores the request the operator chose, not the one it opened by itself", async (_t, j) => {
   const { page } = await openInbox(j, 3, { width: 1366, height: 900 });
   const rows = page.locator(".inbox-row");
