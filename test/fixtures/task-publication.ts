@@ -279,7 +279,7 @@ export class FakeGitHub {
 }
 
 const git = promisify(execFile);
-async function checkout(directory: string) {
+export async function checkout(directory: string) {
   const path = join(directory, "checkout");
   await git("git", ["init", "-q", "-b", "main", path]);
   writeFileSync(join(path, "README.md"), "Fixture\n");
@@ -299,7 +299,7 @@ async function checkout(directory: string) {
   return path;
 }
 
-const noRuntime: Runtime = {
+export const noRuntime: Runtime = {
   async start() {},
   async stop() {},
   onUnexpectedRequest() {},
