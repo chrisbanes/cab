@@ -1,8 +1,11 @@
 # Review a result
 
-**Status:** planned. The result, criteria and evidence sections exist on task
-detail; the first-viewport layout and the budget below are not yet implemented or
-asserted.
+**Status:** built. Task detail opens on the latest result with its summary and
+the first three criterion outcomes; further criteria sit behind "N more". No
+criterion-to-evidence relationship is recorded, so the evidence is the Evidence
+card, one step away. The Recent results strip on Home is not built; Home reaches
+results through Completed work. The budget below is asserted by
+`test/operator/operator-review-result-browser.test.ts`.
 
 ## Goal
 
@@ -12,27 +15,28 @@ to say to the lead.
 
 ## Entry points
 
-- Home recent results.
+- Home Completed work.
 - Task detail Overview (latest result first when one exists).
 - Inbox request pane evidence links.
 - Operator CLI `result` reads.
 
 ## Steps
 
-1. The task opens on the latest result: summary, each supplied criterion with its
-   recorded outcome, and the recorded decisions attributed to who made them.
-2. A criterion with evidence links to it; a criterion without evidence says so in a
-   sentence and offers Ask lead about criterion. No verified outcome is inferred.
+1. The task opens on the latest result: summary, the first three supplied
+   criteria with their recorded outcomes (the rest sit behind "N more"), and the
+   recorded decisions attributed to who made them.
+2. A criterion without recorded evidence says so in a sentence and offers Ask lead
+   about criterion. No verified outcome is inferred.
 3. Changes and retained evidence are one step away; earlier results are listed
    beneath the latest, not above it.
 4. Message lead sends feedback on the result; completion stays the lead's decision.
 
 ## Budget
 
-| Entry point | Interactions to the evidence for a criterion | First screen must show |
+| Entry point | Interactions to the evidence | First screen must show |
 | --- | --- | --- |
-| Task detail | 1 (the criterion's link) | the result summary and every criterion with its outcome |
-| Home recent results | 2 (the result, the criterion's link) | the result summary |
+| Task detail | 1 (Evidence) | the result summary and at most three criterion outcomes, with "N more" for the rest |
+| Home Completed work | 2 (the task, Evidence) | the result summary |
 
 An Inbox evidence link lands on the evidence it names (1).
 
