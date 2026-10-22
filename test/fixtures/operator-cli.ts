@@ -21,6 +21,7 @@ import {
 import { harness } from "./cli-harness.js";
 import { createOperatorFixture } from "./operator-web.js";
 import { createReleaseDeliveryFixture } from "./delivery-integration.js";
+import { publicationFixture } from "./task-publication.js";
 
 type After = { after(fn: () => unknown): void };
 
@@ -380,3 +381,31 @@ export const failReadAfterPost = (): typeof fetch => {
     return response;
   };
 };
+
+/** A project with a GitHub source over a fake GitHub, served to the CLI, for publishing local tasks. */
+export async function publicationWorld(
+  t: After,
+  options: Parameters<typeof publicationFixture>[0] = {},
+) {
+  const f = await publicationFixture(options);
+  t.after(() => f.close());
+  // The operator fixture is only a directory, a service and a way to reopen it.
+  const adapter = {
+    directory: f.root,
+    get service() {
+      return f.service;
+    },
+    reopen: () => f.restart(),
+    close: () => f.close(),
+  } as unknown as Fixture;
+  const s = await serveCli(t, adapter);
+  const o = await loginCli(t, s);
+  const ok = async (connection: "ro" | "rw", args: string[], extra = {}) => {
+    const r = await o.cli(connection, args, extra);
+    if (r.code !== 0)
+      throw Error(`${args.join(" ")}: ${r.code} ${r.err}${r.out}`);
+    // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
+    return r.json() as Record<string, any>;
+  };
+  return { ...o, f, ok };
+}

@@ -173,7 +173,9 @@ test("retained rendered form actions, fields and mounted route controls match do
       mode: "approval",
       ...(action === "project.field"
         ? { projectNodeId: "P1", fieldNodeId: "F1", optionNodeIds: ["O1"] }
-        : {}),
+        : action === "project.item.add"
+          ? { projectNodeId: "P1" }
+          : {}),
     })),
     requiredChecks: [{ name: "check", appId: 42 }],
   });

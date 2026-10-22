@@ -166,7 +166,11 @@ definition. preview-source has no deactivate command; saving any source change
 deactivates every selection. place-task is final once the task has an
 assignment. delivery refresh is installation-wide. send-comment --review-id
 first replays that review to check it is approved; an ID that is not an existing
-review records a new pending review instead, and nothing is posted.`;
+review records a new pending review instead, and nothing is posted.
+delivery publish-send creates a public GitHub issue and turns the local task into
+it; nothing takes that back (close the issue on GitHub), and a publish-confirm
+decision is final. publish-abandon gives up on a create whose outcome is unknown
+and may leave a duplicate issue.`;
 const RECOVERY_NOTE = `Recovery: recovery prepare writes an owner-only document from the observed
 generation identity plus your --evidence-file; nothing is inferred, defaulted or
 confirmed by a flag. recovery submit sends it once. Adoption, recovery and
@@ -331,6 +335,9 @@ export const OPTIONS = {
   "body-file": { type: "string" },
   "expected-task-version": { type: "string" },
   "review-id": { type: "string" },
+  target: { type: "string" },
+  "publication-id": { type: "string" },
+  issue: { type: "string" },
   work: { type: "string" },
   "evidence-file": { type: "string" },
   "expected-conversation-revision": { type: "string" },
