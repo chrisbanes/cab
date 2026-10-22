@@ -36,7 +36,7 @@ to say to the lead.
 | Entry point | Interactions to the evidence | First screen must show |
 | --- | --- | --- |
 | Task detail | 1 (Evidence) | the result summary and at most three criterion outcomes, with "N more" for the rest |
-| Home Completed work | 2 (the task, Evidence) | the task in Completed work; after the first interaction, the result summary on the task page |
+| Home Completed work | 2 (the task, Evidence) | the task in Completed work (below the first screen on a phone); after the first interaction, the result summary on the task page |
 
 The first-screen promise holds for criterion text up to about one line each. A longer
 or multiline criterion is shown in full, never clamped, and can push later outcomes
