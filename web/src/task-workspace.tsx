@@ -1507,6 +1507,15 @@ export function TaskWorkspace({
       changed();
     },
   });
+  const criteriaMore = (key: string) => ({
+    open: state.criteriaOpen.has(key),
+    onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => {
+      if (event.currentTarget.open === state.criteriaOpen.has(key)) return;
+      if (event.currentTarget.open) state.criteriaOpen.add(key);
+      else state.criteriaOpen.delete(key);
+      changed();
+    },
+  });
   const briefSummary = `Requirements · ${source?.kind === "github" || data.source ? "GitHub" : "Local"} · ${(() => {
     if (!source) return "Retained source unavailable";
     const { criteria, known } = briefParts(source),
@@ -2030,6 +2039,9 @@ export function TaskWorkspace({
                         resultId={selected.resultId}
                         sourceId={meta.metadata.sourceId}
                         ask={ask}
+                        more={criteriaMore(
+                          `${selected.resultId}:${meta.metadata.sourceId}`,
+                        )}
                       />
                     ) : (
                       <p>
@@ -2697,14 +2709,72 @@ function CriteriaRows({
   resultId,
   sourceId,
   ask,
+  more,
 }: {
   data: TaskRead["data"];
   resultId: string;
   sourceId: string | undefined;
   ask: (r: Reference, label: string) => void;
+  /** The "N more" disclosure's open state, kept on the history entry like the Overview cards. */
+  more: {
+    open: boolean;
+    onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => void;
+  };
 }) {
   const s = data.review?.sources.find((s) => s.sourceId === sourceId),
-    latest = data.review?.sources.at(-1);
+    latest = data.review?.sources.at(-1),
+    rows = criterionRows(data, resultId, sourceId);
+  const criterionRow = (row: (typeof rows)[number]) => (
+    <div
+      key={row.criterionId}
+      className="criterion-row"
+      data-record-id={row.criterionId}
+    >
+      <p>
+        {row.label} · {row.status}
+        {row.stale ? " · stale source revision" : ""}
+      </p>
+      <p>{row.text}</p>
+      <p className="metadata muted">
+        {[
+          `Source revision ${row.revision}`,
+          row.record?.scope,
+          row.record?.provenance,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
+      {row.records.length > 1 && (
+        <div>
+          <p>Duplicate criterion identity; overall outcome unknown.</p>
+          <Literal
+            text={row.records
+              .map((record) =>
+                [record.outcome, record.scope, record.provenance]
+                  .filter(Boolean)
+                  .join(" · "),
+              )
+              .join("\n")}
+          />
+        </div>
+      )}
+      <Button
+        variant="secondary"
+        onClick={() =>
+          ask(
+            {
+              resultId,
+              sourceId: sourceId as string,
+              criterionId: row.criterionId,
+            },
+            `criterion ${row.position + 1} in source revision ${row.revision}`,
+          )
+        }
+      >
+        Ask lead about criterion
+      </Button>
+    </div>
+  );
   return (
     <div className="criteria-rows">
       <h4 className="small-heading">
@@ -2719,57 +2789,13 @@ function CriteriaRows({
           requirements.
         </p>
       )}
-      {criterionRows(data, resultId, sourceId).map((row) => (
-        <div
-          key={row.criterionId}
-          className="criterion-row"
-          data-record-id={row.criterionId}
-        >
-          <p>
-            {row.label} · {row.status}
-            {row.stale ? " · stale source revision" : ""}
-          </p>
-          <p>{row.text}</p>
-          <p className="metadata muted">
-            {[
-              `Source revision ${row.revision}`,
-              row.record?.scope,
-              row.record?.provenance,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-          {row.records.length > 1 && (
-            <div>
-              <p>Duplicate criterion identity; overall outcome unknown.</p>
-              <Literal
-                text={row.records
-                  .map((record) =>
-                    [record.outcome, record.scope, record.provenance]
-                      .filter(Boolean)
-                      .join(" · "),
-                  )
-                  .join("\n")}
-              />
-            </div>
-          )}
-          <Button
-            variant="secondary"
-            onClick={() =>
-              ask(
-                {
-                  resultId,
-                  sourceId: sourceId as string,
-                  criterionId: row.criterionId,
-                },
-                `criterion ${row.position + 1} in source revision ${row.revision}`,
-              )
-            }
-          >
-            Ask lead about criterion
-          </Button>
-        </div>
-      ))}
+      {rows.slice(0, 3).map(criterionRow)}
+      {rows.length > 3 && (
+        <details className="criteria-more" {...more}>
+          <summary>{rows.length - 3} more</summary>
+          {rows.slice(3).map(criterionRow)}
+        </details>
+      )}
       {latest && s && latest.sourceId !== s.sourceId && (
         <p>
           Newer source revision {latest.revision} has requirements not covered

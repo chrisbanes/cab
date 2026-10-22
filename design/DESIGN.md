@@ -391,7 +391,7 @@ not draw.
 | First run to first task | Install command | `108-signin-desktop` | no frame |
 | First run to first task | Fresh sign-in, no project | `143-home-getting-started` | no frame |
 | Review a result | Task detail | `03-task-detail` | `59-inspect-criterion-feedback` |
-| Review a result | Home recent results | `01-attention-overview` | `59-inspect-criterion-feedback` |
+| Review a result | Home Completed work | `01-attention-overview` | `59-inspect-criterion-feedback` |
 | Review a result | Inbox evidence link | `02-inbox-approval` | `59-inspect-criterion-feedback` |
 | Import issues from GitHub | Unsaved source on the GitHub source tab | `119d-github-source-import-ready` | `119e-github-source-imported` |
 
@@ -2291,7 +2291,9 @@ Production Overview, List and Board
 - There is no Recent results strip. A result excerpt, time and counter are not in
   the task-list read model and no endpoint lists results across tasks. Overview
   has a "Completed work" panel (count, up to three completed tasks, no recency
-  claim) linking to `/app/tasks?state=Done`. A real strip needs a read-model slice.
+  claim) linking to `/app/tasks?state=Done`. Each row is the task title only: the
+  result summary is on the task page, one interaction later, and on the phone the
+  panel sits below Home's first screen. A real strip needs a read-model slice.
 - No short identifiers (AT-142, A-104, Q-204, R2) are shown: no read model
   carries them. Imported tasks show `repository#number`, local tasks "Local task",
   and no raw UUID appears on Overview, List or Board.
@@ -2503,14 +2505,19 @@ as follows:
   disclosures (`46a-task-overview-laptop`, `03-task-detail` open, and
   `47-phone-task-overview` draw all three; the "Earlier results" and "Changes since
   viewed" links beside them stay unbuilt). Each summary is one clamped line of recorded
-  facts: "Requirements · GitHub · 2 supplied criteria", "R2 · 1 validation record ·
+  facts: "Requirements · GitHub · 4 supplied criteria", "R2 · 1 validation record ·
   2 artifacts", and each assignment's short id and known state. A pointer line
   closes the tab: "Captured conversations, earlier results and delivery evidence
   are in History, Changes and Review." The latest-result card keeps its summary, a
   "Changes · N files" link to the Changes tab (the result's changed-file count, or plain
-  "Changes" when the result supplies none; `70-phone-changes-delivery`), criterion rows, the viewing reference and the Result revision select visible; the
+  "Changes" when the result supplies none; `70-phone-changes-delivery`), the first three
+  criterion rows (a native "N more" disclosure follows the third row and holds the rest; it may sit just
+  below the first screen, which promises the summary and up to three outcomes;
+  `03-task-detail` and `47-phone-task-overview` draw "1 more"; the first-screen promise
+  holds for criterion text up to about one line each, and a longer or multiline
+  criterion is shown in full and can push later outcomes below the first screen), the viewing reference and the Result revision select visible; the
   disclosures hold their content mounted, so closing one loses no read, selection or
-  focus target. Open cards belong to the history entry, are written only by their
+  focus target. Open cards (and an open "N more" criteria disclosure, per result) belong to the history entry, are written only by their
   own toggles and links, and a task opened fresh starts with all three closed. The decision card leads
   with any request: a question ("Your decision · question pending", the first
   question's label from the exact question read or the request prompt when that
@@ -2627,6 +2634,10 @@ as follows:
   included, stays in the "read supplied text" disclosure. "Ask lead about
   criterion" keeps its exact-reference draft, which names the criterion by its
   line in the brief ("criterion 3 in source revision 1"), not by its C label.
+  Each row is compact so the third outcome stays on the first screen at 1366 × 900
+  and 390 × 844: the outcome and text lines span, and the metadata shares the last
+  line with Ask lead. On the phone Ask lead sits beside the outcome and text lines as a
+  two-line 44px control and the metadata runs full width below.
 - The phone keeps one reading column with the same tabs; the drill-in screens of
   frames 48, 51 and 55, a sticky bottom bar and the GitHub source / Ensemble
   tab pair of phone frames 14 and 15 are not built, so reading position,
