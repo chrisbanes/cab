@@ -37,6 +37,13 @@ export interface TaskPublicationJourneyOptions {
   readRetryMs?: number;
 }
 
+/**
+ * GitHub's issue list can trail a create by a moment, so the first read-back may not list the new
+ * issue and the create stays unproved. The product resolves it on its next refresh, never by
+ * resending; the journey refreshes at most this many times before it gives up on a publication.
+ */
+const refreshPasses = 8;
+
 /** A Project lists a new item a little after it is added: read it again for at most this many times. */
 const projectReads = 10;
 
@@ -359,19 +366,30 @@ export async function runTaskPublicationJourney(
         materialHash: review.materialHash,
         decision: "approved",
       });
-      const sent = await started.sendTaskPublication({
+      let sent = await started.sendTaskPublication({
         taskId,
         publicationId: review.publicationId,
         expectedTaskVersion: review.taskVersion,
       });
+      const immediate = sent.state;
+      let passes = 0;
+      while (sent.state === "sending" && passes < refreshPasses) {
+        if (sent.issueNumber === null)
+          await new Promise((r) => setTimeout(r, options.readRetryMs ?? 5000));
+        await started.refreshGitHub();
+        passes++;
+        sent = started.publication(review.publicationId) ?? sent;
+      }
       const steps = started.latestPublication(taskId)?.steps ?? [];
       // Recorded from the service's own state too, so cleanup never depends on parsing a response.
       if (sent.issueNumber && sent.issueNodeId)
         guard.recordIssue(sent.issueNumber, sent.issueNodeId);
-      return { review, sent, steps, target };
+      return { review, sent, steps, target, immediate, passes };
     };
     const outcome = (p: Awaited<ReturnType<typeof publish>>) => ({
       target: p.target.selectionId,
+      immediate: p.immediate,
+      refreshPasses: p.passes,
       state: p.sent.state,
       issueNumber: p.sent.issueNumber,
       steps: p.steps.map((s) => ({ kind: s.kind, state: s.state })),
@@ -398,10 +416,27 @@ export async function runTaskPublicationJourney(
       if (
         p.sent.state !== "converted" ||
         p.steps.some((s) => s.state !== "confirmed-success")
-      )
+      ) {
+        // What GitHub shows for the issues made so far, for a diagnosis; the cause is not guessed.
+        evidence.diagnostic = guard.createdIssues().map((number) => {
+          const issue = json(["api", `repos/${fullName}/issues/${number}`]) as {
+            title: string;
+            body: string;
+            labels: { name: string }[];
+            user: { node_id: string };
+          };
+          return {
+            number,
+            title: issue.title,
+            labels: issue.labels.map((l) => l.name),
+            bodyEndsWithMarker:
+              /<!-- ensemble-operation:[0-9a-f-]{36} -->$/.test(issue.body),
+          };
+        });
         throw new Error(
           `Publication to ${p.target.selectionId} ended ${p.sent.state}: ${JSON.stringify(p.steps)}`,
         );
+      }
     const tasksBefore = domain.tasks(projectId).length;
 
     // 7. One real sync must match both issues to their tasks, once the Project lists its item.

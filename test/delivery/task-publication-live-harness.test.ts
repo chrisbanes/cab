@@ -583,3 +583,45 @@ test("a fixture whose visibility differs from the grant stops before anything is
   assert.match(String(evidence.failure), /visibility/);
   assert.equal(fake.state.projectCreated, false);
 });
+
+test("a create GitHub's list does not show at first is proved by a later refresh, never sent again", async () => {
+  const f = files();
+  const github = new FakeGitHub();
+  github.createMode = "lost";
+  github.readbackVisible = false;
+  const fake = fakeGh(github);
+  const provider = github.provider();
+  const evidence = await runTaskPublicationJourney({
+    guard: new TaskPublicationGuard(f.raw, f.grant),
+    token,
+    attempt: 1,
+    gh: fake.gh,
+    fetcher: fixtureFetch(),
+    // The list catches up by the first read-back.
+    providerFactory: () => ({
+      ...provider,
+      inspectAction: async (record) => {
+        for (const issue of github.issues.values()) issue.hidden = false;
+        return provider.inspectAction(record);
+      },
+    }),
+    readerFactory: github.readerFactory(),
+    ghRetryMs: 0,
+    readRetryMs: 0,
+  });
+  assert.equal(evidence.failure, undefined, JSON.stringify(evidence));
+  assert.equal(evidence.qualification, "passed");
+  const publications = evidence.publications as Array<{
+    immediate: string;
+    refreshPasses: number;
+    state: string;
+  }>;
+  assert.deepEqual(
+    publications.map((p) => [p.immediate, p.refreshPasses, p.state]),
+    [
+      ["sending", 1, "converted"],
+      ["sending", 1, "converted"],
+    ],
+  );
+  assert.equal(github.posts, 2);
+});
