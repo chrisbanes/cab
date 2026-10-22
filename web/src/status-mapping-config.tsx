@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { discoveryProjectFieldsSchema } from "../../src/operator/contracts.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import {
@@ -11,7 +11,11 @@ import {
   statusMappingEvents,
   type StatusMappingEvent,
 } from "../../src/core/status-mapping-contracts.js";
-import { statusMappingPlan } from "./status-mapping-draft.js";
+import {
+  type FieldRead,
+  statusFieldNodeId,
+  statusMappingPlan,
+} from "./status-mapping-draft.js";
 import { Alert } from "./ui/alert.js";
 import { Button } from "./components.js";
 import type { TabProps } from "./project-config.js";
@@ -29,17 +33,6 @@ import {
 import type { Values } from "./settings-changes.js";
 
 type StatusView = NonNullable<ProjectConfigurationData["statusMapping"]>;
-type Field = {
-  fieldNodeId: string;
-  name: string;
-  options: { optionNodeId: string; name: string }[];
-};
-/** The Project's single-select `Status` field as GitHub lists it now. */
-type FieldRead =
-  | { state: "loading" }
-  | { state: "unavailable" }
-  | { state: "ready"; status: Field | null };
-
 const fieldErrorPath = (event: StatusMappingEvent) => `mapping.events.${event}`;
 
 export function StatusMappingPanel(
@@ -99,15 +92,19 @@ export function StatusMappingPanel(
       current = false;
     };
   }, [p.client, p.session.csrfToken, project, round]);
+  // Option ids belong to one Project: another Project starts from Nothing, the saved one from its mapping.
+  const shown = useRef(project);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a change of the chosen Project resets the options.
+  useEffect(() => {
+    if (shown.current === project) return;
+    shown.current = project;
+    for (const e of statusMappingEvents)
+      d.set(e, (project === saved?.projectNodeId && saved.events[e]) || "");
+  }, [project]);
   const fieldRead: FieldRead =
       read && read.project === project ? read.read : { state: "loading" },
     status = fieldRead.state === "ready" ? fieldRead.status : null,
-    // A saved mapping keeps its field while GitHub cannot be read.
-    fieldNodeId =
-      status?.fieldNodeId ??
-      (saved && saved.projectNodeId === project
-        ? saved.fieldNodeId
-        : undefined);
+    fieldNodeId = statusFieldNodeId(fieldRead, saved, project);
   const granted = new Set(
     view.granted
       .filter((g) => g.projectNodeId === project)

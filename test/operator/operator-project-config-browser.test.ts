@@ -3941,6 +3941,89 @@ test("an in-flight Status the readiness rule does not accept is refused naming t
   );
 });
 
+test("choosing another Project starts from Nothing, cannot be saved until its Status field is listed, and is never a clear", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, {});
+  const d = f.service.domain();
+  grantStatusOptions(f, ids.atlas, ["PVTSSO_ready"]);
+  d.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.statusMapping(ids.atlas).version,
+    mapping: {
+      selectionId: "S-3",
+      projectNodeId: "PVT_atlas",
+      fieldNodeId: statusField,
+      events: {
+        turnStarted: "PVTSSO_ready",
+        handedBack: null,
+        held: null,
+        done: null,
+      },
+    },
+  });
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true as const },
+      { id: "S-2", keep: true as const },
+      { id: "S-3", keep: true as const },
+      { id: "S-4", kind: "project", projectNodeId: "PVT_other", filter: "" },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  } as Parameters<OperatorApi["execute"]>[0]);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(
+    "**/discovery/project-fields?project=PVT_other",
+    async (route) => {
+      await gate;
+      await route.continue();
+    },
+  );
+  await page.reload();
+  const panel = statusPanel(page);
+  const turn = panel.getByLabel("First turn started", { exact: true });
+  const save = panel.getByRole("button", {
+    name: "Save status mapping",
+    exact: true,
+  });
+  await turn
+    .locator("option", { hasText: "Ready" })
+    .waitFor({ state: "attached" });
+  assert.equal(await turn.inputValue(), "PVTSSO_ready");
+  await panel.getByLabel("Project source", { exact: true }).selectOption("S-4");
+  // The other Project's field is loading: nothing carries over, nothing is cleared, nothing saves.
+  await panel.getByText("Reading this Project's Status options").waitFor();
+  assert.equal(await turn.inputValue(), "");
+  assert.equal(await save.isDisabled(), true);
+  assert.equal(await panel.getByText("Clears the status mapping").count(), 0);
+  release();
+  await panel
+    .getByText("This Project has no single-select field named Status")
+    .waitFor();
+  assert.equal(await save.isDisabled(), true);
+  assert.equal(await panel.getByText("Clears the status mapping").count(), 0);
+  assert.notEqual(d.statusMapping(ids.atlas).mapping, null);
+  // Back on the saved Project its mapping returns, unchanged; Nothing everywhere is the explicit clear.
+  await panel.getByLabel("Project source", { exact: true }).selectOption("S-3");
+  await turn
+    .locator("option", { hasText: "Ready" })
+    .waitFor({ state: "attached" });
+  assert.equal(await turn.inputValue(), "PVTSSO_ready");
+  assert.equal(await save.isDisabled(), true);
+  await turn.selectOption({ label: "Nothing" });
+  await panel.getByText("Clears the status mapping").waitFor();
+  assert.equal(await save.isDisabled(), false);
+});
+
 test("a project without a Project source shows the mapping as unavailable", async (_t, journey) => {
   const { page } = await startSettings(
     journey,

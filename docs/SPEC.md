@@ -1762,6 +1762,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   their own queue with a time limit on each provider call, so a slow or hung GitHub call never
   delays the task's agent actions or completion checks. Once a newer status write has been sent,
   an older unproved one stays uncertain on the task but is not inspected again.
+  A preflight that times out is a `confirmed-failure` that is not retried for that transition, and
+  shutdown can wait up to the status-write limit (30 s) for a hung write.
 
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or

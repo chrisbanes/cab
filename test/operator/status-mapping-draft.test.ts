@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { StatusMapping } from "../../src/core/status-mapping-contracts.js";
-import { statusMappingPlan } from "../../web/src/status-mapping-draft.js";
+import {
+  statusFieldNodeId,
+  statusMappingPlan,
+} from "../../web/src/status-mapping-draft.js";
 
 const saved: StatusMapping = {
   selectionId: "S-1",
@@ -68,4 +71,22 @@ test("a resolved Project saves its mapping and names the changes", () => {
   assert.equal(plan.ready, true);
   assert.equal(plan.mapping?.events.done, "O_done");
   assert.equal(plan.lines.length, 1);
+});
+
+test("another Project's Status field is unknown while loading, unreadable, unavailable or absent, and only the saved Project keeps its field", () => {
+  const listed = { fieldNodeId: "F_two", name: "Status", options: [] };
+  for (const read of [
+    { state: "loading" },
+    { state: "unavailable" },
+    { state: "ready", status: null },
+  ] as const) {
+    assert.equal(statusFieldNodeId(read, saved, "PVT_two"), undefined);
+    assert.equal(statusFieldNodeId(read, null, "PVT_one"), undefined);
+    // The saved Project keeps its field while GitHub cannot list it.
+    assert.equal(statusFieldNodeId(read, saved, "PVT_one"), "F_one");
+  }
+  assert.equal(
+    statusFieldNodeId({ state: "ready", status: listed }, saved, "PVT_two"),
+    "F_two",
+  );
 });

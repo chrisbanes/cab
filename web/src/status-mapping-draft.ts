@@ -6,6 +6,33 @@ import { statusEventLabels } from "../../src/operator/status-mapping-copy.js";
 import type { ProjectConfigurationData, Values } from "./settings-changes.js";
 
 type StatusView = NonNullable<ProjectConfigurationData["statusMapping"]>;
+export type Field = {
+  fieldNodeId: string;
+  name: string;
+  options: { optionNodeId: string; name: string }[];
+};
+/** The Project's single-select `Status` field as GitHub lists it now. */
+export type FieldRead =
+  | { state: "loading" }
+  | { state: "unavailable" }
+  | { state: "ready"; status: Field | null };
+
+/**
+ * The Status field a draft maps: the one GitHub lists for the chosen Project now. A saved mapping
+ * keeps its own field while its Project cannot be read, but only for its own Project. `undefined`
+ * (loading, unreadable, or no Status field) leaves the draft unsaveable.
+ */
+export function statusFieldNodeId(
+  read: FieldRead,
+  saved: StatusMapping | null,
+  project: string | null,
+): string | undefined {
+  const listed = read.state === "ready" ? read.status?.fieldNodeId : undefined;
+  return (
+    listed ??
+    (saved && saved.projectNodeId === project ? saved.fieldNodeId : undefined)
+  );
+}
 
 /** The draft's mapping, or `null` for none: no event names an option. */
 export function draftMapping(
