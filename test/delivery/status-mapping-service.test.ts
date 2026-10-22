@@ -462,7 +462,17 @@ test("a prepared status write left by a crash is attempted once by reconcile", a
   }
 });
 
-test("a hung status write is given up and never delays an agent action or completion qualification", async () => {
+test("a hung status write is given up and never delays an agent action or completion qualification", async (t) => {
+  // The limit is the only handle that can settle a call that never does: it must keep the process alive.
+  const limits: ReturnType<typeof setTimeout>[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", ((...args: unknown[]) => {
+    const timer = (
+      realSetTimeout as unknown as (...a: unknown[]) => NodeJS.Timeout
+    )(...args);
+    if (args[1] === 2000) limits.push(timer);
+    return timer;
+  }) as unknown as typeof setTimeout);
   const f = await mapped(undefined, 2000);
   try {
     await f.service.runStatusMapping();
@@ -494,6 +504,9 @@ test("a hung status write is given up and never delays an agent action or comple
     // Given up before any effect: refused, never sent, and not held.
     assert.equal(writes(f)[1]?.state, "confirmed-failure");
     assert.deepEqual(optionsWritten(f), [inProgress]);
+    assert.ok(
+      limits.length > 0 && limits.every((l) => (l as NodeJS.Timeout).hasRef()),
+    );
   } finally {
     await f.close();
   }

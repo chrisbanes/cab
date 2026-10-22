@@ -136,7 +136,8 @@ export class DeliveryCoordinator {
   /**
    * A status-mapping write's provider call gives up after a time; other callers wait as before. The
    * limit exceeds the provider's 15 s request limit, so the mutation, the first request of a write,
-   * has finished or been aborted before the write is given up and the next one can start.
+   * has finished or been aborted before the write is given up and the next one can start. The timer
+   * stays referenced: it is the only handle that can settle a call that never does.
    */
   private bounded<T>(caller: DeliveryCaller, call: Promise<T>): Promise<T> {
     if (!isServiceDeliveryCaller(caller)) return call;
@@ -148,7 +149,6 @@ export class DeliveryCoordinator {
           () => reject(new Error("status-write-timeout")),
           this.options.statusWriteTimeoutMs ?? 30_000,
         );
-        timer.unref();
       }),
     ]).finally(() => clearTimeout(timer));
   }
