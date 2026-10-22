@@ -723,6 +723,51 @@ test("a pass that began under an older mapping version leaves its tasks to the n
   }
 });
 
+test("a write confirmed after the mapping was rebound leaves no state behind, and the new mapping's next transition writes", async () => {
+  const { f, run } = await mappedManually();
+  try {
+    const { deliveryStore } = startedOf(f.service);
+    const stale = randomUUID();
+    deliveryStore.prepareAction(
+      {
+        operationId: stale,
+        action: {
+          kind: "project.field",
+          target: { repositoryId: "R1", number: 1, nodeId: "I1" },
+          projectNodeId,
+          itemNodeId: fixtureProject.itemNodeId,
+          fieldNodeId,
+          optionNodeId: inProgress,
+          expected: { optionNodeId: inProgress },
+        },
+      },
+      {
+        actor: "service",
+        purpose: "status-mapping",
+        projectId: f.projectId,
+        taskId: f.taskId,
+        mappingVersion: f.domain.statusMapping(f.projectId).version,
+        event: "turnStarted",
+      },
+      false,
+    );
+    save(f, null);
+    save(f, mapping({ turnStarted: inReview }));
+    deliveryStore.recordObservation(stale, {
+      state: "confirmed-success",
+      reason: null,
+      receipt: null,
+    });
+    const store = new StatusMappingStore(databaseOf(f.service));
+    assert.equal(store.taskState(f.taskId).observedAt, null);
+    assert.equal(store.taskState(f.taskId).lastEvent, "none");
+    await run();
+    assert.equal(optionsWritten(f).at(-1), inReview);
+  } finally {
+    await f.close();
+  }
+});
+
 test("a task watched under the current mapping still writes Done on closure after the mapping is saved again", async () => {
   const { f, run } = await mappedManually();
   try {

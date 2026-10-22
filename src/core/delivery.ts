@@ -1486,7 +1486,11 @@ export class DeliveryStore {
         isServiceDeliveryCaller(record.binding) &&
         observation.state === "confirmed-success" &&
         record.request.action.kind === "project.field" &&
-        // A late proof of an older write must not replace what a newer one wrote.
+        // A late proof of an older write must not replace what a newer one wrote, and a write of a
+        // mapping since cleared or rebound must not recreate the state that was forgotten with it.
+        record.binding.mappingVersion ===
+          new StatusMappingStore(this.db).current(record.binding.projectId)
+            .version &&
         this.latestSentServiceOperation(record.binding.taskId) === operationId
       )
         new StatusMappingStore(this.db).observed(
