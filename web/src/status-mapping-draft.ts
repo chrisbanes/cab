@@ -18,20 +18,12 @@ export type FieldRead =
   | { state: "ready"; status: Field | null };
 
 /**
- * The Status field a draft maps: the one GitHub lists for the chosen Project now. A saved mapping
- * keeps its own field while its Project cannot be read, but only for its own Project. `undefined`
- * (loading, unreadable, or no Status field) leaves the draft unsaveable.
+ * The Status field a draft maps: only the one GitHub lists for the chosen Project right now. While
+ * it is loading, unreadable or absent it is `undefined` even for the saved Project, so the draft
+ * cannot be saved, and an unread field is never mistaken for a clear.
  */
-export function statusFieldNodeId(
-  read: FieldRead,
-  saved: StatusMapping | null,
-  project: string | null,
-): string | undefined {
-  const listed = read.state === "ready" ? read.status?.fieldNodeId : undefined;
-  return (
-    listed ??
-    (saved && saved.projectNodeId === project ? saved.fieldNodeId : undefined)
-  );
+export function statusFieldNodeId(read: FieldRead): string | undefined {
+  return read.state === "ready" ? read.status?.fieldNodeId : undefined;
 }
 
 /** The draft's mapping, or `null` for none: no event names an option. */

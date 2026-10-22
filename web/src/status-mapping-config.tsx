@@ -104,7 +104,7 @@ export function StatusMappingPanel(
   const fieldRead: FieldRead =
       read && read.project === project ? read.read : { state: "loading" },
     status = fieldRead.state === "ready" ? fieldRead.status : null,
-    fieldNodeId = statusFieldNodeId(fieldRead, saved, project);
+    fieldNodeId = statusFieldNodeId(fieldRead);
   const granted = new Set(
     view.granted
       .filter((g) => g.projectNodeId === project)

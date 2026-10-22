@@ -73,22 +73,38 @@ test("a resolved Project saves its mapping and names the changes", () => {
   assert.equal(plan.lines.length, 1);
 });
 
-test("another Project's Status field is unknown while loading, unreadable, unavailable or absent, and only the saved Project keeps its field", () => {
-  const listed = { fieldNodeId: "F_two", name: "Status", options: [] };
+test("the Status field is known only when GitHub lists it now, for the saved Project too", () => {
+  const listed = { fieldNodeId: "F_one", name: "Status", options: [] };
   for (const read of [
     { state: "loading" },
     { state: "unavailable" },
     { state: "ready", status: null },
-  ] as const) {
-    assert.equal(statusFieldNodeId(read, saved, "PVT_two"), undefined);
-    assert.equal(statusFieldNodeId(read, null, "PVT_one"), undefined);
-    // The saved Project keeps its field while GitHub cannot list it.
-    assert.equal(statusFieldNodeId(read, saved, "PVT_one"), "F_one");
-  }
-  assert.equal(
-    statusFieldNodeId({ state: "ready", status: listed }, saved, "PVT_two"),
-    "F_two",
-  );
+  ] as const)
+    assert.equal(statusFieldNodeId(read), undefined);
+  assert.equal(statusFieldNodeId({ state: "ready", status: listed }), "F_one");
+});
+
+test("the saved Project with its field unread cannot be saved, with its options on Nothing or not, so it is never a clear", () => {
+  const savedProject = { id: "S-1", projectNodeId: "PVT_one" } as never;
+  for (const read of [
+    { state: "loading" },
+    { state: "unavailable" },
+    { state: "ready", status: null },
+  ] as const)
+    for (const v of [values, { ...values, turnStarted: "" }]) {
+      const plan = statusMappingPlan({
+        saved,
+        clearing: false,
+        values: v,
+        selection: savedProject,
+        fieldNodeId: statusFieldNodeId(read),
+        ...names,
+      });
+      assert.deepEqual(
+        [plan.mapping, plan.lines, plan.ready],
+        [null, [], false],
+      );
+    }
 });
 
 test("another Project with nothing chosen is not a clear of the saved mapping, even once its field is listed", () => {
