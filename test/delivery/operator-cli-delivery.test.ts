@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { deliveryWorld, publicationWorld } from "../fixtures/operator-cli.js";
+import { labelAndFieldReady } from "../fixtures/task-publication.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
@@ -345,5 +346,45 @@ test("delivery publish-link refuses an issue without the marker, and publish-aba
   assert.equal(abandoned.code, 0, abandoned.err);
   assert.match(abandoned.out, /may still have created the issue/);
   assert.match(abandoned.out, /State: +abandoned|abandoned/);
+  assert.equal(w.f.gh.posts, 1);
+});
+
+test("delivery publish-send says a later step is waiting, not that the create is unknown, when only an item add waits for a retry", async (t) => {
+  const w = await publicationWorld(t, {
+    selections: ["project"],
+    readiness: labelAndFieldReady,
+  });
+  w.f.gh.itemMode = "retry";
+  const taskId = w.f.task(true);
+  const review = w.f.service.reviewTaskPublication({
+    key: randomUUID(),
+    taskId,
+    targetId: w.f.target(taskId, "project").id,
+    expectedTaskVersion: w.f.version(taskId),
+  });
+  w.f.service.confirmTaskPublication({
+    key: randomUUID(),
+    taskId,
+    reviewId: review.publicationId,
+    expectedRevision: review.revision,
+    materialHash: review.materialHash,
+    decision: "approved",
+  });
+  const sent = await w.h.run([
+    "delivery",
+    "publish-send",
+    taskId,
+    "--review-id",
+    review.publicationId,
+    "--expected-task-version",
+    String(w.f.version(taskId)),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(sent.code, 0, sent.err);
+  assert.match(sent.out, /Issue #1 was created/);
+  assert.match(sent.out, /Link and Abandon do not apply/);
+  assert.doesNotMatch(sent.out, /outcome is not known/);
+  assert.doesNotMatch(sent.out, /publish-link|publish-abandon/);
   assert.equal(w.f.gh.posts, 1);
 });

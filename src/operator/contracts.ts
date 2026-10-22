@@ -1315,7 +1315,8 @@ export const publicationPolicySchema = z
           })
           .strict(),
       )
-      .max(64),
+      // Every unfiltered Project selection (30) crossed with every linked repository (20).
+      .max(600),
     /** The task's newest publication, whatever its state. */
     latest: z
       .object({

@@ -6,6 +6,7 @@ import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
+import { databaseOf } from "../fixtures/service-internals.js";
 import { publicationFixture } from "../fixtures/task-publication.js";
 
 /** A definite refusal of changed state: the service's conflict, or its 409. */
@@ -227,4 +228,29 @@ test("a runtime actor and a stale task version are refused", async (t) => {
     conflict,
   );
   assert.equal(f.gh.posts, 0);
+});
+
+test("a valid configuration at its maximum size never breaks the task read", async (t) => {
+  const { f, api } = await world(t);
+  const taskId = f.task(true);
+  // 30 unfiltered Project selections crossed with 20 linked repositories.
+  const selections = Array.from({ length: 30 }, (_, i) => ({
+    id: `s${i}`,
+    kind: "project",
+    projectNodeId: `PRJ${i}`,
+    filter: "",
+  }));
+  const repositories = Array.from({ length: 20 }, (_, i) => ({
+    repositoryId: `R${i}`,
+    path: `/checkouts/r${i}`,
+    ref: "main",
+    gitCommonDirectory: `/checkouts/r${i}/.git`,
+  }));
+  databaseOf(f.service)
+    .prepare(
+      "UPDATE project_github_sources SET selections=?, repositories=? WHERE projectId=?",
+    )
+    .run(JSON.stringify(selections), JSON.stringify(repositories), f.projectId);
+  const read = (await api.readTask(taskId)).data.publication;
+  assert.equal(read?.targets.length, 600);
 });

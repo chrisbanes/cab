@@ -56,7 +56,7 @@ export class FakeGitHub {
   createMode: "ok" | "lost" | "lost-unseen" | "rejected" = "ok";
   /** Whether a lost create can be found by the read-back. */
   readbackVisible = true;
-  itemMode: "ok" | "rejected" | "uncertain" = "ok";
+  itemMode: "ok" | "rejected" | "uncertain" | "retry" = "ok";
   /** Read-backs wait on this, so a test can act while one is in flight. */
   inspectGate: Promise<void> | undefined;
   /** Runs when an item add arrives, before it takes effect. */
@@ -182,6 +182,14 @@ export class FakeGitHub {
         if (a.kind === "project.item.add") {
           gh.itemAdds++;
           await gh.beforeItemAdd?.();
+          if (gh.itemMode === "retry")
+            return {
+              state: "confirmed-failure",
+              reason: "provider-http-429",
+              receipt: null,
+              retryable: true,
+              resumeAt: Date.now() + 3_600_000,
+            };
           if (gh.itemMode === "rejected")
             return {
               state: "confirmed-failure",

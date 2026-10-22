@@ -96,9 +96,19 @@ function publicationLines(p: Publication) {
   ]);
 }
 
+/** What a publication still being sent means, from its create step rather than from "sending" alone. */
+function sendingNote(taskId: string, p: Publication) {
+  const create = p.steps.find((s) => s.kind === "issue.create")?.state;
+  if (create === "confirmed-success")
+    return `Issue #${p.issueNumber} was created. A later step is waiting for GitHub or a retry. Nothing is sent again; run 'ensemble delivery refresh ${taskId}' to continue, and the task converts when the steps are recorded. Link and Abandon do not apply.`;
+  if (create !== "uncertain")
+    return `The create is still in progress or waiting for a retry. Nothing is sent again; run 'ensemble delivery refresh ${taskId}' to continue.`;
+  return `The create's outcome is not known. Nothing is sent again. Run 'ensemble delivery refresh ${taskId}' to read GitHub again; if the issue exists, run 'ensemble delivery publish-link ${taskId} --publication-id ${p.publicationId} --issue N'. 'ensemble delivery publish-abandon ${taskId} --publication-id ${p.publicationId}' gives up and may leave a duplicate issue.`;
+}
+
 const stateNote = (taskId: string, p: Publication) =>
   p.state === "sending"
-    ? `The create's outcome is not known. Nothing is sent again. Run 'ensemble delivery refresh ${taskId}' to read GitHub again; if the issue exists, run 'ensemble delivery publish-link ${taskId} --publication-id ${p.publicationId} --issue N'. 'ensemble delivery publish-abandon ${taskId} --publication-id ${p.publicationId}' gives up and may leave a duplicate issue.`
+    ? sendingNote(taskId, p)
     : p.state === "converted"
       ? `The task is now GitHub issue #${p.issueNumber}; its title and description are owned by GitHub from here, and the next sync matches it.`
       : p.state === "abandoned"
