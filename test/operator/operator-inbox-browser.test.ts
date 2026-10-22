@@ -1086,6 +1086,16 @@ test("an intervention shows its recorded reason and links to the execution", asy
     await aside.getByText("Execution ownership is uncertain").count(),
     0,
   );
+  // Ownership stays held is stated once, in the request pane, as on the Home card.
+  assert.equal(
+    await detail.getByText("Ownership stays held", { exact: true }).count(),
+    1,
+  );
+  for (const text of [
+    await page.locator(".inbox-row").innerText(),
+    await aside.innerText(),
+  ])
+    assert.doesNotMatch(text, /Ownership stays held/);
   const inspect = detail.getByRole("link", {
     name: "Inspect execution",
     exact: true,
@@ -1112,9 +1122,9 @@ test("an intervention shows its recorded reason and links to the execution", asy
   assert.ok(box && viewport && box.y >= 0 && box.y < viewport.height);
   assert.deepEqual(
     await card
-      .getByRole("link", { name: "Execution details", exact: true })
+      .getByRole("link", { name: "Recovery evidence", exact: true })
       .evaluateAll((a) => a.map((x) => x.getAttribute("href"))),
-    Array(3).fill(`/runtime/task/${held.taskId}`),
+    Array(3).fill(`/app/assignments/${held.assignmentId}/recovery`),
   );
 });
 

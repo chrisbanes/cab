@@ -180,6 +180,11 @@ export function InterventionDetail({ item }: { item: TaskInboxItem }) {
     <div className="inbox-approval">
       <div className="inbox-approval-body">
         <p>Review the exact execution state before acting.</p>
+        {item.attentionCode === "execution-uncertain" && (
+          <p className="metadata">
+            <strong>Ownership stays held</strong>
+          </p>
+        )}
       </div>
       <div className="inbox-decision">
         <ActionLink href={item.destination}>

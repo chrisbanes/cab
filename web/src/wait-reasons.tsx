@@ -50,6 +50,13 @@ const linkHref = (link: WaitLink, taskId: string | null) =>
           ? `/app/assignments/${link.assignmentId}/recovery`
           : "/app/tasks?state=Running";
 
+/** An assignment whose recovery page a hold line links. */
+export interface RecoveryAssignment {
+  assignmentId: string;
+  /** Null when the profile name is withheld, as in Settings. */
+  name: string | null;
+}
+
 /** One wait's Fix, or the links to what blocks it; holds never get a Fix. */
 function WaitAction({
   wait,
@@ -105,14 +112,16 @@ const WaitDetail = ({ wait }: { wait: Wait }) =>
     <p className="metadata muted wait-detail">{wait.detail}</p>
   ) : null;
 
-/** Holds a Fix leaves in place: what clears each, and the task's Execution view. Never a Fix. */
+/** Holds a Fix leaves in place: what clears each, and where to inspect them. Never a Fix. */
 function HoldList({
   lines,
   href,
+  assignments,
   heading,
 }: {
   lines: readonly HoldLine[];
   href: string;
+  assignments: readonly RecoveryAssignment[];
   heading?: string | undefined;
 }) {
   return (
@@ -126,7 +135,20 @@ function HoldList({
               {line.clears}
             </span>
             {/* Server-rendered page outside the app shell: a plain anchor loads it as a document. */}
-            <a href={href}>Execution details</a>
+            {assignments.length === 0 ? (
+              <a href={href}>Execution details</a>
+            ) : (
+              assignments.map((a) => (
+                <a
+                  key={a.assignmentId}
+                  href={`/app/assignments/${a.assignmentId}/recovery`}
+                >
+                  {assignments.length === 1
+                    ? "Recovery evidence"
+                    : `${a.name ?? "Profile name unavailable"}: recovery evidence`}
+                </a>
+              ))
+            )}
           </li>
         ))}
       </ul>
@@ -146,6 +168,7 @@ export function WaitReasons({
   variant = "list",
   holds = [],
   executionHref,
+  assignments = [],
   ...p
 }: WaitProps & {
   waits: readonly Wait[];
@@ -157,8 +180,10 @@ export function WaitReasons({
   variant?: "list" | "numbered";
   /** The task's execution holds (list variant only), listed beneath the waits. */
   holds?: readonly HoldLine[];
-  /** The task's Execution view, which each hold line links. */
+  /** The task's Execution view: the hold lines' link when the task has no assignment. */
   executionHref?: string;
+  /** The task's assignments; each hold line links every one's recovery page. */
+  assignments?: readonly RecoveryAssignment[];
 }) {
   const [first, ...rest] = waits;
   // One owner for the draft: its store notifies a single listener.
@@ -196,7 +221,12 @@ export function WaitReasons({
   const holdList = (heading?: string) =>
     heldLines.length > 0 &&
     executionHref && (
-      <HoldList lines={heldLines} href={executionHref} heading={heading} />
+      <HoldList
+        lines={heldLines}
+        href={executionHref}
+        assignments={assignments}
+        heading={heading}
+      />
     );
   return (
     <div className="wait-reasons">
