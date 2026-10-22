@@ -25,8 +25,8 @@ to say to the lead.
 1. The task opens on the latest result: summary, the first three supplied
    criteria with their recorded outcomes (the rest sit behind "N more"), and the
    recorded decisions attributed to who made them.
-2. A criterion without recorded evidence says so in a sentence and offers Ask lead
-   about criterion. No verified outcome is inferred.
+2. A criterion without a recorded outcome reads Unverified. Every criterion offers
+   Ask lead about criterion. No verified outcome is inferred.
 3. Changes and retained evidence are one step away; earlier results are listed
    beneath the latest, not above it.
 4. Message lead sends feedback on the result; completion stays the lead's decision.

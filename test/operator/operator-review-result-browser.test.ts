@@ -159,6 +159,16 @@ for (const [label, viewport] of [
       await s.page.locator("#review .criterion-row:visible").count(),
       3,
     );
+    if (viewport === phone) {
+      // Ask lead keeps its 44px target and its label wraps beside the outcome.
+      const box = (await s.page
+        .locator("#review .criterion-row")
+        .first()
+        .getByRole("button", { name: "Ask lead about criterion", exact: true })
+        .boundingBox())!;
+      assert.ok(box.height >= 44, `Ask lead is a 44px target ${box.height}`);
+      assert.ok(box.width <= 120, `Ask lead stays narrow ${box.width}`);
+    }
     let interactions = 0;
     await openEvidence(s.page);
     interactions++;
