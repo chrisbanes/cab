@@ -512,6 +512,12 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      the CLI first checks the review is approved for exactly this body by replaying
      it. An ID that is not an existing review is recorded as a new pending review
      by that replay, and nothing is posted. In approval mode a send needs a review.
+   - `delivery publish-review TASK_ID --target ID --expected-task-version N` records a
+     pending review of publishing a local task as a GitHub issue (the task read's
+     `publication` lists the target IDs and why a target is unavailable) and creates
+     nothing. `publish-confirm`, `publish-send --review-id R --expected-task-version N`,
+     `publish-link --publication-id R --issue N` and `publish-abandon --publication-id R`
+     follow it. Creating the issue is irreversible from Ensemble.
 
    Comment and refresh requests are scoped `task:TASK_ID`. An identical rerun
    reuses the journal key and replays the recorded outcome, so a comment is never

@@ -73,7 +73,9 @@ that share the web UI's Stop hold; Resume clears only the operator Stop.
 sources and repository links (a `github.configure` change document applied with
 `project apply`), activate a selection and place a conflicting imported task;
 `delivery get|refresh|review-comment|confirm-comment|send-comment` inspect delivery
-and drive the existing refresh and staged comment commands. `recovery
+and drive the existing refresh and staged comment commands, and `delivery
+publish-review|publish-confirm|publish-send|publish-link|publish-abandon` publish a
+local task as a GitHub issue with the operator UI's own commands. `recovery
 get|prepare|submit` inspect an assignment's held generations and submit the
 existing adoption, pre-turn and no-turn recovery and conversation-replacement
 commands from an owner-only, digest-bound document built from observed identity and
@@ -941,6 +943,52 @@ Ensemble keeps no copy of the edited text and no local override: the edit goes t
 GitHub, and the next sync observes the new title and body like a hand edit, including
 any source review that raises. Nothing is sent without the operator reviewing it.
 
+**Publish to GitHub.** The operator can turn a local task into a GitHub issue
+([ADR-1018](adr/1018-task-publication-in-place.md)). It is initiated only from task detail
+and the CLI, never by an agent, and the same task becomes that issue's imported task, so the
+next sync matches it instead of importing a duplicate. This is the one place a task changes
+from local to imported; its title and description are source-owned from then on.
+
+- **Eligibility.** A never-started open local task: not imported, not started (no workspace
+  or execution binding, which a draft turn creates), with no local dependency edges as a
+  dependent (a task that blocks others may be published; edges are neither dropped nor
+  converted), no unresolved publication, a GitHub source with a linked repository and a delivery
+  credential. The task read gives the first reason that applies, in that order.
+- **Targets.** Each `repository` selection whose repository is linked, and each unfiltered
+  `project` selection crossed with each linked repository. `search` and filtered `project`
+  selections are listed disabled (`selection-unpredictable`), because whether a new issue
+  would match cannot be predicted. A target is also disabled without an `issue.create` grant on
+  the repository, a `project.item.add` grant for the Project, or the `project.field` grants its
+  readiness writes need; when a Ready task's rule needs a Project field the target cannot set
+  (`readiness-unsatisfiable`); and for a Draft task where the project has no readiness rule,
+  since a new issue would then make it Ready (`would-become-ready`). Every enabled target predicts
+  that the new issue matches the selection and that the task stays as Ready as it is.
+- **Ready.** A Draft task never receives readiness labels or fields. A Ready task gets what its
+  rule needs on the new issue: under `all`, every label condition and every field condition on the
+  target Project; under `any`, the first label condition, else the first field condition on the
+  Project. The task keeps its Ready flag through conversion and the next sync recomputes it from
+  GitHub; a write that did not land leaves the ordinary readiness-lost or withdrawn hold
+  ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
+- **Review, confirm, send.** Review freezes the exact issue (title, body, labels), the target and
+  the operation ids of its steps; confirm is the approval in either grant mode and names the
+  repository, the text, the labels and fields, the predicted selection and Ready, and that nothing
+  reverses it. Send creates the issue, then for a Project target adds the item and sets each
+  readiness field, each as its own recorded delivery action with intent before effect. Until the
+  outcome is known the write shows as pending, the task is held, and its title, outcome, Ready,
+  state and dependencies cannot be changed.
+- **Conversion.** After the create is confirmed and the other steps are recorded (confirmed,
+  failed or unknown), the task is converted in one transaction. A failed or unknown item add leaves
+  the predicted Project membership to be removed by the next complete sync, so the withdrawn hold
+  applies; no field is written to an item that is not known to exist.
+- **Unknown create.** The read-back confirms nothing from an empty list. The task stays held and
+  nothing is sent again, across restart; a sync skips a new issue carrying an unresolved
+  publication's marker. The operator can **Link** a named issue, which must carry the marker and the
+  exact text, after which the remaining steps run and the task converts, or **Abandon**, which
+  returns the task to local with a warning that GitHub may still have created the issue (the next sync
+  would then import it as a separate task). A create GitHub provably refused leaves the task local.
+- **Irreversible.** Closing the issue on GitHub is the only recovery. Publishing is offered only on
+  task detail and by the CLI; the board, list and context menus do not offer it.
+
 Label native GitHub dependencies as source-owned and link to the source; do not
 offer local overrides. Distinguish Message lead from any permitted Post comment to
 GitHub action, including the destination before submission. Local messages do not
@@ -1680,6 +1728,20 @@ Readback requires exactly one submitted marker reply by the credential user, or 
 thread resolved by that user; a lost response stays uncertain and is not replayed.
 Unresolving threads, editing or deleting comments and submitting reviews are not
 supported, and the operator comment path is unchanged.
+
+The operator publishes a local task through three more actions on the same lifecycle,
+sent by the **operator publication caller** and never by an agent or the service
+([ADR-1017](adr/1017-non-agent-readiness-writes.md)): `issue.create` (granted per repository),
+`project.item.add` (per repository and Project, using `addProjectV2ItemById`, which adds nothing a
+second time) and the existing `project.field` for the readiness fields. The confirmed publication
+review is the approval in either grant mode, and each step must be exactly one the review froze,
+on the repository it recorded and, after the create, only on the issue it created. The create posts
+`{title, body + marker, labels}`; read-back pages the credential user's issues since the record
+was made (not the search index), ignores pull requests and requires exactly one issue whose body
+is the posted body, with the same title and every label, by the credential user. An item add is read
+back from the issue's Project items. Link reads the named issue and requires the marker and the
+exact text. A Ready task's publication is the only non-service caller exempt from the readiness
+refusals, and only for the label or option the rule names.
 
 The operator can edit the bound issue's title and body through `issue.edit` on the same
 lifecycle as an operator comment. `issue.edit.review` records the exact material: the

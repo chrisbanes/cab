@@ -487,6 +487,19 @@ hidden `<!-- ensemble-operation:ID -->` marker that the provider read-back match
 Installation-wide source refresh, `source.review`, handback settlement and a list of
 pending comment reviews are not CLI commands.
 
+`delivery publish-review|publish-confirm|publish-send|publish-link|publish-abandon`
+publish a local task as a GitHub issue ([ADR-1018](../adr/1018-task-publication-in-place.md))
+with the web UI's commands (`task.publish.review|confirm|send|link|abandon`), scoped
+`task:<id>`. `publish-review TASK_ID --target ID --expected-task-version N` reads the task's
+publication targets first and refuses a task or target that cannot take it with the reason;
+the review's key is the publication id and the operation id of the create. `publish-confirm`
+records the decision on the printed revision and material hash. `publish-send` is one
+publication keyed by `--request-id`, and a replay answers where it is without sending more.
+`publish-link TASK_ID --publication-id ID --issue N` accepts an issue only if it carries the
+create's marker and text, and `publish-abandon` warns that a duplicate may exist. The commands
+live under `delivery` because the task area's usage block stays within one screen. Creating the
+issue is irreversible from Ensemble; closing it on GitHub is the only recovery.
+
 Recovery drives the five existing evidence-bearing operations through receipted
 commands on `POST /api/operator/commands`, scoped `assignment:<id>`:
 `recovery.pre-turn.adopt`, `recovery.pre-turn.recover`, `recovery.no-turn.adopt`,
