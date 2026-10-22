@@ -5,10 +5,10 @@ import { assignmentRow } from "./task-overview.js";
 import { ExecutionNotices } from "./execution-notice.js";
 import "./task-detail.css";
 
-/** Opens the collapsed Overview card that holds a linked record, so a link never lands on a closed one. */
+/** Opens the collapsed Overview card (or "N more" criteria) that holds a linked record, so a link never lands on a closed one. */
 export function openDisclosures(target: HTMLElement) {
   const card = target.closest<HTMLDetailsElement>(
-    "details.overview-disclosure",
+    "details.overview-disclosure, details.criteria-more",
   );
   if (card) card.open = true;
 }

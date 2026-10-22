@@ -49,7 +49,8 @@ a 1366 × 900 desktop, one row on a phone); reaching it is a scroll, not an inte
 Home's Completed work lists the task title only, so the summary is not on Home. On a
 phone the panel sits below Home's first screen; scrolling is not an interaction.
 
-An Inbox evidence link lands on the evidence it names (1).
+An Inbox evidence link lands on the task's History in one interaction; it does not
+name a single result.
 
 Identifiers (result, assignment, revision) appear as short metadata, never in a
 sentence.

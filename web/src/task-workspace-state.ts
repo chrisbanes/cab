@@ -300,6 +300,8 @@ export class TaskWorkspaceState {
   expanded = new Set<string>();
   /** Open Overview cards; written only by the cards' toggles and a deep link's first selection. */
   overview = new Set<OverviewCard>();
+  /** Results (by result and source) whose "N more" criteria are open; the operator's own toggle writes it. */
+  criteriaOpen = new Set<string>();
   chronological = false;
   get sourceObservation() {
     return this.reply.sourceObservation;

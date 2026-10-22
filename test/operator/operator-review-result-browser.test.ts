@@ -31,7 +31,7 @@ async function start<A extends Awaited<ReturnType<typeof seedReviewTask>>>(
   viewport: { width: number; height: number },
   seed: (f: Fixture) => Promise<A>,
   path: (seeded: A) => string,
-  record = true,
+  record: "lead" | "delegated" | "none" = "lead",
 ) {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
@@ -43,25 +43,26 @@ async function start<A extends Awaited<ReturnType<typeof seedReviewTask>>>(
     () => f.lifecycle.steps,
   );
   const a = await seed(f);
-  const result = !record
-    ? { resultId: "" }
-    : a.result(summary, {
-        sourceId: a.source.sourceId,
-        criteria: a.source.criteria.map((c, i) => ({
-          criterionId: c.criterionId,
-          outcome: outcomes[i]!,
-          scope: `Criterion ${i + 1} scope`,
-          provenance: `Check ${i + 1}`,
-        })),
-        validations: [
-          {
-            label: "Unit tests",
-            outcome: "passed",
-            scope: "Whole suite",
-            provenance: "CI run",
-          },
-        ],
-      });
+  const result =
+    record === "none"
+      ? { resultId: "" }
+      : (record === "lead" ? a.result : a.delegatedResult)(summary, {
+          sourceId: a.source.sourceId,
+          criteria: a.source.criteria.map((c, i) => ({
+            criterionId: c.criterionId,
+            outcome: outcomes[i]!,
+            scope: `Criterion ${i + 1} scope`,
+            provenance: `Check ${i + 1}`,
+          })),
+          validations: [
+            {
+              label: "Unit tests",
+              outcome: "passed",
+              scope: "Whole suite",
+              provenance: "CI run",
+            },
+          ],
+        });
   const web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({ viewport });
@@ -153,6 +154,18 @@ for (const [label, viewport] of [
       third!.y + third!.height <= viewport.height - 8,
       `the third outcome keeps 8px of headroom ${JSON.stringify(third)}`,
     );
+    // Each row reads its recorded outcome, not a default.
+    assert.deepEqual(
+      await s.page
+        .locator("#review .criterion-row > p:first-child")
+        .allTextContents(),
+      [
+        "C1 · Supported by recorded evidence",
+        "C2 · Failed recorded check",
+        "C3 · Unverified",
+        "C4 · Supported by recorded evidence",
+      ],
+    );
     const more = s.page.locator("#review .criteria-more > summary");
     assert.equal(await more.textContent(), "1 more");
     // "N more" directly follows the third row and is reachable; it may sit just below the
@@ -221,7 +234,7 @@ for (const [label, viewport] of [
       (f) => seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
       ({ taskId, interactionId }) =>
         `/app/inbox?request=${interactionId}&task=${taskId}`,
-      false,
+      "delegated",
     );
     const link = s.page.getByRole("link", { name: "Task evidence" });
     await link.waitFor({ state: "attached" });
@@ -232,7 +245,20 @@ for (const [label, viewport] of [
     await s.page.waitForURL(new RegExp(`/app/tasks/${s.taskId}#history`));
     const history = s.page.getByRole("tab", { name: "History", exact: true });
     assert.equal(await history.getAttribute("aria-selected"), "true");
-    await s.page.locator("#task-panel-history").waitFor();
+    // The link names the task's History, which lists the seeded result's recorded capture.
+    const named = s.page.locator("#task-panel-history");
+    await named
+      .getByText(/^assignment-result · /)
+      .first()
+      .waitFor();
+    assert.equal(
+      await inFirstViewport(
+        s.page,
+        named.getByText("Captured context").first(),
+      ),
+      true,
+      "the History panel is in view",
+    );
     await noPageOverflow(s.page);
     assert.equal(interactions, 1);
   });
@@ -309,4 +335,52 @@ test("review a result: a long criterion is shown in full and keeps its outcome",
   assert.match((await outcome.textContent()) ?? "", /^C1 · /);
   assert.equal(await outcome.isVisible(), true);
   await noPageOverflow(s.page);
+});
+
+test("review a result: an open N more, its scroll and the focus in it survive leaving and Back", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    seedFourCriteria,
+    ({ taskId }) => `/app/tasks/${taskId}`,
+  );
+  const more = s.page.locator("#review .criteria-more");
+  const fourth = more.locator(".criterion-row");
+  await more.locator("> summary").click();
+  await fourth.waitFor();
+  const ask = fourth.getByRole("button", {
+    name: "Ask lead about criterion",
+    exact: true,
+  });
+  await ask.scrollIntoViewIfNeeded();
+  await ask.focus();
+  const y = await s.page.evaluate(() => scrollY);
+  assert.ok(y > 0, "the page is scrolled to the fourth criterion");
+  // Leave in place, as the app's own links do, then come Back.
+  await s.page.evaluate(() => {
+    const a = document.createElement("a");
+    a.href = "/app/tasks";
+    document.body.append(a);
+    a.click();
+    a.remove();
+  });
+  await s.page
+    .getByRole("heading", { name: "All tasks", exact: true })
+    .waitFor();
+  await s.page.goBack();
+  await s.page.locator("#review .criteria-more[open]").waitFor();
+  await s.page.waitForFunction(
+    (id) =>
+      document.activeElement
+        ?.closest("[data-record-id]")
+        ?.getAttribute("data-record-id") === id,
+    await fourth.getAttribute("data-record-id"),
+  );
+  await settle(s.page);
+  assert.equal(
+    await inFirstViewport(s.page, ask),
+    true,
+    "criterion 4 is in view",
+  );
+  assert.ok(Math.abs((await s.page.evaluate(() => scrollY)) - y) <= 1);
 });

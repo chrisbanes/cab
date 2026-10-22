@@ -2517,7 +2517,7 @@ as follows:
   holds for criterion text up to about one line each, and a longer or multiline
   criterion is shown in full and can push later outcomes below the first screen), the viewing reference and the Result revision select visible; the
   disclosures hold their content mounted, so closing one loses no read, selection or
-  focus target. Open cards belong to the history entry, are written only by their
+  focus target. Open cards (and an open "N more" criteria disclosure, per result) belong to the history entry, are written only by their
   own toggles and links, and a task opened fresh starts with all three closed. The decision card leads
   with any request: a question ("Your decision · question pending", the first
   question's label from the exact question read or the request prompt when that

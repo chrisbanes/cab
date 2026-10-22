@@ -1507,6 +1507,15 @@ export function TaskWorkspace({
       changed();
     },
   });
+  const criteriaMore = (key: string) => ({
+    open: state.criteriaOpen.has(key),
+    onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => {
+      if (event.currentTarget.open === state.criteriaOpen.has(key)) return;
+      if (event.currentTarget.open) state.criteriaOpen.add(key);
+      else state.criteriaOpen.delete(key);
+      changed();
+    },
+  });
   const briefSummary = `Requirements · ${source?.kind === "github" || data.source ? "GitHub" : "Local"} · ${(() => {
     if (!source) return "Retained source unavailable";
     const { criteria, known } = briefParts(source),
@@ -2030,6 +2039,9 @@ export function TaskWorkspace({
                         resultId={selected.resultId}
                         sourceId={meta.metadata.sourceId}
                         ask={ask}
+                        more={criteriaMore(
+                          `${selected.resultId}:${meta.metadata.sourceId}`,
+                        )}
                       />
                     ) : (
                       <p>
@@ -2697,11 +2709,17 @@ function CriteriaRows({
   resultId,
   sourceId,
   ask,
+  more,
 }: {
   data: TaskRead["data"];
   resultId: string;
   sourceId: string | undefined;
   ask: (r: Reference, label: string) => void;
+  /** The "N more" disclosure's open state, kept on the history entry like the Overview cards. */
+  more: {
+    open: boolean;
+    onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => void;
+  };
 }) {
   const s = data.review?.sources.find((s) => s.sourceId === sourceId),
     latest = data.review?.sources.at(-1),
@@ -2773,7 +2791,7 @@ function CriteriaRows({
       )}
       {rows.slice(0, 3).map(criterionRow)}
       {rows.length > 3 && (
-        <details className="criteria-more">
+        <details className="criteria-more" {...more}>
           <summary>{rows.length - 3} more</summary>
           {rows.slice(3).map(criterionRow)}
         </details>
