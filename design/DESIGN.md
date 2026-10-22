@@ -2291,7 +2291,9 @@ Production Overview, List and Board
 - There is no Recent results strip. A result excerpt, time and counter are not in
   the task-list read model and no endpoint lists results across tasks. Overview
   has a "Completed work" panel (count, up to three completed tasks, no recency
-  claim) linking to `/app/tasks?state=Done`. A real strip needs a read-model slice.
+  claim) linking to `/app/tasks?state=Done`. Each row is the task title only: the
+  result summary is on the task page, one interaction later, and on the phone the
+  panel sits below Home's first screen. A real strip needs a read-model slice.
 - No short identifiers (AT-142, A-104, Q-204, R2) are shown: no read model
   carries them. Imported tasks show `repository#number`, local tasks "Local task",
   and no raw UUID appears on Overview, List or Board.

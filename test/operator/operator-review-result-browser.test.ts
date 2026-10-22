@@ -182,11 +182,16 @@ for (const [label, viewport] of [
     const link = s.page
       .getByRole("region", { name: "Completed work" })
       .getByRole("link", { name: "Ship an accessible command menu" });
+    // Home's Completed work lists only the task; the summary is on the task page. The task is
+    // on Home's first screen at desktop; on the phone Home puts the panel below the fold
+    // (scrolling is not an interaction, and Home's layout is outside this budget).
+    await link.waitFor();
+    if (viewport === desktop) await assertFirstScreen(s.page, [link]);
+    else await noPageOverflow(s.page);
     let interactions = 0;
     await link.click();
     interactions++;
     await s.page.waitForURL(new RegExp(`/app/tasks/${s.taskId}`));
-    // Home's own row may sit below the fold; the screen the click opens is the first screen.
     await assertFirstScreen(s.page, [resultScreen(s.page)[0]!]);
     await openEvidence(s.page);
     interactions++;

@@ -36,7 +36,10 @@ to say to the lead.
 | Entry point | Interactions to the evidence | First screen must show |
 | --- | --- | --- |
 | Task detail | 1 (Evidence) | the result summary and at most three criterion outcomes, with "N more" for the rest |
-| Home Completed work | 2 (the task, Evidence) | the result summary |
+| Home Completed work | 2 (the task, Evidence) | the task in Completed work; after the first interaction, the result summary on the task page |
+
+Home's Completed work lists the task title only, so the summary is not on Home. On a
+phone the panel sits below Home's first screen; scrolling is not an interaction.
 
 An Inbox evidence link lands on the evidence it names (1).
 
