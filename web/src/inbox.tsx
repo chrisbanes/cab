@@ -650,7 +650,7 @@ export function Inbox({
               ) : selected?.kind === "runtime" ? (
                 <RuntimeDetail item={selected} />
               ) : selected ? (
-                <InterventionDetail item={selected} />
+                <InterventionDetail item={selected} leftQueue={leftQueue} />
               ) : (
                 <p>Selected request is unavailable.</p>
               )}

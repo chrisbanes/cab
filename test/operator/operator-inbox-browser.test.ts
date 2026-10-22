@@ -15,7 +15,11 @@ import {
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
-import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
+import {
+  inboxReadSchema,
+  taskSchema,
+  type TaskRead,
+} from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   seedOwnApproval,
@@ -1126,6 +1130,37 @@ test("an intervention shows its recorded reason and links to the execution", asy
       .evaluateAll((a) => a.map((x) => x.getAttribute("href"))),
     Array(3).fill(`/app/assignments/${held.assignmentId}/recovery`),
   );
+});
+
+test("an intervention that leaves the queue stops saying ownership stays held", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnIntervention(f),
+  );
+  const detail = page.getByRole("region", { name: "Selected request" });
+  await page.locator(".inbox-row").click();
+  await detail.getByText("Ownership stays held", { exact: true }).waitFor();
+  // The execution is resolved: the next read no longer lists the intervention.
+  await page.route("**/api/operator/inbox", async (route) => {
+    const body = inboxReadSchema.parse(await (await route.fetch()).json());
+    body.data.items = [];
+    await route.fulfill({ json: body });
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page
+    .getByText(
+      "This request has left the current queue. Its exact detail remains selected.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(
+    await detail.getByText("Ownership stays held", { exact: true }).count(),
+    0,
+  );
+  await detail.getByText("Execution ownership is uncertain").waitFor();
 });
 
 test("returning to the Inbox restores the request the operator chose, not the one it opened by itself", async (_t, j) => {
