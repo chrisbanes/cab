@@ -89,8 +89,13 @@ show the label `ens-1167-aeb6bd32` applied to both issues at creation.
 Failed: after the sync the Project task was Ready and the repository task was not. The harness did not yet
 record the task's holds, memberships or labels, so the cause is not isolated. Candidates are a membership
 the sync dropped because the issue list did not yet show a just-created issue (the same lag as the
-read-back), or a product defect in how a repository-target task is carried through its first sync. The
-deterministic tests, whose fake GitHub never lags, keep both tasks Ready. The harness now records that
+read-back), or a product defect in how a repository-target task is carried through its first sync. The timing fits the
+first candidate: the Project task's issue was created about 16 seconds before the repository task's, the
+first read-back missed each new issue until a refresh several seconds later, and the final sync ran roughly
+eight to fifteen seconds after the repository task's issue was created. A deterministic check with a source
+read that omits the issue once shows the task dropping to not Ready with a `withdrawn` hold, and Ready again
+on the next sync with the hold left in place. The deterministic tests, whose fake GitHub never lags, keep
+both tasks Ready. The harness now records that
 state when the check fails, but no attempt remains.
 
 ## Cleanup proof
