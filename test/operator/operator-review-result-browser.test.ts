@@ -147,6 +147,12 @@ for (const [label, viewport] of [
       ({ taskId }) => `/app/tasks/${taskId}`,
     );
     await assertFirstScreen(s.page, resultScreen(s.page));
+    // Headroom for font metrics that differ between macOS and CI.
+    const third = await resultScreen(s.page)[3]!.boundingBox();
+    assert.ok(
+      third!.y + third!.height <= viewport.height - 8,
+      `the third outcome keeps 8px of headroom ${JSON.stringify(third)}`,
+    );
     const more = s.page.locator("#review .criteria-more > summary");
     assert.equal(await more.textContent(), "1 more");
     assert.equal(

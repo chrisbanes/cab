@@ -572,6 +572,13 @@ a.task-source-chip:hover {
   margin: 2px 0;
 }
 
+/* Criteria past the third sit behind a native disclosure. */
+.criteria-more > summary {
+  cursor: pointer;
+  padding-block: var(--space-8);
+  color: var(--fg-2);
+}
+
 /* Phone: tighten the cards above the criteria so the third outcome stays on the first screen. */
 @media (max-width: 759px) {
   .task-workspace section.decision-card {
@@ -689,6 +696,7 @@ a.task-source-chip:hover {
 
 @media (max-width: 1120px) {
   .overview-disclosure > summary,
+  .criteria-more > summary,
   .task-strip [data-slot="button"],
   .task-strip button.task-next,
   .task-strip a.task-source-chip,
