@@ -413,7 +413,7 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
           request,
           receipt,
           reused,
-          effect: "completed",
+          effect: receipt.state === "converted" ? "completed" : "queued",
           summary: `Linked issue #${issueNumber}`,
           lines: [["Task", taskId]],
           notes: [publicationLines(receipt), stateNote(taskId, receipt)].filter(

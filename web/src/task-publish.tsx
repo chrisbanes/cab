@@ -435,7 +435,9 @@ function Steps({ latest }: { latest: PublicationLatest }) {
         <li key={step.operationId} className="body">
           {stepLabels[step.kind]}:{" "}
           <span className="issue-improve-strong">
-            {stepStates[step.state] ?? step.state}
+            {step.state === "confirmed-failure"
+              ? "waiting to retry"
+              : (stepStates[step.state] ?? step.state)}
           </span>
           {step === create && latest.issueNumber
             ? ` (issue #${latest.issueNumber})`
