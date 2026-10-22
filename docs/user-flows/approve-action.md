@@ -1,7 +1,10 @@
 # Approve an exact action
 
-**Status:** planned. The Inbox and task decision card reach the exact-material
-approval today; the budget below is not yet asserted by a journey test.
+**Status:** built for the three budgeted entry points. The Review material & decide
+link opens the exact-material page at the approval item, and the recorded decision
+returns to the same item. The budget is asserted at 1366 × 900 and 390 × 844 by
+`test/operator/operator-approve-action-browser.test.ts` ("approve an exact action
+budget"); its Home cases pin runtime readiness to passing.
 
 ## Goal
 
@@ -28,8 +31,9 @@ material invalidates approval".
    beneath it and Review material & decide.
 2. The request pane shows action, target, requester, material version and any
    independent hold the decision does not clear, then one Review material & decide.
-3. The exact-material view shows the material in full with Approve, Deny and Leave
-   pending. Approve confirms once.
+3. The exact-material view shows the material in full with "Approve this exact
+   material" and Deny. Approve records the decision in one submission; Deny is the
+   alternative, and leaving the page keeps the request pending.
 4. The recorded decision shows on the request, the task and the Inbox row, with any
    remaining hold stated beside it.
 
@@ -37,9 +41,9 @@ material invalidates approval".
 
 | Entry point | Interactions to a recorded decision | First screen must show |
 | --- | --- | --- |
-| Home card | 3 (Review material & decide, Approve, confirm) | the exact action and the task |
-| Inbox row | 4 (row, Review material & decide, Approve, confirm) | the exact action in the row |
-| Task decision card | 3 (Review material & decide, Approve, confirm) | action, target and material version |
+| Home card | 2 (Review material & decide, Approve this exact material) | the exact action and the task |
+| Inbox row | 3 (row, Review material & decide, Approve this exact material) | the exact action in the row |
+| Task decision card | 2 (Review material & decide, Approve this exact material) | action, target and material version |
 
 The operator CLI is outside the budget: it has no screens.
 

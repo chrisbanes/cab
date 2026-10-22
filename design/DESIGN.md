@@ -2231,7 +2231,7 @@ Production Inbox and shared question response
 06–11, 19, 21 and 27–33 as follows:
 
 - Phone Back is the page header's link ("Back to Inbox"), as frames 10, 21 and 27–30 draw it, not an in-body "Back to queue" button. After a recorded answer the confirmation card's button reads "Back to Inbox". A wide layout has no back control.
-- Approvals show the exact action, target, revision, requester, the independent holds (frames 07 and 33) and the bound-decision statement, with one "Review material & decide" link to the retained `/coordination/task/:id#<interaction>` destination. The Inbox never approves or denies; an in-app decision would be a new authority surface.
+- Approvals show the exact action, target, revision, requester, the independent holds (frames 07 and 33) and the bound-decision statement, with one "Review material & decide" link to the retained `/coordination/task/:id#<interaction>` destination. The page anchors each approval item at `#<interaction>`, and the recorded decision returns to that anchor. The Inbox never approves or denies; an in-app decision would be a new authority surface.
 - Evidence stays the existing "Question evidence" and "Task evidence" links; the read has no excerpt field, so frame 27's in-pane excerpt is not drawn. Returning from the task restores the selection, scroll position and the link's focus.
 - A single question's choice cards stay in the reading flow (frame 06 pins them); only the submit area is sticky, inside the one scroll owner `.inbox-detail`, so a pinned option list cannot trap scrolling or cover a field.
 - Queue rows use read-model facts only: the kind, the title (the first question's label or the approval's exact action from the item's `headline`, which is null, and the row falls back to the task title, whenever the exact read would withhold it; two lines at most, the full text on hover), "Project / Task title" as the subtitle (the project alone under a task-title fallback), the action ("Answer question", "Review material & decide", "Inspect execution"; an intervention's reason and action come from its attention code, and only operator-owned codes raise one, so a routing fallback has no Inbox item; a recorded native answer whose delivery is unresolved keeps its question row, "Answer recorded; native delivery remains unresolved", with "View task" rather than an answer action; the generic "Operator answer requested" and "Review exact approval material" reasons are not shown, and only an intervention's or delivery row's reason is) and "Requester · HH:MM · age". Frame 02 draws "Review material & decide" as an approval row title; the row leads with the exact action instead, as the issue's acceptance criterion requires. There are no short identifiers (Q-204, A-201: U3 #837), no "Execution uncertain" versus "Intervention problems" subtype (one "Interventions" option), and no grouped-question title on a phone.
@@ -2693,7 +2693,9 @@ project's New task, setup's ready check and Getting started, all opening the sam
 only deep link). The retained
 `/task/:id`, `/runtime/task/:id` and `/coordination/task/:id` pages are unchanged
 and linked from Execution (`/runtime/task/:id`) and the History tab's Approval and
-delivery forms (`/coordination/task/:id`, which links `/task/:id`). No
+delivery forms (`/coordination/task/:id`, which links `/task/:id`), except that
+`/coordination/task/:id` anchors each approval item at `#<interaction>` and returns an
+approval decision to it. No
 context menu or extension surface applies, and a browser notification never opens the composer. Counterparts: Stop →
 Execution → Resume (retained); Keep running and Escape send nothing; a tab switch
 sends nothing and keeps drafts, and Refresh task only re-reads; Optional
