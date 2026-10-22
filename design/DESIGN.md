@@ -1565,6 +1565,13 @@ as source files.
 A selected line has a blue selection fill; diff additions/deletions use restrained
 green/red fills plus explicit +/− markers and Before/After labels.
 
+The Changes rail heading reads "Changes · N +a −d" (screen 80,
+`06-workspace-changes-review`): the changed-file count and the added and removed lines
+of every hunk. A truncated comparison, or one with a gap or unsupported entry, shows the
+file count alone, so a partial total never reads as complete. The explanatory sentence
+about snapshots and Refresh follows the rail and diff instead of leading them, so the
+list is the first thing under the comparison controls.
+
 `06-workspace-changes-review` places the draft composer below the selected hunk, with its exact
 Before 41–43 deleted-range anchor visible. Save comment adds to the local draft;
 it does not send. Review opens the complete-review screen `83-review-complete-draft`. Cancel restores
@@ -1584,6 +1591,11 @@ journey is `91-phone-complete-review-first-scroll` → `92-phone-complete-review
 without squeezing a desktop rail onto the phone. `89-phone-deleted-side-range-selection` and `98-phone-retained-result-bytes` use compact
 24px editor rows (13 mobile editor rows at 24px); the desktop row component and
 instances are unchanged.
+The phone Changes tab keeps the changed-file list inside the first 390 × 844 screen with
+its heading: repository and base (or target) selects share one row as in
+`101-phone-local-base-selection`, and the observation strip is one wrapped row with a
+borderless "Details" link while closed, as in `89-phone-deleted-side-range-selection`.
+Focus order and 44px targets are unchanged and no text is hidden.
 
 Keyboard traversal is task controls → Files/Changes → observation/Refresh →
 explorer → open tabs → preview controls → source selection → comment action.
@@ -2464,8 +2476,9 @@ as follows:
   facts: "Requirements · GitHub · 2 supplied criteria", "R2 · 1 validation record ·
   2 artifacts", and each assignment's short id and known state. A pointer line
   closes the tab: "Captured conversations, earlier results and delivery evidence
-  are in History, Changes and Review." The latest-result card keeps its summary,
-  criterion rows, the viewing reference and the Result revision select visible; the
+  are in History, Changes and Review." The latest-result card keeps its summary, a
+  "Changes · N files" link to the Changes tab (the result's changed-file count, or plain
+  "Changes" when the result supplies none; `70-phone-changes-delivery`), criterion rows, the viewing reference and the Result revision select visible; the
   disclosures hold their content mounted, so closing one loses no read, selection or
   focus target. Open cards belong to the history entry, are written only by their
   own toggles and links, and a task opened fresh starts with all three closed. The decision card leads

@@ -1,7 +1,11 @@
 # Inspect changes and reply
 
-**Status:** planned. Files, Changes and local review exist on task detail; the
-default comparison and the budget below are not yet implemented or asserted.
+**Status:** built for the budgeted entry points. Changes opens on the Branch
+comparison, and the file rail's heading shows the file and +/− line counts. The
+latest result links to Changes with its changed-file count, and the changed-file list
+fits the 390 × 844 first screen. An Inbox evidence link opens the task's History tab.
+The budget is asserted at 1366 × 900 and 390 × 844 by
+`test/operator/operator-inspect-changes-browser.test.ts` ("inspect changes budget").
 
 ## Goal
 
@@ -36,7 +40,8 @@ feedback to the lead without leaving the task.
 | Latest result | 2 (Changes link, file) | the result summary and its changed-file count |
 
 The reply box is reachable from the diff without scrolling past the brief or
-retained evidence. An Inbox evidence link lands on the diff it names (1).
+retained evidence. An Inbox evidence link lands on the task evidence it names (1).
+Inbox requests name no diff; the diff is reached through the task (Changes, file).
 The operator CLI is outside the budget: it has no screens.
 
 Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).

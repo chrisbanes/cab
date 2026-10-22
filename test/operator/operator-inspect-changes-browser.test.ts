@@ -192,6 +192,36 @@ for (const [label, viewport] of [
     assert.equal(interactions, 2);
   });
 
+  test(`inspect changes budget: two interactions from the latest result (${label})`, async (_t, journey) => {
+    const s = await start(
+      journey,
+      viewport,
+      ({ taskId }) => `/app/tasks/${taskId}`,
+    );
+    const link = s.page
+      .locator("#review")
+      .getByRole("link", { name: "Changes · 2 files", exact: true });
+    await assertFirstScreen(s.page, [
+      s.page.locator("#review").getByRole("heading", { name: "Latest result" }),
+      s.page.getByText("Inspect result summary", { exact: true }),
+      link,
+    ]);
+    let interactions = 0;
+    await link.click();
+    interactions++;
+    await s.page.waitForURL(/section=changes/);
+    const tab = s.page
+      .getByRole("tablist", { name: "Task sections" })
+      .getByRole("tab", { name: "Changes" });
+    assert.equal(await tab.getAttribute("aria-selected"), "true");
+    const guide = entry(s.page, /guide\.md/);
+    await guide.waitFor();
+    await guide.click();
+    interactions++;
+    await assertDiffWithReply(s.page);
+    assert.equal(interactions, 2);
+  });
+
   test(`inspect changes budget: one interaction from the Inbox evidence link (${label})`, async (_t, journey) => {
     const f = await journey.start("fixture.create", () =>
       createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
