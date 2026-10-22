@@ -728,3 +728,25 @@ test("an imported issue that is not just published is withdrawn by the first omi
   // Today's behaviour on any imported task: the operator resolves the hold.
   assert.deepEqual(holds(f, taskId), ["withdrawn"]);
 });
+
+test("a flag left by two lagging reads cannot release a later ordinary withdrawal", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  const taskId = f.task(true);
+  await f.publish(taskId);
+  const shown = f.gh.snapshots.bind(f.gh);
+  // Two omissions withdraw it, and the listing releases that hold.
+  f.gh.snapshots = () => [];
+  await f.service.refreshGitHub();
+  await f.service.refreshGitHub();
+  f.gh.snapshots = shown;
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), []);
+  // An ordinary withdrawal afterwards stays for the operator, however it is listed again.
+  f.gh.snapshots = () => [];
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  f.gh.snapshots = shown;
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+});

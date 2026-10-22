@@ -915,12 +915,15 @@ export class GitHubSourceStore {
                 "DELETE FROM github_memberships WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
               )
               .run(projectId, selectionId, String(membership.nodeId));
-            if (membership.missedReads === 1)
-              this.db
-                .prepare(
-                  "UPDATE task_publications SET omittedWithdrawal = 1 WHERE state = 'converted' AND taskId = (SELECT taskId FROM github_external_issues WHERE nodeId = ?)",
-                )
-                .run(String(membership.nodeId));
+            // Written from the omission's kind, so an ordinary omission always resets an earlier flag.
+            this.db
+              .prepare(
+                "UPDATE task_publications SET omittedWithdrawal = ? WHERE state = 'converted' AND taskId = (SELECT taskId FROM github_external_issues WHERE nodeId = ?)",
+              )
+              .run(
+                membership.missedReads === 1 ? 1 : 0,
+                String(membership.nodeId),
+              );
             const external = this.issue(String(membership.nodeId));
             if (external) this.updateReadiness(String(external.taskId));
           }
