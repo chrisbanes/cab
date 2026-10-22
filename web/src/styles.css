@@ -1760,7 +1760,19 @@ nav {
     padding: 10px;
   }
   .changes-filters {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .changes-observation {
+    gap: 4px 8px;
+    padding: 4px 0;
+  }
+  /* Closed, Details is its summary alone, a link-like line as in frame 89; open, it keeps its box. */
+  .changes-observation .action-outcome-details:not([open]) {
+    display: block;
+    border: 0;
+    padding: 0;
+    margin: 0;
   }
   .changes-controls [data-slot="button"],
   .changes-layout-controls [data-slot="button"] {
