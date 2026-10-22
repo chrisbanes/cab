@@ -595,6 +595,9 @@ a.task-source-chip:hover {
     grid-column: 2;
     grid-row: 1 / 3;
     order: 0;
+    /* The label wraps to two lines so the outcome line keeps its width. */
+    max-width: 7.5rem;
+    padding-inline: var(--space-8);
   }
 
   .criterion-row > p:first-child {
