@@ -797,10 +797,7 @@ export function TaskWorkspaceChanges({
           >
             <h5>
               {(() => {
-                const counts = changeLineCounts(
-                  snapshot.entries,
-                  snapshot.truncated,
-                );
+                const counts = changeLineCounts(snapshot);
                 return (
                   <>
                     Changes · {counts.files}

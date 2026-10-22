@@ -90,19 +90,23 @@ export function changeMarkers(
 
 /**
  * The totals the Changes rail heading shows. Line counts follow the diff view's rule (every `+` and
- * `-` line of every hunk) and appear only when the comparison is complete: a truncated one, or one
- * with a gap or unsupported entry, shows the file count alone so a partial total never reads as whole.
+ * `-` line of every hunk) and appear only when the comparison is complete: a truncated one, one that
+ * is not `available`, or one with a gap or unsupported entry shows the file count alone, so a partial
+ * total never reads as whole.
  */
-export function changeLineCounts(
+export function changeLineCounts(comparison: {
+  state: "available" | "unavailable" | "gap";
+  truncated: boolean;
   entries: ReadonlyArray<{
     state: "text" | "binary" | "unsupported" | "gap";
     hunks: ReadonlyArray<{ patch: string }>;
-  }>,
-  truncated: boolean,
-): { files: number; added?: number; removed?: number } {
+  }>;
+}): { files: number; added?: number; removed?: number } {
+  const { entries } = comparison;
   const files = entries.length;
   if (
-    truncated ||
+    comparison.truncated ||
+    comparison.state !== "available" ||
     entries.some(
       (entry) => entry.state === "gap" || entry.state === "unsupported",
     )

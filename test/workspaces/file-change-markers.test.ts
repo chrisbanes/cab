@@ -154,11 +154,14 @@ test("the heading counts files and the added and removed lines of every hunk", (
     withPatch("@@ -1,3 +1,4 @@\n one\n-two\n+TWO\n three\n+four"),
     withPatch("@@ -0,0 +1 @@\n+new"),
   ];
-  assert.deepEqual(changeLineCounts(entries, false), {
-    files: 2,
-    added: 3,
-    removed: 1,
-  });
+  assert.deepEqual(
+    changeLineCounts({ state: "available", truncated: false, entries }),
+    {
+      files: 2,
+      added: 3,
+      removed: 1,
+    },
+  );
 });
 
 test("a no-newline marker and a binary entry add no lines", () => {
@@ -166,18 +169,39 @@ test("a no-newline marker and a binary entry add no lines", () => {
     withPatch("@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b"),
     { state: "binary" as const, hunks: [] },
   ];
-  assert.deepEqual(changeLineCounts(entries, false), {
-    files: 2,
-    added: 1,
-    removed: 1,
-  });
+  assert.deepEqual(
+    changeLineCounts({ state: "available", truncated: false, entries }),
+    {
+      files: 2,
+      added: 1,
+      removed: 1,
+    },
+  );
 });
 
 test("a truncated, gapped or unsupported comparison shows the file count alone", () => {
   const text = withPatch("@@ -0,0 +1 @@\n+new");
-  assert.deepEqual(changeLineCounts([text], true), { files: 1 });
+  assert.deepEqual(
+    changeLineCounts({ state: "available", truncated: true, entries: [text] }),
+    { files: 1 },
+  );
   for (const state of ["gap", "unsupported"] as const)
-    assert.deepEqual(changeLineCounts([text, withPatch("", state)], false), {
-      files: 2,
-    });
+    assert.deepEqual(
+      changeLineCounts({
+        state: "available",
+        truncated: false,
+        entries: [text, withPatch("", state)],
+      }),
+      {
+        files: 2,
+      },
+    );
+});
+
+test("a comparison that is itself a gap shows the file count alone even when every entry is text", () => {
+  const text = withPatch("@@ -0,0 +1 @@\n+new");
+  assert.deepEqual(
+    changeLineCounts({ state: "gap", truncated: false, entries: [text] }),
+    { files: 1 },
+  );
 });
