@@ -986,7 +986,7 @@ from local to imported; its title and description are source-owned from then on.
   exact text, after which the remaining steps run and the task converts, or **Abandon**, which
   returns the task to local with a warning that GitHub may still have created the issue (the next sync
   would then import it as a separate task). A create GitHub provably refused leaves the task local.
-- **Irreversible.** Closing the issue on GitHub is the only recovery. Publishing is offered only on
+- **Irreversible.** Closing the issue on GitHub is the only recovery. Bounded live evidence: [task publication live run](evidence/2026-10-22-task-publication.md). Publishing is offered only on
   task detail and by the CLI; the board, list and context menus do not offer it.
 
 Label native GitHub dependencies as source-owned and link to the source; do not

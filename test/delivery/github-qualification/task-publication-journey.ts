@@ -479,8 +479,24 @@ export async function runTaskPublicationJourney(
     evidence.duplicateImports = importedOfOurs - published.length;
     if (evidence.duplicateImports !== 0)
       throw new Error("The sync imported a duplicate");
-    if (published.some((p) => !p.issue || !p.ready))
+    if (published.some((p) => !p.issue || !p.ready)) {
+      // Local state of each published task after the sync, for a diagnosis; no cause is guessed.
+      evidence.diagnostic = published.map((p) => ({
+        ready: p.ready,
+        matched: p.issue !== undefined,
+        labels: p.issue ? JSON.parse(String(p.issue.labels)) : null,
+        memberships: p.issue
+          ? started.githubSources().memberships(String(p.issue.nodeId)).length
+          : 0,
+        holds: started
+          .githubSources()
+          .activeHolds()
+          .filter((h) => h.taskId === p.taskId)
+          .map((h) => h.reason),
+        admission: domain.admission(p.taskId).reasons,
+      }));
       throw new Error("A published task is not matched and Ready after sync");
+    }
 
     // 8. Independent reads of both issues, the Project item and its field.
     const independent = published.map((p) => {

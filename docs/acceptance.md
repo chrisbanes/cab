@@ -395,6 +395,17 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   model turns, and deleted the Project with verified cleanup; two earlier attempts failed in the harness's own setup; the passing
   run on the final product code is the fourth. A skipped write, `held`, `done` and a Codex lead turn were not exercised live.
   Evidence: [status mapping live run](evidence/2026-10-21-status-mapping-live.md).
+- **Task publication** (#1167, ADR-1017, ADR-1018) — **Bounded.** Deterministic tests cover the
+  publication caller's authority and readiness exemption, the create's read-back and its refusals, the
+  state machine (review, confirm, send, unknown outcome, Link, Abandon, failure), conversion in place and
+  the sync's duplicate guard, the operator API, CLI and the panel at desktop, phone and WebKit
+  (`task-publication`, `delivery-store`, `github-delivery-provider`, `operator-task-publish-api`,
+  `operator-task-publish-browser`, `operator-cli-delivery`, `task-publication-live-harness`). Two bounded
+  live runs on scratch user-owned Projects with 0 model turns confirmed every step of both publications
+  (issue, Project item, Ready option) by the provider's read-back, converted both tasks in place and
+  imported no duplicate on a real sync, with verified cleanup; the last assertion, that the
+  repository-target task is still Ready after that sync, **failed** and its cause is not isolated, and the
+  allowance is spent. Evidence: [task publication live run](evidence/2026-10-22-task-publication.md).
 - **Operations, recovery and cutover** (R06) — **Bounded.** A disposable launchd
   service lifecycle with database backup/restore passed, and current-schema backup,
   verify and restore with exact owned-process recovery passed locally. Deterministic
