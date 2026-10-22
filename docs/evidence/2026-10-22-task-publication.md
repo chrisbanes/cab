@@ -1,6 +1,6 @@
 # Task publication: bounded live run
 
-Status: **partly qualified; the allowance is spent.** Attempt 2 published two Ready local tasks through
+Status: **partly qualified; the allowance is spent (three attempts).** Attempt 2 published two Ready local tasks through
 the real service, delivery coordinator and provider on a scratch user-owned Project: every step of both
 publications was confirmed by the provider's own read-back, both tasks were converted in place, and one
 sync imported no duplicate. Its last assertion failed: after that sync the repository-target task was
@@ -17,7 +17,10 @@ change only the harness's diagnostics and documents.
 
 ## Authority
 
-The approved plan allowed at most **2 attempts**, **0 model turns** and **4 fixture issues**, each attempt
+The approved plan allowed at most **2 attempts**, **0 model turns** and **4 fixture issues**; after attempt 2 the
+maintainer allowed one more attempt (decision 5 in the issue), which the ticket agent recorded as a second manifest
+(SHA-256 `028f41bce2c19086e125c84242eea24baf70edb5ed2a579e376edaba500352e1`, `maxAttempts: 3`, `maxIssues: 6`: two
+issues per attempt). Each attempt
 creating and deleting its own scratch user-owned Project `ensemble-1167-<runid>` linked to
 `chrisbanes/ensemble-s07a-fixture`. The ticket agent wrote the manifest and grant outside the repository:
 manifest SHA-256 `2b319a8c94d89ecca106bf2315e1bf94f906c9b64bedcee2d1ad5cdb1bf26282`, naming exactly
@@ -37,6 +40,7 @@ than the fixture (including `chrisbanes/ensemble`).
   `qualification`). Account `chrisbanes` (node `MDQ6VXNlcjIyNzQ4Ng==`).
 - Attempt 1: run `48c3710c`, Project node `PVT_kwHOAAN4ns4BoK-o` (number 18), fixture issues #11 and #12.
 - Attempt 2: run `aeb6bd32`, Project node `PVT_kwHOAAN4ns4BoK_O` (number 19), fixture issues #13 and #14.
+- Attempt 3: run `e52c53c5`, Project node `PVT_kwHOAAN4ns4BoNPW` (number 20), fixture issues #15 and #16.
 
 ## What each attempt does
 
@@ -98,16 +102,34 @@ on the next sync with the hold left in place. The deterministic tests, whose fak
 both tasks Ready. The harness now records that
 state when the check fails, but no attempt remains.
 
+
+**Change after attempt 2 (maintainer decision 5).** GitHub's lists trail a create, so a converted task is now
+forgiven one complete read that omits its issue, withdrawn on a second consecutive omission, and a withdrawal
+produced by those two omissions is released when a later read lists the issue again and the task is Ready
+(SPEC "Conversion", ADR-1018). On main, every other imported issue is withdrawn by the first omission and its
+hold stays until the operator resolves it; that general behaviour is unchanged.
+
+**Attempt 3 (run `e52c53c5`, failed in the harness before the sync, on the final product code).**
+Head `74b2583bea3c6e8e5bfd509fa8298d353c009b1b`. Both publications were again confirmed step by step and
+converted (issues #15 and #16; the Project task did issue, item add and Ready-field write), each after one
+refresh because the first read-back did not yet list the new issue. The harness then waits for the Project to
+list the published item before it syncs: ten reads over about 45 seconds, alternating the `""` and
+`is:issue` filters, all showed no item (`projectListed: 0`), so it stopped with "The Project does not list the
+published item". The sync, the Ready check and the independent reads were therefore not reached, and the
+forgiveness rule is **not** qualified live. Whether the Project never listed the item or listed it late is not
+known; attempt 2 listed it on the first read. Cleanup closed #15 and #16, deleted the Project and the label,
+and the harness verified it.
+
 ## Cleanup proof
 
 The harness closed both issues, deleted the Project and the label, and read them back
-(`cleanup: verified`) in each attempt. An independent `gh` read afterwards lists no Project 18 or 19
+(`cleanup: verified`) in each attempt. An independent `gh` read afterwards lists no Project 18, 19 or 20
 (`gh project list --owner chrisbanes` shows Verity, Ensemble S07a qualification, Ensemble S06
-qualification, Portico, Haze and Ensemble), reads the node `PVT_kwHOAAN4ns4BoK_O` as not found, shows issues
-#11, #12, #13 and #14 closed, and lists no `ens-1167` label. Project 6 was never read or written.
+qualification, Portico, Haze and Ensemble), reads the nodes `PVT_kwHOAAN4ns4BoK_O` and
+`PVT_kwHOAAN4ns4BoNPW` as not found, shows issues #11 to #16 closed, and lists no `ens-1167` label. Project 6 was never read or written.
 
 ## Limits
 
-Both attempts are spent; no model turn ran. The uncertain, Link and Abandon paths are covered only by the
-deterministic service tests. The fixture repository keeps four closed issues (#11 to #14) from these
-attempts. The Ready-after-sync result for a repository-target task is **unqualified live**.
+All three attempts are spent; no model turn ran. The uncertain, Link and Abandon paths are covered only by the
+deterministic service tests. The fixture repository keeps six closed issues (#11 to #16) from these
+attempts. The Ready-after-sync result for a repository-target task, with and without the forgiveness rule, is **unqualified live**: only the deterministic tests cover it.
