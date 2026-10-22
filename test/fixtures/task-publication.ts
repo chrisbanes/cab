@@ -352,7 +352,6 @@ export const labelAndFieldReady: Readiness = {
  */
 export async function seedPublication(
   service: () => StandaloneService,
-  gh: FakeGitHub,
   directory: string,
   options: PublicationFixtureOptions = {},
 ) {
@@ -532,7 +531,7 @@ export async function publicationFixture(
     });
   let service = build();
   await service.start();
-  const seeded = await seedPublication(() => service, gh, root, options);
+  const seeded = await seedPublication(() => service, root, options);
   return {
     ...seeded,
     root,

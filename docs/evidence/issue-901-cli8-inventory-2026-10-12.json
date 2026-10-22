@@ -1317,6 +1317,91 @@
       "gap": "A posted comment cannot be edited or retracted; there is no list of pending reviews. Scripted GitHub only; no live GitHub post. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
+      "id": "delivery publish-review",
+      "kind": "command",
+      "area": "result/artifact/delivery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator-cli-delivery.test.ts",
+        "test/operator-cli-inventory.test.ts"
+      ],
+      "effect": "Records a pending review of publishing a local task as a GitHub issue (target, text, labels, Project fields, predicted selection and Ready) and creates nothing.",
+      "denial": "A read-only credential exits 3; an unavailable task or target exits 4 with the reason and nothing sent.",
+      "revision": "A stale task --expected-task-version exits 4.",
+      "retry": "The review key is the publication id: an identical rerun replays the recorded review.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added after the CLI8 live run: exercised only through the in-process CLI against a real loopback service with fixture runtimes and a scripted GitHub, not through the installed binary. Review has no withdrawal; a later review of the task supersedes it."
+    },
+    {
+      "id": "delivery publish-confirm",
+      "kind": "command",
+      "area": "result/artifact/delivery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator-cli-delivery.test.ts",
+        "test/operator-cli-inventory.test.ts"
+      ],
+      "effect": "Approves or denies the exact reviewed publication (revision 2); the decision is final.",
+      "denial": "A read-only credential exits 3; a wrong hash or revision, a decided review, or a changed task, grant or target exits 4 with the decision unchanged.",
+      "revision": "A review whose task version, policy version or target moved is refused at confirm.",
+      "retry": "n/a: the decision is final; no retry beyond the shared journal rules.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added after the CLI8 live run: exercised only through the in-process CLI against a real loopback service with fixture runtimes and a scripted GitHub, not through the installed binary. Decisions are irreversible."
+    },
+    {
+      "id": "delivery publish-send",
+      "kind": "command",
+      "area": "result/artifact/delivery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator-cli-delivery.test.ts",
+        "test/operator-cli-inventory.test.ts"
+      ],
+      "effect": "Creates the issue once through the provider (then the Project item and readiness fields) and converts the task to the issue's imported task; the receipt state decides what was done.",
+      "denial": "A read-only credential exits 3; a send before approval, after a denial or on a started task exits 4 before any request.",
+      "revision": "A stale task --expected-task-version exits 4.",
+      "retry": "A lost reply then an identical rerun replays the recorded outcome with one issue; an unknown create holds the task and is never resent.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added after the CLI8 live run: exercised only through the in-process CLI against a real loopback service with fixture runtimes and a scripted GitHub, not through the installed binary. Creating the issue cannot be undone from Ensemble; closing it on GitHub is the recovery. Scripted GitHub only in the deterministic suites; one bounded live run is recorded in docs/evidence."
+    },
+    {
+      "id": "delivery publish-link",
+      "kind": "command",
+      "area": "result/artifact/delivery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator-cli-delivery.test.ts",
+        "test/operator-cli-inventory.test.ts"
+      ],
+      "effect": "Accepts a named issue as an unknown create when it carries the create's marker and exact text, then finishes the publication.",
+      "denial": "A read-only credential exits 3; an issue without the marker, or a create whose outcome is known, exits 4 and changes nothing.",
+      "revision": "n/a: the publication id and marker bind the issue.",
+      "retry": "An identical rerun replays the recorded receipt.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added after the CLI8 live run: exercised only through the in-process CLI against a real loopback service with fixture runtimes and a scripted GitHub, not through the installed binary. Linking is final."
+    },
+    {
+      "id": "delivery publish-abandon",
+      "kind": "command",
+      "area": "result/artifact/delivery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator-cli-delivery.test.ts",
+        "test/operator-cli-inventory.test.ts"
+      ],
+      "effect": "Gives up on an unknown create and returns the task to local; GitHub may still have created the issue.",
+      "denial": "A read-only credential exits 3; a publication whose create is known exits 4.",
+      "revision": "n/a: keyed by the publication id.",
+      "retry": "An identical rerun replays the recorded receipt.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added after the CLI8 live run: exercised only through the in-process CLI against a real loopback service with fixture runtimes and a scripted GitHub, not through the installed binary. A duplicate issue may exist and the next sync would import it as a separate task; abandoning cannot be undone."
+    },
+    {
       "id": "runtime list",
       "kind": "command",
       "area": "execution/logs",

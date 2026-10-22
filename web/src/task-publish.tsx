@@ -424,8 +424,8 @@ function Steps({ latest }: { latest: PublicationLatest }) {
   const create = createStep(latest);
   return (
     <ol className="task-publish-steps" aria-label="Publication steps">
-      {latest.steps.map((step, i) => (
-        <li key={`${step.kind}-${i}`} className="body">
+      {latest.steps.map((step) => (
+        <li key={step.operationId} className="body">
           {stepLabels[step.kind]}:{" "}
           <span className="issue-improve-strong">
             {stepStates[step.state] ?? step.state}

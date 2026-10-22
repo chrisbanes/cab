@@ -4559,6 +4559,7 @@ export class OperatorApi {
             ),
             issueNumber: latest.publication.issueNumber,
             steps: latest.steps.map((step) => ({
+              operationId: step.operationId,
               kind: step.kind,
               state: step.state,
               reason: this.safe(step.reason, excluded),
@@ -4626,6 +4627,7 @@ export class OperatorApi {
       state: publication.state,
       issueNumber: publication.issueNumber,
       steps: steps.map((step) => ({
+        operationId: step.operationId,
         kind: step.kind,
         state: step.state,
         reason: this.safe(step.reason, excluded),

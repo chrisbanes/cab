@@ -1329,6 +1329,7 @@ export const publicationPolicySchema = z
           .array(
             z
               .object({
+                operationId: uuid,
                 kind: z.enum([
                   "issue.create",
                   "project.item.add",
@@ -3249,6 +3250,7 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
         .array(
           z
             .object({
+              operationId: uuid,
               kind: z.enum([
                 "issue.create",
                 "project.item.add",

@@ -59,12 +59,7 @@ async function launch(
     "fixture.close",
     () => f.lifecycle.steps,
   );
-  seeded = await seedPublication(
-    () => f.service,
-    gh,
-    f.directory,
-    options.fixture,
-  );
+  seeded = await seedPublication(() => f.service, f.directory, options.fixture);
   const taskId = seeded.task(
     options.ready ?? true,
     "Ship the toolbar",

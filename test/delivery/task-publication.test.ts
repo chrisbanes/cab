@@ -93,7 +93,7 @@ test("a Ready task published to a Project records the create, the item and the f
   );
   const stored = f.service
     .githubSources()
-    .membershipItem("" + f.projectId, "project", String(issue?.nodeId));
+    .membershipItem(f.projectId, "project", String(issue?.nodeId));
   assert.deepEqual(stored?.projectFields, [
     {
       projectNodeId: publicationProject.projectNodeId,
