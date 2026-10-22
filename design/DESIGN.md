@@ -751,9 +751,10 @@ each flow document states what is implemented. Fixtures are fixture-app, `fixtur
   what clears it ("Clears when the task's Stop is resumed.", "Clears when we know
   the execution ended.") or, for a task hold, which no operator action clears, its
   recorded reason and "Recovery stays blocked while it remains." Each line also
-  links to the task's Execution view (Execution details); none is a Fix (149c). These
-  holds are task-wide and name no assignment; only a wait that names its assignment
-  links to that assignment's recovery page.
+  links its assignment's recovery page ("Recovery evidence" for one assignment,
+  "<profile>: recovery evidence" for each of several) or, for a task with no
+  assignment, the task's Execution view (Execution details); none is a Fix (149c).
+  The holds are task-wide, so every line carries the same links.
   The Fix confirmation then names the holds that stay.
 - **Readiness and Add Claude (151, 152, 152b):** Readiness is the first Settings
   section until a task starts a turn and the last afterwards (114c, 151), with Pass,
@@ -2093,9 +2094,9 @@ Interaction notes:
   `01-attention-overview`, `49-state-comparisons`,
   `53-phone-failed-refresh-uncertain`, `25b-phone-board-uncertain`, a task wait that
   names its assignment, and Runtime → Task recovery destinations
-  (`126-runtime-capacity-recovery`), which stays. A task's Stop, task and writer
-  hold lines are task-wide, so they link to the task's Execution view instead
-  (`149c-wait-reasons-specimen`).
+  (`126-runtime-capacity-recovery`), which stays. A task's hold lines are
+  task-wide, so each links every assignment's recovery page, or the task's Execution
+  view when it has none (`149c-wait-reasons-specimen`).
 
 ### First run
 
@@ -2107,7 +2108,7 @@ Interaction notes:
 - The Fix confirmation (`149b-task-fix-resume-confirm`) states that holds and
   access are unchanged. When stop, task or writer holds remain, it names them
   ("The Operator Stop and writer ownership stay."); the task lists them under the
-  Fix with an Execution details link (`149c-wait-reasons-specimen`).
+  Fix with recovery-evidence links (`149c-wait-reasons-specimen`).
 
 ### Action feedback
 
@@ -2271,6 +2272,8 @@ Production Overview, List and Board
   own) and link to the retained destination; they never decide in place.
   Intervention cards show the lead, recorded reasons and "Ownership stays held"
   rather than the frame's "Last observation", which no read carries.
+  The Inbox's intervention detail for an uncertain execution states "Ownership
+  stays held" too, beside its recorded reason and Inspect execution.
 - A pending request with one single-choice question is answered in its card
   through the Inbox's `QuestionResponse`, so the command, validation, shared draft
   and outcomes are the Inbox's: failed answer, Retry answer; stale read, Try again
