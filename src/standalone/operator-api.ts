@@ -4612,12 +4612,12 @@ export class OperatorApi {
     publication: Publication,
     excluded: readonly string[] | undefined,
   ) {
-    const steps =
-      this.service.latestPublication(publication.review.taskId)?.publication
-        .review.publicationId === publication.review.publicationId
-        ? (this.service.latestPublication(publication.review.taskId)?.steps ??
-          [])
-        : [];
+    const latest = this.service.latestPublication(publication.review.taskId),
+      steps =
+        latest?.publication.review.publicationId ===
+        publication.review.publicationId
+          ? latest.steps
+          : [];
     return commandReceiptSchema.parse({
       kind: "publication",
       key,
@@ -4716,7 +4716,7 @@ export class OperatorApi {
             publicationId: c.reviewId,
             issueNumber: c.issueNumber,
           })
-        : this.service.abandonTaskPublication({
+        : await this.service.abandonTaskPublication({
             taskId: c.taskId,
             publicationId: c.reviewId,
           }),

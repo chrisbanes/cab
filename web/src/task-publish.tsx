@@ -224,9 +224,16 @@ export function PublishToGitHub({
       </div>
 
       {view === "unavailable" && (
-        <p className="body" role="status">
-          {policy.reason ?? "This task can’t be published."}
-        </p>
+        <>
+          <p className="body" role="status">
+            {policy.reason ?? "This task can’t be published."}
+          </p>
+          <div className="issue-improve-actions">
+            <Button type="button" disabled>
+              Review
+            </Button>
+          </div>
+        </>
       )}
 
       {view === "choose" && (

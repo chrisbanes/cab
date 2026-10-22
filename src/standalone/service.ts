@@ -3524,7 +3524,15 @@ export class StandaloneService {
     issueNumber: number;
   }): Promise<Publication> {
     const started = this.started(),
-      publication = this.unresolvedCreate(command),
+      known = started.taskPublications.get(command.publicationId);
+    // A replay of a link that went through answers where the publication is.
+    if (
+      known?.review.taskId === command.taskId &&
+      known.issueNumber === command.issueNumber &&
+      known.state !== "sending"
+    )
+      return known;
+    const publication = this.unresolvedCreate(command),
       { review } = publication.publication,
       inspected = await started.deliveryCoordinator.inspectPublishedIssue(
         review.caller.projectId,
@@ -3534,16 +3542,19 @@ export class StandaloneService {
         },
         command.publicationId,
       );
+    // The same proof the automatic read-back asks for: marker, exact text, every label, the credential user.
     if (
       !inspected.hasMarker ||
+      !inspected.byCredentialUser ||
       inspected.title !== review.issue.title ||
       inspected.body !==
-        `${review.issue.body}\n\n${publicationMarker(command.publicationId)}`
+        `${review.issue.body}\n\n${publicationMarker(command.publicationId)}` ||
+      !review.issue.labels.every((l) => inspected.labels.includes(l))
     )
       throw new DomainConflictError(
         "That issue does not carry this publication's marker",
       );
-    started.deliveryStore.recordObservation(command.publicationId, {
+    await started.deliveryCoordinator.resolveUnproved(command.publicationId, {
       state: "confirmed-success",
       reason: null,
       receipt: { nodeId: inspected.nodeId, number: inspected.number },
@@ -3554,13 +3565,16 @@ export class StandaloneService {
     );
   }
   /** Gives up on an unproved create: the task is local again, and a duplicate issue may exist. */
-  abandonTaskPublication(command: {
+  async abandonTaskPublication(command: {
     taskId: string;
     publicationId: string;
-  }): Publication {
-    const started = this.started();
+  }): Promise<Publication> {
+    const started = this.started(),
+      known = started.taskPublications.get(command.publicationId);
+    if (known?.review.taskId === command.taskId && known.state === "abandoned")
+      return known;
     this.unresolvedCreate(command);
-    started.deliveryStore.recordObservation(
+    await started.deliveryCoordinator.resolveUnproved(
       command.publicationId,
       {
         state: "confirmed-failure",

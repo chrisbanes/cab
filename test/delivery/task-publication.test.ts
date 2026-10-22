@@ -343,7 +343,7 @@ test("Abandon returns the task to local and a new publish mints a new operation"
     f.service.publicationAvailability(taskId).reasonCode,
     "publication-unresolved",
   );
-  const abandoned = f.service.abandonTaskPublication({
+  const abandoned = await f.service.abandonTaskPublication({
     taskId,
     publicationId: review.publicationId,
   });
@@ -543,4 +543,123 @@ test("a review moved by an edit or by changed grants is refused at confirm, and 
     /not approved/,
   );
   assert.equal(f.gh.posts, 0);
+});
+
+test("Abandon waits for a read-back already in flight and the abandoned create stays resolved", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  f.gh.createMode = "lost-unseen";
+  const taskId = f.task(false);
+  const { review } = await f.publish(taskId);
+  let release = () => {};
+  f.gh.inspectGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // A refresh reads the unproved create back; Abandon arrives while that read is open.
+  const refreshing = f.service.refreshGitHub();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const abandoning = f.service.abandonTaskPublication({
+    taskId,
+    publicationId: review.publicationId,
+  });
+  release();
+  await refreshing;
+  assert.equal((await abandoning).state, "abandoned");
+  const create = f.service
+    .delivery()
+    .actions(taskId)
+    .find((a) => a.operationId === review.publicationId);
+  assert.equal(create?.state, "confirmed-failure");
+  assert.equal(f.service.publicationAvailability(taskId).reasonCode, null);
+  assert.ok(
+    !f
+      .domain()
+      .admission(taskId)
+      .reasons.some((r) => r.startsWith("external-action")),
+  );
+  // A replay of Abandon answers where it is.
+  assert.equal(
+    (
+      await f.service.abandonTaskPublication({
+        taskId,
+        publicationId: review.publicationId,
+      })
+    ).state,
+    "abandoned",
+  );
+});
+
+test("an issue edited on GitHub between the create and the conversion is still the publication's, not a new task", async (t) => {
+  const f = await publicationFixture({
+    selections: ["project"],
+    readiness: labelAndFieldReady,
+  });
+  t.after(() => f.close());
+  const taskId = f.task(true);
+  f.gh.beforeItemAdd = async () => {
+    // The marker is edited away, and a sync runs before the item add and the conversion.
+    const issue = [...f.gh.issues.values()][0];
+    if (issue) issue.body = "Edited by a human";
+    await startedOf(f.service).githubSynchronizer.refresh();
+  };
+  const { sent } = await f.publish(taskId, "project");
+  assert.equal(sent.state, "converted");
+  assert.equal(f.taskCount(), 1);
+});
+
+test("a publication key that already names a delivery operation is refused before anything is recorded", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  const first = f.task(false);
+  const { review } = await f.publish(first);
+  const second = f.task(false, "Second");
+  assert.throws(
+    () =>
+      f.service.reviewTaskPublication({
+        key: review.publicationId,
+        taskId: second,
+        targetId: f.target(second, "repo").id,
+        expectedTaskVersion: f.version(second),
+      }),
+    /already in use|different material/,
+  );
+  assert.equal(f.service.latestPublication(second), null);
+});
+
+test("Link asks for the readiness label and the credential user's authorship, as the read-back does", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  f.gh.createMode = "lost-unseen";
+  const taskId = f.task(true);
+  const { review } = await f.publish(taskId);
+  const unlabelled = f.gh.add(
+    "Publish me",
+    `Do it\n\n${marker(review.publicationId)}`,
+  );
+  await assert.rejects(
+    f.service.linkTaskPublication({
+      taskId,
+      publicationId: review.publicationId,
+      issueNumber: unlabelled.number,
+    }),
+    /marker/,
+  );
+  unlabelled.labels.push("ready");
+  const linked = await f.service.linkTaskPublication({
+    taskId,
+    publicationId: review.publicationId,
+    issueNumber: unlabelled.number,
+  });
+  assert.equal(linked.state, "converted");
+  // A replay of the link answers where it is.
+  assert.equal(
+    (
+      await f.service.linkTaskPublication({
+        taskId,
+        publicationId: review.publicationId,
+        issueNumber: unlabelled.number,
+      })
+    ).state,
+    "converted",
+  );
 });

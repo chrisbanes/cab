@@ -762,7 +762,7 @@ export class GitHubSourceStore {
         const existing = this.issue(issue.nodeId);
         let taskId: string;
         // An issue Ensemble is publishing is not new: its task is converted when the create resolves.
-        if (!existing && this.publishingMarker(issue.body)) continue;
+        if (!existing && this.publishingIssue(issue)) continue;
         if (!existing) {
           // A closed issue is imported, as Done, only by a Done-mode source on a complete read.
           const importClosed =
@@ -962,15 +962,20 @@ export class GitHubSourceStore {
    * Whether `body` carries the marker of a task publication whose create is unresolved. Such an
    * issue belongs to that task, so a racing sync must not import it as a second one.
    */
-  private publishingMarker(body: string): boolean {
+  private publishingIssue(issue: { nodeId: string; body: string }): boolean {
     return (
       this.db
         .prepare(
-          "SELECT publicationId FROM task_publications WHERE state='sending'",
+          "SELECT publicationId,issueNodeId FROM task_publications WHERE state='sending'",
         )
         .all() as Row[]
-    ).some((row) =>
-      body.includes(`<!-- ensemble-operation:${String(row.publicationId)} -->`),
+    ).some(
+      (row) =>
+        // The create's confirmed issue is known by identity; one still unproved only by its marker.
+        row.issueNodeId === issue.nodeId ||
+        issue.body.includes(
+          `<!-- ensemble-operation:${String(row.publicationId)} -->`,
+        ),
     );
   }
 

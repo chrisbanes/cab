@@ -931,7 +931,7 @@ test("persisted runtime, operator and service records parse and hash as they alw
           workRevision: 1,
           conversationRevision: 1,
         },
-        hash: "",
+        hash: "223f46e35a19dc0e5156e4705091a8980c67ff29cadf42351d599d4647fe362d",
       },
       {
         binding: {
@@ -947,7 +947,7 @@ test("persisted runtime, operator and service records parse and hash as they alw
           sourceRepositoryId: "R_1",
           policyVersion: 1,
         },
-        hash: "",
+        hash: "cf2e4fe1a1e84ca854ce21351f29cce8db2b1be11f297ba6401f7da779bc7e5c",
       },
       {
         binding: {
@@ -958,11 +958,11 @@ test("persisted runtime, operator and service records parse and hash as they alw
           mappingVersion: 1,
           event: "turnStarted",
         },
-        hash: "",
+        hash: "dfbff2aefed2fe3a89c7e83a065148b469e8d51f6c9ea6f92d230155ac5912c1",
       },
     ];
-    for (const [index, { binding }] of records.entries()) {
-      const operationId = randomUUID(),
+    for (const [index, { binding, hash }] of records.entries()) {
+      const operationId = "55555555-5555-4555-8555-555555555555",
         request = {
           operationId,
           action: { kind: "issue.comment" as const, target, body: "Hello" },
@@ -981,12 +981,9 @@ test("persisted runtime, operator and service records parse and hash as they alw
         };
       w.db
         .prepare("INSERT INTO delivery_actions VALUES (?,?,?,?)")
-        .run(
-          operationId,
-          w.taskId,
-          materialDigest({ request, binding }),
-          JSON.stringify(record),
-        );
+        .run(operationId, w.taskId, hash, JSON.stringify(record));
+      // The digest is pinned: the union gains no key and changes no earlier record's hash.
+      assert.equal(materialDigest({ request, binding }), hash, `hash ${index}`);
       // Each record still parses as the branch it was written as, and gains no key.
       assert.deepEqual(
         w.delivery.action(operationId).binding,
@@ -997,6 +994,9 @@ test("persisted runtime, operator and service records parse and hash as they alw
         w.delivery.prepareAction(request, binding as never, false).state,
         "prepared",
       );
+      w.db
+        .prepare("DELETE FROM delivery_actions WHERE operationId=?")
+        .run(operationId);
     }
   } finally {
     w.db.close();

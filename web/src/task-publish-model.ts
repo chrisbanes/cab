@@ -76,7 +76,7 @@ export const publishCopy = {
   hidden:
     "Part of this task’s text can’t be shown in full here, so it can’t be published.",
   moved:
-    "The task or the project’s grants changed after the review. Review again.",
+    "That didn’t apply: the task, the project’s grants or the issue changed, or the issue doesn’t carry this request’s marker. Check the state shown and try again.",
   unknown:
     "Ensemble couldn’t tell whether that was recorded. Check below before trying again.",
   waiting:

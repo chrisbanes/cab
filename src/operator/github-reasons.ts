@@ -150,7 +150,3 @@ export const publicationTargetReasonSentences: Record<
   "would-become-ready":
     "With no readiness rule, a new issue here would make a Draft task Ready. Mark the task Ready or add a readiness rule.",
 };
-
-/** The delivery reason recorded when the operator gives up on a create whose outcome never became known. */
-export const publicationAbandonedNote =
-  "Abandoned without proof that GitHub did not create the issue. A duplicate issue may exist.";

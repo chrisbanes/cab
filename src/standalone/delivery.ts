@@ -7,6 +7,7 @@ import {
   isServiceDeliveryCaller,
 } from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
+import { DomainConflictError } from "../core/domain-errors.js";
 import type { z } from "zod";
 import {
   type DeliveryStore,
@@ -235,6 +236,26 @@ export class DeliveryCoordinator {
         );
         if (record.state !== "prepared") return record;
         return this.attempt(record);
+      },
+    );
+  }
+  /**
+   * Records the operator's resolution of an unproved action under the action's own queue, so a
+   * read-back already in flight cannot overwrite it; refused unless the action is still unproved.
+   */
+  resolveUnproved(
+    operationId: string,
+    observation: ProviderActionObservation,
+    within?: (record: DeliveryActionRecord) => void,
+  ): Promise<DeliveryActionRecord> {
+    return this.serialize(
+      actionKeys(this.store.action(operationId)),
+      async () => {
+        if (this.store.action(operationId).state !== "uncertain")
+          throw new DomainConflictError(
+            "The action does not have an unknown outcome",
+          );
+        return this.store.recordObservation(operationId, observation, within);
       },
     );
   }

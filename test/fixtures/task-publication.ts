@@ -57,6 +57,10 @@ export class FakeGitHub {
   /** Whether a lost create can be found by the read-back. */
   readbackVisible = true;
   itemMode: "ok" | "rejected" | "uncertain" = "ok";
+  /** Read-backs wait on this, so a test can act while one is in flight. */
+  inspectGate: Promise<void> | undefined;
+  /** Runs when an item add arrives, before it takes effect. */
+  beforeItemAdd: (() => Promise<void>) | undefined;
   fieldMode: "ok" | "rejected" | "uncertain" = "ok";
   nodeSequence = 0;
 
@@ -177,6 +181,7 @@ export class FakeGitHub {
         }
         if (a.kind === "project.item.add") {
           gh.itemAdds++;
+          await gh.beforeItemAdd?.();
           if (gh.itemMode === "rejected")
             return {
               state: "confirmed-failure",
@@ -215,6 +220,7 @@ export class FakeGitHub {
         throw new Error(`unexpected ${a.kind}`);
       },
       async inspectAction(record): Promise<ProviderActionObservation> {
+        if (gh.inspectGate) await gh.inspectGate;
         const a = record.request.action;
         const unproved: ProviderActionObservation = {
           state: "uncertain",
@@ -270,7 +276,7 @@ export class FakeGitHub {
           title: issue.title,
           body: issue.body,
           labels: issue.labels,
-          authorNodeId: "U1",
+          byCredentialUser: true,
           hasMarker: issue.body.includes(marker(operationId)),
         };
       },

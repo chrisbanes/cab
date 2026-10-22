@@ -1870,8 +1870,9 @@ the page is **03 Task views**. The frames were drawn from the built panel.
 
 Interaction notes:
 
-- Panel buttons are 44px high on phone. **Publish to** confirms and sends in one step; the
-  review and send keys are kept so a retry after an unknown answer repeats the same operation.
+- Panel buttons are 44px high on phone. **Publish to** confirms and sends in one step with the
+  review's keys, so a retry of a send whose answer was lost repeats the same operation. A new
+  review gets new keys.
 - A pending or unknown publication reopens the panel after a reload because the server holds the
   task; the panel never offers a second publish while one is unresolved.
 - Link and Abandon are the only ways out of an unknown create; Abandon is a two-step action.

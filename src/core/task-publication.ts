@@ -135,19 +135,13 @@ export class TaskPublicationStore {
   }
 
   /** Publications whose steps are being sent or whose create is unresolved. */
-  sending(taskId?: string): Publication[] {
+  sending(): Publication[] {
     return (
-      (taskId
-        ? this.db
-            .prepare(
-              "SELECT * FROM task_publications WHERE state='sending' AND taskId=? ORDER BY rowid",
-            )
-            .all(taskId)
-        : this.db
-            .prepare(
-              "SELECT * FROM task_publications WHERE state='sending' ORDER BY rowid",
-            )
-            .all()) as Row[]
+      this.db
+        .prepare(
+          "SELECT * FROM task_publications WHERE state='sending' ORDER BY rowid",
+        )
+        .all() as Row[]
     ).map((row) => this.publication(row));
   }
 
@@ -340,6 +334,9 @@ export class TaskPublicationStore {
         )
         .get(command.taskId) as Row | undefined;
       if (!task) throw new DomainConflictError("Unknown task");
+      // The key is the create's operation id, so it must not already name a delivery operation.
+      if (new DeliveryStore(this.db).hasAction(command.key))
+        throw new DomainConflictError("Publication key is already in use");
       if (Number(task.version) !== command.expectedTaskVersion)
         throw new DomainConflictError("Task revision conflict");
       // A review nobody confirmed is replaced; one being sent is not.

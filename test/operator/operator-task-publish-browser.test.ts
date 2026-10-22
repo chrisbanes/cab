@@ -204,7 +204,7 @@ test("an unknown outcome stays held across a reload, offers Link, and Abandon wa
   await panel(page).getByLabel("Issue number").fill(String(stranger.number));
   await panel(page).getByRole("button", { name: "Link issue" }).click();
   await panel(page)
-    .getByText(/Review again/)
+    .getByText(/doesn’t carry this request’s marker/)
     .waitFor();
   assert.equal(f.service.domain().importedTask(taskId), undefined);
   // Abandon asks first and says a duplicate may exist.
@@ -241,6 +241,7 @@ test("a publication whose create is still being resolved links to the issue that
   const real = gh.add(
     "Ship the toolbar",
     `Make the toolbar usable.\n\n<!-- ensemble-operation:${publicationId} -->`,
+    ["ready"],
   );
   await panel(page).getByLabel("Issue number").fill(String(real.number));
   await panel(page).getByRole("button", { name: "Link issue" }).click();
@@ -299,8 +300,8 @@ test("a task with local dependencies says why it cannot be published", async (_t
     .getByText(publicationReasonSentences["local-dependencies"])
     .waitFor();
   assert.equal(
-    await panel(page).getByRole("button", { name: "Review" }).count(),
-    0,
+    await panel(page).getByRole("button", { name: "Review" }).isDisabled(),
+    true,
   );
 });
 

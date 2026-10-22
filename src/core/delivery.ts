@@ -811,7 +811,7 @@ export class DeliveryStore {
     }
     if (isOperatorPublicationCaller(binding))
       this.validatePublicationCaller(request, binding);
-    else if (publicationKinds.some((kind) => kind === request.action.kind))
+    else if (publicationKinds.includes(request.action.kind))
       // Agents and the service can never create an issue or add a Project item.
       throw new DomainPolicyError(
         "forbidden",
@@ -972,7 +972,7 @@ export class DeliveryStore {
       request.approval ||
       request.operatorReviewId ||
       !(
-        publicationKinds.some((k) => k === action.kind) ||
+        publicationKinds.includes(action.kind) ||
         action.kind === "project.field"
       )
     )

@@ -160,12 +160,15 @@ test("a denied review sends nothing, and Link and Abandon act on an unknown crea
     }),
     conflict,
   );
-  const abandoned = await api.execute({
-    type: "task.publish.abandon",
+  const abandon = {
+    type: "task.publish.abandon" as const,
     key: randomUUID(),
     taskId,
     reviewId: second.reviewId,
-  });
+  };
+  const abandoned = await api.execute(abandon);
+  // A retry of the same command after a lost answer is answered, not refused.
+  assert.deepEqual(await api.execute(abandon), abandoned);
   assert.equal(
     abandoned.kind === "publication" && abandoned.state,
     "abandoned",

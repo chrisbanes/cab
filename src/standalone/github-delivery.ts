@@ -101,7 +101,8 @@ export interface PublishedIssueInspection {
   title: string;
   body: string;
   labels: string[];
-  authorNodeId: string;
+  /** Whether the credential user opened it. */
+  byCredentialUser: boolean;
   hasMarker: boolean;
 }
 export interface GitHubDeliveryProvider {
@@ -562,6 +563,9 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     operationId: string,
   ): Promise<PublishedIssueInspection> {
     const repo = await this.repository(target.repositoryId);
+    const me = z
+      .object({ node_id: name })
+      .parse((await this.request("/user")).json);
     const value = z
       .object({
         node_id: name,
@@ -581,7 +585,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       title: value.title,
       body: value.body ?? "",
       labels: value.labels.map((l) => l.name),
-      authorNodeId: value.user.node_id,
+      byCredentialUser: value.user.node_id === me.node_id,
       hasMarker: (value.body ?? "").includes(publicationMarker(operationId)),
     };
   }
