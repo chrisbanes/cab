@@ -1,0 +1,81 @@
+/* Publish to GitHub: the panel on a local task. It reuses the Improve with lead panel's frame. */
+.task-publish-targets {
+  display: grid;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.task-publish-target {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  min-width: 0;
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.task-publish-target[data-disabled] {
+  background: var(--raised);
+  color: var(--muted-foreground);
+}
+
+.task-publish-target input {
+  flex: none;
+  margin-top: 4px;
+}
+
+.task-publish-target-text {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.task-publish-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-4) var(--space-12);
+  margin: 0;
+}
+
+.task-publish-facts dt {
+  color: var(--muted-foreground);
+}
+
+.task-publish-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-publish-body {
+  max-height: 12lh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.task-publish-steps {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding-left: var(--space-16);
+}
+
+.task-publish-link {
+  display: grid;
+  gap: var(--space-8);
+  max-width: 28rem;
+}
+
+@media (max-width: 759px) {
+  .task-publish-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-publish-target {
+    min-height: 44px;
+  }
+}

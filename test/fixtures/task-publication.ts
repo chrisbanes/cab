@@ -16,6 +16,7 @@ import type {
   GitHubDeliveryProvider,
   PublishedIssueInspection,
 } from "../../src/standalone/github-delivery.js";
+import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 
 export const publicationProject = {
@@ -118,6 +119,22 @@ export class FakeGitHub {
             }
           : {}),
       }));
+  }
+  /** The source reader over this GitHub, for a service's `github.readerFactory`. */
+  readerFactory(): GitHubReaderFactory {
+    return () => ({
+      readSelection: async (selection) => ({
+        complete: true,
+        issues: this.snapshots(selection),
+        reason: null,
+      }),
+      readBlockers: async () => ({
+        complete: true,
+        blockers: [],
+        reason: null,
+      }),
+      readIssueStatus: async () => ({ status: "open" }),
+    });
   }
   provider(): GitHubDeliveryProvider {
     const gh = this;
@@ -328,43 +345,21 @@ export const labelAndFieldReady: Readiness = {
   conditions: [...labelReady.conditions, ...fieldReady.conditions],
 };
 
-/** A project with a GitHub source over the fake GitHub, no lead (so no turn ever starts) and publish grants. */
-export async function publicationFixture(
+/**
+ * A project with a GitHub source over the fake GitHub, no lead (so no turn ever starts) and publish
+ * grants, on a started service. The delivery credential is set once the runtime has started: the
+ * activation guard refuses a credential its environment snapshot holds.
+ */
+export async function seedPublication(
+  service: () => StandaloneService,
+  gh: FakeGitHub,
+  directory: string,
   options: PublicationFixtureOptions = {},
 ) {
-  const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "ensemble-publication-")),
-    ),
-    projectId = randomUUID(),
-    gh = new FakeGitHub();
-  const path = await checkout(root);
-  const build = () =>
-    new StandaloneService(join(root, "data"), () => noRuntime, undefined, {
-      delivery: { providerFactory: () => gh.provider() },
-      github: {
-        readerFactory: () => ({
-          async readSelection(selection) {
-            return {
-              complete: true,
-              issues: gh.snapshots(selection),
-              reason: null,
-            };
-          },
-          async readBlockers() {
-            return { complete: true, blockers: [], reason: null };
-          },
-          async readIssueStatus() {
-            return { status: "open" };
-          },
-        }),
-      },
-      power: { enabled: false },
-    });
-  let service = build();
-  await service.start();
-  // Set once the runtime has started: the activation guard refuses a credential its environment snapshot holds.
+  const projectId = randomUUID();
+  const path = await checkout(directory);
   process.env.FIXTURE_DELIVERY = "fixture-delivery-credential";
-  const domain = () => service.domain();
+  const domain = () => service().domain();
   domain().execute({
     type: "project.create",
     actor: "operator",
@@ -424,7 +419,7 @@ export async function publicationFixture(
       actor: "operator",
       key: randomUUID(),
       projectId,
-      expectedVersion: service.delivery().configuration(projectId).version,
+      expectedVersion: service().delivery().configuration(projectId).version,
       mode: "reviewable-pr",
       credentialRef: "env:FIXTURE_DELIVERY",
       grants: [
@@ -460,7 +455,6 @@ export async function publicationFixture(
       requiredChecks: [],
     });
   configureGrants(allowed);
-
   const task = (ready: boolean, title = "Publish me", outcome = "Do it") => {
     const taskId = randomUUID();
     domain().execute({
@@ -477,7 +471,7 @@ export async function publicationFixture(
   };
   const version = (taskId: string) => Number(domain().task(taskId).version);
   const target = (taskId: string, selectionId: string) => {
-    const found = service
+    const found = service()
       .publicationAvailability(taskId)
       .targets.find((t) => t.selectionId === selectionId);
     assert.ok(found, `no target for ${selectionId}`);
@@ -485,13 +479,13 @@ export async function publicationFixture(
   };
   /** Review, confirm and send to the target; returns where the publication ended up. */
   const publish = async (taskId: string, selectionId = "repo") => {
-    const review = service.reviewTaskPublication({
+    const review = service().reviewTaskPublication({
       key: randomUUID(),
       taskId,
       targetId: target(taskId, selectionId).id,
       expectedTaskVersion: version(taskId),
     });
-    service.confirmTaskPublication({
+    service().confirmTaskPublication({
       key: randomUUID(),
       taskId,
       reviewId: review.publicationId,
@@ -499,27 +493,16 @@ export async function publicationFixture(
       materialHash: review.materialHash,
       decision: "approved",
     });
-    const sent = await service.sendTaskPublication({
+    const sent = await service().sendTaskPublication({
       taskId,
       publicationId: review.publicationId,
       expectedTaskVersion: version(taskId),
     });
     return { review, sent };
   };
-  const taskCount = () =>
-    (
-      service
-        .domain()
-        .tasks(projectId)
-        .map((t) => t.id) as unknown[]
-    ).length;
+  const taskCount = () => domain().tasks(projectId).length;
   return {
-    root,
     projectId,
-    gh,
-    get service() {
-      return service;
-    },
     domain,
     task,
     version,
@@ -527,6 +510,36 @@ export async function publicationFixture(
     publish,
     taskCount,
     configureGrants,
+    release: () => {
+      delete process.env.FIXTURE_DELIVERY;
+    },
+  };
+}
+
+/** A started service over the fake GitHub with a seeded publishing project. */
+export async function publicationFixture(
+  options: PublicationFixtureOptions = {},
+) {
+  const root = realpathSync(
+      mkdtempSync(join(tmpdir(), "ensemble-publication-")),
+    ),
+    gh = new FakeGitHub();
+  const build = () =>
+    new StandaloneService(join(root, "data"), () => noRuntime, undefined, {
+      delivery: { providerFactory: () => gh.provider() },
+      github: { readerFactory: gh.readerFactory() },
+      power: { enabled: false },
+    });
+  let service = build();
+  await service.start();
+  const seeded = await seedPublication(() => service, gh, root, options);
+  return {
+    ...seeded,
+    root,
+    gh,
+    get service() {
+      return service;
+    },
     /** Stops the service and opens another on the same data, as a restart. */
     async restart() {
       await service.stop();
@@ -535,7 +548,7 @@ export async function publicationFixture(
     },
     async close() {
       await service.stop();
-      delete process.env.FIXTURE_DELIVERY;
+      seeded.release();
       rmSync(root, { recursive: true, force: true });
     },
   };
