@@ -25,8 +25,9 @@ Recovery that releases a generation needs the evidence-bearing operations whose
 
 ## Steps
 
-1. The card or row says what is uncertain and that ownership stays held, names
-   the task, and offers Inspect execution. It shows no last-observed time.
+1. The card or row says what is uncertain and names the task. The Home card, or
+   the Inbox's request pane once the row is selected, also says that ownership stays
+   held and offers Inspect execution. It shows no last-observed time.
 2. Inspect execution opens the task's decision card, where each hold line links
    the assignment recovery page: "Recovery evidence" for one assignment,
    "<profile>: recovery evidence" for each of several, or "Execution details"

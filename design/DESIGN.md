@@ -2089,8 +2089,10 @@ Interaction notes:
 
 ### Recovery
 
-- Every Inspect execution or Recovery details control opens the same assignment
-  recovery destination (`127-assignment-recovery-relay`). These controls are in
+- Every Recovery details control opens the same assignment recovery destination
+  (`127-assignment-recovery-relay`); an uncertain execution's Inspect execution on
+  a Home card or Inbox row first opens the task's decision card, whose hold line
+  opens it. These controls are in
   `01-attention-overview`, `49-state-comparisons`,
   `53-phone-failed-refresh-uncertain`, `25b-phone-board-uncertain`, a task wait that
   names its assignment, and Runtime → Task recovery destinations
