@@ -756,3 +756,49 @@ test("a flag left by two lagging reads cannot release a later ordinary withdrawa
   assert.equal(Boolean(f.domain().task(taskId).ready), true);
   assert.deepEqual(holds(f, taskId), ["withdrawn"]);
 });
+
+const retryingOf = (f: Fixture, taskId: string) =>
+  f.service
+    .latestPublication(taskId)
+    ?.steps.map((s) => [s.kind, s.state, s.retrying]);
+
+test("the publication read marks a later step retrying when GitHub allows a retry", async (t) => {
+  const f = await publicationFixture({
+    selections: ["project"],
+    readiness: labelAndFieldReady,
+  });
+  t.after(() => f.close());
+  f.gh.itemMode = "retry";
+  const taskId = f.task(true);
+  await f.publish(taskId, "project");
+  assert.deepEqual(retryingOf(f, taskId), [
+    ["issue.create", "confirmed-success", false],
+    ["project.item.add", "confirmed-failure", true],
+  ]);
+});
+
+test("the publication read does not mark a create GitHub refused for good as retrying", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  f.gh.createMode = "rejected";
+  const taskId = f.task(false);
+  await f.publish(taskId);
+  assert.deepEqual(retryingOf(f, taskId), [
+    ["issue.create", "confirmed-failure", false],
+  ]);
+});
+
+test("the publication read does not mark an abandoned create as retrying", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  f.gh.createMode = "lost-unseen";
+  const taskId = f.task(false);
+  const { review } = await f.publish(taskId);
+  await f.service.abandonTaskPublication({
+    taskId,
+    publicationId: review.publicationId,
+  });
+  assert.deepEqual(retryingOf(f, taskId), [
+    ["issue.create", "confirmed-failure", false],
+  ]);
+});

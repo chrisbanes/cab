@@ -3457,6 +3457,11 @@ export class StandaloneService {
               operationId: record.operationId,
               state: record.state,
               reason: record.observation?.reason ?? null,
+              // The driver's own signal: a failure GitHub allows retrying, with attempts left.
+              retrying:
+                record.state === "confirmed-failure" &&
+                record.observation?.retryable === true &&
+                record.attempts < 3,
             }
           : null;
       };

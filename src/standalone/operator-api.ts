@@ -4562,6 +4562,7 @@ export class OperatorApi {
               operationId: step.operationId,
               kind: step.kind,
               state: step.state,
+              retrying: step.retrying,
               reason: this.safe(step.reason, excluded),
             })),
             createdAt: latest.publication.createdAt,
@@ -4630,6 +4631,7 @@ export class OperatorApi {
         operationId: step.operationId,
         kind: step.kind,
         state: step.state,
+        retrying: step.retrying,
         reason: this.safe(step.reason, excluded),
       })),
     });

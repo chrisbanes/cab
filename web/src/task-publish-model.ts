@@ -107,3 +107,19 @@ export function targetSummary(target: PublicationTarget) {
 
 /** Whether publishing here keeps the task Ready, or leaves it a Draft. */
 export const readyWord = (ready: boolean) => (ready ? "Ready" : "Draft");
+
+const stepStates: Record<string, string> = {
+  prepared: "recorded, not sent yet",
+  attempting: "in progress",
+  uncertain: "outcome unknown",
+  "confirmed-success": "done",
+  "confirmed-failure": "failed",
+  denied: "refused",
+};
+
+/** A step's state in words; only a failure the server marks as retrying is "waiting to retry". */
+export function stepStateWord(step: PublicationLatest["steps"][number]) {
+  return step.state === "confirmed-failure" && step.retrying
+    ? "waiting to retry"
+    : (stepStates[step.state] ?? step.state);
+}

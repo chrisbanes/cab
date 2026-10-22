@@ -1337,6 +1337,8 @@ export const publicationPolicySchema = z
                   "project.field",
                 ]),
                 state: publicationStepStateSchema,
+                /** A failure GitHub allows retrying, with attempts left: the step waits for a retry. */
+                retrying: z.boolean(),
                 reason: safeText,
               })
               .strict(),
@@ -3258,6 +3260,8 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
                 "project.field",
               ]),
               state: publicationStepStateSchema,
+              /** A failure GitHub allows retrying, with attempts left: the step waits for a retry. */
+              retrying: z.boolean(),
               reason: safeText,
             })
             .strict(),

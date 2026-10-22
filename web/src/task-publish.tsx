@@ -15,6 +15,7 @@ import {
   type PublishView,
   publishCopy,
   publishView,
+  stepStateWord,
   readyWord,
   rejectionSentence,
   targetSummary,
@@ -42,15 +43,6 @@ const stepLabels = {
   "project.item.add": "Add it to the GitHub Project",
   "project.field": "Set a Project field",
 } as const;
-
-const stepStates: Record<string, string> = {
-  prepared: "recorded, not sent yet",
-  attempting: "in progress",
-  uncertain: "outcome unknown",
-  "confirmed-success": "done",
-  "confirmed-failure": "failed",
-  denied: "refused",
-};
 
 /** The panel for one local task, shown while the task page has it open. */
 export function PublishToGitHub({
@@ -434,11 +426,7 @@ function Steps({ latest }: { latest: PublicationLatest }) {
       {latest.steps.map((step) => (
         <li key={step.operationId} className="body">
           {stepLabels[step.kind]}:{" "}
-          <span className="issue-improve-strong">
-            {step.state === "confirmed-failure"
-              ? "waiting to retry"
-              : (stepStates[step.state] ?? step.state)}
-          </span>
+          <span className="issue-improve-strong">{stepStateWord(step)}</span>
           {step === create && latest.issueNumber
             ? ` (issue #${latest.issueNumber})`
             : ""}
