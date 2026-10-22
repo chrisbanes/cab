@@ -9,9 +9,9 @@ import {
 } from "../../src/operator/status-mapping-copy.js";
 import {
   statusMappingEvents,
-  type StatusMapping,
   type StatusMappingEvent,
 } from "../../src/core/status-mapping-contracts.js";
+import { statusMappingPlan } from "./status-mapping-draft.js";
 import { Alert } from "./ui/alert.js";
 import { Button } from "./components.js";
 import type { TabProps } from "./project-config.js";
@@ -41,48 +41,6 @@ type FieldRead =
   | { state: "ready"; status: Field | null };
 
 const fieldErrorPath = (event: StatusMappingEvent) => `mapping.events.${event}`;
-
-/** The draft's mapping, or `null` for none: no event names an option. */
-export function draftMapping(
-  v: Values,
-  selection: StatusView["selections"][number] | undefined,
-  fieldNodeId: string | undefined,
-): StatusMapping | null {
-  if (!selection || !fieldNodeId) return null;
-  const events = Object.fromEntries(
-    statusMappingEvents.map((e) => [e, String(v[e] ?? "") || null]),
-  ) as StatusMapping["events"];
-  return Object.values(events).every((o) => o === null)
-    ? null
-    : {
-        selectionId: selection.id,
-        projectNodeId: selection.projectNodeId,
-        fieldNodeId,
-        events,
-      };
-}
-
-/** One line per event whose mapped option changed, naming the options. */
-export function statusMappingChanges(
-  saved: StatusMapping | null,
-  next: StatusMapping | null,
-  optionName: (id: string) => string,
-  selectionName: (id: string) => string,
-): string[] {
-  if (!next) return saved ? ["Clears the status mapping."] : [];
-  const lines: string[] = [];
-  if (saved?.selectionId !== next.selectionId)
-    lines.push(`Maps Status of ${selectionName(next.selectionId)}.`);
-  for (const event of statusMappingEvents) {
-    const was = saved?.events[event] ?? null,
-      now = next.events[event];
-    if (was !== now)
-      lines.push(
-        `${statusEventLabels[event]}: ${now ? `sets Status to ${optionName(now)}` : "writes nothing"}.`,
-      );
-  }
-  return lines;
-}
 
 export function StatusMappingPanel(
   p: TabProps & {
@@ -157,23 +115,29 @@ export function StatusMappingPanel(
   );
   const optionName = (id: string) =>
     status?.options.find((o) => o.optionNodeId === id)?.name ?? id;
-  const next = draftMapping(d.values, selection, fieldNodeId),
-    selectionName = (id: string) => {
+  const selectionName = (id: string) => {
       const found = view.selections.find((s) => s.id === id);
       return found ? p.selectionName(found) : id;
     },
     unavailable = view.availability === "unavailable",
     // Without its Project source the saved mapping can only be cleared.
     clearing = unavailable && saved !== null,
-    lines = clearing
-      ? ["Clears the status mapping."]
-      : statusMappingChanges(saved, next, optionName, selectionName);
+    plan = statusMappingPlan({
+      saved,
+      clearing,
+      values: d.values,
+      selection,
+      fieldNodeId,
+      optionName,
+      selectionName,
+    }),
+    lines = plan.lines;
   const command = {
     type: "status-mapping.configure",
     key: d.values.key,
     projectId,
     expectedVersion: Number(d.values.expectedVersion),
-    mapping: clearing ? null : next,
+    mapping: plan.mapping,
   };
   // Event and source errors show under their own field; the rest have no field of their own.
   const errorPaths = Object.keys(d.errors).filter(
@@ -214,7 +178,7 @@ export function StatusMappingPanel(
                 command,
                 p.refreshConfiguration,
                 {},
-                !fieldNodeId && next !== null,
+                !plan.ready,
               )
             }
           >
@@ -231,6 +195,12 @@ export function StatusMappingPanel(
                   </option>
                 ))}
               </DraftField>
+            )}
+            {!clearing && fieldRead.state === "loading" && (
+              <p className="metadata muted" role="status">
+                Reading this Project's Status options. Nothing can be saved
+                until they are listed.
+              </p>
             )}
             {!clearing && fieldRead.state === "unavailable" && (
               <Alert variant="warning" role="status">
@@ -310,7 +280,7 @@ export function StatusMappingPanel(
               client={p.client}
               session={p.session}
               label={clearing ? "Clear status mapping" : "Save status mapping"}
-              saveDisabled={lines.length === 0}
+              saveDisabled={lines.length === 0 || !plan.ready}
               discard={() => reloadDraft(d, initial)}
               refresh={p.refreshConfiguration}
               review={() => d.adoptLatest(view.version, initial)}
