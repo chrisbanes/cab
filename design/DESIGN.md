@@ -143,8 +143,9 @@ dimensions.
   leads Intervention (`02b`): the row reads "Codex runtime unavailable · Retries
   exhausted", appears under All projects only and counts in the totals. Its request
   pane shows the kind "Runtime", the position, the headline, the reason "Restart
-  retries exhausted", the last failure ("The runtime process exited") and the
-  attempts ("Attempt 1 · 14:02 · Failed — The runtime failed to start"), then a sticky
+  retries exhausted", the last failure ("The runtime failed to start") and the
+  attempts (all three read "Failed — The runtime failed to start", for example
+  "Attempt 1 · 14:02 · Failed — The runtime failed to start"), then a sticky
   bar with one "Open runtime settings" link. It has no Open task, no task-context
   inspector and no task read; the phone detail has the same content, a Back to Inbox
   header and no Open task (not drawn, same layout). The request pane shows
