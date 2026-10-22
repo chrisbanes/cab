@@ -591,7 +591,7 @@ test("Abandon waits for a read-back already in flight and the abandoned create s
 
 test("an issue edited on GitHub between the create and the conversion is still the publication's, not a new task", async (t) => {
   const f = await publicationFixture({
-    selections: ["project"],
+    selections: ["repo", "project"],
     readiness: labelAndFieldReady,
   });
   t.after(() => f.close());
@@ -610,18 +610,18 @@ test("an issue edited on GitHub between the create and the conversion is still t
 test("a publication key that already names a delivery operation is refused before anything is recorded", async (t) => {
   const f = await publicationFixture();
   t.after(() => f.close());
-  const first = f.task(false);
-  const { review } = await f.publish(first);
+  const first = f.task(true);
+  const { review } = await f.publish(first, "project");
   const second = f.task(false, "Second");
   assert.throws(
     () =>
       f.service.reviewTaskPublication({
-        key: review.publicationId,
+        key: review.item?.operationId ?? "",
         taskId: second,
         targetId: f.target(second, "repo").id,
         expectedTaskVersion: f.version(second),
       }),
-    /already in use|different material/,
+    /already in use/,
   );
   assert.equal(f.service.latestPublication(second), null);
 });

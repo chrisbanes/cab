@@ -3528,8 +3528,7 @@ export class StandaloneService {
     // A replay of a link that went through answers where the publication is.
     if (
       known?.review.taskId === command.taskId &&
-      known.issueNumber === command.issueNumber &&
-      known.state !== "sending"
+      known.issueNumber === command.issueNumber
     )
       return known;
     const publication = this.unresolvedCreate(command),
