@@ -279,6 +279,15 @@ export class GitHubSourceStore {
       ).some((c) => c.name === "readAt")
     )
       this.db.exec("ALTER TABLE github_memberships ADD COLUMN readAt INTEGER");
+    // Complete reads that omitted a just-published issue in a row; null for every other membership.
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(github_memberships)").all() as Row[]
+      ).some((c) => c.name === "missedReads")
+    )
+      this.db.exec(
+        "ALTER TABLE github_memberships ADD COLUMN missedReads INTEGER",
+      );
     const closureColumns = this.db
       .prepare("PRAGMA table_info(github_delivery_closures)")
       .all() as Row[];
@@ -865,7 +874,7 @@ export class GitHubSourceStore {
         }
         this.db
           .prepare(
-            "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId, nodeId) DO UPDATE SET projectFields = excluded.projectFields, itemNodeId = excluded.itemNodeId, readAt = excluded.readAt",
+            "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId, nodeId) DO UPDATE SET projectFields = excluded.projectFields, itemNodeId = excluded.itemNodeId, readAt = excluded.readAt, missedReads = NULL",
           )
           .run(
             projectId,
@@ -881,16 +890,26 @@ export class GitHubSourceStore {
           supplied: { title: issue.title, body: issue.body },
         });
         this.updateReadiness(taskId);
+        this.releasePublishedWithdrawal(taskId);
       }
       new TaskReviewStore(this.db).captureSources(sourceCaptures);
       if (snapshot.complete) {
         const old = this.db
           .prepare(
-            "SELECT nodeId FROM github_memberships WHERE projectId = ? AND selectionId = ?",
+            "SELECT nodeId, missedReads FROM github_memberships WHERE projectId = ? AND selectionId = ?",
           )
           .all(projectId, selectionId) as Row[];
         for (const membership of old)
           if (!seen.has(String(membership.nodeId))) {
+            // GitHub's lists trail a create: a just-published issue survives one complete read that omits it.
+            if (membership.missedReads === 0) {
+              this.db
+                .prepare(
+                  "UPDATE github_memberships SET missedReads = 1 WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
+                )
+                .run(projectId, selectionId, String(membership.nodeId));
+              continue;
+            }
             this.db
               .prepare(
                 "DELETE FROM github_memberships WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
@@ -956,6 +975,29 @@ export class GitHubSourceStore {
           .run(projectId, selectionId);
       return true;
     });
+  }
+
+  /**
+   * A just-published task whose issue a later read lists again, and that is Ready, is no longer
+   * withdrawn: the hold came from reads that omitted a real issue. Every other source hold stays for
+   * the operator, as on any imported task.
+   */
+  private releasePublishedWithdrawal(taskId: string): void {
+    const external = this.db
+      .prepare(
+        "SELECT e.nodeId, t.ready FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ? AND EXISTS (SELECT 1 FROM task_publications p WHERE p.taskId = e.taskId AND p.state = 'converted')",
+      )
+      .get(taskId) as Row | undefined;
+    if (!external || Number(external.ready) !== 1) return;
+    const released = this.db
+      .prepare(
+        "UPDATE github_source_holds SET active = 0 WHERE nodeId = ? AND active = 1 AND reason = 'withdrawn'",
+      )
+      .run(String(external.nodeId)) as { changes: number | bigint };
+    if (Number(released.changes) > 0)
+      this.db
+        .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
+        .run(taskId);
   }
 
   /**
@@ -1032,7 +1074,7 @@ export class GitHubSourceStore {
       .run(input.nodeId, new Date(now).toISOString());
     this.db
       .prepare(
-        "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields, itemNodeId, readAt, missedReads) VALUES (?, ?, ?, ?, ?, ?, 0)",
       )
       .run(
         input.projectId,

@@ -108,7 +108,7 @@ test("a Ready task published to a Project records the create, the item and the f
 });
 
 for (const mode of ["rejected", "uncertain"] as const)
-  test(`with the Project item add ${mode}, the task converts and the next complete sync holds it as withdrawn`, async (t) => {
+  test(`with the Project item add ${mode}, the task converts and the second consecutive complete sync holds it as withdrawn`, async (t) => {
     const f = await publicationFixture({
       selections: ["project"],
       readiness: labelAndFieldReady,
@@ -121,6 +121,10 @@ for (const mode of ["rejected", "uncertain"] as const)
     // No field is written to an item that is not known to exist.
     assert.deepEqual(f.gh.order, ["issue.create", "project.item.add"]);
     assert.ok(imported(f, taskId));
+    // One complete read that omits it is forgiven, as GitHub's lists trail a create.
+    await f.service.refreshGitHub();
+    assert.deepEqual(holds(f, taskId), []);
+    assert.equal(Boolean(f.domain().task(taskId).ready), true);
     await f.service.refreshGitHub();
     assert.deepEqual(holds(f, taskId), ["withdrawn"]);
     assert.equal(f.taskCount(), 1);
@@ -662,4 +666,61 @@ test("Link asks for the readiness label and the credential user's authorship, as
     ).state,
     "converted",
   );
+});
+
+test("a list that trails the create keeps the task Ready, and a later read clears nothing it should keep", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  const taskId = f.task(true);
+  await f.publish(taskId);
+  const shown = f.gh.snapshots.bind(f.gh);
+  // The first complete read after the conversion does not list the new issue yet.
+  f.gh.snapshots = () => [];
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), []);
+  assert.equal(Boolean(f.domain().task(taskId).ready), true);
+  f.gh.snapshots = shown;
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), []);
+  assert.equal(Boolean(f.domain().task(taskId).ready), true);
+  assert.equal(f.taskCount(), 1);
+  // Having been listed, it is an ordinary member: one omission now withdraws it.
+  f.gh.snapshots = () => [];
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+});
+
+test("two consecutive omissions withdraw a just-published task, and a later listing releases only that hold", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  const taskId = f.task(true);
+  await f.publish(taskId);
+  const shown = f.gh.snapshots.bind(f.gh);
+  f.gh.snapshots = () => [];
+  await f.service.refreshGitHub();
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  assert.equal(Boolean(f.domain().task(taskId).ready), false);
+  f.gh.snapshots = shown;
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), []);
+  assert.equal(Boolean(f.domain().task(taskId).ready), true);
+});
+
+test("an imported issue that is not just published is withdrawn by the first omission and keeps its hold", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  const human = f.gh.add("Human", "Made by hand", ["ready"]);
+  await f.service.refreshGitHub();
+  const imported = f.service.githubSources().issue(human.nodeId);
+  assert.ok(imported);
+  const taskId = String(imported?.taskId);
+  const shown = f.gh.snapshots.bind(f.gh);
+  f.gh.snapshots = () => [];
+  await f.service.refreshGitHub();
+  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  f.gh.snapshots = shown;
+  await f.service.refreshGitHub();
+  // Today's behaviour on any imported task: the operator resolves the hold.
+  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
 });

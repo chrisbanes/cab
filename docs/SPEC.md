@@ -977,9 +977,14 @@ from local to imported; its title and description are source-owned from then on.
   outcome is known the write shows as pending, the task is held, and its title, outcome, Ready,
   state and dependencies cannot be changed.
 - **Conversion.** After the create is confirmed and the other steps are recorded (confirmed,
-  failed or unknown), the task is converted in one transaction. A failed or unknown item add leaves
-  the predicted Project membership to be removed by the next complete sync, so the withdrawn hold
-  applies; no field is written to an item that is not known to exist.
+  failed or unknown), the task is converted in one transaction. No field is written to an item that is
+  not known to exist. GitHub's lists trail a create, so a converted task is forgiven **one** complete
+  read of a selection that omits its issue: it keeps its membership, its Ready flag and no hold. A
+  second consecutive complete read that omits it (a failed or unknown item add leaves the predicted
+  Project membership exactly this way) removes the membership and the ordinary withdrawn hold applies.
+  A read that lists the issue again resets the count, and releases a withdrawn hold on a converted task
+  that is Ready. An imported issue that was not just published keeps today's behaviour: the first
+  complete read that omits it withdraws it, and the hold stays until the operator resolves it.
 - **Unknown create.** The read-back confirms nothing from an empty list. The task stays held and
   nothing is sent again, across restart; a sync skips a new issue carrying an unresolved
   publication's marker. The operator can **Link** a named issue, which must carry the marker and the
