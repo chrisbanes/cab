@@ -3435,6 +3435,9 @@ export class StandaloneService {
       this.publicationContext(taskId),
     );
   }
+  publication(publicationId: string): Publication | undefined {
+    return this.started().taskPublications.get(publicationId);
+  }
   /** The task's newest publication with what each of its steps has recorded. */
   latestPublication(taskId: string) {
     const started = this.started(),

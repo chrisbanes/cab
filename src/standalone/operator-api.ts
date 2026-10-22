@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { issueCurrentBodyLimit } from "../core/issue-text-limits.js";
+import {
+  issueBodyLimit,
+  issueCurrentBodyLimit,
+  issueTitleLimit,
+} from "../core/issue-text-limits.js";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
@@ -127,7 +131,13 @@ import {
 import {
   type CommentReasonCode,
   issueEditReasonSentences,
+  publicationReasonSentences,
+  publicationTargetReasonSentences,
 } from "../operator/github-reasons.js";
+import type {
+  Publication,
+  PublicationReview,
+} from "../core/task-publication.js";
 import { deriveWaits } from "../operator/wait-reasons.js";
 import {
   type AttentionCode,
@@ -3507,6 +3517,7 @@ export class OperatorApi {
       delivery: this.deliveryProjection(taskId, excluded),
       commentPolicy: this.commentPolicy(taskId),
       issueEdit: this.issueEditPolicy(taskId, excluded),
+      publication: this.publicationPolicy(taskId, excluded),
       repositoryLinked:
         this.domain().githubConfiguration(String(t.projectId)).repositories
           .length > 0,
@@ -4506,6 +4517,209 @@ export class OperatorApi {
           }
         : null,
     };
+  }
+  /** Whether the operator can publish this local task as an issue, to where, and its newest publication. */
+  private publicationPolicy(
+    taskId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const availability = this.service.publicationAvailability(taskId),
+      latest = this.service.latestPublication(taskId);
+    return {
+      available: availability.available,
+      reasonCode: availability.reasonCode,
+      reason: availability.reasonCode
+        ? publicationReasonSentences[availability.reasonCode]
+        : null,
+      targets: availability.available
+        ? availability.targets.map((t) => ({
+            id: t.id,
+            repository: this.safe(t.repository, excluded),
+            selectionKind: t.kind,
+            enabled: t.enabled,
+            reasonCode: t.reasonCode,
+            reason: t.reasonCode
+              ? publicationTargetReasonSentences[t.reasonCode]
+              : null,
+            labels: t.labels.map((l) => this.safe(l, excluded)),
+            projectFields: t.projectFields,
+            predictedSelected: t.predictedSelected,
+            predictedReady: t.predictedReady,
+          }))
+        : [],
+      latest: latest
+        ? {
+            publicationId: latest.publication.review.publicationId,
+            state: latest.publication.state,
+            revision: latest.publication.review.revision,
+            materialHash: latest.publication.review.materialHash,
+            repository: this.safe(
+              latest.publication.review.target.repository,
+              excluded,
+            ),
+            issueNumber: latest.publication.issueNumber,
+            steps: latest.steps.map((step) => ({
+              kind: step.kind,
+              state: step.state,
+              reason: this.safe(step.reason, excluded),
+            })),
+            createdAt: latest.publication.createdAt,
+          }
+        : null,
+    };
+  }
+  /** Whether the task's text can be shown in full, as the issue it will become. */
+  private publicationText(
+    review: PublicationReview,
+    excluded: readonly string[] | undefined,
+  ) {
+    const title = this.exact(review.issue.title, excluded, issueTitleLimit),
+      body = this.exact(review.issue.body, excluded, issueBodyLimit);
+    return title === null || body === null ? undefined : { title, body };
+  }
+  private publicationReviewReceipt(
+    key: string,
+    review: PublicationReview,
+    excluded: readonly string[] | undefined,
+  ) {
+    const text = this.publicationText(review, excluded);
+    // The operator cannot confirm creating an issue whose text would have to be hidden.
+    if (!text) throw new OperatorApiError(403, "forbidden");
+    return commandReceiptSchema.parse({
+      kind: "publication-review",
+      key,
+      recorded: true,
+      taskId: review.taskId,
+      reviewId: review.publicationId,
+      revision: review.revision,
+      materialHash: review.materialHash,
+      decision: review.decision,
+      repository: this.safe(review.target.repository, excluded),
+      selectionKind: review.target.kind,
+      ...text,
+      labels: review.issue.labels.map((l) => this.safe(l, excluded)),
+      projectFields: review.target.projectFields,
+      addsToProject: review.item !== null,
+      predictedSelected: true,
+      predictedReady: review.target.predictedReady,
+      taskVersion: review.taskVersion,
+      policyVersion: review.caller.policyVersion,
+    });
+  }
+  private publicationReceipt(
+    key: string,
+    publication: Publication,
+    excluded: readonly string[] | undefined,
+  ) {
+    const steps =
+      this.service.latestPublication(publication.review.taskId)?.publication
+        .review.publicationId === publication.review.publicationId
+        ? (this.service.latestPublication(publication.review.taskId)?.steps ??
+          [])
+        : [];
+    return commandReceiptSchema.parse({
+      kind: "publication",
+      key,
+      recorded: true,
+      taskId: publication.review.taskId,
+      publicationId: publication.review.publicationId,
+      state: publication.state,
+      issueNumber: publication.issueNumber,
+      steps: steps.map((step) => ({
+        kind: step.kind,
+        state: step.state,
+        reason: this.safe(step.reason, excluded),
+      })),
+    });
+  }
+  /**
+   * Review, confirm and send of a local task's publication, fenced like the issue-edit commands.
+   * The task text becomes a public issue, so it must be showable in full at review, confirm and send.
+   */
+  private async executePublication(
+    c: Extract<
+      z.output<typeof operatorCommandSchema>,
+      {
+        type:
+          | "task.publish.review"
+          | "task.publish.confirm"
+          | "task.publish.send"
+          | "task.publish.link"
+          | "task.publish.abandon";
+      }
+    >,
+  ) {
+    const task = this.requireTask(c.taskId),
+      visibility = this.visibilityToken(),
+      excluded = await this.exclusions(String(task.projectId), c.taskId);
+    if (
+      visibility !== this.visibilityToken() ||
+      this.requireTask(c.taskId).version !== task.version
+    )
+      throw new OperatorApiError(409, "conflict");
+    if (c.type === "task.publish.review") {
+      // A replay is answered from the review it recorded.
+      const recorded = this.service.publication(c.key);
+      if (
+        !recorded &&
+        (!this.disclosable(task.title, excluded, issueTitleLimit) ||
+          !this.disclosable(task.outcome, excluded, issueBodyLimit))
+      )
+        throw new OperatorApiError(403, "forbidden");
+      return this.publicationReviewReceipt(
+        c.key,
+        this.service.reviewTaskPublication({
+          key: c.key,
+          taskId: c.taskId,
+          targetId: c.targetId,
+          expectedTaskVersion: c.expectedTaskVersion,
+        }),
+        excluded,
+      );
+    }
+    const publication = this.service.publication(c.reviewId);
+    if (!publication || publication.review.taskId !== c.taskId)
+      throw new OperatorApiError(403, "forbidden");
+    if (c.type === "task.publish.confirm") {
+      if (!this.publicationText(publication.review, excluded))
+        throw new OperatorApiError(403, "forbidden");
+      return this.publicationReviewReceipt(
+        c.key,
+        this.service.confirmTaskPublication(c),
+        excluded,
+      );
+    }
+    if (c.type === "task.publish.send") {
+      // Before anything is dispatched, the text is checked against the exclusions as they are now.
+      if (
+        publication.state === "approved" &&
+        !this.publicationText(publication.review, excluded)
+      )
+        throw new OperatorApiError(403, "forbidden");
+      return this.publicationReceipt(
+        c.key,
+        await this.service.sendTaskPublication({
+          taskId: c.taskId,
+          publicationId: c.reviewId,
+          expectedTaskVersion: c.expectedTaskVersion,
+        }),
+        excluded,
+      );
+    }
+    return this.publicationReceipt(
+      c.key,
+      c.type === "task.publish.link"
+        ? await this.service.linkTaskPublication({
+            taskId: c.taskId,
+            publicationId: c.reviewId,
+            issueNumber: c.issueNumber,
+          })
+        : this.service.abandonTaskPublication({
+            taskId: c.taskId,
+            publicationId: c.reviewId,
+          }),
+      excluded,
+    );
   }
   /**
    * The text an edit replaces and the text it sends, each exactly as the exclusions leave it, or
@@ -6778,6 +6992,14 @@ export class OperatorApi {
         c.type === "issue.edit.send"
       )
         return await this.executeIssueEdit(c);
+      if (
+        c.type === "task.publish.review" ||
+        c.type === "task.publish.confirm" ||
+        c.type === "task.publish.send" ||
+        c.type === "task.publish.link" ||
+        c.type === "task.publish.abandon"
+      )
+        return await this.executePublication(c);
       if (
         c.type === "review.anchor.stage" ||
         c.type === "review.draft.save" ||
