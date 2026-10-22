@@ -279,3 +279,34 @@ test("review a result: three criteria render no N more", async (_t, journey) => 
   await s.page.locator("#review .criterion-row").nth(2).waitFor();
   assert.equal(await s.page.locator("#review .criteria-more").count(), 0);
 });
+
+test("review a result: a long criterion is shown in full and keeps its outcome", async (_t, journey) => {
+  const long =
+    "Restore focus to the control that opened the menu after Escape, after choosing an action, and after the menu closes because its anchor was removed, including when the page was scrolled meanwhile";
+  const s = await start(
+    journey,
+    phone,
+    (f) =>
+      seedReviewTask(
+        f,
+        "Atlas",
+        "Ship an accessible command menu",
+        `- [ ] ${long}`,
+      ),
+    ({ taskId }) => `/app/tasks/${taskId}`,
+  );
+  const row = s.page.locator("#review .criterion-row").first();
+  await row.waitFor();
+  const text = row.locator("> p").nth(1);
+  // Not clamped: the whole text is in the page and its box shows every line.
+  assert.equal((await text.textContent())?.trim(), long);
+  assert.equal(
+    await text.evaluate((e) => e.scrollHeight <= e.clientHeight + 1),
+    true,
+    "the criterion text is not clipped",
+  );
+  const outcome = row.locator("> p").first();
+  assert.match((await outcome.textContent()) ?? "", /^C1 · /);
+  assert.equal(await outcome.isVisible(), true);
+  await noPageOverflow(s.page);
+});

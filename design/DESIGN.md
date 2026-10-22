@@ -2513,7 +2513,9 @@ as follows:
   "Changes" when the result supplies none; `70-phone-changes-delivery`), the first three
   criterion rows (a native "N more" disclosure follows the third row and holds the rest; it may sit just
   below the first screen, which promises the summary and up to three outcomes;
-  `03-task-detail` and `47-phone-task-overview` draw "1 more"), the viewing reference and the Result revision select visible; the
+  `03-task-detail` and `47-phone-task-overview` draw "1 more"; the first-screen promise
+  holds for criterion text up to about one line each, and a longer or multiline
+  criterion is shown in full and can push later outcomes below the first screen), the viewing reference and the Result revision select visible; the
   disclosures hold their content mounted, so closing one loses no read, selection or
   focus target. Open cards belong to the history entry, are written only by their
   own toggles and links, and a task opened fresh starts with all three closed. The decision card leads
