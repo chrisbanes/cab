@@ -3557,14 +3557,15 @@ export class StandaloneService {
   }): Publication {
     const started = this.started();
     this.unresolvedCreate(command);
-    started.deliveryStore.transaction(() => {
-      started.deliveryStore.recordObservation(command.publicationId, {
+    started.deliveryStore.recordObservation(
+      command.publicationId,
+      {
         state: "confirmed-failure",
         reason: publicationAbandonedReason,
         receipt: null,
-      });
-      started.taskPublications.end(command.publicationId, "abandoned");
-    });
+      },
+      () => started.taskPublications.end(command.publicationId, "abandoned"),
+    );
     const publication = started.taskPublications.get(command.publicationId);
     if (!publication) throw new DomainConflictError("Publication unavailable");
     return publication;

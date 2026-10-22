@@ -491,7 +491,13 @@ export class TaskPublicationStore {
       const publication = this.get(command.publicationId);
       if (!publication || publication.review.taskId !== command.taskId)
         throw new DomainConflictError("Publication unavailable");
-      if (publication.state === "sending") return publication;
+      // A replay of a send answers with where the publication is.
+      if (
+        ["sending", "converted", "failed", "abandoned"].includes(
+          publication.state,
+        )
+      )
+        return publication;
       if (publication.state !== "approved")
         throw new DomainConflictError("Publication is not approved");
       this.assertCurrent(publication, context, command.expectedTaskVersion);
