@@ -898,6 +898,14 @@ test("overview cards read the Inbox and cover its failure and partial states", a
   await page.goBack();
   await attention.waitFor();
 
+  // Coordination timestamps have second precision; make the existing question older.
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE coordination_interactions SET createdAt=createdAt-1 WHERE taskId=?",
+      )
+      .run(ids.question.id),
+  );
   // A fourth request becomes the dashed row and the counts follow the sidebar.
   await seedOwnQuestion(f, undefined, "Fourth request");
   await page
