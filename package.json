@@ -56,7 +56,7 @@
     "@typesafe-ai/sdk": "0.7.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "lucide-react": "1.59.0",
+    "lucide-react": "1.60.0",
     "pdfjs-dist": "6.4.299",
     "react": "19.3.1",
     "react-dom": "19.3.1",
