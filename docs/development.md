@@ -464,7 +464,12 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      closed-issue mode, linked repositories and refs, and placement conflicts. A
      complete read with open items and none matching the readiness rule adds a
      warning line naming `project prepare-source`; JSON carries the counts and
-     `readinessRule`. A project without a rule shows readiness "No readiness
+     `readinessRule`. Readiness reads as its summary and conditions ("all of 1
+     condition: Status = Ready"), with Project fields named by the last complete read
+     and node IDs otherwise. A GitHub Project selection adds a table of each
+     single-select field's options with their open items and the Project, field and
+     option node IDs a project-field condition takes; JSON carries it as each
+     observation's `projectFields`. A project without a rule shows readiness "No readiness
      rule"; a withheld rule shows "(unavailable)". `task get` adds a `Readiness:` line naming an imported Draft
      task's unmet conditions. Queries, filters, paths and reference names are never shown. A
      partial observation is gap `evidence-gap`, an unavailable one

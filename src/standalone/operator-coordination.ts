@@ -1,4 +1,5 @@
 import { statusMappingActionLabel } from "../operator/status-mapping-copy.js";
+import { projectFieldText } from "../operator/readiness-text.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { CoordinationTaskView } from "./coordination-view.js";
@@ -122,7 +123,7 @@ export function deliverySection(
   const sourceFacts = issue
     ? `<p>Issue ${issue.issueNumber} (${escapeHtml(issue.nodeId)}): observed ${escapeHtml(issue.observedState)}. Labels: ${escapeHtml(issue.labels.join(", "))}.</p>`
     : "<p>No imported issue observation.</p>";
-  const fieldFacts = `<p>Project field observations: ${escapeHtml(delivery.projectFieldObservations.map((f) => `${f.projectNodeId}/${f.fieldNodeId}: ${f.optionNodeId}`).join("; ") || "None observed")}.</p>`;
+  const fieldFacts = `<p>Project field observations: ${escapeHtml(delivery.projectFieldObservations.map(projectFieldText).join("; ") || "None observed")}.</p>`;
   const branchFacts = delivery.branches.length
     ? `<p>Task branches: ${escapeHtml(delivery.branches.map((r) => `${r.branch} (${r.repositoryId}) pushed ${r.lastPushedSha ?? "nothing yet"}${r.outsideHeadSha ? (r.outsideHeadSha === absentBranchHead ? "; branch deleted" : `; outside push ${r.outsideHeadSha}`) : ""}`).join("; "))}.</p>`
     : "";

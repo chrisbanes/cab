@@ -897,6 +897,20 @@ const sourceUrl = z.url().startsWith("https://");
  */
 const sourceClosure = z.enum(["held", "completed", "unattributed"]).nullable();
 /**
+ * The field and option names the last complete read of a Project listed; a read that has
+ * not listed them, or no longer lists them, leaves only the node IDs. Never sent back.
+ */
+const fieldNameShape = {
+  fieldName: text.optional(),
+  optionName: text.optional(),
+};
+const [labelCondition, projectFieldCondition] =
+  readinessConditionSchema.options;
+const readinessConditionViewSchema = z.discriminatedUnion("kind", [
+  labelCondition,
+  projectFieldCondition.extend(fieldNameShape),
+]);
+/**
  * A project's readiness rule as a read may show it: `none` only for a stored null rule
  * (no filtering); `unavailable` when disclosure is withheld, so no condition text leaves.
  */
@@ -907,16 +921,30 @@ export const readinessRuleViewSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("rule"),
       mode: readinessSchema.shape.mode,
-      conditions: readinessSchema.shape.conditions,
+      conditions: z.array(readinessConditionViewSchema).min(1).max(20),
     })
     .strict(),
 ]);
+/** A viewed rule as a command value: without the view's `kind` key and names. */
+export function readinessCommandValue(
+  rule: z.output<typeof readinessRuleViewSchema>,
+) {
+  if (rule.kind !== "rule") return null;
+  return {
+    mode: rule.mode,
+    conditions: rule.conditions.map((c) => {
+      if (c.kind === "label") return c;
+      const { fieldName: _field, optionName: _option, ...ids } = c;
+      return ids;
+    }),
+  };
+}
 /** Why an imported task is Draft under the rule; matching is never Ready or admissible. */
 export const taskReadinessSchema = z
   .object({
     rule: readinessRuleViewSchema,
     outcome: z.enum(["matched", "unmet", "not-evaluated"]),
-    unmet: z.array(readinessConditionSchema).max(20),
+    unmet: z.array(readinessConditionViewSchema).max(20),
   })
   .strict();
 const observationCount = z.number().int().nonnegative();
@@ -930,6 +958,37 @@ export const selectionCountsSchema = z
     complete: z.boolean(),
   })
   .strict();
+/**
+ * A Project selection's single-select fields, named by its last complete read, with the open
+ * items of the selection holding each option; `null` for any other selection kind.
+ */
+export const selectionProjectFieldsSchema = z
+  .object({
+    projectNodeId: text,
+    fields: z
+      .array(
+        z
+          .object({
+            fieldNodeId: text,
+            name: text,
+            options: z
+              .array(
+                z
+                  .object({
+                    optionNodeId: text,
+                    name: text,
+                    open: observationCount,
+                  })
+                  .strict(),
+              )
+              .max(256),
+          })
+          .strict(),
+      )
+      .max(100),
+  })
+  .strict()
+  .nullable();
 export const taskSourceSummarySchema = z
   .object({
     identity: sourceIdentity,
@@ -1227,6 +1286,7 @@ const source = z
                 projectNodeId: z.string().max(512),
                 fieldNodeId: z.string().max(512),
                 optionNodeId: z.string().max(512),
+                ...fieldNameShape,
               })
               .strict(),
           ),
@@ -1289,6 +1349,7 @@ const publicationProjectFieldsSchema = z.array(
       projectNodeId: text,
       fieldNodeId: text,
       optionNodeId: text,
+      ...fieldNameShape,
     })
     .strict(),
 );
@@ -2834,6 +2895,8 @@ export const sourceObservationSchema = envelope(
                   lastAttemptAt: z.string().nullable(),
                   lastSuccessfulAt: z.string().nullable(),
                   counts: selectionCountsSchema.nullable(),
+                  /** Optional so older services still parse; absent means not reported. */
+                  projectFields: selectionProjectFieldsSchema.optional(),
                 })
                 .strict(),
             ),

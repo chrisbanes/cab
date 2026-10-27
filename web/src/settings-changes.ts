@@ -11,7 +11,10 @@ import type {
   runtimeSettingsSchema,
 } from "../../src/operator/contracts.js";
 
-import type { ProfileRuntime } from "../../src/operator/contracts.js";
+import {
+  type ProfileRuntime,
+  readinessCommandValue,
+} from "../../src/operator/contracts.js";
 import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
 import { plural } from "./settings-view.js";
 
@@ -229,10 +232,9 @@ export function sourceRowsFrom(source: Source) {
       keep: true,
     })),
     // No rule and an unavailable rule both load no condition; nothing is prefilled.
-    conditions:
-      source.readiness.kind === "rule"
-        ? source.readiness.conditions.map((c) => ({ ...c }))
-        : [],
+    conditions: (readinessCommandValue(source.readiness)?.conditions ?? []).map(
+      (c) => ({ ...c }),
+    ),
     mode: source.readiness.kind === "rule" ? source.readiness.mode : "all",
     closedIssues: source.closedIssues,
     incomplete:
@@ -309,11 +311,7 @@ export function sourceChanges(
   if (
     unavailable ||
     JSON.stringify(draftedRule(v)) !==
-      JSON.stringify(
-        saved.kind === "rule"
-          ? { mode: saved.mode, conditions: saved.conditions }
-          : null,
-      )
+      JSON.stringify(readinessCommandValue(saved))
   )
     lines.push(
       `Readiness: ${conditions.length ? `${v.mode === "any" ? "any" : "all"} of ${plural(conditions.length, "condition")}` : "no readiness rule"}${unavailable ? " (replaces unavailable readiness)" : ""}`,

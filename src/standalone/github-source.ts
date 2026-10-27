@@ -64,6 +64,7 @@ const fieldDefinitionSchema = z
   .object({
     __typename: z.string(),
     id: name.optional(),
+    name: z.string().optional(),
     options: z.array(z.object({ id: name, name: z.string() })).optional(),
   })
   .passthrough();
@@ -115,9 +116,9 @@ const projectIssueSchema = z.object({
   }),
 });
 
-const projectPageQuery = `query EnsembleProjectPage($id:ID!,$query:String!,$after:String){node(id:$id){... on ProjectV2{id items(first:100,after:$after,query:$query){nodes{id content{__typename ... on Issue{id number title body state repository{id nameWithOwner} labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}}}} fieldValues(first:100){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}} fields(first:100){nodes{__typename ... on ProjectV2SingleSelectField{id options{id name}}} pageInfo{hasNextPage endCursor}}}}}`;
+const projectPageQuery = `query EnsembleProjectPage($id:ID!,$query:String!,$after:String){node(id:$id){... on ProjectV2{id items(first:100,after:$after,query:$query){nodes{id content{__typename ... on Issue{id number title body state repository{id nameWithOwner} labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}}}} fieldValues(first:100){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}} fields(first:100){nodes{__typename ... on ProjectV2SingleSelectField{id name options{id name}}} pageInfo{hasNextPage endCursor}}}}}`;
 const projectValuesQuery = `query EnsembleProjectFieldValues($id:ID!,$after:String){node(id:$id){... on ProjectV2Item{id fieldValues(first:100,after:$after){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}}}}`;
-const projectFieldsQuery = `query EnsembleProjectFields($id:ID!,$after:String){node(id:$id){... on ProjectV2{id fields(first:100,after:$after){nodes{__typename ... on ProjectV2SingleSelectField{id options{id name}}} pageInfo{hasNextPage endCursor}}}}}`;
+const projectFieldsQuery = `query EnsembleProjectFields($id:ID!,$after:String){node(id:$id){... on ProjectV2{id fields(first:100,after:$after){nodes{__typename ... on ProjectV2SingleSelectField{id name options{id name}}} pageInfo{hasNextPage endCursor}}}}}`;
 
 export interface GitHubSourceReader {
   readSelection(selection: GitHubSelection): Promise<SelectionSnapshot>;
@@ -540,16 +541,26 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
         fieldCursor = extra.data.node.fields.pageInfo.endCursor;
         if (!fieldCursor) throw new Error("invalid-pagination");
       }
+      const projectFields = fieldDefinitions.flatMap((field) =>
+        field.__typename === "ProjectV2SingleSelectField" && field.id
+          ? [
+              {
+                projectNodeId: selection.projectNodeId,
+                fieldNodeId: field.id,
+                name: field.name ?? field.id,
+                options: (field.options ?? []).map((option) => ({
+                  optionNodeId: option.id,
+                  name: option.name,
+                })),
+              },
+            ]
+          : [],
+      );
       const singleSelect = new Map(
-        fieldDefinitions
-          .filter(
-            (field) =>
-              field.__typename === "ProjectV2SingleSelectField" && field.id,
-          )
-          .map((field) => [
-            field.id ?? "",
-            new Set(field.options?.map((option) => option.id) ?? []),
-          ]),
+        projectFields.map((f) => [
+          f.fieldNodeId,
+          new Set(f.options.map((o) => o.optionNodeId)),
+        ]),
       );
       for (const issue of issues)
         for (const field of issue.projectFields)
@@ -561,6 +572,7 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
           ...new Map(issues.map((issue) => [issue.nodeId, issue])).values(),
         ],
         reason: null,
+        projectFields,
       };
     } catch (error) {
       return { complete: false, issues, ...incomplete(error) };

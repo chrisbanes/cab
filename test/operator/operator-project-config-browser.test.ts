@@ -2779,6 +2779,134 @@ test("a readiness Project-field condition is picked by name and saves the same n
   );
 });
 
+test("a Project source lists each option's open items, and choosing one adds it as a readiness condition read by name", async (t, journey) => {
+  const previous = process.env.FIXTURE_GITHUB;
+  process.env.FIXTURE_GITHUB = "offline-readiness-source-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env.FIXTURE_GITHUB;
+    else process.env.FIXTURE_GITHUB = previous;
+  });
+  const issue = (n: number, optionNodeId: string) => ({
+    providerInstance: "github.com" as const,
+    nodeId: `I_${n}`,
+    repositoryId: "acme/atlas",
+    repositoryName: "acme/atlas",
+    number: n,
+    title: `Issue ${n}`,
+    body: "Scope",
+    state: "open" as const,
+    labels: [],
+    projectFields: [
+      {
+        projectNodeId: "PVT_atlas",
+        fieldNodeId: "PVTSSF_status",
+        optionNodeId,
+      },
+    ],
+  });
+  const reader: GitHubReaderFactory = () => ({
+    async readSelection(selection) {
+      return selection.kind === "project"
+        ? {
+            complete: true as const,
+            issues: [issue(1, "PVTSSO_todo"), issue(2, "PVTSSO_ready")],
+            reason: null,
+            projectFields: [
+              {
+                projectNodeId: "PVT_atlas",
+                fieldNodeId: "PVTSSF_status",
+                name: "Status",
+                options: [
+                  { optionNodeId: "PVTSSO_todo", name: "Todo" },
+                  { optionNodeId: "PVTSSO_ready", name: "Ready" },
+                ],
+              },
+            ],
+          }
+        : { complete: true as const, issues: [], reason: null };
+    },
+    async readBlockers() {
+      return { complete: true, blockers: [], reason: null };
+    },
+    async readIssueStatus() {
+      return { status: "open" as const };
+    },
+  });
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+    undefined,
+    undefined,
+    { readerFactory: reader, setup: { discovery: fakeDiscovery({}) } },
+  );
+  const api = new OperatorApi(f.service, [f.directory]);
+  await api.execute({
+    type: "discovery.configure",
+    key: randomUUID(),
+    credentialRef: "env:FIXTURE_DISCOVERY",
+  });
+  const d = f.service.domain();
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    selectionId: "S-3",
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+  });
+  await f.service.refreshGitHub();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Require Status = Todo for Ready (1 open)" })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Require Status = Ready for Ready (1 open)" })
+    .click();
+  const added = page.getByRole("button", {
+    name: "Status = Ready is a readiness condition",
+  });
+  assert.equal(await added.isDisabled(), true);
+  // The added condition reads by name in the same selects the picker offers.
+  await page
+    .getByLabel("Readiness option", { exact: true })
+    .last()
+    .locator("option:checked", { hasText: "Ready" })
+    .waitFor({ state: "attached" });
+  assert.equal(
+    await page
+      .getByLabel("Readiness field", { exact: true })
+      .last()
+      .locator("option:checked")
+      .textContent(),
+    "Status",
+  );
+  await captureBrowserEvidence(page, "readiness-project-field-options");
+  const body = commandBody(page);
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  const command = (await body) as { readiness: { conditions: unknown[] } };
+  await savedOutcome(page);
+  const picked = {
+    kind: "project-field",
+    projectNodeId: "PVT_atlas",
+    fieldNodeId: "PVTSSF_status",
+    optionNodeId: "PVTSSO_ready",
+  };
+  // Names are only read: the command and the stored rule carry node IDs alone.
+  assert.deepEqual(command.readiness.conditions.at(-1), picked);
+  assert.deepEqual(
+    d.githubConfiguration(ids.atlas).readiness?.conditions.at(-1),
+    picked,
+  );
+  const observed = (await api.readSourceObservations()).data.projects.find(
+    (p) => p.projectId === ids.atlas,
+  );
+  assert.equal(observed?.readiness.kind, "rule");
+  assert.deepEqual(
+    observed?.readiness.kind === "rule" && observed.readiness.conditions.at(-1),
+    { ...picked, fieldName: "Status", optionName: "Ready" },
+  );
+});
+
 test("a readiness Project-field condition keeps typed node IDs when discovery fails or is truncated", async (_t, journey) => {
   for (const state of [
     { truncated: true },

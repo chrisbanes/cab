@@ -4,6 +4,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
+import {
+  type ProjectFieldIds,
+  type ProjectFieldName,
+  projectFieldNames,
+  replaceProjectFieldNames,
+  withProjectFieldNames,
+} from "./project-field-names.js";
 
 const parseRule = (json: unknown) =>
   readinessSchema.nullable().parse(JSON.parse(String(json)) as unknown);
@@ -37,7 +44,13 @@ export interface IssueSnapshot {
 }
 /** `resumeAt` (epoch ms) marks a rate-limited read: do not read again before then. */
 export type SelectionSnapshot =
-  | { complete: true; issues: IssueSnapshot[]; reason: null }
+  | {
+      complete: true;
+      issues: IssueSnapshot[];
+      reason: null;
+      /** A Project selection's single-select fields, as this read listed them. */
+      projectFields?: ProjectFieldName[];
+    }
   | {
       complete: false;
       issues: IssueSnapshot[];
@@ -253,6 +266,10 @@ export class GitHubSourceStore {
       nodeId TEXT PRIMARY KEY REFERENCES github_external_issues(nodeId),
       active INTEGER NOT NULL CHECK(active IN (0,1)), reason TEXT NOT NULL,
       generation INTEGER NOT NULL CHECK(generation > 0)
+    );
+    CREATE TABLE IF NOT EXISTS github_project_fields (
+      projectNodeId TEXT NOT NULL, fieldNodeId TEXT NOT NULL, name TEXT NOT NULL,
+      options TEXT NOT NULL, PRIMARY KEY(projectNodeId, fieldNodeId)
     );
     CREATE TABLE IF NOT EXISTS github_provider_completions (
       taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id),
@@ -752,8 +769,19 @@ export class GitHubSourceStore {
       const selections = z
         .array(selectionSchema)
         .parse(JSON.parse(String(config.selections)) as unknown);
-      if (!selections.some((selection) => selection.id === selectionId))
-        throw new Error("Unknown GitHub selection");
+      const selection = selections.find((s) => s.id === selectionId);
+      if (!selection) throw new Error("Unknown GitHub selection");
+      // Names only label stored node IDs; a partial read may list fields partially, so it keeps them.
+      if (
+        snapshot.complete &&
+        snapshot.projectFields &&
+        selection.kind === "project"
+      )
+        replaceProjectFieldNames(
+          this.db,
+          selection.projectNodeId,
+          snapshot.projectFields,
+        );
       const previousSync = this.syncState(projectId, selectionId);
       const seen = new Set<string>();
       // Closed issues this read left unimported; counted as observed without a task.
@@ -1516,6 +1544,77 @@ export class GitHubSourceStore {
           },
         ];
       }),
+    );
+  }
+
+  /** Conditions or field values with their stored names; see `withProjectFieldNames`. */
+  withFieldNames<T extends ProjectFieldIds>(
+    items: readonly T[],
+    disclose?: (name: string) => boolean,
+  ) {
+    return withProjectFieldNames(this.db, items, disclose);
+  }
+
+  /**
+   * Each Project selection's single-select fields, named by its last complete read, with how
+   * many open items of the selection hold each option. Never a readiness grant.
+   */
+  selectionFieldCounts(projectId: string): Map<
+    string,
+    {
+      projectNodeId: string;
+      fields: {
+        fieldNodeId: string;
+        name: string;
+        options: { optionNodeId: string; name: string; open: number }[];
+      }[];
+    }
+  > {
+    const row = this.db
+      .prepare(
+        "SELECT selections FROM project_github_sources WHERE projectId = ?",
+      )
+      .get(projectId) as Row | undefined;
+    const projects = z
+      .array(selectionSchema)
+      .parse(JSON.parse(String(row?.selections ?? "[]")) as unknown)
+      .flatMap((s) => (s.kind === "project" ? [s] : []));
+    const names = projectFieldNames(
+      this.db,
+      projects.map((s) => s.projectNodeId),
+    );
+    // Open items per selection, field and option, tallied in one pass.
+    const open = new Map<string, number>();
+    const key = (selectionId: string, fieldNodeId: string, optionId: string) =>
+      `${selectionId}\0${fieldNodeId}\0${optionId}`;
+    for (const m of this.db
+      .prepare(`SELECT m.selectionId, m.projectFields FROM github_memberships m
+        JOIN github_external_issues e ON e.nodeId = m.nodeId
+        WHERE m.projectId = ? AND e.observedState = 'open'`)
+      .all(projectId) as Row[])
+      for (const f of projectFieldsSchema.parse(
+        JSON.parse(String(m.projectFields)),
+      )) {
+        const k = key(String(m.selectionId), f.fieldNodeId, f.optionNodeId);
+        open.set(k, (open.get(k) ?? 0) + 1);
+      }
+    return new Map(
+      projects.map((s) => [
+        s.id,
+        {
+          projectNodeId: s.projectNodeId,
+          fields: names
+            .filter((f) => f.projectNodeId === s.projectNodeId)
+            .map((f) => ({
+              fieldNodeId: f.fieldNodeId,
+              name: f.name,
+              options: f.options.map((o) => ({
+                ...o,
+                open: open.get(key(s.id, f.fieldNodeId, o.optionNodeId)) ?? 0,
+              })),
+            })),
+        },
+      ]),
     );
   }
 

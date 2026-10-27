@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
 import { StatusMappingStore } from "./status-mapping.js";
+import { withProjectFieldNames } from "./project-field-names.js";
 import {
   isInFlightEvent,
   statusMappingEvents,
@@ -2121,7 +2122,7 @@ export class DeliveryStore {
             labels: z.array(identity).parse(JSON.parse(issue.labels)),
           }
         : null,
-      projectFieldObservations: projectFields,
+      projectFieldObservations: withProjectFieldNames(this.db, projectFields),
       policyVersion: configuration.version,
       mode: configuration.mode,
       binding: this.delivery(taskId),

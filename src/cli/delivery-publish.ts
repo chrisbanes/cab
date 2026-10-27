@@ -1,4 +1,5 @@
 import type { CommandReceipt, TaskRead } from "../operator/contracts.js";
+import { projectFieldText } from "../operator/readiness-text.js";
 import { uuidArg } from "./browse.js";
 import { exactCommand, positiveIntFlag } from "./configure.js";
 import { CliError } from "./connections.js";
@@ -61,9 +62,7 @@ function reviewLines(r: Review) {
     [
       "Project fields",
       r.projectFields.length
-        ? r.projectFields
-            .map((f) => `${f.fieldNodeId}=${f.optionNodeId}`)
-            .join(", ")
+        ? r.projectFields.map(projectFieldText).join(", ")
         : "none",
     ],
     ["Added to a GitHub Project", r.addsToProject ? "yes" : "no"],

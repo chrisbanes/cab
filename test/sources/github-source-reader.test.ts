@@ -241,8 +241,13 @@ test("Project filter is passed unchanged and nested field/definition pages must 
                     {
                       __typename: "ProjectV2SingleSelectField",
                       id: "F_1",
-                      options: [{ id: "O_1", name: "Ready" }],
+                      name: "Status",
+                      options: [
+                        { id: "O_0", name: "Todo" },
+                        { id: "O_1", name: "Ready" },
+                      ],
                     },
+                    { __typename: "ProjectV2Field" },
                   ],
                   pageInfo: pageInfo("definitions-2"),
                 },
@@ -307,6 +312,18 @@ test("Project filter is passed unchanged and nested field/definition pages must 
       ],
     ],
   );
+  // A complete read names every single-select field and its options in GitHub's order.
+  assert.deepEqual(complete.complete && complete.projectFields, [
+    {
+      projectNodeId: "P_1",
+      fieldNodeId: "F_1",
+      name: "Status",
+      options: [
+        { optionNodeId: "O_0", name: "Todo" },
+        { optionNodeId: "O_1", name: "Ready" },
+      ],
+    },
+  ]);
   // The Project item holding the issue travels beside, not inside, its field values.
   assert.deepEqual(
     complete.issues.map((entry) => entry.projectItemNodeId),

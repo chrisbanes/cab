@@ -25,6 +25,10 @@ export type ConditionIds = {
   fieldNodeId: string;
   optionNodeId: string;
 };
+export const sameCondition = (a: ConditionIds, b: ConditionIds) =>
+  a.projectNodeId === b.projectNodeId &&
+  a.fieldNodeId === b.fieldNodeId &&
+  a.optionNodeId === b.optionNodeId;
 /** `loading` waits on a read; `typed` falls back to node-ID inputs with a note, if any. */
 export type PickerState =
   | { state: "loading"; projects?: ProjectChoice[] }
