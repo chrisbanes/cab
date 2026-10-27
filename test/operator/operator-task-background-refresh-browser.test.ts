@@ -138,6 +138,8 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   );
   await refresh.click();
   await explicit.entered;
+  // The status waits out its short delay so fast refreshes do not flash it.
+  await page.clock.runFor(1000);
   await page
     .getByText("Refreshing. Showing the last fetched data.", { exact: true })
     .first()

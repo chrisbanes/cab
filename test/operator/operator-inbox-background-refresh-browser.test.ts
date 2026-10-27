@@ -82,6 +82,8 @@ test("Inbox and shell timer reads stay silent until they fail; header Refresh st
   const workspace = await holdResponse(page, "**/api/operator/workspace*");
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await workspace.entered;
+  // The status waits out its short delay so fast refreshes do not flash it.
+  await page.clock.runFor(1000);
   await page
     .getByText("Refreshing. Showing the last fetched data.", { exact: true })
     .first()

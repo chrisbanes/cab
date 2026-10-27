@@ -1,6 +1,8 @@
 import {
   forwardRef,
+  useEffect,
   useRef,
+  useState,
   type AnchorHTMLAttributes,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -183,6 +185,8 @@ export function StatusBadge({
   );
 }
 
+export const refreshNoticeDelayMs = 400;
+
 export function ResourceStatus<T>({
   state,
   retry,
@@ -192,7 +196,18 @@ export function ResourceStatus<T>({
   retry: () => void;
   label?: string;
 }) {
-  if (state.status === "fresh") return null;
+  // A refresh over shown data stays silent briefly, so a fast read does not flash a notice.
+  const refreshing = state.status === "stale" && !state.error;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!refreshing) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), refreshNoticeDelayMs);
+    return () => clearTimeout(timer);
+  }, [refreshing]);
+  if (state.status === "fresh" || (refreshing && !slow)) return null;
   const message =
     state.error === "not-found"
       ? `${label} not found.`

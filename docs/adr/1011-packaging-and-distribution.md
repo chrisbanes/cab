@@ -36,9 +36,9 @@ blocking a later public release.
   Settings → Runtime or restarting the service, enables it.
   A `claude` that resolves but whose runtime fails is unavailable instead. The
   operator turns each runtime on or off in Settings → Runtime (ADR-1012).
-- An npm package is a later channel for the same build. It is not a native app:
-  a desktop wrapper (Tauri or similar) would need signing, notarization and a second
-  owner of the service lifecycle, and can be added later around the same install.
+- An npm package is a later channel for the same build. A Mac app installed through
+  a Homebrew tap is another, registering the same service through SMAppService
+  ([ADR-1019](1019-mac-app-channel.md)).
 
 ## Install and upgrade
 
@@ -48,9 +48,12 @@ snapshots live beside `versions/`, logs in `~/Library/Logs/Ensemble/`, separate 
 development builds. The LaunchAgent binds the exact versioned executable, never a
 `current` symlink, so the plist states the running version.
 
-`ensemble service install | upgrade | uninstall` owns the LaunchAgent (and, in daemon mode, its record). Upgrade stops
-the exact job, takes and verifies an offline snapshot, renders the plist for the new
-version and starts it, then runs the readiness checks. Uninstall removes the job and
+`ensemble service install | upgrade | uninstall` owns the LaunchAgent (and, in daemon mode, its record). The
+plist is rendered from the owner-only service configuration file the Mac app also
+uses (ADR-1019). Upgrade stops the exact job, renders the plist for the new version
+and starts it, then runs the readiness checks. The service takes and verifies the
+offline pre-migration snapshot itself on start, before migrating, and refuses to
+start if either fails. Uninstall removes the job and
 keeps data, auth, snapshots and version directories. There is no self-update.
 
 `service install --mode daemon` is the opt-in alternative that starts the service at
