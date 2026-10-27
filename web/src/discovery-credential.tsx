@@ -293,6 +293,9 @@ export function DiscoveryCredentialRow(
     offer.phase !== "unknown"
       ? signedIn.login
       : null;
+  // Until the one-click save is settled, no other credential write may start: Check whether it
+  // saved resends the original command, which would overwrite a newer reference.
+  const offerUnsettled = offer.phase === "pending" || offer.phase === "unknown";
   const chooseLogin = async () => {
     await offer.submit(
       p.client,
@@ -349,6 +352,7 @@ export function DiscoveryCredentialRow(
               type="button"
               variant="secondary"
               ref={change}
+              disabled={offerUnsettled}
               onClick={() => {
                 // The form's own outcome replaces a kept one-click confirmation.
                 offer.startOperation({ key: key() });
@@ -362,7 +366,7 @@ export function DiscoveryCredentialRow(
               <Button
                 type="button"
                 variant="secondary"
-                disabled={locked(d)}
+                disabled={locked(d) || offerUnsettled}
                 onClick={clear}
               >
                 Clear

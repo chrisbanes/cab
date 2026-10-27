@@ -478,6 +478,50 @@ test("Settings offers the signed-in GitHub CLI login in one click", async (_t, j
   );
 });
 
+test("Settings holds Set while the one-click save is pending", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = credentialRow(page);
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  try {
+    await settingsOffer(page).click();
+    await row.getByRole("button", { name: "Saving…" }).waitFor();
+    assert.equal(
+      await row.getByRole("button", { name: "Set", exact: true }).isDisabled(),
+      true,
+    );
+  } finally {
+    release();
+  }
+  await row
+    .getByText(
+      "GitHub discovery credential · GitHub CLI · @octo · read-only use",
+    )
+    .waitFor();
+  await page.unroute("**/api/operator/commands");
+  await row.getByRole("button", { name: "Change", exact: true }).waitFor();
+  assert.equal(
+    await row.getByRole("button", { name: "Change", exact: true }).isDisabled(),
+    false,
+  );
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
 test("Settings reconciles an unknown one-click outcome", async (_t, journey) => {
   const gh = createFakeGh();
   journey.cleanup(async () => gh.close(), "fake-gh.close");
@@ -498,6 +542,11 @@ test("Settings reconciles an unknown one-click outcome", async (_t, journey) => 
     await check.waitFor();
     assert.equal(await settingsOffer(page).count(), 0);
     assert.equal(await row.getByLabel("GitHub CLI · recommended").count(), 0);
+    // No other credential write starts before the check: it resends the original command.
+    assert.equal(
+      await row.getByRole("button", { name: "Set", exact: true }).isDisabled(),
+      true,
+    );
   } finally {
     await page.unroute("**/api/operator/commands");
   }
