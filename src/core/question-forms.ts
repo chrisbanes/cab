@@ -115,42 +115,45 @@ const questionAnswerSchema = z
   .strict();
 // Parse own entries explicitly: Zod record intentionally omits __proto__, which
 // is a supported literal question identity rather than a prototype operation.
-export const questionAnswersSchema = z
-  .unknown()
-  .transform(
-    (input, ctx): Record<string, z.infer<typeof questionAnswerSchema>> => {
-      if (input === null || typeof input !== "object" || Array.isArray(input)) {
-        ctx.addIssue({ code: "custom", message: "Expected answer dictionary" });
-        return z.NEVER;
+export function ownEntriesRecord<V>(
+  keySchema: z.ZodType<string>,
+  valueSchema: z.ZodType<V>,
+) {
+  return z.unknown().transform((input, ctx): Record<string, V> => {
+    if (input === null || typeof input !== "object" || Array.isArray(input)) {
+      ctx.addIssue({ code: "custom", message: "Expected answer dictionary" });
+      return z.NEVER;
+    }
+    const entries: Array<[string, V]> = [];
+    let invalid = false;
+    for (const [id, value] of Object.entries(input)) {
+      const key = keySchema.safeParse(id),
+        answer = valueSchema.safeParse(value);
+      if (!key.success) {
+        invalid = true;
+        for (const issue of key.error.issues)
+          ctx.addIssue({ ...issue, path: [id, ...issue.path] });
       }
-      const entries: Array<[string, z.infer<typeof questionAnswerSchema>]> = [];
-      let invalid = false;
-      for (const [id, value] of Object.entries(input)) {
-        const key = identity.safeParse(id),
-          answer = questionAnswerSchema.safeParse(value);
-        if (!key.success) {
-          invalid = true;
-          for (const issue of key.error.issues)
-            ctx.addIssue({ ...issue, path: [id, ...issue.path] });
-        }
-        if (!answer.success) {
-          invalid = true;
-          for (const issue of answer.error.issues)
-            ctx.addIssue({ ...issue, path: [id, ...issue.path] });
-        }
-        if (key.success && answer.success)
-          entries.push([key.data, answer.data]);
+      if (!answer.success) {
+        invalid = true;
+        for (const issue of answer.error.issues)
+          ctx.addIssue({ ...issue, path: [id, ...issue.path] });
       }
-      return invalid ? z.NEVER : Object.fromEntries(entries);
-    },
-  )
-  .superRefine((answers, ctx) => {
-    if (
-      new TextEncoder().encode(JSON.stringify(answers)).byteLength >
-      questionPayloadLimit
-    )
-      ctx.addIssue({ code: "custom", message: "Answer payload exceeds limit" });
+      if (key.success && answer.success) entries.push([key.data, answer.data]);
+    }
+    return invalid ? z.NEVER : Object.fromEntries(entries);
   });
+}
+export const questionAnswersSchema = ownEntriesRecord(
+  identity,
+  questionAnswerSchema,
+).superRefine((answers, ctx) => {
+  if (
+    new TextEncoder().encode(JSON.stringify(answers)).byteLength >
+    questionPayloadLimit
+  )
+    ctx.addIssue({ code: "custom", message: "Answer payload exceeds limit" });
+});
 export type QuestionAnswers = z.infer<typeof questionAnswersSchema>;
 export function validateQuestionAnswers(
   form: QuestionForm,

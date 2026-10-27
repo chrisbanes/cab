@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { materialDigest } from "./delivery.js";
+import { ownEntriesRecord } from "./question-forms.js";
 export const questionIdentity = z.string().min(1).max(512);
 const text = z.string().min(1).max(16000);
 export const structuredQuestionSetSchema = z
@@ -45,7 +46,7 @@ export const structuredQuestionSetSchema = z
     }
   });
 export type StructuredQuestionSet = z.infer<typeof structuredQuestionSetSchema>;
-export const structuredQuestionAnswersSchema = z.record(
+export const structuredQuestionAnswersSchema = ownEntriesRecord(
   questionIdentity,
   z.object({ answers: z.array(text).length(1) }).strict(),
 );
@@ -65,7 +66,9 @@ export function validateStructuredAnswers(
   if (Object.keys(answers).length !== questions.length)
     throw new Error("Incomplete or unknown answer identities");
   for (const question of questions) {
-    const answer = answers[question.id]?.answers[0];
+    const answer = Object.hasOwn(answers, question.id)
+      ? answers[question.id]?.answers[0]
+      : undefined;
     if (
       answer === undefined ||
       (!question.isOther &&

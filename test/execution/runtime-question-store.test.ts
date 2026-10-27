@@ -242,6 +242,42 @@ const native = {
     continuation: "synchronous" as const,
   },
 };
+test("runtime question with the literal id __proto__ is answered and survives reopen", () => {
+  const f = fixture();
+  try {
+    const question = f.coordination.recordRuntimeQuestion({
+      ...native,
+      request: {
+        ...native.request,
+        questions: [
+          { ...required(native.request.questions[0]), id: "__proto__" },
+        ],
+      },
+    });
+    const command = {
+      actor: "operator" as const,
+      key: nextCommand(),
+      taskId: taskA,
+      interactionId: question.interactionId,
+      expectedRevision: 1,
+      answers: JSON.parse('{"__proto__":{"answers":["Local"]}}'),
+    };
+    const receipt = f.coordination.answerRuntimeQuestion(command);
+    assert.equal(receipt.recorded, true);
+    f.reopen();
+    const answers = required(
+      f.coordination.runtimeQuestions(taskA)[0]?.answers,
+    );
+    assert.ok(Object.hasOwn(answers, "__proto__"));
+    assert.deepEqual(
+      Object.getOwnPropertyDescriptor(answers, "__proto__")?.value.answers,
+      ["Local"],
+    );
+    assert.deepEqual(f.coordination.answerRuntimeQuestion(command), receipt);
+  } finally {
+    f.close();
+  }
+});
 test("runtime question answer survives restart without inbox delivery or closing attention", () => {
   const f = fixture();
   try {

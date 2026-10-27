@@ -4479,18 +4479,20 @@ export class StandaloneService {
     }
   }
   private handleUserInputOutcome(outcome: RuntimeUserInputOutcome): void {
-    const waiter = this.nativeWaiters.get(nativeEndpointKey(outcome));
+    const endpoint = nativeEndpointKey(outcome);
+    const waiter = this.nativeWaiters.get(endpoint);
     // Outcomes also arrive while runtimes start, before the service is published.
     const { coordination, state, supervisor } = this.acquired ?? {};
     if (!coordination) return;
+    // A terminal delivery state releases the waiter; any hold stays in place and
+    // a held execution cannot be completed by the released callback.
+    const terminal = ["confirmed", "uncertain", "unavailable"];
     try {
       const record = coordination.recordRuntimeReplyOutcome(outcome);
-      if (record.deliveryState === "confirmed" && waiter) {
-        this.nativeWaiters.delete(nativeEndpointKey(outcome));
-        waiter.resolve();
-      } else if (
-        outcome.outcome === "uncertain" ||
-        outcome.outcome === "unavailable"
+      if (
+        (outcome.outcome === "uncertain" ||
+          outcome.outcome === "unavailable") &&
+        !(record.deliveryState === "confirmed" && waiter)
       ) {
         const execution = state?.byWorkId(record.requestingWorkId);
         if (execution) {
@@ -4501,22 +4503,19 @@ export class StandaloneService {
           supervisor?.noteAnomaly(execution.workId);
         }
       }
+      if (terminal.includes(record.deliveryState))
+        this.releaseNativeWaiter(endpoint);
     } catch {
-      const record = coordination.runtimeQuestionByEndpoint({
+      let record = coordination.runtimeQuestionByEndpoint({
         requestId: outcome.requestId,
         runtimeGeneration: outcome.runtimeGeneration,
         threadId: outcome.threadId,
         turnId: outcome.turnId,
         itemId: outcome.itemId,
       });
-      if (
-        record &&
-        !["confirmed", "uncertain", "unavailable"].includes(
-          record.deliveryState,
-        )
-      )
+      if (record && !terminal.includes(record.deliveryState))
         try {
-          coordination.recordRuntimeReplyOutcome({
+          record = coordination.recordRuntimeReplyOutcome({
             ...record.identity,
             ...(record.replyIntentId
               ? {
@@ -4540,7 +4539,14 @@ export class StandaloneService {
         );
         supervisor?.noteAnomaly(execution.workId);
       }
+      if (record && terminal.includes(record.deliveryState))
+        this.releaseNativeWaiter(endpoint);
     }
+  }
+  private releaseNativeWaiter(endpoint: string): void {
+    const waiter = this.nativeWaiters.get(endpoint);
+    this.nativeWaiters.delete(endpoint);
+    waiter?.resolve();
   }
   private runtimeAnswerEligibility(question: RuntimeQuestionRecord): string[] {
     const state = this.started().state,

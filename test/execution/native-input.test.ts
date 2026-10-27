@@ -55,6 +55,34 @@ test("qualified native choice preserves source text and validates a complete exa
   );
   assert.throws(() => encodeNativeInputReply(request, {}));
 });
+test("a native question with the literal id __proto__ validates and encodes as an own answer", () => {
+  const request = parseNativeInputRequest(
+    {
+      ...input,
+      questions: [{ ...input.questions[0], id: "__proto__" }],
+    },
+    qualification,
+  );
+  const result = encodeNativeInputReply(
+    request,
+    JSON.parse('{"__proto__":{"answers":["Local"]}}'),
+  );
+  assert.ok(Object.hasOwn(result.answers, "__proto__"));
+  assert.deepEqual(
+    Object.getOwnPropertyDescriptor(result.answers, "__proto__")?.value.answers,
+    ["Local"],
+  );
+  assert.match(JSON.stringify(result), /"__proto__"/);
+  assert.throws(() => encodeNativeInputReply(request, {}));
+  assert.throws(() =>
+    encodeNativeInputReply(
+      request,
+      JSON.parse(
+        '{"__proto__":{"answers":["Local"]},"extra":{"answers":["Local"]}}',
+      ),
+    ),
+  );
+});
 for (const [name, change] of Object.entries({
   secret: { questions: [{ ...input.questions[0], isSecret: true }] },
   standalone: { questions: [{ ...input.questions[0], options: null }] },
