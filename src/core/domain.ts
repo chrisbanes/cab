@@ -2720,6 +2720,33 @@ export class DomainStore {
   }
 
   /** Must run inside the caller's transaction. */
+  /**
+   * Applies the current profile and instructions revisions to an assignment whose captured
+   * ones are stale, as assignment.apply does. The service calls it only for an assignment
+   * that has never started a turn; a revoked profile is left for its own wait.
+   */
+  applyCurrentRevisions(assignmentId: string): Row {
+    const assignment = this.assignment(assignmentId);
+    const profile = this.profile(String(assignment.profileId));
+    const project = this.project(String(assignment.projectId));
+    if (
+      !profile.revoked &&
+      (Number(assignment.profileRevision) !== Number(profile.version) ||
+        Number(assignment.instructionsRevision) !==
+          Number(project.instructionsRevision))
+    )
+      this.db
+        .prepare(
+          "UPDATE domain_assignments SET version = version + 1, profileRevision = ?, instructionsRevision = ? WHERE id = ?",
+        )
+        .run(
+          present(profile, "version"),
+          present(project, "instructionsRevision"),
+          assignmentId,
+        );
+    return this.assignment(assignmentId);
+  }
+
   ensureLeadAssignmentWithinTransaction(taskId: string): Row | undefined {
     const assignmentId = this.ensureLeadBindingWithinTransaction(taskId);
     if (!assignmentId) return undefined;

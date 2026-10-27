@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -1720,5 +1727,276 @@ test("skip mode never completes a closed imported task", async () => {
     assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
   } finally {
     await w.close();
+  }
+});
+
+/**
+ * A service whose GitHub selection imports a Ready issue from linked R_1, a not-Ready one,
+ * and a Ready one from R_2, which is selected but not linked for checkout.
+ */
+async function importedWorkspaceService(options: { paused: boolean }) {
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), "ensemble-github-imported-workspace-")),
+  );
+  const makeRepository = (name: string) => {
+    const path = join(root, name);
+    mkdirSync(path);
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", path, ...args], { encoding: "utf8" });
+    git("init", "--initial-branch=main");
+    git("config", "user.name", "Test");
+    git("config", "user.email", "test@example.invalid");
+    writeFileSync(join(path, "README.md"), "fixture\n");
+    git("add", "README.md");
+    git("commit", "-m", "fixture");
+    return path;
+  };
+  const repository = makeRepository("source");
+  const unready: IssueSnapshot = {
+    ...issue,
+    nodeId: "I_2",
+    number: 2,
+    title: "Not ready",
+    labels: [],
+  };
+  const unlinked: IssueSnapshot = {
+    ...issue,
+    nodeId: "I_3",
+    repositoryId: "R_2",
+    repositoryName: "org/other",
+    number: 3,
+    title: "Unlinked repository",
+  };
+  const startedWorkspaces: string[] = [];
+  const service = new StandaloneService(
+    join(root, "data"),
+    () => ({
+      async start() {},
+      async stop() {},
+      onUnexpectedRequest() {},
+      async startThread() {
+        return "thread";
+      },
+      async resumeThread() {},
+      async startTurn(_thread, workspace) {
+        startedWorkspaces.push(workspace);
+        return "turn";
+      },
+      async interruptTurn() {},
+      async waitForTurn() {
+        return "completed" as const;
+      },
+    }),
+    undefined,
+    {
+      github: {
+        readerFactory: () => ({
+          async readSelection() {
+            return {
+              complete: true,
+              issues: [issue, unready, unlinked],
+              reason: null,
+            };
+          },
+          async readBlockers() {
+            return { complete: true, blockers: [], reason: null };
+          },
+          async readIssueStatus() {
+            return { status: "open" as const };
+          },
+        }),
+        intervalMs: 60_000,
+      },
+      power: { enabled: false },
+    },
+  );
+  const projectId = randomUUID();
+  const profileId = randomUUID();
+  await service.start();
+  const domain = service.domain();
+  domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Lead",
+    instructions: "Lead",
+    capabilities: "work",
+  });
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Alpha",
+    leadProfileId: profileId,
+  });
+  const resume = () =>
+    domain.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(domain.project(projectId).version),
+      paused: false,
+    });
+  if (!options.paused) resume();
+  // Both repositories are selected; only R_1 is linked for checkout at first.
+  const link = async (
+    repositories: { repositoryId: string; path: string; ref: string }[],
+  ) => {
+    await domain.configureGitHub({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(domain.githubConfiguration(projectId).version),
+      credentialRef: "env:TEST_GITHUB",
+      selections: [
+        {
+          id: "repo",
+          kind: "repository",
+          repositoryId: "R_1",
+          owner: "org",
+          name: "repo",
+        },
+        {
+          id: "other",
+          kind: "repository",
+          repositoryId: "R_2",
+          owner: "org",
+          name: "other",
+        },
+      ],
+      readiness: {
+        mode: "any",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories,
+    });
+    for (const selectionId of ["repo", "other"])
+      domain.execute({
+        type: "github.activate",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        selectionId,
+        expectedVersion: Number(domain.githubConfiguration(projectId).version),
+      });
+    await service.refreshGitHub();
+  };
+  await link([{ repositoryId: "R_1", path: repository, ref: "main" }]);
+  const taskId = (nodeId: string) =>
+    String(service.githubSources().issue(nodeId)?.taskId);
+  const request = (nodeId: string) =>
+    service.turnRequests().find((r) => r.taskId === taskId(nodeId));
+  return {
+    service,
+    domain,
+    projectId,
+    repository,
+    makeRepository,
+    link,
+    profileId,
+    startedWorkspaces,
+    resume,
+    taskId,
+    request,
+    async settle(done: () => boolean) {
+      // Provisioning runs git, so wait on the clock rather than on ticks.
+      for (let i = 0; i < 100 && !done(); i++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    },
+    async close() {
+      await service.stop();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+test("an admitted imported task's turn provisions a workspace from its linked source repository", async () => {
+  const f = await importedWorkspaceService({ paused: false });
+  try {
+    const waiting = (nodeId: string) => f.request(nodeId)?.reason ?? "";
+    await f.settle(
+      () => f.startedWorkspaces.length > 0 && /not linked/.test(waiting("I_3")),
+    );
+    const binding = await f.service.taskWorkspace(f.taskId("I_1"));
+    assert.deepEqual(
+      binding?.repositories.map((r) => [r.repositoryId, r.sourcePath]),
+      [["R_1", f.repository]],
+    );
+    assert.deepEqual(f.startedWorkspaces, [
+      realpathSync(String(binding?.path)),
+    ]);
+    // A not-Ready imported task has no queued turn and no checkout.
+    assert.equal(f.request("I_2"), undefined);
+    assert.equal(await f.service.taskWorkspace(f.taskId("I_2")), undefined);
+    // A Ready task whose repository the project does not link waits without a checkout.
+    assert.match(waiting("I_3"), /source repository is not linked/);
+    assert.equal(await f.service.taskWorkspace(f.taskId("I_3")), undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an imported task's initial turn is queued only once admissible", async () => {
+  const f = await importedWorkspaceService({ paused: true });
+  try {
+    await f.settle(() => false);
+    assert.equal(f.request("I_1"), undefined);
+    f.resume();
+    await f.service.refreshGitHub();
+    await f.settle(() => f.startedWorkspaces.length > 0);
+    assert.equal(f.request("I_1")?.state, "active");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a queued imported turn that never ran takes the current task, profile and instructions revisions when admitted", async () => {
+  const f = await importedWorkspaceService({ paused: false });
+  try {
+    const waiting = () => f.request("I_3")?.reason ?? "";
+    await f.settle(() => /not linked/.test(waiting()));
+    const queued = f.request("I_3");
+    assert.equal(queued?.state, "queued");
+    // The lead profile changes before the turn has ever run: no explicit apply is needed.
+    f.domain.execute({
+      type: "profile.configure",
+      actor: "operator",
+      key: randomUUID(),
+      profileId: f.profileId,
+      expectedVersion: Number(f.domain.profile(f.profileId).version),
+      instructions: "Edited lead",
+    });
+    // Linking R_2 revises the task through the source sync before the turn is admitted.
+    const other = f.makeRepository("other");
+    const before = Number(f.domain.task(f.taskId("I_3")).version);
+    await f.link([
+      { repositoryId: "R_1", path: f.repository, ref: "main" },
+      { repositoryId: "R_2", path: other, ref: "main" },
+    ]);
+    await f.settle(() => f.request("I_3")?.state !== "queued");
+    const request = f.request("I_3");
+    assert.equal(request?.state, "active");
+    assert.ok(Number(f.domain.task(f.taskId("I_3")).version) > before);
+    assert.equal(
+      request?.taskVersion,
+      Number(f.domain.task(f.taskId("I_3")).version),
+    );
+    assert.equal(
+      request?.profileRevision,
+      Number(f.domain.profile(f.profileId).version),
+    );
+    assert.equal(
+      f.service
+        .turnRequests()
+        .filter((r) => r.taskId === f.taskId("I_3") && r.state === "held")
+        .length,
+      0,
+    );
+  } finally {
+    await f.close();
   }
 });

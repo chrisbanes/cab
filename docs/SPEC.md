@@ -211,6 +211,10 @@ read matches none; an imported open Draft task names the conditions it does not 
 These explanations are read-only projections of stored observations: they make no
 provider read and grant no readiness, and matching the rule is neither Ready nor
 admission. Ready authorizes work within scope, without a universal per-task plan approval.
+Source syncs revise an imported task until its readiness and blockers settle, so its
+first turn is queued only once the task is admissible, and a queued first turn that
+has never run takes the task's current revision when it is admitted instead of being
+refused as stale.
 (A [drafting run](#drafting-runs) is not task work: it needs no Ready task but counts
 against the same global and project capacity. A [draft turn](#draft-turns) is task work
 whose only exemption is that the task is not Ready.) Material ambiguity,
@@ -287,8 +291,9 @@ reconciled before retry. Silence flags attention, not automatic restart or termi
 
 Each assignment has durable identity independent of its conversation. Follow-up
 retains history with a new work revision; stale results cannot complete newer work.
-Existing assignments retain captured instructions/profile revisions until explicit
-apply for their next turn. New assignments use current revisions. Permission
+An assignment takes the current instructions and profile revisions when its first
+turn is admitted. Once any turn has started for it, it retains those revisions until
+an explicit apply for its next turn. Permission
 revocations apply to subsequent actions regardless of snapshots.
 
 Record results and handoffs through coordination commands, not transcript inference.
@@ -436,6 +441,11 @@ worktree per participating repository per task, shared by assignments with one
 admitted writer generation at a time under the cooperative rule below. Independent
 tasks can proceed concurrently; parallel reviews
 reference a fixed revision. Repository-free tasks need no Git worktree.
+A local task's workspace is created at its first admitted turn. An imported task's
+is created then too, holding only its issue's source repository at the project's
+linked path and ref, and only once the turn is otherwise admissible, so a held or
+not-Ready task gets no checkout. An imported task whose source repository the
+project does not link waits, without a workspace, until it is linked.
 
 Normal successful completion trusts Codex's successful terminal status for the
 bound thread/turn. After every Ensemble-owned callback has ended, with no known

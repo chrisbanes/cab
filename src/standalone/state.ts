@@ -1683,6 +1683,17 @@ export class ExecutionState {
     return row && { ...row, draftTurn: row.draftTurn === 1 };
   }
 
+  /** Whether any execution, of any kind, was ever bound to the assignment. */
+  assignmentHasExecution(assignmentId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 AS present FROM task_execution_bindings WHERE assignmentId = ? LIMIT 1",
+        )
+        .get(assignmentId) !== undefined
+    );
+  }
+
   latestCompletedAssignmentWork(assignmentId: string): string | undefined {
     const row = this.db
       .prepare(`SELECT binding.workId
