@@ -683,6 +683,9 @@ export class DomainStore {
           WHERE brief = '';
           UPDATE domain_schema SET version = 3`);
       }
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS domain_assignments_taskId ON domain_assignments(taskId)",
+      );
       this.db
         .prepare(
           "INSERT OR IGNORE INTO scheduler_capacity_limits (singleton, globalLimit) VALUES (1, 4)",

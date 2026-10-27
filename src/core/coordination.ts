@@ -772,6 +772,10 @@ export class CoordinationStore {
       this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS coordination_one_routing_fallback
         ON coordination_inbox_events(routingOperationId)
         WHERE routingOperationId IS NOT NULL;`);
+      this.db.exec(`CREATE INDEX IF NOT EXISTS coordination_inbox_events_recipient_sequence
+        ON coordination_inbox_events(recipientAssignmentId, sequence);
+        CREATE INDEX IF NOT EXISTS coordination_inbox_events_taskId
+        ON coordination_inbox_events(taskId);`);
       new TaskReviewStore(this.db).populateMissingWithinTransaction();
       new RetainedEvidenceStore(this.db).migrate();
       this.localReviews().migrate();

@@ -144,6 +144,7 @@ test("primary-key task lookup matches the retired project scan, including missin
     () => api.readAssignment(noRevision.assignmentId),
     () => api.readAssignmentInstructions(noRevision.assignmentId),
     () => api.readAssignmentRecovery(noRevision.assignmentId),
+    () => api.readAssignmentHistory(noRevision.assignmentId),
   ])
     await assert.rejects(read(), notFound);
 });
@@ -172,6 +173,11 @@ test("task and assignment lookups do not scan projects or the catalogue", async 
   ]);
   const recovery = await catalogFree.readAssignmentRecovery(assignmentId);
   assert.equal(recovery.data.taskId, taskId);
+  // The visibility token still lists projects; the per-project task scan is gone.
+  const history = await new OperatorApi(serviceWith(["tasks", "taskCatalog"]), [
+    f.directory,
+  ]).readAssignmentHistory(assignmentId);
+  assert.ok(Array.isArray(history.data.items));
 });
 
 test("unknown task and assignment ids are 404 over the API and HTTP; malformed ids are 400", async (t) => {
@@ -183,6 +189,7 @@ test("unknown task and assignment ids are 404 over the API and HTTP; malformed i
     () => api.readAssignment(unknown),
     () => api.readAssignmentInstructions(unknown),
     () => api.readAssignmentRecovery(unknown),
+    () => api.readAssignmentHistory(unknown),
   ])
     await assert.rejects(read(), notFound);
   const { token } = await s.issue("read", "lookups");
@@ -191,6 +198,7 @@ test("unknown task and assignment ids are 404 over the API and HTTP; malformed i
     `/api/operator/assignments/${unknown}`,
     `/api/operator/assignments/${unknown}/instructions`,
     `/api/operator/assignments/${unknown}/recovery`,
+    `/api/operator/assignments/${unknown}/history`,
   ]) {
     const r = await s.bearer(token, path);
     assert.equal(r.status, 404, path);
@@ -215,6 +223,9 @@ test("a failure other than a missing record is not reported as 404", async (t) =
   });
   const api = new OperatorApi(f.service, [f.directory]);
   await assert.rejects(api.readAssignmentRecovery(randomUUID()), {
+    message: "disk I/O error",
+  });
+  await assert.rejects(api.readAssignmentHistory(randomUUID()), {
     message: "disk I/O error",
   });
 });

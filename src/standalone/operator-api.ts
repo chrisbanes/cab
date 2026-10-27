@@ -3746,7 +3746,12 @@ export class OperatorApi {
     uuid.parse(assignmentId);
     const a = this.existing(() => this.domain().assignment(assignmentId));
     const task = this.requireTask(String(a.taskId));
-    return { a, taskId: String(task.id), projectId: String(task.projectId) };
+    return {
+      a,
+      task,
+      taskId: String(task.id),
+      projectId: String(task.projectId),
+    };
   }
   async readAssignment(assignmentId: string) {
     const { taskId, projectId } = this.requireAssignment(assignmentId);
@@ -4425,61 +4430,48 @@ export class OperatorApi {
     limit?: number,
   ) {
     const visibility = this.visibilityToken();
-    uuid.parse(assignmentId);
-    for (const p of this.domain().projects())
-      for (const task of this.domain().tasks(String(p.id)))
-        if (
-          this.domain()
-            .assignments(String(task.id))
-            .some((a) => a.id === assignmentId)
-        ) {
-          const workspaceVisibility = this.service.taskWorkspaceVisibility(
-            String(task.id),
-          );
-          const history = this.coordination().readAssignmentHistory(
-            assignmentId,
-            beforeSequence,
-            beforeOmissionSequence,
-            limit,
-          );
-          const excluded = await this.exclusions(
-            String(p.id),
-            String(task.id),
-            [...history.items, ...history.turnOmissions],
-          );
-          if (
-            visibility !== this.visibilityToken() ||
-            workspaceVisibility !==
-              this.service.taskWorkspaceVisibility(String(task.id)) ||
-            this.requireTask(String(task.id)).version !== task.version
-          )
-            throw new OperatorApiError(503, "unavailable");
-          return assignmentHistorySchema.parse({
-            data: {
-              ...history,
-              visibilityRevision: createHash("sha256")
-                .update(`${visibility}:${task.version}:${workspaceVisibility}`)
-                .digest("hex"),
-              items: history.items.map((item) => {
-                if (item.lifecycle !== "completed") return item;
-                const text =
-                  excluded === undefined
-                    ? undefined
-                    : sanitizeConversationText(item.text ?? "", excluded);
-                return text === undefined
-                  ? {
-                      ...item,
-                      lifecycle: "omitted",
-                      text: null,
-                      omissionReason: "redaction-unavailable",
-                    }
-                  : { ...item, text };
-              }),
-            },
-            observedAt: Date.now(),
-          });
-        }
-    throw new OperatorApiError(404, "not-found");
+    const { task, taskId, projectId } = this.requireAssignment(assignmentId);
+    const workspaceVisibility = this.service.taskWorkspaceVisibility(taskId);
+    const history = this.coordination().readAssignmentHistory(
+      assignmentId,
+      beforeSequence,
+      beforeOmissionSequence,
+      limit,
+    );
+    const excluded = await this.exclusions(projectId, taskId, [
+      ...history.items,
+      ...history.turnOmissions,
+    ]);
+    if (
+      visibility !== this.visibilityToken() ||
+      workspaceVisibility !== this.service.taskWorkspaceVisibility(taskId) ||
+      this.requireTask(taskId).version !== task.version
+    )
+      throw new OperatorApiError(503, "unavailable");
+    return assignmentHistorySchema.parse({
+      data: {
+        ...history,
+        visibilityRevision: createHash("sha256")
+          .update(`${visibility}:${task.version}:${workspaceVisibility}`)
+          .digest("hex"),
+        items: history.items.map((item) => {
+          if (item.lifecycle !== "completed") return item;
+          const text =
+            excluded === undefined
+              ? undefined
+              : sanitizeConversationText(item.text ?? "", excluded);
+          return text === undefined
+            ? {
+                ...item,
+                lifecycle: "omitted",
+                text: null,
+                omissionReason: "redaction-unavailable",
+              }
+            : { ...item, text };
+        }),
+      },
+      observedAt: Date.now(),
+    });
   }
   private commentPolicy(taskId: string) {
     const task = this.requireTask(taskId),

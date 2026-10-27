@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { test } from "node:test";
 import type { Database } from "../../src/core/store.js";
 import {
@@ -260,6 +260,44 @@ test("age and quota retention keep metadata and leave other tables alone", async
     assert.equal(rows(q).length, 3);
   } finally {
     q.cleanup();
+  }
+});
+
+test("expiry selects through the createdAt index", async (t) => {
+  const f = fixture({ ageMs: 30 * day });
+  try {
+    const now = 40 * day;
+    for (const age of [31, 29]) {
+      f.clock.t = now - age * day;
+      rec(f, "p");
+    }
+    f.clock.t = now;
+    const captured: Array<{ sql: string; args: unknown[] }> = [];
+    const all = StatementSync.prototype.all;
+    t.mock.method(
+      StatementSync.prototype,
+      "all",
+      function (
+        this: StatementSync,
+        ...args: Parameters<StatementSync["all"]>
+      ) {
+        if (/FROM diagnostic_items WHERE createdAt < \?/.test(this.sourceSQL))
+          captured.push({ sql: this.sourceSQL, args: args as unknown[] });
+        return all.apply(this, args);
+      },
+    );
+    await f.store.prune();
+    t.mock.restoreAll();
+    assert.ok(captured[0]);
+    const plan = f.db
+      .prepare(`EXPLAIN QUERY PLAN ${captured[0].sql}`)
+      .all(...(captured[0].args as never[]))
+      .map((row) => String((row as { detail: string }).detail))
+      .join("\n");
+    assert.match(plan, /INDEX diagnostic_items_created/);
+    assert.doesNotMatch(plan, /SCAN diagnostic_items|TEMP B-TREE/);
+  } finally {
+    f.cleanup();
   }
 });
 
