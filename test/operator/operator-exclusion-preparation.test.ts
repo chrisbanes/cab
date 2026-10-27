@@ -213,3 +213,103 @@ test("a repository linked while a shared-base read is held is redacted in every 
     restore();
   }
 });
+
+test("project and composer reads yield during per-task exclusions and reuse the read's list for tasks without paths", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]),
+    profileId = randomUUID(),
+    projectId = randomUUID(),
+    canary = "/private/canary-1240";
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Lead",
+    instructions: "Profile instructions",
+    capabilities: "coordination",
+  });
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Project",
+    leadProfileId: profileId,
+  });
+  const taskIds = Array.from({ length: 45 }, () => randomUUID()),
+    bound = taskIds[3]!,
+    unavailable = taskIds[7]!;
+  for (const [i, taskId] of taskIds.entries())
+    d.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      title: taskId === bound ? `Edits ${canary}` : `Task ${i}`,
+      outcome: "Outcome",
+      ready: false,
+    });
+  const service = f.service,
+    paths = service.taskWorkspaceRedactionPaths.bind(service),
+    exceeds = service.taskRetainedRowsExceed.bind(service);
+  service.taskWorkspaceRedactionPaths = (id) =>
+    id === bound ? [canary] : paths(id);
+  service.taskRetainedRowsExceed = (id, limit) =>
+    id === unavailable || exceeds(id, limit);
+  t.after(() => {
+    service.taskWorkspaceRedactionPaths = paths;
+    service.taskRetainedRowsExceed = exceeds;
+  });
+
+  for (const [name, read] of [
+    [
+      "project",
+      async () =>
+        new Map(
+          (await api.readProject(projectId)).data.tasks.map((x) => [
+            x.id,
+            x.title,
+          ]),
+        ),
+    ],
+    [
+      "composer",
+      async () =>
+        new Map(
+          (await api.readComposerOptions(projectId)).data.dependencies.map(
+            (x) => [x.id, x.title],
+          ),
+        ),
+    ],
+  ] as const) {
+    const lists = new Map<string, unknown>(),
+      restore = wrapTaskExclusions(api, async (id, run) => {
+        const list = await run();
+        lists.set(id, list);
+        return list;
+      });
+    const order: string[] = [];
+    setImmediate(() => order.push("tick"));
+    try {
+      const found = await read();
+      order.push("done");
+      assert.deepEqual(order, ["tick", "done"], name);
+      const shared = lists.get(taskIds[0]!);
+      assert.ok(Array.isArray(shared), name);
+      for (const id of taskIds)
+        if (id !== bound && id !== unavailable)
+          assert.equal(lists.get(id), shared, `${name} ${id}`);
+      assert.notEqual(lists.get(bound), shared, name);
+      assert.ok((lists.get(bound) as string[]).includes(canary), name);
+      assert.equal(found.get(bound), "Edits [redacted]", name);
+      assert.equal(found.get(unavailable), null, name);
+      assert.equal(found.get(taskIds[0]!), "Task 0", name);
+    } finally {
+      restore();
+    }
+  }
+});
