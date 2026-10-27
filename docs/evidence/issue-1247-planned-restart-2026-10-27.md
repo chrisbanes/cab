@@ -2,7 +2,7 @@
 
 Qualification for [#1247](https://github.com/chrisbanes/ensemble/issues/1247). One bounded live run against real Codex, using a temporary Ensemble data directory and a disposable project and task. No installed service, its data directory, launchd job or `~/.ensemble-dev` was touched. The run used two real turns: the interrupted turn and its requeued successor, which was then stopped.
 
-Command: `npm run planned-restart:live` (`test/execution/planned-restart-qualification/live-restart.mjs --live`). Codex CLI `codex-cli 0.164.0` with the local ChatGPT login, Node `v24.22.1`. The script waits five seconds after the turn binds, then calls `service.stop()`, the same call the CLI's SIGINT/SIGTERM path makes.
+Command: `npm run planned-restart:live` (`test/execution/planned-restart-qualification/live-restart.mjs --live`). Codex CLI `codex-cli 0.164.0` with the local ChatGPT login, Node `v24.22.1`, source revision `ff460cdcc22ef05a5fe0f0431c301ab25a3509bd` with a clean working tree (only this evidence file changed afterwards). The script waits five seconds after the turn binds, then calls `service.stop()`, the same call the CLI's SIGINT/SIGTERM path makes.
 
 ## Result
 
@@ -10,7 +10,7 @@ Redacted output of the passing run (`failure: null`). Work, thread and turn IDs 
 
 | Observation | Value |
 | --- | --- |
-| Stop duration | 66 ms |
+| Stop duration | 136 ms |
 | Interrupted generation after stop | `resolved-failed`, "Interrupted by planned shutdown; requeued" |
 | Writer admission and capacity rows after stop | 0 and 0 |
 | Held executions after stop | 0 |
