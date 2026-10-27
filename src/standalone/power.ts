@@ -17,6 +17,8 @@ export interface PowerEventBatch {
   fromCursor: PowerEventCursor | null;
   cursor: PowerEventCursor | null;
   events: PowerEvent[];
+  /** Set by a source on a complete read: a cursor for when the read began. */
+  readStartCursor?: PowerEventCursor;
 }
 
 /** Asynchronous sleep/wake signals from a running listener. */
@@ -56,7 +58,21 @@ const pmsetTimeCursor = /^pmset-time:(\d+)$/;
 const pmsetEventCursorPattern = /^pmset-event:(\d+):(\d+):([a-f0-9]{16})$/;
 const timestampPrefix =
   /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4})\s+(.+)$/;
-const sleepWakeType = /^(Sleep|Wake|DarkWake)\b\s*(.*)$/i;
+// Exact, tab-delimited `pmset -g log` domains; matching is case-sensitive.
+const transitionDomains = new Map<string, "sleep" | "wake">([
+  ["Sleep", "sleep"],
+  ["Wake", "wake"],
+  ["DarkWake", "wake"],
+]);
+// Real rows whose text mentions sleep or wake without being a transition.
+const nonTransitionDomains = new Set([
+  "Assertions",
+  "Wake Requests",
+  "Sleep Service",
+  "Kernel Client Acks",
+  "PM Client Acks",
+  "WakeDetails",
+]);
 
 function createPmsetEventCursor(value: string): PowerEventCursor {
   return { version: 1, value };
@@ -88,8 +104,9 @@ const pmsetPreamble = [
 
 /**
  * Incremental parser for the documented, timestamped Sleep/Wake rows of
- * `pmset -g log`. Feed it exactly the pieces of `output.split(/\r?\n/)` so
- * persisted line-index cursors stay valid; state grows with events, not log size.
+ * `pmset -g log`. Feed it the pieces of `output.split(/\r?\n/)`; state grows
+ * with events, not log size. An event cursor names a row by timestamp, hash and
+ * its ordinal among equal rows, so it survives the log trimming rows above it.
  */
 function createPmsetParser(requested: PowerEventCursor | null) {
   const requestedTime = requested?.value.match(pmsetTimeCursor);
@@ -107,18 +124,17 @@ function createPmsetParser(requested: PowerEventCursor | null) {
   const events: Array<{
     cursor: PowerEventCursor;
     timestamp: number;
-    lineIndex: number;
+    hash: string;
     transition: "sleep" | "wake";
   }> = [];
+  const occurrences = new Map<string, number>();
   let earliestTimestamp: number | undefined;
   let previousTimestamp = Number.NEGATIVE_INFINITY;
   let malformed = false;
   let inSummary = false;
   let preambleStage = 0;
-  let lineIndex = -1;
 
   function line(text: string): void {
-    lineIndex++;
     if (unusable) return;
     const trimmed = text.trimEnd();
     if (trimmed.trim().startsWith("Assertion status system-wide:")) {
@@ -158,55 +174,46 @@ function createPmsetParser(requested: PowerEventCursor | null) {
     earliestTimestamp ??= timestamp;
     previousTimestamp = timestamp;
     const body = match[2] ?? "";
-    const [, kind, detail] = sleepWakeType.exec(body) ?? [];
-    if (kind) {
+    const domain = body.split("\t", 1)[0]?.trim() ?? "";
+    const transition = transitionDomains.get(domain);
+    if (transition) {
       const hash = createHash("sha256")
         .update(normalized)
         .digest("hex")
         .slice(0, 16);
+      const key = `${timestamp}:${hash}`;
+      const ordinal = occurrences.get(key) ?? 0;
+      occurrences.set(key, ordinal + 1);
       events.push({
         cursor: createPmsetEventCursor(
-          `pmset-event:${timestamp}:${lineIndex}:${hash}`,
+          `pmset-event:${timestamp}:${ordinal}:${hash}`,
         ),
         timestamp,
-        lineIndex,
-        transition: kind.toLowerCase() === "sleep" ? "sleep" : "wake",
+        hash,
+        transition,
       });
       return;
     }
-    const category = body.split(/\s+/, 1)[0] ?? "";
-    if (
-      category.toLowerCase() !== "assertions" &&
-      /sleep|wake/i.test(`${category} ${detail ?? body}`)
-    )
+    if (!nonTransitionDomains.has(domain) && /sleep|wake/i.test(body))
       malformed = true;
   }
 
   function finish(): PowerEventBatch {
     if (unusable || malformed || earliestTimestamp === undefined)
       return rejected();
-    let afterLine = Number.NEGATIVE_INFINITY;
+    let selected: typeof events = [];
     if (requestedEvent) {
-      const timestamp = Number(requestedEvent[1]);
-      const requestedLine = Number(requestedEvent[2]);
-      // A cursor saved before macOS 27 predates the preamble, so its row moved
-      // later by an unknown number of lines. With the preamble present, accept
-      // the one later row with the same timestamp and hash; zero or several fail.
-      const exact = events.find(
-        (event) => event.cursor.value === requested?.value,
+      // The hash covers the whole row, so a unique timestamp+hash match names the
+      // cursor's row whatever its ordinal says; equal rows are told apart by ordinal.
+      const matches = events.filter(
+        (event) =>
+          event.timestamp === Number(requestedEvent[1]) &&
+          event.hash === requestedEvent[3],
       );
-      const moved =
-        exact || preambleStage !== pmsetPreamble.length
-          ? []
-          : events.filter(
-              (event) =>
-                event.timestamp === timestamp &&
-                event.lineIndex > requestedLine &&
-                event.cursor.value.endsWith(`:${requestedEvent[3]}`),
-            );
-      const found = exact ?? (moved.length === 1 ? moved[0] : undefined);
+      const found =
+        matches.length === 1 ? matches[0] : matches[Number(requestedEvent[2])];
       if (!found) return rejected();
-      afterLine = found.lineIndex;
+      selected = events.slice(events.indexOf(found) + 1);
     } else if (requestedTime) {
       const timestamp = Number(requestedTime[1]);
       if (
@@ -215,15 +222,8 @@ function createPmsetParser(requested: PowerEventCursor | null) {
         earliestTimestamp > timestamp
       )
         return rejected();
+      selected = events.filter((event) => event.timestamp >= timestamp);
     }
-
-    const selected = events.filter((event) =>
-      requestedEvent
-        ? event.lineIndex > afterLine
-        : requestedTime
-          ? event.timestamp >= Number(requestedTime[1])
-          : false,
-    );
     let previous = requested;
     const chained: PowerEvent[] = selected.map((event) => {
       const item = {
@@ -528,6 +528,9 @@ export class MacPowerEventSource implements PowerEventSource {
 
   async readSince(cursor: PowerEventCursor | null): Promise<PowerEventBatch> {
     try {
+      // pmset timestamps have one-second resolution, so flooring keeps a row
+      // logged later in the same second at or after the cursor.
+      const startedAt = Math.floor(this.now() / 1000) * 1000;
       const parser = createPmsetParser(cursor);
       for await (const line of this.readLog("/usr/bin/pmset", ["-g", "log"], {
         timeoutMs: this.timeoutMs,
@@ -536,16 +539,12 @@ export class MacPowerEventSource implements PowerEventSource {
       }))
         parser.line(line);
       const parsed = parser.finish();
-      if (cursor !== null) return parsed;
-      const now = this.now();
-      return parsed.complete && Number.isSafeInteger(now) && now >= 0
-        ? {
-            complete: true,
-            fromCursor: null,
-            cursor: createPmsetEventCursor(`pmset-time:${now}`),
-            events: [],
-          }
-        : parsed;
+      if (!parsed.complete || !Number.isSafeInteger(startedAt) || startedAt < 0)
+        return parsed;
+      const readStartCursor = createPmsetEventCursor(`pmset-time:${startedAt}`);
+      return cursor === null
+        ? { ...parsed, cursor: readStartCursor }
+        : { ...parsed, readStartCursor };
     } catch (error) {
       if (error instanceof PowerLogReadTimeout) throw error;
       return { complete: false, fromCursor: cursor, cursor, events: [] };
@@ -674,7 +673,8 @@ function validBatch(
     typeof batch.complete !== "boolean" ||
     !sameCursor(batch.fromCursor as PowerEventCursor | null, requested) ||
     (batch.cursor !== null && !validCursor(batch.cursor)) ||
-    !Array.isArray(batch.events)
+    !Array.isArray(batch.events) ||
+    (batch.readStartCursor !== undefined && !validCursor(batch.readStartCursor))
   )
     return false;
 
@@ -923,7 +923,18 @@ export class ExecutionPower {
       return;
     }
 
-    if (batch.events.length === 0 && !persisted.held) return;
+    if (batch.events.length === 0 && !persisted.held) {
+      // An idle complete read proves no transition after the persisted cursor, so
+      // move it to this read's start to stay inside pmset's retention window. A
+      // hold that landed during the read fences the write; the next poll retries.
+      if (persisted.cursor && batch.readStartCursor)
+        this.state.advancePowerCursor(
+          persisted.cursor,
+          batch.readStartCursor,
+          persisted.revision,
+        );
+      return;
+    }
 
     let cursor = batch.cursor;
     let revision = this.state.holdPowerAdmission(

@@ -3797,6 +3797,36 @@ export class ExecutionState {
     });
   }
 
+  /**
+   * Replaces `expected` with `cursor` while admission is unheld and no hold has
+   * landed since `expectedRevision`. Unlike the baseline, it accepts admitted work.
+   */
+  advancePowerCursor(
+    expected: PowerEventCursor,
+    cursor: PowerEventCursor,
+    expectedRevision: number,
+  ): boolean {
+    const previous = JSON.stringify(powerEventCursorSchema.parse(expected));
+    const value = JSON.stringify(powerEventCursorSchema.parse(cursor));
+    const revision = z.number().int().nonnegative().parse(expectedRevision);
+    return transaction(this.db, () => {
+      const state = this.db
+        .prepare(`SELECT cursor, wakeHeld, revision FROM execution_power_supervision
+        WHERE singleton = 1`)
+        .get() as { cursor: string | null; wakeHeld: number; revision: number };
+      const accepted =
+        state.wakeHeld === 0 &&
+        state.revision === revision &&
+        state.cursor === previous;
+      if (accepted)
+        this.db
+          .prepare(`UPDATE execution_power_supervision
+        SET cursor = ? WHERE singleton = 1`)
+          .run(value);
+      return accepted;
+    });
+  }
+
   completePowerReconciliation(
     cursor: PowerEventCursor,
     expectedRevision: number,
