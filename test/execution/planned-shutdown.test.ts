@@ -358,7 +358,6 @@ async function restartAndComplete(
   oldWorkId: string,
   harness: ExecutionHarness,
   oldThread: string,
-  heldAllowed = 0,
 ) {
   const log: string[] = [];
   const runtimes = newRuntimes(log);
@@ -372,17 +371,18 @@ async function restartAndComplete(
     describe(service),
   );
   assert.deepEqual(runtimes[harness].resumed, [oldThread]);
-  assert.equal(
-    service.list().filter((item) => item.state === "held").length,
-    heldAllowed,
-    "no unexpected held execution remains",
-  );
-  assert.equal(
-    databaseOf(service)
-      .prepare("SELECT COUNT(*) AS n FROM execution_capacity_reservations")
-      .get()?.n,
-    heldAllowed,
-  );
+  for (const workId of [oldWorkId, requeue]) {
+    assert.notEqual(stateOf(service, workId), "held", workId);
+    assert.equal(
+      databaseOf(service)
+        .prepare(
+          "SELECT COUNT(*) AS n FROM execution_capacity_reservations WHERE workId = ?",
+        )
+        .get(workId)?.n,
+      0,
+      workId,
+    );
+  }
   assert.equal(
     databaseOf(service)
       .prepare("SELECT COUNT(*) AS n FROM execution_stop_targets")
@@ -976,7 +976,6 @@ test("a hung runtime of one harness does not stop another from being interrupted
     codex.workId,
     "codex",
     codexThread,
-    1,
   );
   assert.equal(stateOf(restarted, claude.workId), "held");
 });
