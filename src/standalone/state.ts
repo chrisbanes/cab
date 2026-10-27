@@ -1295,15 +1295,24 @@ export class ExecutionState {
           .get(input.assignmentId) as { revision: number }
       ).revision,
     );
-    // A conversation keeps the harness that started it; never fall back.
-    const inherited = (this.db
-      .prepare("SELECT harness FROM task_execution_bindings WHERE workId = ?")
-      .get(workId) ??
+    // A conversation keeps the harness that started it; never fall back. This work's own
+    // binding counts only once it got past waiting for admission: until then a re-captured
+    // profile revision may move it to another runtime.
+    const own = this.awaitingAdmission(workId)
+      ? undefined
+      : this.db
+          .prepare(
+            "SELECT harness FROM task_execution_bindings WHERE workId = ?",
+          )
+          .get(workId);
+    const inherited = (own ??
       this.db
         .prepare(`SELECT harness FROM task_execution_bindings
-        WHERE assignmentId = ? AND conversationRevision = ?
+        WHERE assignmentId = ? AND conversationRevision = ? AND workId != ?
         ORDER BY rowid LIMIT 1`)
-        .get(input.assignmentId, revision)) as { harness: unknown } | undefined;
+        .get(input.assignmentId, revision, workId)) as
+      | { harness: unknown }
+      | undefined;
     const executionHarness = inherited
       ? executionHarnessSchema.parse(inherited.harness)
       : requestedHarness;
@@ -1327,12 +1336,13 @@ export class ExecutionState {
       binding.assignmentId === input.assignmentId &&
       (binding.assignmentVersion !== input.assignmentVersion ||
         binding.instructionsRevision !== input.instructionsRevision ||
-        binding.profileRevision !== input.profileRevision)
+        binding.profileRevision !== input.profileRevision ||
+        binding.harness !== executionHarness)
     )
       this.db
         .prepare(`UPDATE task_execution_bindings
         SET assignmentVersion = ?, instructionsRevision = ?,
-          profileRevision = ?
+          profileRevision = ?, harness = ?
         WHERE workId = ? AND taskId = ? AND assignmentId = ?
         AND EXISTS (
           SELECT 1 FROM execution_intents e
@@ -1349,6 +1359,7 @@ export class ExecutionState {
           input.assignmentVersion,
           input.instructionsRevision,
           input.profileRevision,
+          executionHarness,
           workId,
           input.taskId,
           input.assignmentId,
