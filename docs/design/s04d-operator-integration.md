@@ -1,8 +1,8 @@
 # S04d operator integration
 
-The runtime and coordination operator routes sit on top of the authenticated
+The runtime operator routes sit on top of the authenticated
 local UI foundation in [S04c](s04c-operator-ui.md). The production `operator`
-command registers both named route slots with the same `LocalOperatorHttp` instance;
+command registers the runtime route slot with the same `LocalOperatorHttp` instance;
 they therefore inherit its login, exact-Origin, CSRF, input parsing, safe
 redirect and response-header behavior. The adapters receive service/domain
 interfaces, not raw HTTP request or response objects.
@@ -26,29 +26,30 @@ and states that strict isolation, exhaustive ambient access containment and
 universal descendant containment have not been proved. Existing Codex login
 and host/deployment controls remain the execution trust boundary; Ensemble does
 not claim an independent sandbox.
-Runtime and Coordination assignment status follow the latest persisted request
+Runtime assignment status follows the latest persisted request
 sequence for the current assignment revision, so an older completed turn cannot
 mask a queued continuation.
 
 ## Coordination and approval evidence
 
-The Coordination overview, task and assignment pages present task-scoped
-assignments, runtime history, durable messages, questions, exact approval
-materials, results/destinations, routing provenance and completion/fallback
-attention. Controls answer open questions, decide an approval, queue a durable
-message for the next eligible turn, and reconcile an unresolved result only to
-an allowed same-task requester or lead. No live steering is exposed. Operator
-content remains task-scoped and does not display runtime prompts, private
-instructions, workspace paths or credential references.
+The server-rendered Coordination pages are retired. The React task view
+(`/app/tasks/:id`) presents task-scoped assignments, runtime history, durable
+messages, questions, exact approval materials, results/destinations and
+completion attention through the operator API. Its controls answer open
+questions, decide an approval, queue a durable message for the next eligible
+turn, reconcile an unresolved result only to an allowed same-task requester or
+lead, and settle a reviewable PR's handback. No live steering is exposed.
+Operator content remains task-scoped and does not display runtime prompts,
+private instructions, workspace paths or credential references.
 
 Approval callbacks retain canonical JSON material, bounded to 8 KiB, beside
 its digest. A decision must match the exact stored material and revision before
 it is recorded. The additive nullable SQLite column preserves legacy open
 approvals; missing legacy material cannot be approved and may only be denied.
-The operator view renders escaped canonical material and omits approval actions
-for malformed retained data.
+The task view renders the disclosed material and offers no approval for
+material or a target it cannot show.
 
-The task Coordination routing section shows that project's guidance and
+Project routing configuration shows that project's guidance and
 configured candidates with their capabilities and current routing eligibility;
 revoked configured profiles remain visible as unavailable. It distinguishes a
 stored credential reference from an available routing client and gives only
@@ -66,11 +67,9 @@ The HTTP integration test registers the production adapter routes on a real
 loopback server and checks pre-login confidentiality, unauthenticated writes,
 exact Origin and CSRF refusals, malformed and duplicate field rejection, safe
 shared response headers, and idempotent capacity submission. Chromium exercises
-the production route registry with actual message, answer, approval and denial,
-result-recipient reconciliation, dependency, instruction-apply, and Stop/Resume
-form submissions. It reads the committed coordination state after service
-restart, including an unresolved writer hold, and follows the Coordination link
-to task-scoped Runtime controls.
+the production route registry with dependency, instruction-apply and Stop/Resume
+form submissions; coordination writes are covered through the operator API and
+the task view's browser tests.
 
 The opt-in [`test/operator/integration-qualification/live-operator.mjs`](../../test/operator/integration-qualification/live-operator.mjs)
 uses a disposable service with the real Codex App Server, generated local
@@ -82,7 +81,7 @@ delete provider thread records, deploy, or authorize cutover. Evidence is
 recorded in [`s04d-operator-2026-09-30.md`](../evidence/s04d-operator-2026-09-30.md).
 
 The [`test/operations/private-access-qualification/private-access.mjs`](../../test/operations/private-access-qualification/private-access.mjs) proof
-also checks the private Runtime/Coordination reads and a same-origin,
+also checks the private Runtime and workspace API reads and a same-origin,
 replayed capacity write, restoring the disposable project's original effective
 limit afterward. It requires an explicitly provisioned disposable HTTPS/Tailscale
 fixture and a passing run from the fixture host through its canonical Tailscale

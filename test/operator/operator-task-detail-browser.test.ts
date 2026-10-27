@@ -330,17 +330,15 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     4,
     "lead and three delegated assignments",
   );
-  // The legacy pages are one History link, not a header button.
+  // The retained task editor is one History link, not a header button; the coordination pages are gone.
   const forms = page.getByRole("link", {
-    name: "Approval and delivery forms",
+    name: "Edit task and review source",
     exact: true,
   });
   await openTaskTab(page, "History");
   assert.equal(await forms.count(), 1);
-  assert.equal(
-    await forms.getAttribute("href"),
-    `/coordination/task/${a.taskId}`,
-  );
+  assert.equal(await forms.getAttribute("href"), `/task/${a.taskId}`);
+  assert.equal(await page.locator('a[href^="/coordination/"]').count(), 0);
   await openTaskTab(page, "Overview");
   assert.equal(await forms.count(), 0, "History carries the link alone");
   await page.evaluate(() => scrollTo(0, 0));
@@ -710,12 +708,14 @@ test("A rejected completion is a decision the strip and decision card both name"
     .getByRole("button", { name: "Next: you · review rejected completion" });
   await next.click();
   const card = page.locator("section#decisions");
+  await card.getByText(/completion request was rejected/).waitFor();
   assert.equal(
     await card
-      .getByRole("link", { name: "Review rejected completion" })
+      .getByRole("link", { name: "Message the lead" })
       .getAttribute("href"),
-    `/coordination/task/${a.taskId}`,
+    `/app/tasks/${a.taskId}?section=reply`,
   );
+  assert.equal(await page.locator('a[href^="/coordination/"]').count(), 0);
   assert.equal(await card.getByText("No operator decision needed.").count(), 0);
 });
 
@@ -1526,16 +1526,33 @@ test("An approval request opens the approval review, not the question form", asy
     .getByRole("link", { name: "Review material & decide" });
   assert.equal(
     await review.getAttribute("href"),
-    `/coordination/task/${a.taskId}#${a.interactionId}`,
+    `/app/tasks/${a.taskId}?request=${a.interactionId}`,
   );
   await review.click();
-  await page.waitForURL(
-    (url) => url.pathname === `/coordination/task/${a.taskId}`,
+  // The task's request view shows the exact material and decides it in place.
+  const panel = page.locator(
+    `.approval-review[data-record-id="${a.interactionId}"]`,
   );
-  // The coordination view decides the exact approval material.
-  await page
+  await panel
     .getByRole("button", { name: "Approve this exact material" })
     .waitFor();
+  assert.equal(await page.locator(".question-response").count(), 0);
+  assert.deepEqual(
+    await panel.locator(".approval-material-fields dt").allInnerTexts(),
+    ["scope"],
+  );
+  // Deny records once, then the panel reads back the decision with no controls left.
+  await panel.getByRole("button", { name: "Deny", exact: true }).click();
+  await panel.getByText(/^Denied\. Nothing was approved/).waitFor();
+  assert.equal(
+    f.service.coordinationView().readTask(a.taskId).approvals[0]!.status,
+    "denied",
+  );
+  await panel.getByText("Denied", { exact: true }).waitFor();
+  assert.equal(
+    await panel.getByRole("button", { name: /Approve|Deny/ }).count(),
+    0,
+  );
 });
 
 /** A signed-in page on a fresh fixture, with every command POST recorded. */
@@ -1912,7 +1929,7 @@ test("An open approval leads Overview and stays reachable from every tab through
     await decision
       .getByRole("link", { name: "Review material & decide" })
       .getAttribute("href"),
-    `/coordination/task/${a.taskId}#${a.interactionId}`,
+    `/app/tasks/${a.taskId}?request=${a.interactionId}`,
   );
   assert.equal(
     await card.getByRole("button", { name: /Approve|Deny/ }).count(),

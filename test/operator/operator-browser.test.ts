@@ -30,7 +30,7 @@ import {
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import { StandaloneService } from "../../src/standalone/service.js";
@@ -124,14 +124,6 @@ class BrowserJourneyRuntime implements Runtime {
 function serviceRoutes(service: StandaloneService): OperatorRouteRegistry {
   const routes = new OperatorRouteRegistry();
   routes.registerSlot("runtime", runtimeOperatorRoutes(service));
-  routes.registerSlot(
-    "coordination",
-    coordinationOperatorRoutes(
-      service.coordinationView(),
-      service.domain(),
-      (projectId) => service.routingAvailability(projectId),
-    ),
-  );
   return routes;
 }
 
@@ -394,10 +386,11 @@ test("Chromium verifies the independent login and guarded browser session", asyn
     .getByRole("link", { name: "Runtime" })
     .first()
     .waitFor({ state: "attached" });
-  await page
-    .getByRole("link", { name: "Coordination" })
-    .first()
-    .waitFor({ state: "attached" });
+  assert.equal(
+    await page.getByRole("link", { name: "Coordination" }).count(),
+    0,
+    "the retired coordination pages leave the legacy navigation",
+  );
   await page.getByRole("link", { name: "Runtime", exact: true }).click();
   assert.match(
     await page.locator("body").innerText(),
@@ -424,15 +417,6 @@ test("Chromium verifies the independent login and guarded browser session", asyn
   assert.equal(
     service.capacityLimits([project.id]).projectOverrides[project.id],
     1,
-  );
-  await page.getByRole("link", { name: "Coordination", exact: true }).click();
-  assert.match(
-    await page.locator("body").innerText(),
-    /Private browser project/,
-  );
-  assert.doesNotMatch(
-    await page.locator("body").innerText(),
-    /Coordination state is not implemented/,
   );
 
   await page.goto(`${origin}/project/${project.id}`);
@@ -871,31 +855,30 @@ test("authenticated project pause and resume preserve captured instructions whil
     "replay must not create another project instruction revision",
   );
 
-  await page.goto(`${origin}/coordination/task/${taskId}`);
-  const answerForm = page.locator(
-    'form[action="/coordination/control/question/answer"]',
+  // Operator input recorded while the project is paused stays durable but starts nothing.
+  const api = new OperatorApi(service, [directory]);
+  const pausedRead = (await api.readTask(taskId)).data;
+  const pausedQuestion = pausedRead.questions[0];
+  const pausedLead = pausedRead.assignments.find(
+    (candidate) => candidate.assignmentId === String(assignment.id),
   );
-  await answerForm
-    .locator('textarea[name="answer"]')
-    .fill("Use the captured revision after an explicit apply.");
-  await submitControl(
-    page,
-    answerForm,
-    "/coordination/control/question/answer",
-    "Submit",
-  );
-  const messageForm = page.locator(
-    'form[action="/coordination/control/message"]',
-  );
-  await messageForm
-    .locator('textarea[name="message"]')
-    .fill("Continue using the changed project instructions.");
-  await submitControl(
-    page,
-    messageForm,
-    "/coordination/control/message",
-    "Submit",
-  );
+  assert.ok(pausedQuestion && pausedLead);
+  await api.execute({
+    type: "question.answer",
+    key: randomUUID(),
+    taskId,
+    interactionId: pausedQuestion.interactionId,
+    expectedRevision: pausedQuestion.revision,
+    answer: "Use the captured revision after an explicit apply.",
+  });
+  await api.execute({
+    type: "message",
+    key: randomUUID(),
+    taskId,
+    recipientAssignmentId: pausedLead.assignmentId,
+    expectedAssignmentVersion: pausedLead.version,
+    message: "Continue using the changed project instructions.",
+  });
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(runtime.turns, 1, "paused work cannot start a follow-up turn");
 
@@ -941,7 +924,7 @@ test("authenticated project pause and resume preserve captured instructions whil
   );
 });
 
-test("Chromium submits coordination and runtime controls with durable readback", async (_t, journey) => {
+test("operator commands and Chromium runtime controls keep durable readback", async (_t, journey) => {
   const directory = mkdtempSync(
     join(tmpdir(), "ensemble-operator-forms-browser-"),
   );
@@ -1169,84 +1152,52 @@ test("Chromium submits coordination and runtime controls with durable readback",
   assert.match(await page.locator("body").innerText(), /Sign in/);
   assert.equal((await signIn(page, password)).status(), 303);
 
-  await page.goto(`${origin}/coordination/task/${taskId}`);
-  const routingView = await page.locator("body").innerText();
-  assert.match(routingView, /Credential reference: configured/);
-  assert.match(routingView, /Routing client: unavailable/);
-  assert.match(
-    routingView,
-    /Effective routing availability: unavailable \(missing client credentials\)/,
+  const api = new OperatorApi(service, [directory]);
+  const operatorRead = (await api.readTask(taskId)).data;
+  // The task read never carries the routing credential reference.
+  assert.doesNotMatch(JSON.stringify(operatorRead), /PRIVATE_BROWSER_ROUTING/);
+  const leadSummary = operatorRead.assignments.find(
+    (candidate) => candidate.assignmentId === String(leadAssignment.id),
   );
-  assert.match(
-    routingView,
-    /Project routing guidance: BROWSER_ROUTING_GUIDANCE_SENTINEL: prefer browser verification\./,
-  );
-  assert.match(
-    routingView,
-    /Browser worker — capabilities: review; browser verification; eligible routing candidate/,
-  );
-  assert.match(
-    routingView,
-    /Browser revoked candidate — capabilities: historical verification; unavailable: profile revoked/,
-  );
-  assert.doesNotMatch(routingView, /PRIVATE_BROWSER_ROUTING_SECRET/);
-  const messageForm = page
-    .locator('form[action="/coordination/control/message"]')
-    .filter({
-      has: page.locator(
-        `input[name="recipientAssignmentId"][value="${leadAssignment.id}"]`,
-      ),
+  const question = operatorRead.questions[0];
+  assert.ok(leadSummary && question);
+  await api.execute({
+    type: "message",
+    key: randomUUID(),
+    taskId,
+    recipientAssignmentId: leadSummary.assignmentId,
+    expectedAssignmentVersion: leadSummary.version,
+    message: "Please use the new operator direction on the next turn.",
+  });
+  await api.execute({
+    type: "question.answer",
+    key: randomUUID(),
+    taskId,
+    interactionId: question.interactionId,
+    expectedRevision: question.revision,
+    answer: "Retain the reviewed summary format.",
+  });
+  for (const [action, decision] of [
+    ["Record fixture-only operator approval", "approved"],
+    ["Publish the fixture result", "denied"],
+  ] as const) {
+    const approval = operatorRead.approvals.find(
+      (candidate) => candidate.action === action,
+    );
+    assert.ok(approval?.action);
+    assert.equal(approval.approvable, true);
+    await api.execute({
+      type: "approval.decide",
+      key: randomUUID(),
+      taskId,
+      interactionId: approval.interactionId,
+      expectedRevision: approval.revision,
+      decision,
+      action: approval.action,
+      ...(approval.target === null ? {} : { target: approval.target }),
+      ...(approval.material === null ? {} : { material: approval.material }),
     });
-  await messageForm
-    .locator('textarea[name="message"]')
-    .fill("Please use the new operator direction on the next turn.");
-  await submitControl(
-    page,
-    messageForm,
-    "/coordination/control/message",
-    "Submit",
-  );
-  const answerForm = page.locator(
-    'form[action="/coordination/control/question/answer"]',
-  );
-  await answerForm
-    .locator('textarea[name="answer"]')
-    .fill("Retain the reviewed summary format.");
-  await submitControl(
-    page,
-    answerForm,
-    "/coordination/control/question/answer",
-    "Submit",
-  );
-  const approvalForm = page
-    .locator('form[action="/coordination/control/approval/decision"]')
-    .filter({
-      has: page.locator('input[name="decision"][value="approved"]'),
-    })
-    .filter({
-      has: page.locator(
-        'input[name="action"][value="Record fixture-only operator approval"]',
-      ),
-    });
-  assert.equal(
-    await approvalForm.locator('input[name="materialJson"]').inputValue(),
-    '{"version":"fixture-approve"}',
-  );
-  await submitControl(
-    page,
-    approvalForm,
-    "/coordination/control/approval/decision",
-    "Approve this exact material",
-  );
-  const denialForm = page
-    .locator('form[action="/coordination/control/approval/decision"]')
-    .filter({ has: page.locator('input[name="decision"][value="denied"]') });
-  await submitControl(
-    page,
-    denialForm,
-    "/coordination/control/approval/decision",
-    "Deny",
-  );
+  }
   let taskView = service.coordinationView().readTask(taskId);
   assert.equal(taskView.questions[0]?.status, "answered");
   assert.equal(
@@ -1300,26 +1251,23 @@ test("Chromium submits coordination and runtime controls with durable readback",
       service.coordinationView().readTask(taskId).unresolvedResults.length ===
       1,
   );
-  await page.goto(`${origin}/coordination/task/${taskId}`);
-  const reconciliationForm = page.locator(
-    'form[action="/coordination/control/result/recipient"]',
-  );
-  await submitControl(
-    page,
-    reconciliationForm,
-    "/coordination/control/result/recipient",
-    "Reconcile to Browser lead",
-  );
+  const unresolved = (await api.readTask(taskId)).data.unresolvedResults[0];
+  assert.ok(unresolved?.permittedRecipient);
+  assert.equal(unresolved.permittedRecipient.assignmentId, leadAssignment.id);
+  await api.execute({
+    type: "result.recipient",
+    key: randomUUID(),
+    taskId,
+    resultId: unresolved.resultId,
+    expectedRevision: unresolved.revision,
+    recipientAssignmentId: unresolved.permittedRecipient.assignmentId,
+  });
   taskView = service.coordinationView().readTask(taskId);
   assert.equal(taskView.unresolvedResults.length, 0);
   assert.equal(taskView.results[0]?.recipientAssignmentId, leadAssignment.id);
 
   await waitUntil(() => runtime.turns === 3);
-  await page.goto(`${origin}/coordination/task/${taskId}`);
-  await page
-    .getByRole("link", { name: "Task-scoped runtime controls and recovery" })
-    .click();
-  assert.equal(new URL(page.url()).pathname, `/runtime/task/${taskId}`);
+  await page.goto(`${origin}/runtime/task/${taskId}`);
 
   const dependencyForm = page.locator(
     'form[action="/runtime/control/dependency/add"]',

@@ -22,7 +22,6 @@ import {
   LocalOperatorUi,
 } from "../../../dist/src/standalone/operator.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
 import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
 import { TypeSafeRoutingChoiceClient } from "../../../dist/src/standalone/routing.js";
@@ -212,14 +211,6 @@ async function unusedPort() {
 function operatorRoutes(currentService) {
   const routes = new OperatorRouteRegistry();
   routes.registerSlot("runtime", runtimeOperatorRoutes(currentService));
-  routes.registerSlot(
-    "coordination",
-    coordinationOperatorRoutes(
-      currentService.coordinationView(),
-      currentService.domain(),
-      (projectId) => currentService.routingAvailability(projectId),
-    ),
-  );
   return routes;
 }
 

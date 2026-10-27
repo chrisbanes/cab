@@ -185,9 +185,8 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
   assert.deepEqual(hrefs, [
     `/runtime/assignment/${ids.assignmentId}`,
     `/runtime/task/${ids.taskId}`,
-    `/coordination/assignment/${ids.assignmentId}`,
+    `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}#history`,
     `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
-    `/coordination/task/${ids.taskId}`,
     `/assignment/${ids.assignmentId}`,
   ]);
   assert.equal(await page.locator("main form").count(), 0);
@@ -302,9 +301,8 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
   assert.deepEqual(siblingHrefs, [
     `/runtime/assignment/${siblingId}`,
     `/runtime/task/${ids.taskId}`,
-    `/coordination/assignment/${siblingId}`,
+    `/app/tasks/${ids.taskId}?assignment=${siblingId}#history`,
     `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
-    `/coordination/task/${ids.taskId}`,
     `/assignment/${siblingId}`,
   ]);
   await captureBrowserEvidence(page, "1366-recovery");

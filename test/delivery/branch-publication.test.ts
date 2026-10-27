@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { deliverySection } from "../../src/standalone/operator-coordination.js";
 import { test } from "node:test";
 import {
   git,
@@ -401,7 +400,7 @@ test("a PR head Ensemble did not push wakes the lead once and clears handback se
   assert.equal(world.wakes.length - wakesBefore, 1, "one event, once");
 });
 
-test("the task's delivery view and retained page show the branch, its last push and an outside push", async (t) => {
+test("the task's delivery view shows the branch, its last push and an outside push", async (t) => {
   const world = publicationWorld(t);
   const sha = world.commit();
   await world.submit("branch.push", sha);
@@ -417,15 +416,6 @@ test("the task's delivery view and retained page show the branch, its last push 
   assert.deepEqual(
     delivery.branches.map((b) => [b.branch, b.lastPushedSha, b.outsideHeadSha]),
     [[branch, sha, outside]],
-  );
-  const html = deliverySection(
-    { delivery, task: { state: "open" } } as never,
-    "csrf",
-  );
-  assert.ok(
-    html.includes(
-      `${branch} (${repositoryId}) pushed ${sha}; outside push ${outside}`,
-    ),
   );
   // The projection carries refs and commits only, never the delivery credential.
   assert.equal(JSON.stringify(delivery).includes("token"), false);

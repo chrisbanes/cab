@@ -15,6 +15,8 @@ import {
 import { createServer } from "node:net";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { CoordinationStore } from "../../../dist/src/core/coordination.js";
 import {
@@ -25,10 +27,14 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../../dist/src/standalone/operator.js";
+import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
-import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
 import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
+import {
+  OperatorWebBoundary,
+  OperatorWebBundle,
+} from "../../../dist/src/standalone/operator-web.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 import { tmpdir } from "../../../dist/test/fixtures/temp.js";
 
@@ -312,14 +318,6 @@ async function unusedPort() {
 function operatorRoutes(service) {
   const routes = new OperatorRouteRegistry();
   routes.registerSlot("runtime", runtimeOperatorRoutes(service));
-  routes.registerSlot(
-    "coordination",
-    coordinationOperatorRoutes(
-      service.coordinationView(),
-      service.domain(),
-      (projectId) => service.routingAvailability(projectId),
-    ),
-  );
   return routes;
 }
 
@@ -694,14 +692,9 @@ async function submitForm(page, form, path, buttonName) {
   required((await response).status() === 303, `operator-${path}-redirect`);
 }
 
-async function formPayload(form) {
-  return form.evaluate((element) =>
-    Object.fromEntries(new FormData(element).entries()),
-  );
-}
-
 async function login(page, origin, password) {
-  await page.goto(`${origin}/login`);
+  // With the web boundary on, /login is the React shell; a legacy page renders the sign-in form.
+  await page.goto(`${origin}/`);
   await page.locator('input[name="password"]').fill(password);
   const response = page.waitForResponse(
     (candidate) =>
@@ -898,35 +891,74 @@ function readOperatorReceipt(dataDir, scope, key) {
   }
 }
 
-async function replayOperatorForm(
+async function operatorSessionToken(current) {
+  const response = await current.browserContext.request.get(
+    `${current.origin}/api/operator/session`,
+  );
+  const session = await response.json();
+  required(
+    response.status() === 200 && session.authenticated === true,
+    "operator-api-session-authenticated",
+  );
+  return session.csrfToken;
+}
+
+/** One task read through the signed-in JSON operator API. */
+async function readOperatorTask(current, taskId) {
+  const response = await current.browserContext.request.get(
+    `${current.origin}/api/operator/tasks/${taskId}`,
+  );
+  required(response.status() === 200, "operator-api-task-read");
+  return (await response.json()).data;
+}
+
+/** The authenticated operator API's conversation history of one assignment, as text. */
+async function readAssignmentHistoryBody(current, assignmentId) {
+  const response = await current.browserContext.request.get(
+    `${current.origin}/api/operator/assignments/${assignmentId}/history`,
+  );
+  required(response.status() === 200, "operator-api-assignment-history");
+  return await response.text();
+}
+
+/** One command through the signed-in JSON operator API, as the web client sends it. */
+async function postOperatorCommand(current, command) {
+  const response = await current.browserContext.request.post(
+    `${current.origin}/api/operator/commands`,
+    {
+      headers: {
+        origin: current.origin,
+        "x-csrf-token": await operatorSessionToken(current),
+      },
+      data: command,
+    },
+  );
+  return { status: response.status(), receipt: await response.json() };
+}
+
+async function replayOperatorCommand(
   current,
   taskId,
   interactionId,
   eventType,
   eventId,
   scope,
-  path,
-  fields,
+  command,
+  firstReceipt,
 ) {
   required(
     current.restartInvalidatedSessionVerified === true,
     "operator-command-replay-after-service-restart",
   );
-  const key = fields.key;
+  const key = command.key;
   required(typeof key === "string" && isUuid(key), "operator-command-key");
-  const firstReceipt = readOperatorReceipt(current.dataDir, scope, key);
+  const firstStored = readOperatorReceipt(current.dataDir, scope, key);
   required(
-    firstReceipt.count === 1 && firstReceipt.result !== null,
+    firstStored.count === 1 && firstStored.result !== null,
     "operator-command-first-receipt-committed",
   );
-  const response = await current.browserContext.request.post(
-    `${current.origin}${path}`,
-    {
-      headers: { origin: current.origin },
-      form: fields,
-      maxRedirects: 0,
-    },
-  );
+  // The identical command and key, resent after the restart, must replay.
+  const replay = await postOperatorCommand(current, command);
   const replayedReceipt = readOperatorReceipt(current.dataDir, scope, key);
   const view = taskView(current.service, taskId);
   const events = view.messages.filter(
@@ -937,7 +969,7 @@ async function replayOperatorForm(
   let firstResultEventId = null;
   let replayedResultEventId = null;
   try {
-    firstResultEventId = JSON.parse(firstReceipt.result).eventId ?? null;
+    firstResultEventId = JSON.parse(firstStored.result).eventId ?? null;
     replayedResultEventId = JSON.parse(replayedReceipt.result).eventId ?? null;
   } catch {
     required(false, "operator-command-receipt-result-valid");
@@ -948,28 +980,32 @@ async function replayOperatorForm(
       : view.approvals.find((item) => item.interactionId === interactionId);
   const evidence = {
     replayedAfterVerifiedServiceRestart: true,
-    responseStatus: response.status(),
-    receiptCountBeforeReplay: firstReceipt.count,
+    responseStatus: replay.status,
+    receiptCountBeforeReplay: firstStored.count,
     receiptCountAfterReplay: replayedReceipt.count,
     payloadHashStable:
-      firstReceipt.payloadHash !== null &&
-      firstReceipt.payloadHash === replayedReceipt.payloadHash,
+      firstStored.payloadHash !== null &&
+      firstStored.payloadHash === replayedReceipt.payloadHash,
     committedResultStable:
-      firstReceipt.result !== null &&
-      firstReceipt.result === replayedReceipt.result,
+      firstStored.result !== null &&
+      firstStored.result === replayedReceipt.result,
     committedResultMatchesEvent:
       firstResultEventId === eventId && replayedResultEventId === eventId,
+    apiReceiptStable:
+      isDeepStrictEqual(replay.receipt, firstReceipt) &&
+      replay.receipt.eventId === eventId,
     eventCount: events.length,
     eventId: events[0]?.eventId ?? null,
     interactionRevision: interaction?.revision ?? null,
   };
   required(
-    response.status() === 303 &&
-      firstReceipt.count === 1 &&
+    replay.status === 200 &&
+      firstStored.count === 1 &&
       replayedReceipt.count === 1 &&
       evidence.payloadHashStable &&
       evidence.committedResultStable &&
       evidence.committedResultMatchesEvent &&
+      evidence.apiReceiptStable &&
       events.length === 1 &&
       events[0]?.eventId === eventId &&
       interaction?.revision === 2,
@@ -1173,7 +1209,16 @@ async function startOperator(current, evidence, onCreated) {
     owner.http = new LocalOperatorHttp(
       new LocalOperatorUi(current.service.domain()),
       owner.auth,
-      { routes: operatorRoutes(current.service) },
+      {
+        routes: operatorRoutes(current.service),
+        // The JSON operator API carries the coordination commands and task reads.
+        web: new OperatorWebBoundary(
+          await OperatorWebBundle.open(
+            fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
+          ),
+          new OperatorApi(current.service, [dirname(current.dataDir)]),
+        ),
+      },
     );
     owner.startAttempted = true;
     owner.httpStopped = false;
@@ -1204,7 +1249,7 @@ function recordSource(evidence, mode) {
     serviceSource: "src/standalone/service.ts",
     operatorSource: "src/standalone/operator.ts",
     coordinationViewSource: "src/standalone/coordination-view.ts",
-    operatorCoordinationSource: "src/standalone/operator-coordination.ts",
+    operatorApiSource: "src/standalone/operator-api.ts",
     operatorRuntimeSource: "src/standalone/operator-runtime.ts",
     historySource: "src/standalone/conversation-history.ts",
     coordinationToolsSource: "src/standalone/coordination-tools.ts",
@@ -1215,8 +1260,7 @@ function recordSource(evidence, mode) {
     serviceCompiled: "dist/src/standalone/service.js",
     operatorCompiled: "dist/src/standalone/operator.js",
     coordinationViewCompiled: "dist/src/standalone/coordination-view.js",
-    operatorCoordinationCompiled:
-      "dist/src/standalone/operator-coordination.js",
+    operatorApiCompiled: "dist/src/standalone/operator-api.js",
     operatorRuntimeCompiled: "dist/src/standalone/operator-runtime.js",
     historyCompiled: "dist/src/standalone/conversation-history.js",
     coordinationToolsCompiled: "dist/src/standalone/coordination-tools.js",
@@ -2218,26 +2262,24 @@ async function runRepositoryFreeJourney(
     alphaChangedInstructions,
   );
   privateValues.push(alphaChangedInstructions);
-  await page.goto(`${current.origin}/coordination/task/${alpha.taskId}`);
-  const alphaLeadMessage = page
-    .locator('form[action="/coordination/control/message"]')
-    .filter({
-      has: page.locator(
-        `input[name="recipientAssignmentId"][value="${alpha.leadAssignmentId}"]`,
-      ),
-    });
-  await alphaLeadMessage
-    .locator('textarea[name="message"]')
-    .fill(
-      "S05_ALPHA_QUEUED_MESSAGE: retain the explicit project revision boundary.",
-    );
-  const messageResponse = page.waitForResponse(
-    (candidate) =>
-      new URL(candidate.url()).pathname === "/coordination/control/message" &&
-      candidate.request().method() === "POST",
+  const alphaTask = await readOperatorTask(current, alpha.taskId);
+  const alphaLead = alphaTask.assignments.find(
+    (assignment) => assignment.assignmentId === alpha.leadAssignmentId,
   );
-  await alphaLeadMessage.getByRole("button", { name: "Submit" }).click();
-  required((await messageResponse).status() === 303, "paused-message-accepted");
+  required(alphaLead, "paused-message-lead-assignment-disclosed");
+  const messageCommand = await postOperatorCommand(current, {
+    type: "message",
+    key: randomUUID(),
+    taskId: alpha.taskId,
+    recipientAssignmentId: alpha.leadAssignmentId,
+    expectedAssignmentVersion: alphaLead.version,
+    message:
+      "S05_ALPHA_QUEUED_MESSAGE: retain the explicit project revision boundary.",
+  });
+  required(
+    messageCommand.status === 200 && messageCommand.receipt.recorded === true,
+    "paused-message-accepted",
+  );
   required(
     current.service.list().filter((intent) => intent.state === "running")
       .length === 0,
@@ -2270,8 +2312,7 @@ async function runRepositoryFreeJourney(
   return { leadId, projects: initial, alphaRevision };
 }
 
-async function answerQuestionAndDenyApproval(page, current, task) {
-  await page.goto(`${current.origin}/coordination/task/${task.taskId}`);
+async function answerQuestionAndDenyApproval(current, task) {
   const before = taskView(current.service, task.taskId);
   const openQuestions = before.questions.filter(
     (item) => item.status === "open",
@@ -2293,22 +2334,18 @@ async function answerQuestionAndDenyApproval(page, current, task) {
       approval.requestingAssignmentId === task.requesterAssignmentId,
     "operator-responses-target-exact-requester",
   );
-  const answerForm = page
-    .locator('form[action="/coordination/control/question/answer"]')
-    .filter({
-      has: page.locator(
-        `input[name="interactionId"][value="${question.interactionId}"]`,
-      ),
-    });
-  await answerForm
-    .locator('textarea[name="answer"]')
-    .fill(`S05_${task.suffix}_OPERATOR_ANSWER`);
-  const answerFields = await formPayload(answerForm);
-  await submitForm(
-    page,
-    answerForm,
-    "/coordination/control/question/answer",
-    "Submit",
+  const answerCommand = {
+    type: "question.answer",
+    key: randomUUID(),
+    taskId: task.taskId,
+    interactionId: question.interactionId,
+    expectedRevision: question.revision,
+    answer: `S05_${task.suffix}_OPERATOR_ANSWER`,
+  };
+  const answerResponse = await postOperatorCommand(current, answerCommand);
+  required(
+    answerResponse.status === 200 && answerResponse.receipt.recorded === true,
+    "operator-question-answer-accepted",
   );
   const afterAnswer = taskView(current.service, task.taskId);
   const initialQuestionEvents = afterAnswer.messages.filter(
@@ -2320,31 +2357,37 @@ async function answerQuestionAndDenyApproval(page, current, task) {
     initialQuestionEvents.length === 1 && initialQuestionEvents[0]?.eventId,
     "operator-question-answer-committed-once",
   );
-  const questionCommandReplay = await replayOperatorForm(
+  const questionCommandReplay = await replayOperatorCommand(
     current,
     task.taskId,
     question.interactionId,
     "question-answer",
     initialQuestionEvents[0].eventId,
     "answer-question",
-    "/coordination/control/question/answer",
-    answerFields,
+    answerCommand,
+    answerResponse.receipt,
   );
 
-  const denyForm = page
-    .locator('form[action="/coordination/control/approval/decision"]')
-    .filter({
-      has: page.locator(
-        `input[name="interactionId"][value="${approval.interactionId}"]`,
-      ),
-    })
-    .filter({ has: page.locator('input[name="decision"][value="denied"]') });
-  const denialFields = await formPayload(denyForm);
-  await submitForm(
-    page,
-    denyForm,
-    "/coordination/control/approval/decision",
-    "Deny",
+  // Send the action, target and material exactly as the task read discloses them.
+  const disclosed = (
+    await readOperatorTask(current, task.taskId)
+  ).approvals.find((item) => item.interactionId === approval.interactionId);
+  required(disclosed?.action, "operator-approval-action-disclosed");
+  const denialCommand = {
+    type: "approval.decide",
+    key: randomUUID(),
+    taskId: task.taskId,
+    interactionId: approval.interactionId,
+    expectedRevision: disclosed.revision,
+    decision: "denied",
+    action: disclosed.action,
+    ...(disclosed.target === null ? {} : { target: disclosed.target }),
+    ...(disclosed.material === null ? {} : { material: disclosed.material }),
+  };
+  const denialResponse = await postOperatorCommand(current, denialCommand);
+  required(
+    denialResponse.status === 200 && denialResponse.receipt.recorded === true,
+    "operator-approval-denial-accepted",
   );
   const afterDenial = taskView(current.service, task.taskId);
   const initialApprovalEvents = afterDenial.messages.filter(
@@ -2356,15 +2399,15 @@ async function answerQuestionAndDenyApproval(page, current, task) {
     initialApprovalEvents.length === 1 && initialApprovalEvents[0]?.eventId,
     "operator-approval-denial-committed-once",
   );
-  const approvalCommandReplay = await replayOperatorForm(
+  const approvalCommandReplay = await replayOperatorCommand(
     current,
     task.taskId,
     approval.interactionId,
     "approval-decision",
     initialApprovalEvents[0].eventId,
     "decide-approval",
-    "/coordination/control/approval/decision",
-    denialFields,
+    denialCommand,
+    denialResponse.receipt,
   );
   const after = taskView(current.service, task.taskId);
   const questionAnswerEvents = after.messages.filter(
@@ -2478,7 +2521,6 @@ async function completeRepoFree(current, page, repositoryFree, evidence) {
     "alpha-revision-retained-for-apply",
   );
   const betaInteractionResponses = await answerQuestionAndDenyApproval(
-    page,
     current,
     beta,
   );
@@ -2539,7 +2581,6 @@ async function completeRepoFree(current, page, repositoryFree, evidence) {
     );
 
   const alphaInteractionResponses = await answerQuestionAndDenyApproval(
-    page,
     current,
     alpha,
   );
@@ -2635,17 +2676,11 @@ async function completeRepoFree(current, page, repositoryFree, evidence) {
   );
   const alphaBodies = [];
   for (const assignment of alphaAssignments) {
-    await page.goto(
-      `${current.origin}/coordination/assignment/${assignment.id}`,
-    );
-    alphaBodies.push(await page.locator("body").innerText());
+    alphaBodies.push(await readAssignmentHistoryBody(current, assignment.id));
   }
   const betaBodies = [];
   for (const assignment of betaAssignments) {
-    await page.goto(
-      `${current.origin}/coordination/assignment/${assignment.id}`,
-    );
-    betaBodies.push(await page.locator("body").innerText());
+    betaBodies.push(await readAssignmentHistoryBody(current, assignment.id));
   }
   const alphaNoPrivateValues = alphaBodies.every((body) =>
     current.privateValues.every((value) => !value || !body.includes(value)),
@@ -3687,9 +3722,7 @@ export async function runLiveJourney(mode) {
       await startOperator(current, evidence, (owner) => {
         operatorOwners.push(owner);
       });
-      await page.goto(
-        `${current.origin}/coordination/task/${repoFree.projects[0].taskId}`,
-      );
+      await page.goto(`${current.origin}/task/${repoFree.projects[0].taskId}`);
       required(
         /Sign in/.test(await page.locator("body").innerText()),
         "restart-invalidates-old-session",

@@ -166,7 +166,7 @@ test("bearer credentials read through the service under server-side route author
     ["GET", "/app"],
     ["GET", "/assets/main.js"],
     ["POST", "/command", {}],
-    ["POST", `/coordination/task/${s.taskId}`, {}],
+    ["POST", `/runtime/task/${s.taskId}`, {}],
   ];
   for (const token of [read.token, write.token])
     for (const [method, path, body] of denied) {

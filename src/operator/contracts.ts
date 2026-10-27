@@ -1381,6 +1381,15 @@ export const deliveryReadSchema = z
         draft: z.boolean().optional(),
         headSha: text,
         state: z.enum(["OPEN", "CLOSED", "MERGED"]),
+        /** The operator's handback settlement of a reviewable PR, and the head it covers; absent from older servers. */
+        settlement: z
+          .object({
+            decision: z.enum(["accepted", "closed"]),
+            headSha: text,
+          })
+          .strict()
+          .nullable()
+          .optional(),
         observedAt: time,
         readError: safeText,
         omittedCheckCount: z.number().int().nonnegative(),
@@ -2230,6 +2239,18 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({ ...base, type: z.literal("delivery.refresh"), taskId: uuid })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("delivery.settle"),
+      taskId: uuid,
+      expectedTaskVersion: revision,
+      expectedDeliveryRevision: revision,
+      expectedPolicyVersion: revision,
+      expectedHeadSha: z.string().regex(/^[0-9a-f]{40}$/),
+      decision: z.enum(["accepted", "closed"]),
+    })
     .strict(),
   z
     .object({
@@ -3289,6 +3310,16 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       sourceRevision: revision,
       sourceDigest: hash,
       policyVersion: revision,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("delivery-settlement"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      decision: z.enum(["accepted", "closed"]),
+      revision,
     })
     .strict(),
   z

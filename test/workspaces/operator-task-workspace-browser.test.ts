@@ -1082,7 +1082,7 @@ test("mounted Inbox discovers new requests and holds through timer and header re
     await page
       .getByRole("link", { name: "Review material & decide", exact: true })
       .getAttribute("href"),
-    `/coordination/task/${b.taskId}#${approval.interactionId}`,
+    `/app/tasks/${b.taskId}?request=${approval.interactionId}`,
   );
   // A wide layout has no back control: the queue stays beside the detail.
   assert.equal(

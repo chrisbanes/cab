@@ -18,7 +18,6 @@ import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
-import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
 import { chromium } from "playwright";
 import {
   StandaloneService,
@@ -624,14 +623,6 @@ export async function runQualification(options = {}) {
     );
     const routes = new OperatorRouteRegistry();
     routes.registerSlot("runtime", runtimeOperatorRoutes(service));
-    routes.registerSlot(
-      "coordination",
-      coordinationOperatorRoutes(
-        service.coordinationView(),
-        service.domain(),
-        (id) => service.routingAvailability(id),
-      ),
-    );
     http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
       routes,
       web: new OperatorWebBoundary(bundle, new OperatorApi(service, [root])),
