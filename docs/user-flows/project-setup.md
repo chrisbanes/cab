@@ -1,6 +1,6 @@
 # Project setup
 
-**Status:** implemented (`/app/settings/projects/new`, design frames 115–117c and
+**Status:** implemented (`/app/settings/projects/new`, design frames 115–117d and
 145–147, 146c–146d). Product rules are in
 [SPEC](../SPEC.md#task-creation-and-project-setup).
 
@@ -31,11 +31,16 @@ note, **Cancel** and then **Create paused project** at every width.
 2. **Instructions.** Unchanged.
 3. **Repositories.** Discovered repository and ref, folder picker, checkout
    verification, typed fallback. While discovery is unconfigured the step starts
-   collapsed (117c) with the line "Optional. Without a repository the project is
-   repository-free; adding one also offers GitHub discovery." and **Add a
-   repository**. Opening it moves focus to its first control and reveals the setup
-   alert (117b) with **Use GitHub CLI login** when gh is signed in, the one place
-   the first-run path offers it (Settings → Readiness offers the same step later), and **Set discovery credential**. It opens by itself for a row
+   collapsed (117c) with **Add a repository**. When gh is signed in, the setup alert
+   is already there, so the operator who links only a GitHub Project needs no extra
+   step: **Use GitHub CLI login (@account)** with the keychain caveat and **Set
+   discovery credential** (117d), under the line "Optional. Without a repository the
+   project is repository-free. GitHub discovery lists repositories and GitHub
+   Projects to link." Without a signed-in login the collapsed step is unchanged: the
+   line "Optional. Without a repository the project is repository-free; adding one
+   also offers GitHub discovery." and **Add a repository**. Opening it moves focus
+   to its first control and keeps the same alert (117b). Settings offers the same
+   step later, on the GitHub discovery credential row and on Readiness. It opens by itself for a row
    that holds a value, a rejected repository or GitHub Project, and an unsettled
    GitHub CLI login. It never closes again: clearing a row means choosing "No
    repository · repository-free". The GitHub source credential line appears here

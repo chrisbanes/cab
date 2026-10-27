@@ -98,6 +98,14 @@ test("Settings shows each GitHub CLI detection state without an action", async (
   ] as const) {
     gh.set(state);
     await page.reload();
+    await row
+      .getByText("GitHub discovery credential · not configured")
+      .waitFor();
+    assert.equal(
+      await row.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+      0,
+    );
+    assert.equal(await row.getByText(/keychain/).count(), 0);
     await row.getByRole("button", { name: "Set", exact: true }).click();
     await row.getByText(copy).waitFor();
     assert.equal(
@@ -114,6 +122,12 @@ test("Settings reports a missing gh as not installed", async (_t, journey) => {
     path: "/app/settings",
   });
   const row = page.getByRole("region", { name: "GitHub discovery credential" });
+  await row.getByText("GitHub discovery credential · not configured").waitFor();
+  assert.equal(
+    await row.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+    0,
+  );
+  assert.equal(await row.getByText(/keychain/).count(), 0);
   await row.getByRole("button", { name: "Set", exact: true }).click();
   await row.getByText("gh not installed").waitFor();
   assert.equal(
@@ -199,10 +213,8 @@ test("Setup offers the detected GitHub CLI login in one step", async (_t, journe
   const use = page.getByRole("button", {
     name: "Use GitHub CLI login (@octo)",
   });
-  // Step 3 starts collapsed; the offer is one activation away and focus lands on it.
+  // Step 3 starts collapsed and the offer is already one activation away.
   await settleGhRead(page, () => page.reload());
-  assert.equal(await use.count(), 0);
-  await page.getByRole("button", { name: "Add a repository" }).click();
   await use.waitFor();
   await page
     .getByText("Signed in to github.com as @octo with the GitHub CLI", {
@@ -243,7 +255,7 @@ test("Setup reconciles an unknown GitHub CLI login outcome", async (_t, journey)
   const use = page.getByRole("button", {
     name: "Use GitHub CLI login (@octo)",
   });
-  await page.getByRole("button", { name: "Add a repository" }).click();
+  await use.waitFor();
   // The service records the command but its response is lost, so a re-read sees it configured.
   await page.route("**/api/operator/commands", async (route) => {
     await route.fetch();
@@ -290,21 +302,56 @@ test("Setup offers no gh action when gh is not signed in", async (_t, journey) =
     discovery: false,
     ghExecutable: gh.executable,
   });
+  // Both of setup's reads have landed before anything is asserted absent.
+  await settleGhRead(page, () => page.reload());
+  await page.getByRole("button", { name: "Add a repository" }).waitFor();
+  // Collapsed, it keeps the existing line and offers nothing.
+  await page
+    .getByText(
+      "Optional. Without a repository the project is repository-free; adding one also offers GitHub discovery.",
+    )
+    .waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+    0,
+  );
+  assert.equal(await page.getByText(/keychain/).count(), 0);
   await page.getByRole("button", { name: "Add a repository" }).click();
   await page.getByRole("link", { name: "Set discovery credential" }).waitFor();
   assert.equal(
     await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
     0,
   );
+  assert.equal(await page.getByText(/keychain/).count(), 0);
 });
 
 test("The discovery credential row fits a phone", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { page } = await setupJourney(journey, {
     discovery: false,
     path: "/app/settings",
+    ghExecutable: gh.executable,
     viewport: { width: 390, height: 844 },
   });
   const row = page.getByRole("region", { name: "GitHub discovery credential" });
+  // The closed row with its one-click offer fits and keeps full-height targets.
+  await row.getByRole("button", { name: /Use GitHub CLI login/ }).waitFor();
+  await page.waitForFunction(
+    () =>
+      document.documentElement.scrollWidth <=
+      document.documentElement.clientWidth,
+  );
+  assert.deepEqual(
+    await row
+      .locator("button")
+      .evaluateAll((els) =>
+        els
+          .map((el) => el.getBoundingClientRect().height)
+          .filter((h) => h > 0 && h < 44),
+      ),
+    [],
+  );
   await row.getByRole("button", { name: "Set", exact: true }).click();
   await row.getByLabel("Environment variable · advanced").check();
   await row.getByLabel("Variable name").waitFor();
@@ -342,6 +389,180 @@ function commandPosts(page: Page) {
   return posts;
 }
 
+const keychainNote = /If agents can reach this Mac's keychain/;
+const settingsOffer = (page: Page, login = "octo") =>
+  credentialRow(page).getByRole("button", {
+    name: `Use GitHub CLI login (@${login})`,
+  });
+
+test("Settings offers the signed-in GitHub CLI login in one click", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = credentialRow(page);
+  const posts = commandPosts(page);
+  await row.getByText("GitHub discovery credential · not configured").waitFor();
+  await settingsOffer(page).waitFor();
+  await row.getByRole("button", { name: "Set", exact: true }).waitFor();
+  await row.getByText(keychainNote).waitFor();
+  assert.equal(await row.getByLabel("GitHub CLI · recommended").count(), 0);
+  // One press records the login; the form never opens.
+  await settingsOffer(page).click();
+  await row
+    .getByText(
+      "GitHub discovery credential · GitHub CLI · @octo · read-only use",
+    )
+    .waitFor();
+  await savedOutcome(page);
+  assert.deepEqual(
+    posts.map((c) => ({ type: c.type, credentialRef: c.credentialRef })),
+    [{ type: "discovery.configure", credentialRef: "gh:github.com" }],
+  );
+  assert.equal(
+    await row.getByRole("button", { name: /Use GitHub/ }).count(),
+    0,
+  );
+  assert.equal(await row.getByText(keychainNote).count(), 0);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+  assert.equal(
+    (await page.locator("body").innerText()).includes(fakeGhToken),
+    false,
+  );
+  // Focus lands on Change, and Readiness agrees without a reload.
+  await row.getByRole("button", { name: "Change", exact: true }).waitFor();
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Change",
+  );
+  await readinessRow(page).getByText("Pass", { exact: true }).waitFor();
+  await captureBrowserEvidence(page, "1366-settings-discovery-gh-offer");
+  // A later save through the form replaces the one-click confirmation with its own.
+  await row.getByRole("button", { name: "Change", exact: true }).click();
+  await row.getByLabel("Environment variable · advanced").check();
+  await row.getByLabel("Variable name").fill("FIXTURE_Y");
+  await row.getByRole("button", { name: "Save reference" }).click();
+  await row
+    .getByText(/GitHub discovery credential · environment variable/)
+    .waitFor();
+  await savedOutcome(page);
+  await row.getByRole("button", { name: "Change", exact: true }).click();
+  await row.getByLabel("GitHub CLI · recommended").check();
+  await row.getByRole("button", { name: "Use this login" }).click();
+  await row.getByText(/GitHub CLI · @octo/).waitFor();
+  await savedOutcome(page);
+  // Clear is the reverse path and brings the offer back, with one confirmation.
+  await row.getByRole("button", { name: "Clear", exact: true }).click();
+  await row.getByText("GitHub discovery credential · not configured").waitFor();
+  await settingsOffer(page).waitFor();
+  await savedOutcome(page);
+  // Set stays available for the environment variable.
+  await row.getByRole("button", { name: "Set", exact: true }).click();
+  await row.getByLabel("Environment variable · advanced").check();
+  await row.getByLabel("Variable name").fill("FIXTURE_X");
+  await row.getByRole("button", { name: "Save reference" }).click();
+  await row
+    .getByText(
+      "GitHub discovery credential · environment variable · no value in the service environment",
+    )
+    .waitFor();
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "env:FIXTURE_X",
+  );
+});
+
+test("Settings holds Set while the one-click save is pending", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = credentialRow(page);
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  try {
+    await settingsOffer(page).click();
+    await row.getByRole("button", { name: "Saving…" }).waitFor();
+    assert.equal(
+      await row.getByRole("button", { name: "Set", exact: true }).isDisabled(),
+      true,
+    );
+  } finally {
+    release();
+  }
+  await row
+    .getByText(
+      "GitHub discovery credential · GitHub CLI · @octo · read-only use",
+    )
+    .waitFor();
+  await page.unroute("**/api/operator/commands");
+  await row.getByRole("button", { name: "Change", exact: true }).waitFor();
+  assert.equal(
+    await row.getByRole("button", { name: "Change", exact: true }).isDisabled(),
+    false,
+  );
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
+test("Settings reconciles an unknown one-click outcome", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = credentialRow(page);
+  const check = row.getByRole("button", { name: "Check whether it saved" });
+  // The service records the command but its response is lost.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  try {
+    await settingsOffer(page).click();
+    await check.waitFor();
+    assert.equal(await settingsOffer(page).count(), 0);
+    assert.equal(await row.getByLabel("GitHub CLI · recommended").count(), 0);
+    // No other credential write starts before the check: it resends the original command.
+    assert.equal(
+      await row.getByRole("button", { name: "Set", exact: true }).isDisabled(),
+      true,
+    );
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await check.click();
+  await row
+    .getByText(
+      "GitHub discovery credential · GitHub CLI · @octo · read-only use",
+    )
+    .waitFor();
+  await savedOutcome(page);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
 test("Readiness offers the detected GitHub CLI login and Run again changes nothing", async (_t, journey) => {
   const gh = createFakeGh();
   journey.cleanup(async () => gh.close(), "fake-gh.close");
@@ -355,6 +576,7 @@ test("Readiness offers the detected GitHub CLI login and Run again changes nothi
   await row.getByText("Not configured", { exact: true }).waitFor();
   await row.getByText("No GitHub discovery credential is configured").waitFor();
   await offerButton(page).waitFor();
+  await row.getByText(keychainNote).waitFor();
   assert.equal(await row.locator(".identifier").count(), 0);
 
   // Run again only reads: the readiness checks and the detected login, no command; the
@@ -387,6 +609,7 @@ test("Readiness offers the detected GitHub CLI login and Run again changes nothi
   );
   assert.equal(await row.locator(".identifier").count(), 0);
   assert.equal(await row.getByRole("button").count(), 0);
+  assert.equal(await row.getByText(keychainNote).count(), 0);
   // Without a reload the credential row in its own section agrees.
   await credentialRow(page)
     .getByText(
@@ -444,6 +667,7 @@ test("Readiness keeps the existing fix line unless a gh login is signed in", asy
     await row.getByText("Not configured", { exact: true }).waitFor();
     assert.equal(await row.locator(".identifier").innerText(), fixLine);
     assert.equal(await row.getByRole("button").count(), 0, state);
+    assert.equal(await row.getByText(keychainNote).count(), 0, state);
   }
   // Let both discovery reads finish, so only Run again can pick up the new login.
   await page.waitForLoadState("networkidle");

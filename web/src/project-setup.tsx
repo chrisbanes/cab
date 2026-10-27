@@ -52,7 +52,7 @@ import {
   typeRepository,
   verificationCopy,
 } from "./setup-model.js";
-import type { GhLogin } from "./discovery-credential.js";
+import { discoveryUseNote, type GhLogin } from "./discovery-credential.js";
 import { settingsSectionHref } from "./settings-sections.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -460,12 +460,18 @@ export function ProjectSetup(
   const [repoOpen, setRepoOpen] = useState(false);
   if (forced && !repoOpen) setRepoOpen(true);
   const collapsed = unconfigured && !repoOpen && !forced;
+  // The one-click login is offered in step 3 whether or not Add a repository is opened.
+  const offer =
+    ghLogin?.state === "signed-in" &&
+    unconfigured &&
+    ghDraft.phase !== "unknown";
   const repoContent = useRef<HTMLDivElement>(null);
+  const section = useRef<HTMLElement>(null);
   const repoContentId = useId();
   const focusFirstControl = () =>
     repoContent.current
       ?.querySelector<HTMLElement>(
-        ".setup-inline-actions button:not(:disabled), .setup-row :is(input, select):not(:disabled)",
+        ".setup-row :is(input, select):not(:disabled)",
       )
       ?.focus();
   const openRepositories = () => {
@@ -482,8 +488,7 @@ export function ProjectSetup(
     focusAfterRead.current = false;
     // Not while the operator has moved on to another field in the meantime.
     const at = document.activeElement;
-    if (at && at !== document.body && !repoContent.current?.contains(at))
-      return;
+    if (at && at !== document.body && !section.current?.contains(at)) return;
     focusFirstControl();
   }, [discovery.state]);
   // The browser scrolls a focused control into view, not out from under the sticky bar
@@ -660,19 +665,100 @@ export function ProjectSetup(
               multiline
             />
           </section>
-          <section className="settings-panel setup-repositories">
+          <section className="settings-panel setup-repositories" ref={section}>
             <div>
               <h2 className="settings-panel-title">
                 3 · Repository and GitHub · optional
               </h2>
               <p className="metadata muted">
                 {collapsed
-                  ? "Optional. Without a repository the project is repository-free; adding one also offers GitHub discovery."
+                  ? offer
+                    ? "Optional. Without a repository the project is repository-free. GitHub discovery lists repositories and GitHub Projects to link."
+                    : "Optional. Without a repository the project is repository-free; adding one also offers GitHub discovery."
                   : discovery.state === "unavailable"
                     ? discoveryReasonCopy(discovery.reason)
                     : "Repositories and GitHub Projects are discovered from GitHub with the read-only discovery credential. Repository access is exactly what you add here; a linked GitHub Project grants none."}
               </p>
             </div>
+            {(collapsed
+              ? offer
+              : discovery.state === "unavailable" ||
+                discoveredRepos.some(
+                  (repo) => branches[repo]?.state === "unavailable",
+                ) ||
+                projectRepos.some(
+                  (repo) => projectReads[repo]?.state === "unavailable",
+                )) && (
+              <div className="setup-inline-actions">
+                {discovery.state === "unavailable" &&
+                [
+                  "unconfigured",
+                  "missing-credential",
+                  "gh-not-installed",
+                  "gh-not-signed-in",
+                ].includes(discovery.reason) ? (
+                  <>
+                    {offer && (
+                      <Button
+                        type="button"
+                        aria-disabled={ghDraft.phase === "pending"}
+                        className="aria-disabled:opacity-50"
+                        onClick={async () => {
+                          await ghDraft.submit(
+                            p.client,
+                            {
+                              type: "discovery.configure",
+                              key: ghDraft.values.key,
+                              credentialRef: "gh:github.com",
+                            },
+                            csrf,
+                          );
+                          if (ghDraft.phase === "recorded") {
+                            ghDraft.startOperation({ key: key() }, true);
+                            focusAfterRead.current = true;
+                            retry();
+                          }
+                        }}
+                      >
+                        {`Use GitHub CLI login (@${ghLogin.login})`}
+                      </Button>
+                    )}
+                    <ActionLink
+                      variant="secondary"
+                      href={settingsSectionHref("github-discovery")}
+                    >
+                      Set discovery credential
+                    </ActionLink>
+                  </>
+                ) : (
+                  <Button type="button" variant="secondary" onClick={retry}>
+                    Retry
+                  </Button>
+                )}
+              </div>
+            )}
+            {ghLogin?.state === "signed-in" &&
+              discovery.state === "unavailable" &&
+              discovery.reason === "unconfigured" && (
+                <>
+                  <p className="metadata muted">
+                    Signed in to github.com as @{ghLogin.login} with the GitHub
+                    CLI on this Mac.
+                  </p>
+                  <p className="metadata muted">{discoveryUseNote}</p>
+                </>
+              )}
+            <DraftMessage
+              draft={ghDraft}
+              check={async () => {
+                await ghDraft.reconcile(p.client, csrf);
+                if (ghDraft.phase === "recorded") {
+                  ghDraft.startOperation({ key: key() }, true);
+                  focusAfterRead.current = true;
+                  retry();
+                }
+              }}
+            />
             {collapsed && (
               <div>
                 <Button
@@ -695,90 +781,6 @@ export function ProjectSetup(
             >
               {!collapsed && (
                 <>
-                  {(discovery.state === "unavailable" ||
-                    discoveredRepos.some(
-                      (repo) => branches[repo]?.state === "unavailable",
-                    ) ||
-                    projectRepos.some(
-                      (repo) => projectReads[repo]?.state === "unavailable",
-                    )) && (
-                    <div className="setup-inline-actions">
-                      {discovery.state === "unavailable" &&
-                      [
-                        "unconfigured",
-                        "missing-credential",
-                        "gh-not-installed",
-                        "gh-not-signed-in",
-                      ].includes(discovery.reason) ? (
-                        <>
-                          {ghLogin?.state === "signed-in" &&
-                            discovery.reason === "unconfigured" &&
-                            ghDraft.phase !== "unknown" && (
-                              <Button
-                                type="button"
-                                disabled={ghDraft.phase === "pending"}
-                                onClick={async () => {
-                                  await ghDraft.submit(
-                                    p.client,
-                                    {
-                                      type: "discovery.configure",
-                                      key: ghDraft.values.key,
-                                      credentialRef: "gh:github.com",
-                                    },
-                                    csrf,
-                                  );
-                                  if (ghDraft.phase === "recorded") {
-                                    ghDraft.startOperation(
-                                      { key: key() },
-                                      true,
-                                    );
-                                    focusAfterRead.current = true;
-                                    retry();
-                                  }
-                                }}
-                              >
-                                {`Use GitHub CLI login (@${ghLogin.login})`}
-                              </Button>
-                            )}
-                          <ActionLink
-                            variant="secondary"
-                            href={settingsSectionHref("github-discovery")}
-                          >
-                            Set discovery credential
-                          </ActionLink>
-                        </>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={retry}
-                        >
-                          Retry
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  {ghLogin?.state === "signed-in" &&
-                    discovery.state === "unavailable" &&
-                    discovery.reason === "unconfigured" && (
-                      <p className="metadata muted">
-                        Signed in to github.com as @{ghLogin.login} with the
-                        GitHub CLI on this Mac. Choosing it here lets Ensemble
-                        read GitHub with it for discovery; it is never passed to
-                        agents.
-                      </p>
-                    )}
-                  <DraftMessage
-                    draft={ghDraft}
-                    check={async () => {
-                      await ghDraft.reconcile(p.client, csrf);
-                      if (ghDraft.phase === "recorded") {
-                        ghDraft.startOperation({ key: key() }, true);
-                        focusAfterRead.current = true;
-                        retry();
-                      }
-                    }}
-                  />
                   {rows.map((row, i) => {
                     const source = sourceOf(row);
                     const expected = row.owner && row.name ? row : null;

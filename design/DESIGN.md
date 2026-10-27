@@ -424,7 +424,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
 | 07 Tasks, composer & tablet | `24-all-projects-list`, `24b-task-filter-states`, `23-atlas-project-board`, `23b-atlas-project-paused`, `02-composer-optional-expanded`, `800a-tablet-overview-list`, `800b-tablet-inbox-question`, `800c-tablet-task-evidence`, `800d-tablet-search-result`, `800e-tablet-composer-validation`, `800f-tablet-all-projects-board`, `25-phone-board-waiting`, `25b-phone-board-uncertain`, `34-phone-composer-collapsed`, `35-phone-optional-settings-error`, `35b-phone-collapsed-validation`, `800h-phone-composer-short`, `186-composer-draft-idle`, `187-composer-draft-running`, `188-composer-draft-proposal`, `189-composer-draft-interrupted`, `190-composer-draft-failed`, `191-composer-draft-nolead`, `192-phone-composer-draft-idle`, `193-phone-composer-draft-running`, `194-phone-composer-draft-proposal`, `195-phone-composer-draft-interrupted`, `196-phone-composer-draft-failed`, `197-phone-composer-draft-nolead` |
-| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `123b-profile-instructions-revealed`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `117c-first-setup-add-repository`, `131-project-setup-choose-folder`, `118-project-config-general`, `118b-project-instructions-revealed`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `119f-github-source-project-fields`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `181-settings-notifications-off`, `182-settings-notifications-on`, `183-settings-notifications-blocked`, `184-settings-notifications-revoke`, `185-phone-settings-notifications`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration`, `222-project-config-status-mapping`, `223-phone-project-config-status-mapping` |
+| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `123b-profile-instructions-revealed`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `114d-settings-discovery-gh-offer`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `117c-first-setup-add-repository`, `117d-first-setup-collapsed-gh-offer`, `131-project-setup-choose-folder`, `118-project-config-general`, `118b-project-instructions-revealed`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `119f-github-source-project-fields`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `181-settings-notifications-off`, `182-settings-notifications-on`, `183-settings-notifications-blocked`, `184-settings-notifications-revoke`, `185-phone-settings-notifications`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration`, `222-project-config-status-mapping`, `223-phone-project-config-status-mapping` |
 | 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `146c-setup-ready-check-import`, `146d-setup-ready-check-imported`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `114c-settings-first-run`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
 | 10 Action feedback | `154-project-configuration-saved`, `154b-project-configuration-details-expanded`, `155-routing-saved`, `156-project-configuration-field-error`, `157-project-configuration-changed-elsewhere`, `158-project-configuration-unknown-outcome`, `159-change-list-remove-last-repository`, `160-discovery-credential-saved`, `161-composer-created-project-paused`, `162-grouped-questions-answered`, `162b-grouped-questions-send-failed`, `163-task-reply-sent`, `164-stop-confirmation`, `165-cli-credential-revoked`, `ds-action-feedback`, `166a-phone-project-configuration-saved`, `166b-phone-unknown-outcome-locked`, `166c-phone-task-created-project-paused` |
 | 11 Settings, recovery & responsive states | `167-profile-field-error`, `168-routing-field-error`, `169-runtime-capacity-field-error`, `178-profile-revoke-available`, `170-source-config-changed-elsewhere`, `170b-source-config-latest-loaded`, `171-source-config-unknown-outcome`, `172-routing-typesafe-unavailable`, `173-recovery-evidence-unavailable`, `174-recovery-no-admitted-generation`, `175-recovery-pre-turn-witness`, `176-recovery-no-turn-witness`, `177-project-setup-ref-open`, `180a-tablet-settings-index`, `180b-tablet-project-setup`, `180c-tablet-profile`, `180d-tablet-routing`, `180e-tablet-runtime`, `179a-phone-settings-index`, `179b-phone-project-setup`, `179c-phone-profile`, `179d-phone-routing`, `179e-phone-runtime` |
@@ -435,15 +435,26 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 ### GitHub discovery credential
 
 Frame 114's GitHub discovery section, after Routing, carries the installation
-discovery credential row; `114b-settings-discovery-credential` draws it open, and
-`117b-first-setup-discovery-unavailable` draws the setup alert when discovery is
-unconfigured and step 3 is opened; `117c-first-setup-add-repository` draws step 3
-collapsed.
+discovery credential row; `114b-settings-discovery-credential` draws it open,
+`114d-settings-discovery-gh-offer` draws it closed and unconfigured with the one-click
+offer, and `117b-first-setup-discovery-unavailable` draws the setup alert when
+discovery is unconfigured and step 3 is opened; `117c-first-setup-add-repository`
+draws step 3 collapsed and `117d-first-setup-collapsed-gh-offer` draws it collapsed
+with the offer.
 
 - **Configured (114):** "GitHub discovery credential · GitHub CLI · @account ·
   read-only use" with Change and Clear. Clear removes the reference and is the
   reverse of choosing a source. An environment-variable reference keeps its
   existing lines.
+- **One-click offer (114d):** while the row reads "not configured" and the service
+  detects a signed-in gh login, the closed row offers a primary **Use GitHub CLI
+  login (@account)** before a secondary **Set**, with the keychain caveat (the use note) as
+  a muted line under it. One press sends the existing configure command for
+  `gh:github.com`, confirms "Saved." in place and moves focus to **Change**; the
+  form never opens, and **Set** still opens it for the environment variable. An
+  unknown outcome hides the offer and shows **Check whether it saved**. Signed out,
+  not installed, unreadable and a failed read keep the row as 114 draws it, with no
+  offer and no caveat. **Clear** brings the offer back.
 - **Open (114b):** a source choice, with GitHub CLI marked recommended and
   Environment variable marked advanced.
   - **GitHub CLI.** The service detects a login non-interactively. When it finds
@@ -455,15 +466,19 @@ collapsed.
   - The form also carries the use note (read-only use, removed from agent and
     helper environments, keychain limit) and Cancel. The token itself is never
     shown.
-- **Setup alert (117b, 117c):** while discovery is unconfigured, step 3 starts
+- **Setup alert (117b, 117c, 117d):** while discovery is unconfigured, step 3 starts
   collapsed (117c): its heading, the line "Optional. Without a repository the
   project is repository-free; adding one also offers GitHub discovery." and a
-  secondary **Add a repository**. Opening it moves focus to its first control and
-  draws 117b, the opened state: when the service detects a gh login the alert offers
-  **Use GitHub CLI login (@account)** before **Set discovery credential**, the one
-  place setup offers it, even when gh is signed in. The action configures the
-  reference in one step and re-reads discovery. Without a detected login, only **Set
-  discovery credential** appears. Discovery never reads with a gh login the operator
+  secondary **Add a repository**. When the service detects a signed-in gh login the
+  alert is already there, above **Add a repository** (117d): the line reads
+  "Optional. Without a repository the project is repository-free. GitHub discovery
+  lists repositories and GitHub Projects to link.", then **Use GitHub CLI login
+  (@account)** before **Set discovery credential**, "Signed in to github.com as
+  @account with the GitHub CLI on this Mac." and the keychain caveat. Opening **Add a
+  repository** moves focus to its first control and draws 117b, the opened state,
+  with the same alert in the same place. The action configures the reference in one
+  step and re-reads discovery. Without a detected login, collapsed step 3 is as 117c
+  draws it and the opened alert shows only **Set discovery credential**. Discovery never reads with a gh login the operator
   did not choose for it. The section opens by itself for a row that holds a value, a
   rejected repository or GitHub Project, and an unsettled GitHub CLI login, and it
   never closes again: clearing a row means choosing "No repository · repository-free",
@@ -472,11 +487,13 @@ collapsed.
 - **Readiness offer (114c):** the Readiness GitHub discovery row, when it reads Not
   configured, no discovery credential is configured and the service detects a
   signed-in gh login, shows a secondary **Use GitHub CLI login (@account)** in
-  place of its fix line. It is the same one-step configure as the setup alert, as
-  a separate, explicit offer: the first-run path (setup step 3, behind Add a
-  repository) offers it where a new project needs discovery, and Settings offers it
-  where an installation already exists, while the Home checklist row stays
-  informational and links to the GitHub discovery section. Run again still only
+  place of its fix line, with the keychain caveat under it. It is the same one-step
+  configure as the setup alert and the 114d row offer, as a separate, explicit offer:
+  the first-run path (setup step 3, opened or not) offers it where a new project
+  needs discovery, and Settings offers it on the credential row and here where an
+  installation already exists, while the Home checklist row stays informational and
+  links to the GitHub discovery section. The project-configuration GitHub source
+  readiness picker offers no login; it still shows the typed-node-ID note. Run again still only
   re-reads. Signed out, not installed, unreadable, a configured
   but unreadable credential and a failed discovery read keep the server's fix line.
   Saving or clearing the credential here or in the section re-reads both, so Clear
@@ -777,7 +794,7 @@ each flow document states what is implemented. Fixtures are fixture-app, `fixtur
   Fail and Not configured badges, a Geist Mono fix line under each failure, and Run
   again, which only re-reads. When discovery is unconfigured and a gh login is
   detected, the GitHub discovery row offers **Use GitHub CLI login (@account)** in
-  place of its fix line (114c). Add Claude sits at the
+  place of its fix line, with the keychain caveat (114c). Add Claude sits at the
   top of the runtime page's left column: copyable token-file commands, a Token
   reference field (`file:` or `env:`), Save, and a live Token readable row. Set opens
   the field with the suggested `file:` path when no reference is configured; `~` and
@@ -2873,7 +2890,7 @@ frames 114 and 118–128 as follows:
   Production also collapses each run of consecutive generations that show the same
   state under an expandable "N older records, same state", keeping the newest of the
   run, the held generation, witnesses and the latest receipt expanded.
-- Project setup (115–117c, 131, 145–146d, 177, 179b) reads steps 1, 2 and 3 in one
+- Project setup (115–117d, 131, 145–146d, 177, 179b) reads steps 1, 2 and 3 in one
   column, with "What creation does" as an aside beside them from 1121px and after
   them below it, as in the composer; DOM order is visual order and nothing reorders.
   The sticky bar holds a note, Cancel and then Create paused project at every width

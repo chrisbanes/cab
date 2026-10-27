@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { z } from "zod";
 import {
   claudeTokenStatusSchema,
@@ -194,6 +194,10 @@ export function ghLoginCopy(gh: GhLogin) {
 
 const envName = /^[A-Z][A-Z0-9_]*$/;
 
+/** The keychain caveat shown beside every one-click offer and in the form. */
+export const discoveryUseNote =
+  "Ensemble only reads GitHub with this credential and removes it from agent and helper environments. If agents can reach this Mac's keychain they could run gh themselves; Ensemble does not prevent that.";
+
 /** Frames 114 and 114b: the installation's read-only GitHub discovery credential. */
 export function DiscoveryCredentialRow(
   p: SettingsProps & {
@@ -209,6 +213,10 @@ export function DiscoveryCredentialRow(
   const status = useOperatorResource(p.session.csrfToken, loader);
   useHeaderRefresh(p.refreshNonce, status.refresh);
   const d = useDraft(p.drafts, "discovery.configure");
+  // The one-click offer has its own draft, so a save from it never opens the form.
+  const offer = useDraft(p.drafts, "discovery.configure:offer");
+  // A new visit starts clean; an unsettled one-click save stays until it is checked.
+  useEffect(() => offer.startOperation({ key: key() }), [offer]);
   const s = status.state.data?.data;
   const fresh = () => ({
     source: s?.source ?? "gh",
@@ -241,6 +249,65 @@ export function DiscoveryCredentialRow(
     d.startOperation(fresh(), true);
   };
   const reread = () => (d.phase === "recorded" ? settled() : status.refresh());
+  // After a recorded one-click save the offer leaves; focus moves to Change once the re-read
+  // shows it, unless the operator has moved on.
+  const change = useRef<HTMLButtonElement>(null);
+  const focusChange = useRef(false);
+  const configured = s?.configured;
+  useEffect(() => {
+    if (!focusChange.current || !configured) return;
+    focusChange.current = false;
+    change.current?.focus();
+  }, [configured]);
+  const offerRecorded = () => {
+    const at = document.activeElement;
+    focusChange.current =
+      at === document.body || Boolean(rowRef.current?.contains(at));
+    status.refresh();
+    p.onChange?.();
+  };
+  const rowRef = useRef<HTMLElement>(null);
+  // A recorded offer is spent once a read made after it answers; its confirmation stays
+  // until Clear brings the offer back.
+  const { fetchedAt, pending } = status.state;
+  useEffect(() => {
+    if (
+      offer.savedAt === null ||
+      pending ||
+      fetchedAt === null ||
+      fetchedAt < offer.savedAt
+    )
+      return;
+    if (offer.phase === "recorded")
+      offer.startOperation({ key: key() }, Boolean(configured));
+    else if (offer.phase === "editing" && !configured)
+      offer.startOperation({ key: key() });
+  }, [offer, offer.phase, offer.savedAt, pending, fetchedAt, configured]);
+  const signedIn = gh?.state === "signed-in" ? gh : null;
+  const offered =
+    !status.state.error &&
+    s &&
+    !s.configured &&
+    signedIn &&
+    !shown &&
+    offer.phase !== "unknown"
+      ? signedIn.login
+      : null;
+  // Until the one-click save is settled, no other credential write may start: Check whether it
+  // saved resends the original command, which would overwrite a newer reference.
+  const offerUnsettled = offer.phase === "pending" || offer.phase === "unknown";
+  const chooseLogin = async () => {
+    await offer.submit(
+      p.client,
+      {
+        type: "discovery.configure",
+        key: offer.values.key,
+        credentialRef: "gh:github.com",
+      },
+      p.session.csrfToken,
+    );
+    if (offer.phase === "recorded") offerRecorded();
+  };
   const send = (credentialRef: string | null) => ({
     type: "discovery.configure",
     key: d.values.key,
@@ -257,15 +324,38 @@ export function DiscoveryCredentialRow(
     <section
       className="settings-discovery"
       aria-label="GitHub discovery credential"
+      ref={rowRef}
     >
       <div className="settings-discovery-line">
         <p className="metadata">GitHub discovery credential · {line}</p>
         {!shown && (
           <div className="settings-discovery-actions">
+            {offered !== null && (
+              <Button
+                type="button"
+                // Stays in place while saving so focus is not dropped; a pending or recorded
+                // save is not sent twice.
+                aria-disabled={
+                  offer.phase === "pending" || offer.phase === "recorded"
+                }
+                className="aria-disabled:opacity-50"
+                onClick={() =>
+                  offer.phase === "recorded" ? undefined : void chooseLogin()
+                }
+              >
+                {offer.phase === "pending"
+                  ? "Saving…"
+                  : `Use GitHub CLI login (@${offered})`}
+              </Button>
+            )}
             <Button
               type="button"
               variant="secondary"
+              ref={change}
+              disabled={offerUnsettled}
               onClick={() => {
+                // The form's own outcome replaces a kept one-click confirmation.
+                offer.startOperation({ key: key() });
                 d.startOperation(fresh());
                 setOpen(true);
               }}
@@ -276,7 +366,7 @@ export function DiscoveryCredentialRow(
               <Button
                 type="button"
                 variant="secondary"
-                disabled={locked(d)}
+                disabled={locked(d) || offerUnsettled}
                 onClick={clear}
               >
                 Clear
@@ -285,7 +375,17 @@ export function DiscoveryCredentialRow(
           </div>
         )}
       </div>
+      {offered !== null && <p className="metadata muted">{discoveryUseNote}</p>}
       {!shown && <DraftMessage draft={d} />}
+      {!shown && (
+        <DraftMessage
+          draft={offer}
+          check={async () => {
+            await offer.reconcile(p.client, p.session.csrfToken);
+            if (offer.phase === "recorded") offerRecorded();
+          }}
+        />
+      )}
       {shown && (
         <form
           className="settings-discovery-form"
@@ -340,12 +440,7 @@ export function DiscoveryCredentialRow(
               </p>
             </>
           )}
-          <p className="metadata muted">
-            Ensemble only reads GitHub with this credential and removes it from
-            agent and helper environments. If agents can reach this Mac's
-            keychain they could run gh themselves; Ensemble does not prevent
-            that.
-          </p>
+          <p className="metadata muted">{discoveryUseNote}</p>
           <DraftOutcome
             draft={d}
             client={p.client}

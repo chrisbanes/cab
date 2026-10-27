@@ -64,6 +64,6 @@ Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
   fix on its own (a data directory mode) is fixed, not reported.
 - Leaving setup before Create discards the draft with a prompt; a created project
   stays paused until Resume.
-- GitHub is optional for a repository-free project. Setup step 3 (behind Add a
-  repository) is the one place the first-run path offers the one-click GitHub CLI
-  login; Settings → Readiness offers it again later, as a separate step.
+- GitHub is optional for a repository-free project. Setup step 3 offers the one-click
+  GitHub CLI login, with the keychain caveat, whether or not Add a repository is
+  opened; Settings offers it again later, as a separate step.
