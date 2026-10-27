@@ -51,8 +51,10 @@ self.addEventListener("push", (event) => {
 });
 
 // A tab still running an older bundle has no listener, so a posted message alone proves nothing:
-// the tab confirms on the message's port, and an unconfirmed click opens a window instead.
-const ACK_MS = 1000;
+// the tab confirms on the message's port, and an unconfirmed click opens a window instead (a
+// late confirmation can leave both). The window interaction a click allows is spent once, on
+// focus() or on openWindow(), so focus only after the tab confirmed.
+const ACK_MS = 500;
 const routed = (client, url) => {
   const { port1, port2 } = new MessageChannel();
   return new Promise((resolve) => {
@@ -85,9 +87,11 @@ self.addEventListener("notificationclick", (event) => {
       });
       if (target) {
         try {
-          await target.focus();
           // The app routes in place, so an open tab keeps its unsaved input.
-          if (await routed(target, url)) return;
+          if (await routed(target, url)) {
+            await target.focus();
+            return;
+          }
         } catch {
           // A window that cannot be focused or messaged is replaced by a new one.
         }

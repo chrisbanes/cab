@@ -235,6 +235,11 @@ test("a tab that does not confirm routing is replaced by a new window", async ()
   const w = await load([stale]);
   await w.click("/app/inbox?request=Q");
   assert.equal(stale.posted.length, 1);
+  assert.equal(
+    stale.focused,
+    0,
+    "the click's one window interaction opens the window",
+  );
   assert.deepEqual(w.opened, ["/app/inbox?request=Q"]);
   assert.deepEqual(w.closed, ["closed"]);
 });
