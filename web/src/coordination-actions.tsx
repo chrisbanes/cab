@@ -111,7 +111,8 @@ export function HandbackSettlement({
       !d.blockers.includes("reviewable-pr-awaiting-current-settlement")
         ? b.settlement.decision
         : null,
-    outsidePush = d.branches.some((r) => r.outsideHeadSha !== null),
+    // The service's branch hold on the bound PR's own branch, not on any other task branch.
+    outsidePush = d.blockers.includes("task-branch-outside-change"),
     settle = (decision: "accepted" | "closed") =>
       send(
         operatorCommandSchema.parse({
