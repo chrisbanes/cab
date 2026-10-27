@@ -27,6 +27,7 @@ interface PowerEventSource {
     fromCursor: PowerEventCursor | null;
     cursor: PowerEventCursor | null;
     events: TestPowerEvent[];
+    readStartCursor?: PowerEventCursor;
   }>;
   lastSleepOrWakeAt?(): Promise<number>;
 }
@@ -1020,6 +1021,11 @@ const pmsetRows = [
   "",
 ];
 
+function withoutReadStart<T extends { readStartCursor?: unknown }>(batch: T) {
+  const { readStartCursor: _, ...rest } = batch;
+  return rest;
+}
+
 function printLines(lines: string[], eol: string): string[] {
   return ["-e", `process.stdout.write(${JSON.stringify(lines.join(eol))})`];
 }
@@ -1041,10 +1047,10 @@ test("the default pmset reader streams lines so cursors match the whole-output p
       const batch = await source.readSince(baseline.cursor);
       const expected = parsePmsetPowerLog(text.join(eol), baseline.cursor);
       assert.equal(batch.complete, true);
-      assert.deepEqual(batch, expected);
+      assert.deepEqual(withoutReadStart(batch), expected);
       assert.deepEqual(
         batch.events.map((event) => event.cursor.value.split(":")[2]),
-        ["2", "3", "4", "5"],
+        ["0", "0", "0", "0"],
       );
       const resumed = await source.readSince(batch.events[1]?.cursor ?? null);
       assert.deepEqual(
@@ -1075,7 +1081,7 @@ const macos27Rows = [
 const macos27Log = [...macos27Preamble, ...macos27Rows];
 const macos27BaselineMs = Date.parse("2026-09-29T08:59:00Z");
 
-test("a macOS 27 column header gives a complete baseline and follow-up with cursors that count the skipped lines", async () => {
+test("a macOS 27 column header gives a complete baseline and follow-up with cursors that ignore the skipped lines", async () => {
   const readLog: PowerLogReader = async function* () {
     yield* macos27Log;
   };
@@ -1101,11 +1107,11 @@ test("a macOS 27 column header gives a complete baseline and follow-up with curs
   assert.deepEqual(batch.events[0]?.previousCursor, baseline.cursor);
   assert.deepEqual(
     batch.events.map((event) => event.cursor.value.split(":")[2]),
-    ["6", "7"],
+    ["0", "0"],
   );
 });
 
-test("macOS 27 preamble output streams to the same batch as whole-output parsing, and a cursor that ignores the skipped lines is rejected", async () => {
+test("macOS 27 preamble output streams to the same batch as whole-output parsing, and its cursors resolve after the skipped lines", async () => {
   for (const eol of ["\n", "\r\n"]) {
     for (const text of [macos27Log, [...macos27Log, ""]]) {
       const reader: PowerLogReader = (_c, _a, options) =>
@@ -1121,7 +1127,7 @@ test("macOS 27 preamble output streams to the same batch as whole-output parsing
       const batch = await source.readSince(baseline.cursor);
       assert.equal(batch.complete, true);
       assert.deepEqual(
-        batch,
+        withoutReadStart(batch),
         parsePmsetPowerLog(text.join(eol), baseline.cursor),
       );
       const resumed = await source.readSince(batch.events[0]?.cursor ?? null);
@@ -1134,12 +1140,11 @@ test("macOS 27 preamble output streams to the same batch as whole-output parsing
   }
 });
 
-test("an event cursor saved from headerless output resolves to the one matching row, and ambiguous or unsupported matches are rejected", () => {
+test("an event cursor saved from headerless output resolves to the one matching row, and ambiguous or missing matches are rejected", () => {
   const baseline = powerCursor(`pmset-time:${macos27BaselineMs}`);
-  // A real cursor from the pre-macOS 27 layout, where the first Sleep is line 2.
+  // A cursor saved before event cursors held an ordinal: its field 2 was a line index.
   const old = parsePmsetPowerLog(pmsetRows.join("\n"), baseline).events[0];
-  const [prefix, timestamp, index, hash] = (old?.cursor.value ?? "").split(":");
-  assert.equal(index, "2");
+  const [prefix, timestamp, , hash] = (old?.cursor.value ?? "").split(":");
   const withIndex = (value: number, rowHash = hash) =>
     powerCursor([prefix, timestamp, value, rowHash].join(":"));
   const text = macos27Log.join("\n");
@@ -1147,16 +1152,18 @@ test("an event cursor saved from headerless output resolves to the one matching 
   const current = parsePmsetPowerLog(text, baseline).events[0]?.cursor;
   assert.ok(current);
   const exact = parsePmsetPowerLog(text, current);
-  const legacy = parsePmsetPowerLog(text, withIndex(2));
-  assert.equal(legacy.complete, true);
-  assert.deepEqual(
-    legacy.events.map((event) => event.cursor),
-    exact.events.map((event) => event.cursor),
-  );
-  assert.deepEqual(
-    legacy.events.map((event) => event.transition),
-    ["wake"],
-  );
+  for (const index of [0, 2, 7]) {
+    const legacy = parsePmsetPowerLog(text, withIndex(index));
+    assert.equal(legacy.complete, true, `field 2 = ${index}`);
+    assert.deepEqual(
+      legacy.events.map((event) => event.cursor),
+      exact.events.map((event) => event.cursor),
+    );
+    assert.deepEqual(
+      legacy.events.map((event) => event.transition),
+      ["wake"],
+    );
+  }
 
   const rejects = (output: string[], cursor: PowerEventCursor, label: string) =>
     assert.equal(
@@ -1165,8 +1172,6 @@ test("an event cursor saved from headerless output resolves to the one matching 
       label,
     );
   rejects(macos27Log, withIndex(2, "0123456789abcdef"), "unknown hash");
-  rejects(macos27Log, withIndex(7), "cursor past the row");
-  rejects(pmsetRows, withIndex(1), "no preamble in the output");
   const [sleepRow] = macos27Rows.slice(1, 2) as [string];
   const duplicated = [
     ...macos27Preamble,
@@ -1174,7 +1179,107 @@ test("an event cursor saved from headerless output resolves to the one matching 
     sleepRow,
     ...macos27Rows.slice(2),
   ];
-  rejects(duplicated, withIndex(2), "two matching rows");
+  rejects(duplicated, withIndex(2), "two matching rows, ordinal past both");
+});
+
+test("an event cursor still resolves after the log trims rows above it, and fails closed when its own row is gone", () => {
+  const baseline = powerCursor(
+    `pmset-time:${Date.parse("2026-09-29T08:59:00Z")}`,
+  );
+  const [, assertions, sleep1, wake1, sleep2, wake2, ...tail] = pmsetRows as [
+    string,
+    ...string[],
+  ];
+  const full = parsePmsetPowerLog(pmsetRows.join("\n"), baseline);
+  const wakeCursor = full.events[1]?.cursor ?? null;
+  assert.ok(wakeCursor);
+  const appended = "2026-09-29 10:08:00 +0100 Sleep\tEntering Sleep state";
+  const header = pmsetRows[0] as string;
+
+  const oldestAssertionTrimmed = parsePmsetPowerLog(
+    [header, sleep1, wake1, sleep2, wake2, appended, ...tail].join("\n"),
+    wakeCursor,
+  );
+  assert.equal(oldestAssertionTrimmed.complete, true);
+  assert.deepEqual(
+    oldestAssertionTrimmed.events.map((event) => event.transition),
+    ["sleep", "wake", "sleep"],
+  );
+  const oldestSleepTrimmed = parsePmsetPowerLog(
+    [header, assertions, wake1, sleep2, wake2, ...tail].join("\n"),
+    wakeCursor,
+  );
+  assert.equal(oldestSleepTrimmed.complete, true);
+  assert.deepEqual(
+    oldestSleepTrimmed.events.map((event) => event.transition),
+    ["sleep", "wake"],
+  );
+  const cursorRowTrimmed = parsePmsetPowerLog(
+    [header, sleep2, wake2, ...tail].join("\n"),
+    wakeCursor,
+  );
+  assert.equal(cursorRowTrimmed.complete, false);
+});
+
+test("identical rows get ordinals, and a cursor selects the row it counted", () => {
+  const baseline = powerCursor(`pmset-time:${macos27BaselineMs}`);
+  const sleep = "2026-09-29 10:00:00 +0100 Sleep\tEntering Sleep state";
+  const wake = "2026-09-29 10:05:00 +0100 Wake\tWake from Normal Sleep";
+  const output = [macos27Rows[0], sleep, sleep, wake].join("\n");
+  const batch = parsePmsetPowerLog(output, baseline);
+  assert.deepEqual(
+    batch.events.map((event) => event.cursor.value.split(":")[2]),
+    ["0", "1", "0"],
+  );
+  const [first, second] = batch.events;
+  assert.deepEqual(
+    parsePmsetPowerLog(output, first?.cursor ?? null).events.map(
+      (event) => event.transition,
+    ),
+    ["sleep", "wake"],
+  );
+  assert.deepEqual(
+    parsePmsetPowerLog(output, second?.cursor ?? null).events.map(
+      (event) => event.transition,
+    ),
+    ["wake"],
+  );
+  const beyond = (second?.cursor.value ?? "").replace(":1:", ":2:");
+  assert.equal(parsePmsetPowerLog(output, powerCursor(beyond)).complete, false);
+});
+
+test("only the exact Sleep, Wake and DarkWake domains are transitions; known non-transition rows are skipped and other sleep or wake rows fail closed", () => {
+  const baseline = powerCursor(`pmset-time:${macos27BaselineMs}`);
+  const row = (minute: number, body: string) =>
+    `2026-09-29 10:${String(minute).padStart(2, "0")}:00 +0100 ${body}`;
+  const rows = [
+    macos27Rows[0] as string,
+    row(0, "Sleep\tEntering Sleep state due to 'Clamshell Sleep'"),
+    row(1, "Wake Requests\t[process=powerd request=Maintenance] wake"),
+    row(2, "Sleep Service\tSleep Service Back to Sleep"),
+    row(3, "Kernel Client Acks\tDelays to Sleep notifications: none"),
+    row(4, "PM Client Acks\tDelays to Wake notifications: none"),
+    row(5, "WakeDetails\t[reason:EC.LidOpen] Wake from Normal Sleep"),
+    row(6, "DarkWake\tDark Wake from Normal Sleep"),
+    row(7, "Wake\tWake from Deep Idle"),
+  ];
+  const batch = parsePmsetPowerLog(rows.join("\n"), baseline);
+  assert.equal(batch.complete, true);
+  assert.deepEqual(
+    batch.events.map((event) => event.transition),
+    ["sleep", "wake", "wake"],
+  );
+  for (const body of [
+    "Sleeping\tEntering Sleep state",
+    "UnknownWakeSummary",
+    "wake\tlower case domain",
+    "Sleep Entering Sleep state without a tab",
+  ])
+    assert.equal(
+      parsePmsetPowerLog([...rows, row(8, body)].join("\n"), baseline).complete,
+      false,
+      body,
+    );
 });
 
 test("the macOS 27 preamble is accepted once, in order, and only before the first timestamped row", () => {
@@ -1431,7 +1536,7 @@ test("a read slower than the idle bound completes while it keeps producing outpu
   const batch = await source.readSince(baseline.cursor);
   assert.equal(batch.complete, true);
   assert.deepEqual(
-    batch,
+    withoutReadStart(batch),
     parsePmsetPowerLog(`${pmsetRows.join("\n")}\n`, baseline.cursor),
   );
 
@@ -1989,5 +2094,205 @@ test("a listener failure during a poll's history read keeps the durable hold and
       assert.equal(state.powerAdmissionState().held, false);
       assert.equal(power.observedForAdmission(), true);
     },
+  );
+});
+
+const retentionStart = Date.parse("2026-09-29T09:00:00Z");
+
+function utcRow(ms: number, body: string): string {
+  return `${new Date(ms).toISOString().slice(0, 19).replace("T", " ")} +0000 ${body}`;
+}
+
+/** A supervisor over a pmset source whose log rows and clock the test moves. */
+async function withRetentionHarness(
+  run: (harness: {
+    state: ExecutionState;
+    power: ExecutionPowerPort;
+    db: DatabaseSync;
+    log: { rows: string[]; now: number };
+  }) => Promise<void>,
+) {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-power-retention-"));
+  const { db, state } = powerStore(join(root, "power.sqlite"));
+  const log = {
+    rows: [utcRow(retentionStart - 3_600_000, "Assertions\tearlier")],
+    now: retentionStart,
+  };
+  const readLog: PowerLogReader = async function* () {
+    yield* log.rows;
+  };
+  const power = new ExecutionPower(
+    state,
+    new MacPowerEventSourceWithListener(
+      readLog,
+      2500,
+      2500,
+      4096,
+      () => log.now,
+      undefined,
+      new SleepWakeListener(readyListenerSpawn()),
+    ),
+    new CaffeinateAssertion(() => new FakeChild()),
+    async () => {},
+  );
+  try {
+    await power.start();
+    await run({ state, power, db, log });
+  } finally {
+    await power.stop();
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("empty polls keep the time cursor inside the log's retention window, idle or with admitted work", async () => {
+  for (const active of [false, true]) {
+    await withRetentionHarness(async ({ state, power, log }) => {
+      const cursorValue = () => state.powerAdmissionState().cursor?.value;
+      await power.poll();
+      assert.equal(cursorValue(), `pmset-time:${retentionStart}`);
+      if (active) begin(state, "work-a", "/workspace/a");
+
+      // The clock moves on by a fractional second; the cursor is the whole second.
+      log.now = retentionStart + 60_500;
+      log.rows.push(utcRow(retentionStart + 30_000, "Assertions\tlater"));
+      await power.poll();
+      assert.equal(power.admissionHeld(), false);
+      assert.equal(cursorValue(), `pmset-time:${retentionStart + 60_000}`);
+
+      // pmset has trimmed everything before the previous read; the baseline cursor
+      // would now be older than the earliest row.
+      log.rows = [utcRow(retentionStart + 60_000, "Assertions\tonly")];
+      log.now = retentionStart + 120_000;
+      await power.poll();
+      assert.equal(power.admissionHeld(), false);
+      assert.equal(cursorValue(), `pmset-time:${retentionStart + 120_000}`);
+    });
+  }
+});
+
+test("a reconciled event cursor is replaced by a time cursor on the next empty poll, so trimming its row leaves admission open", async () => {
+  await withRetentionHarness(async ({ state, power, log }) => {
+    await power.poll();
+    log.now = retentionStart + 60_000;
+    log.rows.push(
+      utcRow(retentionStart + 30_000, "Sleep\tEntering Sleep state"),
+    );
+    await power.poll();
+    assert.match(
+      state.powerAdmissionState().cursor?.value ?? "",
+      /^pmset-event:/,
+    );
+    assert.equal(power.admissionHeld(), false);
+
+    log.now = retentionStart + 120_000;
+    await power.poll();
+    assert.equal(
+      state.powerAdmissionState().cursor?.value,
+      `pmset-time:${retentionStart + 120_000}`,
+    );
+
+    log.rows = [utcRow(retentionStart + 120_000, "Assertions\tonly")];
+    log.now = retentionStart + 180_000;
+    await power.poll();
+    assert.equal(power.admissionHeld(), false);
+    assert.equal(
+      state.powerAdmissionState().cursor?.value,
+      `pmset-time:${retentionStart + 180_000}`,
+    );
+  });
+});
+
+test("a held poll resumes with the cursor it read instead of advancing to the read start", async () => {
+  await withRetentionHarness(async ({ state, power, log }) => {
+    await power.poll();
+    const baseline = state.powerAdmissionState().cursor;
+    state.holdPowerAdmission("test hold");
+    log.now = retentionStart + 60_000;
+    log.rows.push(utcRow(retentionStart + 30_000, "Assertions\tlater"));
+    await power.poll();
+    // A held, empty poll reconciles and resumes through the existing path, which
+    // writes the high-water cursor it was given rather than the read start.
+    assert.deepEqual(state.powerAdmissionState().cursor, baseline);
+  });
+});
+
+test("advancing the power cursor is fenced by holds, stale revisions and a changed cursor, and allows admitted work", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-power-advance-"));
+  const { db, state } = powerStore(join(root, "power.sqlite"));
+  try {
+    const a = powerCursor("pmset-time:1000");
+    const b = powerCursor("pmset-time:2000");
+    const c = powerCursor("pmset-time:3000");
+    assert.equal(state.setPowerCursorBaseline(a), true);
+    begin(state, "work-a", "/workspace/a");
+    const { revision } = state.powerAdmissionState();
+
+    assert.equal(
+      state.advancePowerCursor(c, b, revision),
+      false,
+      "stored cursor differs from the expected one",
+    );
+    assert.deepEqual(state.powerAdmissionState().cursor, a);
+    assert.equal(state.advancePowerCursor(a, b, revision), true, "with work");
+    assert.deepEqual(state.powerAdmissionState().cursor, b);
+
+    state.holdPowerAdmission("sleep landed");
+    assert.equal(state.advancePowerCursor(b, c, revision), false, "stale");
+    const held = state.powerAdmissionState();
+    assert.equal(state.advancePowerCursor(b, c, held.revision), false, "held");
+    assert.deepEqual(state.powerAdmissionState().cursor, b);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a batch with an invalid read-start cursor holds admission, and the source floors the read start to a whole second", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-power-readstart-"));
+  const { db, state } = powerStore(join(root, "power.sqlite"));
+  const events = new FakePowerEvents();
+  events.cursor = powerCursor("baseline-1");
+  state.setPowerCursorBaseline(powerCursor("baseline-1"));
+  const readSince = events.readSince.bind(events);
+  events.readSince = async (cursor) => ({
+    ...(await readSince(cursor)),
+    readStartCursor: powerCursor(""),
+  });
+  const power = new ExecutionPower(
+    state,
+    events,
+    new CaffeinateAssertion(() => new FakeChild()),
+    async () => {},
+  );
+  try {
+    await power.start();
+    await power.poll();
+    assert.equal(
+      state.powerAdmissionState().reason,
+      "Power-event history is incomplete or ambiguous",
+    );
+  } finally {
+    await power.stop();
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const source = new MacPowerEventSource(
+    async function* () {
+      yield utcRow(retentionStart - 1000, "Assertions\tearlier");
+    },
+    2500,
+    2500,
+    4096,
+    () => retentionStart + 999,
+  );
+  const batch = await source.readSince(
+    powerCursor(`pmset-time:${retentionStart - 1000}`),
+  );
+  assert.equal(batch.complete, true);
+  assert.deepEqual(
+    batch.readStartCursor,
+    powerCursor(`pmset-time:${retentionStart}`),
   );
 });
