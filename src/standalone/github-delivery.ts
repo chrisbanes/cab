@@ -151,6 +151,10 @@ const page = z.object({
   endCursor: z.string().nullable(),
 });
 const prQuery = deliveryDocuments.EnsembleDeliveryPr;
+/** GitHub matches label names case-insensitively. */
+const hasLabel = (labels: { name: string }[], name: string): boolean =>
+  labels.some((v) => v.name.toLowerCase() === name.toLowerCase());
+
 class ProviderFailure extends Error {
   constructor(
     readonly status: number,
@@ -1316,10 +1320,16 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           break;
         case "issue.labels":
           for (const label of a.remove)
-            await this.request(
-              `${repo.path}/issues/${a.target.number}/labels/${encodeURIComponent(label)}`,
-              "DELETE",
-            );
+            try {
+              await this.request(
+                `${repo.path}/issues/${a.target.number}/labels/${encodeURIComponent(label)}`,
+                "DELETE",
+              );
+            } catch (error) {
+              // A label the issue does not carry is already removed.
+              if (!(error instanceof ProviderFailure && error.status === 404))
+                throw error;
+            }
           if (a.add.length)
             await this.request(
               `${repo.path}/issues/${a.target.number}/labels`,
@@ -1637,7 +1647,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           found &&
           found.body === `${a.body}\n\n${marker}` &&
           found.title === a.title &&
-          a.labels.every((l) => found.labels.some((v) => v.name === l)) &&
+          a.labels.every((l) => hasLabel(found.labels, l)) &&
           found.user.node_id === user.node_id
         )
           receipt = { nodeId: found.node_id, number: found.number };
@@ -1795,8 +1805,8 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
             (a.fields.body === undefined || issue.body === a.fields.body);
         if (a.kind === "issue.labels")
           matches =
-            a.add.every((l) => issue.labels.some((v) => v.name === l)) &&
-            a.remove.every((l) => !issue.labels.some((v) => v.name === l));
+            a.add.every((l) => hasLabel(issue.labels, l)) &&
+            a.remove.every((l) => !hasLabel(issue.labels, l));
         if (a.kind === "project.field")
           matches = (await this.projectField(a)) === a.optionNodeId;
         if (matches)

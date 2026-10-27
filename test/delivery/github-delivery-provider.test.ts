@@ -1622,6 +1622,12 @@ test("a lost issue create is confirmed only by exactly one marker issue by the c
   assert.equal((await provider.inspectAction(record)).state, "uncertain");
   state.listed = [markerIssue(record, { labels: [] })];
   assert.equal((await provider.inspectAction(record)).state, "uncertain");
+  // GitHub matches label names case-insensitively.
+  state.listed = [markerIssue(record, { labels: [{ name: "Ready" }] })];
+  assert.equal(
+    (await provider.inspectAction(record)).state,
+    "confirmed-success",
+  );
   // A pull request in the list is ignored, even with the marker.
   state.listed = [
     markerIssue(record, { node_id: "PR1", number: 9, pull_request: {} }),
@@ -1630,6 +1636,87 @@ test("a lost issue create is confirmed only by exactly one marker issue by the c
   assert.equal(
     (await provider.inspectAction(record)).state,
     "confirmed-success",
+  );
+});
+
+/** A fake issue 7 carrying `labels`, answering each per-label DELETE with `deleteStatus` and recording writes. */
+function labelsFixture(labels: string[], deleteStatus: number) {
+  const writes: string[] = [];
+  const provider = new GitHubHttpDeliveryProvider(
+    "fixture-marker",
+    async (input, init) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? "GET";
+      const repository = prRepository(url);
+      if (repository) return repository;
+      if (url.pathname === "/user")
+        return Response.json({ node_id: "U1", login: "bot" });
+      if (method !== "GET") writes.push(`${method} ${url.pathname}`);
+      if (method === "DELETE")
+        return new Response(null, { status: deleteStatus });
+      if (method === "POST") return Response.json([]);
+      return Response.json({
+        node_id: "I7",
+        number: 7,
+        state: "open",
+        title: "t",
+        body: "b",
+        labels: labels.map((name) => ({ name })),
+      });
+    },
+  );
+  const record = (add: string[], remove: string[]) => {
+    const r = commentRecord();
+    r.request.action = {
+      kind: "issue.labels",
+      target: { repositoryId: "R1", nodeId: "I7", number: 7 },
+      add,
+      remove,
+    };
+    return r;
+  };
+  return { provider, writes, record };
+}
+
+test("removing a label the issue does not carry still sends the add", async () => {
+  const absent = labelsFixture(["in-progress"], 404);
+  assert.equal(
+    (
+      await absent.provider.performAction(
+        absent.record(["in-progress"], ["needs-triage"]),
+      )
+    ).state,
+    "confirmed-success",
+  );
+  assert.deepEqual(absent.writes, [
+    "DELETE /repos/org/repo/issues/7/labels/needs-triage",
+    "POST /repos/org/repo/issues/7/labels",
+  ]);
+  // Any other failed removal stays unproved and sends no add.
+  const failed = labelsFixture(["in-progress"], 500);
+  assert.equal(
+    (
+      await failed.provider.performAction(
+        failed.record(["in-progress"], ["needs-triage"]),
+      )
+    ).state,
+    "uncertain",
+  );
+  assert.deepEqual(failed.writes, [
+    "DELETE /repos/org/repo/issues/7/labels/needs-triage",
+  ]);
+});
+
+test("a label change is read back by case-insensitive label name", async () => {
+  const f = labelsFixture(["ready"], 204);
+  assert.equal(
+    (await f.provider.inspectAction(f.record(["Ready"], ["OLD"]))).state,
+    "confirmed-success",
+  );
+  const still = labelsFixture(["Old"], 204);
+  assert.equal(
+    (await still.provider.inspectAction(still.record([], ["old"]))).state,
+    "uncertain",
   );
 });
 

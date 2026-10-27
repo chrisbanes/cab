@@ -1085,7 +1085,8 @@ history.
 - **Tools.** The lead may ask questions, request approval, and use external actions of
   kind `issue.comment` and `issue.labels` where the project's grants allow them. The
   service refuses every other coordination tool with a deterministic message. The
-  existing refusal of readiness labels and fields stays the only readiness protection.
+  existing refusal of readiness labels and fields stays the only readiness protection; label names
+  match case-insensitively, as on GitHub.
   An answer to a draft-turn question waits for the next draft turn or for Ready; it
   never starts a turn.
 - **Access.** Codex runs the turn with a per-turn read-only sandbox policy and Claude with

@@ -899,17 +899,17 @@ export class DeliveryStore {
         : true;
       const readinessLabels = new Set(
         (readiness?.conditions ?? []).flatMap((c) =>
-          c.kind === "label" ? [c.name] : [],
+          c.kind === "label" ? [c.name.toLowerCase()] : [],
         ),
       );
       if (
         !exempt &&
         ((action.kind === "issue.labels" &&
           [...action.add, ...action.remove].some((l) =>
-            readinessLabels.has(l),
+            readinessLabels.has(l.toLowerCase()),
           )) ||
           (action.kind === "issue.create" &&
-            action.labels.some((l) => readinessLabels.has(l))))
+            action.labels.some((l) => readinessLabels.has(l.toLowerCase()))))
       )
         throw new Error("Agent cannot change readiness labels");
       if (
@@ -954,7 +954,9 @@ export class DeliveryStore {
       );
     if (action.kind === "issue.create")
       return action.labels.every((l) =>
-        readiness.conditions.some((c) => c.kind === "label" && c.name === l),
+        readiness.conditions.some(
+          (c) => c.kind === "label" && c.name.toLowerCase() === l.toLowerCase(),
+        ),
       );
     return false;
   }
