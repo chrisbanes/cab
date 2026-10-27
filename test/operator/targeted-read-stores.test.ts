@@ -287,6 +287,66 @@ test("per-task retained-row counts are indexed and capped", async (t) => {
   assert.doesNotMatch(text, /SCAN turn_requests|SCAN task_execution_bindings/);
 });
 
+test("coordination reads by task and recipient use indexes", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedCatalog(f);
+  const taskId = ids.normal.id,
+    assignment = f.service.domain().assignments(taskId)[0];
+  assert.ok(assignment);
+  const assignmentId = String(assignment.id);
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  t.after(() => db.close());
+  const coordination = new CoordinationStore(db, new DomainStore(db));
+  const captured: Array<{ sql: string; args: unknown[] }> = [];
+  const all = StatementSync.prototype.all;
+  t.mock.method(
+    StatementSync.prototype,
+    "all",
+    function (this: StatementSync, ...args: Parameters<StatementSync["all"]>) {
+      if (/domain_assignments|coordination_inbox_events/.test(this.sourceSQL))
+        captured.push({ sql: this.sourceSQL, args: args as unknown[] });
+      return all.apply(this, args);
+    },
+  );
+  new DomainStore(db).assignments(taskId);
+  coordination.inboxEvents(assignmentId);
+  coordination.pendingEvents(assignmentId);
+  t.mock.restoreAll();
+  assert.equal(captured.length, 3);
+  // The completion-blocker pending-inbox-event check in CoordinationStore.completionBlockers
+  // is private, so its statement is copied from there.
+  captured.push({
+    sql: `SELECT 1 AS pending FROM coordination_inbox_events event
+      LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
+      WHERE event.taskId = ? AND delivery.eventId IS NULL LIMIT 1`,
+    args: [taskId],
+  });
+  const plan = (c: { sql: string; args: unknown[] }) =>
+    db
+      .prepare(`EXPLAIN QUERY PLAN ${c.sql}`)
+      .all(...(c.args as never[]))
+      .map((row) => String((row as { detail: string }).detail))
+      .join("\n");
+  const plans = captured.map(plan);
+  assert.match(plans[0] as string, /INDEX domain_assignments_taskId/);
+  for (const recipient of [plans[1], plans[2]])
+    assert.match(
+      recipient as string,
+      /INDEX coordination_inbox_events_recipient_sequence/,
+    );
+  assert.match(plans[3] as string, /INDEX coordination_inbox_events_taskId/);
+  const text = plans.join("\n");
+  assert.doesNotMatch(
+    text,
+    /SCAN domain_assignments|SCAN (coordination_inbox_events|event)\b/,
+  );
+  assert.doesNotMatch(
+    `${plans[1]}\n${plans[2]}`,
+    /USE TEMP B-TREE FOR ORDER BY/,
+  );
+});
+
 test("targeted-read indexes exist on new and reopened databases", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -295,11 +355,19 @@ test("targeted-read indexes exist on new and reopened databases", async (t) => {
     "task_execution_bindings_assignment",
     "turn_requests_taskId_sequence",
     "turn_requests_assignmentId_sequence",
+    "domain_assignments_taskId",
+    "coordination_inbox_events_recipient_sequence",
+    "coordination_inbox_events_taskId",
   ];
   const present = () => {
     const found: string[] = [];
     f.seedPersistedState((db) => {
-      for (const table of ["task_execution_bindings", "turn_requests"])
+      for (const table of [
+        "task_execution_bindings",
+        "turn_requests",
+        "domain_assignments",
+        "coordination_inbox_events",
+      ])
         for (const row of db.prepare(`PRAGMA index_list(${table})`).all())
           found.push(String((row as { name: string }).name));
     });

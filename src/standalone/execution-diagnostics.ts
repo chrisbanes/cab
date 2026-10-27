@@ -611,7 +611,7 @@ export class ExecutionDiagnosticsStore {
       this.deleteRows(
         this.db
           .prepare(
-            "SELECT sequence, workId, payloadBytes FROM diagnostic_items WHERE createdAt < ? ORDER BY sequence LIMIT ?",
+            "SELECT sequence, workId, payloadBytes FROM diagnostic_items WHERE createdAt < ? ORDER BY createdAt, sequence LIMIT ?",
           )
           .all(cutoff, batchRows) as unknown as DeleteRow[],
         code,
