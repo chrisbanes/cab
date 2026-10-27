@@ -699,7 +699,7 @@ test("an outside head on a second repository's branch holds completion and accep
 test("a merged PR completes despite an outside head, since a merge on GitHub is acceptance", async (t) => {
   const w = publicationWorld(t);
   const { first, branch } = await withPr(w);
-  w.showPr(first, branch).merged = true;
+  Object.assign(w.showPr(first, branch), { state: "MERGED", merged: true });
   await w.coordinator.refresh();
   assignSecondRepository(w);
   setOutsideHead(w, repositoryId, "5".repeat(40));
