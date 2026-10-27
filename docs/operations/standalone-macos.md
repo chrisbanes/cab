@@ -484,9 +484,8 @@ again once on the same thread, so the next start resumes it without a hold and
 without using retries. Anything it could not see end keeps the hold described under
 recovery, as does a crash or kill. That includes a runtime that stays silent and a
 turn so new that App Server still refuses the interrupt ("no active turn to
-interrupt"). Drafting
-runs and direct `run` turns keep that hold too. The wait plus runtime stop stays
-under launchd's default 20-second exit timeout.
+interrupt"). Drafting runs and direct `run` turns keep that hold too. The wait
+plus runtime stop stays under launchd's default 20-second exit timeout.
 
 Restart state lives in memory, so a service restart starts afresh. The "next at"
 time is the service's local time on the `/runtime` page and the browser's or

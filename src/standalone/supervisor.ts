@@ -353,15 +353,35 @@ export class ExecutionSupervisor {
    * is no longer in flight (or its target is gone), or when the signal aborts.
    * Settled does not mean released: the caller checks the recorded outcome.
    */
-  async shutdownSettled(workId: string, signal: AbortSignal): Promise<void> {
+  shutdownSettled(workId: string, signal: AbortSignal): Promise<void> {
+    return this.untilTarget(workId, signal, (target) => {
+      return (
+        target.terminalState !== "unknown" &&
+        target.interruptState !== "pending" &&
+        target.interruptState !== "uncertain"
+      );
+    });
+  }
+
+  /** Resolves once the work's interrupt request is no longer in flight, or the signal aborts. */
+  interruptSettled(workId: string, signal: AbortSignal): Promise<void> {
+    return this.untilTarget(
+      workId,
+      signal,
+      (target) =>
+        target.interruptState !== "pending" &&
+        target.interruptState !== "uncertain",
+    );
+  }
+
+  private async untilTarget(
+    workId: string,
+    signal: AbortSignal,
+    settledTarget: (target: StopTarget) => boolean,
+  ): Promise<void> {
     const settled = () => {
       const target = this.state.stopTarget(workId);
-      return (
-        !target ||
-        (target.terminalState !== "unknown" &&
-          target.interruptState !== "pending" &&
-          target.interruptState !== "uncertain")
-      );
+      return !target || settledTarget(target);
     };
     if (settled() || signal.aborted) return;
     await new Promise<void>((resolve) => {

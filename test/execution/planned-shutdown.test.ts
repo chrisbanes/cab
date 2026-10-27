@@ -40,7 +40,7 @@ async function waitUntil(
  * do. `interrupt` scripts how the harness answers an interrupt request.
  */
 class ShutdownRuntime implements Runtime {
-  interrupt: "clean" | "complete" | "silent" | "hang" = "clean";
+  interrupt: "clean" | "late-ack" | "complete" | "silent" | "hang" = "clean";
   autoComplete = false;
   startTurnGate: Promise<void> | undefined;
   startTurnFailure: Error | undefined;
@@ -113,6 +113,11 @@ class ShutdownRuntime implements Runtime {
     this.log.push(`${this.name}:interrupt:${turnId}`);
     this.interrupted.push(turnId);
     if (this.interrupt === "clean") this.wait(turnId).resolve("failed");
+    if (this.interrupt === "late-ack") {
+      // The terminal status precedes the interrupt response.
+      this.wait(turnId).resolve("failed");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     if (this.interrupt === "complete") this.wait(turnId).resolve("completed");
     if (this.interrupt === "hang")
       await this.until(new Promise<void>(() => {}));
@@ -172,7 +177,7 @@ function serviceFor(
       runtimeHarnesses: ["codex", "claude"],
       power: { enabled: false },
       routingClient: null,
-      supervisor: { shutdownWaitMs: 200 },
+      supervisor: { shutdownWaitMs: 2000 },
       ...options,
     },
   );
@@ -746,7 +751,11 @@ test("a turn that never reports keeps today's hold and shutdown stays bounded", 
   const log: string[] = [];
   const runtimes = newRuntimes(log);
   runtimes.codex.interrupt = "silent";
-  const service = box.track(serviceFor(box.root, runtimes));
+  const service = box.track(
+    serviceFor(box.root, runtimes, {
+      supervisor: { shutdownWaitMs: 200 },
+    }),
+  );
   await service.start();
   const [task] = await seed(service, ["codex"]);
   assert.ok(task);
@@ -922,7 +931,11 @@ test("a hung runtime of one harness does not stop another from being interrupted
   const log: string[] = [];
   const runtimes = newRuntimes(log);
   runtimes.claude.interrupt = "hang";
-  const service = box.track(serviceFor(box.root, runtimes));
+  const service = box.track(
+    serviceFor(box.root, runtimes, {
+      supervisor: { shutdownWaitMs: 200 },
+    }),
+  );
   await service.start();
   const tasks = await seed(service, ["codex", "claude"]);
   const codex = tasks.find((task) => task.harness === "codex");
@@ -1035,4 +1048,23 @@ test("the shutdown wait must be a positive integer", () => {
         }),
       /Shutdown wait must be a positive integer/,
     );
+});
+
+test("an interrupt response that arrives after the terminal status still releases the turn", async (t) => {
+  const box = sandbox(t);
+  const runtimes = newRuntimes([]);
+  runtimes.codex.interrupt = "late-ack";
+  const service = box.track(serviceFor(box.root, runtimes));
+  await service.start();
+  const [task] = await seed(service, ["codex"]);
+  assert.ok(task);
+  await untilRunning(service, [runtimes.codex], [task.workId]);
+
+  await service.stop();
+
+  assert.equal(
+    intents(box.root).find((row) => row.workId === task.workId)?.state,
+    "resolved-failed",
+  );
+  assert.equal(count(box.root, "execution_shutdown_resolutions"), 1);
 });

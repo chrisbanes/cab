@@ -2407,7 +2407,9 @@ export class StandaloneService {
    */
   private async drainExecutionsForShutdown(): Promise<void> {
     const { state, supervisor } = this.acquired ?? {};
-    if (!state || !supervisor || !this.db?.isOpen) return;
+    // A failed close can leave the raw handle open behind a closed cache facade.
+    if (!state || !supervisor || !this.db?.isOpen || !this.cache?.isOpen)
+      return;
     const targets = state.beginShutdownInterrupts();
     if (targets.length === 0) return;
     supervisor.interruptForShutdown(targets);
@@ -2430,8 +2432,14 @@ export class StandaloneService {
           ]),
         ),
       );
-      // The run loop records the terminal outcome after the runtime reports it.
-      await Promise.all(targets.map(({ workId }) => ended(workId)));
+      // The run loop records the terminal outcome after the runtime reports it,
+      // which can precede the interrupt response.
+      await Promise.all(
+        targets.map(async ({ workId }) => {
+          await ended(workId);
+          await supervisor.interruptSettled(workId, window.signal);
+        }),
+      );
     } finally {
       clearTimeout(timer);
     }

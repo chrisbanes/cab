@@ -373,8 +373,9 @@ transient-retry allowance and applies to Codex and Claude alike; the next start
 admits it under every current check. The shutdown target never creates a task hold
 and is dropped at the next open, and an operator Stop on the same work always wins.
 A hung or silent runtime, a failed or uncertain interrupt (App Server refuses one for
-a turn that has only just started), or any other hold keeps the restart hold above, and nothing is released on the timer alone. A crash is
-unchanged, and drafting and direct turns keep today's restart behavior.
+a turn that has only just started), or any other hold keeps the restart hold
+above, and nothing is released on the timer alone. A crash is unchanged, and
+drafting and direct turns keep today's restart behavior.
 
 ## Reuse and transition
 
