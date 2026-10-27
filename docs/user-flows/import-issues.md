@@ -15,7 +15,11 @@ saved sources and reads them from GitHub, then says which were imported.
 - Ready check after [project setup](project-setup.md) with a linked GitHub Project:
   the same panel, offered before Resume. The press stays explicit, Resume stays
   available without it, and links open in a new tab so the check stays.
-- Sync & placement keeps later refreshes and placement. It is not part of the budget.
+- Sync & placement needs no action after Preview and import now: its sources read
+  Active. It shows the same panel only while a saved source is inactive at the current
+  version, which is the case after a later save, and one press there previews,
+  activates and refreshes as on the source tab. It keeps later refreshes and placement
+  and is not part of the budget.
 - Operator CLI `project preview-source` is outside the budget: it has no screens.
 
 ## Steps
@@ -37,8 +41,9 @@ saved sources and reads them from GitHub, then says which were imported.
 | Unsaved source on the GitHub source tab | 2 (Save changes, Preview and import now) | after Save, the Import issues panel and its action; after the press, the activation line, the read line and View imported tasks |
 | Ready check with a linked GitHub Project | 1 (Preview and import now; creating the project is not part of it) | the panel and its action before Resume; after the press, the activation line, the read line and View imported tasks |
 
-The journey test asserts the count and that each first screen is in view at 1366 × 900
-and 390 × 844. Adding or editing the source is the edit being saved, not an interaction.
+The journey test asserts the count, that each first screen is in view at 1366 × 900
+and 390 × 844, and that Sync & placement then offers no preview and reads every source
+Active. Adding or editing the source is the edit being saved, not an interaction.
 The ready check's path is asserted within the [first-run budget](first-run.md) and in
 `operator-setup-browser`.
 Frames: `119d-github-source-import-ready` to `119e-github-source-imported`, and
@@ -52,6 +57,9 @@ Frames: `119d-github-source-import-ready` to `119e-github-source-imported`, and
   twice; the chain then continues from the next source.
 - A refresh that is not confirmed says "The sources are active." and offers Refresh
   again, which sends only the refresh.
+- Both tabs read the same keyed previews, so a preview's recovery (Check whether it
+  saved, Review changes, the credential link) shows on either tab. The refresh outcome
+  and Refresh again belong to the press and stay on the tab where it was made.
 - A source saved elsewhere refuses the preview: the warning offers Review changes,
   which reads the new version and offers the action again under new keys.
 - An unusable source credential keeps the action focusable with the reason beside it

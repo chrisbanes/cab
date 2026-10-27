@@ -98,7 +98,7 @@ async function openSync(page: Page, project: string) {
     .getByRole("navigation", { name: "Project configuration sections" })
     .getByRole("link", { name: "Sync & placement" })
     .click();
-  await page.getByRole("heading", { name: "Preview and activation" }).waitFor();
+  await page.getByRole("heading", { name: "Source sync" }).waitFor();
 }
 /**
  * Reveal the project instructions and replace them with `text`, so only the typed text is

@@ -513,8 +513,8 @@ history, invalidates activation and requires preview at the new source version.
 Reconciliation uses the same request; no new save is issued while its outcome is
 unknown.
 
-Frame `120-project-config-sync-placement` shows missing credentials in its preview and observations panels, with a route to GitHub source settings and no invented attempt or success
-timestamp. Frame `120b-sync-credential-unusable` shows a configured but unusable login: sign in on the
+Frame `120-project-config-sync-placement` shows missing credentials as an alert above its observations, with a route to GitHub source settings and no invented attempt or success
+timestamp. It draws no preview form: the Import issues panel appears there only while a saved source is inactive. Frame `120b-sync-credential-unusable` shows a configured but unusable login: sign in on the
 service host or change the source credential. Not installed and unreadable use the
 same blocked presentation with their own actionable reason. Stale success is not
 proof of current completeness; blocker status remains unknown. Frame `121-phone-atlas-configuration`
@@ -2095,7 +2095,9 @@ Interaction notes:
   (complete, partial, never or unavailable). The refresh creates no receipt, and a
   partial or unavailable read says so and claims no import
   (`119d-github-source-import-ready`, `119e-github-source-imported`). Sync &
-  placement remains for later refreshes and placement.
+  placement needs no action after that press. It shows the same panel, one press to
+  preview, activate and refresh, only while a saved source is inactive at the current
+  version, and keeps later refreshes and placement (`120-project-config-sync-placement`).
 - Source status lines are sentences with the clock label: "Synced 10:47 · 4 issues
   observed, 2 match the readiness rule" or "Not synced yet" (`120-project-config-sync-placement`). A
   panel's caveat is one line under its primary action, not in its intro.
@@ -2792,7 +2794,7 @@ frames 114 and 118–128 as follows:
   removed selection and keeps the stored activation of each kept one. The save
   raises the source version, and activation counts only at the version it was
   previewed, so every kept selection reads "Inactive" and is not synced until it
-  is previewed again in Sync & placement.
+  is previewed again with Preview and import now, on either tab.
 - Frames `119d-github-source-import-ready` and `119e-github-source-imported` chain
   activation and import on the GitHub source tab after a save: Preview and import
   now sends one preview-and-activate command per saved inactive source, then one
@@ -2802,12 +2804,10 @@ frames 114 and 118–128 as follows:
   after leaving the tab and offers only what is left to do. The same panel is offered
   on the setup ready check for a linked GitHub Project (`146c-setup-ready-check-import`,
   `146d-setup-ready-check-imported`). Production differs from
-  the frames in three ways. A Project source has no stored title, so its name is the
+  the frames in two ways. A Project source has no stored title, so its name is the
   title discovery lists for it and otherwise "GitHub Project"; the Settings index
   always reads "GitHub Project". The frames' Project name carries the filter
-  (", status:Next"), which production never shows. The Sync & placement select reads
-  a saved search as "Saved search (S-2)", because an option cannot be masked in
-  evidence and a saved query appears only in the signed-in view's rows and panels.
+  (", status:Next"), which production never shows.
 - Frames 119–121 draw a status sentence per source ("Synced 10:47 · 4 issues
   observed, 2 match the readiness rule"). Production keeps the selection's detailed
   stored counts ("9 observed · 9 open · 0 match label `ready`") in the row's

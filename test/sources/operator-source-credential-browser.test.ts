@@ -129,11 +129,11 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
     .getByRole("link", { name: "Sync & placement", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Preview and activate selection" })
+    .getByRole("button", { name: "Preview and import now", exact: true })
     .waitFor();
   gh.set("not-signed-in");
   await page
-    .getByRole("button", { name: "Preview and activate selection" })
+    .getByRole("button", { name: "Preview and import now", exact: true })
     .click();
   await page
     .getByText("GitHub CLI is not signed in.", { exact: false })
@@ -231,11 +231,15 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
     .getByRole("link", { name: "Set or change source credential" })
     .first()
     .waitFor();
+  const importNow = page.getByRole("button", {
+    name: "Preview and import now",
+    exact: true,
+  });
+  // The action stays focusable and names the reason it is unavailable.
+  assert.equal(await importNow.getAttribute("aria-disabled"), "true");
   assert.equal(
-    await page
-      .getByRole("button", { name: "Preview and activate selection" })
-      .isDisabled(),
-    true,
+    await importNow.getAttribute("aria-describedby"),
+    "source-credential-reason",
   );
   await page.setViewportSize({ width: 390, height: 844 });
   await page
@@ -332,11 +336,15 @@ test("Source and sync recover from an explicitly missing GitHub CLI executable",
     })
     .first()
     .waitFor();
+  const importNow = page.getByRole("button", {
+    name: "Preview and import now",
+    exact: true,
+  });
+  // The action stays focusable and names the reason it is unavailable.
+  assert.equal(await importNow.getAttribute("aria-disabled"), "true");
   assert.equal(
-    await page
-      .getByRole("button", { name: "Preview and activate selection" })
-      .isDisabled(),
-    true,
+    await importNow.getAttribute("aria-describedby"),
+    "source-credential-reason",
   );
   const recovery = page
     .getByRole("link", { name: "Set or change source credential" })

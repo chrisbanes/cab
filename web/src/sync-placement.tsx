@@ -14,16 +14,16 @@ import {
 } from "../../src/operator/project-labels.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 import { OutcomeDetails } from "./action-feedback.js";
+import { credentialReasonId, ImportPanel } from "./source-import.js";
+import { Alert } from "./ui/alert.js";
 import {
   SourceHeading,
   sourceDetails,
   useSavedSourceNames,
 } from "./source-names.js";
 import {
-  activationLine,
   type SourceNaming,
   sourceCredentialCopy,
-  sourceHeading,
   sourceStatusLine,
 } from "./settings-view.js";
 import {
@@ -34,7 +34,6 @@ import {
   key,
   submitDraft,
   useDraft,
-  useLoadedDraft,
   type SettingsProps,
 } from "./settings.js";
 
@@ -44,117 +43,35 @@ export interface ObservationResource {
   refresh: () => void;
 }
 
-/**
- * A source in the select. An option cannot be masked in evidence, so a saved query never
- * appears there: a search reads as a saved search, told apart by its id.
- */
-const optionName = (n: SourceNaming, id: string | null) =>
-  n.kind === "search" ? `Saved search (${id}) · search` : sourceHeading(n);
-
 /** The one saved line of a recorded placement, in plain words. */
 const placedLine = (d: ConfigurationDraft) =>
   `Saved. ${d.values.placementTitle || "The task"} now belongs to ${d.values.placementProject || "the chosen project"}.`;
 
 export function SyncTab(p: TabProps & { observations: ObservationResource }) {
   const { data } = p,
-    naming = useSavedSourceNames(p),
-    preview = useDraft(p.drafts, `github.preview:${p.projectId}`);
-  // After a preview is recorded the next read starts a new one, so the form never stays locked.
-  useLoadedDraft(
-    preview,
-    {
-      expectedVersion: String(data.source.version),
-      selectionId: data.source.selections.find((s) => s.id !== null)?.id ?? "",
-      // Part of the signature that re-initialises the form once a preview is recorded and
-      // the next read shows the new active set.
-      activeSelectionIds: data.source.selections.flatMap((s) =>
-        s.active && s.id !== null ? [s.id] : [],
-      ),
-    },
-    p.loadedAt,
-  );
-  const saved = p.drafts.saved(`github.preview:${p.projectId}`),
-    activation = activationLine({
-      saved,
-      sourceVersion: data.source.version,
-      selections: data.source.selections,
-      recorded: preview.phase === "recorded",
-      // A sentence never carries a saved query, so a search reads as a saved search here.
-      name: (id) => {
-        const s = data.source.selections.find((x) => x.id === id);
-        const n = s && naming(s);
-        return n ? (n.private ? "Saved search" : n.name) : "This source";
-      },
-    });
+    naming = useSavedSourceNames(p);
   const unsettled = p.drafts
     .unsettledPlacements(p.projectId)
     .filter((c) => !data.placements.some((row) => row.taskId === c.taskId));
   return (
     <div className="settings-split settings-split-even">
       <div className="settings-column">
-        <Panel title="Preview and activation">
-          {data.source.credential && !data.source.credential.usable && (
-            <p className="body" role="alert">
-              {sourceCredentialCopy(data.source.credential.reason)}{" "}
-              <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
-                Set or change source credential
-              </a>
-            </p>
-          )}
-          <form
-            onSubmit={(e) =>
-              void submitDraft(
-                e,
-                preview,
-                p.client,
-                p.session,
-                {
-                  type: "github.preview",
-                  key: preview.values.key,
-                  projectId: p.projectId,
-                  selectionId: preview.values.selectionId,
-                  expectedVersion: Number(preview.values.expectedVersion),
-                },
-                p.refreshConfiguration,
-              )
-            }
-          >
-            <DraftField
-              draft={preview}
-              field="selectionId"
-              label="Selection to preview"
-            >
-              <option value="">Choose selection</option>
-              {data.source.selections
-                .filter((s) => s.id !== null)
-                .map((s) => (
-                  <option value={s.id ?? ""} key={s.id}>
-                    {optionName(naming(s), s.id)}
-                    {" · "}
-                    {s.active ? "active" : "inactive"}
-                  </option>
-                ))}
-            </DraftField>
-            <DraftOutcome
-              draft={preview}
-              client={p.client}
-              session={p.session}
-              label="Preview and activate selection"
-              saveDisabled={data.source.credential?.usable === false}
-              refresh={p.refreshConfiguration}
-              review={() => preview.adoptVersion(data.source.version)}
-              success={activation ? activation.line : null}
-              caveat="Previewing activates the source; it doesn't import tasks."
-            >
-              {activation?.refresh && <RefreshObservations {...p} />}
-            </DraftOutcome>
-            {preview.phase === "conflict" && preview.errors.credentialRef && (
-              <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
-                Set or change source credential
-              </a>
-            )}
-          </form>
-        </Panel>
+        {data.source.credential?.usable === false && (
+          <Alert role="alert" id={credentialReasonId}>
+            {sourceCredentialCopy(data.source.credential.reason)}{" "}
+            <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
+              Set or change source credential
+            </a>
+          </Alert>
+        )}
+        <ImportPanel
+          {...p}
+          naming={naming}
+          quiet
+          saved={false}
+          savePhase="editing"
+          inactiveOnly
+        />
         <SourceObservations {...p} naming={naming} />
       </div>
       <div className="settings-column">
@@ -190,40 +107,6 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
         )}
       </div>
     </div>
-  );
-}
-/** The next step of an activation: one request for observations, then a read of them. */
-function RefreshObservations(
-  p: SettingsProps & { observations: ObservationResource },
-) {
-  const [notice, setNotice] = useState(""),
-    [pending, setPending] = useState(false);
-  return (
-    <>
-      <Button
-        type="button"
-        variant="secondary"
-        disabled={pending}
-        onClick={async () => {
-          setPending(true);
-          setNotice("Refresh requested.");
-          try {
-            await p.client.refreshSources(p.session.csrfToken);
-            setNotice("Refresh finished.");
-            p.observations.refresh();
-          } catch {
-            setNotice(
-              "We couldn't confirm the refresh. Check the sources again before refreshing.",
-            );
-          } finally {
-            setPending(false);
-          }
-        }}
-      >
-        Refresh sources
-      </Button>
-      {notice && <p className="body">{notice}</p>}
-    </>
   );
 }
 function SourceObservations(
