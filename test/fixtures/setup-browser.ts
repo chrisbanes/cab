@@ -5,6 +5,7 @@ import {
   readinessCheckIds,
   readinessSchema,
 } from "../../src/operator/readiness.js";
+import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import type { BrowserJourney } from "./browser-diagnostics.js";
 import {
   ClaudeShapedFixtureRuntime,
@@ -27,6 +28,8 @@ export async function setupJourney(
     truncated?: boolean;
     /** A fake `gh` executable; without one the service finds no gh. */
     ghExecutable?: string;
+    /** The GitHub source reader, for a setup that imports from its linked Project. */
+    readerFactory?: GitHubReaderFactory;
     /** Enable the Claude runtime beside Codex, with a Claude-shaped fake. */
     claude?: boolean;
   } = {},
@@ -39,7 +42,7 @@ export async function setupJourney(
     options.claude
       ? createOperatorFixture(
           null,
-          undefined,
+          options.readerFactory,
           undefined,
           journey.fixtureOptions,
           (_context, harness) =>
@@ -50,7 +53,7 @@ export async function setupJourney(
         )
       : createOperatorFixture(
           null,
-          undefined,
+          options.readerFactory,
           undefined,
           journey.fixtureOptions,
           undefined,
@@ -119,6 +122,35 @@ export async function setupJourney(
   await page.locator("main.page h1").waitFor();
   return { f, web, home, page, discoveryState, profiles };
 }
+
+/** Four open issues per selection on acme/atlas, as a linked GitHub Project would read. */
+export const atlasIssueReader: GitHubReaderFactory = () => ({
+  async readSelection(selection) {
+    const id = String((selection as { id?: string }).id ?? "S");
+    return {
+      complete: true as const,
+      reason: null,
+      issues: [1, 2, 3, 4].map((n) => ({
+        providerInstance: "github.com" as const,
+        nodeId: `I_${id}_${n}`,
+        repositoryId: "R_atlas",
+        repositoryName: "acme/atlas",
+        number: n,
+        title: `Issue ${n} of ${id}`,
+        body: "Body",
+        state: "open" as const,
+        labels: n <= 2 ? ["ready"] : [],
+        projectFields: [],
+      })),
+    };
+  },
+  async readBlockers() {
+    return { complete: true, blockers: [], reason: null };
+  },
+  async readIssueStatus() {
+    return { status: "unknown" as const };
+  },
+});
 
 export const commandRequest = (page: Page) =>
   page.waitForRequest(

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { Page, Route } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
+import { atlasIssueReader } from "../fixtures/setup-browser.js";
 import { fakeDiscovery } from "../fixtures/setup-home.js";
 import {
   captureSettingsEvidence,
@@ -31,35 +31,6 @@ after(() => {
 const githubTab = "/app/projects/:atlas/settings?tab=github";
 const syncTab = "/app/projects/:atlas/settings?tab=sync";
 
-/** Four open issues per selection, two labelled ready: counts the status lines can show. */
-const reader: GitHubReaderFactory = () => ({
-  async readSelection(selection) {
-    const id = String((selection as { id?: string }).id ?? "S");
-    return {
-      complete: true as const,
-      reason: null,
-      issues: [1, 2, 3, 4].map((n) => ({
-        providerInstance: "github.com" as const,
-        nodeId: `I_${id}_${n}`,
-        repositoryId: "R_atlas",
-        repositoryName: "acme/atlas",
-        number: n,
-        title: `Issue ${n} of ${id}`,
-        body: "Body",
-        state: "open" as const,
-        labels: n <= 2 ? ["ready"] : [],
-        projectFields: [],
-      })),
-    };
-  },
-  async readBlockers() {
-    return { complete: true, blockers: [], reason: null };
-  },
-  async readIssueStatus() {
-    return { status: "unknown" as const };
-  },
-});
-
 const start = (
   journey: Parameters<typeof startSettings>[0],
   path = githubTab,
@@ -67,7 +38,7 @@ const start = (
   options: Parameters<typeof startSettings>[4] = {},
 ) =>
   startSettings(journey, path, viewport, undefined, {
-    readerFactory: reader,
+    readerFactory: atlasIssueReader,
     ...options,
   });
 type Started = Awaited<ReturnType<typeof start>>;

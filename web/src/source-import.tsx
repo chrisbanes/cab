@@ -89,6 +89,8 @@ export function ImportPanel(
     saved: boolean;
     /** The form's save phase, to move focus here once after a save records. */
     savePhase: ConfigurationDraft["phase"];
+    /** Open this panel's links in a new tab, for a page the operator must not leave. */
+    newTab?: boolean;
   },
 ) {
   const { data, projectId } = p,
@@ -246,7 +248,8 @@ export function ImportPanel(
   }
 
   if (!shown) return null;
-  const nameOf = (id: string) => {
+  const tab = p.newTab ? { target: "_blank", rel: "noopener" } : {},
+    nameOf = (id: string) => {
       const s = selections.find((x) => x.id === id);
       return s ? p.naming(s) : { name: "A source", kind: "", private: false };
     },
@@ -383,7 +386,7 @@ export function ImportPanel(
             tone="error"
             message={sourceCredentialCopy(data.source.credential?.reason)}
           >
-            <a href={`/app/projects/${projectId}/settings?tab=github`}>
+            <a href={`/app/projects/${projectId}/settings?tab=github`} {...tab}>
               Set or change source credential
             </a>
           </ActionOutcome>
@@ -424,7 +427,9 @@ export function ImportPanel(
               </>
             }
           >
-            <a href={`/app/projects/${projectId}`}>View imported tasks</a>
+            <a href={`/app/projects/${projectId}`} {...tab}>
+              View imported tasks
+            </a>
           </ActionOutcome>
         )}
         {answer && partial.length + missing.length > 0 && (

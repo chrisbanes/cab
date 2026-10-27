@@ -700,6 +700,11 @@ Otherwise the source starts without one: with a repository the ready check says 
 cannot sync until one is set, and a repository-free project shows no credential line
 and records none. Creates from the HTML fallback or CLI record no default. Existing,
 environment-selected and cleared sources are never re-defaulted.
+For a linked GitHub Project the ready check also offers the Import
+issues panel before Resume, whose Preview and import now is an explicit press that
+previews and activates the source and refreshes it; Resume stays primary and available
+without it and opens the composer, since imported tasks wait while the project is
+paused.
 The discovery credential never supplies a missing source credential. Source settings
 offer the detected GitHub CLI account or an environment variable, with Change,
 Cancel and Clear. Every selection, preview, issue-status and blocker read resolves

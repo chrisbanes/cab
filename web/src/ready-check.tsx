@@ -3,17 +3,55 @@ import {
   composerOptionsSchema,
   type OperatorCommand,
   projectConfigurationSchema,
+  sourceObservationSchema,
 } from "../../src/operator/contracts.js";
 import { readinessSchema } from "../../src/operator/readiness.js";
 import { ActionLink, Button } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { DraftMessage, key, type SettingsProps, useDraft } from "./settings.js";
+import { credentialReasonId, ImportPanel } from "./source-import.js";
+import { useSavedSourceNames } from "./source-names.js";
+import type { ObservationResource } from "./sync-placement.js";
 import {
   type ReadinessRead,
   readyCheckItems,
   sourceCredentialLine,
 } from "./setup-model.js";
+import type { TabProps } from "./project-config.js";
 import type { ConfigurationDraft } from "./settings-state.js";
+
+/** Frames 146c–146d: Import issues for the linked GitHub Project, before Resume. */
+function ReadyCheckImport({
+  settings,
+  projectId,
+  data,
+  loadedAt,
+  refreshConfiguration,
+  observations,
+}: Pick<TabProps, "data" | "loadedAt" | "refreshConfiguration"> & {
+  settings: SettingsProps;
+  projectId: string;
+  observations: ObservationResource;
+}) {
+  const tab: TabProps = {
+    ...settings,
+    projectId,
+    data,
+    loadedAt,
+    refreshConfiguration,
+  };
+  return (
+    <ImportPanel
+      {...tab}
+      observations={observations}
+      naming={useSavedSourceNames(tab)}
+      quiet
+      saved={false}
+      savePhase="editing"
+      newTab
+    />
+  );
+}
 
 /** Frames 146–147: what creation saved, what would make work wait, and Resume or Keep paused. */
 export function ReadyCheck({
@@ -67,6 +105,20 @@ export function ReadyCheck({
         ),
       [p.client, projectId],
     ),
+  );
+  const observations = useOperatorResource(
+    csrf,
+    useCallback(
+      (signal: AbortSignal) =>
+        p.client.read(
+          "/api/operator/source-observations",
+          sourceObservationSchema,
+          signal,
+        ),
+      [p.client],
+    ),
+    // Only the linked Project's Import issues panel reads them.
+    Boolean(created.githubProject),
   );
   const credential = sourceCredentialLine(
     projectId,
@@ -142,7 +194,7 @@ export function ReadyCheck({
             <li>GitHub Project linked as an inactive discovery source.</li>
           )}
           {withRepositories && (
-            <li>
+            <li id={credentialReasonId}>
               {credential.text}
               {credential.link && (
                 <>
@@ -161,6 +213,19 @@ export function ReadyCheck({
           )}
         </ul>
       </DraftMessage>
+      {created.githubProject && configuration.state.data && (
+        <ReadyCheckImport
+          settings={p}
+          projectId={projectId}
+          data={configuration.state.data.data}
+          loadedAt={configuration.state.data.observedAt}
+          refreshConfiguration={() => {
+            p.refresh();
+            configuration.refresh();
+          }}
+          observations={observations}
+        />
+      )}
       <div className="setup-inline-actions">
         {resume.phase !== "unknown" && (
           <Button
@@ -237,6 +302,7 @@ export function ReadyCheck({
                   void readiness.refresh();
                   void options.refresh();
                   void configuration.refresh();
+                  if (created.githubProject) void observations.refresh();
                   p.refresh();
                   // The result takes focus: the button leaves when a failed read starts again.
                   waitsRoot.current?.focus();

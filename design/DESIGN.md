@@ -395,6 +395,7 @@ not draw.
 | Review a result | Home Completed work | `01-attention-overview` | `59-inspect-criterion-feedback` |
 | Review a result | Inbox evidence link | `02-inbox-approval` | `59-inspect-criterion-feedback` |
 | Import issues from GitHub | Unsaved source on the GitHub source tab | `119d-github-source-import-ready` | `119e-github-source-imported` |
+| Import issues from GitHub | Ready check with a linked GitHub Project | `146c-setup-ready-check-import` | `146d-setup-ready-check-imported` |
 
 The `no frame` cells are the Home or task-card answer confirmation (only the Inbox
 `162-grouped-questions-answered` and phone `30-phone-question-answer-sent` draw "Answer sent"), the Home
@@ -423,7 +424,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
 | 07 Tasks, composer & tablet | `24-all-projects-list`, `23-atlas-project-board`, `23b-atlas-project-paused`, `02-composer-optional-expanded`, `800a-tablet-overview-list`, `800b-tablet-inbox-question`, `800c-tablet-task-evidence`, `800d-tablet-search-result`, `800e-tablet-composer-validation`, `800f-tablet-all-projects-board`, `25-phone-board-waiting`, `25b-phone-board-uncertain`, `34-phone-composer-collapsed`, `35-phone-optional-settings-error`, `35b-phone-collapsed-validation`, `800h-phone-composer-short`, `186-composer-draft-idle`, `187-composer-draft-running`, `188-composer-draft-proposal`, `189-composer-draft-interrupted`, `190-composer-draft-failed`, `191-composer-draft-nolead`, `192-phone-composer-draft-idle`, `193-phone-composer-draft-running`, `194-phone-composer-draft-proposal`, `195-phone-composer-draft-interrupted`, `196-phone-composer-draft-failed`, `197-phone-composer-draft-nolead` |
 | 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `123b-profile-instructions-revealed`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `117c-first-setup-add-repository`, `131-project-setup-choose-folder`, `118-project-config-general`, `118b-project-instructions-revealed`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `119f-github-source-project-fields`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `181-settings-notifications-off`, `182-settings-notifications-on`, `183-settings-notifications-blocked`, `184-settings-notifications-revoke`, `185-phone-settings-notifications`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration`, `222-project-config-status-mapping`, `223-phone-project-config-status-mapping` |
-| 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `114c-settings-first-run`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
+| 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `146c-setup-ready-check-import`, `146d-setup-ready-check-imported`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `114c-settings-first-run`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
 | 10 Action feedback | `154-project-configuration-saved`, `154b-project-configuration-details-expanded`, `155-routing-saved`, `156-project-configuration-field-error`, `157-project-configuration-changed-elsewhere`, `158-project-configuration-unknown-outcome`, `159-change-list-remove-last-repository`, `160-discovery-credential-saved`, `161-composer-created-project-paused`, `162-grouped-questions-answered`, `162b-grouped-questions-send-failed`, `163-task-reply-sent`, `164-stop-confirmation`, `165-cli-credential-revoked`, `ds-action-feedback`, `166a-phone-project-configuration-saved`, `166b-phone-unknown-outcome-locked`, `166c-phone-task-created-project-paused` |
 | 11 Settings, recovery & responsive states | `167-profile-field-error`, `168-routing-field-error`, `169-runtime-capacity-field-error`, `178-profile-revoke-available`, `170-source-config-changed-elsewhere`, `170b-source-config-latest-loaded`, `171-source-config-unknown-outcome`, `172-routing-typesafe-unavailable`, `173-recovery-evidence-unavailable`, `174-recovery-no-admitted-generation`, `175-recovery-pre-turn-witness`, `176-recovery-no-turn-witness`, `177-project-setup-ref-open`, `180a-tablet-settings-index`, `180b-tablet-project-setup`, `180c-tablet-profile`, `180d-tablet-routing`, `180e-tablet-runtime`, `179a-phone-settings-index`, `179b-phone-project-setup`, `179c-phone-profile`, `179d-phone-routing`, `179e-phone-runtime` |
 | 00 Foundations & components | `Main`, `Sidebar`, `TopBar`, `ds-domain-components` |
@@ -710,7 +711,7 @@ each flow document states what is implemented. Fixtures are fixture-app, `fixtur
   two submissions. In 145b the lead select is back beside Project name with the
   new profile chosen, and the success line "Profile created. Other setup values kept."
   (the success line in `ds-action-feedback`) sits below the row.
-- **Ready check (146, 146b, 147):** replaces the "Recorded … as a paused project"
+- **Ready check (146–147):** replaces the "Recorded … as a paused project"
   alert. The frames show the region that replaces the setup form after Create and
   receives focus; the first-project heading stays "Set up your first project" (146
   and 146b draw no subtitle).
@@ -734,6 +735,19 @@ each flow document states what is implemented. Fixtures are fixture-app, `fixtur
     Check again, which re-reads readiness, the workspace, capacity and the source
     credential. The hint's
     first sentence appears only when an item has a link.
+  - Drawn in 146c and 146d: with a linked GitHub Project the Import issues panel of
+    119d and 119e sits between the recorded lines and the actions, so Preview and
+    import now comes before Resume. 146c: "Fixture roadmap isn't imported yet." (no
+    "Saved." prefix, since nothing was saved here), the action and its caveat. 146d,
+    after the press: the activation line with Details, the read line and View imported
+    tasks, which opens in a new tab so the check and Resume stay. Importing is
+    optional and explicit: nothing previews or refreshes on arrival, Resume stays
+    primary and available either way, and imported tasks wait while the project is
+    paused. A partial, never-read or unavailable read says so and claims no import;
+    the unknown-preview, Refresh again, Review changes and unusable-credential
+    recoveries are the panel's own (the credential reason is the credential line
+    above, which the action points at). On phone the panel stacks above the stacked
+    actions; there is no separate phone frame.
   - Not drawn, same layout: the items no lead profile, the lead's runtime unavailable
     or not enabled, and an unreadable readiness check ("Readiness couldn't be
     checked."); and, never blocking, the line "Capacity is full now, so the first
@@ -2773,7 +2787,9 @@ frames 114 and 118–128 as follows:
   refresh, showing the activation receipts and then the refresh's observation
   state; activation and a successful import stay separate evidence. The panel is
   offered whenever a saved source is inactive or has never been read, so it returns
-  after leaving the tab and offers only what is left to do. Production differs from
+  after leaving the tab and offers only what is left to do. The same panel is offered
+  on the setup ready check for a linked GitHub Project (`146c-setup-ready-check-import`,
+  `146d-setup-ready-check-imported`). Production differs from
   the frames in three ways. A Project source has no stored title, so its name is the
   title discovery lists for it and otherwise "GitHub Project"; the Settings index
   always reads "GitHub Project". The frames' Project name carries the filter
@@ -2845,7 +2861,7 @@ frames 114 and 118–128 as follows:
   Production also collapses each run of consecutive generations that show the same
   state under an expandable "N older records, same state", keeping the newest of the
   run, the held generation, witnesses and the latest receipt expanded.
-- Project setup (115–117c, 131, 145–146b, 177, 179b) reads steps 1, 2 and 3 in one
+- Project setup (115–117c, 131, 145–146d, 177, 179b) reads steps 1, 2 and 3 in one
   column, with "What creation does" as an aside beside them from 1121px and after
   them below it, as in the composer; DOM order is visual order and nothing reorders.
   The sticky bar holds a note, Cancel and then Create paused project at every width
@@ -2854,6 +2870,8 @@ frames 114 and 118–128 as follows:
   its reason while the project or the inline profile is being saved or its outcome is
   unknown, and while a typed profile name is not recorded. After Create the
   ready check replaces the form and takes focus, and reloading shows a blank form.
+  The ready check of a project with a linked GitHub Project also offers Import issues
+  before Resume (146c, 146d).
 - Paused project badges are idle (slate) with a pause symbol in the sidebar, phone
   drawer and Settings; Enabled, Available and Configured stay slate with a check,
   and Revoked stays amber, rather than the canvas's emerald and rose. Project setup
