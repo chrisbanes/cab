@@ -1,9 +1,7 @@
-import { DeliveryStore } from "./delivery.js";
-import { TaskReviewStore } from "./task-review.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { transaction, type Database } from "./store.js";
+import { DeliveryStore } from "./delivery.js";
 import {
   type ProjectFieldIds,
   type ProjectFieldName,
@@ -11,6 +9,8 @@ import {
   replaceProjectFieldNames,
   withProjectFieldNames,
 } from "./project-field-names.js";
+import { type Database, transaction } from "./store.js";
+import { TaskReviewStore } from "./task-review.js";
 
 const parseRule = (json: unknown) =>
   readinessSchema.nullable().parse(JSON.parse(String(json)) as unknown);
@@ -82,23 +82,24 @@ export interface GitHubObservationBinding {
 }
 
 import {
+  evaluateReadiness,
   nonempty,
   projectFieldsSchema,
-  repositoryLinkSchema,
-  readinessSchema,
-  selectionSchema,
-  evaluateReadiness,
   type Readiness,
   type ReadinessCondition,
-} from "./github-source-contracts.js";
-export {
-  repositoryLinkSchema,
   readinessSchema,
+  repositoryLinkSchema,
   selectionSchema,
-  githubConfigurationSchema,
-  githubConfigurationCommandSchema,
+} from "./github-source-contracts.js";
+
+export {
   type GitHubConfigurationInput,
   type GitHubSelection,
+  githubConfigurationCommandSchema,
+  githubConfigurationSchema,
+  readinessSchema,
+  repositoryLinkSchema,
+  selectionSchema,
 } from "./github-source-contracts.js";
 export const linkedRepositorySchema = repositoryLinkSchema.extend({
   gitCommonDirectory: z.string().min(1).refine(isAbsolute),
@@ -918,7 +919,7 @@ export class GitHubSourceStore {
           supplied: { title: issue.title, body: issue.body },
         });
         this.updateReadiness(taskId);
-        this.releasePublishedWithdrawal(taskId);
+        if (snapshot.complete) this.releaseSourceHold(taskId);
       }
       new TaskReviewStore(this.db).captureSources(sourceCaptures);
       if (snapshot.complete) {
@@ -943,15 +944,6 @@ export class GitHubSourceStore {
                 "DELETE FROM github_memberships WHERE projectId = ? AND selectionId = ? AND nodeId = ?",
               )
               .run(projectId, selectionId, String(membership.nodeId));
-            // Written from the omission's kind, so an ordinary omission always resets an earlier flag.
-            this.db
-              .prepare(
-                "UPDATE task_publications SET omittedWithdrawal = ? WHERE state = 'converted' AND taskId = (SELECT taskId FROM github_external_issues WHERE nodeId = ?)",
-              )
-              .run(
-                membership.missedReads === 1 ? 1 : 0,
-                String(membership.nodeId),
-              );
             const external = this.issue(String(membership.nodeId));
             if (external) this.updateReadiness(String(external.taskId));
           }
@@ -1015,28 +1007,18 @@ export class GitHubSourceStore {
   }
 
   /**
-   * A just-published task withdrawn because two complete reads in a row omitted its issue is no longer
-   * withdrawn once a later read lists it again and it is Ready: those reads omitted a real issue. Any
-   * other withdrawal, including one taken later for an issue that was listed in between, stays for the
-   * operator, as on any imported task.
+   * A complete read that lists the issue again while its task is Ready resolves a source-caused
+   * `withdrawn` or `readiness-lost` hold: the source has recovered. Every other source hold stays
+   * for `source.review`, and a partial read never calls this.
    */
-  private releasePublishedWithdrawal(taskId: string): void {
-    const row = this.db
-      .prepare(
-        "SELECT e.nodeId, t.ready FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId JOIN task_publications p ON p.taskId = e.taskId AND p.state = 'converted' AND p.omittedWithdrawal = 1 WHERE e.taskId = ?",
-      )
-      .get(taskId) as Row | undefined;
-    if (!row || Number(row.ready) !== 1) return;
+  private releaseSourceHold(taskId: string): void {
     const released = this.db
       .prepare(
-        "UPDATE github_source_holds SET active = 0 WHERE nodeId = ? AND active = 1 AND reason = 'withdrawn'",
+        `UPDATE github_source_holds SET active = 0 WHERE active = 1 AND reason IN ('withdrawn', 'readiness-lost')
+          AND nodeId = (SELECT e.nodeId FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId
+            WHERE e.taskId = ? AND t.ready = 1)`,
       )
-      .run(String(row.nodeId)) as { changes: number | bigint };
-    this.db
-      .prepare(
-        "UPDATE task_publications SET omittedWithdrawal = 0 WHERE taskId = ? AND state = 'converted'",
-      )
-      .run(taskId);
+      .run(taskId) as { changes: number | bigint };
     if (Number(released.changes) > 0)
       this.db
         .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")

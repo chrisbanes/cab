@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
+import { startedOf } from "../fixtures/service-internals.js";
 import {
   fieldReady,
   labelAndFieldReady,
@@ -9,7 +10,6 @@ import {
   publicationFixture,
   publicationProject,
 } from "../fixtures/task-publication.js";
-import { startedOf } from "../fixtures/service-internals.js";
 
 type Fixture = Awaited<ReturnType<typeof publicationFixture>>;
 const imported = (f: Fixture, taskId: string) =>
@@ -668,7 +668,7 @@ test("Link asks for the readiness label and the credential user's authorship, as
   );
 });
 
-test("a list that trails the create keeps the task Ready, and a later read clears nothing it should keep", async (t) => {
+test("a list that trails the create keeps the task Ready, and a later omission withdraws it only until it is listed again", async (t) => {
   const f = await publicationFixture();
   t.after(() => f.close());
   const taskId = f.task(true);
@@ -684,14 +684,14 @@ test("a list that trails the create keeps the task Ready, and a later read clear
   assert.deepEqual(holds(f, taskId), []);
   assert.equal(Boolean(f.domain().task(taskId).ready), true);
   assert.equal(f.taskCount(), 1);
-  // Having been listed, it is an ordinary member: one omission now withdraws it, and a listing
-  // afterwards leaves that hold for the operator, as on any imported task.
+  // Having been listed, it is an ordinary member: one omission withdraws it, and a listing
+  // afterwards releases that hold, as on any imported task.
   f.gh.snapshots = () => [];
   await f.service.refreshGitHub();
   assert.deepEqual(holds(f, taskId), ["withdrawn"]);
   f.gh.snapshots = shown;
   await f.service.refreshGitHub();
-  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  assert.deepEqual(holds(f, taskId), []);
 });
 
 test("two consecutive omissions withdraw a just-published task, and a later listing releases only that hold", async (t) => {
@@ -711,7 +711,7 @@ test("two consecutive omissions withdraw a just-published task, and a later list
   assert.equal(Boolean(f.domain().task(taskId).ready), true);
 });
 
-test("an imported issue that is not just published is withdrawn by the first omission and keeps its hold", async (t) => {
+test("an imported issue that is not just published is withdrawn by the first omission and released when listed again", async (t) => {
   const f = await publicationFixture();
   t.after(() => f.close());
   const human = f.gh.add("Human", "Made by hand", ["ready"]);
@@ -725,11 +725,11 @@ test("an imported issue that is not just published is withdrawn by the first omi
   assert.deepEqual(holds(f, taskId), ["withdrawn"]);
   f.gh.snapshots = shown;
   await f.service.refreshGitHub();
-  // Today's behaviour on any imported task: the operator resolves the hold.
-  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  assert.deepEqual(holds(f, taskId), []);
+  assert.equal(Boolean(f.domain().task(taskId).ready), true);
 });
 
-test("a flag left by two lagging reads cannot release a later ordinary withdrawal", async (t) => {
+test("a listing that leaves the task unready releases no withdrawal, and a Ready listing does", async (t) => {
   const f = await publicationFixture();
   t.after(() => f.close());
   const taskId = f.task(true);
@@ -747,14 +747,11 @@ test("a flag left by two lagging reads cannot release a later ordinary withdrawa
   issue.labels = [];
   await f.service.refreshGitHub();
   assert.deepEqual(holds(f, taskId), ["withdrawn"]);
-  // An ordinary omission, then a Ready listing: the hold stays for the operator.
-  f.gh.snapshots = () => [];
-  await f.service.refreshGitHub();
-  f.gh.snapshots = shown;
+  // Ready again and listed: the source has recovered.
   issue.labels = ["ready"];
   await f.service.refreshGitHub();
   assert.equal(Boolean(f.domain().task(taskId).ready), true);
-  assert.deepEqual(holds(f, taskId), ["withdrawn"]);
+  assert.deepEqual(holds(f, taskId), []);
 });
 
 const retryingOf = (f: Fixture, taskId: string) =>

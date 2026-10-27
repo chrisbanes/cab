@@ -1,22 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
-  type DeliveryCaller,
-  type ExternalActionArguments,
-  DeliveryStore,
   canonicalMaterial,
+  type DeliveryCaller,
+  DeliveryStore,
+  type ExternalActionArguments,
+  isOperatorPublicationCaller,
   materialDigest,
   operatorPublicationCallerSchema,
-  isOperatorPublicationCaller,
 } from "./delivery.js";
 import { DomainConflictError } from "./domain-errors.js";
+import { GitHubSourceStore, linkedRepositorySchema } from "./github-source.js";
 import {
   type Readiness,
   readinessSchema,
   selectionSchema,
 } from "./github-source-contracts.js";
-import { GitHubSourceStore, linkedRepositorySchema } from "./github-source.js";
-import { transaction, type Database } from "./store.js";
+import { type Database, transaction } from "./store.js";
 import {
   type PublicationReasonCode,
   type PublicationTarget,
@@ -103,15 +103,6 @@ export class TaskPublicationStore {
       WHERE state IN ('reviewed','approved','sending');
     CREATE TABLE IF NOT EXISTS task_publication_receipts (
       key TEXT PRIMARY KEY, material TEXT NOT NULL, recordJson TEXT NOT NULL);`);
-    // Set when two complete reads in a row omitted the converted issue; only that withdrawal is released.
-    if (
-      !(
-        this.db.prepare("PRAGMA table_info(task_publications)").all() as Row[]
-      ).some((c) => c.name === "omittedWithdrawal")
-    )
-      this.db.exec(
-        "ALTER TABLE task_publications ADD COLUMN omittedWithdrawal INTEGER NOT NULL DEFAULT 0",
-      );
   }
 
   private publication(row: Row): Publication {

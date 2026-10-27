@@ -236,6 +236,19 @@ test("initial and later incomplete native blocker reads hold imported admission"
       reason: null,
     });
     assert.ok(domain.admission(taskId).reasons.includes("task-unready"));
+    // Ready again on a complete read: the readiness-lost hold clears itself.
+    sources.reconcileSelection(projectId, "repo", {
+      complete: true,
+      issues: [{ ...selected, body: "Ship revised scope" }],
+      reason: null,
+    });
+    assert.ok(!domain.admission(taskId).reasons.includes("source-hold"));
+    // A closure hold is not source-recovered by reopening: it waits for the operator.
+    sources.reconcileSelection(projectId, "repo", {
+      complete: true,
+      issues: [{ ...selected, body: "Ship revised scope", state: "closed" }],
+      reason: null,
+    });
     sources.reconcileSelection(projectId, "repo", {
       complete: true,
       issues: [{ ...selected, body: "Ship revised scope" }],
