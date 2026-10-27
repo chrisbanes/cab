@@ -105,8 +105,12 @@ export function HandbackSettlement({
     },
   );
   if (d?.mode !== "reviewable-pr" || !b || b.state === "MERGED") return null;
+  // Current only while completion does not await a new one: head, task and policy versions all match.
   const current =
-      b.settlement?.headSha === b.headSha ? b.settlement.decision : null,
+      b.settlement &&
+      !d.blockers.includes("reviewable-pr-awaiting-current-settlement")
+        ? b.settlement.decision
+        : null,
     outsidePush = d.branches.some((r) => r.outsideHeadSha !== null),
     settle = (decision: "accepted" | "closed") =>
       send(

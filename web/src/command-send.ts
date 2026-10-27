@@ -28,7 +28,11 @@ export function useCommandSend(
   const [sending, setSending] = useState<OperatorCommand | null>(null),
     [outcome, setOutcome] = useState<SendOutcome | null>(null);
   const send = async (command?: OperatorCommand) => {
-    if (command && !lifecycle.freeze(command)) return;
+    if (command) {
+      // A recorded command is finished; only an unconfirmed one must be resent before another.
+      if (lifecycle.receipt) lifecycle.reset();
+      if (!lifecycle.freeze(command)) return;
+    }
     const begun = lifecycle.begin();
     if (!begun) return;
     const currentAuthentication = client.captureAuthenticationScope();

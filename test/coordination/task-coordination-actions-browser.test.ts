@@ -4,6 +4,7 @@ import { chromium, type Browser } from "playwright";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signIn } from "../fixtures/operator-settings.js";
+import { until } from "../fixtures/questions.js";
 import { seedReviewTask, seedTaskResult } from "../fixtures/task-review.js";
 
 const test = browserSuite("task-coordination-actions");
@@ -106,6 +107,22 @@ test("the task view delivers an undelivered result and messages a delegated assi
   assert.equal(
     await assignment.getByRole("textbox", { name: /^Message / }).inputValue(),
     "",
+  );
+  // A second message is a new command, not blocked by the first's receipt.
+  await assignment
+    .getByRole("textbox", { name: /^Message / })
+    .fill("And the shortcut hint.");
+  await send.click();
+  await until(
+    () =>
+      f.service
+        .coordinationView()
+        .readTask(a.taskId)
+        .messages.filter(
+          (m) =>
+            m.recipientAssignmentId === pendingId &&
+            m.eventType === "operator-message",
+        ).length === 2,
   );
   // The lead keeps its own reply card, and a completed delegate takes no message.
   for (const id of [a.assignmentId, delegateId])
