@@ -427,7 +427,7 @@ export function ImportPanel(
               </>
             }
           >
-            <a href={`/app/projects/${projectId}`} {...tab}>
+            <a href={`/app/projects/${projectId}?ready=any`} {...tab}>
               View imported tasks
             </a>
           </ActionOutcome>

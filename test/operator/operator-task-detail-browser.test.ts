@@ -431,7 +431,12 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app/tasks?view=board");
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    "/app/tasks?view=board&ready=any",
+  );
   const card = page.locator(`[data-task-id="${a.taskId}"] .task-title`);
   await card.waitFor();
   // Columns and rails now fit one 1366 screen; widen them so the board still scrolls.
@@ -464,13 +469,13 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   ]);
   // A new tab reads about:blank until its navigation commits.
   await tab.waitForURL((u) => u.protocol === "http:");
-  assert.equal(new URL(tab.url()).search, "?view=board");
+  assert.equal(new URL(tab.url()).search, "?view=board&ready=any");
   await tab.close();
   assert.equal(page.url(), taskUrl);
   const length = await page.evaluate(() => history.length);
   await back.click();
   await page.waitForURL(
-    (u) => u.pathname === "/app/tasks" && u.search === "?view=board",
+    (u) => u.pathname === "/app/tasks" && u.search === "?view=board&ready=any",
   );
   assert.equal(await page.evaluate(() => history.length), length);
   await card.waitFor();

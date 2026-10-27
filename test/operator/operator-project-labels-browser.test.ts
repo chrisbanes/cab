@@ -132,7 +132,7 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app/tasks");
+  await signIn(page, web.origin, web.password, "/app/tasks?ready=any");
 
   // The sidebar: id order, id hrefs, distinct accessible names.
   await sidebarLinks(page).first().waitFor();

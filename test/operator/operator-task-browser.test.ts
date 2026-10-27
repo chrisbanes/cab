@@ -24,7 +24,8 @@ async function signIn(
   page: Page,
   origin: string,
   password: string,
-  path = "/app/tasks",
+  // The seeded Draft, Done and Cancelled tasks are not Ready, so open with Any readiness.
+  path = "/app/tasks?ready=any",
 ) {
   await page.goto(origin + path);
   await page.getByLabel("Password").fill(password);
@@ -1052,7 +1053,7 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
   }
 
   await page.setViewportSize({ width: 800, height: 768 });
-  await page.goto(`${web.origin}/app/tasks?state=all`);
+  await page.goto(`${web.origin}/app/tasks?state=all&ready=any`);
   await page
     .locator(`.task-list [data-task-id="${ids.paused}"]`)
     .waitFor({ state: "visible" });
@@ -1317,7 +1318,7 @@ for (const viewport of [
       0,
     );
     await screenshot(page, `${viewport.width}-list-interventions`);
-    await page.goto(`${web.origin}/app/tasks?view=board&state=all`);
+    await page.goto(`${web.origin}/app/tasks?view=board&state=all&ready=any`);
     await page
       .getByRole("heading", { name: "All tasks", exact: true })
       .waitFor();
@@ -1499,13 +1500,13 @@ for (const viewport of [
     await page.goForward();
     assert.ok(page.url().includes("state=Stopping"));
     assert.equal(commandPosts, 0);
-    await page.goto(`${web.origin}/app/projects/${ids.projectId}`);
+    await page.goto(`${web.origin}/app/projects/${ids.projectId}?ready=any`);
     await page
       .locator(`[data-task-id="${ids.question.id}"]`)
       .getByText("Question needs an answer", { exact: true })
       .waitFor();
     await page.goto(
-      `${web.origin}/app/projects/${ids.projectId}?source=github`,
+      `${web.origin}/app/projects/${ids.projectId}?source=github&ready=any`,
     );
     await page
       .getByRole("link", { name: ids.importedTitle, exact: true })
@@ -1552,7 +1553,7 @@ for (const viewport of [
       await page.locator("#brief > details > summary .metadata").textContent(),
       "Requirements · GitHub · Retained source unavailable",
     );
-    await page.goto(`${web.origin}/app/tasks`);
+    await page.goto(`${web.origin}/app/tasks?ready=any`);
     await page
       .getByRole("link", { name: "Normal Stop observation", exact: true })
       .waitFor();
@@ -1595,7 +1596,7 @@ for (const viewport of [
       .getByLabel("Filter tasks", { exact: true })
       .fill("No matching outcome");
     await page
-      .getByText("No tasks match these filters.", { exact: true })
+      .getByText("No tasks match these filters", { exact: true })
       .waitFor();
     await screenshot(page, `${viewport.width}-no-match`);
     await page.goto(`${web.origin}/app/tasks/new?project=${ids.projectId}`);
@@ -2051,7 +2052,12 @@ test("List and Board name an imported Draft task's unmet readiness condition", a
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web.origin, web.password, "/app/tasks?state=all");
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    "/app/tasks?state=all&ready=any",
+  );
   for (const surface of [".task-list", ".board-columns"]) {
     if (surface === ".board-columns")
       await page.getByRole("button", { name: "Board", exact: true }).click();

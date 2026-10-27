@@ -548,6 +548,7 @@ web-disabled diagnostic fallback is not qualified for production visual parity.
 The daily operator flows each state their entry points, steps and an interaction
 budget the interface must meet: [first run to first task](user-flows/first-run.md),
 [create a task](user-flows/create-task.md),
+[find tasks](user-flows/find-tasks.md),
 [import issues from GitHub](user-flows/import-issues.md),
 [answer a question](user-flows/answer-question.md),
 [approve an exact action](user-flows/approve-action.md),
@@ -589,7 +590,10 @@ waiting is normal progress unless a separate intervention is required.
 
 Provide a List/Board switch for cross-project and project task views. Both views
 show the same tasks and respect the current project and task filters. Switching
-views preserves those filters and does not change task state.
+views preserves those filters and does not change task state. The browser
+remembers the filters per device and restores them on a task view opened without
+any; Readiness defaults to Ready, so Draft tasks are shown by choosing Not Ready or
+Any readiness.
 
 Group board cards by Ensemble work state, showing the task title, project, lead,
 source identity when imported, and the reason for waiting or intervention. Keep

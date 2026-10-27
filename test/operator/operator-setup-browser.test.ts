@@ -1755,7 +1755,10 @@ test("Setup's ready check imports the linked GitHub Project before Resume, then 
   });
   await read.waitFor();
   const view = t.ready.getByRole("link", { name: "View imported tasks" });
-  assert.equal(await view.getAttribute("href"), `/app/projects/${t.projectId}`);
+  assert.equal(
+    await view.getAttribute("href"),
+    `/app/projects/${t.projectId}?ready=any`,
+  );
   assert.equal(await view.getAttribute("target"), "_blank");
   assert.deepEqual(t.steps, ["preview", "refresh"]);
   assert.deepEqual(

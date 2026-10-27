@@ -48,7 +48,7 @@ const linkHref = (link: WaitLink, taskId: string | null) =>
         ? link.url
         : link.kind === "recovery"
           ? `/app/assignments/${link.assignmentId}/recovery`
-          : "/app/tasks?state=Running";
+          : "/app/tasks?state=Running&ready=any";
 
 /** An assignment whose recovery page a hold line links. */
 export interface RecoveryAssignment {

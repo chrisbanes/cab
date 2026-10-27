@@ -89,10 +89,26 @@ export interface TaskFilters {
   project: string;
   state: string;
   source: string;
-  ready: string;
+  /** `yes` (the default) and `no` match a task's Ready flag; `any` ignores it. */
+  ready: "yes" | "no" | "any";
   q: string;
   view: "list" | "board";
 }
+export const defaultTaskFilters: TaskFilters = {
+  project: "",
+  state: "",
+  source: "",
+  ready: "yes",
+  q: "",
+  view: "list",
+};
+/** Filters that differ from their defaults; the project is the page's own on a project page, not a filter. */
+export const activeFilterCount = (filters: TaskFilters, projectId?: string) =>
+  (["project", "state", "source", "ready", "q"] as const).filter(
+    (key) =>
+      filters[key] !== defaultTaskFilters[key] &&
+      !(key === "project" && projectId),
+  ).length;
 export function parseTaskFilters(search: string): TaskFilters {
   const p = new URLSearchParams(search),
     project = p.get("project") ?? "",
@@ -103,7 +119,7 @@ export function parseTaskFilters(search: string): TaskFilters {
     project: uuid.safeParse(project).success ? project : "",
     state: state === "all" || columns.some((c) => c === state) ? state : "",
     source: source === "local" || source === "github" ? source : "",
-    ready: ready === "yes" || ready === "no" ? ready : "",
+    ready: ready === "no" || ready === "any" ? ready : "yes",
     q: (p.get("q") ?? "").slice(0, 512),
     view: p.get("view") === "board" ? "board" : "list",
   };
@@ -111,8 +127,26 @@ export function parseTaskFilters(search: string): TaskFilters {
 export function taskFiltersUrl(path: string, filters: TaskFilters) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters))
-    if (value && !(key === "view" && value === "list")) params.set(key, value);
+    if (value && value !== defaultTaskFilters[key as keyof TaskFilters])
+      params.set(key, value);
   return path + (params.size ? `?${params}` : "");
+}
+const TASK_FILTERS_KEY = "ensemble.task-filters.v1";
+/** The remembered filters as a query string without `?`; blocked or unavailable storage reads as none. */
+export function rememberedTaskQuery() {
+  try {
+    return localStorage.getItem(TASK_FILTERS_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+/** Remember the canonical query for these filters; the defaults leave nothing stored. */
+export function rememberTaskFilters(filters: TaskFilters) {
+  try {
+    const query = taskFiltersUrl("", filters).slice(1);
+    if (query) localStorage.setItem(TASK_FILTERS_KEY, query);
+    else localStorage.removeItem(TASK_FILTERS_KEY);
+  } catch {}
 }
 export function filterTasks(
   tasks: TaskListSummary[],
@@ -129,7 +163,7 @@ export function filterTasks(
           ? taskColumn(t) === f.state
           : isActiveColumn(taskColumn(t)))) &&
       (!f.source || (f.source === "github") === Boolean(t.source)) &&
-      (!f.ready || t.ready === (f.ready === "yes")) &&
+      (f.ready === "any" || t.ready === (f.ready === "yes")) &&
       (!query ||
         [t.title, t.project.name, t.lead?.name, t.source?.repositoryName].some(
           (v) => v?.toLocaleLowerCase().includes(query),

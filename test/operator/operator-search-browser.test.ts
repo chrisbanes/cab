@@ -9,6 +9,7 @@ import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { markTaskReady, seedReviewTask } from "../fixtures/task-review.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
+import { rememberAnyReadiness } from "../fixtures/operator-work.js";
 import {
   openSearchFromSidebar,
   searchDayEnd,
@@ -519,6 +520,7 @@ test("same-task historical Search entries preserve manual origin selections and 
   await page.locator(`[data-search-record="${old.resultId}"]`).waitFor();
   await page.goForward();
   await page.getByText("Entry ancient result", { exact: true }).waitFor();
+  await rememberAnyReadiness(page);
   await page.getByRole("link", { name: "Tasks", exact: true }).click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
   await page.getByRole("link", { name: "Entry task", exact: true }).click();

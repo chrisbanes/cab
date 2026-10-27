@@ -12,7 +12,13 @@ import {
   ChevronRight,
   type LucideIcon,
 } from "lucide-react";
-import { useState, useRef, useLayoutEffect, useCallback } from "react";
+import {
+  useState,
+  useRef,
+  useLayoutEffect,
+  useCallback,
+  useEffect,
+} from "react";
 import { createPortal } from "react-dom";
 import type {
   InboxItem,
@@ -39,8 +45,11 @@ import { useMediaQuery } from "./use-media-query.js";
 import {
   columns as allColumns,
   columnCounts,
+  defaultTaskFilters,
   filterTasks,
   parseTaskFilters,
+  rememberedTaskQuery,
+  rememberTaskFilters,
   capacityNotice,
   taskColumn,
   taskDetailHref,
@@ -447,7 +456,7 @@ export function TaskViews({
   refresh: () => void;
   workspace: Workspace | null;
   path: string;
-  navigate: (path: string) => void;
+  navigate: (path: string, options?: { replace?: boolean }) => void;
   projectId?: string;
   overview?: boolean;
   /** Overview only: what its request cards read and answer with. */
@@ -456,12 +465,41 @@ export function TaskViews({
   resume?: WaitProps | undefined;
 }) {
   const base = path.split("?")[0] ?? "/app/tasks",
-    filters = parseTaskFilters(
-      path.includes("?") ? path.slice(path.indexOf("?")) : "",
-    );
-  const update = (patch: Partial<TaskFilters>) =>
-    navigate(taskFiltersUrl(base, { ...filters, ...patch }));
+    query = path.includes("?") ? path.slice(path.indexOf("?")) : "",
+    remembered = parseTaskFilters(rememberedTaskQuery());
+  // The URL wins. A bare URL shows the remembered set at once; the effect then writes it into the URL.
+  // A project page takes its project from the route and leaves the remembered one alone.
+  const filters = {
+    ...(query ? parseTaskFilters(query) : remembered),
+    ...(projectId && { project: "" }),
+  };
+  const withStoredProject = (f: TaskFilters) =>
+    projectId ? { ...f, project: remembered.project } : f;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the address changes, not on every render.
+  useEffect(() => {
+    if (query) rememberTaskFilters(withStoredProject(filters));
+    else if (taskFiltersUrl(base, filters) !== base)
+      navigate(taskFiltersUrl(base, filters), { replace: true });
+  }, [path]);
+  const update = (patch: Partial<TaskFilters>) => {
+    const next = { ...filters, ...patch };
+    // A bare URL (every filter back at its default) must not restore the previous set.
+    rememberTaskFilters(withStoredProject(next));
+    // Typing replaces the entry, so one Back leaves the filter instead of undoing a keystroke.
+    navigate(taskFiltersUrl(base, next), {
+      replace: Object.keys(patch).join() === "q",
+    });
+  };
+  // List or Board is a presentation switch, not a filter, so Reset keeps it.
+  const reset = () => {
+    const next = { ...defaultTaskFilters, view: filters.view };
+    rememberTaskFilters(withStoredProject(next));
+    navigate(taskFiltersUrl(base, next));
+  };
   const all = state.data?.tasks ?? [],
+    inScope = projectId
+      ? all.filter((t) => t.projectId === projectId).length
+      : all.length,
     tasks = filterTasks(all, filters, projectId),
     notice = capacityNotice(tasks);
   const project = workspace?.data.projects.find((p) => p.id === projectId),
@@ -480,6 +518,8 @@ export function TaskViews({
         projectId={projectId}
         overview={overview}
         count={tasks.length}
+        total={inScope}
+        reset={reset}
         refresh={refresh}
         pending={state.pending}
         phone={phone}
@@ -489,9 +529,11 @@ export function TaskViews({
       {/* Home with no project shows the getting-started checklist instead. */}
       {state.data &&
         !tasks.length &&
-        !(overview && !workspace?.data.projects.length) && (
+        !(overview && !workspace?.data.projects.length) &&
+        // Tasks and project pages say "no matches" in the toolbar's count line.
+        !(inScope && !overview) && (
           <p className="body empty-state">
-            {all.some((t) => !projectId || t.projectId === projectId) ? (
+            {inScope ? (
               "No tasks match these filters."
             ) : workspace?.data.projects.length ? (
               "Ready for your first task. Create an outcome or save a draft."

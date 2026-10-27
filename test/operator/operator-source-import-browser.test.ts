@@ -388,7 +388,7 @@ test("saved source imports through Preview and import now", async (_t, journey) 
     await page
       .getByRole("link", { name: "View imported tasks" })
       .getAttribute("href"),
-    `/app/projects/${ids.atlas}`,
+    `/app/projects/${ids.atlas}?ready=any`,
   );
   // Details name each source by id, with its request key and source version.
   await activation.locator("summary").click();

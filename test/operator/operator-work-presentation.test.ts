@@ -151,8 +151,13 @@ test("columns follow the design order and Active tasks hides only terminal work"
     Object.values(counts).reduce((a, b) => a + b, 0),
     tasks.length,
   );
-  assert.equal(filterTasks(tasks, parseTaskFilters("")).length, 3);
-  assert.equal(filterTasks(tasks, parseTaskFilters("?state=all")).length, 5);
+  assert.equal(filterTasks(tasks, parseTaskFilters("")).length, 2);
+  assert.equal(filterTasks(tasks, parseTaskFilters("?ready=any")).length, 3);
+  assert.equal(filterTasks(tasks, parseTaskFilters("?state=all")).length, 4);
+  assert.equal(
+    filterTasks(tasks, parseTaskFilters("?state=all&ready=any")).length,
+    5,
+  );
   assert.equal(filterTasks(tasks, parseTaskFilters("?state=Done")).length, 1);
 });
 

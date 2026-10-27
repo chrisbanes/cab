@@ -304,9 +304,13 @@ test("normal Stop observation stays Work while Stop with actual uncertainty need
 
 import { OperatorClient } from "../../web/src/api.js";
 import {
+  activeFilterCount,
+  defaultTaskFilters,
   loadTaskList,
   filterTasks,
   parseTaskFilters,
+  taskFiltersUrl,
+  type TaskFilters,
   taskColumn,
   taskDetailHref,
   taskReasons,
@@ -366,7 +370,32 @@ test("a complete task aggregate rejects changing membership and repeated page cu
   assert.ok(filtered.every((t) => taskDetailHref(t) === `/app/tasks/${t.id}`));
   assert.deepEqual(
     parseTaskFilters("?project=bad&source=bad&state=bad&ready=bad&view=bad"),
-    { project: "", state: "", source: "", ready: "", q: "", view: "list" },
+    defaultTaskFilters,
+  );
+  assert.equal(parseTaskFilters("?ready=any").ready, "any");
+  assert.equal(parseTaskFilters("?ready=").ready, "yes");
+  assert.equal(taskFiltersUrl("/app/tasks", defaultTaskFilters), "/app/tasks");
+  assert.equal(
+    taskFiltersUrl("/app/tasks", { ...defaultTaskFilters, ready: "any" }),
+    "/app/tasks?ready=any",
+  );
+  const readiness = (ready: TaskFilters["ready"]) =>
+    filterTasks(all.tasks, { ...defaultTaskFilters, state: "all", ready });
+  assert.ok(readiness("no").every((t) => !t.ready));
+  assert.ok(readiness("yes").every((t) => t.ready));
+  assert.equal(
+    readiness("any").length,
+    readiness("yes").length + readiness("no").length,
+  );
+  const shown = { ...defaultTaskFilters, source: "github", q: "x" } as const;
+  assert.equal(activeFilterCount(shown), 2);
+  assert.equal(
+    activeFilterCount({ ...defaultTaskFilters, project: randomUUID() }),
+    1,
+  );
+  assert.equal(
+    activeFilterCount({ ...defaultTaskFilters, project: randomUUID() }, "p"),
+    0,
   );
   assert.equal(parseTaskFilters("?state=all").state, "all");
 });
