@@ -16,7 +16,6 @@ import {
 } from "../../../dist/src/standalone/operator.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
-import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
 import { runtimeOperatorRoutes } from "../../../dist/src/standalone/operator-runtime.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 
@@ -90,6 +89,16 @@ function failureKind(error) {
   return "runtime-or-operator-assertion";
 }
 
+/** The task's open question as the operator task read discloses it. */
+function openOperatorQuestion() {
+  const question = service
+    .coordinationView()
+    .readTask(taskId)
+    .questions.find((item) => item.status === "open");
+  assert.ok(question, "operator task read discloses the open question");
+  return question;
+}
+
 function command(body) {
   return service.domain().execute({
     key: randomUUID(),
@@ -157,14 +166,6 @@ class ObservedCodexRuntime extends CodexRuntime {
 function operatorRoutes(currentService) {
   const routes = new OperatorRouteRegistry();
   routes.registerSlot("runtime", runtimeOperatorRoutes(currentService));
-  routes.registerSlot(
-    "coordination",
-    coordinationOperatorRoutes(
-      currentService.coordinationView(),
-      currentService.domain(),
-      (projectId) => currentService.routingAvailability(projectId),
-    ),
-  );
   return routes;
 }
 
@@ -365,11 +366,9 @@ async function run() {
     requestingAssignmentLinked: true,
     requestingAssignmentRunning: /:\s*Running\./.test(callbackAssignmentRow),
   };
-  await page.goto(`${origin}/coordination/task/${taskId}`);
-  assert.equal(new URL(page.url()).origin, origin);
-  const coordinationBody = await page.locator("body").innerText();
-  assert.match(coordinationBody, /S04D_OPERATOR_QUESTION_V1/);
-  assert.match(coordinationBody, /open/i);
+  const coordinationQuestion = openOperatorQuestion();
+  assert.match(coordinationQuestion.prompt, /S04D_OPERATOR_QUESTION_V1/);
+  assert.equal(coordinationQuestion.status, "open");
   assert.equal((await page.locator('a[href="/runtime"]').count()) > 0, true);
 
   progress("best-effort-stop-through-operator");
@@ -441,10 +440,9 @@ async function run() {
   assert.match(afterRestartLogin, /Sign in/);
   evidence.operator.restartInvalidatedSession = true;
   await signIn();
-  await page.goto(`${origin}/coordination/task/${taskId}`);
-  const retainedCoordination = await page.locator("body").innerText();
-  assert.match(retainedCoordination, /S04D_OPERATOR_QUESTION_V1/);
-  assert.match(retainedCoordination, /open/i);
+  const retainedQuestion = openOperatorQuestion();
+  assert.match(retainedQuestion.prompt, /S04D_OPERATOR_QUESTION_V1/);
+  assert.equal(retainedQuestion.status, "open");
   await page.goto(`${origin}/runtime/task/${taskId}`);
   const retainedRuntime = await page.locator("body").innerText();
   assert.match(retainedRuntime, /Operator Stop remains active/);
@@ -454,8 +452,8 @@ async function run() {
     /execution stopped and released|force unlock/i,
   );
   evidence.restart = {
-    questionRetained: /S04D_OPERATOR_QUESTION_V1/.test(retainedCoordination),
-    questionStillOpen: /open/i.test(retainedCoordination),
+    questionRetained: /S04D_OPERATOR_QUESTION_V1/.test(retainedQuestion.prompt),
+    questionStillOpen: retainedQuestion.status === "open",
     stopHoldRetained: /Operator Stop remains active/.test(retainedRuntime),
     writerHoldRetained: /Writer ownership remains held/.test(retainedRuntime),
     noForceUnlockClaim: !/execution stopped and released|force unlock/i.test(

@@ -19,7 +19,11 @@ import type {
   TaskCompletionRequest,
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
-import { isOperatorDeliveryCaller, materialDigest } from "../core/delivery.js";
+import {
+  HandbackSettlementRefusedError,
+  isOperatorDeliveryCaller,
+  materialDigest,
+} from "../core/delivery.js";
 import { StatusMappingRefusal } from "../core/status-mapping.js";
 import type { StatusMapping } from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
@@ -3147,10 +3151,7 @@ export class OperatorApi {
                   ? "Answer recorded; native delivery remains unresolved"
                   : "Operator answer requested",
             attentionCode: delivering ? "question-delivery" : null,
-            destination:
-              q.kind === "question"
-                ? `/app/tasks/${taskId}?request=${q.interactionId}`
-                : `/coordination/task/${taskId}#${q.interactionId}`,
+            destination: `/app/tasks/${taskId}?request=${q.interactionId}`,
             conversation: `/app/tasks/${taskId}?assignment=${q.requestingAssignmentId}#history`,
           });
         }
@@ -4959,6 +4960,12 @@ export class OperatorApi {
             draft: b.observation.draft,
             headSha: b.observation.headSha,
             state: b.observation.state,
+            settlement: b.settlement
+              ? {
+                  decision: b.settlement.decision,
+                  headSha: b.settlement.headSha,
+                }
+              : null,
             observedAt: b.observedAt,
             readError: this.safe(b.readError, excluded),
             omittedCheckCount: Math.max(0, b.observation.checks.length - 128),
@@ -7093,6 +7100,43 @@ export class OperatorApi {
           recorded: true,
           taskId: c.taskId,
           operation: c.type,
+        });
+      }
+      if (c.type === "delivery.settle") {
+        this.requireTask(c.taskId);
+        // The PR identity is the stored binding's; the expected revisions bind it to what was read.
+        const observation = this.coordination().readTask(c.taskId).delivery
+          ?.binding?.observation;
+        if (!observation) throw new OperatorApiError(409, "conflict");
+        try {
+          await this.coordination().settleHandback({
+            key: c.key,
+            taskId: c.taskId,
+            expectedTaskVersion: c.expectedTaskVersion,
+            expectedDeliveryRevision: c.expectedDeliveryRevision,
+            expectedPolicyVersion: c.expectedPolicyVersion,
+            repositoryId: observation.repositoryId,
+            prNumber: observation.number,
+            expectedPrNodeId: observation.nodeId,
+            expectedHeadSha: c.expectedHeadSha,
+            decision: c.decision,
+          });
+        } catch (error) {
+          if (error instanceof HandbackSettlementRefusedError)
+            throw new OperatorApiError(409, "conflict");
+          throw error;
+        }
+        const settled = this.coordination().readTask(c.taskId).delivery
+          ?.binding;
+        if (!settled)
+          throw new OperatorApiError(503, "command-outcome-unknown");
+        return commandReceiptSchema.parse({
+          kind: "delivery-settlement",
+          key: c.key,
+          recorded: true,
+          taskId: c.taskId,
+          decision: c.decision,
+          revision: settled.revision,
         });
       }
       if (c.type === "delivery.refresh") {

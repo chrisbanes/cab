@@ -1098,7 +1098,7 @@ test("cards put uncertain interventions first, then the oldest, with exact appro
     await approvalCard
       .getByRole("link", { name: "Review material & decide" })
       .getAttribute("href"),
-    `/coordination/task/${approval.taskId}#${approval.interactionId}`,
+    `/app/tasks/${approval.taskId}?request=${approval.interactionId}`,
   );
   // The paused approval project holds execution; the card says approval does not clear it.
   await approvalCard.getByText(/Approval does not resume work/).waitFor();

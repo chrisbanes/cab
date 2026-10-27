@@ -116,7 +116,7 @@ export function ApprovalFacts({
 
 /**
  * An approval in the Inbox: the exact action, target and revision, and the independent holds an
- * approval does not clear. Deciding stays at the exact retained destination, where the control lives.
+ * approval does not clear. Deciding happens in the task's request view, where the material is shown.
  */
 export function ApprovalDetail({
   item,

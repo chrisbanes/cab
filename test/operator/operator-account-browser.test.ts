@@ -362,7 +362,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     0,
   );
 
-  // Pointer: opens with the label and four items; an outside press closes it.
+  // Pointer: opens with the label and three items; an outside press closes it.
   await trigger.click();
   const menu = page.getByRole("menu");
   await menu.waitFor();
@@ -385,20 +385,10 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
       .getAttribute("href"),
     "/app/getting-started",
   );
-  // A plain anchor: the legacy pages are server-rendered, outside the app shell.
-  assert.equal(
-    await menu
-      .getByRole("menuitem", {
-        name: "Approval and delivery forms",
-        exact: true,
-      })
-      .getAttribute("href"),
-    "/coordination",
-  );
   await menu.getByRole("menuitem", { name: "Sign out", exact: true }).waitFor();
   assert.deepEqual(
     (await menu.getByRole("menuitem").allInnerTexts()).map((t) => t.trim()),
-    ["Settings", "Getting started", "Approval and delivery forms", "Sign out"],
+    ["Settings", "Getting started", "Sign out"],
   );
   await captureBrowserEvidence(page, "desktop-account-menu");
   await page.locator("main h1").click();
@@ -426,15 +416,11 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Getting started");
   await page.keyboard.press("ArrowDown");
-  assert.equal(await focused(), "Approval and delivery forms");
-  await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Sign out");
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Settings", "wraps to the first item");
   await page.keyboard.press("ArrowUp");
   assert.equal(await focused(), "Sign out", "wraps to the last item");
-  await page.keyboard.press("ArrowUp");
-  assert.equal(await focused(), "Approval and delivery forms");
   await page.keyboard.press("ArrowUp");
   assert.equal(await focused(), "Getting started");
   await page.keyboard.press("Home");
@@ -502,24 +488,11 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     0,
     "history navigation leaves the menu closed",
   );
-  // Reopening after history navigation still lists the four entries.
+  // Reopening after history navigation still lists the three entries.
   await trigger.click();
-  assert.equal(await menu.getByRole("menuitem").count(), 4);
+  assert.equal(await menu.getByRole("menuitem").count(), 3);
   await page.keyboard.press("Escape");
   await menu.waitFor({ state: "detached" });
-
-  // Approval and delivery forms loads the server-rendered coordination index as a document.
-  await trigger.click();
-  await menu
-    .getByRole("menuitem", { name: "Approval and delivery forms", exact: true })
-    .click();
-  await page.waitForURL("**/coordination");
-  await page
-    .getByRole("heading", { name: "Coordination", exact: true })
-    .waitFor();
-  await page.goBack();
-  await page.waitForURL("**/app/getting-started");
-  await trigger.waitFor();
 
   // Pending sign-out keeps the menu open and the item disabled.
   // A failed assertion must not leave the held request blocking cleanup.
@@ -582,7 +555,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   }
 });
 
-test("phone drawer shows the account group with Settings, Getting started, Approval and delivery forms and Sign out", async (_t, journey) => {
+test("phone drawer shows the account group with Settings, Getting started and Sign out", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[1]);
   await page.goto(`${web.origin}/app`);
   await submitPassword(page, web.password);
@@ -592,11 +565,7 @@ test("phone drawer shows the account group with Settings, Getting started, Appro
   await open();
   const dialog = page.getByRole("dialog");
   await dialog.getByText("Signed in as Operator", { exact: true }).waitFor();
-  for (const name of [
-    "Settings",
-    "Getting started",
-    "Approval and delivery forms",
-  ]) {
+  for (const name of ["Settings", "Getting started"]) {
     const row = dialog.getByRole("link", { name, exact: true });
     assert.ok(
       (await row.evaluate((el) => el.getBoundingClientRect().height)) >= 44,
@@ -698,7 +667,6 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   assert.deepEqual(await menuNames(menu), [
     "Settings",
     "Show getting started",
-    "Approval and delivery forms",
     "Sign out",
   ]);
   assert.equal(
@@ -724,7 +692,6 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   assert.deepEqual(await menuNames(menu), [
     "Settings",
     "Getting started",
-    "Approval and delivery forms",
     "Sign out",
   ]);
   await page.keyboard.press("Escape");

@@ -310,7 +310,7 @@ export class LocalOperatorUi {
       .tasks(projectId)
       .map(
         (task) =>
-          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}${closureText(this.store.providerClosure(String(task.id)))}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a> · <a href="/coordination/task/${escapeHtml(task.id)}">Coordination</a></li>`,
+          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}${closureText(this.store.providerClosure(String(task.id)))}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a></li>`,
       )
       .join("");
     const candidateProfileIds = JSON.stringify(
@@ -458,7 +458,7 @@ export class LocalOperatorUi {
             : ""
         }`
       : "";
-    return `<main><h1>${escapeHtml(task.title)}</h1><p>Outcome: ${escapeHtml(task.outcome)}</p><p>${task.ready ? "Ready" : `Not ready${unmet ? ` (${escapeHtml(unmet)})` : ""}`}; ${escapeHtml(task.state)}.</p><p>Configuration eligibility only: ${admission.eligible ? "eligible for future admission" : `held: ${escapeHtml(admission.reasons.join(", "))}`}.</p><p>Readiness and configuration eligibility do not confirm runtime admission or execution.</p>${provenance}<p><a href="/runtime/task/${escapeHtml(taskId)}">Runtime status, controls and recovery evidence</a> · <a href="/coordination/task/${escapeHtml(taskId)}">Task-scoped coordination and history</a></p>${imported ? "" : form("task.configure", field("projectId", String(task.projectId), "hidden") + field("taskId", taskId, "hidden") + field("expectedVersion", String(task.version), "hidden") + field("title", String(task.title)) + textarea("outcome", String(task.outcome)) + field("ready", "1", "checkbox", Boolean(task.ready)), undefined, csrfToken)}</main>`;
+    return `<main><h1>${escapeHtml(task.title)}</h1><p>Outcome: ${escapeHtml(task.outcome)}</p><p>${task.ready ? "Ready" : `Not ready${unmet ? ` (${escapeHtml(unmet)})` : ""}`}; ${escapeHtml(task.state)}.</p><p>Configuration eligibility only: ${admission.eligible ? "eligible for future admission" : `held: ${escapeHtml(admission.reasons.join(", "))}`}.</p><p>Readiness and configuration eligibility do not confirm runtime admission or execution.</p>${provenance}<p><a href="/runtime/task/${escapeHtml(taskId)}">Runtime status, controls and recovery evidence</a></p>${imported ? "" : form("task.configure", field("projectId", String(task.projectId), "hidden") + field("taskId", taskId, "hidden") + field("expectedVersion", String(task.version), "hidden") + field("title", String(task.title)) + textarea("outcome", String(task.outcome)) + field("ready", "1", "checkbox", Boolean(task.ready)), undefined, csrfToken)}</main>`;
   }
 
   profile(profileId: string, csrfToken = ""): string {
@@ -470,15 +470,11 @@ export class LocalOperatorUi {
     const assignment = this.store.assignment(assignmentId);
     const task = this.store.task(String(assignment.taskId));
     const profile = this.store.profile(String(assignment.profileId));
-    return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="/app/tasks/${escapeHtml(task.id)}?assignment=${escapeHtml(assignment.id)}">${escapeHtml(task.title)}</a>. Assignment lifecycle state: ${escapeHtml(assignment.state)}; this does not confirm runtime admission or execution.</p><p>Captured profile revision runtime: ${escapeHtml(runtimeSummary(this.store.profileRuntime(String(assignment.profileId), Number(assignment.profileRevision))))}.</p><p><a href="/runtime/assignment/${escapeHtml(assignment.id)}">Runtime status, controls and recovery evidence</a> · <a href="/coordination/assignment/${escapeHtml(assignment.id)}">Conversation and coordination history</a></p></main>`;
+    return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="/app/tasks/${escapeHtml(task.id)}?assignment=${escapeHtml(assignment.id)}">${escapeHtml(task.title)}</a>. Assignment lifecycle state: ${escapeHtml(assignment.state)}; this does not confirm runtime admission or execution.</p><p>Captured profile revision runtime: ${escapeHtml(runtimeSummary(this.store.profileRuntime(String(assignment.profileId), Number(assignment.profileRevision))))}.</p><p><a href="/runtime/assignment/${escapeHtml(assignment.id)}">Runtime status, controls and recovery evidence</a></p></main>`;
   }
 
   runtime(): string {
     return "<main><h1>Runtime</h1><p>Unavailable. This operator surface does not start or control execution.</p></main>";
-  }
-
-  coordination(): string {
-    return "<main><h1>Coordination</h1><p>Unavailable. Coordination state is not implemented in this operator surface.</p></main>";
   }
 
   async submit(fields: Record<string, string>): Promise<unknown> {
@@ -1164,7 +1160,7 @@ function document(
     ? `<form method="post" action="/logout">${hidden("csrfToken", session.csrfToken)}<button type="submit">Log out</button></form>`
     : "";
   const navigation = session.authenticated
-    ? `<nav>${webEnabled ? '<a href="/app">New interface</a> ' : ""}<a href="/">Existing operator controls</a> <a href="/runtime">Runtime</a> <a href="/coordination">Coordination</a></nav>${logout}`
+    ? `<nav>${webEnabled ? '<a href="/app">New interface</a> ' : ""}<a href="/">Existing operator controls</a> <a href="/runtime">Runtime</a></nav>${logout}`
     : "";
   const styles = webEnabled
     ? stylesheets
@@ -1189,7 +1185,7 @@ function isSafeRedirect(location: string): boolean {
 
 // Pages of the server-rendered operator UI; only these may start a pre-login session.
 const LEGACY_PAGE =
-  /^\/(?:$|(?:runtime|coordination)(?:\/|$)|(?:project|task|profile|assignment)\/)/;
+  /^\/(?:$|runtime(?:\/|$)|(?:project|task|profile|assignment)\/)/;
 
 /** Authenticated loopback HTTP server for the standalone operator surface. */
 export class LocalOperatorHttp {
@@ -1392,8 +1388,7 @@ export class LocalOperatorHttp {
           const parts =
             url.pathname === "/" ? [] : url.pathname.slice(1).split("/");
           const kind = parts[0] ?? "";
-          const slot =
-            kind === "runtime" || kind === "coordination" ? kind : undefined;
+          const slot = kind === "runtime" ? kind : undefined;
           const slotRoute = slot
             ? this.routes.matchSlot(slot, "GET", url.pathname)
             : undefined;
@@ -1426,8 +1421,6 @@ export class LocalOperatorHttp {
             html = this.ui.assignment(value);
           else if (kind === "runtime" && parts.length === 1)
             html = this.ui.runtime();
-          else if (kind === "coordination" && parts.length === 1)
-            html = this.ui.coordination();
           else if (url.pathname === "/")
             html = this.ui.home(authorized.csrfToken);
           if (html !== undefined) {
@@ -1475,10 +1468,7 @@ export class LocalOperatorHttp {
           return;
         }
         const firstSegment = url.pathname.slice(1).split("/", 1)[0];
-        const slot =
-          firstSegment === "runtime" || firstSegment === "coordination"
-            ? firstSegment
-            : undefined;
+        const slot = firstSegment === "runtime" ? firstSegment : undefined;
         const extension =
           slot && this.routes.matchSlot(slot, "POST", url.pathname);
         if (!extension) {

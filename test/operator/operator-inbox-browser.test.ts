@@ -949,7 +949,7 @@ test("an approval shows its exact action, target and independent holds, and deci
   });
   assert.equal(
     await decide.getAttribute("href"),
-    `/coordination/task/${approval.taskId}#${approval.interactionId}`,
+    `/app/tasks/${approval.taskId}?request=${approval.interactionId}`,
   );
   // Nothing on the page decides: not the request pane, not the inspector.
   assert.equal(
@@ -1574,7 +1574,7 @@ test("the request pane shows kind, position, identities and a sticky response ba
     await bar
       .getByRole("link", { name: "Review material & decide", exact: true })
       .getAttribute("href"),
-    `/coordination/task/${approval.taskId}#${approval.interactionId}`,
+    `/app/tasks/${approval.taskId}?request=${approval.interactionId}`,
   );
   assert.equal(
     await page.getByRole("button", { name: /^(approve|deny)\b/i }).count(),

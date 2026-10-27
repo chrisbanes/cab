@@ -100,22 +100,19 @@ test("operator project, profile, routing, and task views render scoped editable 
       /Readiness and configuration eligibility do not confirm runtime admission or execution\./,
     );
     assert.ok(taskPage.includes(`/runtime/task/${task.id}`));
-    assert.ok(taskPage.includes(`/coordination/task/${task.id}`));
     assert.ok(projectPage.includes(`/runtime/task/${task.id}`));
-    assert.ok(projectPage.includes(`/coordination/task/${task.id}`));
+    assert.ok(!taskPage.includes("/coordination/"));
+    assert.ok(!projectPage.includes("/coordination/"));
     const assignmentPage = ui.assignment(assignment.id);
     assert.match(assignmentPage, /Assignment lifecycle state: pending/);
     assert.ok(assignmentPage.includes(`/runtime/assignment/${assignment.id}`));
-    assert.ok(
-      assignmentPage.includes(`/coordination/assignment/${assignment.id}`),
-    );
+    assert.ok(!assignmentPage.includes("/coordination/"));
     assert.match(
       assignmentPage,
       /does not confirm runtime admission or execution/,
     );
     assert.doesNotMatch(ui.assignment(assignment.id), /data-command=/);
     assert.match(ui.runtime(), /Unavailable/i);
-    assert.match(ui.coordination(), /Unavailable/i);
   } finally {
     db.close();
   }

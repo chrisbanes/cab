@@ -718,3 +718,112 @@ a.task-source-chip:hover {
 .task-workspace section.reply-card {
   padding: var(--space-16);
 }
+
+/* An approval under review: badge line, exact facts, material, then the decision. It sits in
+   the decision card, so it drops the workspace's section rule and disclosure frame. */
+.task-workspace section.approval-review {
+  border-top: 0;
+  padding-top: 0;
+}
+.task-workspace details.approval-material-json {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.approval-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+.approval-review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+.approval-review-close {
+  margin-left: auto;
+}
+.approval-review h3,
+.approval-review h4,
+.approval-review p {
+  margin: 0;
+}
+.approval-review-facts,
+.approval-material-fields {
+  display: grid;
+  grid-template-columns: minmax(96px, 140px) minmax(0, 1fr);
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.approval-material-fields > div {
+  display: contents;
+}
+.approval-review-facts dt,
+.approval-review-facts dd,
+.approval-material-fields dt,
+.approval-material-fields dd {
+  margin: 0;
+  padding: var(--space-8) var(--space-12);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.approval-review-facts > :nth-last-child(-n + 2),
+.approval-material-fields > div:last-child > * {
+  border-bottom: 0;
+}
+.approval-review-facts dt {
+  color: var(--fg-3);
+}
+.approval-material-fields {
+  background: var(--raised);
+}
+.approval-material-fields dd {
+  white-space: pre-wrap;
+}
+.approval-material {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.approval-material-json > summary {
+  cursor: pointer;
+  color: var(--fg-2);
+}
+.approval-review-decision {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line);
+}
+/* Phone: the two decisions stack full width at the touch height. */
+@media (max-width: 759px) {
+  .approval-review-decision .question-actions > * {
+    flex: 1 1 100%;
+  }
+}
+
+/* Handback settlement and a delegated assignment's message: a short stack with one action row. */
+.handback-settlement,
+.assignment-message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+.handback-settlement p,
+.assignment-message p {
+  margin: 0;
+}
+.assignment-message-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}

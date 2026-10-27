@@ -8,7 +8,6 @@ import {
 } from "../fixtures/operator-web.js";
 import { actionKinds } from "../../src/core/delivery.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 test("retained rendered form actions, fields and mounted route controls match documented owners", async (t) => {
   let providerCalls = 0;
   const unexpectedProviderCall = async () => {
@@ -134,33 +133,6 @@ test("retained rendered form actions, fields and mounted route controls match do
       "INSERT INTO github_source_holds VALUES ('I1',1,'source hold',1)",
     ).run();
   });
-  const workId = "inventory-work",
-    resultId = randomUUID();
-  f.seedPersistedState((db) => {
-    db.prepare(
-      "INSERT INTO execution_intents(id,workId,prompt,workspace,state,reason,threadId,turnId,accountType,sandbox,approval) VALUES (?,?,'fixture','fixture','completed',NULL,'fixture-thread','fixture-turn','chatgpt','workspaceWrite','never')",
-    ).run(randomUUID(), workId);
-    db.prepare(
-      "INSERT INTO coordination_interactions(interactionId,taskId,requestingAssignmentId,requestingWorkId,requestingWorkRevision,requestingAssignmentVersion,conversationRevision,kind,status,prompt,action,target,materialHash,materialJson,revision) VALUES (?,?,?,?,1,1,1,'question','open','Choose target',NULL,NULL,NULL,NULL,1)",
-    ).run(randomUUID(), taskId, assignmentId, workId);
-    for (const material of ['{"version":"next"}', null])
-      db.prepare(
-        "INSERT INTO coordination_interactions(interactionId,taskId,requestingAssignmentId,requestingWorkId,requestingWorkRevision,requestingAssignmentVersion,conversationRevision,kind,status,prompt,action,target,materialHash,materialJson,revision) VALUES (?,?,?,?,1,1,1,'approval','open','Publish','Publish','next',?,?,1)",
-      ).run(
-        randomUUID(),
-        taskId,
-        assignmentId,
-        workId,
-        "a".repeat(64),
-        material,
-      );
-    db.prepare(
-      "INSERT INTO coordination_results(resultId,taskId,assignmentId,workId,workRevision,assignmentVersion,summary,payloadHash,recipientAssignmentId,destinationDisposition) VALUES (?,?,?,?,1,1,'Retained result',?,NULL,'unresolved')",
-    ).run(resultId, taskId, assignmentId, workId, "a".repeat(64));
-    db.prepare(
-      "INSERT INTO coordination_unresolved_result_destinations(resultId,taskId,assignmentId,originalDestination,reason,revision,status) VALUES (?,?,?,'lead','Unresolved',1,'unresolved')",
-    ).run(resultId, taskId, assignmentId);
-  });
   command({
     type: "delivery.configure",
     projectId,
@@ -199,11 +171,7 @@ test("retained rendered form actions, fields and mounted route controls match do
     body: JSON.stringify({ password: web.password }),
   });
   cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
-  const routes = runtimeOperatorRoutes(f.service).concat(
-    coordinationOperatorRoutes(f.service.coordinationView(), d, (id) =>
-      f.service.routingAvailability(id),
-    ),
-  );
+  const routes = runtimeOperatorRoutes(f.service);
   const inventory = await readFile(
     new URL("../../../docs/design/ui02-foundation.md", import.meta.url),
     "utf8",
@@ -287,9 +255,6 @@ test("retained rendered form actions, fields and mounted route controls match do
     "/runtime",
     `/runtime/task/${taskId}`,
     `/runtime/assignment/${assignmentId}`,
-    "/coordination",
-    `/coordination/task/${taskId}`,
-    `/coordination/assignment/${assignmentId}`,
   ];
   const actions = new Set<string>(),
     commands = new Set<string>(),
@@ -348,10 +313,6 @@ test("retained rendered form actions, fields and mounted route controls match do
     "mode",
     "grants",
     "requiredChecks",
-    "expectedDeliveryRevision",
-    "expectedPolicyVersion",
-    "expectedPrNodeId",
-    "expectedHeadSha",
     "selections",
     "readiness",
     "closedIssues",
@@ -373,56 +334,10 @@ test("retained rendered form actions, fields and mounted route controls match do
     `/app/tasks/${taskId}`,
     `/profile/${profileId}`,
     "/runtime",
-    "/coordination",
     "/app",
   ])
     assert.ok(destinations.has(path), `${path} cross-navigation retained`);
-  for (const action of [
-    "/coordination/control/delivery/settle",
-    "/coordination/control/delivery/refresh",
-    "/coordination/control/question/answer",
-    "/coordination/control/approval/decision",
-    "/coordination/control/result/recipient",
-  ])
-    assert.ok(actions.has(action), `${action} conditional form retained`);
-  assert.ok(fields.has("materialJson"));
   assert.ok(forms >= 20);
-  const deliveryHtml = await (
-    await fetch(`${web.origin}/coordination/task/${taskId}`, {
-      headers: { cookie },
-    })
-  ).text();
-  const settlements = [
-    ...deliveryHtml.matchAll(
-      /<form\b[^>]*action="\/coordination\/control\/delivery\/settle"[^>]*>([\s\S]*?)<\/form>/g,
-    ),
-  ];
-  assert.equal(
-    settlements.length,
-    2,
-    "both bound-PR settlement decisions are present",
-  );
-  for (const [index, decision] of ["accepted", "closed"].entries()) {
-    const material = Object.fromEntries(
-      [
-        ...String(settlements[index]?.[1]).matchAll(
-          /<input\b[^>]*name="([^"]+)"[^>]*value="([^"]*)"/g,
-        ),
-      ].map((m) => [m[1], m[2]]),
-    );
-    assert.equal(material.taskId, taskId);
-    assert.equal(
-      material.expectedTaskVersion,
-      String(deliveryCaller.taskVersion),
-    );
-    assert.equal(material.expectedDeliveryRevision, "1");
-    assert.equal(material.expectedPolicyVersion, "2");
-    assert.equal(material.repositoryId, "R1");
-    assert.equal(material.prNumber, "7");
-    assert.equal(material.expectedPrNodeId, "P7");
-    assert.equal(material.expectedHeadSha, "1".repeat(40));
-    assert.equal(material.decision, decision);
-  }
   assert.equal(
     f.service.delivery().delivery(taskId)?.registeredWorkId,
     deliveryCaller.workId,

@@ -70,7 +70,6 @@ test("retained HTML routes share the production foundation and native interactio
     command: "Publish approved release notes",
     details: "approved material ".repeat(12),
   });
-  const longHistory = "retained assistant history ".repeat(12);
   f.seedPersistedState((db) => {
     db.prepare(
       "INSERT INTO execution_intents(id,workId,prompt,workspace,state,reason,threadId,turnId,accountType,sandbox,approval) VALUES (?,?,'fixture','fixture','completed',NULL,'fixture-thread','fixture-turn','chatgpt','workspaceWrite','never')",
@@ -85,9 +84,6 @@ test("retained HTML routes share the production foundation and native interactio
       "a".repeat(64),
       approvalMaterial,
     );
-    db.prepare(
-      "INSERT INTO conversation_history_items(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,workRevision,threadId,turnId,itemId,lifecycle,text,omissionReason,deltaBytes,createdAt,updatedAt) VALUES (?, ?, ?,1,1,1,1,1,'fixture-thread','fixture-turn','foundation-long-history','completed',?,NULL,0,1,1)",
-    ).run(approvalWorkId, taskId, assignmentId, longHistory);
   });
 
   const web = await journey.start("fixture.web", () => f.startWeb());
@@ -126,9 +122,6 @@ test("retained HTML routes share the production foundation and native interactio
     "/runtime",
     `/runtime/task/${taskId}`,
     `/runtime/assignment/${assignmentId}`,
-    "/coordination",
-    `/coordination/task/${taskId}`,
-    `/coordination/assignment/${assignmentId}`,
   ];
   let stylesheetHref = "";
   let verifiedFonts = false;
@@ -157,18 +150,6 @@ test("retained HTML routes share the production foundation and native interactio
     assert.match(style.family, /Geist/);
     assert.equal(style.scripts, 0, "legacy HTML remains non-hydrated");
     assert.equal(style.overflow, false, path);
-    if (path === `/coordination/task/${taskId}`) {
-      const requester = desktop.getByRole("link", {
-        name: "the task-scoped assignment",
-        exact: true,
-      });
-      assert.equal(
-        await requester.evaluate(
-          (element) => getComputedStyle(element).textDecorationLine,
-        ),
-        "underline",
-      );
-    }
     const fontFaces = await desktop.evaluate(async () => {
       const sans = await document.fonts.load('14px "Geist"');
       const mono = await document.fonts.load('14px "Geist Mono"');
@@ -254,68 +235,24 @@ test("retained HTML routes share the production foundation and native interactio
     true,
   );
   await captureBrowserEvidence(phone, "390-retained-runtime-controls");
-  await phone.goto(`${web.origin}/coordination/task/${taskId}`);
-  const approvalPre = phone
-    .locator("body.legacy-operator pre")
-    .filter({ hasText: approvalMaterial.slice(0, 30) });
-  await approvalPre.waitFor();
-  assert.equal(await approvalPre.textContent(), approvalMaterial);
-  const approvalForm = phone
-    .locator('form[action="/coordination/control/approval/decision"]')
-    .filter({ has: phone.locator('input[name="decision"][value="approved"]') })
-    .filter({
-      has: phone.locator(
-        'input[name="action"][value="Publish approved release notes"]',
-      ),
-    });
-  const approvalFields = await approvalForm
-    .locator("input[type=hidden]")
-    .evaluateAll((inputs) =>
-      Object.fromEntries(
-        inputs.map((input) => [
-          (input as HTMLInputElement).name,
-          (input as HTMLInputElement).value,
-        ]),
-      ),
-    );
-  assert.equal(approvalFields.taskId, taskId);
-  assert.equal(approvalFields.interactionId, approvalInteractionId);
-  assert.equal(approvalFields.expectedRevision, "1");
-  assert.equal(approvalFields.decision, "approved");
-  assert.equal(approvalFields.action, "Publish approved release notes");
-  assert.equal(approvalFields.target, "release-42");
-  assert.equal(approvalFields.materialJson, approvalMaterial);
-  assert.match(approvalFields.key ?? "", /^[0-9a-f-]{36}$/i);
-  assert.ok(approvalFields.csrfToken);
-  await assertPhonePreContained(approvalPre);
-  await captureBrowserEvidence(phone, "390-retained-long-approval-material");
-
-  await phone.goto(`${web.origin}/coordination/assignment/${assignmentId}`);
-  const historyPre = phone.locator("body.legacy-operator pre").filter({
-    hasText: longHistory.slice(0, 30),
-  });
-  await historyPre.waitFor();
-  assert.equal(await historyPre.textContent(), longHistory);
-  await assertPhonePreContained(historyPre);
-  await captureBrowserEvidence(phone, "390-retained-long-assignment-history");
+  // The approval's long material stays inside a phone viewport on its in-app review.
+  await phone.goto(
+    `${web.origin}/app/tasks/${taskId}?request=${approvalInteractionId}`,
+  );
+  await phone
+    .getByRole("button", { name: "Approve this exact material" })
+    .waitFor();
+  assert.ok(
+    await phone.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  await captureBrowserEvidence(phone, "390-long-approval-material");
+  await phone.goto(`${web.origin}/runtime`);
   await phone.getByRole("link", { name: "New interface", exact: true }).click();
   await phone.locator("main.page h1").waitFor();
   assert.equal(new URL(phone.url()).pathname, "/app");
 });
-
-async function assertPhonePreContained(pre: import("playwright").Locator) {
-  const dimensions = await pre.evaluate((element) => ({
-    preWidth: element.getBoundingClientRect().width,
-    preScrollWidth: element.scrollWidth,
-    viewportWidth: document.documentElement.clientWidth,
-    documentWidth: document.documentElement.scrollWidth,
-    whiteSpace: getComputedStyle(element).whiteSpace,
-  }));
-  assert.equal(dimensions.whiteSpace, "pre-wrap");
-  assert.ok(dimensions.preWidth <= dimensions.viewportWidth);
-  assert.ok(dimensions.preScrollWidth <= dimensions.preWidth + 1);
-  assert.ok(dimensions.documentWidth <= dimensions.viewportWidth);
-}
 
 test("Nova primitives keep 32px controls, the documented radii and tinted destructive tokens", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>

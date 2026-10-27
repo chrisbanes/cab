@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import {
   browserSuite,
@@ -139,44 +140,79 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     await f.waitTurn(2);
     if (mode === "reviewable-pr") {
       assert.equal((await f.merge()).success, false);
-      await page.goto(`${web.origin}/coordination/task/${f.taskId}`);
-      const form = page
-        .locator('form[action="/coordination/control/delivery/settle"]')
-        .first();
-      const material = await form
-        .locator("input")
-        .evaluateAll((inputs) =>
-          Object.fromEntries(
-            inputs.map((i) => [
-              (i as HTMLInputElement).name,
-              (i as HTMLInputElement).value,
-            ]),
-          ),
-        );
-      const denied = await page.request.post(
-        `${web.origin}/coordination/control/delivery/settle`,
-        {
-          headers: { origin: web.origin },
-          form: { ...material, csrfToken: "wrong" },
+      await openTask();
+      const handback = changes.locator(".handback-settlement");
+      await handback
+        .getByText("Reviewable PR handed back.", { exact: true })
+        .waitFor();
+      const accept = handback.getByRole("button", {
+        name: "Accept handback",
+        exact: true,
+      });
+      const close = handback.getByRole("button", {
+        name: "Settle as closed",
+        exact: true,
+      });
+      assert.equal(await accept.count(), 1);
+      assert.equal(await close.count(), 1);
+      // Forged or stale material through the page's own session settles nothing.
+      const read = (
+        await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+      ).data;
+      const binding = read.delivery?.binding;
+      assert.ok(read.delivery && binding);
+      const csrfToken = (
+        (await (
+          await page.request.get(`${web.origin}/api/operator/session`)
+        ).json()) as {
+          csrfToken: string;
+        }
+      ).csrfToken;
+      const settle = (
+        over: Record<string, unknown>,
+        token: string = csrfToken,
+      ) =>
+        page.request.post(`${web.origin}/api/operator/commands`, {
+          headers: { origin: web.origin, "x-csrf-token": token },
+          data: {
+            type: "delivery.settle",
+            key: randomUUID(),
+            taskId: f.taskId,
+            expectedTaskVersion: read.task.version,
+            expectedDeliveryRevision: binding.revision,
+            expectedPolicyVersion: read.delivery?.policyVersion,
+            expectedHeadSha: binding.headSha,
+            decision: "accepted",
+            ...over,
+          },
           maxRedirects: 0,
-        },
+        });
+      assert.equal((await settle({}, "wrong")).status(), 403);
+      assert.equal(
+        (
+          await settle({ expectedDeliveryRevision: binding.revision + 1 })
+        ).status(),
+        409,
       );
-      assert.equal(denied.status(), 403);
+      assert.equal(
+        (await settle({ expectedHeadSha: "5".repeat(40) })).status(),
+        409,
+      );
       assert.equal(f.service.delivery().delivery(f.taskId)?.settlement, null);
+      // The provider moves the head: the shown material is stale, so nothing settles until it is reread.
       f.scripted.state.head = "4".repeat(40);
-      const stale = await page.request.post(
-        `${web.origin}/coordination/control/delivery/settle`,
-        { headers: { origin: web.origin }, form: material, maxRedirects: 0 },
-      );
-      assert.ok(stale.status() >= 400);
+      assert.equal((await settle({})).status(), 409);
       assert.equal(f.service.delivery().delivery(f.taskId)?.settlement, null);
       await page.reload();
-      await form.locator('button[type="submit"]').first().click();
-      await until(
-        () =>
-          f.service.delivery().delivery(f.taskId)?.settlement?.decision ===
-          "accepted",
-        "authenticated settlement",
+      await expectPullRequest(changes, f.scripted.state.head);
+      await accept.click();
+      await handback
+        .getByRole("status")
+        .filter({ hasText: /^Handback accepted for head/ })
+        .waitFor();
+      assert.equal(
+        f.service.delivery().delivery(f.taskId)?.settlement?.decision,
+        "accepted",
       );
       assert.equal(f.scripted.state.writes, 0);
     } else {

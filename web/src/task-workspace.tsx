@@ -1,3 +1,9 @@
+import { ApprovalReview } from "./approval-review.js";
+import {
+  AssignmentMessage,
+  HandbackSettlement,
+  ResultDestination,
+} from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
 import {
   CommandNetworkLine,
@@ -1375,7 +1381,11 @@ export function TaskWorkspace({
     inView = openRequests.find(
       (q) => q.interactionId === params.get("request"),
     ),
-    deciding = inView?.kind === "approval" ? inView.interactionId : null;
+    deciding = inView?.kind === "approval" ? inView.interactionId : null,
+    // Any status: a decided approval stays in view, read only, until the operator leaves it.
+    reviewing = data.approvals.find(
+      (a) => a.interactionId === params.get("request"),
+    );
   const requesterOf = (interactionId: string | null) => {
     const request = [...data.questions, ...data.approvals].find(
       (q) => q.interactionId === interactionId,
@@ -1870,17 +1880,28 @@ export function TaskWorkspace({
                 aria-label="Pending requests and holds"
               >
                 <h3 className="sr-only">Decisions and holds</h3>
-                {params.get("request") && (
-                  <QuestionResponse
+                {reviewing ? (
+                  <ApprovalReview
                     client={client}
                     session={session}
                     taskId={taskId}
-                    interactionId={params.get("request")!}
-                    states={questionStates}
+                    approval={reviewing}
+                    requesterName={requesterOf(reviewing.interactionId)}
                     onRecorded={refreshAll}
-                    observedAt={resource.state.fetchedAt}
-                    requesterName={requesterOf(params.get("request"))}
                   />
+                ) : (
+                  params.get("request") && (
+                    <QuestionResponse
+                      client={client}
+                      session={session}
+                      taskId={taskId}
+                      interactionId={params.get("request")!}
+                      states={questionStates}
+                      onRecorded={refreshAll}
+                      observedAt={resource.state.fetchedAt}
+                      requesterName={requesterOf(params.get("request"))}
+                    />
+                  )
                 )}
                 {openRequests
                   .filter((q) => q.interactionId !== params.get("request"))
@@ -1918,11 +1939,7 @@ export function TaskWorkspace({
                       )}
                       <ActionLink
                         variant="secondary"
-                        href={
-                          q.kind === "question"
-                            ? `/app/tasks/${taskId}?request=${q.interactionId}`
-                            : `/coordination/task/${taskId}#${q.interactionId}`
-                        }
+                        href={`/app/tasks/${taskId}?request=${q.interactionId}`}
                       >
                         {q.kind === "approval"
                           ? "Review material & decide"
@@ -1933,29 +1950,50 @@ export function TaskWorkspace({
                 {data.completionRequests
                   .filter((r) => r.status === "pending")
                   .map((r) => (
-                    <ActionLink
+                    <div
                       key={r.requestId}
-                      variant="secondary"
-                      href={`/coordination/task/${taskId}`}
+                      className="decision"
+                      data-record-id={r.requestId}
                     >
-                      Pending completion review
-                    </ActionLink>
+                      <p>
+                        The lead requested completion (revision {r.revision}).
+                        It finishes once the holds below clear.
+                      </p>
+                      {data.delivery?.blockers.includes(
+                        "reviewable-pr-awaiting-current-settlement",
+                      ) && (
+                        <ActionLink
+                          variant="secondary"
+                          href={`/app/tasks/${taskId}?section=changes`}
+                        >
+                          Settle handback
+                        </ActionLink>
+                      )}
+                    </div>
                   ))}
-                {data.unresolvedResults.length > 0 && (
-                  <ActionLink
-                    variant="secondary"
-                    href={`/coordination/task/${taskId}`}
-                  >
-                    Unresolved result delivery
-                  </ActionLink>
-                )}
+                {data.unresolvedResults.map((item) => (
+                  <ResultDestination
+                    key={item.resultId}
+                    client={client}
+                    session={session}
+                    task={data}
+                    item={item}
+                    onRecorded={refreshAll}
+                  />
+                ))}
                 {nextActor.code === "completion-rejected" && (
-                  <ActionLink
-                    variant="secondary"
-                    href={`/coordination/task/${taskId}`}
-                  >
-                    Review rejected completion
-                  </ActionLink>
+                  <div className="decision">
+                    <p>
+                      The lead's completion request was rejected at this task
+                      version. The lead continues on its next turn.
+                    </p>
+                    <ActionLink
+                      variant="secondary"
+                      href={`/app/tasks/${taskId}?section=reply`}
+                    >
+                      Message the lead
+                    </ActionLink>
+                  </div>
                 )}
                 {nextActor.code === "execution-uncertain" &&
                   !data.execution.holds.uncertainty && (
@@ -2324,6 +2362,7 @@ export function TaskWorkspace({
               })
             }
             refreshDisabled={Boolean(unconfirmed)}
+            reread={refreshAll}
             unconfirmed={unconfirmedCheck("delivery.refresh")}
             outcome={
               !pending &&
@@ -2345,8 +2384,8 @@ export function TaskWorkspace({
         <TabPanel tab="history" active={state.tab}>
           <p className="metadata">
             {/* Server-rendered page outside the app shell: a plain anchor loads it as a document. */}
-            <a href={`/coordination/task/${encodeURIComponent(taskId)}`}>
-              Approval and delivery forms
+            <a href={`/task/${encodeURIComponent(taskId)}`}>
+              Edit task and review source
             </a>
           </p>
           <section id="context">
@@ -2552,11 +2591,16 @@ export function TaskWorkspace({
                           </ActionLink>
                         </p>
                       ))}
-                    <ActionLink
-                      href={`/coordination/assignment/${a.assignmentId}`}
-                    >
-                      Advanced assignment and history controls
-                    </ActionLink>
+                    {(a.state === "pending" || a.state === "running") &&
+                      a.assignmentId !== data.leadAssignmentId && (
+                        <AssignmentMessage
+                          client={client}
+                          session={session}
+                          taskId={taskId}
+                          assignment={a}
+                          onChanged={refreshAll}
+                        />
+                      )}
                     {historyErrors[a.assignmentId] && (
                       <p role="alert">
                         History refresh failed: {historyErrors[a.assignmentId]}.
@@ -3048,6 +3092,7 @@ function Changes({
   changed,
   refresh,
   refreshDisabled,
+  reread,
   unconfirmed,
   outcome,
 }: {
@@ -3062,6 +3107,8 @@ function Changes({
   changed: () => void;
   refresh: () => void;
   refreshDisabled: boolean;
+  /** Rereads the task after a handback settlement. */
+  reread: () => void;
   /** The check for a refresh whose response was lost; it stays until resolved, even once delivery stops applying. */
   unconfirmed: ReactNode;
   /** The last settled refresh's outcome; it leaves with the delivery controls. */
@@ -3214,6 +3261,14 @@ function Changes({
             <OutcomeDetails fields={[["Code", b]]} />
           </div>
         ))}
+      {delivers && (
+        <HandbackSettlement
+          client={client}
+          session={session}
+          task={data}
+          onSettled={reread}
+        />
+      )}
       {delivers && (
         <Button
           variant="secondary"

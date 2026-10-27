@@ -152,7 +152,7 @@ dimensions.
   kind, position, project/task, the request as a question, requester and identities,
   exact material, version and hold notes, and a sticky response bar. Questions are
   answered there; an approval ends with the statement of what a decision covers and
-  one Review material & decide link to the retained exact-material destination.
+  one Review material & decide link to the task's approval review (`236`).
   The Inbox never approves or denies. The task-context inspector lists the task, lead,
   requester, assignment chain, holds and evidence. Queue and detail scroll
   independently; phone uses queue → detail → queue with restored selection and
@@ -417,7 +417,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | --- | --- |
 | 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `02b-inbox-runtime-exhausted`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
 | 02 Inbox & questions | `06-inbox-question-audience`, `08-inbox-empty`, `19-inbox-grouped-questions`, `20-task-answering-grouped-request`, `32-inbox-approved-dependency-held`, `22-question-states-specimen`, `17-imported-source-overview-inbox`, `21-phone-grouped-questions`, `21b-phone-grouped-questions-scrolled`, `27-phone-question-evidence`, `28-phone-question-failed-answer`, `29-phone-question-stale-read`, `30-phone-question-answer-sent`, `31-phone-inbox-anchored-return`, `33-phone-exact-approval-source-hold`, `800g-phone-grouped-question-short` |
-| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `47b-phone-task-actions-open`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation`, `198-task-draft-turn-available`, `200-task-draft-turn-queued`, `202-task-draft-turn-sent`, `204-task-draft-turn-unavailable`, `199-phone-task-draft-turn-available`, `201-phone-task-draft-turn-queued`, `203-phone-task-draft-turn-sent`, `205-phone-task-draft-turn-unavailable`, `206-task-improve-issue-available`, `208-task-improve-issue-running`, `210-task-improve-issue-proposal`, `212-task-improve-issue-review`, `214-task-improve-issue-sent`, `216-task-improve-issue-stale`, `218-task-improve-issue-held`, `220-task-improve-issue-unavailable`, `207-phone-task-improve-issue-available`, `209-phone-task-improve-issue-running`, `211-phone-task-improve-issue-proposal`, `213-phone-task-improve-issue-review`, `215-phone-task-improve-issue-sent`, `217-phone-task-improve-issue-stale`, `219-phone-task-improve-issue-held`, `221-phone-task-improve-issue-unavailable`, `224-task-publish-available`, `226-task-publish-confirm`, `228-task-publish-pending`, `230-task-publish-uncertain`, `232-task-publish-published`, `234-task-publish-unavailable`, `225-phone-task-publish-available`, `227-phone-task-publish-confirm`, `229-phone-task-publish-pending`, `231-phone-task-publish-uncertain`, `233-phone-task-publish-published`, `235-phone-task-publish-unavailable` |
+| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `47b-phone-task-actions-open`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation`, `198-task-draft-turn-available`, `200-task-draft-turn-queued`, `202-task-draft-turn-sent`, `204-task-draft-turn-unavailable`, `199-phone-task-draft-turn-available`, `201-phone-task-draft-turn-queued`, `203-phone-task-draft-turn-sent`, `205-phone-task-draft-turn-unavailable`, `206-task-improve-issue-available`, `208-task-improve-issue-running`, `210-task-improve-issue-proposal`, `212-task-improve-issue-review`, `214-task-improve-issue-sent`, `216-task-improve-issue-stale`, `218-task-improve-issue-held`, `220-task-improve-issue-unavailable`, `207-phone-task-improve-issue-available`, `209-phone-task-improve-issue-running`, `211-phone-task-improve-issue-proposal`, `213-phone-task-improve-issue-review`, `215-phone-task-improve-issue-sent`, `217-phone-task-improve-issue-stale`, `219-phone-task-improve-issue-held`, `221-phone-task-improve-issue-unavailable`, `224-task-publish-available`, `226-task-publish-confirm`, `228-task-publish-pending`, `230-task-publish-uncertain`, `232-task-publish-published`, `234-task-publish-unavailable`, `225-phone-task-publish-available`, `227-phone-task-publish-confirm`, `229-phone-task-publish-pending`, `231-phone-task-publish-uncertain`, `233-phone-task-publish-published`, `235-phone-task-publish-unavailable`, `236-task-approval-review`, `237-phone-task-approval-review`, `238-task-approval-states`, `239-task-coordination-actions` |
 | 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
@@ -1880,7 +1880,7 @@ Interaction notes:
 - Link and Abandon are the only ways out of an unknown create; Abandon is a two-step action.
 - If the task's title or body would have to be hidden, the review is refused rather than shown altered.
 - Entry points: task detail and the CLI (`delivery publish-*`). The board, list and context menus do
-  not offer it, and the legacy coordination pages neither show nor drive it.
+  not offer it.
 
 ### Task detail and updates
 
@@ -1899,10 +1899,35 @@ Interaction notes:
   `acme/atlas#142`, or Local task) and one outline "Task actions" disclosure holding
   Execution and Stop… (open in `47b-phone-task-actions-open`); the decision card sits
   in the first viewport, and the reply follows the latest result.
-- A task's legacy page (`/coordination/task/:id`) is linked once, as Approval and
-  delivery forms, from its History tab; that page links `/task/:id` (Edit task and
-  review source). The project page keeps Project settings and links to no legacy
-  page.
+- The History tab links the retained `/task/:id` page once, as Edit task and review
+  source. Approvals, handback settlement, result destinations and assignment messages
+  are all in the task view ([Coordination actions](#coordination-actions)). The project
+  page keeps Project settings and links to no legacy page.
+
+### Coordination actions
+
+- `239-task-coordination-actions` draws the three task-view controls that replaced the
+  retired coordination pages (approvals are [Approval review](#approval-review)).
+- **Handback settlement** sits in the Changes tab's delivery section for a reviewable PR
+  that is not merged. Until the current head is settled it states that the task completes
+  only after settlement and that settling writes nothing to GitHub, then offers Accept
+  handback and Settle as closed. Accept is offered only for an open, ready PR with no
+  outside push on the task branch; a failed GitHub read offers neither and asks for a
+  refresh. A settled head shows "Handback accepted for head …" or "Settled as closed."
+  The command binds the task, delivery and policy versions and the head; a change in any
+  of them records nothing and says so.
+- **Result destination**: each result with no recorded destination is a decision-card row
+  ("Your decision · result undelivered") naming the result and its producer, with
+  Deliver to <recipient> for the one recipient the service permits, or a line saying none
+  can receive it.
+- **Assignment message**: each pending or running delegated assignment's row in the
+  History tab has a Message <name> composer, delivered on that assignment's next eligible
+  turn; the lead keeps the Reply card. A conflict keeps the text.
+- Each send uses one request key: an unknown outcome offers Check whether it saved, which
+  resends the same command; a conflict rereads the task.
+- A pending completion request is a status line in the decision card, with Settle
+  handback (to the Changes tab) while a reviewable PR awaits settlement; a rejected one
+  links to the Reply card.
 - The reading anchor is the top visible message and its pixel offset. Updates keep
   that anchor, open groups, expanded message previews and the unfinished reply.
 - Auto-follow is on only while the reader is at the bottom. Scrolling away turns it
@@ -1929,16 +1954,29 @@ Interaction notes:
 
 ### Approval review
 
-- The review panel (`02-inbox-approval`, `33-phone-exact-approval-source-hold`) has
-  labelled sections for Exact action, Target and Material to approve. Each material
-  item shows its version, and the panel offers Open full description and Inspect
-  patch. A line states that the decision applies only to these material versions,
-  and that a change cancels it and needs a new review.
-- Accepted states that the action is allowed but has not started yet.
-- Denied states that nothing was approved, and offers to add feedback for the
-  requester or close the review.
-- Stale names the version change, says the earlier acceptance no longer applies,
-  and asks the operator to inspect the new material before deciding.
+- Approvals are decided in place on the task's Overview, at
+  `/app/tasks/:id?request=<interaction>` (`236-task-approval-review`,
+  `237-phone-task-approval-review`). The panel replaces the request's decision card and
+  shows the status badge, requester, the request prompt, then Exact action, Target and
+  Version (revision and short material hash) as one bordered list.
+- Material to approve lists the material's top-level fields as a key/value list; a
+  string keeps its line breaks and a nested value is shown as indented JSON. Exact JSON
+  sits behind a disclosure, open by default when the material is not an object.
+- The decision bar states that the decision covers this action, target and material
+  version only and cannot be changed, then Deny and Approve this exact material. On a
+  phone both are 44px and full width. Leave pending returns to the Overview.
+- States (`238-task-approval-states`): Sending disables both buttons; Approved says
+  the action is allowed but has not started and the requester receives it on its next
+  eligible turn; Denied says nothing was approved; an unknown outcome offers Check
+  whether it saved, which resends the same request key; a conflict (decided, changed or
+  withdrawn meanwhile) records nothing and offers Review current material; a refused
+  send keeps the approval pending and offers Retry approval. Material or a target the
+  read withholds allows Deny only; a withheld action cannot be decided here. An approval
+  decided elsewhere shows its status, read only.
+- Independent holds stay in the decision card's hold lines; approving clears none.
+- The Inbox (`02-inbox-approval`, `33-phone-exact-approval-source-hold`) shows the facts
+  and holds and links here; its drawn description and patch tabs are not built, because
+  approval material is the requester's own JSON.
 
 ### Inbox and filters
 
@@ -2018,11 +2056,8 @@ Interaction notes:
 - On settings pages no primary navigation item is selected. Project configuration
   selects its own project in the sidebar.
 - The account menu (`113-account-menu`) lists Settings (`/app/settings`), Getting
-  started (Show getting started once the card is dismissed, which restores it),
-  Approval and delivery forms and Sign out. Runtime is reached from Settings.
-  Approval and delivery forms opens the legacy coordination index (`/coordination`)
-  as a document load, for approval decisions, delivery settlement, result
-  destinations and assignment messages that the app does not offer.
+  started (Show getting started once the card is dismissed, which restores it)
+  and Sign out. Runtime is reached from Settings.
 - Project names are unique ignoring case. Project setup and project configuration
   refuse a matching name as a field error on the 116 pattern: "Another project is
   named Atlas. Choose a different name." (`116b-project-setup-duplicate-name`).
@@ -2232,7 +2267,7 @@ Production Inbox and shared question response
 06–11, 19, 21 and 27–33 as follows:
 
 - Phone Back is the page header's link ("Back to Inbox"), as frames 10, 21 and 27–30 draw it, not an in-body "Back to queue" button. After a recorded answer the confirmation card's button reads "Back to Inbox". A wide layout has no back control.
-- Approvals show the exact action, target, revision, requester, the independent holds (frames 07 and 33) and the bound-decision statement, with one "Review material & decide" link to the retained `/coordination/task/:id#<interaction>` destination. The page anchors each approval item at `#<interaction>`, and the recorded decision returns to that anchor. The Inbox never approves or denies; an in-app decision would be a new authority surface.
+- Approvals show the exact action, target, revision, requester, the independent holds (frames 07 and 33) and the bound-decision statement, with one "Review material & decide" link to the task's approval review at `/app/tasks/:id?request=<interaction>` ([Approval review](#approval-review)). The Inbox never approves or denies.
 - Evidence stays the existing "Question evidence" and "Task evidence" links; the read has no excerpt field, so frame 27's in-pane excerpt is not drawn. Returning from the task restores the selection, scroll position and the link's focus.
 - A single question's choice cards stay in the reading flow (frame 06 pins them); only the submit area is sticky, inside the one scroll owner `.inbox-detail`, so a pinned option list cannot trap scrolling or cover a field.
 - Queue rows use read-model facts only: the kind, the title (the first question's label or the approval's exact action from the item's `headline`, which is null, and the row falls back to the task title, whenever the exact read would withhold it; two lines at most, the full text on hover), "Project / Task title" as the subtitle (the project alone under a task-title fallback), the action ("Answer question", "Review material & decide", "Inspect execution"; an intervention's reason and action come from its attention code, and only operator-owned codes raise one, so a routing fallback has no Inbox item; a recorded native answer whose delivery is unresolved keeps its question row, "Answer recorded; native delivery remains unresolved", with "View task" rather than an answer action; the generic "Operator answer requested" and "Review exact approval material" reasons are not shown, and only an intervention's or delivery row's reason is) and "Requester · HH:MM · age". Frame 02 draws "Review material & decide" as an approval row title; the row leads with the exact action instead, as the issue's acceptance criterion requires. There are no short identifiers (Q-204, A-201: U3 #837), no "Execution uncertain" versus "Intervention problems" subtype (one "Interventions" option), and no grouped-question title on a phone.
@@ -2240,7 +2275,7 @@ Production Inbox and shared question response
 - Three-pane workbench against frame 02 (composed from the read model, with no new contract): there are no short identifiers (AP-17, A-104, C-104), so the identity line reads "requester · version N · HH:MM" and the Chain row uses assignment names ("Operator → Mira → Jonas"). The request headline is the question's first label or the approval's exact action (`headline` on the Inbox read, withheld exactly when the exact read is), not the task title; the task title and project sit above it. A pending request shows no "Awaiting answer" badge, and the version line, "Conversation revision N.", "Question evidence" and the drafts note sit below the form (on the task page and Overview cards too); below 1280px the "Task evidence" and "Requesting conversation" links follow them, so a phone shows the options on first view. There is no reviewed-material excerpt, tabs or file counts, no "Version N is out of date" note and no approved state: the exact action, target and version facts and the one Review link stand in for them. The kind badge reads "Approval", "Question" or "Intervention" (no "Pending approval" or execution-uncertain subtype in the Inbox read). The breadcrumb stays "Inbox"; the bar statement keeps the existing bound-decision sentence. Grouped questions read in two columns only where the request pane is at least 640px wide (1121–1279px, and from about 1530px with the inspector); at 1366 beside the inspector they are one column. The inspector shows no task state badge or synced-at time, and its Evidence section has the request's "Task evidence" and "Requesting conversation" links, which appear there instead of in the request pane from 1280px.
 - "Recommended by <requester>" appears in the Inbox and on the task page (`/app/tasks/:id?request=`), which passes the requesting assignment's name.
 - Choice labels use the focus ring on `:focus-within`, because WebKit drops `:focus-visible` on a radio after arrow keys.
-- Entry points that apply: Inbox desktop three-pane, tablet two-pane and phone, and the `/app/inbox?task=&request=` deep link (it opens the request pane and the inspector); the shared `QuestionResponse` at `/app/tasks/:id?request=` (it shows the holds an answer does not clear, in the answering wording); Overview question cards, which answer a pending single-choice question through the same shared `QuestionResponse` (other forms link to the Inbox), and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Try again (or the page Refresh); conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
+- Entry points that apply: Inbox desktop three-pane, tablet two-pane and phone, and the `/app/inbox?task=&request=` deep link (it opens the request pane and the inspector); the shared `QuestionResponse` at `/app/tasks/:id?request=` (it shows the holds an answer does not clear, in the answering wording); Overview question cards, which answer a pending single-choice question through the same shared `QuestionResponse` (other forms link to the Inbox), and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Try again (or the page Refresh); conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision in the task's approval review.
 - Runtime item (`02b-inbox-runtime-exhausted`): selected by `/app/inbox?request=runtime%3Acodex` with no `task` parameter, from the "Runtime" request type, the queue or a browser notification (`181`); the Overview card and the phone queue open the same item. Not drawn, same layout: the phone runtime detail (header Back to Inbox, "Runtime · N of M", no Open task), the compact tablet Inbox (`800b-tablet-inbox-question`) and the runtime rows of `179e-phone-runtime` and `180e-tablet-runtime`, which carry the Fix text of `126`. Previous and Next request stay wide-layout tools. The detail has no task-context inspector at any width.
 - Open approvals as holds: every hold surface passes the approval in view and omits only that one. Any other open approval on the task is listed as "Execution held (approval needs a decision)" in the surface's wording. The task-page decision card and inspector already list every open approval as its own row ("Your decision · approval pending", "Approval pending"), so they list that hold only for the other open approvals when `?request=` selects an approval, and none when no approval is selected, rather than repeating every approval as a hold. The Overview approval card and the Inbox approval pane omit their own approval; the Inbox and Overview question footers list every open approval as a hold, since no approval is in view.
 - Hold copy in the approval pane, from the task read's `admission.reasons`; each reads "Approval does not clear it" or "Approving does not clear it":
@@ -2272,7 +2307,7 @@ Production Overview, List and Board
   omitted ([Presentation](#presentation)).
   Approval cards show the exact action, target, version and holds ("Approval does
   not clear it", including any other open approval on the task but not the card's
-  own) and link to the retained destination; they never decide in place.
+  own) and link to the task's approval review; they never decide in place.
   Intervention cards show the lead, recorded reasons and "Ownership stays held"
   rather than the frame's "Last observation", which no read carries.
   The Inbox's intervention detail for an uncertain execution states "Ownership
@@ -2530,8 +2565,8 @@ as follows:
   read withholds it or fails, and "Answer question" to the form on this page,
   as in `20-task-answering-grouped-request`) or an approval ("Your decision ·
   approval pending", exact action, target, revision and material hash, and
-  "Review material & decide" to the coordination view; the page never
-  approves), then pending completion and unresolved result
+  "Review material & decide", which opens the approval review in place of the
+  card), then pending completion and unresolved result
   links, a "Review rejected completion" link for a completion rejected at the
   current task version and "Inspect uncertain execution" for an uncertain execution
   without its hold line, then, once and only while a request is open, the holds it does not clear
@@ -2692,11 +2727,10 @@ Back; the
 composer is reached from the top bar's New task on every route, Overview, List, a
 project's New task, setup's ready check and Getting started, all opening the same `/app/tasks/new` (`?project=` is the
 only deep link). The retained
-`/task/:id`, `/runtime/task/:id` and `/coordination/task/:id` pages are unchanged
-and linked from Execution (`/runtime/task/:id`) and the History tab's Approval and
-delivery forms (`/coordination/task/:id`, which links `/task/:id`), except that
-`/coordination/task/:id` anchors each approval item at `#<interaction>` and returns an
-approval decision to it. No
+`/task/:id` and `/runtime/task/:id` pages are unchanged and linked from Execution
+(`/runtime/task/:id`) and the History tab's Edit task and review source (`/task/:id`).
+The coordination pages are retired; every approval link opens the task's approval
+review. No
 context menu or extension surface applies, and a browser notification never opens the composer. Counterparts: Stop →
 Execution → Resume (retained); Keep running and Escape send nothing; a tab switch
 sends nothing and keeps drafts, and Refresh task only re-reads; Optional

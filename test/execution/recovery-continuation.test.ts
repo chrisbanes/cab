@@ -6,7 +6,6 @@ import { test } from "node:test";
 import { tmpdir } from "../fixtures/temp.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -402,29 +401,6 @@ test("validated recovery requires a new operator message, processes old batch wi
       )?.deliveryState,
       "operator-reconciled",
     );
-    const routes = coordinationOperatorRoutes(
-      service.coordinationView(),
-      service.domain(),
-      (id) => service.routingAvailability(id),
-    );
-    for (const [path, params] of [
-      ["/coordination/task/:taskId", { taskId: f.taskId }],
-      [
-        "/coordination/assignment/:assignmentId",
-        { assignmentId: String(f.old.assignmentId) },
-      ],
-    ] as const) {
-      const route = routes.find((r) => r.method === "GET" && r.path === path);
-      assert.ok(route);
-      const rendered = await route.handler({
-        params,
-        fields: {},
-        csrfToken: "test-token",
-      });
-      assert.equal(rendered.kind, "html");
-      if (rendered.kind === "html")
-        assert.match(rendered.body, /operator-reconciled/);
-    }
     assert.equal(
       (await service.coordinationView().postOperatorMessage(f.message)).eventId,
       fresh.eventId,

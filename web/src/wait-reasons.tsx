@@ -42,8 +42,8 @@ const linkHref = (link: WaitLink, taskId: string | null) =>
   link.kind === "task"
     ? `/app/tasks/${link.id}`
     : link.kind === "request"
-      ? // Request waits are approvals; they are decided in the coordination view, as on task detail.
-        `/coordination/task/${taskId}#${encodeURIComponent(link.id)}`
+      ? // Request waits are approvals; they are decided in the task's request view.
+        `/app/tasks/${taskId}?request=${encodeURIComponent(link.id)}`
       : link.kind === "source"
         ? link.url
         : link.kind === "recovery"

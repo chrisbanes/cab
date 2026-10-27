@@ -1,10 +1,10 @@
 # UI02 foundation contract
 
-The React operator is served at `/app`; `/` and all existing operator forms remain available. One production operator listener serves the built bundle and same-origin `/api/operator` boundary. The boundary delegates durable writes to existing domain and coordination commands. Receipts prove recorded outcomes only. `observedAt` means server capture, never successful provider sync.
+The React operator is served at `/app`; `/` and the retained operator forms remain available (the coordination pages are retired). One production operator listener serves the built bundle and same-origin `/api/operator` boundary. The boundary delegates durable writes to existing domain and coordination commands. Receipts prove recorded outcomes only. `observedAt` means server capture, never successful provider sync.
 
 ## Retained-control inventory
 
-Each semicolon-separated control is individually retained at the listed destination. No removal is authorized until a replacement has equivalent behavior, keyboard/browser evidence and approved parity review (UI07 #745). JSON readiness says whether a curated JSON adapter exists. [UI06 configuration and recovery](ui06-configuration.md) records the individual control dispositions.
+Each semicolon-separated control is individually retained at the listed destination. No removal is authorized until a replacement has equivalent behavior, keyboard/browser evidence and approved parity review (UI07 #745); the coordination task and assignment pages were retired on that basis, and their controls are listed at their task-view destinations. JSON readiness says whether a curated JSON adapter exists. [UI06 configuration and recovery](ui06-configuration.md) records the individual control dispositions.
 
 | Existing destination | Command/action | Controls/read destinations | React surface or retained destination | JSON readiness |
 | --- | --- | --- | --- | --- |
@@ -18,9 +18,9 @@ Each semicolon-separated control is individually retained at the listed destinat
 | /project/:id | github.refresh | refresh observation | Settings | no |
 | /project/:id | github.place | conflicting placement | Settings | no |
 | /project/:id | delivery.configure | completion mode; scoped grants; required checks; set/clear credential reference | Retained exact editor; Settings links it | no |
-| /coordination/task/:id | delivery.read | issue observation; Project field observations; PR identity/head/state; provider feedback; external action states; local task state; delivery holds | Retained coordination task page | no |
-| /coordination/task/:id | /coordination/control/delivery/settle | Accept handback; Settle outcome as closed; task/delivery/policy revisions; repository/PR/node/head guard | Retained coordination task page | no |
-| /coordination/task/:id | /coordination/control/delivery/refresh | refresh delivery observations | Retained coordination task page | yes |
+| /app/tasks/:id | delivery.read | issue observation; Project field observations; PR identity/head/state; provider feedback; external action states; local task state; delivery holds | Task Changes tab | yes |
+| /app/tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard | Task Changes tab | yes |
+| /app/tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
 | /project/:id | task.create | draft; create and start; project-page task form | Task composer (`/app/tasks/new`) | yes |
 | /task/:id | task.configure | local title; outcome; readiness | Retained task page | yes |
 | /task/:id | source.review | source identity; body; status; Project fields; native blockers; review; hold resolution | Retained task page | no |
@@ -31,17 +31,17 @@ Each semicolon-separated control is individually retained at the listed destinat
 | /runtime/task/:id | /runtime/control/stop | stop request and observation | Retained Runtime task page | no |
 | /runtime/task/:id | /runtime/control/resume | explicit resume | Retained Runtime task page | no |
 | /runtime/assignment/:id | read | generation; holds; advanced recovery evidence | Assignment recovery | read subset |
-| /coordination/task/:id | /coordination/control/message | message recipient; exact version; durable message | Task workspace; retained coordination task page | yes |
-| /coordination/task/:id | /coordination/control/result/recipient | unresolved results; destination reconciliation | Retained coordination task page | yes |
-| /coordination/assignment/:id | read | retained captured history; omissions; results | Retained coordination assignment page | yes |
-| /coordination/task/:id | /coordination/control/question/answer | plain question and exact revision answer | Inbox and request view; retained coordination task page | yes |
-| /coordination/task/:id | /coordination/control/approval/decision | retained exact material; approve; deny | Inbox and request view; retained coordination task page | yes |
+| /app/tasks/:id | message | message recipient; exact version; durable message | Task reply card; History tab assignment rows | yes |
+| /app/tasks/:id | result.recipient | unresolved results; destination reconciliation | Task decision card | yes |
+| /app/tasks/:id | read | retained captured history; omissions; results | Task History tab | yes |
+| /app/tasks/:id | question.answer | plain question and exact revision answer | Inbox and task request view | yes |
+| /app/tasks/:id | approval.decide | retained exact material; approve; deny | Task request view | yes |
 | /login | /login | password sign-in | Sign-in | yes |
 | all authenticated views | /logout | sign-out | Account menu | yes |
-| all views | navigation | delivered overview/project List/Board/composer; retained task/profile/assignment/Runtime/Coordination destinations | App shell and retained destinations | curated reads |
+| all views | navigation | delivered overview/project List/Board/composer; retained task/profile/assignment/Runtime destinations | App shell and retained destinations | curated reads |
 | /assignment/:id | read | captured instructions/profile revision and result destination | Retained assignment page | curated subset |
 
-The delivery rows cover the existing delivery controls: the exact policy/authority editor is retained, and the task delivery facts, guarded handback settlement and observation refresh live in the coordination task page. Only observation refresh has a JSON command; policy editing and settlement have no JSON delivery adapter. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
+The delivery rows cover the existing delivery controls: the exact policy/authority editor is retained, and the task delivery facts, guarded handback settlement (`delivery.settle`) and observation refresh (`delivery.refresh`) live in the task's Changes tab. Policy editing has no JSON delivery adapter. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
 
 Advanced authenticated recovery routes have no rendered form or React control. The host operator supplies the reviewed evidence and exact command material under the existing Origin, session and CSRF checks; model tools have no adoption authority. The operator CLI reaches the same service methods through receipted `recovery.*` commands on `/api/operator/commands`; a command key recorded through either entry point replays through the other, and these session routes stay closed to bearer credentials.
 
@@ -77,4 +77,4 @@ Provider timestamps are stored observations; unavailable successful sync/history
 
 ## Client
 
-The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, which links Execution (`/runtime/task/:id`) and, from its History tab, the retained Approval and delivery forms (`/coordination/task/:id`, which links `/task/:id`). The account menu links the retained `/coordination` index. First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.
+The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, which links Execution (`/runtime/task/:id`) and, from its History tab, the retained task page (`/task/:id`, Edit task and review source). First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.

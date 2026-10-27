@@ -11,7 +11,10 @@ import type {
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
+import {
+  OperatorApi,
+  OperatorApiError,
+} from "../../src/standalone/operator-api.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import { StandaloneService } from "../../src/standalone/service.js";
@@ -33,38 +36,6 @@ const runtime: Runtime = {
   onUnexpectedRequest() {},
   onToolCall() {},
 };
-
-test("coordination adapter owns task-scoped read and mutation routes", async (t) => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-operator-coordination-"),
-  );
-  const service = new StandaloneService(join(directory, "data"), () => runtime);
-  t.after(async () => {
-    await service.stop();
-    rmSync(directory, { recursive: true, force: true });
-  });
-  await service.start();
-
-  const routes = coordinationOperatorRoutes(
-    service.coordinationView(),
-    service.domain(),
-    (projectId) => service.routingAvailability(projectId),
-  );
-  assert.deepEqual(
-    routes.map(({ method, path }) => `${method} ${path}`),
-    [
-      "POST /coordination/control/delivery/settle",
-      "POST /coordination/control/delivery/refresh",
-      "GET /coordination",
-      "GET /coordination/task/:taskId",
-      "GET /coordination/assignment/:assignmentId",
-      "POST /coordination/control/message",
-      "POST /coordination/control/question/answer",
-      "POST /coordination/control/approval/decision",
-      "POST /coordination/control/result/recipient",
-    ],
-  );
-});
 
 test("operator status follows a newer queued continuation over completed history", async (t) => {
   const directory = mkdtempSync(
@@ -214,21 +185,9 @@ test("operator status follows a newer queued continuation over completed history
       /Execution status: Queued; waiting for capacity admission\./,
     );
 
-  const coordinationTaskRoute = route(
-    coordinationOperatorRoutes(
-      service.coordinationView(),
-      service.domain(),
-      (projectId) => service.routingAvailability(projectId),
-    ),
-    "GET",
-    "/coordination/task/:taskId",
-  );
-  const coordinationPage = await coordinationTaskRoute.handler({
-    params: { taskId },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(coordinationPage.kind, "html");
+  const taskRead = (
+    await new OperatorApi(service, [directory]).readTask(taskId)
+  ).data;
   assert.deepEqual(
     {
       runtimeShowsCurrentQueue:
@@ -236,32 +195,17 @@ test("operator status follows a newer queued continuation over completed history
         /Current-status lead \(project lead\)<\/a>: Queued; waiting for capacity admission\./.test(
           runtimePage.body,
         ),
-      coordinationShowsCurrentQueue:
-        coordinationPage.kind === "html" &&
-        /execution: Queued; waiting for capacity admission\./.test(
-          coordinationPage.body,
-        ),
+      taskReadShowsCurrentQueue:
+        taskRead.execution.state === "queued" &&
+        taskRead.assignments.find(
+          (candidate) => candidate.assignmentId === String(assignment.id),
+        )?.executionGeneration?.workId === requests[1]?.workId,
     },
-    {
-      runtimeShowsCurrentQueue: true,
-      coordinationShowsCurrentQueue: true,
-    },
+    { runtimeShowsCurrentQueue: true, taskReadShowsCurrentQueue: true },
   );
-  if (coordinationPage.kind === "html")
-    assert.ok(
-      coordinationPage.body.includes(
-        `<a href="/runtime/task/${taskId}">Task-scoped runtime controls and recovery</a>`,
-      ),
-    );
-  if (coordinationPage.kind === "html")
-    assert.ok(
-      coordinationPage.body.includes(
-        `<a href="/task/${taskId}">Edit task and review source</a>`,
-      ),
-    );
 });
 
-test("operator pages retain an active worker turn after applying next-turn revisions", async (t) => {
+test("operator reads retain an active worker turn after applying next-turn revisions", async (t) => {
   const directory = mkdtempSync(
     join(tmpdir(), "ensemble-operator-active-old-version-"),
   );
@@ -435,42 +379,20 @@ test("operator pages retain an active worker turn after applying next-turn revis
     );
   }
 
-  const coordinationRoutes = coordinationOperatorRoutes(
-    service.coordinationView(),
-    service.domain(),
-    (id) => service.routingAvailability(id),
+  const api = new OperatorApi(service, [directory]);
+  const running = (await api.readTask(taskId)).data;
+  const runningWorker = running.assignments.find(
+    (candidate) => candidate.assignmentId === assignmentId,
   );
-  const coordinationTaskPage = await route(
-    coordinationRoutes,
-    "GET",
-    "/coordination/task/:taskId",
-  ).handler({ params: { taskId }, fields: {}, csrfToken: "test-token" });
-  const coordinationAssignmentPage = await route(
-    coordinationRoutes,
-    "GET",
-    "/coordination/assignment/:assignmentId",
-  ).handler({
-    params: { assignmentId },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(coordinationTaskPage.kind, "html");
-  assert.equal(coordinationAssignmentPage.kind, "html");
-  if (coordinationTaskPage.kind === "html")
-    assert.match(
-      coordinationTaskPage.body,
-      /Active-turn worker<\/a> — selected assignment state running; execution: Running\./,
-    );
-  if (coordinationAssignmentPage.kind === "html") {
-    assert.match(
-      coordinationAssignmentPage.body,
-      /Assignment state: running; execution: Running\./,
-    );
-    assert.match(
-      coordinationAssignmentPage.body,
-      /Assignment revision 1; conversation revision [0-9]+; runtime intent running\./,
-    );
-  }
+  assert.equal(running.execution.state, "running");
+  assert.equal(runningWorker?.state, "running");
+  // The active turn stays on the version it started with; the assignment itself moved on.
+  assert.equal(runningWorker?.version, 2);
+  assert.equal(runningWorker?.executionGeneration?.assignmentVersion, 1);
+  assert.equal(
+    runningWorker?.executionGeneration?.workId,
+    activeRequest.workId,
+  );
 
   runtime.complete("operator-turn-1");
   await waitUntil(
@@ -485,27 +407,13 @@ test("operator pages retain an active worker turn after applying next-turn revis
     "GET",
     "/runtime/task/:taskId",
   ).handler({ params: { taskId }, fields: {}, csrfToken: "test-token" });
-  const completedCoordinationTaskPage = await route(
-    coordinationOperatorRoutes(
-      service.coordinationView(),
-      service.domain(),
-      (id) => service.routingAvailability(id),
-    ),
-    "GET",
-    "/coordination/task/:taskId",
-  ).handler({ params: { taskId }, fields: {}, csrfToken: "test-token" });
   assert.equal(completedRuntimeTaskPage.kind, "html");
-  assert.equal(completedCoordinationTaskPage.kind, "html");
   if (completedRuntimeTaskPage.kind === "html")
     assert.doesNotMatch(
       completedRuntimeTaskPage.body,
       /Execution status: Running\./,
     );
-  if (completedCoordinationTaskPage.kind === "html")
-    assert.doesNotMatch(
-      completedCoordinationTaskPage.body,
-      /execution: Running\./,
-    );
+  assert.notEqual((await api.readTask(taskId)).data.execution.state, "running");
 });
 
 function deferred<T>() {
@@ -589,7 +497,7 @@ function command(service: StandaloneService, body: object): unknown {
 }
 
 function route(
-  routes: ReturnType<typeof coordinationOperatorRoutes>,
+  routes: ReturnType<typeof runtimeOperatorRoutes>,
   method: "GET" | "POST",
   path: string,
 ) {
@@ -785,7 +693,7 @@ test("routing availability distinguishes credentials, clients, and project scope
   assert.equal(injectedRequests, 0);
 });
 
-test("coordination histories and keyed controls stay scoped and durable", async (t) => {
+test("coordination reads and keyed commands stay scoped and durable", async (t) => {
   const directory = mkdtempSync(
     join(tmpdir(), "ensemble-operator-coordination-flow-"),
   );
@@ -969,11 +877,11 @@ test("coordination histories and keyed controls stay scoped and durable", async 
       material: { version: "next", marker: "APPROVAL_MATERIAL_SENTINEL" },
     },
   });
-  const view = service.coordinationView();
-  const taskView = view.readTask(taskId);
-  const question = taskView.questions[0];
-  const approval = taskView.approvals[0];
-  assert.ok(question && approval);
+  let api = new OperatorApi(service, [directory]);
+  const taskRead = (await api.readTask(taskId)).data;
+  const question = taskRead.questions[0];
+  const approval = taskRead.approvals[0];
+  assert.ok(question && approval?.action);
   const workerRequest = service
     .turnRequests()
     .find((request) => request.assignmentId === workerAssignment.id);
@@ -999,134 +907,47 @@ test("coordination histories and keyed controls stay scoped and durable", async 
     1,
   );
 
-  const messageKey = randomUUID();
-  const answerKey = randomUUID();
-  const approvalKey = randomUUID();
-  const messageContext = {
-    params: {},
-    fields: {
-      key: messageKey,
-      taskId: otherTaskId,
-      recipientAssignmentId: messageAssignmentId,
-      expectedAssignmentVersion: "1",
-      message: "Please preserve the current interface.",
-    },
-    csrfToken: "test-token",
+  const message = {
+    type: "message" as const,
+    key: randomUUID(),
+    taskId: otherTaskId,
+    recipientAssignmentId: messageAssignmentId,
+    expectedAssignmentVersion: 1,
+    message: "Please preserve the current interface.",
   };
-  const answerContext = {
-    params: {},
-    fields: {
-      key: answerKey,
-      taskId,
-      interactionId: question.interactionId,
-      expectedRevision: String(question.revision),
-      answer: "Use format B.",
-    },
-    csrfToken: "test-token",
+  const answer = {
+    type: "question.answer" as const,
+    key: randomUUID(),
+    taskId,
+    interactionId: question.interactionId,
+    expectedRevision: question.revision,
+    answer: "Use format B.",
   };
-  const approvalContext = {
-    params: {},
-    fields: {
-      key: approvalKey,
-      taskId,
-      interactionId: approval.interactionId,
-      expectedRevision: String(approval.revision),
-      decision: "denied",
-      action: approval.action ?? "",
-      ...(approval.target === null ? {} : { target: approval.target }),
-      materialJson: approval.materialJson ?? "",
-    },
-    csrfToken: "test-token",
+  const decision = {
+    type: "approval.decide" as const,
+    key: randomUUID(),
+    taskId,
+    interactionId: approval.interactionId,
+    expectedRevision: approval.revision,
+    decision: "denied" as const,
+    action: approval.action,
+    ...(approval.target === null ? {} : { target: approval.target }),
+    ...(approval.material === null ? {} : { material: approval.material }),
   };
-  let routes = coordinationOperatorRoutes(
-    service.coordinationView(),
-    service.domain(),
-    (projectId) => service.routingAvailability(projectId),
+  // The task read carries the task's own coordination state and nothing from another task or project.
+  const scoped = JSON.stringify(taskRead);
+  assert.match(scoped, /APPROVAL_MATERIAL_SENTINEL/);
+  assert.doesNotMatch(
+    scoped,
+    /PRIVATE_(?:RUNTIME_PROMPT|ROUTING_CREDENTIAL)_SENTINEL|OTHER_TASK_(?:TITLE|OUTCOME)_SENTINEL|OTHER_PROJECT_ROUTING_GUIDANCE_SENTINEL|Other project candidate/,
   );
-  const getTask = route(routes, "GET", "/coordination/task/:taskId");
-  const page = await getTask.handler({
-    params: { taskId },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(page.kind, "html");
-  if (page.kind === "html") {
-    assert.match(page.body, /Task-scoped lead/);
-    assert.match(page.body, /task-scoped lead history/);
-    assert.match(page.body, /Routing selection is not execution admission/);
-    assert.match(page.body, /Credential reference: configured/);
-    assert.match(page.body, /Routing client: unavailable/);
-    assert.match(
-      page.body,
-      /Effective routing availability: unavailable \(missing client credentials\)/,
-    );
-    assert.match(
-      page.body,
-      /Project routing guidance: PROJECT_ROUTING_GUIDANCE_SENTINEL: prefer implementation skills\./,
-    );
-    assert.match(
-      page.body,
-      /Worker — capabilities: review; TypeScript implementation; eligible routing candidate/,
-    );
-    assert.match(
-      page.body,
-      /Revoked candidate — capabilities: historical review; unavailable: profile revoked/,
-    );
-    assert.match(page.body, /APPROVAL_MATERIAL_SENTINEL/);
-    assert.ok(page.body.includes(`<li id="${approval.interactionId}">`));
-    assert.doesNotMatch(
-      page.body,
-      /PRIVATE_(?:RUNTIME_PROMPT|TASK_OUTCOME|ASSIGNMENT_BRIEF|ROUTING_CREDENTIAL)_SENTINEL|OTHER_TASK_(?:TITLE|OUTCOME)_SENTINEL|OTHER_PROJECT_ROUTING_GUIDANCE_SENTINEL|Other project candidate/,
-    );
-  }
-  const assignmentPage = await route(
-    routes,
-    "GET",
-    "/coordination/assignment/:assignmentId",
-  ).handler({
-    params: { assignmentId: String(workerAssignment.id) },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(assignmentPage.kind, "html");
-  if (assignmentPage.kind === "html") {
-    assert.match(assignmentPage.body, /Scoped coordination task/);
-    assert.match(assignmentPage.body, /Queued|Running/);
-    assert.doesNotMatch(
-      assignmentPage.body,
-      /PRIVATE_ASSIGNMENT_BRIEF_SENTINEL/,
-    );
-  }
 
-  const messageRoute = route(routes, "POST", "/coordination/control/message");
-  const answerRoute = route(
-    routes,
-    "POST",
-    "/coordination/control/question/answer",
-  );
-  const approvalRoute = route(
-    routes,
-    "POST",
-    "/coordination/control/approval/decision",
-  );
-  assert.deepEqual(await messageRoute.handler(messageContext), {
-    kind: "redirect",
-    location: `/coordination/task/${otherTaskId}`,
-  });
-  assert.deepEqual(await messageRoute.handler(messageContext), {
-    kind: "redirect",
-    location: `/coordination/task/${otherTaskId}`,
-  });
+  const messageReceipt = await api.execute(message);
+  assert.deepEqual(await api.execute(message), messageReceipt);
   // Record while the requester remains current. Later completed-assignment
   // acknowledgements below are historical same-key replay, never fresh input.
-  assert.deepEqual(await answerRoute.handler(answerContext), {
-    kind: "redirect",
-    location: `/coordination/task/${taskId}`,
-  });
-  assert.deepEqual(await approvalRoute.handler(approvalContext), {
-    kind: "redirect",
-    location: `/coordination/task/${taskId}#${approval.interactionId}`,
-  });
+  const answerReceipt = await api.execute(answer);
+  const decisionReceipt = await api.execute(decision);
   runtime.complete(leadIntent.turnId);
   await waitUntil(() =>
     service
@@ -1196,53 +1017,23 @@ test("coordination histories and keyed controls stay scoped and durable", async 
   assert.equal(leadReport.success, true, leadReport.text);
   runtime.complete(leadContinuation.turnId);
   await assert.rejects(
-    async () =>
-      answerRoute.handler({
-        ...answerContext,
-        fields: { ...answerContext.fields, key: randomUUID() },
-      }),
-    /stale, cancelled or ambiguous|not open/,
+    api.execute({ ...answer, key: randomUUID() }),
+    (error) => error instanceof OperatorApiError,
   );
-  assert.deepEqual(await answerRoute.handler(answerContext), {
-    kind: "redirect",
-    location: `/coordination/task/${taskId}`,
-  });
-  assert.deepEqual(await answerRoute.handler(answerContext), {
-    kind: "redirect",
-    location: `/coordination/task/${taskId}`,
-  });
-  assert.deepEqual(await approvalRoute.handler(approvalContext), {
-    kind: "redirect",
-    location: `/coordination/task/${taskId}#${approval.interactionId}`,
-  });
-  assert.deepEqual(await approvalRoute.handler(approvalContext), {
-    kind: "redirect",
-    location: `/coordination/task/${taskId}#${approval.interactionId}`,
-  });
-  const unresolved = service.coordinationView().readTask(taskId)
-    .unresolvedResults[0];
-  assert.ok(unresolved);
-  const recipientKey = randomUUID();
-  const recipientContext = {
-    params: {},
-    fields: {
-      key: recipientKey,
-      taskId,
-      resultId: unresolved.resultId,
-      expectedRevision: String(unresolved.revision),
-      recipientAssignmentId: String(leadAssignment.id),
-    },
-    csrfToken: "test-token",
+  assert.deepEqual(await api.execute(answer), answerReceipt);
+  assert.deepEqual(await api.execute(decision), decisionReceipt);
+  const unresolved = (await api.readTask(taskId)).data.unresolvedResults[0];
+  assert.ok(unresolved?.permittedRecipient);
+  const recipient = {
+    type: "result.recipient" as const,
+    key: randomUUID(),
+    taskId,
+    resultId: unresolved.resultId,
+    expectedRevision: unresolved.revision,
+    recipientAssignmentId: unresolved.permittedRecipient.assignmentId,
   };
-  const recipientRoute = route(
-    routes,
-    "POST",
-    "/coordination/control/result/recipient",
-  );
-  assert.deepEqual(await recipientRoute.handler(recipientContext), {
-    kind: "redirect",
-    location: `/coordination/task/${taskId}`,
-  });
+  assert.equal(recipient.recipientAssignmentId, String(leadAssignment.id));
+  const recipientReceipt = await api.execute(recipient);
 
   await service.stop();
   service = new StandaloneService(filename, () => runtime, undefined, {
@@ -1250,44 +1041,14 @@ test("coordination histories and keyed controls stay scoped and durable", async 
     routingClient: null,
   });
   await service.start();
-  routes = coordinationOperatorRoutes(
-    service.coordinationView(),
-    service.domain(),
-    (projectId) => service.routingAvailability(projectId),
-  );
-  assert.deepEqual(
-    await route(routes, "POST", "/coordination/control/message").handler(
-      messageContext,
-    ),
-    { kind: "redirect", location: `/coordination/task/${otherTaskId}` },
-  );
-  assert.deepEqual(
-    await route(
-      routes,
-      "POST",
-      "/coordination/control/question/answer",
-    ).handler(answerContext),
-    { kind: "redirect", location: `/coordination/task/${taskId}` },
-  );
-  assert.deepEqual(
-    await route(
-      routes,
-      "POST",
-      "/coordination/control/approval/decision",
-    ).handler(approvalContext),
-    {
-      kind: "redirect",
-      location: `/coordination/task/${taskId}#${approval.interactionId}`,
-    },
-  );
-  assert.deepEqual(
-    await route(
-      routes,
-      "POST",
-      "/coordination/control/result/recipient",
-    ).handler(recipientContext),
-    { kind: "redirect", location: `/coordination/task/${taskId}` },
-  );
+  api = new OperatorApi(service, [directory]);
+  for (const [saved, receipt] of [
+    [message, messageReceipt],
+    [answer, answerReceipt],
+    [decision, decisionReceipt],
+    [recipient, recipientReceipt],
+  ] as const)
+    assert.deepEqual(await api.execute(saved), receipt, saved.type);
   const finalView = service.coordinationView().readTask(taskId);
   assert.equal(
     finalView.messages.filter((item) => item.eventType === "operator-message")
@@ -1318,24 +1079,12 @@ test("coordination histories and keyed controls stay scoped and durable", async 
       (result) => result.recipientAssignmentId === String(leadAssignment.id),
     ),
   );
-  const otherPage = await route(
-    routes,
-    "GET",
-    "/coordination/task/:taskId",
-  ).handler({
-    params: { taskId: otherTaskId },
-    fields: {},
-    csrfToken: "test-token",
-  });
-  assert.equal(otherPage.kind, "html");
-  if (otherPage.kind === "html") {
-    assert.doesNotMatch(otherPage.body, new RegExp(taskId));
-    assert.doesNotMatch(
-      otherPage.body,
-      /APPROVAL_MATERIAL_SENTINEL|Scoped coordination task/,
-    );
-    assert.match(otherPage.body, /Please preserve the current interface\./);
-  }
+  const otherRead = JSON.stringify((await api.readTask(otherTaskId)).data);
+  assert.doesNotMatch(
+    otherRead,
+    new RegExp(`${taskId}|APPROVAL_MATERIAL_SENTINEL|Scoped coordination task`),
+  );
+  assert.match(otherRead, /Please preserve the current interface\./);
   assert.equal(
     service
       .coordinationView()
