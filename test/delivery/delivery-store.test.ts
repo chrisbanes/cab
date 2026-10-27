@@ -256,11 +256,11 @@ test("agents cannot change readiness labels or fields, and no readiness rule pro
       conversationRevision: 1,
     };
     const target = { repositoryId: "R1", number: 1, nodeId: "I1" };
-    const labels = () =>
+    const labels = (add = ["ready"], remove: string[] = []) =>
       delivery.authorize(
         {
           operationId: randomUUID(),
-          action: { kind: "issue.labels", target, add: ["ready"], remove: [] },
+          action: { kind: "issue.labels", target, add, remove },
         },
         binding,
         false,
@@ -307,6 +307,10 @@ test("agents cannot change readiness labels or fields, and no readiness rule pro
       repositories: [],
     });
     assert.throws(labels, /readiness labels/);
+    // GitHub matches label names case-insensitively, so a case variant is the same label.
+    assert.throws(() => labels(["Ready"]), /readiness labels/);
+    assert.throws(() => labels([], ["READY"]), /readiness labels/);
+    labels(["other"]);
     assert.throws(field, /readiness fields/);
   } finally {
     db.close();
@@ -837,7 +841,8 @@ test("only the publication of a Ready task may write exactly the readiness label
   const label = (
     w: ReturnType<typeof publicationWorld>,
     caller = w.caller as never,
-  ) => w.delivery.authorize({ ...w.create(["ready"]) }, caller, true);
+    names = ["ready"],
+  ) => w.delivery.authorize({ ...w.create(names) }, caller, true);
   const confirmedCreate = (w: ReturnType<typeof publicationWorld>) => {
     w.delivery.prepareAction(w.create([]), w.caller, true);
     w.delivery.beginAttempt(w.publicationId, {});
@@ -861,6 +866,7 @@ test("only the publication of a Ready task may write exactly the readiness label
   const ready = publicationWorld({ ready: true });
   try {
     label(ready);
+    label(ready, undefined, ["Ready"]);
     confirmedCreate(ready);
     ready.delivery.authorize(field(PUB_READY), ready.caller, true);
     // A granted option the rule does not name is not exempt.
@@ -883,6 +889,7 @@ test("only the publication of a Ready task may write exactly the readiness label
   const draft = publicationWorld({ ready: false });
   try {
     assert.throws(() => label(draft), /readiness labels/);
+    assert.throws(() => label(draft, undefined, ["Ready"]), /readiness labels/);
     confirmedCreate(draft);
     assert.throws(
       () => draft.delivery.authorize(field(PUB_READY), draft.caller, true),

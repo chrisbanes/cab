@@ -1090,7 +1090,8 @@ history.
 - **Tools.** The lead may ask questions, request approval, and use external actions of
   kind `issue.comment` and `issue.labels` where the project's grants allow them. The
   service refuses every other coordination tool with a deterministic message. The
-  existing refusal of readiness labels and fields stays the only readiness protection.
+  existing refusal of readiness labels and fields stays the only readiness protection; label names
+  match case-insensitively, as on GitHub.
   An answer to a draft-turn question waits for the next draft turn or for Ready; it
   never starts a turn.
 - **Access.** Codex runs the turn with a per-turn read-only sandbox policy and Claude with
@@ -1766,7 +1767,7 @@ review is the approval in either grant mode, and each step must be exactly one t
 on the repository it recorded and, after the create, only on the issue it created. The create posts
 `{title, body + marker, labels}`; read-back pages the credential user's issues since the record
 was made (not the search index), ignores pull requests and requires exactly one issue whose body
-is the posted body, with the same title and every label, by the credential user. An item add is read
+is the posted body, with the same title and every label (names match case-insensitively), by the credential user. An item add is read
 back from the issue's Project items. Link reads the named issue and requires the marker and the
 exact text. A Ready task's publication is the only non-service caller exempt from the readiness
 refusals, and only for the label or option the rule names.
