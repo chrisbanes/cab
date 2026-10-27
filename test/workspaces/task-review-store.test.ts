@@ -613,6 +613,68 @@ test("upgrade population rolls back missing source and review/index writes then 
   }
 });
 
+test("upgrade population discovers exclusions once per pass and still withholds private text", () => {
+  const f = fixture();
+  try {
+    const record = (summary: string) => {
+      const w = f.work();
+      return f.stores.c.recordResult({
+        threadId: w.threadId,
+        turnId: w.turnId,
+        callId: randomUUID(),
+        tool: "ensemble_report_result",
+        arguments: {
+          summary,
+          review: { decisions: [{ text: "Keep it", attribution: "Lead" }] },
+        },
+      }).result;
+    };
+    const results = [
+      record("PRIVATE INSTRUCTIONS hidden result"),
+      record("First public result"),
+      record("Second public result"),
+    ];
+    f.db.exec(
+      "DELETE FROM task_review_search; DELETE FROM task_review_sources",
+    );
+    const prepare = f.db.prepare.bind(f.db);
+    let discoveries = 0;
+    f.db.prepare = (sql) => {
+      if (
+        sql.includes(
+          "UNION ALL SELECT instructions FROM project_instruction_revisions",
+        )
+      )
+        discoveries++;
+      return prepare(sql);
+    };
+    f.stores.c.migrate();
+    assert.equal(discoveries, 1);
+    assert.equal(f.stores.review.sources(f.taskId).length, 1);
+    for (const r of results) {
+      const rows = f.db
+        .prepare(
+          "SELECT type,excerpt FROM task_review_search WHERE recordId=? OR resultId=? ORDER BY type",
+        )
+        .all(r.resultId, r.resultId);
+      assert.deepEqual(
+        rows.map((row) => row.type),
+        ["decision", "result"],
+      );
+    }
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT excerpt FROM task_review_search WHERE recordId=? AND type='result'",
+        )
+        .get(results[0]!.resultId)?.excerpt,
+      "",
+    );
+  } finally {
+    f.close();
+  }
+});
+
 test("maximum bounded review callback discovers exclusions once and rejects a private later-tail field atomically", () => {
   const f = fixture();
   try {

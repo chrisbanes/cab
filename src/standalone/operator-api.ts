@@ -720,6 +720,8 @@ export class OperatorApi {
     /** Only for dedicated instruction views: `profile:ID`/`project:ID` texts to leave unredacted. */
     disclose: readonly string[] = [],
     base: ExclusionBase = this.exclusionBase(),
+    /** The read's project-level list, returned as is for a task that adds no paths of its own. */
+    prepared?: readonly string[] | undefined,
   ): Promise<readonly string[] | undefined> {
     if (!base) return undefined;
     try {
@@ -766,7 +768,15 @@ export class OperatorApi {
         }
         // Polled reads use the stored binding; identity validation happens at recovery,
         // execution and explicit inspection.
-        values.push(...this.service.taskWorkspaceRedactionPaths(taskId));
+        const paths = this.service.taskWorkspaceRedactionPaths(taskId);
+        if (
+          prepared &&
+          paths.length === 0 &&
+          historyBindings.length === 0 &&
+          disclose.length === 0
+        )
+          return prepared;
+        values.push(...paths);
       }
       const distinct = [...new Set(values.filter(Boolean))];
       if (!withinRedactionLimits(distinct))
@@ -2225,25 +2235,35 @@ export class OperatorApi {
       snapshot = this.workspaceSnapshot(rows.map((t) => String(t.id))),
       base = this.exclusionBase(),
       excluded = await this.exclusions(projectId, undefined, [], [], base);
+    const tasks = [];
+    for (const [i, t] of rows.entries()) {
+      tasks.push({
+        id: String(t.id),
+        projectId,
+        title: this.safe(
+          t.title,
+          await this.exclusions(
+            projectId,
+            String(t.id),
+            [],
+            [],
+            base,
+            excluded,
+          ),
+        ),
+        version: Number(t.version),
+        state: t.state,
+        ready: Boolean(t.ready),
+        execution: this.execution(t),
+        sourceIdentity: this.identity(String(t.id)),
+      });
+      if (i % 20 === 19) await yieldTraversal();
+    }
     const response = {
       data: {
         project: this.project(p, excluded),
         profiles: this.profiles(excluded),
-        tasks: await Promise.all(
-          rows.map(async (t) => ({
-            id: String(t.id),
-            projectId,
-            title: this.safe(
-              t.title,
-              await this.exclusions(projectId, String(t.id), [], [], base),
-            ),
-            version: Number(t.version),
-            state: t.state,
-            ready: Boolean(t.ready),
-            execution: this.execution(t),
-            sourceIdentity: this.identity(String(t.id)),
-          })),
-        ),
+        tasks,
       },
       observedAt: Date.now(),
     };
@@ -2849,19 +2869,19 @@ export class OperatorApi {
       readiness = this.service
         .githubSources()
         .readinessByTask(own.map((t) => t.id));
-    const dependencies = await Promise.all(
-      own.map(async (t) => {
-        const row = d.task(t.id),
-          safe = await this.exclusions(projectId, t.id, [], [], base);
-        return {
-          id: t.id,
-          title: this.safe(row.title, safe),
-          state: row.state,
-          source: this.sourceSummary(t.id, safe, readiness),
-          blocking: d.blocksDependents(t.id),
-        };
-      }),
-    );
+    const dependencies = [];
+    for (const [i, t] of own.entries()) {
+      const row = d.task(t.id),
+        safe = await this.exclusions(projectId, t.id, [], [], base, excluded);
+      dependencies.push({
+        id: t.id,
+        title: this.safe(row.title, safe),
+        state: row.state,
+        source: this.sourceSummary(t.id, safe, readiness),
+        blocking: d.blocksDependents(t.id),
+      });
+      if (i % 20 === 19) await yieldTraversal();
+    }
     this.requireWorkspaceSnapshot(snapshot);
     return composerOptionsSchema.parse({
       data: {

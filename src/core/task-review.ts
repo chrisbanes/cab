@@ -53,6 +53,9 @@ export class TaskReviewStore {
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='github_external_issues'",
       )
       .get();
+    // One discovery for the whole pass: it writes only task_review_* tables, which exclusions() never reads.
+    let shared: ReturnType<TaskReviewStore["snapshot"]> | undefined;
+    const snapshot = () => (shared ??= this.snapshot());
     let cursor = 0;
     for (;;) {
       const rows = this.db
@@ -70,7 +73,13 @@ export class TaskReviewStore {
           const imported = this.db
             .prepare("SELECT 1 FROM github_imported_tasks WHERE taskId=?")
             .get(taskId);
-          if (!imported) this.captureSource(taskId);
+          if (!imported)
+            this.captureSourceWithSnapshot(
+              taskId,
+              "local",
+              undefined,
+              snapshot(),
+            );
           else if (externalAvailable) {
             const observed = this.db
               .prepare(
@@ -78,10 +87,15 @@ export class TaskReviewStore {
               )
               .get(taskId) as Row | undefined;
             if (observed)
-              this.captureSource(taskId, "github", {
-                title: String(observed.observedTitle),
-                body: String(observed.observedBody),
-              });
+              this.captureSourceWithSnapshot(
+                taskId,
+                "github",
+                {
+                  title: String(observed.observedTitle),
+                  body: String(observed.observedBody),
+                },
+                snapshot(),
+              );
           }
         }
         cursor = Number(row.cursor);
@@ -110,7 +124,7 @@ export class TaskReviewStore {
             "task",
             source.sourceId,
             null,
-            `${source.title === null ? "" : (this.safe(source.title) ?? "")}\n${source.body === null ? "" : (this.safe(source.body) ?? "")}`.slice(
+            `${source.title === null ? "" : (this.safe(source.title, snapshot()) ?? "")}\n${source.body === null ? "" : (this.safe(source.body, snapshot()) ?? "")}`.slice(
               0,
               16000,
             ),
@@ -163,13 +177,14 @@ export class TaskReviewStore {
           String(row.resultId),
           String(row.taskId),
           String(row.projectId),
-          this.safe(String(row.summary)) ?? "",
+          this.safe(String(row.summary), snapshot()) ?? "",
           Number(row.createdAt) * 1000,
+          snapshot(),
         );
         this.indexArtifactIdentities(review);
         review.metadata.decisions.forEach((decision, index) => {
-          const attribution = this.safe(decision.attribution),
-            text = this.safe(decision.text);
+          const attribution = this.safe(decision.attribution, snapshot()),
+            text = this.safe(decision.text, snapshot());
           if (attribution === null || text === null) return;
           this.db
             .prepare(
