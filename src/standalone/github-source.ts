@@ -17,6 +17,7 @@ export type {
 import {
   githubApi as api,
   githubFetch,
+  githubGraphqlRateLimitResumeAt,
   githubPages,
   githubRateLimitResumeAt,
   nextPageLink,
@@ -222,7 +223,7 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
     }
   }
 
-  // The synchronizer builds a reader per project per refresh pass, so this caches within one pass only.
+  // The synchronizer builds one reader per credential per refresh pass, so this caches within one pass only.
   private readonly repositories = new Map<
     string,
     z.output<typeof repositorySchema>
@@ -251,14 +252,23 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
     query: string,
     variables: Record<string, unknown>,
   ): Promise<unknown> {
-    const value = (
-      await this.request(`${api}/graphql`, { operationName, query, variables })
-    ).value;
+    const { response, value } = await this.request(`${api}/graphql`, {
+      operationName,
+      query,
+      variables,
+    });
     const envelope = z
       .object({ errors: z.array(z.unknown()).optional() })
       .passthrough()
       .parse(value);
-    if (envelope.errors?.length) throw new Error("invalid-graphql-response");
+    if (envelope.errors?.length) {
+      const resumeAt = githubGraphqlRateLimitResumeAt(
+        response,
+        envelope.errors,
+      );
+      if (resumeAt !== undefined) throw new RateLimitedError(resumeAt);
+      throw new Error("invalid-graphql-response");
+    }
     return value;
   }
 
@@ -349,16 +359,13 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
       if (!owner || !name || extra)
         throw new Error("invalid-repository-reference");
       const repository = await this.repository(owner, name);
-      if (
-        repository.node_id !== reference.repositoryId ||
-        repository.full_name.toLowerCase() !==
-          reference.repositoryName.toLowerCase()
-      )
+      // Identity is the node id: a renamed repository answers under its new name.
+      if (repository.node_id !== reference.repositoryId)
         throw new Error("repository-mismatch");
       const issue = issueSchema.parse(
         (
           await this.request(
-            `${api}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${reference.number}`,
+            `${api}/repos/${repository.full_name.split("/").map(encodeURIComponent).join("/")}/issues/${reference.number}`,
           )
         ).value,
       );

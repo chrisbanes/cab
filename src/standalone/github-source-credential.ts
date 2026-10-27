@@ -100,7 +100,7 @@ export async function gitHubSourceCredentialStatus(
 
 export interface CredentialSourceReaderOptions extends SourceCredentialOptions {
   fetcher?: typeof fetch;
-  /** Injection seam; a fresh delegate receives each public read's resolved token. */
+  /** Injection seam; receives each public read's resolved token and is reused while it is unchanged. */
   reader?: (token: string) => GitHubSourceReader;
 }
 
@@ -146,6 +146,9 @@ export class CredentialGitHubSourceReader implements GitHubSourceReader {
     );
   }
 
+  // The last token's reader: one token is reused, a changed token starts afresh.
+  private cached?: { token: string; reader: GitHubSourceReader };
+
   private async delegate() {
     const resolved = await resolveGitHubSourceCredential(
       this.reference,
@@ -157,13 +160,19 @@ export class CredentialGitHubSourceReader implements GitHubSourceReader {
         ? { reason: "rate-limited" as const }
         : {
             token: resolved.token,
-            reader: this.options.reader
-              ? this.options.reader(resolved.token)
-              : new GitHubHttpSourceReader(
-                  resolved.token,
-                  this.options.fetcher,
-                ),
+            reader: this.readerFor(resolved.token),
           };
+  }
+
+  private readerFor(token: string): GitHubSourceReader {
+    if (this.cached?.token !== token)
+      this.cached = {
+        token,
+        reader: this.options.reader
+          ? this.options.reader(token)
+          : new GitHubHttpSourceReader(token, this.options.fetcher),
+      };
+    return this.cached.reader;
   }
 
   async readSelection(selection: GitHubSelection) {

@@ -13,6 +13,7 @@ import { z } from "zod";
 import {
   githubApi as api,
   githubFetch,
+  githubGraphqlRateLimitResumeAt,
   githubPages,
   githubRateLimitResumeAt,
   nextPageLink,
@@ -266,12 +267,21 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     };
   }
   private async graph(query: string, variables: unknown): Promise<unknown> {
+    const { json, response } = await this.request("/graphql", "POST", {
+      query,
+      variables,
+    });
     const result = z
       .object({ data: z.unknown(), errors: z.array(z.unknown()).optional() })
-      .parse(
-        (await this.request("/graphql", "POST", { query, variables })).json,
-      );
-    if (result.errors?.length) throw new Error("provider-graphql-incomplete");
+      .parse(json);
+    if (result.errors?.length) {
+      // GraphQL reports a rate limit as HTTP 200, but GitHub did not apply the request.
+      const resumeAt = githubGraphqlRateLimitResumeAt(response, result.errors, {
+        typedOnly: true,
+      });
+      if (resumeAt !== undefined) throw new ProviderFailure(429, resumeAt);
+      throw new Error("provider-graphql-incomplete");
+    }
     return result.data;
   }
   private async pages(path: string): Promise<unknown[]> {

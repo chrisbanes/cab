@@ -91,13 +91,20 @@ export class GitHubSynchronizer {
   }
 
   private async perform(): Promise<void> {
+    // One reader per credential for this pass, so its repository lookups are shared.
+    const readers = new Map<string, GitHubSourceReader>();
+    const readerFor = (reference: string) => {
+      const reader = readers.get(reference) ?? this.reader(reference);
+      readers.set(reference, reader);
+      return reader;
+    };
     for (const project of this.domain.projects()) {
       const projectId = String(project.id);
       const config = this.domain.githubConfiguration(projectId);
       const active = new Set(this.domain.githubActiveSelectionIds(projectId));
       const credentialRef = config.credentialRef;
       if (!credentialRef) continue;
-      const reader = this.reader(credentialRef);
+      const reader = readerFor(credentialRef);
       for (const raw of config.selections) {
         if (this.stopped) return;
         const selection = selectionSchema.parse(raw);
@@ -165,7 +172,7 @@ export class GitHubSynchronizer {
       if (this.stopped) return;
       const config = this.domain.githubConfiguration(retained.projectId);
       const credentialRef = config.credentialRef;
-      const reader = credentialRef ? this.reader(credentialRef) : undefined;
+      const reader = credentialRef ? readerFor(credentialRef) : undefined;
       const paused =
         credentialRef && !(reader instanceof CredentialGitHubSourceReader)
           ? this.paused(credentialRef)

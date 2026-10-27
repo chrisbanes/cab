@@ -972,7 +972,16 @@ const idleRuntime = (): Runtime => ({
   },
 });
 
-function addGitHubProject(domain: DomainStore): string {
+function addGitHubProject(
+  domain: DomainStore,
+  selection: object = {
+    id: "repo",
+    kind: "repository",
+    repositoryId: "R_1",
+    owner: "org",
+    name: "repo",
+  },
+): string {
   const projectId = randomUUID();
   const profileId = randomUUID();
   const execute = (command: object) =>
@@ -999,15 +1008,7 @@ function addGitHubProject(domain: DomainStore): string {
     projectId,
     expectedVersion: 1,
     credentialRef: "env:TEST_GITHUB",
-    selections: [
-      {
-        id: "repo",
-        kind: "repository",
-        repositoryId: "R_1",
-        owner: "org",
-        name: "repo",
-      },
-    ],
+    selections: [selection],
     readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
     repositories: [],
   });
@@ -2072,5 +2073,162 @@ test("a first turn waiting for capacity takes revisions changed by a profile edi
   } finally {
     f.release();
     await f.close();
+  }
+});
+
+const json = (body: unknown, init?: ResponseInit) =>
+  new Response(JSON.stringify(body), init);
+
+/** A synchronizer over the real credential reader, with a project and its fetcher. */
+function credentialSync(
+  fetcher: (url: string, init?: RequestInit) => Response,
+  selection?: object,
+) {
+  const db = new DatabaseSync(":memory:");
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const sources = new GitHubSourceStore(db);
+  sources.migrate();
+  const projectId = addGitHubProject(domain, selection);
+  const sync = new GitHubSynchronizer(
+    domain,
+    sources,
+    (ref) =>
+      new CredentialGitHubSourceReader(ref, {
+        environment: { TEST_GITHUB: "token" },
+        fetcher: async (input, init) => fetcher(String(input), init),
+      }),
+  );
+  /** Imports `number` as a blocker of a new local task, outside any selection read. */
+  const addLocalDependent = (nodeId: string, number: number) => {
+    sources.reconcileSelection(projectId, "repo", {
+      complete: true,
+      issues: [{ ...issue, nodeId, number }],
+      reason: null,
+    });
+    const localId = randomUUID();
+    const execute = (command: object) =>
+      domain.execute({
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        ...command,
+      } as never);
+    execute({
+      type: "task.create",
+      taskId: localId,
+      title: `Dependent ${number}`,
+      outcome: "Wait",
+      ready: true,
+    });
+    execute({
+      type: "dependency.add",
+      taskId: localId,
+      blockerTaskId: String(sources.issue(nodeId)?.taskId),
+      expectedVersion: Number(domain.task(localId).version),
+    });
+    return localId;
+  };
+  return { db, domain, sources, sync, projectId, addLocalDependent };
+}
+
+const statusRow = (db: DatabaseSync, nodeId: string) => ({
+  ...db
+    .prepare("SELECT status, reason FROM github_issue_status WHERE nodeId = ?")
+    .get(nodeId),
+});
+
+test("a GraphQL RATE_LIMITED answer pauses the source credential until the reset", async () => {
+  const requests: string[] = [];
+  const { db, sources, sync, projectId } = credentialSync(
+    (url) => {
+      requests.push(url);
+      return json(
+        { errors: [{ type: "RATE_LIMITED", message: "x" }], data: null },
+        {
+          headers: {
+            "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 600),
+          },
+        },
+      );
+    },
+    { id: "repo", kind: "project", projectNodeId: "P_1", filter: "" },
+  );
+  try {
+    await sync.refresh();
+    assert.equal(sources.syncState(projectId, "repo")?.reason, "rate-limited");
+    const fetched = requests.length;
+    assert.ok(fetched > 0);
+    await sync.refresh();
+    assert.equal(requests.length, fetched, "the paused pass fetches nothing");
+  } finally {
+    await sync.stop();
+    db.close();
+  }
+});
+
+test("a blocker outside every selection read keeps its status after its repository is renamed", async () => {
+  const { db, domain, sync, addLocalDependent } = credentialSync((url) => {
+    if (url === "https://api.github.com/repos/org/repo")
+      return new Response(null, {
+        status: 301,
+        headers: { location: "/repositories/1" },
+      });
+    if (url === "https://api.github.com/repositories/1")
+      return json({ node_id: "R_1", full_name: "org/renamed" });
+    if (url === "https://api.github.com/repos/org/renamed/issues/1")
+      return json({
+        node_id: "I_1",
+        number: 1,
+        title: "Imported",
+        body: "Ship",
+        state: "closed",
+        repository_url: "https://api.github.com/repos/org/renamed",
+        labels: [],
+      });
+    // The selection's own listing fails, so nothing refreshes the issue.
+    return new Response("unavailable", { status: 503 });
+  });
+  try {
+    const localId = addLocalDependent("I_1", 1);
+    await sync.refresh();
+    assert.deepEqual(statusRow(db, "I_1"), { status: "closed", reason: null });
+    assert.ok(!domain.admission(localId).reasons.includes("local-dependency"));
+  } finally {
+    await sync.stop();
+    db.close();
+  }
+});
+
+test("one refresh pass looks a repository up once across selection and blocker reads, and the next pass again", async () => {
+  let lookups = 0;
+  const { db, sync, addLocalDependent } = credentialSync((url) => {
+    if (url === "https://api.github.com/repos/org/repo") {
+      lookups++;
+      return json({ node_id: "R_1", full_name: "org/repo" });
+    }
+    const match = /\/issues\/(\d+)$/.exec(url);
+    if (match)
+      return json({
+        node_id: `I_${match[1]}`,
+        number: Number(match[1]),
+        title: "Imported",
+        body: "Ship",
+        state: "open",
+        repository_url: "https://api.github.com/repos/org/repo",
+        labels: [],
+      });
+    return new Response("unavailable", { status: 503 });
+  });
+  try {
+    for (const number of [1, 2, 3]) addLocalDependent(`I_${number}`, number);
+    await sync.refresh();
+    assert.equal(lookups, 1);
+    await sync.refresh();
+    assert.equal(lookups, 2);
+  } finally {
+    await sync.stop();
+    db.close();
   }
 });

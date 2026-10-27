@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   githubApi,
   githubFetch,
+  githubGraphqlRateLimitResumeAt,
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
@@ -146,9 +147,6 @@ const projectFieldsQuery = `query ($project: ID!) {
   }
 }`;
 
-const exhausted = (response: Response) =>
-  response.headers.get("x-ratelimit-remaining") === "0";
-
 export class GitHubDiscoveryReader implements DiscoveryReader {
   constructor(
     private readonly token: string | undefined,
@@ -254,17 +252,7 @@ export class GitHubDiscoveryReader implements DiscoveryReader {
       z.object({ errors: z.array(z.unknown()).optional() }).passthrough(),
     );
     if (raw.errors?.length) {
-      // GraphQL reports an exhausted limit as HTTP 200 with errors.
-      if (
-        exhausted(response) ||
-        raw.errors.some(
-          (e) =>
-            typeof e === "object" &&
-            e !== null &&
-            "type" in e &&
-            e.type === "RATE_LIMITED",
-        )
-      )
+      if (githubGraphqlRateLimitResumeAt(response, raw.errors) !== undefined)
         throw new DiscoveryFailure("rate-limited");
       // A token without Projects access answers with GraphQL errors: degrade only this read.
       throw new DiscoveryFailure("forbidden");
