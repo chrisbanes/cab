@@ -3481,6 +3481,7 @@ export const apiErrorSchema = z
           "body-too-large",
           "conflict",
           "unavailable",
+          "redaction-limit",
           "command-outcome-unknown",
           "local-review-batch-too-large",
           "local-review-recipient-unavailable",

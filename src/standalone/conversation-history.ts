@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  redactionExclusionLimits,
+  withinRedactionLimits,
+} from "../core/redaction-limits.js";
 import { type Database, transaction } from "../core/store.js";
 import type { RuntimeConversationEvent } from "./codex.js";
 
@@ -23,9 +27,6 @@ export interface ConversationHistoryAssignmentRead {
 }
 
 const maxHistoryTextBytes = 64 * 1024;
-const maxExcludedValues = 128;
-const maxExcludedValueLength = 64 * 1024;
-const maxExclusionBytes = 256 * 1024;
 const maxBufferedEvents = 8192;
 const maxBufferedTextBytes = 4 * 1024 * 1024;
 const deltaFlushMs = 1000;
@@ -96,22 +97,18 @@ const preparedExclusions = new WeakMap<
 function validExclusions(
   excludedValues: readonly string[],
 ): string[] | undefined {
-  if (excludedValues.length > maxExcludedValues) return undefined;
-  let totalBytes = 0;
   const values = new Set<string>();
   for (const value of excludedValues) {
     if (
       typeof value !== "string" ||
-      value.length > maxExcludedValueLength ||
-      Buffer.byteLength(value, "utf8") > maxExcludedValueLength
+      value.length > redactionExclusionLimits.valueBytes ||
+      Buffer.byteLength(value, "utf8") > redactionExclusionLimits.valueBytes
     )
       return undefined;
-    if (value.length === 0) continue;
-    totalBytes += Buffer.byteLength(value, "utf8");
-    if (totalBytes > maxExclusionBytes) return undefined;
-    values.add(value);
+    if (value.length > 0) values.add(value);
   }
-  return [...values];
+  const list = [...values];
+  return withinRedactionLimits(list) ? list : undefined;
 }
 
 /**

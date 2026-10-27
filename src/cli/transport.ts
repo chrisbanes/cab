@@ -103,7 +103,7 @@ export class ServiceClient {
       }
       const parsed = apiErrorSchema.safeParse(body);
       const code = parsed.success ? parsed.data.error.code : undefined;
-      if (response.status >= 500 || !code)
+      if ((response.status >= 500 && code !== "redaction-limit") || !code)
         throw new CliError("unavailable", "The service is unavailable.", {
           requestId,
           retryable: response.status >= 500,

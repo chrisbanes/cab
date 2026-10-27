@@ -378,7 +378,8 @@ content conflicts; reusing a UUID in another scope cannot select its receipt.
 Do not store secret request material in a convenience retry log. Nonzero exit
 statuses distinguish invalid input (2), authentication/authorization (3),
 revision/policy conflict (4), unavailability including TLS and redirect rejection
-(5), uncertain outcomes (6) and an unsupported service version or capability (7).
+(5; this includes `redaction-limit`, when the service holds more private material than
+it can redact against), uncertain outcomes (6) and an unsupported service version or capability (7).
 The JSON envelope schema is `ensemble.cli/v1`.
 
 List reads add `pagination: {limit, maxLimit, returned, nextCursor}` to the
