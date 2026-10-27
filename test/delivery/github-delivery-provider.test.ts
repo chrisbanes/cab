@@ -1640,7 +1640,11 @@ test("a lost issue create is confirmed only by exactly one marker issue by the c
 });
 
 /** A fake issue 7 carrying `labels`, answering each per-label DELETE with `deleteStatus` and recording writes. */
-function labelsFixture(labels: string[], deleteStatus: number) {
+function labelsFixture(
+  labels: string[],
+  deleteStatus: number,
+  issueStatus = 200,
+) {
   const writes: string[] = [];
   const provider = new GitHubHttpDeliveryProvider(
     "fixture-marker",
@@ -1655,6 +1659,8 @@ function labelsFixture(labels: string[], deleteStatus: number) {
       if (method === "DELETE")
         return new Response(null, { status: deleteStatus });
       if (method === "POST") return Response.json([]);
+      if (issueStatus !== 200)
+        return new Response(null, { status: issueStatus });
       return Response.json({
         node_id: "I7",
         number: 7,
@@ -1705,6 +1711,10 @@ test("removing a label the issue does not carry still sends the add", async () =
   assert.deepEqual(failed.writes, [
     "DELETE /repos/org/repo/issues/7/labels/needs-triage",
   ]);
+  // A 404 because the issue is gone proves nothing: the readback cannot confirm it.
+  const gone = labelsFixture([], 404, 404);
+  const record = gone.record([], ["needs-triage"]);
+  assert.equal((await gone.provider.inspectAction(record)).state, "uncertain");
 });
 
 test("a label change is read back by case-insensitive label name", async () => {
