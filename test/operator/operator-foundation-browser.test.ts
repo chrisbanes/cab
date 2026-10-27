@@ -290,7 +290,7 @@ test("Nova primitives keep 32px controls, the documented radii and tinted destru
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await page.goto(`${web.origin}/app/tasks?view=board`);
+  await page.goto(`${web.origin}/app/tasks?view=board&ready=any`);
   await page.getByLabel("Password", { exact: true }).fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator('[data-slot="card"]').first().waitFor();

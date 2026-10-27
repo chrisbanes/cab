@@ -10,6 +10,7 @@ import {
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { rememberAnyReadiness } from "../fixtures/operator-work.js";
 import {
   leadAwaitingRecoveryNotice,
   leadResumeNotice,
@@ -461,6 +462,7 @@ async function holdSaves(page: Page, count = 1) {
 
 /** Leaves the task and opens it again through a new navigation entry. */
 async function reopenTask(page: Page) {
+  await rememberAnyReadiness(page);
   await page.getByRole("link", { name: "Tasks", exact: true }).first().click();
   await page.getByRole("link", { name: "Review exact lines" }).first().click();
 }

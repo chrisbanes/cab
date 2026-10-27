@@ -59,6 +59,19 @@
   order: 3;
 }
 
+/* Reset filters sits on the More filters line, so it never crowds the toolbar row. */
+.work-more-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.work-more {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .work-more > summary {
   display: inline-block;
   cursor: pointer;

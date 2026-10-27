@@ -517,7 +517,7 @@ export function CompletedPanel({
       </ul>
       <a
         className="control work-link"
-        href={`/app/tasks?state=Done${project ? `&project=${project}` : ""}`}
+        href={`/app/tasks?state=Done&ready=any${project ? `&project=${project}` : ""}`}
       >
         View completed <ArrowRight aria-hidden="true" />
       </a>

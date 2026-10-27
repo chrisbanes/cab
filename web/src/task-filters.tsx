@@ -4,7 +4,7 @@ import { workspaceLabels } from "../../src/operator/project-labels.js";
 import { Button } from "./components.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
-import { columns, type TaskFilters } from "./tasks.js";
+import { activeFilterCount, columns, type TaskFilters } from "./tasks.js";
 
 /** One row: heading, List/Board switch, inline Project and State dropdowns, count, refresh. */
 export function TaskToolbar({
@@ -14,6 +14,9 @@ export function TaskToolbar({
   projectId,
   overview,
   count,
+  total,
+  loaded,
+  reset,
   refresh,
   pending,
   phone = false,
@@ -25,6 +28,11 @@ export function TaskToolbar({
   projectId: string | undefined;
   overview: boolean;
   count: number;
+  /** Tasks in scope before any filter, so "no tasks" and "no matches" read differently. */
+  total: number;
+  /** The task list has been read, so a zero total is real. */
+  loaded: boolean;
+  reset: () => void;
   refresh: () => void;
   pending: boolean;
   /** ≤759px: the selects group up front, in the order they appear, and the Board can lend a chip slot. */
@@ -33,7 +41,12 @@ export function TaskToolbar({
   columnsSlot?: ((element: HTMLElement | null) => void) | undefined;
 }) {
   const labels = workspaceLabels(workspace);
-  const hasMore = Boolean(filters.q || filters.source || filters.ready);
+  const hiddenActive = activeFilterCount({
+    ...filters,
+    project: "",
+    state: "",
+  });
+  const hasMore = hiddenActive > 0;
   const [open, setOpen] = useState(hasMore);
   const switchView = (
     <div className="work-switch" role="toolbar" aria-label="Task presentation">
@@ -84,8 +97,17 @@ export function TaskToolbar({
   );
   const countLine = !overview && (
     <p className="metadata muted work-count">
-      {count} task{count === 1 ? "" : "s"}
+      {loaded && total === 0
+        ? "No tasks"
+        : loaded && count === 0
+          ? "No tasks match these filters"
+          : `${count} task${count === 1 ? "" : "s"}`}
     </p>
+  );
+  const resetButton = activeFilterCount(filters, projectId) > 0 && (
+    <Button variant="secondary" className="work-reset" onClick={reset}>
+      Reset filters
+    </Button>
   );
   const refreshButton = (
     <Button
@@ -133,50 +155,57 @@ export function TaskToolbar({
           </>
         )}
       </div>
-      <details
-        className="work-more"
-        open={open}
-        onToggle={(e) => setOpen(e.currentTarget.open)}
-      >
-        <summary className="metadata muted">More filters</summary>
-        <div className="work-more-fields">
-          <label className="field body" htmlFor="task-search">
-            Filter tasks
-            <Input
-              id="task-search"
-              value={filters.q}
-              maxLength={512}
-              onChange={(e) => update({ q: e.target.value })}
-            />
-          </label>
-          <label className="field body" htmlFor="task-source">
-            Source
-            <NativeSelect
-              id="task-source"
-              aria-label="Source"
-              value={filters.source}
-              onChange={(e) => update({ source: e.target.value })}
-            >
-              <option value="">All sources</option>
-              <option value="local">Local</option>
-              <option value="github">GitHub</option>
-            </NativeSelect>
-          </label>
-          <label className="field body" htmlFor="task-ready">
-            Readiness
-            <NativeSelect
-              id="task-ready"
-              aria-label="Readiness"
-              value={filters.ready}
-              onChange={(e) => update({ ready: e.target.value })}
-            >
-              <option value="">Any readiness</option>
-              <option value="yes">Ready</option>
-              <option value="no">Not Ready</option>
-            </NativeSelect>
-          </label>
-        </div>
-      </details>
+      <div className="work-more-row">
+        <details
+          className="work-more"
+          open={open}
+          onToggle={(e) => setOpen(e.currentTarget.open)}
+        >
+          <summary className="metadata muted">
+            More filters{hiddenActive > 0 && ` · ${hiddenActive} active`}
+          </summary>
+          <div className="work-more-fields">
+            <label className="field body" htmlFor="task-search">
+              Filter tasks
+              <Input
+                id="task-search"
+                value={filters.q}
+                maxLength={512}
+                onChange={(e) => update({ q: e.target.value })}
+              />
+            </label>
+            <label className="field body" htmlFor="task-source">
+              Source
+              <NativeSelect
+                id="task-source"
+                aria-label="Source"
+                value={filters.source}
+                onChange={(e) => update({ source: e.target.value })}
+              >
+                <option value="">All sources</option>
+                <option value="local">Local</option>
+                <option value="github">GitHub</option>
+              </NativeSelect>
+            </label>
+            <label className="field body" htmlFor="task-ready">
+              Readiness
+              <NativeSelect
+                id="task-ready"
+                aria-label="Readiness"
+                value={filters.ready}
+                onChange={(e) =>
+                  update({ ready: e.target.value as TaskFilters["ready"] })
+                }
+              >
+                <option value="yes">Ready</option>
+                <option value="no">Not Ready</option>
+                <option value="any">Any readiness</option>
+              </NativeSelect>
+            </label>
+          </div>
+        </details>
+        {resetButton}
+      </div>
     </div>
   );
 }

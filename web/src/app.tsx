@@ -776,7 +776,17 @@ export function App() {
       taskRefresh.current();
     }
   }, [pathname, navigationVersion]);
-  const navigate = (next: string) => {
+  const navigate = (next: string, options?: { replace?: boolean }) => {
+    if (options?.replace) {
+      // The entry keeps its identity: only its URL, and the stamp that claims it, change.
+      history.replaceState(
+        { ...history.state, entryUrl: absoluteUrl(next) },
+        "",
+        next,
+      );
+      setPath(next);
+      return;
+    }
     history.replaceState({ ...history.state, scrollY }, "");
     pushAppEntry(next, navigationScope.current);
     setPath(next);

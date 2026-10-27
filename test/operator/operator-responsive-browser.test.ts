@@ -136,12 +136,13 @@ async function runResponsiveBrowserJourney(
     });
   const web = await journey.start("fixture.web", () => f.startWeb());
   const routes = {
-    overview: "/app",
-    tasks: "/app/tasks",
-    board: "/app/tasks?view=board",
+    overview: "/app?ready=any",
+    tasks: "/app/tasks?ready=any",
+    board: "/app/tasks?view=board&ready=any",
+    // The seeded tasks are not Ready, so task views ask for Any readiness.
     // The default Board opens the empty Ready column; the first-viewport check needs a card.
-    boardpaused: "/app/tasks?view=board&state=Paused",
-    project: `/app/projects/${question.projectId}`,
+    boardpaused: "/app/tasks?view=board&state=Paused&ready=any",
+    project: `/app/projects/${question.projectId}?ready=any`,
     inbox: "/app/inbox",
     question: `/app/tasks/${question.taskId}?request=${question.interactionId}`,
     approval: `/app/tasks/${approval.taskId}`,
