@@ -305,7 +305,8 @@ test("instruction views fail closed without exclusions and fence concurrent revi
   // 3. Without computable exclusions no text is shown.
   const unavailable = new OperatorApi(
     s.f.service,
-    Array.from({ length: 129 }, (_, i) => `synthetic-path-${i}`),
+    // A value past the per-value size bound makes redaction genuinely unavailable.
+    ["x".repeat(64 * 1024 + 1)],
   );
   const profile = await unavailable.readProfileInstructions(
     seed.profileId,

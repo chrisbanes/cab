@@ -7,8 +7,15 @@ import {
 } from "../../src/operator/readiness-text.js";
 
 const label = (name: string) => ({ kind: "label" as const, name });
-const field = {
-  kind: "project-field" as const,
+const field: {
+  kind: "project-field";
+  projectNodeId: string;
+  fieldNodeId: string;
+  optionNodeId: string;
+  fieldName?: string;
+  optionName?: string;
+} = {
+  kind: "project-field",
   projectNodeId: "P_1",
   fieldNodeId: "F_1",
   optionNodeId: "O_1",
@@ -120,4 +127,19 @@ test("unmet reasons name the missing conditions and stay silent otherwise", () =
     null,
   );
   assert.equal(unmetReason(undefined), null);
+});
+
+test("a Project field condition reads by its names, falling back to the node ID each lacks", () => {
+  const named = { ...field, fieldName: "Status", optionName: "Ready" };
+  assert.equal(
+    unmetReason({ rule: rule("all", named), outcome: "unmet", unmet: [named] }),
+    "Not Ready: missing Status = Ready",
+  );
+  assert.equal(
+    selectionCountsText(
+      counts({ closedSkipped: 0 }),
+      rule("all", { ...field, fieldName: "Status" }),
+    ),
+    "149 observed · 9 open · 0 match Status = O_1",
+  );
 });

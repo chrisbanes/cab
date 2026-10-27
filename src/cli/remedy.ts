@@ -104,6 +104,8 @@ export const DEFAULT_FIX: Record<string, string> = {
   "cursor-stale":
     "Repeat the command without --cursor to restart from the first page.",
   unavailable: `Check that the service is running and reachable, then retry (${LIST}).`,
+  "redaction-limit":
+    "The service holds more private material than it can redact against; ask its operator to reduce it. Retrying will not help.",
   "integrity-mismatch": "Retry the download; do not use any partial output.",
   "tls-verification-failed":
     "Point NODE_EXTRA_CA_CERTS at the service's CA certificate (a PEM file), then retry.",

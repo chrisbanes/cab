@@ -2030,7 +2030,8 @@ test("history supplements captured privacy with external auth and GitHub values 
   assert.equal(read.data.turnOmissions[0]?.reason, "early-buffer-limit");
   const unavailable = await new OperatorApi(
     f.service,
-    Array.from({ length: 129 }, (_, i) => `synthetic-path-${i}`),
+    // A value past the per-value size bound makes redaction genuinely unavailable.
+    ["x".repeat(64 * 1024 + 1)],
   ).readAssignmentHistory(String(a.id));
   assert.equal(
     unavailable.data.items.find((i) => i.itemId === "private-history")

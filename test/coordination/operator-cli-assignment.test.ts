@@ -229,7 +229,8 @@ test("instruction revisions, bound-versus-current comparison and history browse 
 test("instruction views report unavailable redaction and refuse managed or expired use", async (t) => {
   const { s, seed, h } = await setup(
     t,
-    Array.from({ length: 129 }, (_, i) => `synthetic-path-${i}`),
+    // A value past the per-value size bound makes redaction genuinely unavailable.
+    ["x".repeat(64 * 1024 + 1)],
   );
   const r = await h.run([
     "profile",

@@ -20,6 +20,10 @@ import type {
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
 import { isOperatorDeliveryCaller, materialDigest } from "../core/delivery.js";
+import {
+  redactionExclusionLimits,
+  withinRedactionLimits,
+} from "../core/redaction-limits.js";
 import { StatusMappingRefusal } from "../core/status-mapping.js";
 import type { StatusMapping } from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
@@ -58,6 +62,7 @@ import {
 } from "../operator/runtime-restart-copy.js";
 import type { StructuredQuestionSet } from "../core/structured-questions.js";
 import type { Readiness } from "../core/github-source-contracts.js";
+import type { ProjectFieldIds } from "../core/project-field-names.js";
 import type { TaskReadiness } from "../core/github-source.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
@@ -119,6 +124,7 @@ import {
   taskRecordQuerySchema,
   taskResultPageSchema,
   taskSchema,
+  textMaxLength,
   unsupportedRuntimeField,
   uuid,
   workIdSchema,
@@ -383,6 +389,7 @@ export class OperatorApiError extends Error {
       | "forbidden"
       | "conflict"
       | "unavailable"
+      | "redaction-limit"
       | "unauthenticated"
       | "command-outcome-unknown"
       | "local-review-batch-too-large"
@@ -637,7 +644,8 @@ export class OperatorApi {
   }
   /**
    * One read's global exclusion inputs: instruction revisions tagged for dedicated
-   * disclosure, credentials and repository paths, read once and null past a bound.
+   * disclosure, credentials and repository paths, read once; null when redaction is
+   * unavailable and `redaction-limit` past the installation bound.
    * Pass it to every `exclusions` call of the read; post-await fences stay live.
    */
   private exclusionBase(): ExclusionBase {
@@ -655,12 +663,12 @@ export class OperatorApi {
       add(...this.service.gitHubCredentialExclusions().redactions);
       if (claude) add(...claudeTokenExclusions(claude).redactions);
       // Bound retained-revision lookups before iterating persisted counters.
-      let remaining = 128;
-      if (profiles.length + projects.length > remaining) return null;
+      let remaining: number = redactionExclusionLimits.values;
       for (const profile of profiles) {
         const count = Number(profile.version);
-        if (!Number.isSafeInteger(count) || count < 1 || count > remaining)
-          return null;
+        if (!Number.isSafeInteger(count) || count < 1) return null;
+        if (count > remaining)
+          throw new OperatorApiError(503, "redaction-limit");
         remaining -= count;
         for (let revision = 1; revision <= count; revision++) {
           values.push([
@@ -675,8 +683,9 @@ export class OperatorApi {
       for (const project of projects) {
         const id = String(project.id),
           count = Number(project.instructionsRevision);
-        if (!Number.isSafeInteger(count) || count < 1 || count > remaining)
-          return null;
+        if (!Number.isSafeInteger(count) || count < 1) return null;
+        if (count > remaining)
+          throw new OperatorApiError(503, "redaction-limit");
         remaining -= count;
         for (let revision = 1; revision <= count; revision++) {
           values.push([`project:${id}`, d.instructionRevision(id, revision)]);
@@ -698,7 +707,8 @@ export class OperatorApi {
           add(repo.path, repo.gitCommonDirectory);
       }
       return { values, covered };
-    } catch {
+    } catch (error) {
+      if (error instanceof OperatorApiError) throw error;
       return null;
     }
   }
@@ -758,8 +768,12 @@ export class OperatorApi {
         // execution and explicit inspection.
         values.push(...this.service.taskWorkspaceRedactionPaths(taskId));
       }
-      return prepareExclusions([...new Set(values.filter(Boolean))]);
-    } catch {
+      const distinct = [...new Set(values.filter(Boolean))];
+      if (!withinRedactionLimits(distinct))
+        throw new OperatorApiError(503, "redaction-limit");
+      return prepareExclusions(distinct);
+    } catch (error) {
+      if (error instanceof OperatorApiError) throw error;
       return undefined;
     }
   }
@@ -2141,6 +2155,7 @@ export class OperatorApi {
         if (
           !(error instanceof OperatorApiError) ||
           error.status !== 503 ||
+          error.code === "redaction-limit" ||
           fence === this.exclusionFence()
         )
           throw error;
@@ -2557,7 +2572,23 @@ export class OperatorApi {
     if (rule === null) return { kind: "none" as const };
     if (this.exact(JSON.stringify(rule), excluded) === null)
       return { kind: "unavailable" as const };
-    return { kind: "rule" as const, ...rule };
+    return {
+      kind: "rule" as const,
+      ...rule,
+      conditions: this.fieldNames(rule.conditions, excluded),
+    };
+  }
+  /** Node-ID conditions or field values with each stored name the exclusions leave whole. */
+  private fieldNames<T extends ProjectFieldIds>(
+    items: readonly T[],
+    excluded: readonly string[] | undefined,
+  ) {
+    return this.service
+      .githubSources()
+      .withFieldNames(
+        items,
+        (name) => this.exact(name, excluded, textMaxLength) !== null,
+      );
   }
   private taskReadiness(
     projectId: () => string,
@@ -2575,7 +2606,11 @@ export class OperatorApi {
       );
     return rule.kind === "unavailable" || !result
       ? { rule, outcome: "not-evaluated" as const, unmet: [] }
-      : { rule, outcome: result.outcome, unmet: result.unmet };
+      : {
+          rule,
+          outcome: result.outcome,
+          unmet: this.fieldNames(result.unmet, excluded),
+        };
   }
   private async taskSummary(
     taskId: string,
@@ -4344,7 +4379,7 @@ export class OperatorApi {
             .parse(JSON.parse(String(m.projectFields)));
           return {
             selectionId: String(m.selectionId),
-            projectFields: fields,
+            projectFields: this.fieldNames(fields, excluded),
             sync: {
               lastAttemptAt: sync ? String(sync.refreshedAt) : null,
               lastSuccessfulAt:
@@ -4539,7 +4574,7 @@ export class OperatorApi {
               ? publicationTargetReasonSentences[t.reasonCode]
               : null,
             labels: t.labels.map((l) => this.safe(l, excluded)),
-            projectFields: t.projectFields,
+            projectFields: this.fieldNames(t.projectFields, excluded),
             predictedSelected: t.predictedSelected,
             predictedReady: t.predictedReady,
           }))
@@ -4597,7 +4632,7 @@ export class OperatorApi {
       selectionKind: review.target.kind,
       ...text,
       labels: review.issue.labels.map((l) => this.safe(l, excluded)),
-      projectFields: review.target.projectFields,
+      projectFields: this.fieldNames(review.target.projectFields, excluded),
       addsToProject: review.item !== null,
       predictedSelected: true,
       predictedReady: review.target.predictedReady,
@@ -5121,7 +5156,10 @@ export class OperatorApi {
           href: `/app/tasks/${taskId}?section=${row.type === "task" ? "brief" : "review"}&record=${encodeURIComponent(String(row.recordId))}${resultId ? `&result=${resultId}` : ""}${sourceId ? `&source=${sourceId}` : ""}`,
         });
       } catch (error) {
-        if (error instanceof OperatorApiError) {
+        if (
+          error instanceof OperatorApiError &&
+          error.code !== "redaction-limit"
+        ) {
           omittedCount++;
           continue;
         }
@@ -5900,7 +5938,25 @@ export class OperatorApi {
               this.service.githubSources().readinessRule(projectId),
               excluded,
             ),
-            counted = this.service.githubSources().selectionCounts(projectId);
+            counted = this.service.githubSources().selectionCounts(projectId),
+            fieldCounts = this.service
+              .githubSources()
+              .selectionFieldCounts(projectId);
+          // A name the exclusions withhold reads as its node ID.
+          const shown = (name: string, id: string) =>
+            this.exact(name, excluded, textMaxLength) ?? id;
+          const named = (f: ReturnType<typeof fieldCounts.get>) =>
+            f && {
+              projectNodeId: f.projectNodeId,
+              fields: f.fields.map((field) => ({
+                ...field,
+                name: shown(field.name, field.fieldNodeId),
+                options: field.options.map((o) => ({
+                  ...o,
+                  name: shown(o.name, o.optionNodeId),
+                })),
+              })),
+            };
           return {
             projectId,
             credential,
@@ -5937,6 +5993,7 @@ export class OperatorApi {
                   matching:
                     readiness.kind === "unavailable" ? null : counts.matching,
                 },
+                projectFields: (counts && named(fieldCounts.get(s.id))) ?? null,
               };
             }),
           };

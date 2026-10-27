@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { ExecutionState } from "../../src/standalone/state.js";
 import type { TaskListSummary } from "../../src/operator/contracts.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
+import {
+  OperatorApi,
+  OperatorApiError,
+} from "../../src/standalone/operator-api.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { uniqueProjectName } from "../fixtures/project-names.js";
 
@@ -476,12 +479,33 @@ test("task catalog and options fail explicitly above ten thousand identities rat
         e instanceof Error && "code" in e && e.code === "unavailable",
     );
 });
-test("catalog privacy fails closed when the global retained-revision lookup budget is exhausted", async (t) => {
+test("task titles stay readable with about 40 projects and repeated profile edits, and retained revisions stay redacted", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const ids = await projectFixture(f),
     d = f.service.domain(),
-    taskId = createTask(f, ids.projectId, "Private-budget title");
+    taskId = createTask(f, ids.projectId, "Private-budget title"),
+    leaked = createTask(f, ids.projectId, "Mentions retained secret 7");
+  for (let n = 0; n < 40; n++) {
+    const project = n === 0 ? ids : await projectFixture(f);
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "UPDATE project_github_sources SET version=version+1, repositories=? WHERE projectId=?",
+        )
+        .run(
+          JSON.stringify([
+            {
+              repositoryId: `R-${n}`,
+              path: `/fixture/linked-${n}`,
+              ref: "main",
+              gitCommonDirectory: `/fixture/linked-${n}/.git`,
+            },
+          ]),
+          project.projectId,
+        ),
+    );
+  }
   for (let version = 1; version < 129; version++)
     d.execute({
       type: "profile.configure",
@@ -492,18 +516,46 @@ test("catalog privacy fails closed when the global retained-revision lookup budg
       instructions: `retained secret ${version}`,
     });
   const api = new OperatorApi(f.service, [f.directory]),
-    task = (await api.readTaskListPage()).data.tasks.find(
-      (t) => t.id === taskId,
-    );
+    tasks = (await api.readTaskListPage()).data.tasks,
+    task = tasks.find((t) => t.id === taskId);
   assert.ok(task);
-  assert.equal(task.title, null);
-  assert.equal(task.project.name, null);
-  assert.equal(task.lead?.name, null);
-  assert.equal(task.lead?.profileId, ids.profileId);
-  assert.equal(task.state, "open");
+  assert.equal(task.title, "Private-budget title");
+  assert.notEqual(task.project.name, null);
+  assert.notEqual(task.lead?.name, null);
+  assert.equal(
+    tasks.find((t) => t.id === leaked)?.title,
+    "Mentions [redacted]",
+  );
   const options = await api.readComposerOptions(ids.projectId);
-  assert.equal(options.data.profiles[0]?.name, null);
-  assert.equal(options.data.dependencies[0]?.title, null);
+  assert.notEqual(options.data.profiles[0]?.name, null);
+});
+test("reads fail with redaction-limit past the installation bound instead of withholding prose", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await projectFixture(f),
+    d = f.service.domain();
+  createTask(f, ids.projectId, "Bounded title");
+  for (let version = 1; version <= 360; version++)
+    d.execute({
+      type: "profile.configure",
+      key: randomUUID(),
+      actor: "operator",
+      profileId: ids.profileId,
+      expectedVersion: version,
+      instructions: `${"界".repeat(15990)}${version}`,
+    });
+  const api = new OperatorApi(f.service, [f.directory]);
+  for (const read of [
+    () => api.readTaskListPage(),
+    () => api.readComposerOptions(ids.projectId),
+  ])
+    await assert.rejects(
+      read(),
+      (e: unknown) =>
+        e instanceof OperatorApiError &&
+        e.code === "redaction-limit" &&
+        e.status === 503,
+    );
 });
 test("a complete aggregate rejects the maximum-page breach and malformed pages and obeys resource cancellation", async (t) => {
   const f = await createOperatorFixture();

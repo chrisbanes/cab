@@ -88,8 +88,14 @@ function textarea(name: string, value = ""): string {
 }
 
 /** The stored rule as the shared readiness text reads it; this page shows the whole rule. */
-const ruleView = (rule: Readiness | null) =>
-  rule ? { kind: "rule" as const, ...rule } : { kind: "none" as const };
+const ruleView = (rule: Readiness | null, sources?: GitHubSourceStore) =>
+  rule
+    ? {
+        kind: "rule" as const,
+        ...rule,
+        conditions: sources?.withFieldNames(rule.conditions) ?? rule.conditions,
+      }
+    : { kind: "none" as const };
 
 const closureText = (closure: "held" | "completed" | "unattributed" | null) =>
   closure === "held"
@@ -233,7 +239,10 @@ export class LocalOperatorUi {
     const activeGithub = new Set(
       this.store.githubActiveSelectionIds(projectId),
     );
-    const rule = ruleView(this.githubSources?.readinessRule(projectId) ?? null),
+    const rule = ruleView(
+        this.githubSources?.readinessRule(projectId) ?? null,
+        this.githubSources,
+      ),
       counted = this.githubSources?.selectionCounts(projectId);
     const previewForms = github.selections
       .map((raw) => {
@@ -344,7 +353,7 @@ export class LocalOperatorUi {
         ),
       undefined,
       csrfToken,
-    )}<h2 id="github-source-credential">GitHub source</h2><p>Credential: ${credential?.source === "gh" ? "GitHub CLI" : credential?.source === "env" ? "environment variable" : github.credentialRef ? "configured" : "not configured"}. ${credential ? (credential.usable ? "Usable." : escapeHtml(sourceCredentialExplanation(credential.reason ?? "missing-credential"))) : ""} ${credential?.gh.state === "signed-in" ? `Detected GitHub CLI account @${escapeHtml(credential.gh.login)}.` : ""} Selections require preview before activation at the current source version.</p><p>${github.readiness ? `Readiness rule: ${escapeHtml(ruleText({ kind: "rule", ...github.readiness }))}. Set readiness to null to remove it.` : noRuleText}</p>${form(
+    )}<h2 id="github-source-credential">GitHub source</h2><p>Credential: ${credential?.source === "gh" ? "GitHub CLI" : credential?.source === "env" ? "environment variable" : github.credentialRef ? "configured" : "not configured"}. ${credential ? (credential.usable ? "Usable." : escapeHtml(sourceCredentialExplanation(credential.reason ?? "missing-credential"))) : ""} ${credential?.gh.state === "signed-in" ? `Detected GitHub CLI account @${escapeHtml(credential.gh.login)}.` : ""} Selections require preview before activation at the current source version.</p><p>${github.readiness ? `Readiness rule: ${escapeHtml(ruleText(ruleView(github.readiness, this.githubSources)))}. Set readiness to null to remove it.` : noRuleText}</p>${form(
       "github.configure",
       field("projectId", projectId, "hidden") +
         field("expectedVersion", String(github.version), "hidden") +
@@ -413,9 +422,11 @@ export class LocalOperatorUi {
     const unmet =
       readiness &&
       unmetText({
-        rule: ruleView(readiness.rule),
+        rule: ruleView(readiness.rule, this.githubSources),
         outcome: readiness.outcome,
-        unmet: readiness.unmet,
+        unmet:
+          this.githubSources?.withFieldNames(readiness.unmet) ??
+          readiness.unmet,
       });
     const hold = imported
       ? this.githubSources?.hold(String(imported.nodeId))
@@ -875,6 +886,8 @@ function publicMessage(code: string): string {
     conflict:
       "Saved state conflicts with this request. Review before retrying.",
     unavailable: "Service unavailable. Try again.",
+    "redaction-limit":
+      "Too much private material to redact safely. Contact the operator.",
     "command-outcome-unknown":
       "Command outcome is unknown. Reconcile the same key and input.",
     "local-review-batch-too-large":

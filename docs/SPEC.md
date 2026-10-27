@@ -210,6 +210,13 @@ complete read only. Membership in another source cannot grant admission. Each se
 source observation counts its observed items (including closed issues skipped without a
 task), open items and open items matching the readiness rule, and warns when a complete
 read matches none; an imported open Draft task names the conditions it does not meet.
+A GitHub Project selection's observation also lists each single-select field with how many
+of its open items hold each option, and the operator can add an option as a
+Project-field condition from that list; the condition still saves only with the
+source configuration. Conditions, unmet reasons and observed field values read by the
+field and option names the Project's last complete read listed; a partial read keeps
+them, and a field or option no complete read has named shows its node ID. Names are
+display only: rules, commands and readiness matching use node IDs.
 These explanations are read-only projections of stored observations: they make no
 provider read and grant no readiness, and matching the rule is neither Ready nor
 admission. Ready authorizes work within scope, without a universal per-task plan approval.
@@ -835,7 +842,13 @@ composer, runtime settings, Inbox, search and execution list reads capture their
 redaction exclusions once per attempt and derive every task's list from them; a
 rebuild captures them afresh, and no exclusion list outlives its read. A task's prose is
 withheld when its own retained turn requests or recovery identities exceed 128
-(each counted separately); other tasks' history never counts. Credential and workspace
+(each counted separately); other tasks' history never counts. Operator reads redact
+with every project's and profile's retained instruction revisions, every declared
+credential and every repository path, not only the task's own, so one project's private
+material never appears unredacted in another's prose. The installation bound is 4096
+distinct values and 16 MiB; past it, reads and actions fail with `503 redaction-limit`
+and agent result reports with review metadata fail with "Redaction exclusion limit
+exceeded". Archived workspace bindings never count toward it. Credential and workspace
 fences still reject changed access material. Comment send receipts recheck
 visibility, task version and workspace after loading their redaction exclusions;
 a conflict does not undo the recorded provider operation or authorize a resend.
@@ -1870,9 +1883,12 @@ the outcome unproved until a read shows it (a first push whose branch is deleted
 told from read lag, so it stays unproved until an operator acts); a later third head then records the push and the outside
 head separately. Any head Ensemble does not own, seen at a push or on the task's PR, is an outside
 change: the push is refused, the lead is woken and handback settlement is invalidated at once;
-without a PR it is noticed at the next push, as Ensemble does not poll branches. While the branch
-holds an outside head, or the PR's head is not Ensemble's last push, completion is held and
-settlement is refused (closing the outcome of a closed PR stays possible), and PR actions that name the task branch (`pr.create`, `pr.edit`,
+without a PR it is noticed at the next push, as Ensemble does not poll branches. While any of the
+task's branches, in any repository and with or without a PR, holds an outside head, or the bound
+PR's head is not Ensemble's last push, completion, accepted settlement and `issue.close` are held
+(closing the outcome of a closed PR stays possible). A PR merged on GitHub counts as acceptance,
+even at an outside head, and a closed PR's own branch never holds, because GitHub may delete it
+and no operator action clears that. PR actions that name the task branch (`pr.create`, `pr.edit`,
 `pr.ready`, `pr.merge`) need `expectedHeadSha` to equal Ensemble's last push. A branch found absent is held the same way and stays held, even while the PR still shows its head commit, until a ref read
 shows it back at that commit. The record clears when
 the branch is read back at that commit or Ensemble pushes again; a PR inspection that still shows the last push while
