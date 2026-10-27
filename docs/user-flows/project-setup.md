@@ -1,7 +1,7 @@
 # Project setup
 
 **Status:** implemented (`/app/settings/projects/new`, design frames 115–117c and
-145–147). Product rules are in
+145–147, 146c–146d). Product rules are in
 [SPEC](../SPEC.md#task-creation-and-project-setup).
 
 ## Goal
@@ -64,9 +64,20 @@ note, **Cancel** and then **Create paused project** at every width.
      An unreadable readiness check counts as a wait item, so the check fails closed.
      Fix links open in a new tab so the check stays; **Check again** re-reads
      readiness, the workspace and capacity once the item is fixed.
+   - With a linked GitHub Project, the [Import issues](import-issues.md) panel sits
+     between those lines and the actions: **Preview and import now** previews and
+     activates the linked source, then refreshes it, and shows the activation line, the
+     read line and **View imported tasks** (which opens in a new tab so the check stays).
+     It is optional and explicit: nothing previews or refreshes on arrival, and Resume
+     stays available with or without it. Its recoveries are the same as on the GitHub
+     source tab; the unusable-credential reason is the credential line above it.
    - Primary **Resume and create first task**: resumes the project through the
      existing project command, then opens the composer with the project selected.
      Disabled with the blocking reason while a listed item would make work wait.
+   - The primary stays **Resume and create first task**, opening the composer, even
+     after an import: imported tasks belong to a paused project and cannot start until
+     it is resumed, so Resume is the one next step either way. **View imported tasks**
+     is the secondary route.
    - Capacity changes as other work runs, so it never disables the primary. When
      capacity is full, the check says the first task will wait for capacity.
    - Secondary **Keep paused**, which opens project configuration.
@@ -97,4 +108,5 @@ note, **Cancel** and then **Create paused project** at every width.
 
 Creation starts no execution; Resume is an explicit operator action; repository
 access is exactly the list in step 3; discovery imports nothing until a source is
-previewed and activated.
+previewed and activated, which the ready check's Preview and import now only does on
+an explicit press.

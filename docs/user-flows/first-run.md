@@ -5,6 +5,8 @@
 install is implemented ([operations](../operations/standalone-macos.md#install)).
 The interactions budget is asserted at 1366 × 900, 390 × 844 and in WebKit at
 390 × 844 by `first run budget: seven interactions from sign-in to a created task`
+and, with a repository and its linked GitHub Project, `first run budget: eight
+interactions from sign-in to a created task with a linked GitHub Project`
 in `test/operator/operator-first-run-browser.test.ts`, from a fresh sign-in on Home.
 The install command and the other ways to reach project setup (the account menu's
 Getting started page, Settings → Projects → New project, the sidebar's New project
@@ -29,7 +31,9 @@ each screen leading to the next and nothing to look up.
 2. Sign in. Home shows the getting-started card and nothing else until the first
    turn.
 3. Project setup creates the lead profile inline (name and runtime), then the project;
-   the ready check replaces the form and offers Resume and create first task.
+   the ready check replaces the form and offers Resume and create first task. With a
+   linked GitHub Project it first offers Preview and import now
+   ([import issues](import-issues.md)); importing is optional.
 4. The composer opens with the project selected; Create and start.
 5. Task detail shows the running turn, or the wait with its Fix where one exists
    and otherwise the link to what blocks it.
@@ -39,6 +43,7 @@ each screen leading to the next and nothing to look up.
 | Entry point | Interactions to a created task | First screen must show |
 | --- | --- | --- |
 | Fresh sign-in, no project | 7 (Create project, fill setup, Create profile, Create paused project, Resume and create first task, fill, Create and start) | the getting-started card with Create project in the first view |
+| Fresh sign-in, no project, with a repository and linked GitHub Project | 8 (as above, plus Preview and import now before Resume) | the ready check's Preview and import now in the first view; after the press, the activation line, the read line and View imported tasks |
 
 Count clicks and key presses after sign-in; one screen's form fill (one or more
 fields before that screen's next action) counts as one. Install and service start are

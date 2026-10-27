@@ -12,6 +12,9 @@ saved sources and reads them from GitHub, then says which were imported.
 - GitHub source tab of project configuration, after Save changes: the Import issues
   panel. It is also offered whenever a saved source is inactive or has never been read,
   so it survives leaving the tab and a lost reply.
+- Ready check after [project setup](project-setup.md) with a linked GitHub Project:
+  the same panel, offered before Resume. The press stays explicit, Resume stays
+  available without it, and links open in a new tab so the check stays.
 - Sync & placement keeps later refreshes and placement. It is not part of the budget.
 - Operator CLI `project preview-source` is outside the budget: it has no screens.
 
@@ -32,10 +35,14 @@ saved sources and reads them from GitHub, then says which were imported.
 | Entry point | Interactions to imported tasks | First screen must show |
 | --- | --- | --- |
 | Unsaved source on the GitHub source tab | 2 (Save changes, Preview and import now) | after Save, the Import issues panel and its action; after the press, the activation line, the read line and View imported tasks |
+| Ready check with a linked GitHub Project | 1 (Preview and import now; creating the project is not part of it) | the panel and its action before Resume; after the press, the activation line, the read line and View imported tasks |
 
 The journey test asserts the count and that each first screen is in view at 1366 × 900
 and 390 × 844. Adding or editing the source is the edit being saved, not an interaction.
-Frames: `119d-github-source-import-ready` to `119e-github-source-imported`; see
+The ready check's path is asserted within the [first-run budget](first-run.md) and in
+`operator-setup-browser`.
+Frames: `119d-github-source-import-ready` to `119e-github-source-imported`, and
+`146c-setup-ready-check-import` to `146d-setup-ready-check-imported`; see
 [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
 
 ## Recovery
@@ -49,4 +56,7 @@ Frames: `119d-github-source-import-ready` to `119e-github-source-imported`; see
   which reads the new version and offers the action again under new keys.
 - An unusable source credential keeps the action focusable with the reason beside it
   and the link to Set or change source credential.
+- On the ready check, the unusable-credential reason is the credential line above the
+  panel, and **Check again** (offered while that line has a fix link or an item waits)
+  re-reads it.
 - An unsaved edit removes the panel until it is saved or discarded.

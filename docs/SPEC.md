@@ -691,7 +691,11 @@ repository is added and, when it is signed in and the project has at least one
 repository, records `gh:github.com` as that source's credential at creation.
 Otherwise the source starts without one: with a repository the ready check says it
 cannot sync until one is set, and a repository-free project shows no credential line
-and records none. Creates from the HTML fallback or CLI record no default. Existing,
+and records none. For a linked GitHub Project the ready check also offers the Import
+issues panel before Resume, whose Preview and import now is an explicit press that
+previews and activates the source and refreshes it; Resume stays primary and available
+without it and opens the composer, since imported tasks wait while the project is
+paused. Creates from the HTML fallback or CLI record no default. Existing,
 environment-selected and cleared sources are never re-defaulted.
 The discovery credential never supplies a missing source credential. Source settings
 offer the detected GitHub CLI account or an environment variable, with Change,
