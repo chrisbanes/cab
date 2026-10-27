@@ -5,6 +5,7 @@ import {
 import { feedbackReferenceSchema } from "../core/task-review.js";
 import {
   handbackSettlementSchema,
+  HandbackSettlementRefusedError,
   type HandbackSettlement,
   type TaskDeliveryView,
 } from "../core/delivery.js";
@@ -333,7 +334,9 @@ export class CoordinationView {
     ) => ConversationHistoryAssignmentRead,
     private readonly deliveryApi?: {
       readTask: (taskId: string) => TaskDeliveryView;
-      settleHandback: (command: HandbackSettlement) => Promise<unknown>;
+      settleHandback: (
+        command: HandbackSettlement,
+      ) => Promise<{ revision: number }>;
       refresh: () => Promise<void>;
     },
   ) {}
@@ -562,12 +565,26 @@ export class CoordinationView {
     };
   }
 
+  /** Settles the task's bound PR; its identity is the stored binding's, which the expected revisions pin. */
   async settleHandback(
-    input: Omit<HandbackSettlement, "actor">,
-  ): Promise<void> {
+    input: Omit<
+      HandbackSettlement,
+      "actor" | "repositoryId" | "prNumber" | "expectedPrNodeId"
+    >,
+  ): Promise<{ revision: number }> {
     if (!this.deliveryApi) throw new Error("Delivery is unavailable");
-    await this.deliveryApi.settleHandback(
-      handbackSettlementSchema.parse({ ...input, actor: "operator" }),
+    const observation = this.deliveryApi.readTask(input.taskId).binding
+      ?.observation;
+    if (!observation)
+      throw new HandbackSettlementRefusedError("Unknown PR delivery");
+    return this.deliveryApi.settleHandback(
+      handbackSettlementSchema.parse({
+        ...input,
+        actor: "operator",
+        repositoryId: observation.repositoryId,
+        prNumber: observation.number,
+        expectedPrNodeId: observation.nodeId,
+      }),
     );
   }
   async refreshDelivery(taskId: string): Promise<void> {

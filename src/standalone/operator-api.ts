@@ -19,11 +19,7 @@ import type {
   TaskCompletionRequest,
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
-import {
-  HandbackSettlementRefusedError,
-  isOperatorDeliveryCaller,
-  materialDigest,
-} from "../core/delivery.js";
+import { isOperatorDeliveryCaller, materialDigest } from "../core/delivery.js";
 import { StatusMappingRefusal } from "../core/status-mapping.js";
 import type { StatusMapping } from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
@@ -7104,32 +7100,9 @@ export class OperatorApi {
       }
       if (c.type === "delivery.settle") {
         this.requireTask(c.taskId);
-        // The PR identity is the stored binding's; the expected revisions bind it to what was read.
-        const observation = this.coordination().readTask(c.taskId).delivery
-          ?.binding?.observation;
-        if (!observation) throw new OperatorApiError(409, "conflict");
-        try {
-          await this.coordination().settleHandback({
-            key: c.key,
-            taskId: c.taskId,
-            expectedTaskVersion: c.expectedTaskVersion,
-            expectedDeliveryRevision: c.expectedDeliveryRevision,
-            expectedPolicyVersion: c.expectedPolicyVersion,
-            repositoryId: observation.repositoryId,
-            prNumber: observation.number,
-            expectedPrNodeId: observation.nodeId,
-            expectedHeadSha: c.expectedHeadSha,
-            decision: c.decision,
-          });
-        } catch (error) {
-          if (error instanceof HandbackSettlementRefusedError)
-            throw new OperatorApiError(409, "conflict");
-          throw error;
-        }
-        const settled = this.coordination().readTask(c.taskId).delivery
-          ?.binding;
-        if (!settled)
-          throw new OperatorApiError(503, "command-outcome-unknown");
+        // Refusals are domain conflicts, which the catch below answers with 409.
+        const { type: _type, ...settlement } = c;
+        const settled = await this.coordination().settleHandback(settlement);
         return commandReceiptSchema.parse({
           kind: "delivery-settlement",
           key: c.key,

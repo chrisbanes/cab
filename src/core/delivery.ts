@@ -547,7 +547,7 @@ export const handbackSettlementSchema = registerPrArgumentsSchema
   .strict();
 export type HandbackSettlement = z.output<typeof handbackSettlementSchema>;
 /** A settlement refused because its target or material is no longer current. */
-export class HandbackSettlementRefusedError extends Error {}
+export class HandbackSettlementRefusedError extends DomainConflictError {}
 const prBindingSchema = z
   .object({
     taskId: z.string().uuid(),

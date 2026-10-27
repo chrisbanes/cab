@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type {
   CommandReceipt,
   OperatorCommand,
@@ -24,7 +24,7 @@ export function useCommandSend(
   /** Runs once each send settles, with how it ended. */
   onSettled?: (kind: SendOutcome["kind"]) => void,
 ) {
-  const lifecycle = useRef(new CommandLifecycle<OperatorCommand>()).current;
+  const [lifecycle] = useState(() => new CommandLifecycle<OperatorCommand>());
   const [sending, setSending] = useState<OperatorCommand | null>(null),
     [outcome, setOutcome] = useState<SendOutcome | null>(null);
   const send = async (command?: OperatorCommand) => {

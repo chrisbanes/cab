@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   operatorCommandSchema,
+  textMaxLength,
   type Session,
   type TaskRead,
 } from "../../src/operator/contracts.js";
@@ -8,22 +9,29 @@ import type { OperatorClient } from "./api.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
 import { useCommandSend, type SendOutcome } from "./command-send.js";
 import { Button, ShortId } from "./components.js";
-import { failureCause } from "./outcome-copy.js";
+import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { Textarea } from "./ui/textarea.js";
 
 type Task = TaskRead["data"];
 
 /** The one message a settled send leaves: recorded copy, or the shared unknown/conflict/failure wording. */
-function SendFeedback({
+export function SendFeedback({
   outcome,
   recorded,
   conflict,
+  unknown = "We couldn't confirm it was recorded. Check whether it saved; it is never recorded twice.",
+  failed = (code) => `Not recorded: ${failureCause(code)}.`,
+  details,
   check,
   review,
 }: {
   outcome: SendOutcome | null;
   recorded: string;
   conflict: string;
+  unknown?: string;
+  failed?: (code: string) => string;
+  /** Receipt fields beyond the command and request key, shown in Details. */
+  details?: ReceiptDetails;
   /** Resends the frozen command after an unknown outcome. */
   check: () => void;
   /** Clears a conflict once the reread shows current state. */
@@ -44,10 +52,10 @@ function SendFeedback({
         outcome.kind === "recorded"
           ? recorded
           : outcome.kind === "unknown"
-            ? "We couldn't confirm it was recorded. Check whether it saved; it is never recorded twice."
+            ? unknown
             : outcome.kind === "conflict"
               ? conflict
-              : `Not recorded: ${failureCause(outcome.code ?? "command-outcome-unknown")}.`
+              : failed(outcome.code ?? "command-outcome-unknown")
       }
       focus
       action={
@@ -59,6 +67,7 @@ function SendFeedback({
       }
       details={detailRows({
         command: outcome.command.type,
+        ...details,
         requestKey: outcome.command.key,
         ...(outcome.code ? { code: outcome.code } : {}),
       })}
@@ -74,13 +83,13 @@ export function HandbackSettlement({
   client,
   session,
   task,
-  onSettled,
+  onChanged,
 }: {
   client: OperatorClient;
   session: Session;
   task: Task;
   /** Rereads the task after a recorded settlement or a conflict. */
-  onSettled: () => void;
+  onChanged: () => void;
 }) {
   const d = task.delivery,
     b = d?.binding;
@@ -92,7 +101,7 @@ export function HandbackSettlement({
       r.key === c.key &&
       r.taskId === task.task.id,
     (kind) => {
-      if (kind === "recorded" || kind === "conflict") onSettled();
+      if (kind === "recorded" || kind === "conflict") onChanged();
     },
   );
   if (d?.mode !== "reviewable-pr" || !b || b.state === "MERGED") return null;
@@ -173,14 +182,10 @@ export function HandbackSettlement({
           </p>
         </>
       )}
+      {/* A recorded settlement is the status line above, once the reread shows it. */}
       <SendFeedback
-        outcome={outcome}
-        recorded={
-          outcome?.command.type === "delivery.settle" &&
-          outcome.command.decision === "closed"
-            ? "Settled as closed."
-            : "Handback accepted."
-        }
+        outcome={outcome?.kind === "recorded" ? null : outcome}
+        recorded="Handback settled."
         conflict="Not settled: the PR, branch or policy changed since it was read. Refresh delivery status and review the current head."
         check={() => void send()}
         review={{ label: "Review current state", onClick: clear }}
@@ -195,14 +200,14 @@ export function ResultDestination({
   session,
   task,
   item,
-  onRecorded,
+  onConflict,
 }: {
   client: OperatorClient;
   session: Session;
   task: Task;
   item: Task["unresolvedResults"][number];
   /** Rereads the task after a conflict. */
-  onRecorded: () => void;
+  onConflict: () => void;
 }) {
   const recipient = item.permittedRecipient,
     result = task.results.find((r) => r.resultId === item.resultId),
@@ -218,7 +223,7 @@ export function ResultDestination({
       r.recipientAssignmentId === c.recipientAssignmentId,
     // A recorded delivery keeps its row and confirmation; the next poll removes the resolved row.
     (kind) => {
-      if (kind === "conflict") onRecorded();
+      if (kind === "conflict") onConflict();
     },
   );
   const name = recipient?.name ?? "the permitted recipient";
@@ -325,7 +330,7 @@ export function AssignmentMessage({
       <Textarea
         id={id}
         autoGrow
-        maxLength={16000}
+        maxLength={textMaxLength}
         value={text}
         disabled={Boolean(sending) || uncertain}
         onChange={(e) => setText(e.target.value)}

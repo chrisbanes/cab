@@ -1374,18 +1374,15 @@ export function TaskWorkspace({
     lead = data.assignments.find((a) => a.assignmentId === leadId),
     leadName = data.lead?.name ?? "Project lead",
     leadMode = leadFeedbackMode(data, lead?.state);
-  const openRequests = [...data.questions, ...data.approvals].filter(
+  const requestId = params.get("request"),
+    openRequests = [...data.questions, ...data.approvals].filter(
       (q) => q.status === "open",
     ),
     nextActor = taskNextActor(data),
-    inView = openRequests.find(
-      (q) => q.interactionId === params.get("request"),
-    ),
+    inView = openRequests.find((q) => q.interactionId === requestId),
     deciding = inView?.kind === "approval" ? inView.interactionId : null,
     // Any status: a decided approval stays in view, read only, until the operator leaves it.
-    reviewing = data.approvals.find(
-      (a) => a.interactionId === params.get("request"),
-    );
+    reviewing = data.approvals.find((a) => a.interactionId === requestId);
   const requesterOf = (interactionId: string | null) => {
     const request = [...data.questions, ...data.approvals].find(
       (q) => q.interactionId === interactionId,
@@ -1887,24 +1884,24 @@ export function TaskWorkspace({
                     taskId={taskId}
                     approval={reviewing}
                     requesterName={requesterOf(reviewing.interactionId)}
-                    onRecorded={refreshAll}
+                    onChanged={refreshAll}
                   />
                 ) : (
-                  params.get("request") && (
+                  requestId && (
                     <QuestionResponse
                       client={client}
                       session={session}
                       taskId={taskId}
-                      interactionId={params.get("request")!}
+                      interactionId={requestId}
                       states={questionStates}
                       onRecorded={refreshAll}
                       observedAt={resource.state.fetchedAt}
-                      requesterName={requesterOf(params.get("request"))}
+                      requesterName={requesterOf(requestId)}
                     />
                   )
                 )}
                 {openRequests
-                  .filter((q) => q.interactionId !== params.get("request"))
+                  .filter((q) => q.interactionId !== requestId)
                   .map((q) => (
                     <div
                       key={q.interactionId}
@@ -1978,7 +1975,7 @@ export function TaskWorkspace({
                     session={session}
                     task={data}
                     item={item}
-                    onRecorded={refreshAll}
+                    onConflict={refreshAll}
                   />
                 ))}
                 {nextActor.code === "completion-rejected" && (
@@ -3266,7 +3263,7 @@ function Changes({
           client={client}
           session={session}
           task={data}
-          onSettled={reread}
+          onChanged={reread}
         />
       )}
       {delivers && (

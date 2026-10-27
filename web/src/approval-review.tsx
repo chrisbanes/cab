@@ -6,8 +6,8 @@ import {
   type TaskRead,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { ActionOutcome, detailRows } from "./action-feedback.js";
 import { useCommandSend } from "./command-send.js";
+import { SendFeedback } from "./coordination-actions.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
 import { failureCause } from "./outcome-copy.js";
 
@@ -37,7 +37,7 @@ export function ApprovalReview({
   taskId,
   approval,
   requesterName,
-  onRecorded,
+  onChanged,
 }: {
   client: OperatorClient;
   session: Session;
@@ -45,7 +45,7 @@ export function ApprovalReview({
   approval: Approval;
   requesterName: string | null;
   /** Rereads the task after a recorded decision or a conflict. */
-  onRecorded: () => void;
+  onChanged: () => void;
 }) {
   const { send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
@@ -56,7 +56,7 @@ export function ApprovalReview({
       r.taskId === taskId &&
       r.eventType === "approval-decision",
     (kind) => {
-      if (kind === "recorded" || kind === "conflict") onRecorded();
+      if (kind === "recorded" || kind === "conflict") onChanged();
     },
   );
   const open = approval.status === "open",
@@ -132,47 +132,20 @@ export function ApprovalReview({
         </dd>
       </dl>
       {approval.material !== null && <Material value={approval.material} />}
-      {outcome && (
-        <ActionOutcome
-          key={`${outcome.kind}:${outcome.command.key}`}
-          tone={
-            outcome.kind === "recorded"
-              ? "success"
-              : outcome.kind === "failed"
-                ? "error"
-                : "warning"
-          }
-          message={
-            outcome.kind === "recorded"
-              ? copy[outcomeDecision ?? "approved"]
-              : outcome.kind === "failed"
-                ? copy.failed(outcome.code ?? "command-outcome-unknown")
-                : copy[outcome.kind]
-          }
-          focus
-          action={
-            outcome.kind === "unknown"
-              ? {
-                  label: "Check whether it saved",
-                  onClick: () => send(),
-                }
-              : outcome.kind === "conflict"
-                ? {
-                    // The conflict already reread the task; this shows its current material.
-                    label: "Review current material",
-                    onClick: clear,
-                  }
-                : undefined
-          }
-          details={detailRows({
-            command: outcome.command.type,
-            resource: approval.interactionId,
-            version: approval.revision,
-            requestKey: outcome.command.key,
-            ...(outcome.code ? { code: outcome.code } : {}),
-          })}
-        />
-      )}
+      <SendFeedback
+        outcome={outcome}
+        recorded={copy[outcomeDecision ?? "approved"]}
+        conflict={copy.conflict}
+        unknown={copy.unknown}
+        failed={copy.failed}
+        details={{
+          resource: approval.interactionId,
+          version: approval.revision,
+        }}
+        check={() => void send()}
+        // The conflict already reread the task; this shows its current material.
+        review={{ label: "Review current material", onClick: clear }}
+      />
       {decidable && !uncertain && (
         <div className="approval-review-decision">
           <p className="metadata muted">
