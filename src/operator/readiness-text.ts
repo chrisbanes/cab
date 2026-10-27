@@ -15,9 +15,16 @@ type Counts = z.infer<typeof selectionCountsSchema>;
 type Condition = Extract<RuleView, { kind: "rule" }>["conditions"][number];
 
 export const conditionText = (c: Condition) =>
-  c.kind === "label"
-    ? `label \`${c.name}\``
-    : `Project field ${c.fieldNodeId} = ${c.optionNodeId}`;
+  c.kind === "label" ? `label \`${c.name}\`` : projectFieldText(c);
+
+/** "Status = Ready", or the node ID of a field or option no complete read has named. */
+export const projectFieldText = (f: {
+  fieldNodeId: string;
+  optionNodeId: string;
+  fieldName?: string | undefined;
+  optionName?: string | undefined;
+}) =>
+  `${f.fieldName ?? `Project field ${f.fieldNodeId}`} = ${f.optionName ?? f.optionNodeId}`;
 
 /** What a source without a readiness rule admits, in every surface's settings. */
 export const noRuleText =

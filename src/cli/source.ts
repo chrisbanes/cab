@@ -1,4 +1,5 @@
 import {
+  ruleText,
   selectionCountsText,
   zeroMatchWarning,
 } from "../operator/readiness-text.js";
@@ -15,6 +16,7 @@ import {
 } from "../core/github-source-contracts.js";
 import {
   type CommandReceipt,
+  readinessCommandValue,
   sourceObservationSchema,
   taskSchema,
 } from "../operator/contracts.js";
@@ -65,7 +67,9 @@ const ruleSummary = (r: Readiness | null) =>
 const readinessText = (r: Source["readiness"]) =>
   r.kind === "unavailable"
     ? "(unavailable)"
-    : ruleSummary(r.kind === "rule" ? r : null);
+    : r.kind === "rule"
+      ? `${ruleSummary(r)}: ${ruleText(r)}`
+      : ruleSummary(null);
 const sourceCredentialReasons: SourceCredentialReason[] = [
   "missing-credential",
   "invalid-credential-reference",
@@ -208,6 +212,26 @@ const sourcesCommand: BrowseCommand = {
               ]
             : [];
         }),
+        // Each option's node IDs are what a project-field readiness condition names.
+        ...(observations.some((o) => o.projectFields?.fields.length)
+          ? [
+              "",
+              table(
+                ["Selection", "Field", "Option", "Open", "Condition IDs"],
+                observations.flatMap((o) =>
+                  (o.projectFields?.fields ?? []).flatMap((f) =>
+                    f.options.map((option) => [
+                      unavailable(o.selectionId),
+                      f.name,
+                      option.name,
+                      String(option.open),
+                      `${o.projectFields?.projectNodeId} ${f.fieldNodeId} ${option.optionNodeId}`,
+                    ]),
+                  ),
+                ),
+              ),
+            ]
+          : []),
         "",
         source.repositories.length
           ? table(
@@ -408,11 +432,7 @@ export function sourceEditCommand(
     throw bad(
       'This edit removes every repository link, so no task can be checked out. Add "confirmUnlinkAll": true to confirm.',
     );
-  // The saved rule as a command value: the view's `kind` key is not part of it.
-  const savedRule =
-    source.readiness.kind === "rule"
-      ? { mode: source.readiness.mode, conditions: source.readiness.conditions }
-      : null;
+  const savedRule = readinessCommandValue(source.readiness);
   const readiness = edit.readiness !== undefined ? edit.readiness : savedRule;
   const command: Record<string, unknown> = {
     type: "github.configure",

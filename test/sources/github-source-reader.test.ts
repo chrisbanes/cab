@@ -241,8 +241,13 @@ test("Project filter is passed unchanged and nested field/definition pages must 
                     {
                       __typename: "ProjectV2SingleSelectField",
                       id: "F_1",
-                      options: [{ id: "O_1", name: "Ready" }],
+                      name: "Status",
+                      options: [
+                        { id: "O_0", name: "Todo" },
+                        { id: "O_1", name: "Ready" },
+                      ],
                     },
+                    { __typename: "ProjectV2Field" },
                   ],
                   pageInfo: pageInfo("definitions-2"),
                 },
@@ -307,6 +312,18 @@ test("Project filter is passed unchanged and nested field/definition pages must 
       ],
     ],
   );
+  // A complete read names every single-select field and its options in GitHub's order.
+  assert.deepEqual(complete.complete && complete.projectFields, [
+    {
+      projectNodeId: "P_1",
+      fieldNodeId: "F_1",
+      name: "Status",
+      options: [
+        { optionNodeId: "O_0", name: "Todo" },
+        { optionNodeId: "O_1", name: "Ready" },
+      ],
+    },
+  ]);
   // The Project item holding the issue travels beside, not inside, its field values.
   assert.deepEqual(
     complete.issues.map((entry) => entry.projectItemNodeId),
@@ -336,6 +353,82 @@ test("Project filter is passed unchanged and nested field/definition pages must 
   missingNestedCursor = true;
   const cursorless = await reader.readSelection(selection);
   assert.equal(cursorless.complete, false);
+});
+
+test("a Project read over several item pages lists each field once", async () => {
+  const pageInfo = (next: string | null) => ({
+    hasNextPage: next !== null,
+    endCursor: next,
+  });
+  const item = (n: number) => ({
+    id: `PVTI_${n}`,
+    content: {
+      __typename: "Issue",
+      id: `I_${n}`,
+      number: n,
+      title: `Issue ${n}`,
+      body: "",
+      state: "OPEN",
+      repository: { id: "R_1", nameWithOwner: "org/repo" },
+      labels: { nodes: [], pageInfo: pageInfo(null) },
+    },
+    fieldValues: {
+      nodes: [
+        {
+          __typename: "ProjectV2ItemFieldSingleSelectValue",
+          optionId: "O_1",
+          field: { id: "F_1" },
+        },
+      ],
+      pageInfo: pageInfo(null),
+    },
+  });
+  const reader = new GitHubHttpSourceReader(
+    "fixture-token",
+    async (_i, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        variables: { after: string | null };
+      };
+      const first = body.variables.after === null;
+      return new Response(
+        JSON.stringify({
+          data: {
+            node: {
+              id: "P_1",
+              items: {
+                nodes: [item(first ? 1 : 2)],
+                pageInfo: pageInfo(first ? "items-2" : null),
+              },
+              // GitHub returns the first page of fields with every items page.
+              fields: {
+                nodes: [
+                  {
+                    __typename: "ProjectV2SingleSelectField",
+                    id: "F_1",
+                    name: "Status",
+                    options: [{ id: "O_1", name: "Ready" }],
+                  },
+                ],
+                pageInfo: pageInfo(null),
+              },
+            },
+          },
+        }),
+      );
+    },
+  );
+  const read = await reader.readSelection({
+    id: "project",
+    kind: "project",
+    projectNodeId: "P_1",
+    filter: "",
+  });
+  assert.equal(read.complete, true);
+  assert.equal(read.issues.length, 2);
+  assert.deepEqual(
+    read.complete && read.projectFields?.map((f) => f.fieldNodeId),
+    ["F_1"],
+  );
 });
 
 test("search deduplicates complete pages and rejects truncation, incomplete results, rate limits and missing credentials", async () => {

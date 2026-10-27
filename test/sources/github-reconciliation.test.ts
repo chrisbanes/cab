@@ -1212,6 +1212,118 @@ test("matching counts a Project field from another selection's membership, as Re
   }
 });
 
+test("a complete Project read names its fields for conditions and per-option counts; a partial read keeps them", () => {
+  const db = new DatabaseSync(":memory:");
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const sources = new GitHubSourceStore(db);
+  sources.migrate();
+  const projectId = randomUUID();
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Alpha",
+    leadProfileId: null,
+  });
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "env:TEST_GITHUB",
+    selections: [
+      { id: "board", kind: "project", projectNodeId: "P_1", filter: "" },
+    ],
+    readiness: null,
+    repositories: [],
+  });
+  domain.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    selectionId: "board",
+    expectedVersion: 2,
+  });
+  const status = (optionNodeId: string) => ({
+    projectNodeId: "P_1",
+    fieldNodeId: "F_1",
+    optionNodeId,
+  });
+  const at = (nodeId: string, optionNodeId: string, state = "open") => ({
+    ...issue,
+    nodeId,
+    number: Number(nodeId.replace(/\D/g, "")),
+    state: state as "open" | "closed",
+    projectFields: [status(optionNodeId)],
+  });
+  const field = (options: [string, string][]) => [
+    {
+      projectNodeId: "P_1",
+      fieldNodeId: "F_1",
+      name: "Status",
+      options: options.map(([optionNodeId, name]) => ({ optionNodeId, name })),
+    },
+  ];
+  try {
+    sources.reconcileSelection(projectId, "board", {
+      complete: true,
+      issues: [at("I_1", "O_1"), at("I_2", "O_2"), at("I_3", "O_2", "closed")],
+      reason: null,
+      projectFields: field([
+        ["O_1", "Todo"],
+        ["O_2", "Ready"],
+      ]),
+    });
+    // Closed items are not counted; options keep GitHub's order.
+    assert.deepEqual(sources.selectionFieldCounts(projectId).get("board"), {
+      projectNodeId: "P_1",
+      fields: [
+        {
+          fieldNodeId: "F_1",
+          name: "Status",
+          options: [
+            { optionNodeId: "O_1", name: "Todo", open: 1 },
+            { optionNodeId: "O_2", name: "Ready", open: 1 },
+          ],
+        },
+      ],
+    });
+    const condition = { kind: "project-field" as const, ...status("O_2") };
+    assert.deepEqual(sources.withFieldNames([condition]), [
+      { ...condition, fieldName: "Status", optionName: "Ready" },
+    ]);
+    // A partial read may list fields partially, so the stored names stay.
+    sources.reconcileSelection(projectId, "board", {
+      complete: false,
+      issues: [],
+      reason: "rate-limited",
+    });
+    assert.equal(sources.withFieldNames([condition])[0]?.optionName, "Ready");
+    // An option a complete read no longer lists loses its name but keeps its field's.
+    sources.reconcileSelection(projectId, "board", {
+      complete: true,
+      issues: [at("I_1", "O_1")],
+      reason: null,
+      projectFields: field([["O_1", "Todo"]]),
+    });
+    assert.deepEqual(sources.withFieldNames([condition]), [
+      { ...condition, fieldName: "Status" },
+    ]);
+    // A withheld name is left out, as an unknown one is.
+    assert.deepEqual(
+      sources.withFieldNames([status("O_1")], (name) => name !== "Todo"),
+      [{ ...status("O_1"), fieldName: "Status" }],
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test("an issue skipped closed and imported on a later partial read counts once", () => {
   const f = readinessFixture({
     mode: "all",

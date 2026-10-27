@@ -1,10 +1,14 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Check } from "lucide-react";
+import type { z } from "zod";
 import {
   discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
+  type sourceObservationSchema,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { Button } from "./components.js";
 import {
   type ConditionIds,
   type FieldsRead,
@@ -13,6 +17,7 @@ import {
   projectChoices,
   type RepositoriesRead,
   rowState,
+  sameCondition,
   selectField,
   selectProject,
 } from "./readiness-discovery.js";
@@ -116,6 +121,68 @@ export function useReadinessDiscovery(p: {
   return { choices, fieldReads };
 }
 export type ReadinessDiscovery = ReturnType<typeof useReadinessDiscovery>;
+
+type SelectionFields = NonNullable<
+  z.infer<
+    typeof sourceObservationSchema
+  >["data"]["projects"][number]["selections"][number]["projectFields"]
+>;
+
+/**
+ * A Project source's single-select fields with each option's open items. Choosing an option
+ * adds it to the drafted readiness conditions; Save applies it.
+ */
+export function ProjectFieldOptions(p: {
+  projectFields: SelectionFields | null | undefined;
+  drafted: readonly ConditionIds[];
+  disabled: boolean;
+  onAdd: (ids: ConditionIds) => void;
+}) {
+  if (!p.projectFields?.fields.some((f) => f.options.length)) return null;
+  const { projectNodeId, fields } = p.projectFields;
+  return (
+    <div className="settings-rows">
+      <p className="metadata">Project fields</p>
+      {fields.map((f) => (
+        <div key={f.fieldNodeId}>
+          <p className="body">{f.name}</p>
+          <ul className="settings-pills">
+            {f.options.map((o) => {
+              const ids = {
+                projectNodeId,
+                fieldNodeId: f.fieldNodeId,
+                optionNodeId: o.optionNodeId,
+              };
+              const added = p.drafted.some((c) => sameCondition(c, ids));
+              return (
+                <li key={o.optionNodeId}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={p.disabled || added}
+                    aria-label={
+                      added
+                        ? `${f.name} = ${o.name} is a readiness condition`
+                        : `Require ${f.name} = ${o.name} for Ready (${o.open} open)`
+                    }
+                    onClick={() => p.onAdd(ids)}
+                  >
+                    {added && <Check aria-hidden="true" />}
+                    {o.name} · {o.open}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+      <p className="metadata muted">
+        Open items of this source per option, from its last complete read.
+        Choosing one adds it as a readiness condition; Save applies it.
+      </p>
+    </div>
+  );
+}
 
 /**
  * Name selects for one Project-field condition. A row whose state falls back to typed node IDs

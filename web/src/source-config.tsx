@@ -55,6 +55,7 @@ import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import {
+  ProjectFieldOptions,
   ProjectFieldPicker,
   useReadinessDiscovery,
 } from "./readiness-picker.js";
@@ -356,6 +357,20 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     });
   const observedRow = (id: unknown) =>
     observed?.selections.find((o) => o.selectionId === id);
+  const projectSources = data.source.selections.filter(
+    (s) => s.kind === "project" && s.descriptor,
+  );
+  const draftedFieldConditions = conditions.flatMap((c) =>
+    c.kind === "project-field"
+      ? [
+          {
+            projectNodeId: String(c.projectNodeId ?? ""),
+            fieldNodeId: String(c.fieldNodeId ?? ""),
+            optionNodeId: String(c.optionNodeId ?? ""),
+          },
+        ]
+      : [],
+  );
   /** The Remove and Undo names carry the S-n id, so two rows with one name stay distinct. */
   const rowName = (n: SourceNaming, id: unknown) =>
     `${n.private ? "Saved search" : n.name} (${String(id)})`;
@@ -468,6 +483,16 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                       </Button>
                     </div>
                     <OutcomeDetails fields={details(r, savedNaming(r))} />
+                    {r.kind === "project" && !r.removed && (
+                      <ProjectFieldOptions
+                        projectFields={observedRow(r.id)?.projectFields}
+                        drafted={draftedFieldConditions}
+                        disabled={isLocked}
+                        onAdd={(ids) =>
+                          add("conditions", { kind: "project-field", ...ids })
+                        }
+                      />
+                    )}
                     {r.kind === "search" && !r.removed && (
                       <div className="settings-fields">
                         {savedValue(
@@ -680,7 +705,11 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                               ? { kind, name: "" }
                               : {
                                   kind,
-                                  projectNodeId: "",
+                                  // The source's only GitHub Project is the likely one.
+                                  projectNodeId:
+                                    projectSources.length === 1
+                                      ? String(projectSources[0]?.descriptor)
+                                      : "",
                                   fieldNodeId: "",
                                   optionNodeId: "",
                                 }),

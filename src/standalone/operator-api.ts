@@ -58,6 +58,7 @@ import {
 } from "../operator/runtime-restart-copy.js";
 import type { StructuredQuestionSet } from "../core/structured-questions.js";
 import type { Readiness } from "../core/github-source-contracts.js";
+import type { ProjectFieldIds } from "../core/project-field-names.js";
 import type { TaskReadiness } from "../core/github-source.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
@@ -119,6 +120,7 @@ import {
   taskRecordQuerySchema,
   taskResultPageSchema,
   taskSchema,
+  textMaxLength,
   unsupportedRuntimeField,
   uuid,
   workIdSchema,
@@ -2557,7 +2559,23 @@ export class OperatorApi {
     if (rule === null) return { kind: "none" as const };
     if (this.exact(JSON.stringify(rule), excluded) === null)
       return { kind: "unavailable" as const };
-    return { kind: "rule" as const, ...rule };
+    return {
+      kind: "rule" as const,
+      ...rule,
+      conditions: this.fieldNames(rule.conditions, excluded),
+    };
+  }
+  /** Node-ID conditions or field values with each stored name the exclusions leave whole. */
+  private fieldNames<T extends ProjectFieldIds>(
+    items: readonly T[],
+    excluded: readonly string[] | undefined,
+  ) {
+    return this.service
+      .githubSources()
+      .withFieldNames(
+        items,
+        (name) => this.exact(name, excluded, textMaxLength) !== null,
+      );
   }
   private taskReadiness(
     projectId: () => string,
@@ -2575,7 +2593,11 @@ export class OperatorApi {
       );
     return rule.kind === "unavailable" || !result
       ? { rule, outcome: "not-evaluated" as const, unmet: [] }
-      : { rule, outcome: result.outcome, unmet: result.unmet };
+      : {
+          rule,
+          outcome: result.outcome,
+          unmet: this.fieldNames(result.unmet, excluded),
+        };
   }
   private async taskSummary(
     taskId: string,
@@ -4344,7 +4366,7 @@ export class OperatorApi {
             .parse(JSON.parse(String(m.projectFields)));
           return {
             selectionId: String(m.selectionId),
-            projectFields: fields,
+            projectFields: this.fieldNames(fields, excluded),
             sync: {
               lastAttemptAt: sync ? String(sync.refreshedAt) : null,
               lastSuccessfulAt:
@@ -4539,7 +4561,7 @@ export class OperatorApi {
               ? publicationTargetReasonSentences[t.reasonCode]
               : null,
             labels: t.labels.map((l) => this.safe(l, excluded)),
-            projectFields: t.projectFields,
+            projectFields: this.fieldNames(t.projectFields, excluded),
             predictedSelected: t.predictedSelected,
             predictedReady: t.predictedReady,
           }))
@@ -4597,7 +4619,7 @@ export class OperatorApi {
       selectionKind: review.target.kind,
       ...text,
       labels: review.issue.labels.map((l) => this.safe(l, excluded)),
-      projectFields: review.target.projectFields,
+      projectFields: this.fieldNames(review.target.projectFields, excluded),
       addsToProject: review.item !== null,
       predictedSelected: true,
       predictedReady: review.target.predictedReady,
@@ -5900,7 +5922,25 @@ export class OperatorApi {
               this.service.githubSources().readinessRule(projectId),
               excluded,
             ),
-            counted = this.service.githubSources().selectionCounts(projectId);
+            counted = this.service.githubSources().selectionCounts(projectId),
+            fieldCounts = this.service
+              .githubSources()
+              .selectionFieldCounts(projectId);
+          // A name the exclusions withhold reads as its node ID.
+          const shown = (name: string, id: string) =>
+            this.exact(name, excluded, textMaxLength) ?? id;
+          const named = (f: ReturnType<typeof fieldCounts.get>) =>
+            f && {
+              projectNodeId: f.projectNodeId,
+              fields: f.fields.map((field) => ({
+                ...field,
+                name: shown(field.name, field.fieldNodeId),
+                options: field.options.map((o) => ({
+                  ...o,
+                  name: shown(o.name, o.optionNodeId),
+                })),
+              })),
+            };
           return {
             projectId,
             credential,
@@ -5937,6 +5977,7 @@ export class OperatorApi {
                   matching:
                     readiness.kind === "unavailable" ? null : counts.matching,
                 },
+                projectFields: (counts && named(fieldCounts.get(s.id))) ?? null,
               };
             }),
           };

@@ -210,6 +210,13 @@ complete read only. Membership in another source cannot grant admission. Each se
 source observation counts its observed items (including closed issues skipped without a
 task), open items and open items matching the readiness rule, and warns when a complete
 read matches none; an imported open Draft task names the conditions it does not meet.
+A GitHub Project selection's observation also lists each single-select field with how many
+of its open items hold each option, and the operator can add an option as a
+Project-field condition from that list; the condition still saves only with the
+source configuration. Conditions, unmet reasons and observed field values read by the
+field and option names the Project's last complete read listed; a partial read keeps
+them, and a field or option no complete read has named shows its node ID. Names are
+display only: rules, commands and readiness matching use node IDs.
 These explanations are read-only projections of stored observations: they make no
 provider read and grant no readiness, and matching the rule is neither Ready nor
 admission. Ready authorizes work within scope, without a universal per-task plan approval.
