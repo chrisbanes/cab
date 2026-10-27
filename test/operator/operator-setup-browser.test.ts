@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
-import type { Page } from "playwright";
+import type { Page, Route } from "playwright";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import {
+  atlasIssueReader,
   chooseRepository,
   commandRequest,
   readinessBody,
@@ -1669,6 +1671,287 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
     0,
   );
   assert.equal(await resume.isEnabled(), true);
+});
+
+/** The ready check of a project that links acme/atlas's GitHub Project, over a signed-in gh. */
+async function linkedReadyCheck(
+  journey: Parameters<typeof setupJourney>[0],
+  options: {
+    viewport?: { width: number; height: number };
+    /** Readiness checks that fail, which also offers Check again. */
+    failing?: Parameters<typeof stubReadiness>[1];
+  } = {},
+) {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const s = await setupJourney(journey, {
+    ghExecutable: gh.executable,
+    readerFactory: atlasIssueReader,
+    ...(options.viewport ? { viewport: options.viewport } : {}),
+  });
+  await stubReadiness(s.page, options.failing);
+  const sent = sentCommands(s.page);
+  const steps: string[] = [];
+  s.page.on("request", (r) => {
+    if (
+      r.method() === "POST" &&
+      r.url().endsWith("/api/operator/source-refresh")
+    )
+      steps.push("refresh");
+    else if (
+      r.method() === "POST" &&
+      r.url().endsWith("/api/operator/commands")
+    ) {
+      const body = r.postDataJSON() as { type: string };
+      if (body.type === "github.preview") steps.push("preview");
+    }
+  });
+  await addRepository(s.page);
+  // Create records the gh credential only once step 3 has read the login.
+  await s.page
+    .getByText(/^GitHub source credential: GitHub CLI · @octo\. /)
+    .waitFor();
+  const created = await createProject(s.page, sent);
+  return {
+    ...s,
+    ...created,
+    gh,
+    sent,
+    steps,
+    previews: () => sent.filter((c) => c.type === "github.preview"),
+    panel: created.ready.getByRole("region", { name: "Import issues" }),
+    importButton: created.ready.getByRole("button", {
+      name: "Preview and import now",
+      exact: true,
+    }),
+  };
+}
+
+test("Setup's ready check imports the linked GitHub Project before Resume, then resumes", async (_t, journey) => {
+  const t = await linkedReadyCheck(journey);
+  await t.importButton.waitFor();
+  // Importing stays an explicit press: nothing has previewed or refreshed yet.
+  assert.deepEqual(t.steps, []);
+  assert.equal(
+    await t.importButton.evaluate(
+      (el, resume) =>
+        Boolean(
+          el.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      await t.resume.elementHandle(),
+    ),
+    true,
+    "Preview and import now comes before Resume",
+  );
+  await t.importButton.click();
+  const activation = outcomeMessages(t.ready).filter({ hasText: /^Previewed/ });
+  await activation.waitFor();
+  assert.match(
+    await activation.locator(".action-outcome-message").innerText(),
+    /^Previewed \d\d:\d\d\. .* is active\.$/,
+  );
+  const read = outcomeMessages(t.ready).filter({
+    hasText: /Read .* completely at/,
+  });
+  await read.waitFor();
+  const view = t.ready.getByRole("link", { name: "View imported tasks" });
+  assert.equal(await view.getAttribute("href"), `/app/projects/${t.projectId}`);
+  assert.equal(await view.getAttribute("target"), "_blank");
+  assert.deepEqual(t.steps, ["preview", "refresh"]);
+  assert.deepEqual(
+    t.previews().map(({ selectionId, expectedVersion }) => ({
+      selectionId,
+      expectedVersion,
+    })),
+    [{ selectionId: "S-1", expectedVersion: 1 }],
+  );
+  const d = t.f.service.domain();
+  const imported = d.tasks(t.projectId).length;
+  assert.ok(imported > 0, "the refresh imported the project's issues");
+  // Resume is unaffected: it still sends its recorded version and opens the composer.
+  assert.equal(await t.resume.isEnabled(), true);
+  assert.equal(d.project(t.projectId).paused, 1);
+  await t.resume.click();
+  await t.composer();
+  const resumed = t.sent.filter((c) => c.type === "project.configure");
+  assert.deepEqual(
+    resumed.map(({ paused, expectedVersion }) => ({ paused, expectedVersion })),
+    [{ paused: false, expectedVersion: 1 }],
+  );
+  assert.equal(d.project(t.projectId).paused, 0);
+  assert.equal(d.tasks(t.projectId).length, imported);
+});
+
+for (const state of ["partial", "never"] as const)
+  test(`Setup's ready check claims no import when the read is ${state}`, async (_t, journey) => {
+    const t = await linkedReadyCheck(journey);
+    await t.page.route("**/api/operator/source-refresh", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      for (const project of body.data.projects)
+        for (const s of project.selections) {
+          s.state = state;
+          s.lastSuccessfulAt = null;
+          if (state === "never") s.lastAttemptAt = null;
+        }
+      await route.fulfill({ response, json: body });
+    });
+    await t.importButton.click();
+    await outcomeMessages(t.ready)
+      .filter({
+        hasText:
+          state === "partial" ? /only partly/ : /nothing was imported from/,
+      })
+      .waitFor();
+    assert.equal(
+      await t.ready.getByRole("link", { name: "View imported tasks" }).count(),
+      0,
+    );
+  });
+
+test("Setup's ready check resends an unknown preview with the same key, then refreshes once", async (_t, journey) => {
+  const t = await linkedReadyCheck(journey);
+  let first = true;
+  await t.page.route("**/api/operator/commands", async (route: Route) => {
+    if (!first || route.request().postDataJSON().type !== "github.preview")
+      return route.continue();
+    first = false;
+    await route.abort();
+  });
+  await t.importButton.click();
+  const check = t.ready.getByRole("button", { name: "Check whether it saved" });
+  await check.waitFor();
+  assert.deepEqual(t.steps, ["preview"], "no refresh before it is confirmed");
+  await check.click();
+  await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
+  const [one, two] = t.previews();
+  assert.equal(t.previews().length, 2);
+  assert.equal(one?.key, two?.key);
+  assert.deepEqual(t.steps, ["preview", "preview", "refresh"]);
+});
+
+test("Setup's ready check offers Refresh again for an unconfirmed refresh without previewing again", async (_t, journey) => {
+  const t = await linkedReadyCheck(journey);
+  let fail = true;
+  await t.page.route("**/api/operator/source-refresh", (route) =>
+    fail ? route.abort() : route.continue(),
+  );
+  await t.importButton.click();
+  const warning = outcomeMessages(t.ready).filter({
+    hasText: "We couldn't confirm the refresh. The sources are active.",
+  });
+  await warning.waitFor();
+  fail = false;
+  await warning.getByRole("button", { name: "Refresh again" }).click();
+  await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
+  assert.deepEqual(t.steps, ["preview", "refresh", "refresh"]);
+});
+
+test("Setup's ready check reviews a source saved elsewhere before importing again", async (_t, journey) => {
+  const t = await linkedReadyCheck(journey);
+  await t.importButton.waitFor();
+  const d = t.f.service.domain();
+  await new OperatorApi(t.f.service, [t.f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: t.projectId,
+    expectedVersion: 1,
+    selections: [{ id: "S-1", keep: true }],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: d
+      .githubConfiguration(t.projectId)
+      .repositories.map(({ repositoryId, ref }) => ({ repositoryId, ref })),
+  } as never);
+  await t.importButton.click();
+  const warning = outcomeMessages(t.ready).filter({
+    hasText: "Nothing was refreshed.",
+  });
+  await warning.waitFor();
+  assert.deepEqual(t.steps, ["preview"]);
+  // The action is offered again at once; the press that follows needs the re-read version.
+  const reread = t.page.waitForResponse((r) =>
+    r.url().endsWith(`/api/operator/projects/${t.projectId}/configuration`),
+  );
+  await warning.getByRole("button", { name: "Review changes" }).click();
+  await reread;
+  await t.importButton.waitFor();
+  await t.importButton.click();
+  await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
+  const [stale, fresh] = t.previews();
+  assert.equal(fresh?.expectedVersion, 2);
+  assert.notEqual(fresh?.key, stale?.key);
+});
+
+test("Setup's ready check keeps Preview and import now focusable with the unusable credential's reason", async (_t, journey) => {
+  // A failing readiness item is what offers Check again here.
+  const t = await linkedReadyCheck(journey, {
+    failing: { "codex-login": "fail" },
+  });
+  await t.importButton.waitFor();
+  t.gh.set("not-signed-in");
+  await t.ready.getByRole("button", { name: "Check again" }).click();
+  await t.ready.getByRole("link", { name: "GitHub source settings" }).waitFor();
+  assert.equal(await t.importButton.getAttribute("aria-disabled"), "true");
+  const reason = await t.importButton.evaluate((el) => {
+    const id = el.getAttribute("aria-describedby");
+    const line = id ? document.getElementById(id) : null;
+    return {
+      id,
+      text: line?.textContent ?? "",
+      link: line?.querySelector("a")?.textContent ?? "",
+    };
+  });
+  assert.equal(reason.id, "source-credential-reason");
+  assert.match(reason.text, /^GitHub source credential: GitHub CLI\./);
+  assert.equal(reason.link, "GitHub source settings");
+  await t.importButton.click({ force: true });
+  await t.page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => done(null))),
+  );
+  assert.deepEqual(t.steps, []);
+});
+
+test("Setup's ready check offers no import without a linked GitHub Project", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { page } = await setupJourney(journey, {
+    ghExecutable: gh.executable,
+    readerFactory: atlasIssueReader,
+  });
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  await addRepository(page);
+  await page.getByLabel("GitHub Project", { exact: true }).selectOption("");
+  const { ready, resume } = await createProject(page, sent);
+  assert.equal(
+    "githubProject" in (sent.find((c) => c.type === "project.create") ?? {}),
+    false,
+  );
+  await resume.waitFor();
+  assert.equal(
+    await ready.getByRole("region", { name: "Import issues" }).count(),
+    0,
+  );
+  assert.equal(
+    await ready.getByRole("button", { name: "Preview and import now" }).count(),
+    0,
+  );
+});
+
+test("Setup's linked-Project ready check stays usable on a phone", async (_t, journey) => {
+  const t = await linkedReadyCheck(journey, {
+    viewport: { width: 390, height: 844 },
+  });
+  await t.importButton.click();
+  await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await t.page.waitForFunction(
+    () =>
+      document.documentElement.scrollWidth <=
+      document.documentElement.clientWidth,
+  );
+  await t.resume.scrollIntoViewIfNeeded();
+  assert.equal(await t.resume.isVisible(), true);
+  await captureBrowserEvidence(t.page, "390-setup-ready-check-imported");
 });
 
 const setupBar = (page: Page) => page.locator(".setup-submit");
