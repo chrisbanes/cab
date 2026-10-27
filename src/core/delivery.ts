@@ -1968,14 +1968,24 @@ export class DeliveryStore {
       )
       .run(taskId, repositoryId);
   }
-  /** The PR's head is on the task branch but is not the commit Ensemble last pushed there. */
-  private branchHold(taskId: string, binding: PrDeliveryBinding): boolean {
-    const branch = this.taskBranch(taskId, binding.observation.repositoryId);
-    return (
-      !!branch &&
-      branch.branch === binding.observation.headRef &&
-      (branch.outsideHeadSha !== null ||
-        branch.lastPushedSha !== binding.observation.headSha)
+  /**
+   * Any task branch, in any repository and with or without a PR, that records an outside head holds
+   * completion. The bound PR's own branch also holds when its head is not Ensemble's last push, and
+   * a closed PR's own branch never holds, because GitHub may delete it and nothing clears that.
+   */
+  private branchHold(
+    taskId: string,
+    binding: PrDeliveryBinding | null,
+  ): boolean {
+    const observation = binding?.observation;
+    return this.taskBranches(taskId).some((branch) =>
+      observation &&
+      branch.repositoryId === observation.repositoryId &&
+      branch.branch === observation.headRef
+        ? observation.state !== "CLOSED" &&
+          (branch.outsideHeadSha !== null ||
+            branch.lastPushedSha !== observation.headSha)
+        : branch.outsideHeadSha !== null,
     );
   }
   recordPrReadFailure(taskId: string): void {
@@ -2052,15 +2062,15 @@ export class DeliveryStore {
   ): string[] {
     const reasons = this.actionBlockers(taskId, exceptOperationId),
       binding = this.delivery(taskId);
-    if (!binding) return reasons;
+    if (!binding)
+      return this.branchHold(taskId, null)
+        ? [...reasons, "task-branch-outside-change"]
+        : reasons;
     if (binding.readError) reasons.push("delivery-provider-read-unavailable");
     const policy = this.configuration(binding.projectId);
     if (binding.mode !== policy.mode) reasons.push("delivery-mode-changed");
     if (binding.observation.merged) return reasons;
-    if (
-      binding.observation.state !== "CLOSED" &&
-      this.branchHold(taskId, binding)
-    )
+    if (this.branchHold(taskId, binding))
       reasons.push("task-branch-outside-change");
     if (binding.mode === "through-merge")
       reasons.push("pr-not-confirmed-merged");
