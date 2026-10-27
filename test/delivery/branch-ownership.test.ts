@@ -17,6 +17,7 @@ import {
   publicationWorld,
   repositoryId,
 } from "../fixtures/publication.js";
+import { absentBranchHead } from "../../src/core/delivery.js";
 import { verifyTaskPush } from "../../src/standalone/push-verification.js";
 
 type World = ReturnType<typeof publicationWorld>;
@@ -650,4 +651,70 @@ test("closing the outcome stays possible on a closed PR whose branch was deleted
     expectedHeadSha: first,
   });
   assert.ok(w.store.delivery(w.taskId)?.settlement);
+});
+
+const holdsCompletion = (w: World) =>
+  w.store
+    .completionBlockers(w.taskId, 1)
+    .includes("task-branch-outside-change");
+const setOutsideHead = (w: World, repo: string, head: string | null) =>
+  w.db
+    .prepare(
+      "UPDATE delivery_task_branches SET outsideHeadSha=? WHERE taskId=? AND repositoryId=?",
+    )
+    .run(head, w.taskId, repo);
+const assignSecondRepository = (w: World) =>
+  w.store.transaction(() =>
+    w.store.assignTaskBranchWithinTransaction(w.taskId, "R2"),
+  );
+
+test("an outside head with no PR holds completion until it clears", async (t) => {
+  const w = publicationWorld(t);
+  await w.submit("branch.push", w.commit());
+  assert.equal(holdsCompletion(w), false);
+  setOutsideHead(w, repositoryId, "5".repeat(40));
+  assert.equal(holdsCompletion(w), true);
+  w.store.clearOutsideHead(w.taskId, repositoryId);
+  assert.equal(holdsCompletion(w), false);
+});
+
+test("a deleted branch with no PR holds completion", async (t) => {
+  const w = publicationWorld(t);
+  await w.submit("branch.push", w.commit());
+  setOutsideHead(w, repositoryId, absentBranchHead);
+  assert.equal(holdsCompletion(w), true);
+});
+
+test("an outside head on a second repository's branch holds completion and accepted settlement", async (t) => {
+  const w = publicationWorld(t);
+  const { first } = await withPr(w);
+  assignSecondRepository(w);
+  setOutsideHead(w, "R2", "5".repeat(40));
+  assert.equal(holdsCompletion(w), true);
+  await assert.rejects(settle(w, first), /outside Ensemble/);
+  setOutsideHead(w, "R2", null);
+  await settle(w, first);
+});
+
+test("a merged PR completes despite an outside head, since a merge on GitHub is acceptance", async (t) => {
+  const w = publicationWorld(t);
+  const { first, branch } = await withPr(w);
+  Object.assign(w.showPr(first, branch), { state: "MERGED", merged: true });
+  await w.coordinator.refresh();
+  assignSecondRepository(w);
+  setOutsideHead(w, repositoryId, "5".repeat(40));
+  setOutsideHead(w, "R2", "5".repeat(40));
+  assert.equal(holdsCompletion(w), false);
+});
+
+test("a closed PR's own branch does not hold, but another repository's outside head does", async (t) => {
+  const w = publicationWorld(t);
+  const { first, branch } = await withPr(w);
+  w.showPr(first, branch).state = "CLOSED";
+  await w.coordinator.refresh();
+  setOutsideHead(w, repositoryId, absentBranchHead);
+  assert.equal(holdsCompletion(w), false);
+  assignSecondRepository(w);
+  setOutsideHead(w, "R2", "5".repeat(40));
+  assert.equal(holdsCompletion(w), true);
 });

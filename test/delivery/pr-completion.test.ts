@@ -247,6 +247,24 @@ test("non-code issue close remains permitted without a PR delivery binding", asy
     await f.close();
   }
 });
+test("an outside head on a task branch holds issue close without a PR delivery binding", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    const store = f.service.delivery();
+    store.transaction(() =>
+      store.assignTaskBranchWithinTransaction(f.taskId, "R1"),
+    );
+    (f.service as unknown as { db: DatabaseSync }).db
+      .prepare("UPDATE delivery_task_branches SET outsideHeadSha=?")
+      .run("5".repeat(40));
+    const result = await closeFixtureIssue(f);
+    assert.equal(result.success, false, result.text);
+    assert.match(result.text, /held/i);
+    assert.deepEqual(f.effects, []);
+  } finally {
+    await f.close();
+  }
+});
 for (const mode of ["reviewable-pr", "through-merge"] as const)
   test(`${mode} issue close passes a current settled or merged PR boundary`, async () => {
     const f = await deliveryFixture(mode, true);
