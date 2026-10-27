@@ -117,6 +117,8 @@ export function ReadyCheck({
         ),
       [p.client],
     ),
+    // Only the linked Project's Import issues panel reads them.
+    Boolean(created.githubProject),
   );
   const credential = sourceCredentialLine(
     projectId,
@@ -300,7 +302,7 @@ export function ReadyCheck({
                   void readiness.refresh();
                   void options.refresh();
                   void configuration.refresh();
-                  void observations.refresh();
+                  if (created.githubProject) void observations.refresh();
                   p.refresh();
                   // The result takes focus: the button leaves when a failed read starts again.
                   waitsRoot.current?.focus();

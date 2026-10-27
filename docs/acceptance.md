@@ -440,7 +440,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   `operator-discovery-credential-browser`), including the inline lead profile, the
   leave prompt and the ready check's Resume, Keep paused, blocked, full-capacity and
   unknown-outcome journeys and its Import issues recovery for a linked GitHub Project, with
-the eight-interaction first-run journey (`operator-setup-model` covers its wait items). Live
+  the eight-interaction first-run journey (`operator-setup-model` covers its wait items). Live
   evidence is bounded to one read-only discovery probe against api.github.com and
   one real home-folder listing, recorded as counts in
   [project setup evidence](evidence/ui07-project-setup.md). Limits: typed repositories carry

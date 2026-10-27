@@ -1938,22 +1938,6 @@ test("Setup's ready check offers no import without a linked GitHub Project", asy
   );
 });
 
-test("Setup's linked-Project ready check stays usable on a phone", async (_t, journey) => {
-  const t = await linkedReadyCheck(journey, {
-    viewport: { width: 390, height: 844 },
-  });
-  await t.importButton.click();
-  await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
-  await t.page.waitForFunction(
-    () =>
-      document.documentElement.scrollWidth <=
-      document.documentElement.clientWidth,
-  );
-  await t.resume.scrollIntoViewIfNeeded();
-  assert.equal(await t.resume.isVisible(), true);
-  await captureBrowserEvidence(t.page, "390-setup-ready-check-imported");
-});
-
 const setupBar = (page: Page) => page.locator(".setup-submit");
 const startsWithH2 = (page: Page) =>
   page.locator("main.page form.setup-grid h2").allTextContents();

@@ -108,5 +108,5 @@ note, **Cancel** and then **Create paused project** at every width.
 
 Creation starts no execution; Resume is an explicit operator action; repository
 access is exactly the list in step 3; discovery imports nothing until a source is
-previewed and activated, which the ready check's Preview and import now only does on
-an explicit press.
+previewed and activated; the ready check's Preview and import now does so only on an
+explicit press.
