@@ -799,3 +799,76 @@ test("a POST refuses redirects instead of replaying the body", async () => {
     },
   ]);
 });
+
+test("a GraphQL RATE_LIMITED answer is rate-limited with the reset time; other GraphQL errors stay invalid", async () => {
+  const projectSelection = {
+    id: "project",
+    kind: "project" as const,
+    projectNodeId: "P_1",
+    filter: "status:ready",
+  };
+  const graphqlErrors = (errors: unknown[], headers: Record<string, string>) =>
+    new GitHubHttpSourceReader(
+      "fixture-token",
+      async () =>
+        new Response(JSON.stringify({ errors, data: null }), { headers }),
+    ).readSelection(projectSelection);
+
+  const reset = Math.floor(Date.now() / 1000) + 120;
+  const limited = await graphqlErrors(
+    [{ type: "RATE_LIMITED", message: "x" }],
+    {
+      "x-ratelimit-reset": String(reset),
+    },
+  );
+  assert.equal(limited.complete, false);
+  assert.equal(limited.reason, "rate-limited");
+  assert.equal(limited.resumeAt, reset * 1000);
+
+  const fallback = await graphqlErrors([{ type: "RATE_LIMITED" }], {});
+  assert.equal(fallback.reason, "rate-limited");
+  assert.ok(
+    (fallback.resumeAt ?? 0) > Date.now() + 30_000 &&
+      (fallback.resumeAt ?? 0) <= Date.now() + 61_000,
+  );
+
+  const other = await graphqlErrors([{ type: "FORBIDDEN", message: "x" }], {});
+  assert.equal(other.reason, "invalid-graphql-response");
+  assert.equal(other.resumeAt, undefined);
+});
+
+test("a blocker's status follows a repository rename by node id, not by the stored name", async () => {
+  const reference = {
+    nodeId: "B_7",
+    repositoryId: "R_2",
+    repositoryName: "org/old",
+    number: 7,
+  };
+  const reader = (repositoryNodeId: string, issueRepository = "org/new") =>
+    redirectingReader({
+      "https://api.github.com/repos/org/old": () =>
+        redirect(301, "/repositories/2"),
+      "https://api.github.com/repositories/2": () =>
+        new Response(
+          JSON.stringify({ node_id: repositoryNodeId, full_name: "org/new" }),
+        ),
+      "https://api.github.com/repos/org/new/issues/7": () =>
+        new Response(
+          JSON.stringify({
+            ...issue(7, "B_7"),
+            repository_url: `https://api.github.com/repos/${issueRepository}`,
+            state: "closed",
+          }),
+        ),
+    }).reader.readIssueStatus(reference);
+
+  assert.deepEqual(await reader("R_2"), { status: "closed" });
+  assert.deepEqual(await reader("R_9"), {
+    status: "unknown",
+    reason: "repository-mismatch",
+  });
+  assert.deepEqual(await reader("R_2", "org/other"), {
+    status: "unknown",
+    reason: "invalid-issue-identity",
+  });
+});

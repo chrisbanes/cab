@@ -556,3 +556,39 @@ test("status shares one equivalent login probe but fresh tokens, isolating snaps
   );
   assert.equal(fake.environments().length, before);
 });
+
+test("one token reuses its delegate across reads while the credential is resolved on every read", async () => {
+  const environment: Record<string, string> = { SOURCE: "token-A" };
+  const tokens: string[] = [];
+  const reader = new CredentialGitHubSourceReader("env:SOURCE", {
+    environment,
+    reader: (token) => {
+      tokens.push(token);
+      return {
+        async readSelection() {
+          return { complete: true, issues: [], reason: null };
+        },
+        async readBlockers() {
+          return { complete: true, blockers: [], reason: null };
+        },
+        async readIssueStatus() {
+          return { status: "open" };
+        },
+      };
+    },
+  });
+  await reader.readSelection(selection);
+  await reader.readIssueStatus(reference);
+  assert.deepEqual(tokens, ["token-A"]);
+  environment.SOURCE = "token-B";
+  await reader.readBlockers(reference);
+  await reader.readSelection(selection);
+  assert.deepEqual(tokens, ["token-A", "token-B"]);
+  environment.SOURCE = "";
+  assert.equal((await reader.readSelection(selection)).complete, false);
+  assert.deepEqual(
+    tokens,
+    ["token-A", "token-B"],
+    "a cleared credential reads nothing",
+  );
+});

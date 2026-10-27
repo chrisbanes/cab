@@ -1002,6 +1002,8 @@ function threadFixture() {
     resolves: 0,
     lost: false,
     graphqlErrors: false,
+    rateLimitedUntil: 0,
+    exhaustedWithUnrelatedError: false,
     replyState: "SUBMITTED",
     status: 200,
   };
@@ -1050,6 +1052,20 @@ function threadFixture() {
       assert.equal(variables.thread, "T1");
       if (state.graphqlErrors)
         return Response.json({ data: null, errors: [{ message: "nope" }] });
+      if (state.exhaustedWithUnrelatedError)
+        return Response.json(
+          { data: null, errors: [{ message: "nope" }] },
+          { headers: { "x-ratelimit-remaining": "0" } },
+        );
+      if (state.rateLimitedUntil)
+        return Response.json(
+          { data: null, errors: [{ type: "RATE_LIMITED", message: "slow" }] },
+          {
+            headers: {
+              "x-ratelimit-reset": String(state.rateLimitedUntil / 1000),
+            },
+          },
+        );
       state.comments.push({
         id: `C${state.comments.length + 1}`,
         body: variables.body,
@@ -1195,6 +1211,7 @@ test("thread resolve is confirmed only when the credential user resolved the thr
 });
 
 test("thread write failures are uncertain unless the provider definitively rejected the request", async () => {
+  const resumeAt = Math.floor(Date.now() / 1000 + 300) * 1000;
   for (const [name, change, expected] of [
     [
       "lost response with effect",
@@ -1209,6 +1226,20 @@ test("thread write failures are uncertain unless the provider definitively rejec
         s.graphqlErrors = true;
       },
       "uncertain",
+    ],
+    [
+      "GraphQL errors that may have run on the last point of the budget",
+      (s: ReturnType<typeof threadFixture>["state"]) => {
+        s.exhaustedWithUnrelatedError = true;
+      },
+      "uncertain",
+    ],
+    [
+      "GraphQL rate limit",
+      (s: ReturnType<typeof threadFixture>["state"]) => {
+        s.rateLimitedUntil = resumeAt;
+      },
+      "confirmed-failure",
     ],
     [
       "pending review comment",
@@ -1233,6 +1264,11 @@ test("thread write failures are uncertain unless the provider definitively rejec
     );
     const result = await f.provider.performAction(f.reply);
     assert.equal(result.state, expected, name);
+    if (name === "GraphQL rate limit") {
+      assert.equal(result.reason, "provider-http-429");
+      assert.equal(result.retryable, true);
+      assert.equal(result.resumeAt, resumeAt);
+    }
     if (name === "HTTP 403") assert.equal(result.reason, "provider-http-403");
     // Only readback, never the lost response, proves the effect.
     if (name === "lost response with effect")

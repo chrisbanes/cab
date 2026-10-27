@@ -88,6 +88,37 @@ export async function githubRateLimitResumeAt(
     !/rate limit/i.test(await response.text().catch(() => ""))
   )
     return undefined;
+  return resumeTime(response);
+}
+
+/**
+ * The epoch-ms time to resume after a GraphQL rate limit, else undefined.
+ * GraphQL reports a spent budget as HTTP 200 with a `RATE_LIMITED` error (or
+ * errors alongside an exhausted `x-ratelimit-remaining`), never as 403/429.
+ * A write that must know GitHub did not apply it passes `typedOnly`: the request
+ * that spends the last point executes and also reports `remaining: 0`.
+ */
+export function githubGraphqlRateLimitResumeAt(
+  response: Response,
+  errors: readonly unknown[],
+  { typedOnly = false } = {},
+): number | undefined {
+  const limited =
+    errors.length > 0 &&
+    ((!typedOnly && response.headers.get("x-ratelimit-remaining") === "0") ||
+      errors.some(
+        (error) =>
+          typeof error === "object" &&
+          error !== null &&
+          "type" in error &&
+          error.type === "RATE_LIMITED",
+      ));
+  return limited ? resumeTime(response) : undefined;
+}
+
+function resumeTime(response: Response): number {
+  const header = (name: string) => response.headers.get(name);
+  const retryAfter = header("retry-after");
   const now = Date.now();
   // Only positive whole seconds are usable; empty, negative or past values fall back.
   const seconds = (value: string | null) =>
