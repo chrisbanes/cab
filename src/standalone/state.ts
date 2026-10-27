@@ -1311,15 +1311,24 @@ export class ExecutionState {
           .get(input.assignmentId) as { revision: number }
       ).revision,
     );
-    // A conversation keeps the harness that started it; never fall back.
-    const inherited = (this.db
-      .prepare("SELECT harness FROM task_execution_bindings WHERE workId = ?")
-      .get(workId) ??
+    // A conversation keeps the harness that started it; never fall back. This work's own
+    // binding counts only once it got past waiting for admission: until then a re-captured
+    // profile revision may move it to another runtime.
+    const own = this.awaitingAdmission(workId)
+      ? undefined
+      : this.db
+          .prepare(
+            "SELECT harness FROM task_execution_bindings WHERE workId = ?",
+          )
+          .get(workId);
+    const inherited = (own ??
       this.db
         .prepare(`SELECT harness FROM task_execution_bindings
-        WHERE assignmentId = ? AND conversationRevision = ?
+        WHERE assignmentId = ? AND conversationRevision = ? AND workId != ?
         ORDER BY rowid LIMIT 1`)
-        .get(input.assignmentId, revision)) as { harness: unknown } | undefined;
+        .get(input.assignmentId, revision, workId)) as
+      | { harness: unknown }
+      | undefined;
     const executionHarness = inherited
       ? executionHarnessSchema.parse(inherited.harness)
       : requestedHarness;
@@ -1343,16 +1352,18 @@ export class ExecutionState {
       binding.assignmentId === input.assignmentId &&
       (binding.assignmentVersion !== input.assignmentVersion ||
         binding.instructionsRevision !== input.instructionsRevision ||
-        binding.profileRevision !== input.profileRevision)
+        binding.profileRevision !== input.profileRevision ||
+        binding.harness !== executionHarness)
     )
       this.db
         .prepare(`UPDATE task_execution_bindings
         SET assignmentVersion = ?, instructionsRevision = ?,
-          profileRevision = ?
+          profileRevision = ?, harness = ?
         WHERE workId = ? AND taskId = ? AND assignmentId = ?
         AND EXISTS (
           SELECT 1 FROM execution_intents e
-          WHERE e.workId = task_execution_bindings.workId AND e.state = 'ready'
+          WHERE e.workId = task_execution_bindings.workId
+            AND e.state IN ('ready','capacity-waiting') AND e.threadId IS NULL
         ) AND NOT EXISTS (
           SELECT 1 FROM task_writer_admissions a
           WHERE a.workId = task_execution_bindings.workId
@@ -1364,6 +1375,7 @@ export class ExecutionState {
           input.assignmentVersion,
           input.instructionsRevision,
           input.profileRevision,
+          executionHarness,
           workId,
           input.taskId,
           input.assignmentId,
@@ -1697,6 +1709,33 @@ export class ExecutionState {
       throw new Error("Coordination callback matches ambiguous work");
     const [row] = rows;
     return row && { ...row, draftTurn: row.draftTurn === 1 };
+  }
+
+  /**
+   * Whether the work is still waiting for admission: no execution yet, or one that is
+   * ready or capacity-waiting with no thread, owning no writer or capacity reservation.
+   */
+  awaitingAdmission(workId: string): boolean {
+    const intent = this.byWorkId(workId);
+    return (
+      !intent ||
+      ((intent.state === "ready" || intent.state === "capacity-waiting") &&
+        !intent.threadId)
+    );
+  }
+
+  /** Whether any execution bound to the assignment got past waiting for admission. */
+  assignmentHasStartedExecution(assignmentId: string): boolean {
+    return (
+      this.db
+        .prepare(`SELECT 1 AS present FROM task_execution_bindings binding
+          JOIN execution_intents intent ON intent.workId = binding.workId
+          WHERE binding.assignmentId = ?
+            AND (intent.state NOT IN ('ready','capacity-waiting')
+              OR intent.threadId IS NOT NULL)
+          LIMIT 1`)
+        .get(assignmentId) !== undefined
+    );
   }
 
   latestCompletedAssignmentWork(assignmentId: string): string | undefined {

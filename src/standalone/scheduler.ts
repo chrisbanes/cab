@@ -389,6 +389,30 @@ export class SchedulerStore {
       .run(workspace, workId);
   }
 
+  /** Re-captures a queued request; callers ensure it never reached an execution. */
+  recapture(
+    workId: string,
+    input: Pick<
+      TurnRequestInput,
+      | "taskVersion"
+      | "assignmentVersion"
+      | "instructionsRevision"
+      | "profileRevision"
+    >,
+  ): void {
+    this.db
+      .prepare(`UPDATE turn_requests SET taskVersion = ?, assignmentVersion = ?,
+        instructionsRevision = ?, profileRevision = ?, reason = NULL
+        WHERE workId = ? AND state = 'queued'`)
+      .run(
+        input.taskVersion ?? null,
+        input.assignmentVersion ?? null,
+        input.instructionsRevision ?? null,
+        input.profileRevision ?? null,
+        workId,
+      );
+  }
+
   wait(workId: string, reason: string): void {
     this.db
       .prepare(

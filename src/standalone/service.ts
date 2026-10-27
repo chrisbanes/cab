@@ -3812,6 +3812,16 @@ export class StandaloneService {
     taskId: string,
     repositories: TaskWorkspaceRepositoryInput[] = [],
   ) {
+    const binding = await this.provisionTaskWorkspace(taskId, repositories);
+    await this.wakeScheduler();
+    return binding;
+  }
+
+  /** Verifies an imported task's repositories against the project's links, then provisions. */
+  private async provisionTaskWorkspace(
+    taskId: string,
+    repositories: TaskWorkspaceRepositoryInput[],
+  ) {
     const task = this.domain().task(taskId);
     const imported = this.domain().importedTask(taskId);
     if (imported) {
@@ -3857,12 +3867,7 @@ export class StandaloneService {
           "Imported task repository grant changed during verification",
         );
     }
-    const binding = await this.started().workspaces.provision(
-      taskId,
-      repositories,
-    );
-    await this.wakeScheduler();
-    return binding;
+    return this.started().workspaces.provision(taskId, repositories);
   }
 
   taskWorkspaceVisibility(taskId: string) {
@@ -6107,6 +6112,21 @@ export class StandaloneService {
       if (Number(task.ready) !== 1 || task.state !== "open") continue;
       const assignmentId = String(assignment.id);
       const initialWorkId = `assignment:${assignmentId}:initial`;
+      // Source syncs revise an imported task until it settles, so its initial turn is
+      // queued only once admissible; admission re-captures it if it changes again.
+      if (domain.importedTask(taskId)) {
+        // Stale captured revisions don't hold back a first turn: admission resolves them.
+        const unstarted = !state.assignmentHasStartedExecution(assignmentId);
+        if (
+          domain
+            .assignmentAdmission(assignmentId)
+            .reasons.some(
+              (reason) =>
+                !(unstarted && immutableRevisionMismatches.has(reason)),
+            )
+        )
+          continue;
+      }
       if (queries.hasWork(initialWorkId)) continue;
       if (draftOnlyLeadWaits(assignment)) continue;
       const queued = coordination
@@ -6537,14 +6557,114 @@ export class StandaloneService {
     );
   }
 
-  private async attemptRequest(
+  /**
+   * An imported task's first workspace holds only its source repository, at the project's
+   * link. It is provisioned only once the turn would otherwise be admitted, so a held or
+   * not-Ready task gets no checkout. A stale assignment waits here for its explicit apply,
+   * after which the scheduler wake re-captures the request.
+   */
+  private importedWorkspaceRepositories(
     request: TurnRequest,
+  ): TaskWorkspaceRepositoryInput[] {
+    const taskId = String(request.taskId);
+    const imported = this.domain().importedTask(taskId);
+    if (!imported) return [];
+    const reasons = this.domain()
+      .assignmentAdmission(String(request.assignmentId))
+      .reasons.filter(
+        (reason) => !(request.draftTurn && reason === "task-unready"),
+      );
+    if (reasons.length)
+      throw new Error(`Imported task is not admissible: ${reasons.join(", ")}`);
+    const linked = this.domain()
+      .githubConfiguration(String(this.domain().task(taskId).projectId))
+      .repositories.find(
+        (r) => r.repositoryId === String(imported.repositoryId),
+      );
+    if (!linked)
+      throw new Error("Imported task's source repository is not linked");
+    return [
+      { repositoryId: linked.repositoryId, path: linked.path, ref: linked.ref },
+    ];
+  }
+
+  /**
+   * An assignment that has never started a turn takes the current profile and instructions
+   * revisions when its first turn is admitted, and its queued request is re-captured to
+   * match. Once a turn has started, they change only through an explicit apply. Source
+   * syncs revise an imported task until it settles, so that turn also takes the task's
+   * current revision. The prompt is kept: it is the assignment's fixed brief and any
+   * inbox batch already bound to the request.
+   */
+  private resolveFirstTurnRevisions(request: TurnRequest): TurnRequest {
+    const store = this.started().schedulerStore;
+    if (!this.firstTurnRecapturable(request)) return request;
+    const assignmentId = String(request.assignmentId),
+      taskId = String(request.taskId);
+    const assignment = this.domain().applyCurrentRevisions(assignmentId);
+    const taskVersion = this.domain().importedTask(taskId)
+      ? Number(this.domain().task(taskId).version)
+      : request.taskVersion;
+    if (
+      request.taskVersion === taskVersion &&
+      request.assignmentVersion === Number(assignment.version) &&
+      request.instructionsRevision ===
+        Number(assignment.instructionsRevision) &&
+      request.profileRevision === Number(assignment.profileRevision)
+    )
+      return request;
+    store.recapture(request.workId, {
+      taskVersion,
+      assignmentVersion: Number(assignment.version),
+      instructionsRevision: Number(assignment.instructionsRevision),
+      profileRevision: Number(assignment.profileRevision),
+    });
+    return store.byWorkId(request.workId);
+  }
+
+  /**
+   * Whether a first turn's stale revisions are re-captured rather than refused: its
+   * assignment has never started a turn, and nothing but stale revisions or an incomplete
+   * source read (which a later sync clears) stands in its way. A held, closed or
+   * not-Ready task is refused as before.
+   */
+  private firstTurnRecapturable(request: TurnRequest): boolean {
+    if (
+      request.kind !== "assignment" ||
+      !request.assignmentId ||
+      !request.taskId ||
+      !this.started().state.awaitingAdmission(request.workId) ||
+      this.started().state.assignmentHasStartedExecution(request.assignmentId)
+    )
+      return false;
+    return this.domain()
+      .assignmentAdmission(request.assignmentId)
+      .reasons.every(
+        (reason) =>
+          immutableRevisionMismatches.has(reason) ||
+          reason === "imported-blockers-unknown" ||
+          reason === "source-unknown" ||
+          (request.draftTurn && reason === "task-unready"),
+      );
+  }
+
+  /** Whether the next attempt re-captures this mismatch, so the turn waits instead. */
+  private firstTurnResolves(request: TurnRequest, reason: string): boolean {
+    if (!this.firstTurnRecapturable(request)) return false;
+    return reason === "task-revision-changed"
+      ? this.domain().importedTask(String(request.taskId)) !== undefined
+      : reason.startsWith("assignment-");
+  }
+
+  private async attemptRequest(
+    queued: TurnRequest,
     generation = this.generation,
   ): Promise<void> {
     if (!generation || this.generation !== generation || !generation.accepting)
       return;
     const state = this.started().state;
     const store = this.started().schedulerStore;
+    const request = this.resolveFirstTurnRevisions(queued);
     let workspaceKey: string;
     let context: TaskExecutionContext | undefined;
     let validateAssignment: (() => string[]) | undefined;
@@ -6558,11 +6678,13 @@ export class StandaloneService {
         // including held/missing workspaces, remain the recovery authority.
         if (
           !this.current?.workspaceBindings.get(request.taskId) &&
-          !this.domain().importedTask(request.taskId) &&
           !state.taskHold(request.taskId) &&
           !state.hasTaskWorkspaceEvidence(request.taskId)
         )
-          await this.started().workspaces.provision(request.taskId, []);
+          await this.provisionTaskWorkspace(
+            request.taskId,
+            this.importedWorkspaceRepositories(request),
+          );
         const binding = await this.started().workspaces.forExecution(
           request.taskId,
         );
@@ -6804,8 +6926,10 @@ export class StandaloneService {
           ? {
               validate: validateAssignment,
               refuse: (reasons) =>
-                reasons.some((reason) =>
-                  immutableRevisionMismatches.has(reason),
+                reasons.some(
+                  (reason) =>
+                    immutableRevisionMismatches.has(reason) &&
+                    !this.firstTurnResolves(request, reason),
                 ),
             }
           : {}),

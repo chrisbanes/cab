@@ -592,6 +592,63 @@ test("a profile change keeps a live conversation on its harness", async () => {
   }
 });
 
+test("a first turn still waiting for capacity moves to the runtime of a re-captured profile revision", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-waiting-"));
+  const runtimes = fakes();
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    const lead = profile(service, "codex");
+    const blocker = profile(service, "codex");
+    const changing = profile(service, "codex");
+    const projectId = project(service, lead, [blocker, changing]);
+    execute(service, {
+      type: "capacity.configure",
+      globalLimit: 4,
+      projectOverrides: { [projectId]: 1 },
+    });
+    runtimes.codex.holdTurns = true;
+    const running = await task(service, projectId, [blocker]);
+    await waitUntil(
+      () =>
+        intent(service, initial(running.assignmentIds[0] ?? ""))?.state ===
+        "running",
+      describe,
+    );
+    const waiting = await task(service, projectId, [changing]);
+    const workId = initial(waiting.assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, workId)?.state === "capacity-waiting",
+      describe,
+    );
+    assert.equal(service.bindingHarness(workId), "codex");
+
+    // The waiting turn never started, so it takes the new revision and its runtime.
+    execute(service, {
+      type: "profile.configure",
+      profileId: changing,
+      expectedVersion: 1,
+      runtime: { harness: "claude", model: "opus", reasoningEffort: "high" },
+    });
+    runtimes.codex.holdTurns = false;
+    runtimes.codex.releaseAll();
+    await waitUntil(
+      () => intent(service, workId)?.state === "completed",
+      describe,
+    );
+    assert.equal(service.bindingHarness(workId), "claude");
+    assert.deepEqual(runtimes.claude.calls, [
+      "startThread",
+      "startTurn:claude-thread-1",
+    ]);
+  } finally {
+    runtimes.codex.releaseAll();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an unconfigured or failed harness holds its work visibly without fallback", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-harness-unavailable-"));
   const dataDir = join(root, "data");
