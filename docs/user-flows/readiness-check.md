@@ -70,7 +70,8 @@ service sees rather than the operator's interactive shell.
 - Re-running is the only action of the check, and it changes nothing. In Settings
   only, when GitHub discovery is not configured and the service detects a signed-in
   `gh` login, the row offers **Use GitHub CLI login (@account)** in place of its fix
-  line. That is a separate, explicit step beside the one in
+  line, with the keychain caveat. The Settings GitHub discovery credential row offers
+  the same action beside **Set**. Each is a separate, explicit step beside the one in
   [project setup](project-setup.md) step 3: the existing discovery credential
   command, sent once per activation. Signed out, not installed, unreadable or a configured but
   unreadable credential keep the fix line, and `ensemble doctor` always prints it.

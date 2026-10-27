@@ -953,7 +953,7 @@ test("Home keeps the card until a task starts a turn, then shows the board", asy
 });
 
 for (const viewport of viewports)
-  test(`Home first run offers the GitHub CLI login only in the first-run path (project setup) at ${viewport.width}`, async (_t, journey) => {
+  test(`Home first run offers the GitHub CLI login in project setup, not on Home or getting started, at ${viewport.width}`, async (_t, journey) => {
     const { web, page } = await launch(journey, viewport);
     await routeReadiness(page, { pass: true });
     await page.route("**/api/operator/discovery", async (route) => {
@@ -1003,15 +1003,15 @@ for (const viewport of viewports)
       await project.getByRole("link", { name: "Create project" }).click();
       await page.waitForURL("**/app/settings/projects/new");
     });
-    // Step 3 starts collapsed; the one offer is behind "Add a repository".
-    assert.equal(
-      await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
-      0,
-    );
-    await page.getByRole("button", { name: "Add a repository" }).click();
+    // Step 3 starts collapsed and already offers the login once, without Add a repository.
     await page
       .getByRole("button", { name: "Use GitHub CLI login (@fixture-user)" })
       .waitFor();
+    assert.equal(
+      await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+      1,
+    );
+    await page.getByRole("button", { name: "Add a repository" }).click();
     assert.equal(
       await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
       1,

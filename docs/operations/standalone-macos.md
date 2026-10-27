@@ -555,8 +555,8 @@ initialization without requesting a model turn.
 
 Project setup discovers repositories with the installation discovery credential.
 On a host with an authenticated GitHub CLI (`gh auth login`), choose **GitHub CLI**
-in Settings, or **Use GitHub CLI login** in setup or on the Settings → Readiness
-GitHub discovery row. The service runs `gh` by name
+in Settings, or **Use GitHub CLI login** on the Settings GitHub discovery credential
+row, on the Settings → Readiness GitHub discovery row or in project setup. The service runs `gh` by name
 from the LaunchAgent's fixed `PATH`, without prompts, for each discovery read.
 
 A launchd job in the user's GUI domain reads the keychain-backed gh login without

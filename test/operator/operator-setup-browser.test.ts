@@ -2150,11 +2150,14 @@ test("Setup collapses step 3 for a repository-free project without discovery and
   assert.equal(await add.getAttribute("aria-expanded"), "false");
   for (const text of [
     "GitHub discovery is unavailable",
-    "Signed in to github.com as",
     "GitHub source credential",
-    "Use GitHub CLI login",
   ])
     assert.equal(await page.getByText(text).count(), 0, text);
+  // Pressing nothing configures nothing: the signed-in login is only offered.
+  await page
+    .getByRole("button", { name: "Use GitHub CLI login (@octo)" })
+    .waitFor();
+  await page.getByText(/If agents can reach this Mac's keychain/).waitFor();
   assert.equal(await page.getByLabel("Repository (owner/name)").count(), 0);
   await captureBrowserEvidence(page, "1366-setup-add-repository");
   const sent = sentCommands(page);
@@ -2167,6 +2170,7 @@ test("Setup collapses step 3 for a repository-free project without discovery and
     f.service.domain().githubConfiguration(projectId).credentialRef,
     null,
   );
+  assert.equal(f.service.domain().discoveryCredentialReference(), null);
   await ready.getByText("Repository access: none · repository-free.").waitFor();
   await ready.getByText("Checking readiness…").waitFor({ state: "detached" });
   assert.equal(await ready.getByText(/GitHub source credential/).count(), 0);
@@ -2234,7 +2238,7 @@ test("Setup opens Add a repository for a rejected row and keeps it open for a ke
   );
 });
 
-test("Setup offers the GitHub CLI login exactly once in the first-run path, behind Add a repository", async (_t, journey) => {
+test("Setup offers the GitHub CLI login in collapsed step 3 without Add a repository", async (_t, journey) => {
   const gh = createFakeGh();
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {
@@ -2243,21 +2247,34 @@ test("Setup offers the GitHub CLI login exactly once in the first-run path, behi
   });
   await settleGhRead(page, () => page.reload());
   const offer = page.getByRole("button", { name: /Use GitHub CLI login/ });
-  await page.getByRole("button", { name: "Add a repository" }).waitFor();
-  assert.equal(await offer.count(), 0);
+  const add = page.getByRole("button", { name: "Add a repository" });
+  await add.waitFor();
+  assert.equal(await add.getAttribute("aria-expanded"), "false");
   const use = page.getByRole("button", {
     name: "Use GitHub CLI login (@octo)",
   });
-  await page.getByRole("button", { name: "Add a repository" }).click();
   await use.waitFor();
   assert.equal(await offer.count(), 1);
-  // Opening moves focus to the offer, the first control of the revealed content.
-  assert.equal(await use.evaluate((el) => el === document.activeElement), true);
+  // The offer comes before Add a repository, with the new collapsed line and the caveat.
+  assert.equal(
+    await use.evaluate(
+      (el, other) =>
+        Boolean(
+          el.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      await add.elementHandle(),
+    ),
+    true,
+  );
   await page
-    .getByText("Signed in to github.com as @octo with the GitHub CLI", {
-      exact: false,
-    })
+    .getByText(
+      "GitHub discovery lists repositories and GitHub Projects to link.",
+    )
     .waitFor();
+  await page.getByRole("link", { name: "Set discovery credential" }).waitFor();
+  await page.getByText(/If agents can reach this Mac's keychain/).waitFor();
+  assert.equal(await page.getByLabel("Repository (owner/name)").count(), 0);
+  await captureBrowserEvidence(page, "1366-setup-collapsed-gh-offer");
   const request = commandRequest(page);
   await use.click();
   const body = (await request).postDataJSON();
@@ -2268,10 +2285,8 @@ test("Setup offers the GitHub CLI login exactly once in the first-run path, behi
       "Discovered from GitHub · 3 repositories visible to the credential",
     )
     .waitFor();
-  assert.equal(
-    await page.getByRole("button", { name: "Add a repository" }).count(),
-    0,
-  );
+  await savedOutcome(page);
+  assert.equal(await add.count(), 0);
   assert.equal(await offer.count(), 0);
   // The offer is gone, so focus moves to the first repository control.
   await page.waitForFunction(() =>
@@ -2281,6 +2296,34 @@ test("Setup offers the GitHub CLI login exactly once in the first-run path, behi
     f.service.domain().discoveryCredentialReference(),
     "gh:github.com",
   );
+});
+
+test("Setup keeps the one GitHub CLI login offer when Add a repository is opened first", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    ghExecutable: gh.executable,
+  });
+  await settleGhRead(page, () => page.reload());
+  const offer = page.getByRole("button", { name: /Use GitHub CLI login/ });
+  await offer.waitFor();
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  await page.getByLabel("Repository (owner/name)").waitFor();
+  assert.equal(await offer.count(), 1);
+  // Opening moves focus to the first row control; the offer stays where it was.
+  assert.equal(
+    await page
+      .getByLabel("Repository (owner/name)")
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page
+    .getByText("Signed in to github.com as @octo with the GitHub CLI", {
+      exact: false,
+    })
+    .waitFor();
+  await page.getByText(/If agents can reach this Mac's keychain/).waitFor();
 });
 
 test("Setup replaces the form with the ready check, focuses it and keeps the first-project heading", async (_t, journey) => {

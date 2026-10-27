@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { discoveryStatusSchema } from "../../src/operator/contracts.js";
 import { readinessSchema } from "../../src/operator/readiness.js";
 import { Button, ResourceStatus, StatusBadge } from "./components.js";
+import { discoveryUseNote } from "./discovery-credential.js";
 import { useOperatorResource } from "./resource.js";
 import {
   DraftMessage,
@@ -152,21 +153,26 @@ export function ReadinessPanel(
             </div>
             {c.reason && <p className="metadata muted">{c.reason}</p>}
             {showOffer ? (
-              <Button
-                type="button"
-                variant="secondary"
-                // Stays in place while saving so focus is not dropped; the pending
-                // save and a recorded one are not sent twice.
-                aria-disabled={d.phase === "pending" || d.phase === "recorded"}
-                className="aria-disabled:opacity-50"
-                onClick={() =>
-                  d.phase === "recorded" ? undefined : void offer()
-                }
-              >
-                {d.phase === "pending"
-                  ? "Saving…"
-                  : `Use GitHub CLI login (@${offered})`}
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  // Stays in place while saving so focus is not dropped; the pending
+                  // save and a recorded one are not sent twice.
+                  aria-disabled={
+                    d.phase === "pending" || d.phase === "recorded"
+                  }
+                  className="aria-disabled:opacity-50"
+                  onClick={() =>
+                    d.phase === "recorded" ? undefined : void offer()
+                  }
+                >
+                  {d.phase === "pending"
+                    ? "Saving…"
+                    : `Use GitHub CLI login (@${offered})`}
+                </Button>
+                <p className="metadata muted">{discoveryUseNote}</p>
+              </>
             ) : (
               c.fix && <p className="identifier">{c.fix}</p>
             )}
