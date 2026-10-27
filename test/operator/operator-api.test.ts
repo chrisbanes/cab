@@ -1011,8 +1011,15 @@ test("scoped interactions preserve exact material, revision conflicts, and origi
     /PRIVATE INSTRUCTIONS|SECRET/,
   );
   await assert.rejects(api.execute({ ...denied, key: randomUUID() }));
-  await assert.rejects(api.execute({ ...denied, action: "Changed" }));
-  await assert.rejects(api.execute({ ...denied, target: "Changed" }));
+  // Redacted or changed action and target text still binds the retained denial.
+  assert.deepEqual(
+    await api.execute({ ...denied, action: "[redacted]" }),
+    deniedReceipt,
+  );
+  assert.deepEqual(
+    await api.execute({ ...denied, target: "Changed" }),
+    deniedReceipt,
+  );
   await assert.rejects(
     api.execute({ ...denied, material: { text: "Altered" } }),
   );
@@ -2116,13 +2123,21 @@ test("core-valid material beyond public collection and depth limits remains priv
         expectedRevision: command.expectedRevision + 1,
       }),
     );
-    await assert.rejects(api.execute({ ...command, action: "Different" }));
-    await assert.rejects(api.execute({ ...command, target: "Different" }));
     await assert.rejects(
       api.execute({ ...command, material: { altered: true } }),
     );
     const receipt = await api.execute(command);
     assert.deepEqual(await api.execute(command), receipt);
+    // A denial is bound by interaction and revision; the read's (possibly redacted) action and
+    // target are replaced by the retained originals, so they replay the same decision.
+    assert.deepEqual(
+      await api.execute({ ...command, action: "Different" }),
+      receipt,
+    );
+    assert.deepEqual(
+      await api.execute({ ...command, target: "Different" }),
+      receipt,
+    );
     await assert.rejects(api.execute({ ...command, key: randomUUID() }));
     assert.doesNotMatch(JSON.stringify(receipt), /PRIVATE INSTRUCTIONS|nested/);
     commands.push({ command, receipt });

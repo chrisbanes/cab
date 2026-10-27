@@ -7322,24 +7322,26 @@ export class OperatorApi {
       const view = this.coordination();
       const { type, ...submitted } = c;
       let command: typeof submitted = submitted;
-      if (
-        c.type === "approval.decide" &&
-        c.decision === "denied" &&
-        c.material === undefined
-      ) {
+      if (c.type === "approval.decide" && c.decision === "denied") {
         const retained = view
           .readTask(c.taskId)
           .approvals.find((i) => i.interactionId === c.interactionId);
-        if (
-          retained?.materialJson !== null &&
-          retained?.materialJson !== undefined
-        ) {
+        if (retained) {
+          // A denial is bound by interaction and revision; the read may have redacted or withheld
+          // the action, target or material, so the retained originals are what the core compares.
+          const { type: _type, target: _target, ...rest } = c;
           command = {
-            ...submitted,
-            // Display bounds deliberately exclude some core-valid retained JSON.
-            // The existing command compares these immutable bytes canonically.
-            material: JSON.parse(retained.materialJson),
-          };
+            ...rest,
+            action: retained.action ?? c.action,
+            ...(retained.target === null ? {} : { target: retained.target }),
+            ...(c.material === undefined && retained.materialJson !== null
+              ? {
+                  // Display bounds deliberately exclude some core-valid retained JSON.
+                  // The existing command compares these immutable bytes canonically.
+                  material: JSON.parse(retained.materialJson),
+                }
+              : {}),
+          } as typeof submitted;
         }
       }
       if (c.type === "approval.decide" && c.decision === "approved") {

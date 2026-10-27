@@ -60,12 +60,9 @@ export function ApprovalReview({
     },
   );
   const open = approval.status === "open",
-    // Only the action is required to decide; a withheld material or target still allows Deny.
+    // Deny never needs the disclosed fields: the server binds it to the retained originals.
     decidable =
-      open &&
-      approval.action !== null &&
-      outcome?.kind !== "recorded" &&
-      outcome?.kind !== "conflict",
+      open && outcome?.kind !== "recorded" && outcome?.kind !== "conflict",
     decided = (c: OperatorCommand | null | undefined) =>
       c?.type === "approval.decide" ? c.decision : null;
   const decide = (decision: Decision) =>
@@ -77,10 +74,13 @@ export function ApprovalReview({
         interactionId: approval.interactionId,
         expectedRevision: approval.revision,
         decision,
-        action: approval.action,
+        // An approval needs the disclosed fields; a denial's are replaced by the retained ones.
+        action: approval.action ?? "withheld",
         ...(approval.target === null ? {} : { target: approval.target }),
-        // A withheld material is filled from the retained record, for a denial only.
-        ...(approval.material === null ? {} : { material: approval.material }),
+        // JSON null is real material; only withheld material is left out.
+        ...(approval.materialUnavailable
+          ? {}
+          : { material: approval.material }),
       }),
     );
   const outcomeDecision = decided(outcome?.command);
@@ -110,9 +110,8 @@ export function ApprovalReview({
       </h3>
       {open && !approval.approvable ? (
         <p className="body">
-          {approval.action === null
-            ? "The exact action is withheld here, so this approval cannot be decided here."
-            : "The exact material or target cannot be shown here, so you cannot review it. This approval can only be denied."}
+          The exact action, material or target cannot be shown here, so you
+          cannot review it. This approval can only be denied.
         </p>
       ) : null}
       <dl className="approval-review-facts">
@@ -131,7 +130,7 @@ export function ApprovalReview({
           )}
         </dd>
       </dl>
-      {approval.material !== null && <Material value={approval.material} />}
+      {!approval.materialUnavailable && <Material value={approval.material} />}
       <SendFeedback
         outcome={outcome}
         recorded={copy[outcomeDecision ?? "approved"]}
