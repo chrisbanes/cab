@@ -137,8 +137,10 @@ export async function deliveryFixture(
   let status: string | null = fixtureProject.todo;
   let movedAfterWrite: string | undefined;
   let statusHold: Promise<void> | undefined;
+  let closedIssueReads = 0;
   const provider: GitHubDeliveryProvider = {
     async inspectClosedIssue() {
+      closedIssueReads += 1;
       if (closedIssue instanceof Error) throw closedIssue;
       if (closedIssue?.state === "open") return closedIssue;
       return {
@@ -530,6 +532,8 @@ export async function deliveryFixture(
     setIssueOpen: (value: boolean | undefined) => {
       issueOpen = value;
     },
+    /** How many fresh closure reads the fake GitHub has served. */
+    closedIssueReads: () => closedIssueReads,
     onInspection: (hook: (() => Promise<void> | void) | undefined) => {
       inspectionHook = hook;
     },
