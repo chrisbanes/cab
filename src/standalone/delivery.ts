@@ -14,6 +14,7 @@ import {
   externalActionArgumentsSchema,
   registerPrArgumentsSchema,
   handbackSettlementSchema,
+  HandbackSettlementRefusedError,
   materialDigest,
   type DeliveryActionRecord,
   type DeliveryCaller,
@@ -640,7 +641,8 @@ export class DeliveryCoordinator {
       const receipt = this.store.settlementReceipt(command);
       if (receipt) return receipt;
       const prior = this.store.delivery(command.taskId);
-      if (!prior) throw new Error("Unknown PR delivery");
+      if (!prior)
+        throw new HandbackSettlementRefusedError("Unknown PR delivery");
       const taskVersion =
           this.options.taskVersion?.(command.taskId) ??
           command.expectedTaskVersion,
@@ -650,7 +652,7 @@ export class DeliveryCoordinator {
         prior.observation.nodeId !== command.expectedPrNodeId ||
         prior.observation.number !== command.prNumber
       )
-        throw new Error("Handback target changed");
+        throw new HandbackSettlementRefusedError("Handback target changed");
       const observed = await this.inspectBinding(command.taskId);
       // Changed observations and their durable feedback survive a rejected command.
       return this.store.transaction(() => {
@@ -665,7 +667,9 @@ export class DeliveryCoordinator {
           observed.revision !== prior.revision ||
           observed.observation.headSha !== command.expectedHeadSha
         )
-          throw new Error("Handback material changed during fresh inspection");
+          throw new HandbackSettlementRefusedError(
+            "Handback material changed during fresh inspection",
+          );
         const result = this.store.settleHandbackWithinTransaction(command);
         this.options.feedback?.(
           command.taskId,

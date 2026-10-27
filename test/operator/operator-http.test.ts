@@ -18,7 +18,6 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import {
   type OperatorRoute,
   OperatorRouteRegistry,
@@ -109,16 +108,12 @@ function commandForm(
   return new URLSearchParams({ ...fields, csrfToken });
 }
 
-test("operator route registry exposes runtime and coordination only through named slots", () => {
+test("operator route registry exposes the runtime only through its named slot", () => {
   const handler = () => ({ kind: "html" as const, body: "slot" });
   const routes = new OperatorRouteRegistry();
   routes.registerSlot("runtime", [
     { method: "GET", path: "/runtime", handler },
-    { method: "POST", path: "/runtime/control", handler },
-  ]);
-  routes.registerSlot("coordination", [
-    { method: "GET", path: "/coordination", handler },
-    { method: "POST", path: "/coordination/control/:id", handler },
+    { method: "POST", path: "/runtime/control/:id", handler },
   ]);
 
   assert.equal(
@@ -126,12 +121,7 @@ test("operator route registry exposes runtime and coordination only through name
     handler,
   );
   assert.equal(
-    routes.matchSlot("runtime", "POST", "/runtime/control")?.handler,
-    handler,
-  );
-  assert.equal(
-    routes.matchSlot("coordination", "POST", "/coordination/control/item")
-      ?.params.id,
+    routes.matchSlot("runtime", "POST", "/runtime/control/item")?.params.id,
     "item",
   );
   assert.throws(
@@ -148,17 +138,18 @@ test("operator route registry exposes runtime and coordination only through name
       { method: "GET", path: "/coordination", handler },
     ]),
   );
+  // The server-rendered coordination pages were removed; the slot no longer exists.
   assert.throws(
     () =>
-      routes.registerSlot("coordination", [
-        { method: "POST", path: "/coordination/control/:other", handler },
+      wrongSlot.registerSlot("coordination" as never, [
+        { method: "GET", path: "/coordination", handler },
       ]),
-    /already registered/i,
+    /Invalid operator route slot/,
   );
   routes.mount();
   assert.throws(() =>
-    routes.registerSlot("coordination", [
-      { method: "GET", path: "/coordination/status", handler },
+    routes.registerSlot("runtime", [
+      { method: "GET", path: "/runtime/status", handler },
     ]),
   );
 });
@@ -215,8 +206,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     let extensionWrites = 0;
     let runtimeReads = 0;
     let runtimeWrites = 0;
-    let coordinationReads = 0;
-    let coordinationWrites = 0;
     const routes = new OperatorRouteRegistry();
     const runtimeRoutes: OperatorRoute[] = [
       {
@@ -236,27 +225,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
         },
       },
     ];
-    routes.registerSlot("coordination", [
-      {
-        method: "GET",
-        path: "/coordination",
-        handler: () => {
-          coordinationReads += 1;
-          return {
-            kind: "html",
-            body: "<main><h1>Coordination slot</h1></main>",
-          };
-        },
-      },
-      {
-        method: "POST",
-        path: "/coordination/control/:operation",
-        handler: () => {
-          coordinationWrites += 1;
-          return { kind: "redirect", location: "/coordination" };
-        },
-      },
-    ]);
     runtimeRoutes.push({
       method: "GET",
       path: "/runtime/extension/:itemId",
@@ -289,8 +257,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
       "/assignment/not-a-public-run",
       "/runtime",
       "/runtime/control",
-      "/coordination",
-      "/coordination/control/start",
       "/runtime/extension/private-marker",
     ];
     for (const path of privatePaths) {
@@ -308,7 +274,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     }
     assert.equal(extensionReads, 0);
     assert.equal(runtimeReads, 0);
-    assert.equal(coordinationReads, 0);
 
     for (const [path, body] of [
       ["/command", new URLSearchParams({ type: "project.create" })],
@@ -317,7 +282,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
         new URLSearchParams({ payload: "accepted" }),
       ],
       ["/runtime/control", new URLSearchParams({ action: "start" })],
-      ["/coordination/control/start", new URLSearchParams({ action: "start" })],
     ] as const) {
       const response = await fetch(`${origin}${path}`, {
         method: "POST",
@@ -334,7 +298,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     assert.equal(domain.projects().length, 1);
     assert.equal(extensionWrites, 0);
     assert.equal(runtimeWrites, 0);
-    assert.equal(coordinationWrites, 0);
 
     const loginPage = await fetch(`${origin}/login`);
     assert.equal(loginPage.status, 200);
@@ -432,7 +395,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     const homeHtml = await home.text();
     assert.ok(homeHtml.includes("PRIVATE-PROJECT-MARKER"));
     assert.ok(homeHtml.includes('href="/runtime"'));
-    assert.ok(homeHtml.includes('href="/coordination"'));
+    assert.ok(!homeHtml.includes('href="/coordination"'));
     assert.ok(!homeHtml.includes("PRIVATE-CREDENTIAL-REFERENCE"));
     assert.ok(!homeHtml.includes("TYPESAFE_KEY"));
 
@@ -449,12 +412,21 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     assert.equal(runtimePage.status, 200);
     assert.match(await runtimePage.text(), /Runtime slot/);
     assert.equal(runtimeReads, 1);
-    const coordinationPage = await fetch(`${origin}/coordination`, {
-      headers: { cookie: sessionCookie },
-    });
-    assert.equal(coordinationPage.status, 200);
-    assert.match(await coordinationPage.text(), /Coordination slot/);
-    assert.equal(coordinationReads, 1);
+    // The server-rendered coordination pages and forms are gone; the JSON command API replaces them.
+    for (const path of [
+      "/coordination",
+      `/coordination/task/${task.id}`,
+      `/coordination/assignment/${randomUUID()}`,
+    ])
+      assert.equal(
+        (
+          await fetch(`${origin}${path}`, {
+            headers: { cookie: sessionCookie },
+          })
+        ).status,
+        404,
+        `GET ${path}`,
+      );
 
     const protectedCsrf = csrfFrom(homeHtml);
     for (const attempt of [
@@ -540,10 +512,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     assert.equal(oversizedForm.status, 413);
     assert.equal(domain.profiles().length, profileCount);
 
-    for (const [path, target] of [
-      ["/runtime/control", "runtime"],
-      ["/coordination/control/start", "coordination"],
-    ] as const) {
+    for (const [path, target] of [["/runtime/control", "runtime"]] as const) {
       const wrongOrigin = await fetch(`${origin}${path}`, {
         method: "POST",
         headers: {
@@ -579,7 +548,17 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
       assert.equal(accepted.status, 303, `${target} authenticated POST`);
     }
     assert.equal(runtimeWrites, 1);
-    assert.equal(coordinationWrites, 1);
+    const removedPost = await fetch(`${origin}/coordination/control/message`, {
+      method: "POST",
+      headers: {
+        origin,
+        cookie: sessionCookie,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: commandForm({ message: "No such page" }, protectedCsrf),
+      redirect: "manual",
+    });
+    assert.equal(removedPost.status, 404);
     const credentialSentinel = "NEVER-ECHO-THIS-CREDENTIAL";
     const invalidCredentialReference = await fetch(`${origin}/command`, {
       method: "POST",
@@ -727,12 +706,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     const forgedRuntimeHost = await getWithForgedHost(port, "/runtime");
     assert.equal(forgedRuntimeHost.status, 403);
     assert.ok(!forgedRuntimeHost.body.includes("Runtime slot"));
-    const forgedCoordinationHost = await getWithForgedHost(
-      port,
-      "/coordination",
-    );
-    assert.equal(forgedCoordinationHost.status, 403);
-    assert.ok(!forgedCoordinationHost.body.includes("Coordination slot"));
   } finally {
     await http?.stop();
     auth?.close();
@@ -912,7 +885,7 @@ test("HTML login settles concurrent and stale attempts through the shared auth b
   }
 });
 
-test("real runtime and coordination routes inherit HTTP guards and persist capacity", async () => {
+test("real runtime routes inherit HTTP guards and persist capacity", async () => {
   const directory = mkdtempSync(
     join(tmpdir(), "ensemble-real-operator-routes-"),
   );
@@ -962,14 +935,8 @@ test("real runtime and coordination routes inherit HTTP guards and persist capac
     const assignmentId = String(assignment.id);
 
     const runtimeRoutes = runtimeOperatorRoutes(service);
-    const coordinationRoutes = coordinationOperatorRoutes(
-      service.coordinationView(),
-      domain,
-      (projectId) => service.routingAvailability(projectId),
-    );
     const routes = new OperatorRouteRegistry();
     routes.registerSlot("runtime", runtimeRoutes);
-    routes.registerSlot("coordination", coordinationRoutes);
     const port = await unusedPort();
     const origin = `http://127.0.0.1:${port}`;
     await OperatorAuth.initialize(authFile, password);
@@ -979,10 +946,10 @@ test("real runtime and coordination routes inherit HTTP guards and persist capac
 
     const pathFor = (path: string) =>
       path.replace(":taskId", taskId).replace(":assignmentId", assignmentId);
-    const getPaths = [...runtimeRoutes, ...coordinationRoutes]
+    const getPaths = runtimeRoutes
       .filter((route) => route.method === "GET")
       .map((route) => pathFor(route.path));
-    const postPaths = [...runtimeRoutes, ...coordinationRoutes]
+    const postPaths = runtimeRoutes
       .filter((route) => route.method === "POST")
       .map((route) => route.path);
 
@@ -1160,9 +1127,6 @@ test("legacy awaited slots and extension publications reject expired or logged-o
     };
     const routes = new OperatorRouteRegistry();
     const profileId = randomUUID();
-    routes.registerSlot("coordination", [
-      { method: "GET", path: "/coordination", handler },
-    ]);
     routes.registerSlot("runtime", [
       { method: "GET", path: "/runtime", handler },
       { method: "GET", path: "/runtime/extension/private", handler },
@@ -1208,11 +1172,7 @@ test("legacy awaited slots and extension publications reject expired or logged-o
       });
       assert.equal(response.status, 303);
     };
-    for (const path of [
-      "/runtime",
-      "/coordination",
-      "/runtime/extension/private",
-    ])
+    for (const path of ["/runtime", "/runtime/extension/private"])
       for (const mode of ["logout", "expiry"]) {
         const session = await login();
         let response = await fetch(origin + path, {

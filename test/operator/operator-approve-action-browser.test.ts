@@ -42,14 +42,17 @@ async function start(
   const page = await browser.newPage({ viewport });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  const posts: URLSearchParams[] = [];
+  const posts: Array<{
+    type: string;
+    decision?: string;
+    interactionId?: string;
+  }> = [];
   page.on("request", (request) => {
     if (
       request.method() === "POST" &&
-      new URL(request.url()).pathname ===
-        "/coordination/control/approval/decision"
+      new URL(request.url()).pathname === "/api/operator/commands"
     )
-      posts.push(new URLSearchParams(request.postData() ?? ""));
+      posts.push(request.postDataJSON());
   });
   // Home's getting-started rows follow this machine's runtime login; a failing row pushes the card down.
   await stubReadiness(page);
@@ -79,14 +82,16 @@ async function assertFirstScreen(page: Page, targets: Locator[]) {
   await noPageOverflow(page);
 }
 
-/** The retained exact-material page opens on the approval, with Approve in view. */
+/** The task's request view opens on the approval, with Approve in view. */
 async function arriveAtApproval(s: Awaited<ReturnType<typeof start>>) {
   await s.page.waitForURL(
     (url) =>
-      url.pathname === `/coordination/task/${s.taskId}` &&
-      url.hash === `#${s.interactionId}`,
+      url.pathname === `/app/tasks/${s.taskId}` &&
+      url.searchParams.get("request") === s.interactionId,
   );
-  const item = s.page.locator(`li[id="${s.interactionId}"]`);
+  const item = s.page.locator(
+    `.approval-review[data-record-id="${s.interactionId}"]`,
+  );
   const approve = item.getByRole("button", {
     name: "Approve this exact material",
     exact: true,
@@ -94,7 +99,7 @@ async function arriveAtApproval(s: Awaited<ReturnType<typeof start>>) {
   await approve.waitFor();
   await settle(s.page);
   for (const target of [
-    item.getByText(`Approval requested: ${action}`),
+    item.getByRole("heading", { name: `Approval requested for ${action}` }),
     approve,
   ])
     assert.equal(
@@ -113,7 +118,7 @@ async function approveOnce(
   approve: Locator,
 ) {
   await approve.click();
-  const decided = item.getByText("Decision: approved.", { exact: true });
+  const decided = item.getByText(/^Approved\. The action is allowed/);
   await decided.waitFor();
   await settle(s.page);
   assert.equal(
@@ -121,10 +126,14 @@ async function approveOnce(
     true,
     `the decision is in view ${JSON.stringify(await decided.boundingBox())}`,
   );
-  assert.equal(new URL(s.page.url()).hash, `#${s.interactionId}`);
+  assert.equal(
+    new URL(s.page.url()).searchParams.get("request"),
+    s.interactionId,
+  );
   assert.equal(s.posts.length, 1);
-  assert.equal(s.posts[0]!.get("decision"), "approved");
-  assert.equal(s.posts[0]!.get("interactionId"), s.interactionId);
+  assert.equal(s.posts[0]!.type, "approval.decide");
+  assert.equal(s.posts[0]!.decision, "approved");
+  assert.equal(s.posts[0]!.interactionId, s.interactionId);
   assert.equal(
     s.f.service.coordinationView().readTask(s.taskId).approvals[0]!.status,
     "approved",

@@ -14,7 +14,6 @@ import { LocalOperatorHttp, LocalOperatorUi } from "./operator.js";
 import { OperatorAuth } from "./operator-auth.js";
 import { OperatorPush } from "./operator-push.js";
 import { dirname, join } from "node:path";
-import { coordinationOperatorRoutes } from "./operator-coordination.js";
 import { OperatorRouteRegistry } from "./operator-routes.js";
 import { runtimeOperatorRoutes } from "./operator-runtime.js";
 
@@ -201,14 +200,6 @@ export async function main(
         throw new Error("Operator authentication is unavailable");
       const routes = new OperatorRouteRegistry();
       routes.registerSlot("runtime", runtimeOperatorRoutes(service));
-      routes.registerSlot(
-        "coordination",
-        coordinationOperatorRoutes(
-          service.coordinationView(),
-          service.domain(),
-          (projectId) => service.routingAvailability(projectId),
-        ),
-      );
       const bundle = await OperatorWebBundle.open(
         fileURLToPath(new URL("../../operator", import.meta.url)),
       );

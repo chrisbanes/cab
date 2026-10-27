@@ -9,7 +9,6 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
 import { StatusMappingStore } from "./status-mapping.js";
-import { withProjectFieldNames } from "./project-field-names.js";
 import {
   isInFlightEvent,
   statusMappingEvents,
@@ -547,6 +546,8 @@ export const handbackSettlementSchema = registerPrArgumentsSchema
   })
   .strict();
 export type HandbackSettlement = z.output<typeof handbackSettlementSchema>;
+/** A settlement refused because its target or material is no longer current. */
+export class HandbackSettlementRefusedError extends DomainConflictError {}
 const prBindingSchema = z
   .object({
     taskId: z.string().uuid(),
@@ -1996,20 +1997,25 @@ export class DeliveryStore {
       | undefined;
     if (!row) return null;
     if (row.payloadHash !== materialDigest(command))
-      throw new Error("Settlement key has different material");
+      throw new HandbackSettlementRefusedError(
+        "Settlement key has different material",
+      );
     return prBindingSchema.parse(JSON.parse(row.recordJson));
   }
   settleHandbackWithinTransaction(
     command: HandbackSettlement,
   ): PrDeliveryBinding {
     const binding = this.delivery(command.taskId);
-    if (!binding) throw new Error("Unknown PR delivery");
+    if (!binding)
+      throw new HandbackSettlementRefusedError("Unknown PR delivery");
     // Closing the outcome does not accept the branch's content, so it stays possible on a closed PR.
     if (
       command.decision === "accepted" &&
       this.branchHold(command.taskId, binding)
     )
-      throw new Error("Task branch changed outside Ensemble");
+      throw new HandbackSettlementRefusedError(
+        "Task branch changed outside Ensemble",
+      );
     if (
       binding.mode !== "reviewable-pr" ||
       binding.revision !== command.expectedDeliveryRevision ||
@@ -2018,12 +2024,12 @@ export class DeliveryStore {
       this.configuration(binding.projectId).version !==
         command.expectedPolicyVersion
     )
-      throw new Error("Handback material changed");
+      throw new HandbackSettlementRefusedError("Handback material changed");
     if (
       command.decision === "accepted" &&
       (binding.observation.draft || binding.observation.state === "CLOSED")
     )
-      throw new Error("PR is not reviewable");
+      throw new HandbackSettlementRefusedError("PR is not reviewable");
     binding.revision++;
     binding.settlement = {
       key: command.key,
@@ -2122,7 +2128,7 @@ export class DeliveryStore {
             labels: z.array(identity).parse(JSON.parse(issue.labels)),
           }
         : null,
-      projectFieldObservations: withProjectFieldNames(this.db, projectFields),
+      projectFieldObservations: projectFields,
       policyVersion: configuration.version,
       mode: configuration.mode,
       binding: this.delivery(taskId),

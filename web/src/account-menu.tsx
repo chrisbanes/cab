@@ -6,13 +6,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import {
-  ChevronsUpDown,
-  ExternalLink,
-  ListChecks,
-  LogOut,
-  Settings,
-} from "lucide-react";
+import { ChevronsUpDown, ListChecks, LogOut, Settings } from "lucide-react";
 
 /** Sessions carry no operator name (SPEC: one operator), so the account is labelled by its role. */
 export const OPERATOR_LABEL = "Operator";
@@ -204,17 +198,6 @@ export function AccountMenu({
               Show getting started
             </button>
           )}
-          {/* Server-rendered page outside the app shell: a plain anchor, so it loads as a document. */}
-          <a
-            role="menuitem"
-            tabIndex={-1}
-            className="account-menu-item"
-            href="/coordination"
-            onClick={() => setOpen(false)}
-          >
-            <ExternalLink aria-hidden="true" />
-            Approval and delivery forms
-          </a>
           <hr />
           <button
             type="button"

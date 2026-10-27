@@ -735,15 +735,12 @@ export function AssignmentRecovery(
                   </a>,
                   <a
                     key="c"
-                    href={`/coordination/assignment/${p.assignmentId}`}
+                    href={`/app/tasks/${data.taskId}?assignment=${p.assignmentId}#history`}
                   >
                     Captured assignment history
                   </a>,
                   <a key="d" href={inspect}>
                     Task detail
-                  </a>,
-                  <a key="e" href={`/coordination/task/${data.taskId}`}>
-                    Messages, results, questions and approvals
                   </a>,
                   <a key="f" href={`/assignment/${p.assignmentId}`}>
                     Exact captured instructions and result destination

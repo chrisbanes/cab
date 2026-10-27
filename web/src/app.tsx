@@ -14,7 +14,6 @@ import {
 } from "react";
 import {
   CirclePause,
-  ExternalLink,
   Folder,
   InboxIcon,
   LayoutDashboard,
@@ -397,13 +396,6 @@ function AccountRows({
           Show getting started
         </Button>
       )}
-      {/* Server-rendered page outside the app shell: a plain anchor, so it loads as a document. */}
-      <a className="nav-link nav-row" href="/coordination">
-        <NavigationRow
-          icon={<ExternalLink {...navIcon} />}
-          title="Approval and delivery forms"
-        />
-      </a>
       <Button variant="secondary" disabled={pending} onClick={onSignOut}>
         <LogOut aria-hidden="true" />
         {pending ? "Signing out…" : "Sign out"}

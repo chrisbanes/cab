@@ -370,12 +370,6 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     1,
   );
   await captureBrowserEvidence(page, "1366-recorded", { fullPage: false });
-  const legacy = await page.request.get(
-    `${web.origin}/coordination/task/${a.taskId}`,
-  );
-  const html = await legacy.text();
-  assert.ok(html.includes(`/app/tasks/${a.taskId}?request=${a.interactionId}`));
-  assert.equal(html.includes("/coordination/control/question/answer"), false);
   // Sign out is in the sidebar footer; a nested phone screen reaches it only via its parent.
   await page.setViewportSize({ width: 1366, height: 900 });
   await signOutFromSidebar(page);

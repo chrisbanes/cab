@@ -87,13 +87,24 @@ if (args.length !== 1 || args[0] !== "--live") {
       );
       assert.ok(anonymousCookie);
 
-      phase = "unauthenticated runtime and coordination reads";
-      for (const path of ["/runtime", "/coordination"]) {
-        const response = await page.goto(`${config.origin}${path}`);
-        assert.equal(response?.status(), 200);
-        const body = await page.locator("body").innerText();
-        assert.match(body, /Sign in/);
-        assert.equal(body.includes(config.privateMarker), false);
+      phase = "unauthenticated runtime and workspace reads";
+      const runtimeRead = await page.goto(`${config.origin}/runtime`);
+      assert.equal(runtimeRead?.status(), 200);
+      const runtimeReadBody = await page.locator("body").innerText();
+      assert.match(runtimeReadBody, /Sign in/);
+      assert.equal(runtimeReadBody.includes(config.privateMarker), false);
+      const anonymousWorkspaceContext = await browser.newContext();
+      try {
+        const anonymousWorkspace = await anonymousWorkspaceContext.request.get(
+          `${config.origin}/api/operator/workspace`,
+        );
+        assert.equal(anonymousWorkspace.status(), 401);
+        assert.equal(
+          (await anonymousWorkspace.text()).includes(config.privateMarker),
+          false,
+        );
+      } finally {
+        await anonymousWorkspaceContext.close();
       }
 
       phase = "unauthenticated private write";
@@ -176,10 +187,13 @@ if (args.length !== 1 || args[0] !== "--live") {
       );
       assert.ok(Number.isSafeInteger(globalLimit) && globalLimit > 0);
       assert.ok(Number.isSafeInteger(projectLimit) && projectLimit > 0);
-      await page.goto(`${config.origin}/coordination`);
-      assert.equal(new URL(page.url()).origin, config.origin);
+      // The signed-in workspace read replaces the removed coordination page.
+      const workspace = await context.request.get(
+        `${config.origin}/api/operator/workspace`,
+      );
+      assert.equal(workspace.status(), 200);
       assert.equal(
-        (await page.locator("body").innerText()).includes(config.privateMarker),
+        (await workspace.text()).includes(config.privateMarker),
         true,
       );
       await page.goto(`${config.origin}/`);

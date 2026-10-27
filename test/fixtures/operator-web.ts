@@ -30,7 +30,6 @@ import {
 } from "../../src/standalone/operator-push.js";
 import { serviceReadiness } from "../../src/standalone/readiness.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
-import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
@@ -472,14 +471,6 @@ export async function createOperatorFixture<
         if (!auth) throw Error("Fixture authentication unavailable");
         const routes = new OperatorRouteRegistry();
         routes.registerSlot("runtime", runtimeOperatorRoutes(service));
-        routes.registerSlot(
-          "coordination",
-          coordinationOperatorRoutes(
-            service.coordinationView(),
-            service.domain(),
-            (id) => service.routingAvailability(id),
-          ),
-        );
         let bundle!: OperatorWebBundle;
         await start(`bundle-${id}.open`, async () => {
           bundle = await OperatorWebBundle.open(

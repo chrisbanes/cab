@@ -137,11 +137,7 @@ test("local forms submit versioned commands and render secret-safe views", async
         .assignment(assignment.id)
         .includes(`/runtime/assignment/${assignment.id}`),
     );
-    assert.ok(
-      ui
-        .assignment(assignment.id)
-        .includes(`/coordination/assignment/${assignment.id}`),
-    );
+    assert.ok(!ui.assignment(assignment.id).includes("/coordination/"));
   } finally {
     db.close();
   }

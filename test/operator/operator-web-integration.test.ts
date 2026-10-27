@@ -43,7 +43,6 @@ test("built React assets, JSON and retained routes share one service listener an
   for (const path of [
     `/project/${projectId}`,
     "/runtime",
-    "/coordination",
     "/app",
     `/app/projects/${projectId}`,
     "/api/operator/workspace",

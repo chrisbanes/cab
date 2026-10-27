@@ -19,7 +19,7 @@ export type OperatorRoute = {
   handler: OperatorRouteHandler;
 };
 
-export type OperatorRouteSlot = "runtime" | "coordination";
+export type OperatorRouteSlot = "runtime";
 
 type RegisteredRoute = OperatorRoute & {
   segments: string[];
@@ -119,8 +119,7 @@ export class OperatorRouteRegistry {
 
   registerSlot(slot: OperatorRouteSlot, routes: OperatorRoute[]): void {
     if (this.started) throw new Error("Operator routes are already mounted");
-    if (slot !== "runtime" && slot !== "coordination")
-      throw new Error("Invalid operator route slot");
+    if (slot !== "runtime") throw new Error("Invalid operator route slot");
     if (this.slots.has(slot))
       throw new Error("Operator route slot already registered");
     if (!Array.isArray(routes) || routes.length === 0)

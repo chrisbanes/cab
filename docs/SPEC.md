@@ -530,14 +530,13 @@ Keep known state and uncertainty legible and retain unfinished drafts across
 transient failures.
 
 The operator UI is a React application at `/app`, served with same-origin
-`/api/operator` JSON by the production `operator` command. Controls the app does not offer
-remain on retained server-rendered routes: approval decisions, delivery settlement,
-result-destination reconciliation and messages to non-lead assignments on
-`/coordination/task/:id`; local task edits and source review decisions on
-`/task/:id`; delivery policy on `/project/:id`; and Stop/Resume and recovery on
-`/runtime/task/:id`. They are reached from the account menu's Approval and delivery
-forms (`/coordination`), a task's History tab, Project settings' Open advanced
-editor and a task's Execution link. The technical
+`/api/operator` JSON by the production `operator` command. Approval decisions, handback
+settlement, result-destination reconciliation and messages to delegated assignments
+are task-view controls. Controls the app does not offer remain on retained
+server-rendered routes: local task edits and source review decisions on `/task/:id`;
+delivery policy on `/project/:id`; and Stop/Resume and recovery on
+`/runtime/task/:id`. They are reached from a task's History tab, Project settings'
+Open advanced editor and a task's Execution link. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and
@@ -1560,12 +1559,8 @@ Contract details:
   conversation is never resumed.
 - Follow-up messages in the operator task read carry `requester`
   (`assignment` or `operator`), shown in the task message history.
-- Limitation: the legacy server-rendered `/coordination/...` task and
-  assignment pages offer message forms only for pending or running
-  assignments. A direct `POST /coordination/control/message` follows the same
-  rule as the API. Those pages list follow-up events without their
-  instructions, because they do not apply the operator API's exclusion
-  redaction.
+- The task view offers a message composer only for pending or running
+  delegated assignments, the same rule the API enforces.
 
 ### Readable task histories
 

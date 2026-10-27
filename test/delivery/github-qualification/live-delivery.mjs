@@ -10,9 +10,9 @@ import {
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import { DatabaseSync } from "node:sqlite";
-import { chromium } from "playwright";
 import { z } from "zod";
 import {
   FixtureGuard,
@@ -26,13 +26,16 @@ import { GitHubSourceStore } from "../../../dist/src/core/github-source.js";
 import { verifiedRepository } from "../../../dist/src/standalone/repository-verification.js";
 import { CodexRuntime } from "../../../dist/src/standalone/codex.js";
 import { StandaloneService } from "../../../dist/src/standalone/service.js";
+import { OperatorApi } from "../../../dist/src/standalone/operator-api.js";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../../dist/src/standalone/operator.js";
-import { OperatorRouteRegistry } from "../../../dist/src/standalone/operator-routes.js";
-import { coordinationOperatorRoutes } from "../../../dist/src/standalone/operator-coordination.js";
+import {
+  OperatorWebBoundary,
+  OperatorWebBundle,
+} from "../../../dist/src/standalone/operator-web.js";
 import { MacProcessTerminationVerifier } from "../../../dist/src/standalone/termination.js";
 import { canonicalMaterial } from "../../../dist/src/core/delivery.js";
 
@@ -272,7 +275,7 @@ class BoundedRuntime extends CodexRuntime {
 }
 const password = randomBytes(32).toString("base64url"),
   authFile = join(root, "operator-auth.json");
-let service, runtime, http, browser, page, origin;
+let service, runtime, http, origin, session;
 async function unusedPort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -321,28 +324,20 @@ async function start() {
   const port = await unusedPort();
   origin = `http://127.0.0.1:${port}`;
   const auth = await OperatorAuth.open({ authFile, origin });
-  const routes = new OperatorRouteRegistry();
-  routes.registerSlot(
-    "coordination",
-    coordinationOperatorRoutes(
-      service.coordinationView(),
-      service.domain(),
-      (project) => service.routingAvailability(project),
-    ),
-  );
   http = new LocalOperatorHttp(new LocalOperatorUi(service.domain()), auth, {
-    routes,
+    web: new OperatorWebBoundary(
+      await OperatorWebBundle.open(
+        fileURLToPath(new URL("../../../dist/operator", import.meta.url)),
+      ),
+      new OperatorApi(service, [root]),
+    ),
   });
   await http.start(port);
-  if (!browser) browser = await chromium.launch({ headless: true });
-  page = await browser.newPage();
-  await page.goto(`${origin}/login`);
-  await page.locator('input[name="password"]').fill(password);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await signIn();
   save();
 }
 async function stop() {
-  await page?.close();
+  session = undefined;
   await http?.stop();
   const identity = await runtime?.processIdentity();
   await service?.stop();
@@ -353,34 +348,70 @@ async function stop() {
   }
   save();
 }
-async function formMaterial(taskId, selector) {
-  await page.goto(`${origin}/coordination/task/${taskId}`);
-  return page
-    .locator(selector)
-    .first()
-    .locator("input")
-    .evaluateAll((inputs) =>
-      Object.fromEntries(inputs.map((input) => [input.name, input.value])),
-    );
-}
-async function post(path, fields) {
-  return page.request.post(`${origin}${path}`, {
-    headers: { origin },
-    form: fields,
-    maxRedirects: 0,
+const sessionCookie = (response) =>
+  String(response.headers.get("set-cookie")).split(";")[0];
+// The operator signs in through the JSON API; a restart invalidates the session.
+async function signIn() {
+  const anonymous = await fetch(`${origin}/api/operator/session`);
+  assert.equal(anonymous.status, 200);
+  const login = await fetch(`${origin}/api/operator/login`, {
+    method: "POST",
+    headers: {
+      origin,
+      cookie: sessionCookie(anonymous),
+      "content-type": "application/json",
+      "x-csrf-token": (await anonymous.json()).csrfToken,
+    },
+    body: JSON.stringify({ password }),
   });
+  assert.equal(login.status, 200);
+  session = {
+    cookie: sessionCookie(login),
+    csrfToken: (await login.json()).csrfToken,
+  };
+}
+async function readTask(taskId) {
+  const response = await fetch(`${origin}/api/operator/tasks/${taskId}`, {
+    headers: { cookie: session.cookie },
+  });
+  assert.equal(response.status, 200);
+  return (await response.json()).data;
+}
+async function operatorCommand(command) {
+  const response = await fetch(`${origin}/api/operator/commands`, {
+    method: "POST",
+    headers: {
+      origin,
+      cookie: session.cookie,
+      "content-type": "application/json",
+      "x-csrf-token": session.csrfToken,
+    },
+    body: JSON.stringify(command),
+  });
+  return { status: response.status, body: await response.json() };
 }
 async function decide(taskId, decision, wrong = false) {
-  const fields = await formMaterial(
+  const approval = (await readTask(taskId)).approvals.find(
+    (item) => item.status === "open",
+  );
+  assert.ok(approval?.action);
+  // The action, target and material go back exactly as the task read discloses them.
+  const response = await operatorCommand({
+    type: "approval.decide",
+    key: randomUUID(),
     taskId,
-    `form[action="/coordination/control/approval/decision"]:has(input[name="decision"][value="${decision}"])`,
-  );
-  if (wrong) fields.materialJson = "{}";
-  const response = await post(
-    "/coordination/control/approval/decision",
-    fields,
-  );
-  assert.ok(wrong ? response.status() >= 400 : response.status() === 303);
+    interactionId: approval.interactionId,
+    expectedRevision: approval.revision,
+    decision,
+    action: approval.action,
+    ...(approval.target === null ? {} : { target: approval.target }),
+    ...(wrong
+      ? { material: {} }
+      : approval.material === null
+        ? {}
+        : { material: approval.material }),
+  });
+  assert.ok(wrong ? response.status >= 400 : response.status === 200);
 }
 function idle(taskId) {
   return qualificationTaskIdle(taskId, service.turnRequests(), service.list());
@@ -655,14 +686,23 @@ try {
       assert.equal(service.delivery().delivery(taskId).settlement, null);
       item.restartWaiting = true;
       stage = "operator-handback-settlement";
-      const fields = await formMaterial(
+      const task = await readTask(taskId);
+      const settle = {
+        type: "delivery.settle",
+        key: randomUUID(),
         taskId,
-        'form[action="/coordination/control/delivery/settle"]:has(input[name="decision"][value="accepted"])',
-      );
-      assert.equal(
-        (await post("/coordination/control/delivery/settle", fields)).status(),
-        303,
-      );
+        expectedTaskVersion: task.task.version,
+        expectedDeliveryRevision: task.delivery.binding.revision,
+        expectedPolicyVersion: task.delivery.policyVersion,
+        expectedHeadSha: task.delivery.binding.headSha,
+        decision: "accepted",
+      };
+      const settled = await operatorCommand(settle);
+      assert.equal(settled.status, 200);
+      assert.equal(settled.body.kind, "delivery-settlement");
+      assert.equal(settled.body.recorded, true);
+      // The same command and key replays the same receipt.
+      assert.deepEqual(await operatorCommand(settle), settled);
     } else {
       stage = "through-merge-passing-gate";
       await provider(`${repoPath}/statuses/${j.pr.headSha}`, "POST", {
@@ -773,7 +813,6 @@ try {
   }
   process.exitCode = 1;
 } finally {
-  await browser?.close();
   save();
   process.stdout.write(
     `S07a ${qualificationDisposition(evidence.results)}; retained evidence ${join(root, "evidence.json")}\n`,

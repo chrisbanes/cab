@@ -348,7 +348,7 @@ test("request wording is exhaustive and links match the Inbox selection", () => 
     taskId,
     destination:
       kind === "approval"
-        ? `/coordination/task/${taskId}#a`
+        ? `/app/tasks/${taskId}?request=a`
         : `/app/tasks/${taskId}`,
     requesterName: "Jonas",
     createdAt: new Date(2026, 9, 9, 9, 5).getTime(),
@@ -358,7 +358,7 @@ test("request wording is exhaustive and links match the Inbox selection", () => 
     requestHref(item("question")),
     `/app/inbox?task=${taskId}&request=interaction%3A1%2Fx`,
   );
-  assert.equal(requestHref(item("approval")), `/coordination/task/${taskId}#a`);
+  assert.equal(requestHref(item("approval")), `/app/tasks/${taskId}?request=a`);
   assert.equal(requestHref(item("intervention")), `/app/tasks/${taskId}`);
   // Only an intervention names who is responsible for execution; a question's requester does not.
   const other = { taskId, kind: "question", requesterName: "Nora" } as const;

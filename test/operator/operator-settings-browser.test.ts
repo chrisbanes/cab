@@ -1646,58 +1646,41 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
     await page.setViewportSize(viewport);
     await capture(page, `${viewport.width}-retained-delivery-policy`);
   }
-  await page.goto(`${web.origin}/coordination/task/${ids.taskId}`);
-  const settlements = page.locator(
-    'form[action="/coordination/control/delivery/settle"]',
-  );
-  assert.equal(await settlements.count(), 2);
-  for (const [index, decision] of ["accepted", "closed"].entries()) {
-    const form = settlements.nth(index);
-    const material = await form
-      .locator("input")
-      .evaluateAll((inputs) =>
-        Object.fromEntries(
-          inputs.map((e) => [
-            (e as HTMLInputElement).name,
-            (e as HTMLInputElement).value,
-          ]),
-        ),
-      );
-    assert.equal(material.taskId, ids.taskId);
-    assert.equal(material.expectedTaskVersion, String(caller.taskVersion));
-    assert.equal(material.expectedDeliveryRevision, "1");
-    assert.equal(material.expectedPolicyVersion, "2");
-    assert.equal(material.repositoryId, "R1");
-    assert.equal(material.prNumber, "7");
-    assert.equal(material.expectedPrNodeId, "P7");
-    assert.equal(material.expectedHeadSha, "1".repeat(40));
-    assert.equal(material.decision, decision);
-    assert.equal(
-      await form.getByRole("button").innerText(),
-      index === 0 ? "Accept handback" : "Settle outcome as closed",
-    );
-  }
-  for (const fact of [
-    "No imported issue observation.",
-    "Project field observations: None observed.",
-    "PR 7 (P7)",
-    "provider state OPEN",
-    "Provider feedback: None observed.",
-    "No external actions.",
-    "Local task: open",
-    "Delivery holds:",
-  ])
-    assert.equal(
-      (await page.locator("body").innerText()).includes(fact),
-      true,
-      fact,
-    );
-  assert.equal(
+  // The in-app handback settlement binds the exact material shown; the request is held back to read it.
+  const delivery = page.locator("#changes");
+  for (const [button, decision] of [
+    ["Accept handback", "accepted"],
+    ["Settle as closed", "closed"],
+  ] as const) {
+    await page.goto(`${web.origin}/app/tasks/${ids.taskId}?section=changes`);
+    await delivery
+      .getByText("Reviewable PR handed back.", { exact: true })
+      .waitFor();
+    let posted: Record<string, unknown> | undefined;
+    await page.route("**/api/operator/commands", async (route) => {
+      posted = JSON.parse(route.request().postData() ?? "null");
+      await route.abort();
+    });
+    await delivery.getByRole("button", { name: button, exact: true }).click();
     await page
-      .getByRole("button", {
-        name: "Refresh delivery observations",
-        exact: true,
-      })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
+      .waitFor();
+    await page.unroute("**/api/operator/commands");
+    assert.equal(posted?.type, "delivery.settle");
+    assert.equal(posted.taskId, ids.taskId);
+    assert.equal(posted.expectedTaskVersion, caller.taskVersion);
+    assert.equal(posted.expectedDeliveryRevision, 1);
+    assert.equal(posted.expectedPolicyVersion, 2);
+    assert.equal(posted.expectedHeadSha, "1".repeat(40));
+    assert.equal(posted.decision, decision);
+  }
+  await page.goto(`${web.origin}/app/tasks/${ids.taskId}?section=changes`);
+  await delivery.getByText(/PR #7/).first().waitFor();
+  for (const fact of ["Open", "No checks or repair owner were observed"])
+    assert.equal((await delivery.innerText()).includes(fact), true, fact);
+  assert.equal(
+    await delivery
+      .getByRole("button", { name: "Refresh delivery status", exact: true })
       .count(),
     1,
   );
@@ -1716,7 +1699,7 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
   assert.deepEqual(external, []);
   assert.deepEqual(errors, []);
   console.log(
-    `UI06 retained delivery: two guarded settlement forms, all nine grant kinds, zero provider calls; screenshots ${journey.directory}`,
+    `UI06 retained delivery: two guarded settlement commands, all nine grant kinds, zero provider calls; screenshots ${journey.directory}`,
   );
 });
 

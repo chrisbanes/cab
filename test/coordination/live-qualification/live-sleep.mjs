@@ -810,14 +810,6 @@ function operatorRoutes(currentService, routeTypes) {
     "runtime",
     routeTypes.runtimeOperatorRoutes(currentService),
   );
-  routes.registerSlot(
-    "coordination",
-    routeTypes.coordinationOperatorRoutes(
-      currentService.coordinationView(),
-      currentService.domain(),
-      (projectId) => currentService.routingAvailability(projectId),
-    ),
-  );
   return routes;
 }
 
@@ -1284,9 +1276,6 @@ async function runLiveJourney(approval) {
       runtimeOperatorRoutes: (
         await import("../../../dist/src/standalone/operator-runtime.js")
       ).runtimeOperatorRoutes,
-      coordinationOperatorRoutes: (
-        await import("../../../dist/src/standalone/operator-coordination.js")
-      ).coordinationOperatorRoutes,
     });
     http = new operatorTypes.LocalOperatorHttp(
       new operatorTypes.LocalOperatorUi(service.domain()),
@@ -1312,10 +1301,16 @@ async function runLiveJourney(approval) {
     const login = await loginResponse;
     assert.equal(login.status(), 303);
     evidence.operator.authenticated = true;
-    await page.goto(`${origin}/coordination/task/${activeTaskId}`);
-    assert.match(
-      await page.locator("body").innerText(),
-      /S05_PHYSICAL_SLEEP_V1/,
+    // The operator task read (the view behind GET /api/operator/tasks/:id).
+    assert.ok(
+      service
+        .coordinationView()
+        .readTask(activeTaskId)
+        .questions.some(
+          (question) =>
+            question.status === "open" &&
+            /S05_PHYSICAL_SLEEP_V1/.test(question.prompt),
+        ),
     );
     evidence.operator.liveQuestionVisible = true;
     await page.goto(`${origin}/runtime/task/${activeTaskId}`);
