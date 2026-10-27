@@ -43,6 +43,8 @@ export interface StopObservation {
 export interface ExecutionSupervisorOptions {
   clock?: SupervisorClock;
   observationMs?: number;
+  /** How long planned shutdown waits for interrupted turns to report; default 5000. */
+  shutdownWaitMs?: number;
 }
 
 const defaultClock: SupervisorClock = {
@@ -134,6 +136,7 @@ function inspectionIdentity(
 export class ExecutionSupervisor {
   private readonly clock: SupervisorClock;
   private readonly observationMs: number;
+  readonly shutdownWaitMs: number;
   private readonly events = new EventEmitter();
   private readonly observations = new Set<Promise<StopObservation>>();
   private readonly observationControllers = new Set<AbortController>();
@@ -153,6 +156,9 @@ export class ExecutionSupervisor {
     this.observationMs = options.observationMs ?? 3000;
     if (!Number.isSafeInteger(this.observationMs) || this.observationMs <= 0)
       throw new Error("Stop observation window must be a positive integer");
+    this.shutdownWaitMs = options.shutdownWaitMs ?? 5000;
+    if (!Number.isSafeInteger(this.shutdownWaitMs) || this.shutdownWaitMs <= 0)
+      throw new Error("Shutdown wait must be a positive integer");
   }
 
   async reconcileOnStart(): Promise<void> {
@@ -333,6 +339,63 @@ export class ExecutionSupervisor {
     const target = this.state.stopTarget(workId);
     if (target && target.terminalState !== "unknown")
       this.events.emit("terminal", target.taskId);
+    this.events.emit("progress");
+  }
+
+  /** Interrupts every bound shutdown target; unbound ones interrupt when `turnBound` binds them. */
+  interruptForShutdown(targets: StopTarget[]): void {
+    for (const target of targets)
+      if (target.interruptState === "pending") this.interrupt(target);
+  }
+
+  /**
+   * Resolves once the work's turn terminal is known and its interrupt request
+   * is no longer in flight (or its target is gone), or when the signal aborts.
+   * Settled does not mean released: the caller checks the recorded outcome.
+   */
+  shutdownSettled(workId: string, signal: AbortSignal): Promise<void> {
+    return this.untilTarget(workId, signal, (target) => {
+      return (
+        target.terminalState !== "unknown" &&
+        target.interruptState !== "pending" &&
+        target.interruptState !== "uncertain"
+      );
+    });
+  }
+
+  /** Resolves once the work's interrupt request is no longer in flight, or the signal aborts. */
+  interruptSettled(workId: string, signal: AbortSignal): Promise<void> {
+    return this.untilTarget(
+      workId,
+      signal,
+      (target) =>
+        target.interruptState !== "pending" &&
+        target.interruptState !== "uncertain",
+    );
+  }
+
+  private async untilTarget(
+    workId: string,
+    signal: AbortSignal,
+    settledTarget: (target: StopTarget) => boolean,
+  ): Promise<void> {
+    const settled = () => {
+      const target = this.state.stopTarget(workId);
+      return !target || settledTarget(target);
+    };
+    if (settled() || signal.aborted) return;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        this.events.off("progress", check);
+        signal.removeEventListener("abort", done);
+        resolve();
+      };
+      const check = () => {
+        if (settled()) done();
+      };
+      this.events.on("progress", check);
+      signal.addEventListener("abort", done, { once: true });
+    });
   }
 
   noteSurvivor(workId: string): void {
@@ -462,7 +525,8 @@ export class ExecutionSupervisor {
         return runtime.interruptTurn(threadId, turnId);
       })
       .then(() => this.state.recordStopInterrupt(target.workId, "acknowledged"))
-      .catch(() => this.state.recordStopInterrupt(target.workId, "failed"));
+      .catch(() => this.state.recordStopInterrupt(target.workId, "failed"))
+      .finally(() => this.events.emit("progress"));
     this.interruptRequests.add(action);
     void action
       .finally(() => this.interruptRequests.delete(action))

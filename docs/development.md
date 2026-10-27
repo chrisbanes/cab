@@ -69,7 +69,8 @@ them as runner performance changes.
 
 Real App Server
 qualification is separate and runs only when requested explicitly, for example
-`npm run recovery:live` and `npm run routing:live`, which require their `--live` opt-in
+`npm run recovery:live`, `npm run planned-restart:live` and `npm run routing:live`,
+which require their `--live` opt-in
 (see the other `*:live` scripts in `package.json`). These checks do not prove
 physical sleep/wake behavior, operational host-restart recovery or private remote
 Tailscale access.

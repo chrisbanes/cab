@@ -20,6 +20,7 @@ import type {
   ExecutionInspection,
 } from "../../src/standalone/recovery-types.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { stopWithoutDrain } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 /** Records every call so each test can prove which harness ran the work. */
@@ -810,7 +811,8 @@ test("restart recovery inspects admitted work only through its own harness", asy
       () => intent(service, workId)?.state === "running",
       describe,
     );
-    await service.stop();
+    // A crash leaves no planned-shutdown interrupt, so the restart cannot release it.
+    await stopWithoutDrain(service);
 
     runtimes = fakes();
     service = open(dataDir, runtimes, ["codex"]);
@@ -1189,7 +1191,8 @@ test("a harness failing during a pending recovery inspection does not stall star
       () => intent(service, claudeWork)?.state === "running",
       describe,
     );
-    await service.stop();
+    // A crash leaves no planned-shutdown interrupt, so the restart cannot release it.
+    await stopWithoutDrain(service);
 
     runtimes = fakes();
     runtimes.claude.failDuringInspection = true;

@@ -844,7 +844,7 @@ test("Stop during an awaited before observation prevents runtime dispatch", asyn
   assert.equal(f.service.taskHold(f.taskId), "Task stopped");
 });
 
-test("generation shutdown during before observation does not dispatch and leaves durable unsettled evidence", async (t) => {
+test("generation shutdown during before observation still submits the admitted task turn and settles its capture", async (t) => {
   const f = await fixture();
   t.after(() => f.close());
   const internals = f.service as unknown as {
@@ -875,8 +875,9 @@ test("generation shutdown during before observation does not dispatch and leaves
   release.resolve(undefined);
   await action;
   await stopping;
-  assert.equal(f.runtime.turns, 1);
-  assert.equal(f.runtime.starts, 1);
+  // Admitted task work submits during planned shutdown; successors are never admitted.
+  assert.equal(f.runtime.turns, 2);
+  assert.equal(f.runtime.starts, 2);
   assert.equal(f.runtime.resumes, 0);
 
   const recovered = new StandaloneService(
@@ -889,13 +890,11 @@ test("generation shutdown during before observation does not dispatch and leaves
   await recovered.start();
   assert.equal(
     recovered.list().find((work) => work.workId === "shutdown-before")?.state,
-    "held",
+    "completed",
   );
   const captures = storeFor(recovered).latestTurnCaptures(f.taskId);
-  assert.equal(captures.latestFinished?.identity.workId, f.firstWorkId);
-  assert.equal(captures.pending?.captureState, "unsettled");
-  assert.equal(captures.pending?.outcome, "unknown");
-  assert.ok(captures.pending?.comparison);
+  assert.equal(captures.latestFinished?.identity.workId, "shutdown-before");
+  assert.equal(captures.pending, undefined);
 });
 
 test("Stop during after observation preserves the stop hold and does not finish the turn capture", async (t) => {

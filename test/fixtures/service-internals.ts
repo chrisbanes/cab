@@ -44,3 +44,14 @@ export function activeWorkIdsOf(service: StandaloneService): string[] {
   // biome-ignore lint/complexity/useLiteralKeys: private member access for tests
   return [...service["activeByWorkId"].keys()];
 }
+
+/**
+ * Stops the service without the planned-shutdown drain, so running work is left
+ * as a crash leaves it: the runtime stop is the only thing that reaches it.
+ */
+export function stopWithoutDrain(service: StandaloneService): Promise<void> {
+  // biome-ignore lint/complexity/useLiteralKeys: private member access for tests
+  const acquired = service["acquired"];
+  if (acquired) delete acquired.supervisor;
+  return service.stop();
+}

@@ -402,6 +402,8 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
     () => runtime,
     undefined,
     {
+      // The stalled Git call, not a running turn, is what this stop measures.
+      supervisor: { shutdownWaitMs: 1 },
       workspaceManager: {
         gitExecutable: controlled.executable,
         gitTimeoutMs: { "repository-identity": 30_000 },

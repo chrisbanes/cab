@@ -3325,6 +3325,16 @@ export class CoordinationStore {
     return Boolean(
       this.isNeverAdmittedRefusedAssignmentWork?.(workId) ||
         this.hasRecoveryContinuation(workId) ||
+        // Planned shutdown released it and queued its successor.
+        (this.one(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_shutdown_resolutions'",
+        ) &&
+          this.one(
+            `SELECT 1 FROM execution_shutdown_resolutions r
+            JOIN execution_intents i ON i.workId=r.interruptedWorkId
+            WHERE r.interruptedWorkId=? AND i.state='resolved-failed'`,
+            workId,
+          )) ||
         (this.one(
           "SELECT 1 FROM sqlite_master WHERE type='table' AND name='inbox_request_supersessions'",
         ) &&

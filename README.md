@@ -68,9 +68,10 @@ owns delivery scope and status.
 **Implemented**
 
 - **Coordination.** Durable scheduling with shared writer and capacity limits,
-  supervised turns, best-effort Stop and conservative restart recovery. Task
-  coordination covers assignments, results, inboxes, questions, approvals,
-  lead-gated completion and assignment routing.
+  supervised turns, best-effort Stop and conservative restart recovery. A planned
+  restart interrupts running task turns and requeues the ones it sees end; a crash
+  keeps every hold. Task coordination covers assignments, results, inboxes,
+  questions, approvals, lead-gated completion and assignment routing.
 - **Operator UI.** An authenticated React interface at `/app` with an attention
   overview, cross-project and per-project List and Board views, a local task
   composer, the Inbox, retained search and Settings. The original HTML forms remain

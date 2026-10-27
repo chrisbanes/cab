@@ -287,6 +287,19 @@ Resume revalidates readiness, dependencies, permissions and execution ownership.
 Hold a macOS sleep assertion while execution is active, releasing it when idle.
 Forced sleep or wake requires execution reconciliation before admitting more work.
 
+A planned restart (SIGINT or SIGTERM) stops admitting work, then interrupts each
+running task turn through the Stop interrupt lifecycle, lets an in-flight
+submission bind or fail, and waits one bounded, configurable interval (five seconds
+by default) for terminal status. A turn whose interrupt was acknowledged and whose
+exact bound turn reported a terminal failure is released when every Ensemble
+callback has ended and nothing else holds it: no known survivor and no pending
+effect other than its own uncommitted assignment result, which is settled as
+superseded. Its writer ownership and capacity go atomically and the same request is
+requeued as a fresh generation on the same thread, admitted on the next start under
+every current admission check, without using the transient-retry allowance. A turn
+that completes within the interval completes normally. Everything else, including
+drafting and direct turns, keeps today's restart hold.
+
 Ensemble owns capacity admission with both a global active-turn cap and a cap for
 each project. Waiting for workers, people or external feedback
 releases an execution slot; capacity one must not deadlock delegation. Default
@@ -467,7 +480,8 @@ exclusion or the policy of an unobserved action. See the
 [runtime trust boundary](design/standalone.md#runtime-trust-boundary).
 Crash, Stop, failure/interruption, missing or conflicting terminal identity/status,
 unfinished Ensemble callbacks and known survivors retain holds until independently
-resolved.
+resolved; the one exception is a task turn that a planned restart interrupted and
+recorded as ended (see above).
 A timer, expired lease, quiet interval, empty terminal list, acknowledged Stop or
 operator acknowledgement cannot release them. Conversation replacement and archival
 do not automatically delete

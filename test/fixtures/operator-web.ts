@@ -302,6 +302,8 @@ export async function createOperatorFixture<
       undefined,
       {
         ...serviceOptions,
+        // Fake turns never report, so a planned stop would otherwise wait out the default window.
+        supervisor: { shutdownWaitMs: 50, ...serviceOptions.supervisor },
         ghExecutable:
           serviceOptions.ghExecutable ?? join(directory, "no-gh", "gh"),
         power: serviceOptions.power ?? { enabled: false },

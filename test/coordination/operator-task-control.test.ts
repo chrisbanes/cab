@@ -118,6 +118,51 @@ test("a receipted Stop is atomic with its hold and replays without effect", asyn
   assert.equal(f.service.taskHold(other.taskId), "Task stopped");
 });
 
+test("stop targets written before shutdown targets existed read as operator targets", async (t) => {
+  const f = await fixture(t);
+  const { a } = await startOwnWork(f, "Legacy stop", "Legacy project");
+  await control(f, "task.stop", a.taskId);
+  const columns =
+    "taskId, workId, threadId, turnId, interruptState, terminalState, reason, requestedAt";
+  const before = rows(
+    f,
+    `SELECT ${columns} FROM execution_stop_targets WHERE taskId = ?`,
+    a.taskId,
+  );
+  assert.equal(before.length, 1);
+  f.seedPersistedState((db) => {
+    db.exec(`CREATE TABLE execution_stop_targets_legacy (
+      taskId TEXT NOT NULL,
+      workId TEXT NOT NULL REFERENCES execution_intents(workId),
+      threadId TEXT,
+      turnId TEXT,
+      interruptState TEXT NOT NULL CHECK(interruptState IN ('pending','uncertain','acknowledged','failed','unbound')),
+      terminalState TEXT NOT NULL CHECK(terminalState IN ('unknown','completed','failed')),
+      reason TEXT,
+      requestedAt INTEGER NOT NULL,
+      PRIMARY KEY(taskId, workId)
+    );
+    INSERT INTO execution_stop_targets_legacy (${columns})
+      SELECT ${columns} FROM execution_stop_targets;
+    DROP TABLE execution_stop_targets;
+    ALTER TABLE execution_stop_targets_legacy RENAME TO execution_stop_targets`);
+  });
+
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  try {
+    new ExecutionState(db);
+    assert.deepEqual(
+      db
+        .prepare(`SELECT ${columns}, origin FROM execution_stop_targets`)
+        .all()
+        .map((row) => ({ ...row })),
+      before.map((row) => ({ ...(row as object), origin: "operator" })),
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test("an expected version fences Stop and Resume only when supplied", async (t) => {
   const f = await fixture(t);
   const a = await seedReviewTask(f);
