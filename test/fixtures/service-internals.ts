@@ -38,3 +38,9 @@ export function databaseOf(service: StandaloneService) {
   if (!db) throw new Error("Service database is not open");
   return db;
 }
+
+/** Work ids whose turn the service is still driving. */
+export function activeWorkIdsOf(service: StandaloneService): string[] {
+  // biome-ignore lint/complexity/useLiteralKeys: private member access for tests
+  return [...service["activeByWorkId"].keys()];
+}

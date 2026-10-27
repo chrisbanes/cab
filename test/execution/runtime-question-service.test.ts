@@ -7,7 +7,11 @@ import { tmpdir } from "../fixtures/temp.js";
 import { test } from "node:test";
 import type { RuntimeQuestionRecord } from "../../src/core/coordination.js";
 import { ExecutionState } from "../../src/standalone/state.js";
-import { StandaloneService } from "../../src/standalone/service.js";
+import {
+  StandaloneService,
+  type StandaloneServiceOptions,
+} from "../../src/standalone/service.js";
+import type { RecoveryReceipt } from "../../src/standalone/recovery-types.js";
 import type { Runtime, UnexpectedRequest } from "../../src/standalone/codex.js";
 import type {
   RuntimeUserInputRequest,
@@ -16,7 +20,11 @@ import type {
   NativeInputReply,
   RuntimeReplyIntent,
 } from "../../src/standalone/native-input.js";
-import { acquiredOf, startedOf } from "../fixtures/service-internals.js";
+import {
+  acquiredOf,
+  activeWorkIdsOf,
+  startedOf,
+} from "../fixtures/service-internals.js";
 
 function required<T>(value: T | null | undefined): T {
   assert.ok(value !== undefined && value !== null);
@@ -190,7 +198,13 @@ class NativeRuntime implements Runtime {
 function command(service: StandaloneService, body: Record<string, unknown>) {
   return service.domain().execute({ key: randomUUID(), ...body } as never);
 }
-async function fixture(options: { early?: boolean; claude?: boolean } = {}) {
+async function fixture(
+  options: {
+    early?: boolean;
+    claude?: boolean;
+    terminationVerifier?: StandaloneServiceOptions["terminationVerifier"];
+  } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-native-service-"));
   const runtime = new NativeRuntime();
   runtime.early = options.early ?? false;
@@ -205,6 +219,9 @@ async function fixture(options: { early?: boolean; claude?: boolean } = {}) {
     {
       power: { enabled: false },
       supervisor: { observationMs: 5 },
+      ...(options.terminationVerifier
+        ? { terminationVerifier: options.terminationVerifier }
+        : {}),
       ...(options.claude ? { runtimeHarnesses: ["codex", "claude"] } : {}),
     },
   );
@@ -500,7 +517,7 @@ for (const boundary of ["request", "answer", "intent", "write"] as const)
       await f.close();
     }
   });
-test("failed durable native receipt commit keeps the callback and ownership held", async () => {
+test("failed durable native receipt commit keeps ownership held and releases the callback", async () => {
   const f = await fixture();
   try {
     const db = new (await import("node:sqlite")).DatabaseSync(
@@ -529,12 +546,84 @@ test("failed durable native receipt commit keeps the callback and ownership held
     assert.equal(question.answerDigest, f.runtime.receipt?.answerDigest);
     assert.equal(f.service.list()[0]?.state, "held");
     f.runtime.terminal.resolve("completed");
-    await until(() => Boolean(f.service.list()[0]?.reason));
+    await until(() => activeWorkIdsOf(f.service).length === 0);
     assert.equal(f.service.list()[0]?.state, "held");
+    assert.equal(
+      f.service.list()[0]?.reason,
+      "Native receipt could not be durably committed",
+    );
   } finally {
     await f.close();
   }
 });
+for (const mode of ["unavailable", "uncertain"] as const)
+  test(`native ${mode} outcome releases its waiter so a reconciled assignment offers continuation without restart`, async () => {
+    const f = await fixture({
+      terminationVerifier: {
+        async verify(identity) {
+          return {
+            kind: "verified",
+            processIdentity: identity,
+            verifiedAt: "2026-10-03T10:05:00.000Z",
+            method: "mac-pid-absent-same-boot",
+          };
+        },
+      },
+    });
+    try {
+      const q = runtimeQuestion(f.service, f.taskId);
+      if (mode === "uncertain") {
+        f.runtime.confirm = false;
+        await f.service.coordinationView().answerRuntimeQuestion({
+          taskId: f.taskId,
+          key: randomUUID(),
+          interactionId: q.interactionId,
+          expectedRevision: q.revision,
+          answers: { q: { answers: ["Local"] } },
+        });
+        await until(() => f.runtime.replies === 1);
+        // A sent-unconfirmed write is not terminal: the waiter stays registered.
+        assert.equal(
+          runtimeQuestion(f.service, f.taskId).deliveryState,
+          "sent-unconfirmed",
+        );
+        assert.equal(f.service.list()[0]?.state, "running");
+      }
+      f.runtime.cancelUserInput(q.identity, "Runtime resolved the request");
+      assert.equal(runtimeQuestion(f.service, f.taskId).deliveryState, mode);
+      const nativeReason = "Native input delivery unavailable or uncertain";
+      assert.equal(f.service.list()[0]?.state, "held");
+      assert.equal(f.service.list()[0]?.reason, nativeReason);
+      f.runtime.terminal.resolve("completed");
+      await until(() => activeWorkIdsOf(f.service).length === 0);
+      // The released waiter cannot complete the held execution.
+      assert.equal(f.service.list()[0]?.state, "held");
+      assert.equal(f.service.list()[0]?.reason, nativeReason);
+      const request = required(f.service.turnRequests()[0]);
+      const recovery = required(
+        f.service.recoveryView().find((r) => r.workId === request.workId),
+      );
+      await f.service.resolveHeldExecution({
+        workId: request.workId,
+        workRevision: recovery.generation.workRevision,
+        requestSequence: recovery.generation.requestSequence,
+        threadId: recovery.intent.threadId,
+        turnId: recovery.intent.turnId,
+        processIdentity: required(recovery.processIdentity),
+        termination: { kind: "process-exit" },
+        effects: "settled",
+        workspace: "preserved",
+      } as RecoveryReceipt);
+      assert.equal(
+        f.service
+          .coordinationView()
+          .leadAwaitsRecoveryMessage(f.taskId, required(request.assignmentId)),
+        true,
+      );
+    } finally {
+      await f.close();
+    }
+  });
 for (const returned of ["turn", "other"] as const)
   test(`early native prebinding reconciles only the ${returned === "turn" ? "exact" : "conflicting"} start response`, async () => {
     const f = await fixture({ early: true });
