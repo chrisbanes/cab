@@ -359,6 +359,23 @@ There is no force unlock, timer-only release or operator-acknowledgement waiver.
 The implemented recovery controls require qualification before release. Any
 different release guarantee requires a concrete new decision.
 
+The one decided release guarantee outside these controls is a planned restart.
+Graceful shutdown stops admission, records a transient shutdown Stop target for each
+submitting or running task turn and interrupts it through the Stop interrupt
+lifecycle (a submission is interrupted once its turn binds), then waits one bounded
+interval, `shutdownWaitMs`, five seconds by default. When the exact bound turn
+reports a failed terminal status after an acknowledged interrupt, every Ensemble
+callback has ended, no survivor is known and no pending effect other than the turn's
+own `assignment-result` remains, one transaction settles that effect as superseded,
+releases writer ownership and capacity, resolves the generation and requeues the same
+request as a fresh generation that resumes the thread. The requeue does not use the
+transient-retry allowance and applies to Codex and Claude alike; the next start
+admits it under every current check. The shutdown target never creates a task hold
+and is dropped at the next open, and an operator Stop on the same work always wins.
+A hung or silent runtime, a failed or uncertain interrupt (App Server refuses one for
+a turn that has only just started), or any other hold keeps the restart hold above, and nothing is released on the timer alone. A crash is
+unchanged, and drafting and direct turns keep today's restart behavior.
+
 ## Reuse and transition
 
 Reuse `src/core` behavior and real-SQLite tests where it fits. Preserve

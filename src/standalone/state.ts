@@ -55,6 +55,7 @@ const stopTargetColumns = `(
       terminalState TEXT NOT NULL CHECK(terminalState IN ('unknown','completed','failed')),
       reason TEXT,
       requestedAt INTEGER NOT NULL,
+      origin TEXT NOT NULL DEFAULT 'operator' CHECK(origin IN ('operator','shutdown')),
       PRIMARY KEY(taskId, workId)
     )`;
 // Reason texts earlier builds used as the uncertain-interrupt discriminator.
@@ -159,6 +160,8 @@ export interface StopTarget {
     | "unbound";
   terminalState: "unknown" | "completed" | "failed";
   reason: string | null;
+  /** A shutdown target is transient and never an operator Stop. */
+  origin: "operator" | "shutdown";
 }
 
 export interface RecoveryExecutionIdentity {
@@ -343,6 +346,11 @@ export interface FailureResolutionEvidence {
   nextEligibleAt: number;
 }
 
+export interface ShutdownInterruptResolution {
+  interruptedWorkId: string;
+  requeueWorkId: string;
+}
+
 export interface FailedGenerationResolution {
   failedWorkId: string;
   retryWorkId: string;
@@ -382,6 +390,22 @@ const failureResolutionSchema = z
     nextEligibleAt: z.number().int().nonnegative().safe(),
   })
   .strict();
+
+const shutdownResolutionSchema = z
+  .object({
+    workId: z.string().min(1),
+    workRevision: z.number().int().positive().nullable(),
+    requestSequence: z.number().int().positive(),
+    threadId: z.string().min(1),
+    turnId: z.string().min(1),
+    harness: executionHarnessSchema,
+    callbacksEnded: z.literal(true),
+    noSurvivor: z.literal(true),
+  })
+  .strict();
+export type ShutdownResolutionEvidence = z.infer<
+  typeof shutdownResolutionSchema
+>;
 
 const processIdentitySchema = z.object({
   processId: z.string().min(1).max(128),
@@ -437,6 +461,8 @@ function recoveryReason(kind: string): string {
       return "A validated recovery receipt resolved this generation";
     case "retry-enqueued":
       return "A validated transient failure queued one bounded retry generation";
+    case "shutdown-requeued":
+      return "Planned shutdown interrupted this turn; one fresh generation was queued";
     default:
       return "Execution state requires operator attention";
   }
@@ -573,6 +599,16 @@ export class ExecutionState {
       nextEligibleAt INTEGER NOT NULL,
       createdAt INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS execution_shutdown_resolutions (
+      interruptedWorkId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+      requeueWorkId TEXT NOT NULL UNIQUE REFERENCES execution_intents(workId),
+      workRevision INTEGER,
+      requestSequence INTEGER NOT NULL,
+      threadId TEXT NOT NULL,
+      turnId TEXT NOT NULL,
+      harness TEXT NOT NULL,
+      createdAt INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS execution_recovery_identities (
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       workRevision INTEGER,
@@ -691,6 +727,16 @@ export class ExecutionState {
     this.migrateRuntimeRetention();
     this.migratePreTurnReceipts();
     this.migrateStopInterruptState();
+    // Targets written before shutdown targets existed were all operator Stops.
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(execution_stop_targets)").all() as {
+          name: string;
+        }[]
+      ).some(({ name }) => name === "origin")
+    )
+      this.db.exec(`ALTER TABLE execution_stop_targets ADD COLUMN origin TEXT
+        NOT NULL DEFAULT 'operator' CHECK(origin IN ('operator','shutdown'))`);
     this.migrateTaskStopHoldKind();
     // Earlier builds kept Stop targets after a receipt reconciled their work.
     this.db.exec(`DELETE FROM execution_stop_targets
@@ -997,10 +1043,10 @@ export class ExecutionState {
       threadId: string | null;
       turnId: string | null;
     }>;
-    const insertTarget =
-      this.db.prepare(`INSERT OR IGNORE INTO execution_stop_targets
-        (taskId, workId, threadId, turnId, interruptState, terminalState, reason, requestedAt)
-        VALUES (?, ?, ?, ?, ?, 'unknown', NULL, ?)`);
+    const insertTarget = this.db.prepare(`INSERT INTO execution_stop_targets
+        (taskId, workId, threadId, turnId, interruptState, terminalState, reason, requestedAt, origin)
+        VALUES (?, ?, ?, ?, ?, 'unknown', NULL, ?, 'operator')
+        ON CONFLICT(taskId, workId) DO UPDATE SET origin = 'operator'`);
     for (const item of active)
       insertTarget.run(
         id,
@@ -1042,6 +1088,45 @@ export class ExecutionState {
       )
       .all(z.string().uuid().parse(taskId))
       .map((row) => stopTargetSchema.parse(row));
+  }
+
+  /**
+   * Records a transient shutdown Stop target for each task-bound execution that
+   * is submitting or running and has no target yet. Returns only the rows added.
+   */
+  beginShutdownInterrupts(): StopTarget[] {
+    return transaction(this.db, () =>
+      (
+        this.db
+          .prepare(`INSERT OR IGNORE INTO execution_stop_targets
+            (taskId, workId, threadId, turnId, interruptState, terminalState,
+              reason, requestedAt, origin)
+            SELECT b.taskId, e.workId, e.threadId, e.turnId,
+              CASE WHEN e.threadId IS NOT NULL AND e.turnId IS NOT NULL
+                THEN 'pending' ELSE 'unbound' END,
+              'unknown', NULL, ?, 'shutdown'
+            FROM execution_intents e
+            JOIN task_execution_bindings b ON b.workId = e.workId
+            WHERE e.state IN ('submitting','running')
+              AND NOT EXISTS (
+                SELECT 1 FROM execution_stop_targets t WHERE t.workId = e.workId)
+            RETURNING *`)
+          .all(Date.now()) as unknown[]
+      ).map((row) => stopTargetSchema.parse(row)),
+    );
+  }
+
+  /** The shutdown resolution that queued this work as its interrupted generation's successor. */
+  shutdownRequeue(
+    workId: string,
+  ): { interruptedWorkId: string; requeueWorkId: string } | undefined {
+    const row = this.db
+      .prepare(`SELECT interruptedWorkId, requeueWorkId
+        FROM execution_shutdown_resolutions WHERE requeueWorkId = ?`)
+      .get(workId) as
+      | { interruptedWorkId: string; requeueWorkId: string }
+      | undefined;
+    return row && { ...row };
   }
 
   stopTarget(workId: string): StopTarget | undefined {
@@ -4470,6 +4555,10 @@ export class ExecutionState {
 
   /** An interrupted service cannot prove a send failed or a writer stopped. */
   holdUnfinishedOnOpen(): void {
+    // An unresolved shutdown target must leave exactly today's restart hold.
+    this.db.exec(
+      "DELETE FROM execution_stop_targets WHERE origin = 'shutdown'",
+    );
     const held = this.db
       .prepare(
         "UPDATE execution_intents SET state = 'held', reason = 'service restarted with unresolved execution' WHERE state IN ('submitting','running') RETURNING workId",
@@ -5447,6 +5536,317 @@ export class ExecutionState {
   }
 
   /**
+   * Releases a turn that planned shutdown interrupted, once its exact bound turn
+   * reported failed after an acknowledged interrupt: the writer and capacity go,
+   * and the same request is requeued as a fresh generation that resumes the
+   * thread. Returns undefined, releasing nothing, while any other hold remains.
+   * It never touches the transient-retry allowance.
+   */
+  resolveShutdownInterrupted(
+    input: ShutdownResolutionEvidence,
+  ): ShutdownInterruptResolution | undefined {
+    const value = shutdownResolutionSchema.parse(input);
+    if (!this.hasTurnRequests)
+      throw new Error("Shutdown resolution requires durable turn requests");
+    return transaction(this.db, () => {
+      const committed = this.db
+        .prepare(`SELECT * FROM execution_shutdown_resolutions
+        WHERE interruptedWorkId = ?`)
+        .get(value.workId) as
+        | {
+            interruptedWorkId: string;
+            requeueWorkId: string;
+            workRevision: number | null;
+            requestSequence: number;
+            threadId: string;
+            turnId: string;
+            harness: string;
+          }
+        | undefined;
+      if (committed) {
+        if (
+          committed.workRevision !== value.workRevision ||
+          committed.requestSequence !== value.requestSequence ||
+          committed.threadId !== value.threadId ||
+          committed.turnId !== value.turnId ||
+          committed.harness !== value.harness
+        )
+          throw new Error(
+            "Shutdown resolution proof does not match the committed generation",
+          );
+        return {
+          interruptedWorkId: committed.interruptedWorkId,
+          requeueWorkId: committed.requeueWorkId,
+        };
+      }
+
+      const current = this.db
+        .prepare(`SELECT intent.id, intent.state, intent.threadId,
+        intent.turnId, intent.workspace, request.kind, request.taskId,
+        request.projectId, request.assignmentId, request.taskVersion,
+        request.assignmentVersion, request.instructionsRevision,
+        request.profileRevision, request.prompt, request.state AS requestState,
+        request.draftTurn, request.draftTaskDigest,
+        request.sequence AS requestSequence, identity.workRevision,
+        identity.requestSequence AS identitySequence,
+        identity.threadId AS identityThreadId, identity.turnId AS identityTurnId,
+        identity.inspectionKind, identity.terminalStatus,
+        binding.harness AS bindingHarness
+        FROM execution_intents intent
+        JOIN turn_requests request ON request.workId = intent.workId
+        JOIN execution_recovery_identities identity ON identity.workId = intent.workId
+        JOIN task_execution_bindings binding ON binding.workId = intent.workId
+        WHERE intent.workId = ?`)
+        .get(value.workId) as
+        | {
+            id: string;
+            state: string;
+            threadId: string | null;
+            turnId: string | null;
+            workspace: string;
+            kind: string;
+            taskId: string | null;
+            projectId: string | null;
+            assignmentId: string | null;
+            taskVersion: number | null;
+            assignmentVersion: number | null;
+            instructionsRevision: number | null;
+            profileRevision: number | null;
+            prompt: string;
+            requestState: string;
+            draftTurn: number;
+            draftTaskDigest: string | null;
+            requestSequence: number;
+            workRevision: number | null;
+            identitySequence: number;
+            identityThreadId: string | null;
+            identityTurnId: string | null;
+            inspectionKind: string | null;
+            terminalStatus: string | null;
+            bindingHarness: string;
+          }
+        | undefined;
+      const actualWorkRevision =
+        (
+          this.db
+            .prepare(
+              "SELECT workRevision FROM task_work_revisions WHERE workId = ?",
+            )
+            .get(value.workId) as { workRevision: number } | undefined
+        )?.workRevision ?? null;
+      if (
+        current?.state !== "held" ||
+        current.requestState !== "held" ||
+        current.bindingHarness !== value.harness ||
+        current.workRevision !== value.workRevision ||
+        actualWorkRevision !== value.workRevision ||
+        current.requestSequence !== value.requestSequence ||
+        current.identitySequence !== value.requestSequence ||
+        current.threadId !== value.threadId ||
+        current.identityThreadId !== value.threadId ||
+        current.turnId !== value.turnId ||
+        current.identityTurnId !== value.turnId ||
+        current.inspectionKind !== "exact-terminal-failed" ||
+        current.terminalStatus !== "failed"
+      )
+        throw new Error(
+          "Shutdown resolution evidence does not match the exact interrupted generation",
+        );
+
+      const owns = this.db
+        .prepare(`SELECT
+        EXISTS (SELECT 1 FROM task_writer_admissions WHERE workId = ?) AS writer,
+        EXISTS (SELECT 1 FROM execution_capacity_reservations WHERE workId = ?) AS capacity`)
+        .get(value.workId, value.workId) as {
+        writer: number;
+        capacity: number;
+      };
+      if (!owns.writer || !owns.capacity)
+        throw new Error(
+          "Interrupted generation no longer owns its exact writer and capacity",
+        );
+
+      const target = this.stopTarget(value.workId);
+      const hasTable = (name: string) =>
+        this.db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+          )
+          .get(name) !== undefined;
+      const held = this.db
+        .prepare(`SELECT
+        EXISTS (SELECT 1 FROM execution_request_refusals WHERE workId = ?) AS refused,
+        EXISTS (SELECT 1 FROM execution_pending_effects
+          WHERE workId = ? AND state = 'pending'
+          AND effectKey != 'assignment-result') AS pendingEffect,
+        EXISTS (SELECT 1 FROM task_execution_bindings binding
+          JOIN task_writer_holds hold ON hold.taskId = binding.taskId
+          WHERE binding.workId = ?) AS taskHold,
+        EXISTS (SELECT 1 FROM task_execution_bindings binding
+          JOIN task_writer_ambiguity_holds hold ON hold.taskId = binding.taskId
+          WHERE binding.workId = ?) AS ambiguousTaskHold,
+        EXISTS (SELECT 1 FROM task_execution_bindings binding
+          JOIN task_archival_holds hold ON hold.taskId = binding.taskId
+          WHERE binding.workId = ?) AS archivalHold,
+        EXISTS (SELECT 1 FROM task_execution_bindings binding
+          JOIN task_execution_bindings otherBinding ON otherBinding.taskId = binding.taskId
+          JOIN execution_intents other ON other.workId = otherBinding.workId
+          JOIN task_writer_admissions otherAdmission ON otherAdmission.workId = other.workId
+          WHERE binding.workId = ? AND other.workId != ?
+          AND other.state IN ('held','submitting','running')) AS otherTaskWriter,
+        EXISTS (SELECT 1 FROM execution_intents other
+          JOIN task_writer_admissions otherAdmission ON otherAdmission.workId = other.workId
+          WHERE other.workspace = ? AND other.workId != ?
+          AND other.state IN ('held','submitting','running')) AS otherWorkspaceWriter,
+        EXISTS (SELECT 1 FROM turn_requests
+          WHERE previousWorkId = ? AND state = 'queued') AS queuedSuccessor`)
+        .get(
+          value.workId,
+          value.workId,
+          value.workId,
+          value.workId,
+          value.workId,
+          value.workId,
+          value.workId,
+          current.workspace,
+          value.workId,
+          value.workId,
+        ) as Record<string, number>;
+      const completionPending =
+        hasTable("coordination_completion_requests") &&
+        this.db
+          .prepare(`SELECT 1 FROM coordination_completion_requests
+          WHERE leadWorkId = ? AND status = 'pending'`)
+          .get(value.workId) !== undefined;
+      if (
+        target?.origin !== "shutdown" ||
+        target.interruptState !== "acknowledged" ||
+        target.terminalState !== "failed" ||
+        target.threadId !== value.threadId ||
+        target.turnId !== value.turnId ||
+        Object.values(held).some(Boolean) ||
+        completionPending
+      )
+        return undefined;
+
+      const generation = this.db
+        .prepare(`SELECT chainId, retryIndex
+        FROM execution_retry_generations WHERE workId = ?`)
+        .get(value.workId) as
+        | { chainId: string; retryIndex: number }
+        | undefined;
+      if (!generation) throw new Error("Retry accounting state is unavailable");
+
+      const requeueWorkId = `shutdown:${randomUUID()}`;
+      this.db
+        .prepare(`INSERT INTO execution_intents
+        (id, workId, prompt, workspace, state, reason, threadId, turnId,
+          accountType, sandbox, approval)
+        VALUES (?, ?, ?, ?, 'ready', NULL, NULL, NULL, 'chatgpt', 'workspaceWrite', 'never')`)
+        .run(randomUUID(), requeueWorkId, current.prompt, current.workspace);
+      this.db
+        .prepare(`INSERT INTO execution_request_predecessors
+        (workId, previousWorkId, predecessorKnown) VALUES (?, ?, 1)`)
+        .run(requeueWorkId, value.workId);
+      this.db
+        .prepare(`INSERT INTO task_execution_bindings
+        (workId, taskId, assignmentId, assignmentVersion, instructionsRevision,
+          profileRevision, conversationRevision, harness)
+        SELECT ?, taskId, assignmentId, assignmentVersion, instructionsRevision,
+          profileRevision, conversationRevision, harness FROM task_execution_bindings
+        WHERE workId = ?`)
+        .run(requeueWorkId, value.workId);
+      this.db
+        .prepare(`INSERT INTO turn_requests
+        (requestKey, workId, kind, taskId, projectId, assignmentId, taskVersion,
+          assignmentVersion, instructionsRevision, profileRevision, prompt,
+          workspace, previousWorkId, state, reason, nextEligibleAt, draftTurn,
+          draftTaskDigest)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, NULL, ?, ?)`)
+        .run(
+          requeueWorkId,
+          requeueWorkId,
+          current.kind,
+          current.taskId,
+          current.projectId,
+          current.assignmentId,
+          current.taskVersion,
+          current.assignmentVersion,
+          current.instructionsRevision,
+          current.profileRevision,
+          current.prompt,
+          current.workspace,
+          value.workId,
+          current.draftTurn,
+          current.draftTaskDigest,
+        );
+      this.db
+        .prepare(`INSERT INTO execution_retry_generations
+        (workId, chainId, retryIndex) VALUES (?, ?, ?)`)
+        .run(requeueWorkId, generation.chainId, generation.retryIndex);
+      const resolved = this.db
+        .prepare(`UPDATE execution_intents SET state = 'resolved-failed',
+        reason = 'Interrupted by planned shutdown; requeued'
+        WHERE workId = ? AND state = 'held' RETURNING workId`)
+        .get(value.workId);
+      if (!resolved)
+        throw new Error(
+          "Interrupted generation changed before shutdown resolution",
+        );
+      this.db
+        .prepare(`UPDATE turn_requests SET
+        reason = 'Interrupted by planned shutdown; requeued'
+        WHERE workId = ? AND state = 'held'`)
+        .run(value.workId);
+      this.db
+        .prepare(`UPDATE execution_pending_effects SET state = 'settled',
+        reason = 'Superseded by shutdown requeue'
+        WHERE workId = ? AND effectKey = 'assignment-result'`)
+        .run(value.workId);
+      for (const table of [
+        "execution_capacity_reservations",
+        "task_writer_admissions",
+        "execution_stop_targets",
+      ])
+        this.db
+          .prepare(`DELETE FROM ${table} WHERE workId = ?`)
+          .run(value.workId);
+      // The delivery batch's work ID is unique, so it follows the requeue.
+      if (hasTable("coordination_delivery_batches"))
+        this.db
+          .prepare(`UPDATE coordination_delivery_batches SET deliveryWorkId = ?
+          WHERE deliveryWorkId = ? AND state = 'queued'`)
+          .run(requeueWorkId, value.workId);
+      this.db
+        .prepare(`INSERT INTO execution_shutdown_resolutions
+        (interruptedWorkId, requeueWorkId, workRevision, requestSequence,
+          threadId, turnId, harness, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          value.workId,
+          requeueWorkId,
+          value.workRevision,
+          value.requestSequence,
+          value.threadId,
+          value.turnId,
+          value.harness,
+          Date.now(),
+        );
+      this.db
+        .prepare(`INSERT INTO execution_recovery_observations
+        (id, workId, kind, reason, recordedAt)
+        VALUES (?, ?, 'shutdown-requeued', ?, ?)`)
+        .run(
+          randomUUID(),
+          value.workId,
+          recoveryReason("shutdown-requeued"),
+          Date.now(),
+        );
+      return { interruptedWorkId: value.workId, requeueWorkId };
+    });
+  }
+
+  /**
    * Ends a drafting run's request once its runtime is known to have ended (or,
    * for a queued run, never started), releasing any capacity it held. Task
    * executions never pass through here: their release goes through completion
@@ -5504,6 +5904,11 @@ export class ExecutionState {
       this.db
         .prepare("DELETE FROM execution_capacity_reservations WHERE workId = ?")
         .run(row.workId);
+      this.db
+        .prepare(
+          "DELETE FROM execution_stop_targets WHERE workId = ? AND origin = 'shutdown'",
+        )
+        .run(row.workId);
       if (this.hasTurnRequests)
         this.db
           .prepare(
@@ -5530,4 +5935,5 @@ const stopTargetSchema = z.object({
   terminalState: z.enum(["unknown", "completed", "failed"]),
   reason: z.string().nullable(),
   requestedAt: z.number().int(),
+  origin: z.enum(["operator", "shutdown"]),
 });

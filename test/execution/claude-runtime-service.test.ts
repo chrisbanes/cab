@@ -28,6 +28,7 @@ import {
   type Script,
   sessionOf,
 } from "../fixtures/claude-sdk.js";
+import { stopWithoutDrain } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { failureNotice } from "../../web/src/execution-runtime.js";
@@ -1044,7 +1045,8 @@ test("a restart with a running Claude execution holds it as unknown", async (t) 
   t.after(() => releaseTemporaryBase(workspace));
   const identity = run.recovery(workId)?.processIdentity;
   assert.ok(identity);
-  await run.service.stop();
+  // A crash leaves no planned-shutdown interrupt, so the restart cannot release it.
+  await stopWithoutDrain(run.service);
   const restarted = claudeHarness(join(run.root, "data"), [], {
     selfTest: true,
     verified: true,
@@ -1060,6 +1062,39 @@ test("a restart with a running Claude execution holds it as unknown", async (t) 
   assert.deepEqual(
     [record?.holds.writer, record?.holds.capacity, record?.holds.uncertainty],
     [true, true, true],
+  );
+});
+
+test("a planned restart with a running Claude execution interrupts and releases it", async (t) => {
+  const scripts: Script[] = [
+    async function* (session) {
+      yield init(sessionOf(session));
+      await new Promise(() => {});
+    },
+  ];
+  const run = await claudeServiceRun(t, scripts);
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(() => run.intent(workId)?.state === "running", run.describe);
+  const workspace = run.intent(workId)?.workspace;
+  t.after(() => releaseTemporaryBase(workspace));
+  await run.service.stop();
+  const restarted = claudeHarness(join(run.root, "data"), [], {
+    selfTest: true,
+    verified: true,
+  });
+  t.after(() => restarted.service.stop().catch(() => {}));
+  await restarted.service.start();
+  assert.equal(restarted.intent(workId)?.state, "resolved-failed");
+  assert.equal(restarted.recovery(workId)?.holds.writer, false);
+  assert.equal(
+    restarted
+      .db()
+      .prepare(
+        "SELECT COUNT(*) AS n FROM execution_shutdown_resolutions WHERE interruptedWorkId = ?",
+      )
+      .get(workId)?.n,
+    1,
   );
 });
 

@@ -2296,18 +2296,22 @@ export class StandaloneService {
     };
 
     try {
-      workspaces?.cancelGitWork();
-      draftingWorkspaces?.cancelGitWork();
-    } catch (error) {
-      recordFailure("workspace Git cancellation", error);
-    }
-    try {
       scheduler?.stop();
     } catch (error) {
       recordFailure("scheduler stop", error);
     }
     for (const timer of this.timers) clearInterval(timer);
     this.timers.clear();
+    // Before Git cancellation and runtime stop, so interrupted turns can record their end.
+    await attempt("execution shutdown drain", () =>
+      this.drainExecutionsForShutdown(),
+    );
+    try {
+      workspaces?.cancelGitWork();
+      draftingWorkspaces?.cancelGitWork();
+    } catch (error) {
+      recordFailure("workspace Git cancellation", error);
+    }
     try {
       supervisor?.cancelObservations();
     } catch (error) {
@@ -2393,6 +2397,80 @@ export class StandaloneService {
         failures.map(({ error }) => error),
         `Service shutdown failed during ${failures.map(({ stage }) => stage).join(", ")}`,
       );
+  }
+
+  /**
+   * Planned shutdown: interrupts running task turns, lets in-flight submissions
+   * bind, and waits one bounded window for each turn's terminal. A turn whose
+   * interrupt was acknowledged and whose exact terminal failed is released and
+   * requeued. Anything unresolved when the window ends keeps today's restart hold.
+   */
+  private async drainExecutionsForShutdown(): Promise<void> {
+    const { state, supervisor } = this.acquired ?? {};
+    if (!state || !supervisor || !this.db?.isOpen) return;
+    const targets = state.beginShutdownInterrupts();
+    if (targets.length === 0) return;
+    supervisor.interruptForShutdown(targets);
+    const window = new AbortController();
+    const timer = setTimeout(() => window.abort(), supervisor.shutdownWaitMs);
+    const expired = new Promise<void>((resolve) =>
+      window.signal.addEventListener("abort", () => resolve(), { once: true }),
+    );
+    const ended = (workId: string) =>
+      Promise.race([
+        (this.activeByWorkId.get(workId) ?? Promise.resolve()).catch(() => {}),
+        expired,
+      ]);
+    try {
+      await Promise.all(
+        targets.map(({ workId }) =>
+          Promise.race([
+            supervisor.shutdownSettled(workId, window.signal),
+            ended(workId),
+          ]),
+        ),
+      );
+      // The run loop records the terminal outcome after the runtime reports it.
+      await Promise.all(targets.map(({ workId }) => ended(workId)));
+    } finally {
+      clearTimeout(timer);
+    }
+    const failures: unknown[] = [];
+    for (const { workId } of targets) {
+      const target = state.stopTarget(workId);
+      const identity = state.recoveryIdentity(workId);
+      if (
+        target?.origin !== "shutdown" ||
+        target.interruptState !== "acknowledged" ||
+        target.terminalState !== "failed" ||
+        state.byWorkId(workId)?.state !== "held" ||
+        !identity?.threadId ||
+        !identity.turnId ||
+        identity.threadId !== target.threadId ||
+        identity.turnId !== target.turnId ||
+        (this.callbacks.get(workId)?.size ?? 0) > 0 ||
+        supervisor.hasKnownRisk(workId)
+      )
+        continue;
+      try {
+        state.resolveShutdownInterrupted({
+          workId,
+          workRevision: identity.workRevision,
+          requestSequence: identity.requestSequence,
+          threadId: identity.threadId,
+          turnId: identity.turnId,
+          harness: harnessForWork(state, workId),
+          callbacksEnded: true,
+          noSurvivor: true,
+        });
+      } catch (error) {
+        // One stale proof keeps only its own hold; the others still resolve.
+        failures.push(error);
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, "Shutdown resolution failed");
   }
 
   private createGeneration(): ServiceGeneration {
@@ -6780,12 +6858,18 @@ export class StandaloneService {
     let previous: ExecutionIntent | undefined;
     let priorBinding: TaskExecutionBinding | undefined;
     let waitsForPredecessor = false;
+    let shutdownRequeued = false;
     if (request.previousWorkId) {
       previous = state.byWorkId(request.previousWorkId);
       priorBinding = state.taskBinding(request.previousWorkId);
+      // Planned shutdown released the predecessor and queued this request to resume its thread.
+      shutdownRequeued =
+        state.shutdownRequeue(request.workId)?.interruptedWorkId ===
+        request.previousWorkId;
       waitsForPredecessor = Boolean(
         context &&
           previous &&
+          !shutdownRequeued &&
           previous.state !== "completed" &&
           previous.workspace === workspaceKey &&
           priorBinding?.taskId === context.taskId &&
@@ -6794,7 +6878,7 @@ export class StandaloneService {
       if (
         !previous ||
         (!waitsForPredecessor &&
-          (previous.state !== "completed" ||
+          ((previous.state !== "completed" && !shutdownRequeued) ||
             !previous.threadId ||
             previous.workspace !== workspaceKey ||
             (context &&
@@ -7135,10 +7219,11 @@ export class StandaloneService {
       }
     }
     try {
+      // Admitted task work submits during planned shutdown, so it binds and is interrupted.
       if (
         !generation ||
         this.generation !== generation ||
-        !generation.accepting ||
+        (!generation.accepting && !state.taskBinding(request.workId)) ||
         this.runtimes.get(harness) !== runtime
       )
         throw new Error(

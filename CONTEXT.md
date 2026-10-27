@@ -50,6 +50,14 @@ best-effort cancellation of its active executions. It is neither cancellation
 nor completion, and it does not apply to a finished task.
 _Avoid_: Cancel or abort when referring to a stop
 
+**Shutdown requeue**:
+The fresh generation that planned shutdown queues for a task turn it interrupted
+and recorded as ended: the same request resumes the same thread on the next start
+under every current admission check. It is not a retry and does not use the
+transient-retry allowance. Any turn shutdown could not record as ended keeps its
+restart hold.
+_Avoid_: Retry when referring to a restart
+
 **Closure hold**:
 The hold on an imported open task whose external item was closed without
 Ensemble delivering it. It is distinct from a project pause. An own closure that a
