@@ -5455,11 +5455,10 @@ export class StandaloneService {
       const assignmentId = String(assignment.id);
       const initialWorkId = `assignment:${assignmentId}:initial`;
       // Source syncs revise an imported task until it settles, so its initial turn is
-      // captured only once admissible, and a queued one that never reached admission is
-      // re-captured at the current revisions rather than refused as stale.
+      // queued only once admissible; admission re-captures it if it changes again.
       if (domain.importedTask(taskId)) {
         // Stale captured revisions don't hold back a first turn: admission resolves them.
-        const unstarted = !state.assignmentHasExecution(assignmentId);
+        const unstarted = !state.assignmentHasStartedExecution(assignmentId);
         if (
           domain
             .assignmentAdmission(assignmentId)
@@ -5469,29 +5468,6 @@ export class StandaloneService {
             )
         )
           continue;
-        const queued = store.find(initialWorkId);
-        if (
-          queued?.state === "queued" &&
-          !state.byWorkId(initialWorkId) &&
-          (queued.taskVersion !== Number(task.version) ||
-            queued.assignmentVersion !== Number(assignment.version) ||
-            queued.instructionsRevision !==
-              Number(assignment.instructionsRevision) ||
-            queued.profileRevision !== Number(assignment.profileRevision))
-        )
-          store.recapture(initialWorkId, {
-            taskVersion: Number(task.version),
-            assignmentVersion: Number(assignment.version),
-            instructionsRevision: Number(assignment.instructionsRevision),
-            profileRevision: Number(assignment.profileRevision),
-            prompt: this.assignmentPrompt(
-              String(assignment.brief),
-              undefined,
-              store.hasOnlyDraftTurns(assignmentId)
-                ? currentTaskOf(task)
-                : undefined,
-            ),
-          });
       }
       if (queries.hasWork(initialWorkId)) continue;
       if (draftOnlyLeadWaits(assignment)) continue;
@@ -5948,21 +5924,22 @@ export class StandaloneService {
   /**
    * An assignment that has never started a turn takes the current profile and instructions
    * revisions when its first turn is admitted, and its queued request is re-captured to
-   * match. Once a turn has started, they change only through an explicit apply.
+   * match. Once a turn has started, they change only through an explicit apply. Source
+   * syncs revise an imported task until it settles, so that turn also takes the task's
+   * current revision. The prompt is kept: it is the assignment's fixed brief and any
+   * inbox batch already bound to the request.
    */
   private resolveFirstTurnRevisions(request: TurnRequest): TurnRequest {
-    const { state, schedulerStore: store } = this.started();
+    const store = this.started().schedulerStore;
+    if (!this.firstTurnRecapturable(request)) return request;
+    const assignmentId = String(request.assignmentId),
+      taskId = String(request.taskId);
+    const assignment = this.domain().applyCurrentRevisions(assignmentId);
+    const taskVersion = this.domain().importedTask(taskId)
+      ? Number(this.domain().task(taskId).version)
+      : request.taskVersion;
     if (
-      request.kind !== "assignment" ||
-      !request.assignmentId ||
-      state.byWorkId(request.workId) ||
-      state.assignmentHasExecution(request.assignmentId)
-    )
-      return request;
-    const assignment = this.domain().applyCurrentRevisions(
-      request.assignmentId,
-    );
-    if (
+      request.taskVersion === taskVersion &&
       request.assignmentVersion === Number(assignment.version) &&
       request.instructionsRevision ===
         Number(assignment.instructionsRevision) &&
@@ -5970,13 +5947,46 @@ export class StandaloneService {
     )
       return request;
     store.recapture(request.workId, {
-      taskVersion: request.taskVersion,
+      taskVersion,
       assignmentVersion: Number(assignment.version),
       instructionsRevision: Number(assignment.instructionsRevision),
       profileRevision: Number(assignment.profileRevision),
-      prompt: request.prompt,
     });
     return store.byWorkId(request.workId);
+  }
+
+  /**
+   * Whether a first turn's stale revisions are re-captured rather than refused: its
+   * assignment has never started a turn, and nothing but stale revisions or an incomplete
+   * source read (which a later sync clears) stands in its way. A held, closed or
+   * not-Ready task is refused as before.
+   */
+  private firstTurnRecapturable(request: TurnRequest): boolean {
+    if (
+      request.kind !== "assignment" ||
+      !request.assignmentId ||
+      !request.taskId ||
+      !this.started().state.awaitingAdmission(request.workId) ||
+      this.started().state.assignmentHasStartedExecution(request.assignmentId)
+    )
+      return false;
+    return this.domain()
+      .assignmentAdmission(request.assignmentId)
+      .reasons.every(
+        (reason) =>
+          immutableRevisionMismatches.has(reason) ||
+          reason === "imported-blockers-unknown" ||
+          reason === "source-unknown" ||
+          (request.draftTurn && reason === "task-unready"),
+      );
+  }
+
+  /** Whether the next attempt re-captures this mismatch, so the turn waits instead. */
+  private firstTurnResolves(request: TurnRequest, reason: string): boolean {
+    if (!this.firstTurnRecapturable(request)) return false;
+    return reason === "task-revision-changed"
+      ? this.domain().importedTask(String(request.taskId)) !== undefined
+      : reason.startsWith("assignment-");
   }
 
   private async attemptRequest(
@@ -6249,8 +6259,10 @@ export class StandaloneService {
           ? {
               validate: validateAssignment,
               refuse: (reasons) =>
-                reasons.some((reason) =>
-                  immutableRevisionMismatches.has(reason),
+                reasons.some(
+                  (reason) =>
+                    immutableRevisionMismatches.has(reason) &&
+                    !this.firstTurnResolves(request, reason),
                 ),
             }
           : {}),

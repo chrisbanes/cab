@@ -1336,7 +1336,8 @@ export class ExecutionState {
         WHERE workId = ? AND taskId = ? AND assignmentId = ?
         AND EXISTS (
           SELECT 1 FROM execution_intents e
-          WHERE e.workId = task_execution_bindings.workId AND e.state = 'ready'
+          WHERE e.workId = task_execution_bindings.workId
+            AND e.state IN ('ready','capacity-waiting') AND e.threadId IS NULL
         ) AND NOT EXISTS (
           SELECT 1 FROM task_writer_admissions a
           WHERE a.workId = task_execution_bindings.workId
@@ -1683,13 +1684,29 @@ export class ExecutionState {
     return row && { ...row, draftTurn: row.draftTurn === 1 };
   }
 
-  /** Whether any execution, of any kind, was ever bound to the assignment. */
-  assignmentHasExecution(assignmentId: string): boolean {
+  /**
+   * Whether the work is still waiting for admission: no execution yet, or one that is
+   * ready or capacity-waiting with no thread, owning no writer or capacity reservation.
+   */
+  awaitingAdmission(workId: string): boolean {
+    const intent = this.byWorkId(workId);
+    return (
+      !intent ||
+      ((intent.state === "ready" || intent.state === "capacity-waiting") &&
+        !intent.threadId)
+    );
+  }
+
+  /** Whether any execution bound to the assignment got past waiting for admission. */
+  assignmentHasStartedExecution(assignmentId: string): boolean {
     return (
       this.db
-        .prepare(
-          "SELECT 1 AS present FROM task_execution_bindings WHERE assignmentId = ? LIMIT 1",
-        )
+        .prepare(`SELECT 1 AS present FROM task_execution_bindings binding
+          JOIN execution_intents intent ON intent.workId = binding.workId
+          WHERE binding.assignmentId = ?
+            AND (intent.state NOT IN ('ready','capacity-waiting')
+              OR intent.threadId IS NOT NULL)
+          LIMIT 1`)
         .get(assignmentId) !== undefined
     );
   }

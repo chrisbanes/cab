@@ -256,6 +256,21 @@ test("dedicated instruction reads disclose bound and current revisions with excl
     matchesBound: true,
   });
   assert.equal(view.comparison.boundIsCurrent, true);
+  // Bound is not started: wait until the turn gets past waiting for admission.
+  const workId = String((view.execution as { workId?: string }).workId);
+  while (
+    !s.f.service
+      .list()
+      .some(
+        (item) =>
+          item.workId === workId &&
+          item.state !== "ready" &&
+          item.state !== "capacity-waiting",
+      )
+  ) {
+    if (Date.now() > deadline) throw Error("the first turn never started");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   // After a turn has run, a profile edit leaves the binding stale until applied.
   d.execute({
     type: "profile.configure",

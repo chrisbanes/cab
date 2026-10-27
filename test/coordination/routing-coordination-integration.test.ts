@@ -610,7 +610,7 @@ test("capacity waiting preserves the routing-selected candidate", async () => {
   }
 });
 
-test("stale assignment versions stay pending and never reserve writer capacity", async () => {
+test("a first turn waiting for capacity is re-captured at a newer assignment version, not held", async () => {
   const client = new FakeRoutingClient((request) =>
     routeResponse(
       request,
@@ -656,31 +656,34 @@ test("stale assignment versions stay pending and never reserve writer capacity",
         .run(assignmentId).changes,
       1,
     );
+    // The turn never started, so admission re-captures and re-binds it at version 2.
     f.runtime.complete(1);
     await waitUntil(() =>
       f.service
         .list()
         .some(
-          (item) => item.workId === request.workId && item.state === "held",
+          (item) =>
+            item.workId === request.workId &&
+            item.state !== "capacity-waiting" &&
+            item.state !== "ready",
         ),
     );
-    assert.equal(f.service.domain().assignment(assignmentId).version, 2);
-    assert.equal(f.service.domain().assignment(assignmentId).state, "pending");
+    const admitted = f.service
+      .list()
+      .find((item) => item.workId === request.workId);
+    assert.notEqual(admitted?.state, "held");
     assert.equal(
-      rowCount(
-        f.service,
-        "SELECT COUNT(*) AS count FROM task_writer_admissions WHERE workId = ?",
-        request.workId,
-      ),
-      0,
+      f.service.turnRequests().find((item) => item.workId === request.workId)
+        ?.assignmentVersion,
+      2,
     );
     assert.equal(
       rowCount(
         f.service,
-        "SELECT COUNT(*) AS count FROM execution_capacity_reservations WHERE workId = ?",
+        "SELECT COUNT(*) AS count FROM task_execution_bindings WHERE workId = ? AND assignmentVersion = 2",
         request.workId,
       ),
-      0,
+      1,
     );
   } finally {
     await f.close();

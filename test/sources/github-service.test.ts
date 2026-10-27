@@ -1734,7 +1734,13 @@ test("skip mode never completes a closed imported task", async () => {
  * A service whose GitHub selection imports a Ready issue from linked R_1, a not-Ready one,
  * and a Ready one from R_2, which is selected but not linked for checkout.
  */
-async function importedWorkspaceService(options: { paused: boolean }) {
+async function importedWorkspaceService(options: {
+  paused: boolean;
+  /** Further issues the selection lists, after the three above. */
+  extra?: IssueSnapshot[];
+  /** The first turn runs until released, holding the project's capacity. */
+  blockFirstTurn?: boolean;
+}) {
   const root = realpathSync(
     mkdtempSync(join(tmpdir(), "ensemble-github-imported-workspace-")),
   );
@@ -1768,6 +1774,11 @@ async function importedWorkspaceService(options: { paused: boolean }) {
     title: "Unlinked repository",
   };
   const startedWorkspaces: string[] = [];
+  let release = () => {};
+  const firstTurn = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let blockersFail = false;
   const service = new StandaloneService(
     join(root, "data"),
     () => ({
@@ -1784,6 +1795,8 @@ async function importedWorkspaceService(options: { paused: boolean }) {
       },
       async interruptTurn() {},
       async waitForTurn() {
+        if (options.blockFirstTurn && startedWorkspaces.length === 1)
+          await firstTurn;
         return "completed" as const;
       },
     }),
@@ -1794,12 +1807,14 @@ async function importedWorkspaceService(options: { paused: boolean }) {
           async readSelection() {
             return {
               complete: true,
-              issues: [issue, unready, unlinked],
+              issues: [issue, unready, unlinked, ...(options.extra ?? [])],
               reason: null,
             };
           },
           async readBlockers() {
-            return { complete: true, blockers: [], reason: null };
+            return blockersFail
+              ? { complete: false, blockers: [], reason: "http-403" }
+              : { complete: true, blockers: [], reason: null };
           },
           async readIssueStatus() {
             return { status: "open" as const };
@@ -1899,6 +1914,10 @@ async function importedWorkspaceService(options: { paused: boolean }) {
     link,
     profileId,
     startedWorkspaces,
+    release,
+    failBlockers(fail: boolean) {
+      blockersFail = fail;
+    },
     resume,
     taskId,
     request,
@@ -1997,6 +2016,61 @@ test("a queued imported turn that never ran takes the current task, profile and 
       0,
     );
   } finally {
+    await f.close();
+  }
+});
+
+test("a first turn waiting for capacity takes revisions changed by a profile edit and a source sync", async () => {
+  const f = await importedWorkspaceService({
+    paused: true,
+    extra: [{ ...issue, nodeId: "I_4", number: 4, title: "Second ready" }],
+    blockFirstTurn: true,
+  });
+  try {
+    await f.service.configureCapacity({
+      key: randomUUID(),
+      globalLimit: 4,
+      projectOverrides: { [f.projectId]: 1 },
+    });
+    f.resume();
+    await f.service.refreshGitHub();
+    // One Ready task runs; the other is bound to an execution waiting for capacity.
+    await f.settle(
+      () =>
+        f.startedWorkspaces.length === 1 &&
+        /Capacity waiting/.test(f.request("I_4")?.reason ?? ""),
+    );
+    const waiting = f.request("I_4");
+    assert.match(String(waiting?.reason), /Capacity waiting/);
+    f.domain.execute({
+      type: "profile.configure",
+      actor: "operator",
+      key: randomUUID(),
+      profileId: f.profileId,
+      expectedVersion: Number(f.domain.profile(f.profileId).version),
+      instructions: "Edited lead",
+    });
+    // A blocker read that fails then recovers revises the task, as each restart does.
+    const before = Number(f.domain.task(f.taskId("I_4")).version);
+    f.failBlockers(true);
+    await f.service.refreshGitHub();
+    f.failBlockers(false);
+    await f.service.refreshGitHub();
+    assert.ok(Number(f.domain.task(f.taskId("I_4")).version) > before);
+    f.release();
+    await f.settle(() => f.startedWorkspaces.length === 2);
+    const request = f.request("I_4");
+    assert.equal(request?.state, "active");
+    assert.equal(
+      request?.taskVersion,
+      Number(f.domain.task(f.taskId("I_4")).version),
+    );
+    assert.equal(
+      request?.profileRevision,
+      Number(f.domain.profile(f.profileId).version),
+    );
+  } finally {
+    f.release();
     await f.close();
   }
 });

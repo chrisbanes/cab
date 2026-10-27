@@ -212,9 +212,9 @@ These explanations are read-only projections of stored observations: they make n
 provider read and grant no readiness, and matching the rule is neither Ready nor
 admission. Ready authorizes work within scope, without a universal per-task plan approval.
 Source syncs revise an imported task until its readiness and blockers settle, so its
-first turn is queued only once the task is admissible, and a queued first turn that
-has never run takes the task's current revision when it is admitted instead of being
-refused as stale.
+first turn is queued only once the task is admissible, and a first turn that has never
+run, including one waiting for capacity, takes the task's current revision when it is
+admitted instead of being refused as stale.
 (A [drafting run](#drafting-runs) is not task work: it needs no Ready task but counts
 against the same global and project capacity. A [draft turn](#draft-turns) is task work
 whose only exemption is that the task is not Ready.) Material ambiguity,

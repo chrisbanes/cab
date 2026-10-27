@@ -398,19 +398,17 @@ export class SchedulerStore {
       | "assignmentVersion"
       | "instructionsRevision"
       | "profileRevision"
-      | "prompt"
     >,
   ): void {
     this.db
       .prepare(`UPDATE turn_requests SET taskVersion = ?, assignmentVersion = ?,
-        instructionsRevision = ?, profileRevision = ?, prompt = ?, reason = NULL
+        instructionsRevision = ?, profileRevision = ?, reason = NULL
         WHERE workId = ? AND state = 'queued'`)
       .run(
         input.taskVersion ?? null,
         input.assignmentVersion ?? null,
         input.instructionsRevision ?? null,
         input.profileRevision ?? null,
-        input.prompt,
         workId,
       );
   }
