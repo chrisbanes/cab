@@ -1043,3 +1043,74 @@ test("issue.close attribution without a pin requires a null closer", async () =>
     await f.close();
   }
 });
+
+test("a done task's confirmed own closure is not re-read on refresh", async () => {
+  const f = await deliveryFixture("through-merge", true);
+  try {
+    await treatClosureAs(f, "done");
+    await mergeFixturePr(f);
+    f.turns[0]?.release();
+    await f.waitTurn(1);
+    assert.equal(
+      (
+        await f.call(
+          "ensemble_request_completion",
+          { reviewedResultIds: [] },
+          1,
+        )
+      ).success,
+      true,
+    );
+    await settleInto(f, "done");
+    assert.equal(f.domain.task(f.taskId).state, "done");
+    assert.equal(f.domain.hasOwnDeliveryClosure(f.taskId), true);
+    const before = f.closedIssueReads();
+    f.setClosedIssue(new Error("unavailable"));
+    await f.service.refreshGitHub();
+    assert.equal(f.closedIssueReads(), before);
+    assert.notEqual(
+      f.service.githubSources().hold("I1")?.reason,
+      "closure-read-unavailable",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("a confirmed merge keeps its successful receipt when the follow-up refresh fails", async () => {
+  const f = await deliveryFixture("through-merge", true);
+  try {
+    await treatClosureAs(f, "done");
+    await registerFixturePr(f);
+    (f.service as unknown as { refreshGitHub(): Promise<void> }).refreshGitHub =
+      async () => {
+        throw new Error("refresh failed");
+      };
+    const merged = await f.call("ensemble_external_action", {
+      operationId: randomUUID(),
+      action: {
+        kind: "pr.merge",
+        target: {
+          repositoryId: "R1",
+          nodeId: "P7",
+          number: 7,
+          headRef: "cb/change",
+          baseRef: "main",
+          expectedHeadSha: f.getPr().headSha,
+        },
+        method: "squash",
+        reviewedResultIds: [],
+      },
+    });
+    assert.equal(merged.success, true, merged.text);
+    assert.match(merged.text, /: confirmed-success/);
+    assert.doesNotMatch(merged.text, /rejected or held/);
+    const deadline = Date.now() + 5000;
+    while (!f.service.backgroundFailureObserved()) {
+      if (Date.now() > deadline) throw new Error("No background failure");
+      await new Promise<void>((r) => setTimeout(r, 5));
+    }
+  } finally {
+    await f.close();
+  }
+});

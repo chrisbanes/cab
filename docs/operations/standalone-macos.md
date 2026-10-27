@@ -293,7 +293,8 @@ per line:
 
 - `{"event":"service-start","version","mode","port","serviceId"}` once the service is
   serving (`port` is `null` for `serve`).
-- A background-failure diagnostic when a background loop (`github-poll`,
+- A background-failure diagnostic when a background loop (`github-poll`, which also
+  covers the GitHub refresh after a confirmed delivery action,
   `power-poll`, `domain-wake`, `post-turn-wake`, `scheduler-drain`) fails
   unexpectedly, and a `safe-shutdown` diagnostic when the service cannot stop
   cleanly. Both carry `error`, the failure's `name`, `code` when it has one, its

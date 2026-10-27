@@ -2420,14 +2420,15 @@ export class StandaloneService {
     generation: ServiceGeneration,
     operation: Exclude<BackgroundFailureOperation, "safe-shutdown">,
     action: () => Promise<unknown>,
-  ): void {
-    if (this.generation !== generation || !generation.accepting) return;
+  ): Promise<void> {
+    if (this.generation !== generation || !generation.accepting)
+      return Promise.resolve();
     let pending: Promise<unknown>;
     try {
       pending = Promise.resolve(action());
     } catch (error) {
       this.handleBackgroundFailure(generation, operation, error);
-      return;
+      return Promise.resolve();
     }
     const observed = pending.then(
       () => {},
@@ -2436,6 +2437,7 @@ export class StandaloneService {
     );
     this.backgroundRuns.add(observed);
     void observed.then(() => this.backgroundRuns.delete(observed));
+    return observed;
   }
 
   private handleBackgroundFailure(
@@ -3648,6 +3650,8 @@ export class StandaloneService {
   >): Promise<void> {
     for (const project of domain.projects())
       for (const task of domain.tasks(String(project.id))) {
+        // Every consumer of an own closure needs an open task.
+        if (task.state !== "open") continue;
         const imported = domain.importedTask(String(task.id));
         if (
           !imported ||
@@ -4748,17 +4752,6 @@ export class StandaloneService {
             call.arguments,
             caller,
           );
-          if (
-            result.state === "confirmed-success" &&
-            result.request.action.kind.startsWith("pr.")
-          )
-            await this.started().deliveryCoordinator.refresh();
-          if (
-            result.state === "confirmed-success" &&
-            (result.request.action.kind === "pr.merge" ||
-              result.request.action.kind === "issue.close")
-          )
-            await this.refreshGitHub();
           const response = coordination.recordAsyncReceipt(
             call as CoordinationCall,
             caller,
@@ -4767,8 +4760,26 @@ export class StandaloneService {
               success: result.state === "confirmed-success",
             },
           );
-          // Post-commit: a wake failure must not report committed work as failed.
+          // Post-commit: a refresh or wake failure must not report committed work as failed.
           const generation = this.generation;
+          const kind = result.request.action.kind;
+          const refreshesPr = kind.startsWith("pr.");
+          const refreshesSources =
+            kind === "pr.merge" || kind === "issue.close";
+          if (
+            generation &&
+            result.state === "confirmed-success" &&
+            (refreshesPr || refreshesSources)
+          )
+            await this.observeBackgroundFailure(
+              generation,
+              "github-poll",
+              async () => {
+                if (refreshesPr)
+                  await this.started().deliveryCoordinator.refresh();
+                if (refreshesSources) await this.refreshGitHub();
+              },
+            );
           if (generation)
             this.observeBackgroundFailure(generation, "domain-wake", () =>
               this.wakeScheduler(0, generation),
