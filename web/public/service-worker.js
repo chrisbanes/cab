@@ -1,6 +1,7 @@
 // Ensemble operator push worker, served at /app/service-worker.js (scope /app/).
 // It has no fetch handler and keeps no cache, so an update can never serve a stale app.
-// A push shows a notification and a click opens the exact Inbox selection; nothing else.
+// A push shows a notification; a click routes an open tab to the exact Inbox selection in
+// place, or opens one. Nothing else.
 const FALLBACK_TITLE = "Ensemble needs you";
 const FALLBACK_URL = "/app/inbox";
 const BODY = "Open Ensemble to respond.";
@@ -73,10 +74,11 @@ self.addEventListener("notificationclick", (event) => {
       if (target) {
         try {
           await target.focus();
-          await target.navigate(url);
+          // The app routes in place, so an open tab keeps its unsaved input.
+          target.postMessage({ type: "ensemble.notification-open", url });
           return;
         } catch {
-          // A window the worker does not control cannot be navigated; open one instead.
+          // A window that cannot be focused or messaged is replaced by a new one.
         }
       }
       await self.clients.openWindow(url);

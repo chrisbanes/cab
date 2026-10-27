@@ -4,7 +4,10 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
+import {
+  OperatorApi,
+  OperatorApiError,
+} from "../../src/standalone/operator-api.js";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
@@ -44,9 +47,18 @@ test("curated review API retains historical identities and delivery/context gaps
   assert.equal(f.service.domain().task(task.taskId).state, "open");
   assert.equal(f.runtime.turns, 0);
   assert.ok(!JSON.stringify(read).includes("PRIVATE REVIEW INSTRUCTIONS"));
-  await assert.rejects(
-    api.execute({ ...c, key: randomUUID(), resultIds: [randomUUID()] }),
-  );
+  const refused = (error: unknown) =>
+    error instanceof OperatorApiError &&
+    error.status === 409 &&
+    error.code === "conflict";
+  for (const refusal of [
+    { ...c, key: randomUUID(), resultIds: [randomUUID()] },
+    { ...c, key: randomUUID(), sourceId: randomUUID() },
+    { ...c, resultIds: [] },
+  ])
+    await assert.rejects(api.execute(refusal), refused);
+  read = await api.readTask(task.taskId);
+  assert.deepEqual(read.data.review?.viewed, baseline);
 });
 test("artifact API resolves only recorded task-owned regular PNG and rejects foreign/redacted IDs without returning local paths", async (t) => {
   const f = await createOperatorFixture();

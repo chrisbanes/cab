@@ -10,8 +10,10 @@ interface FakeClient {
   url: string;
   focused: number;
   navigated: string[];
+  posted: unknown[];
   focus(): Promise<void>;
   navigate(url: string): Promise<void>;
+  postMessage(message: unknown): void;
 }
 
 /** The worker source, run against a fake worker scope: no browser. */
@@ -164,15 +166,19 @@ const client = (url: string): FakeClient => ({
   url,
   focused: 0,
   navigated: [],
+  posted: [],
   async focus() {
     this.focused++;
   },
   async navigate(to: string) {
     this.navigated.push(to);
   },
+  postMessage(message: unknown) {
+    this.posted.push(message);
+  },
 });
 
-test("a click focuses and navigates an open app window and never opens another", async () => {
+test("a click focuses an open app window and routes it in place, never opening another", async () => {
   const app = client(`${ORIGIN}/app/tasks`);
   const w = await load([
     client("https://other.test/app/x"),
@@ -181,7 +187,13 @@ test("a click focuses and navigates an open app window and never opens another",
   ]);
   await w.click("/app/inbox?request=runtime%3Acodex");
   assert.equal(app.focused, 1);
-  assert.deepEqual(app.navigated, ["/app/inbox?request=runtime%3Acodex"]);
+  assert.deepEqual(plain(app.posted), [
+    {
+      type: "ensemble.notification-open",
+      url: "/app/inbox?request=runtime%3Acodex",
+    },
+  ]);
+  assert.deepEqual(app.navigated, []);
   assert.deepEqual(w.opened, []);
   assert.deepEqual(w.closed, ["closed"]);
 });
@@ -199,16 +211,34 @@ test("a click on a notification with a foreign link opens the Inbox instead", as
   assert.deepEqual(w.opened, ["/app/inbox"]);
 });
 
-test("a window the worker cannot navigate is replaced by a new one", async () => {
-  const stubborn: FakeClient = {
-    ...client(`${ORIGIN}/app/inbox`),
-    async navigate() {
-      throw new Error("not controlled");
+test("a click with a foreign link routes an open app window to the Inbox", async () => {
+  const app = client(`${ORIGIN}/app/tasks`);
+  const w = await load([app]);
+  await w.click("https://evil.test/");
+  assert.deepEqual(plain(app.posted), [
+    { type: "ensemble.notification-open", url: "/app/inbox" },
+  ]);
+  assert.deepEqual(w.opened, []);
+});
+
+test("a window that cannot be focused or messaged is replaced by a new one", async () => {
+  const refusals: Partial<FakeClient>[] = [
+    {
+      async focus() {
+        throw new Error("not allowed");
+      },
     },
-  };
-  const w = await load([stubborn]);
-  await w.click("/app/inbox?request=Q");
-  assert.deepEqual(w.opened, ["/app/inbox?request=Q"]);
+    {
+      postMessage() {
+        throw new Error("gone");
+      },
+    },
+  ];
+  for (const refusal of refusals) {
+    const w = await load([{ ...client(`${ORIGIN}/app/inbox`), ...refusal }]);
+    await w.click("/app/inbox?request=Q");
+    assert.deepEqual(w.opened, ["/app/inbox?request=Q"]);
+  }
 });
 
 test("the worker takes over immediately and has no fetch handler", async () => {

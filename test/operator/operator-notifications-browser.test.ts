@@ -324,3 +324,79 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
     "no horizontal overflow",
   );
 });
+
+test("notifications: a click routes an open tab in place, keeping unsaved input", async (_t, journey) => {
+  const { f, web, page, context } = await start(journey);
+  const q = await seedOwnQuestion(f);
+  const link = `/app/inbox?task=${q.taskId}&request=${q.interactionId}`;
+  await signIn(page, web, `/app/projects/${q.projectId}/settings`);
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.register("/app/service-worker.js", {
+      scope: "/app/",
+    });
+    await navigator.serviceWorker.ready;
+  });
+  const worker =
+    context.serviceWorkers()[0] ??
+    (await context.waitForEvent("serviceworker"));
+  // Chromium refuses focus() outside a real click, so the test posts the worker's exact message.
+  const click = (url: string) =>
+    worker.evaluate(async (target) => {
+      const { clients } = self as unknown as {
+        clients: {
+          matchAll(
+            options: object,
+          ): Promise<{ postMessage(m: unknown): void }[]>;
+        };
+      };
+      const windows = await clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      for (const w of windows)
+        w.postMessage({ type: "ensemble.notification-open", url: target });
+    }, url);
+  const selected = page.getByRole("region", { name: "Selected request" });
+
+  await page.evaluate(() => {
+    (window as unknown as { __noReload: boolean }).__noReload = true;
+  });
+  await page
+    .getByRole("button", { name: "Reveal instructions", exact: true })
+    .click();
+  const instructions = page.getByRole("textbox", {
+    name: "Instructions",
+    exact: true,
+  });
+  await instructions.fill("UNSAVED NOTIFICATION DRAFT");
+
+  await click(link);
+  await selected.waitFor();
+  assert.equal(page.url(), web.origin + link);
+  assert.ok((await selected.innerText()).includes("Explain"));
+  assert.equal(
+    await page.evaluate(
+      () => (window as unknown as { __noReload?: boolean }).__noReload,
+    ),
+    true,
+    "the page was not reloaded",
+  );
+  await page.goBack();
+  assert.equal(await instructions.inputValue(), "UNSAVED NOTIFICATION DRAFT");
+
+  // A signed-out tab routes in place too, and the request opens after sign-in.
+  await context.clearCookies();
+  await page.goto(`${web.origin}/app/inbox`);
+  await page.getByLabel("Password").waitFor();
+  await click(link);
+  await page.waitForURL(web.origin + link);
+  await page.getByLabel("Password").waitFor();
+  await signInAgain(page, web.password);
+  await selected.waitFor();
+  assert.ok((await selected.innerText()).includes("Explain"));
+
+  // A foreign address from the worker is ignored.
+  await click("https://evil.test/app/inbox");
+  await click("/api/operator/inbox");
+  assert.equal(page.url(), web.origin + link);
+});
