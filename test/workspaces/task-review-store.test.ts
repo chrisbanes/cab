@@ -14,6 +14,7 @@ import {
 } from "../../src/core/task-review.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { ExecutionState } from "../../src/standalone/state.js";
+import { SqliteWorkspaceBindingStore } from "../../src/standalone/workspaces.js";
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "ui04-review-")),
     file = join(directory, "state.sqlite");
@@ -96,6 +97,7 @@ function fixture() {
     get db() {
       return db;
     },
+    profileId,
     projectId,
     taskId,
     assignmentId,
@@ -964,6 +966,89 @@ test("ordinary GitHub selection capture shares one fresh exclusion snapshot and 
     discoveries = 0;
     assert.deepEqual(f.stores.review.captureSources([]), []);
     assert.equal(discoveries, 0);
+  } finally {
+    f.close();
+  }
+});
+
+function validationReport(
+  w: { threadId: string; turnId: string },
+  label: string,
+) {
+  return {
+    threadId: w.threadId,
+    turnId: w.turnId,
+    callId: randomUUID(),
+    tool: "ensemble_report_result",
+    arguments: {
+      summary: "Recorded result",
+      review: {
+        criteria: [],
+        validations: [
+          {
+            label,
+            outcome: "passed" as const,
+            scope: "Recorded scope",
+            provenance: "Fixture producer",
+          },
+        ],
+        artifacts: [],
+        decisions: [],
+      },
+    },
+  };
+}
+test("a result report with review metadata succeeds after 129 workspace bindings, archived included, and still redacts a live workspace path", () => {
+  const f = fixture();
+  try {
+    const bindings = new SqliteWorkspaceBindingStore(f.db);
+    for (let i = 0; i < 129; i++) {
+      const taskId = randomUUID();
+      bindings.createOrGet(taskId, randomUUID(), `/workspaces/task-${i}`, []);
+      if (i < 64) bindings.update(taskId, "archived", null);
+    }
+    const w = f.work();
+    assert.throws(
+      () =>
+        f.stores.c.recordResult(
+          validationReport(w, "Checked /workspaces/task-100"),
+        ),
+      /excluded material/,
+    );
+    f.stores.c.recordResult(validationReport(w, "Checked /workspaces/task-0"));
+    const [result] = f.stores.c.results(f.taskId);
+    assert.ok(result);
+    assert.equal(
+      f.stores.review.result(f.taskId, result.resultId)?.metadata.validations[0]
+        ?.label,
+      "Checked /workspaces/task-0",
+    );
+  } finally {
+    f.close();
+  }
+});
+test("past the installation redaction bound a result report fails with a distinct reason and rolls back", () => {
+  const f = fixture();
+  try {
+    for (let version = 1; version <= 360; version++)
+      f.stores.d.execute({
+        type: "profile.configure",
+        key: randomUUID(),
+        actor: "operator",
+        profileId: f.profileId,
+        expectedVersion: version,
+        instructions: `${"界".repeat(15990)}${version}`,
+      } as DomainCommand);
+    const w = f.work();
+    assert.throws(
+      () => f.stores.c.recordResult(validationReport(w, "Typecheck")),
+      /Redaction exclusion limit exceeded/,
+    );
+    assert.equal(f.stores.c.results(f.taskId).length, 0);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) AS n FROM task_review_results").get()?.n,
+      0,
+    );
   } finally {
     f.close();
   }

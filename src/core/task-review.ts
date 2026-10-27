@@ -3,6 +3,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { setImmediate } from "node:timers/promises";
 import type { z } from "zod";
 import { childCredentialExclusions } from "./child-environment.js";
+import {
+  RedactionLimitError,
+  redactionExclusionLimits,
+  withinRedactionLimits,
+} from "./redaction-limits.js";
 import { transaction, type Database } from "./store.js";
 import {
   contextCaptureSchema,
@@ -186,20 +191,22 @@ export class TaskReviewStore {
       if (rows.length < 64) break;
     }
   }
+  /** Throws `RedactionLimitError` past the installation bound; returns `undefined` when redaction is unavailable. */
   private exclusions(): string[] | undefined {
+    const cap = redactionExclusionLimits.values;
     const rows = this.db
       .prepare(
-        "SELECT instructions FROM profile_revisions UNION ALL SELECT instructions FROM project_instruction_revisions LIMIT 257",
+        `SELECT instructions FROM profile_revisions UNION ALL SELECT instructions FROM project_instruction_revisions LIMIT ${cap + 1}`,
       )
       .all() as Row[];
-    if (rows.length > 256) return undefined;
+    if (rows.length > cap) throw new RedactionLimitError();
     const excluded = rows.map((r) => String(r.instructions)).filter(Boolean);
     const refs = this.db
       .prepare(
-        "SELECT credentialRef FROM project_routing UNION ALL SELECT credentialRef FROM project_github_sources LIMIT 257",
+        `SELECT credentialRef FROM project_routing UNION ALL SELECT credentialRef FROM project_github_sources LIMIT ${cap + 1}`,
       )
       .all() as Row[];
-    if (refs.length > 256) return undefined;
+    if (refs.length > cap) throw new RedactionLimitError();
     // The installation discovery credential (#841) is excluded at capture time too.
     if (
       this.db
@@ -226,9 +233,11 @@ export class TaskReviewStore {
       }
     }
     const repositories = this.db
-      .prepare("SELECT repositories FROM project_github_sources LIMIT 129")
+      .prepare(
+        `SELECT repositories FROM project_github_sources LIMIT ${cap + 1}`,
+      )
       .all() as Row[];
-    if (repositories.length > 128) return undefined;
+    if (repositories.length > cap) throw new RedactionLimitError();
     for (const row of repositories) {
       const repos = JSON.parse(String(row.repositories)) as {
         path?: string;
@@ -249,16 +258,19 @@ export class TaskReviewStore {
         )
         .get()
     ) {
+      // Archived bindings cost nothing: their text was redacted when it was captured.
       const workspaces = this.db
-        .prepare("SELECT path FROM task_workspace_bindings LIMIT 129")
+        .prepare(
+          `SELECT path FROM task_workspace_bindings WHERE state != 'archived' LIMIT ${cap + 1}`,
+        )
         .all() as Row[];
-      if (workspaces.length > 128) return undefined;
+      if (workspaces.length > cap) throw new RedactionLimitError();
       excluded.push(...workspaces.map((w) => String(w.path)));
     }
     const policies = this.db
-      .prepare("SELECT policyJson FROM delivery_policies LIMIT 129")
+      .prepare(`SELECT policyJson FROM delivery_policies LIMIT ${cap + 1}`)
       .all() as Row[];
-    if (policies.length > 128) return undefined;
+    if (policies.length > cap) throw new RedactionLimitError();
     for (const row of policies) {
       const policy = JSON.parse(String(row.policyJson)) as {
         credentialRef?: string;
@@ -274,13 +286,21 @@ export class TaskReviewStore {
       if (/TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(key) && v)
         excluded.push(v);
     excluded.push(...childCredentialExclusions().values);
+    if (!withinRedactionLimits(excluded)) throw new RedactionLimitError();
     return excluded;
+  }
+  /** Capture and indexing withhold the value when the bound is hit; only a result report fails on it. */
+  private snapshot(): { excluded: readonly string[] | undefined } {
+    try {
+      return { excluded: this.exclusions() };
+    } catch (error) {
+      if (error instanceof RedactionLimitError) return { excluded: undefined };
+      throw error;
+    }
   }
   private safe(
     value: string,
-    snapshot: { excluded: readonly string[] | undefined } = {
-      excluded: this.exclusions(),
-    },
+    snapshot: { excluded: readonly string[] | undefined } = this.snapshot(),
   ): string | null {
     const excluded = snapshot.excluded;
     if (excluded === undefined || excluded.some((v) => value.includes(v)))
@@ -306,7 +326,7 @@ export class TaskReviewStore {
     }[],
   ) {
     if (!entries.length) return [];
-    const snapshot = { excluded: this.exclusions() };
+    const snapshot = this.snapshot();
     return entries.map((entry) =>
       this.captureSourceWithSnapshot(
         entry.taskId,
@@ -321,9 +341,12 @@ export class TaskReviewStore {
     kind: "local" | "github" = "local",
     supplied?: { title: string; body: string },
   ) {
-    return this.captureSourceWithSnapshot(taskId, kind, supplied, {
-      excluded: this.exclusions(),
-    });
+    return this.captureSourceWithSnapshot(
+      taskId,
+      kind,
+      supplied,
+      this.snapshot(),
+    );
   }
   private captureSourceWithSnapshot(
     taskId: string,

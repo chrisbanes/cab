@@ -831,7 +831,13 @@ composer, runtime settings, Inbox, search and execution list reads capture their
 redaction exclusions once per attempt and derive every task's list from them; a
 rebuild captures them afresh, and no exclusion list outlives its read. A task's prose is
 withheld when its own retained turn requests or recovery identities exceed 128
-(each counted separately); other tasks' history never counts. Credential and workspace
+(each counted separately); other tasks' history never counts. Operator reads redact
+with every project's and profile's retained instruction revisions, every declared
+credential and every repository path, not only the task's own, so one project's private
+material never appears unredacted in another's prose. The installation bound is 4096
+distinct values and 16 MiB; past it, reads and actions fail with `503 redaction-limit`
+and agent result reports with review metadata fail with "Redaction exclusion limit
+exceeded". Archived workspace bindings never count toward it. Credential and workspace
 fences still reject changed access material. Comment send receipts recheck
 visibility, task version and workspace after loading their redaction exclusions;
 a conflict does not undo the recorded provider operation or authorize a resend.

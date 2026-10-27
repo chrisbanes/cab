@@ -879,6 +879,8 @@ function publicMessage(code: string): string {
     conflict:
       "Saved state conflicts with this request. Review before retrying.",
     unavailable: "Service unavailable. Try again.",
+    "redaction-limit":
+      "Too much private material to redact safely. Contact the operator.",
     "command-outcome-unknown":
       "Command outcome is unknown. Reconcile the same key and input.",
     "local-review-batch-too-large":

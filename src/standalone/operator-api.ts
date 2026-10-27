@@ -20,6 +20,10 @@ import type {
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
 import { isOperatorDeliveryCaller, materialDigest } from "../core/delivery.js";
+import {
+  redactionExclusionLimits,
+  withinRedactionLimits,
+} from "../core/redaction-limits.js";
 import { StatusMappingRefusal } from "../core/status-mapping.js";
 import type { StatusMapping } from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
@@ -383,6 +387,7 @@ export class OperatorApiError extends Error {
       | "forbidden"
       | "conflict"
       | "unavailable"
+      | "redaction-limit"
       | "unauthenticated"
       | "command-outcome-unknown"
       | "local-review-batch-too-large"
@@ -637,7 +642,8 @@ export class OperatorApi {
   }
   /**
    * One read's global exclusion inputs: instruction revisions tagged for dedicated
-   * disclosure, credentials and repository paths, read once and null past a bound.
+   * disclosure, credentials and repository paths, read once; null when redaction is
+   * unavailable and `redaction-limit` past the installation bound.
    * Pass it to every `exclusions` call of the read; post-await fences stay live.
    */
   private exclusionBase(): ExclusionBase {
@@ -655,12 +661,12 @@ export class OperatorApi {
       add(...this.service.gitHubCredentialExclusions().redactions);
       if (claude) add(...claudeTokenExclusions(claude).redactions);
       // Bound retained-revision lookups before iterating persisted counters.
-      let remaining = 128;
-      if (profiles.length + projects.length > remaining) return null;
+      let remaining: number = redactionExclusionLimits.values;
       for (const profile of profiles) {
         const count = Number(profile.version);
-        if (!Number.isSafeInteger(count) || count < 1 || count > remaining)
-          return null;
+        if (!Number.isSafeInteger(count) || count < 1) return null;
+        if (count > remaining)
+          throw new OperatorApiError(503, "redaction-limit");
         remaining -= count;
         for (let revision = 1; revision <= count; revision++) {
           values.push([
@@ -675,8 +681,9 @@ export class OperatorApi {
       for (const project of projects) {
         const id = String(project.id),
           count = Number(project.instructionsRevision);
-        if (!Number.isSafeInteger(count) || count < 1 || count > remaining)
-          return null;
+        if (!Number.isSafeInteger(count) || count < 1) return null;
+        if (count > remaining)
+          throw new OperatorApiError(503, "redaction-limit");
         remaining -= count;
         for (let revision = 1; revision <= count; revision++) {
           values.push([`project:${id}`, d.instructionRevision(id, revision)]);
@@ -698,7 +705,8 @@ export class OperatorApi {
           add(repo.path, repo.gitCommonDirectory);
       }
       return { values, covered };
-    } catch {
+    } catch (error) {
+      if (error instanceof OperatorApiError) throw error;
       return null;
     }
   }
@@ -758,8 +766,12 @@ export class OperatorApi {
         // execution and explicit inspection.
         values.push(...this.service.taskWorkspaceRedactionPaths(taskId));
       }
-      return prepareExclusions([...new Set(values.filter(Boolean))]);
-    } catch {
+      const distinct = [...new Set(values.filter(Boolean))];
+      if (!withinRedactionLimits(distinct))
+        throw new OperatorApiError(503, "redaction-limit");
+      return prepareExclusions(distinct);
+    } catch (error) {
+      if (error instanceof OperatorApiError) throw error;
       return undefined;
     }
   }
@@ -2141,6 +2153,7 @@ export class OperatorApi {
         if (
           !(error instanceof OperatorApiError) ||
           error.status !== 503 ||
+          error.code === "redaction-limit" ||
           fence === this.exclusionFence()
         )
           throw error;
@@ -5118,7 +5131,10 @@ export class OperatorApi {
           href: `/app/tasks/${taskId}?section=${row.type === "task" ? "brief" : "review"}&record=${encodeURIComponent(String(row.recordId))}${resultId ? `&result=${resultId}` : ""}${sourceId ? `&source=${sourceId}` : ""}`,
         });
       } catch (error) {
-        if (error instanceof OperatorApiError) {
+        if (
+          error instanceof OperatorApiError &&
+          error.code !== "redaction-limit"
+        ) {
           omittedCount++;
           continue;
         }

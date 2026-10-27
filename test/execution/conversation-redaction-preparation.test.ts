@@ -21,13 +21,18 @@ const lists: readonly (readonly string[])[] = [
   ["secret", "abc", "abcdef", "xyz", "yzw", "café", "\u{1f511}key"],
   ["", "secret", "secret", ""],
   [],
-  Array.from({ length: 128 }, (_, i) => `v${i}`),
-  Array.from({ length: 129 }, (_, i) => `v${i}`),
+  Array.from({ length: 4096 }, (_, i) => `v${i}`),
+  Array.from({ length: 4097 }, (_, i) => `v${i}`),
   ["a".repeat(64 * 1024)],
   ["a".repeat(64 * 1024 + 1)],
   ["é".repeat(32 * 1024 + 1)],
-  // Duplicates count toward the aggregate byte bound before deduplication.
+  // Duplicates are removed before the aggregate bound applies.
   Array.from({ length: 5 }, () => "d".repeat(64 * 1024)),
+  // 257 distinct maximum-size values pass the 16 MiB aggregate byte bound.
+  Array.from(
+    { length: 257 },
+    (_, i) => String(i).padStart(8, "0") + "a".repeat(64 * 1024 - 8),
+  ),
   [42 as unknown as string],
 ];
 
@@ -75,6 +80,6 @@ test("a prepared list reads its source once; other arrays are validated on every
   assert.equal(reads, 2);
 
   // A frozen array the factory does not own is not trusted as prepared.
-  const frozen = Object.freeze(Array.from({ length: 129 }, (_, i) => `f${i}`));
+  const frozen = Object.freeze(Array.from({ length: 4097 }, (_, i) => `f${i}`));
   assert.equal(sanitizeConversationText("text", frozen), undefined);
 });

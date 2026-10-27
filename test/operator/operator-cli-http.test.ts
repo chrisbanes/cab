@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { z } from "zod";
 import { CliError } from "../../src/cli/connections.js";
 import { ServiceClient } from "../../src/cli/transport.js";
 import { cliCapabilities } from "../../src/operator/contracts.js";
@@ -88,6 +89,27 @@ test("command transport retains only validated source credential refusal metadat
     assert.equal(error.code, code);
     assert.equal(error.extra.credentialReason, expectedReason);
   }
+});
+
+test("a read refused with redaction-limit keeps its code instead of collapsing to unavailable", async () => {
+  const client = new ServiceClient(
+    "https://service.test",
+    "test-only-bearer",
+    async () =>
+      new Response(
+        JSON.stringify({
+          error: { code: "redaction-limit", message: "Too much to redact." },
+        }),
+        { status: 503, headers: { "content-type": "application/json" } },
+      ),
+  );
+  await assert.rejects(
+    client.get("/api/operator/tasks", z.unknown()),
+    (e: unknown) =>
+      e instanceof CliError &&
+      e.code === "redaction-limit" &&
+      e.extra.retryable === false,
+  );
 });
 
 test("bearer credentials read through the service under server-side route authority", async (t) => {

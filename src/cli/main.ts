@@ -81,6 +81,7 @@ export const EXIT: Record<string, [number, string]> = {
   "journal-unavailable": [5, "unavailable"],
   "cursor-stale": [4, "conflict"],
   unavailable: [5, "unavailable"],
+  "redaction-limit": [5, "unavailable"],
   "integrity-mismatch": [5, "unavailable"],
   "tls-verification-failed": [5, "unavailable"],
   "redirect-rejected": [5, "unavailable"],
