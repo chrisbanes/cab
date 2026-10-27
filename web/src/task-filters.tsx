@@ -4,12 +4,7 @@ import { workspaceLabels } from "../../src/operator/project-labels.js";
 import { Button } from "./components.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
-import {
-  activeFilterCount,
-  columns,
-  defaultTaskFilters,
-  type TaskFilters,
-} from "./tasks.js";
+import { activeFilterCount, columns, type TaskFilters } from "./tasks.js";
 
 /** One row: heading, List/Board switch, inline Project and State dropdowns, count, refresh. */
 export function TaskToolbar({
@@ -20,6 +15,7 @@ export function TaskToolbar({
   overview,
   count,
   total,
+  loaded,
   reset,
   refresh,
   pending,
@@ -34,6 +30,8 @@ export function TaskToolbar({
   count: number;
   /** Tasks in scope before any filter, so "no tasks" and "no matches" read differently. */
   total: number;
+  /** The task list has been read, so a zero total is real. */
+  loaded: boolean;
   reset: () => void;
   refresh: () => void;
   pending: boolean;
@@ -48,9 +46,7 @@ export function TaskToolbar({
     project: "",
     state: "",
   });
-  const hasMore = Boolean(
-    filters.q || filters.source || filters.ready !== defaultTaskFilters.ready,
-  );
+  const hasMore = hiddenActive > 0;
   const [open, setOpen] = useState(hasMore);
   const switchView = (
     <div className="work-switch" role="toolbar" aria-label="Task presentation">
@@ -101,9 +97,9 @@ export function TaskToolbar({
   );
   const countLine = !overview && (
     <p className="metadata muted work-count">
-      {total === 0
+      {loaded && total === 0
         ? "No tasks"
-        : count === 0
+        : loaded && count === 0
           ? "No tasks match these filters"
           : `${count} task${count === 1 ? "" : "s"}`}
     </p>

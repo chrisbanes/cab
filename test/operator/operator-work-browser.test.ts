@@ -96,12 +96,14 @@ async function open(
   await page.locator("main.page h1").waitFor();
   return { f, ids, web, page, commands: () => commandPosts };
 }
-const start = (
-  ...args: Parameters<typeof open> extends [boolean, ...infer R] ? R : never
-) => open(false, ...args);
-const startDefaults = (
-  ...args: Parameters<typeof open> extends [boolean, ...infer R] ? R : never
-) => open(true, ...args);
+type StartArgs = [
+  journey: BrowserJourney,
+  path?: string,
+  runtimes?: Parameters<typeof open>[3],
+  afterSeed?: Parameters<typeof open>[4],
+];
+const start = (...args: StartArgs) => open(false, ...args);
+const startDefaults = (...args: StartArgs) => open(true, ...args);
 const shot = (page: Page, name: string) => captureBrowserEvidence(page, name);
 const taskIds = (page: Page, scope = "main") =>
   page
@@ -339,6 +341,9 @@ test("active filters are counted, reset in one step and undone by Back", async (
   assert.equal(await reset.count(), 0);
   await page.goto(`${web.origin}/app/tasks?source=github`);
   await page.locator(".work-more").waitFor();
+  // A URL filter opens the disclosure; the indicator is for when it is collapsed.
+  await summary.click();
+  assert.equal(await page.locator(".work-more").getAttribute("open"), null);
   assert.match(await summary.innerText(), /More filters · 1 active$/);
   assert.equal(await reset.count(), 1);
   await page.goto(`${web.origin}/app/tasks?source=github&ready=any`);
@@ -391,7 +396,7 @@ test("active filters are counted, reset in one step and undone by Back", async (
   assert.equal(await reset.count(), 1);
 });
 
-test("typing in the text filter replaces the history entry", async (_t, journey) => {
+test("typing in the text filter adds one history entry that one Back clears", async (_t, journey) => {
   const { page } = await start(journey, "/app");
   await tasksLink(page).click();
   await page.waitForURL((u) => u.pathname === "/app/tasks");
@@ -400,13 +405,43 @@ test("typing in the text filter replaces the history entry", async (_t, journey)
   await openMoreFilters(page);
   await page.getByLabel("Filter tasks").pressSequentially("Normal");
   await page.waitForURL((u) => u.searchParams.get("q") === "Normal");
-  assert.equal(await page.evaluate(() => history.length), before);
+  assert.equal(await page.evaluate(() => history.length), before + 1);
+  await page.goBack();
+  await page.waitForURL(
+    (u) => u.pathname === "/app/tasks" && !u.searchParams.has("q"),
+  );
+  assert.equal(await page.getByLabel("Filter tasks").inputValue(), "");
+  await page.goForward();
+  await page.waitForURL((u) => u.searchParams.get("q") === "Normal");
   // Clearing the text leaves a URL with no query for it, and that must not bring it back.
   await page.getByLabel("Filter tasks").fill("");
   await page.waitForURL((u) => u.searchParams.get("q") === null);
   assert.equal(await stored(page), "ready=any");
+});
+
+test("Back and Forward show each entry's own filters", async (_t, journey) => {
+  const { page } = await startDefaults(journey, "/app/tasks");
+  await page.locator(".task-list [data-task-id]").first().waitFor();
+  await openMoreFilters(page);
+  await page.getByLabel("Source").selectOption("github");
+  await page.waitForURL((u) => u.searchParams.get("source") === "github");
+  assert.equal(await stored(page), "source=github");
   await page.goBack();
-  await page.waitForURL((u) => u.pathname === "/app");
+  await page.waitForURL((u) => u.search === "");
+  assert.equal(await page.getByLabel("Source").inputValue(), "");
+  assert.equal(await stored(page), null);
+  await page.goForward();
+  await page.waitForURL((u) => u.search === "?source=github");
+  assert.equal(await stored(page), "source=github");
+  // Reset is undone by Back and redone by Forward.
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await page.waitForURL((u) => u.search === "");
+  await page.goBack();
+  await page.waitForURL((u) => u.search === "?source=github");
+  await page.goForward();
+  await page.waitForURL((u) => u.search === "");
+  assert.equal(await page.getByLabel("Source").inputValue(), "");
+  assert.equal(await stored(page), null);
 });
 
 test("headers carry the new subtitles, one New task action and the page-owned refresh", async (_t, journey) => {

@@ -466,18 +466,30 @@ export function TaskViews({
 }) {
   const base = path.split("?")[0] ?? "/app/tasks",
     query = path.includes("?") ? path.slice(path.indexOf("?")) : "",
+    // An entry that was left bare while the filters were the defaults says so, so Back and
+    // Forward to it show the defaults rather than whatever was remembered since.
+    bareDefaults = Boolean(history.state?.taskDefaults),
     remembered = parseTaskFilters(rememberedTaskQuery());
   // The URL wins. A bare URL shows the remembered set at once; the effect then writes it into the URL.
   // A project page takes its project from the route and leaves the remembered one alone.
   const filters = {
-    ...(query ? parseTaskFilters(query) : remembered),
+    ...(query || bareDefaults ? parseTaskFilters(query) : remembered),
     ...(projectId && { project: "" }),
   };
   const withStoredProject = (f: TaskFilters) =>
     projectId ? { ...f, project: remembered.project } : f;
+  const stampBare = () => {
+    if (!location.search)
+      history.replaceState({ ...history.state, taskDefaults: true }, "");
+  };
+  const go = (url: string, replace: boolean) => {
+    stampBare();
+    navigate(url, { replace });
+    stampBare();
+  };
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the address changes, not on every render.
   useEffect(() => {
-    if (query) rememberTaskFilters(withStoredProject(filters));
+    if (query || bareDefaults) rememberTaskFilters(withStoredProject(filters));
     else if (taskFiltersUrl(base, filters) !== base)
       navigate(taskFiltersUrl(base, filters), { replace: true });
   }, [path]);
@@ -485,16 +497,17 @@ export function TaskViews({
     const next = { ...filters, ...patch };
     // A bare URL (every filter back at its default) must not restore the previous set.
     rememberTaskFilters(withStoredProject(next));
-    // Typing replaces the entry, so one Back leaves the filter instead of undoing a keystroke.
-    navigate(taskFiltersUrl(base, next), {
-      replace: Object.keys(patch).join() === "q",
-    });
+    // The first keystroke adds an entry and the rest replace it, so one Back clears the text.
+    go(
+      taskFiltersUrl(base, next),
+      Object.keys(patch).join() === "q" && filters.q !== "",
+    );
   };
   // List or Board is a presentation switch, not a filter, so Reset keeps it.
   const reset = () => {
     const next = { ...defaultTaskFilters, view: filters.view };
     rememberTaskFilters(withStoredProject(next));
-    navigate(taskFiltersUrl(base, next));
+    go(taskFiltersUrl(base, next), false);
   };
   const all = state.data?.tasks ?? [],
     inScope = projectId
@@ -519,6 +532,7 @@ export function TaskViews({
         overview={overview}
         count={tasks.length}
         total={inScope}
+        loaded={Boolean(state.data)}
         reset={reset}
         refresh={refresh}
         pending={state.pending}
@@ -530,8 +544,8 @@ export function TaskViews({
       {state.data &&
         !tasks.length &&
         !(overview && !workspace?.data.projects.length) &&
-        // Tasks and project pages say "no matches" in the toolbar's count line.
-        !(inScope && !overview) && (
+        // Tasks and project pages say "no matches" in the toolbar's count line, which the phone Board only reads aloud.
+        !(inScope && !overview && !(phone && filters.view === "board")) && (
           <p className="body empty-state">
             {inScope ? (
               "No tasks match these filters."

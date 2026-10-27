@@ -262,7 +262,7 @@ export async function seedCatalog(
     importedId: String(imported.id),
   };
 }
-/** Seeded Draft, Done and Cancelled tasks are not Ready; the operator has chosen Any readiness for task views opened without filters. */
+/** Seeded tasks are Drafts, which the Ready default hides; the operator has chosen Any readiness for task views opened without filters. */
 export const rememberAnyReadiness = (page: Page) =>
   page.evaluate(() =>
     localStorage.setItem("ensemble.task-filters.v1", "ready=any"),

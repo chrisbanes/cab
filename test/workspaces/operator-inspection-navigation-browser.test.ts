@@ -48,7 +48,7 @@ test("inspection sections are reached from task origins and exact direct links w
   const files = page.locator("#files");
 
   // Board origin → task → Files → back restores the board and its filter.
-  await page.goto(`${web.origin}/app/tasks?view=board&q=Navigable`);
+  await page.goto(`${web.origin}/app/tasks?view=board&q=Navigable&ready=any`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
@@ -169,7 +169,7 @@ test("overview, project list and inbox origins return correctly from Files", asy
   };
 
   // Overview → task → Files → back.
-  await page.goto(`${web.origin}/app`);
+  await page.goto(`${web.origin}/app?ready=any`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
@@ -183,7 +183,7 @@ test("overview, project list and inbox origins return correctly from Files", asy
   assert.equal(page.url(), overviewURL);
 
   // Project list → task → Files → back.
-  const projectURL = `${web.origin}/app/projects/${task.projectId}`;
+  const projectURL = `${web.origin}/app/projects/${task.projectId}?ready=any`;
   await page.goto(projectURL);
   await page
     .getByRole("link", { name: /Origin inspection/ })

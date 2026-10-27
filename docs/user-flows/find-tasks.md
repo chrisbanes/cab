@@ -1,6 +1,6 @@
 # Find tasks
 
-**Status:** implemented. The behaviour is asserted by the `task filters are remembered…`, `active filters are counted…` and `typing in the text filter…` journeys in `test/operator/operator-work-browser.test.ts`, with the parsing rules in `test/operator/operator-task-list.test.ts`.
+**Status:** implemented. The behaviour is asserted by the `task filters are remembered…`, `active filters are counted…`, `typing in the text filter…` and `Back and Forward show…` journeys in `test/operator/operator-work-browser.test.ts`, with the parsing rules in `test/operator/operator-task-list.test.ts`.
 
 ## Goal
 
@@ -39,9 +39,11 @@ list or reloading, and always sees which filters are hiding work.
 6. The count line reads "N tasks", "No tasks" when nothing is in scope, or "No tasks
    match these filters" when filters hide everything. Overview states the same in its
    empty panel.
-7. Typing in Filter tasks replaces the current history entry instead of adding one
-   per keystroke, so one Back leaves the page. Every other filter change adds an
-   entry.
+7. The first keystroke in Filter tasks adds a history entry and later ones replace
+   it, so one Back returns to the list without the text. Every other filter change adds
+   an entry. Back and Forward show the filters each entry had: an entry left bare while
+   the filters were the defaults stays the defaults, instead of taking the remembered
+   set.
 
 ## Budget
 

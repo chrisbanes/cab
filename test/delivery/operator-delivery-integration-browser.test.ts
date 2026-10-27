@@ -304,8 +304,9 @@ async function sharedDestinations(
   projectId: string,
   done = false,
 ) {
+  // The delivery task is not Ready, so each surface asks for Any readiness.
   for (const route of ["/app", "/app/tasks", `/app/projects/${projectId}`]) {
-    await page.goto(origin + route);
+    await page.goto(`${origin}${route}?ready=any`);
     if (done)
       await page.getByLabel("State", { exact: true }).selectOption("Done");
     const task = page.locator(`[data-task-id="${taskId}"]`).first();

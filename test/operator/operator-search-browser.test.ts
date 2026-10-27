@@ -8,8 +8,8 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { markTaskReady, seedReviewTask } from "../fixtures/task-review.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
-import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import { rememberAnyReadiness } from "../fixtures/operator-work.js";
+import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import {
   openSearchFromSidebar,
   searchDayEnd,
