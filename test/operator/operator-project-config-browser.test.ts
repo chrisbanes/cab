@@ -3660,17 +3660,19 @@ test("another writer committing between a routing save and its re-read is not de
   );
 });
 
-test("Sync & placement shows preview, observations and the placement status line", async (_t, journey) => {
+test("Sync & placement shows the import offer, observations and the placement status line", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
     "/app/projects/:atlas/settings?tab=sync",
   );
-  await page.getByRole("heading", { name: "Preview and activation" }).waitFor();
+  await page.getByRole("heading", { name: "Source sync" }).waitFor();
   await page
     .locator(".settings-status")
     .getByText("No placement conflicts.")
     .waitFor();
-  await page.getByLabel("Selection to preview", { exact: true }).waitFor();
+  await page
+    .getByRole("button", { name: "Preview and import now", exact: true })
+    .waitFor();
   await page
     .getByRole("button", {
       name: "Refresh all sources",

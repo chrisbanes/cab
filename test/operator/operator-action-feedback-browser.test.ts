@@ -48,8 +48,6 @@ const reader: GitHubReaderFactory = () => ({
   },
 });
 
-const activated = /^Activated acme\/atlas\./;
-
 type Fixture = Awaited<ReturnType<typeof startSettings>>;
 
 interface Surface {
@@ -275,13 +273,11 @@ for (const [device, viewport] of [
     });
   }
 
-test("Profile edit, capacity, source preview, Claude token and discovery saves each leave one message", async (_t, journey) => {
+test("Profile edit, capacity, Claude token and discovery saves each leave one message", async (_t, journey) => {
   const { page, ids, web } = await startSettings(
     journey,
     "/app/profiles/:reviewer/settings",
     desktop,
-    undefined,
-    { readerFactory: reader },
   );
   const go = async (path: string) => {
     await page.goto(web.origin + resolve(path, ids));
@@ -296,19 +292,6 @@ test("Profile edit, capacity, source preview, Claude token and discovery saves e
   await page.getByLabel("Global active-turn cap", { exact: true }).fill("1");
   await page.getByRole("button", { name: "Save capacity" }).click();
   await savedOutcome(page);
-
-  // A recorded preview re-opens the form, so another selection can follow.
-  await go("/app/projects/:atlas/settings?tab=sync");
-  const preview = page.getByRole("button", {
-    name: "Preview and activate selection",
-  });
-  await preview.click();
-  await savedOutcome(page, activated);
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll("button")].some(
-      (b) => b.textContent === "Preview and activate selection" && !b.disabled,
-    ),
-  );
 
   // Each credential row keeps the confirmation of its own save.
   await go("/app/settings");
@@ -358,44 +341,6 @@ const configurationReads = (page: Page) => {
   });
   return reads;
 };
-/** Focus stays on the outcome message, not on the page body. */
-const focusOnOutcome = (page: Page) =>
-  page.evaluate(
-    () =>
-      document.activeElement?.closest('[data-slot="action-outcome"]') !== null,
-  );
-
-test("a source preview recorded through Check re-reads and opens the form again", async (_t, journey) => {
-  const { page } = await startSettings(
-    journey,
-    "/app/projects/:atlas/settings?tab=sync",
-    desktop,
-    undefined,
-    { readerFactory: reader },
-  );
-  const reads = configurationReads(page);
-  await loseFirstResponse(page);
-  const preview = page.getByRole("button", {
-    name: "Preview and activate selection",
-  });
-  await preview.click();
-  await check(page).waitFor();
-  const before = reads.length;
-  await check(page).click();
-  await savedOutcome(page, activated);
-  // The check re-reads, so the form opens for the next preview, as after a direct save.
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll("button")].some(
-      (b) => b.textContent === "Preview and activate selection" && !b.disabled,
-    ),
-  );
-  assert.equal(await page.getByLabel("Selection to preview").isEnabled(), true);
-  assert.ok(reads.length > before, "the check re-read the configuration");
-  // The saved line stays, once, and focus did not fall to the page body.
-  await savedOutcome(page, activated);
-  assert.equal(await focusOnOutcome(page), true);
-});
-
 test("a placement recorded through Check in a mounted row shows one saved line and resolves", async (_t, journey) => {
   const { f, ids, web, page } = await startSettings(
     journey,
@@ -492,58 +437,10 @@ test("Review changes without a manual Refresh loads the newer version, keeps the
   assert.equal(d.project(ids.atlas).paused, 1);
 });
 
-test("a source preview that conflicts re-reads, and the next preview records without a manual Refresh", async (_t, journey) => {
-  const { f, ids, page } = await startSettings(
-    journey,
-    "/app/projects/:atlas/settings?tab=sync",
-    desktop,
-    undefined,
-    { readerFactory: reader },
-  );
-  // The source is saved elsewhere after the page loaded, so the preview's version is stale.
-  const d = f.service.domain();
-  await new OperatorApi(f.service, [f.directory]).execute({
-    type: "github.configure",
-    key: randomUUID(),
-    projectId: ids.atlas,
-    expectedVersion: d.githubConfiguration(ids.atlas).version,
-    selections: [
-      { id: "S-1", keep: true },
-      { id: "S-2", keep: true },
-      { id: "S-3", keep: true },
-    ],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
-  });
-  const preview = page.getByRole("button", {
-    name: "Preview and activate selection",
-  });
-  const reads = configurationReads(page);
-  await preview.click();
-  await page.getByText("A newer version was saved elsewhere.").waitFor();
-  assert.equal(await outcomeMessages(page).count(), 1);
-  // The conflict re-reads on its own; the untouched form takes the newer version.
-  await outcomeMessages(page)
-    .getByRole("button", { name: "Review changes" })
-    .waitFor();
-  assert.ok(reads.length > 0, "the conflict re-read the configuration");
-  assert.equal(await preview.isEnabled(), true);
-  await preview.click();
-  await savedOutcome(page, activated);
-});
-
-const previewButton = (page: Page) =>
-  page.getByRole("button", { name: "Preview and activate selection" });
-/** Sources are named by what they read; S-1 is acme/atlas and S-2 is a saved search. */
-const names: Record<string, string> = {
-  "S-1": "acme/atlas",
-  "S-2": "Saved search",
-};
-const optionText = (page: Page, id: string) =>
-  page
-    .getByLabel("Selection to preview")
-    .locator("option", { hasText: names[id] ?? id })
-    .textContent();
+const importButton = (page: Page) =>
+  page.getByRole("button", { name: "Preview and import now", exact: true });
+/** Sources are named by what they read; S-1 is acme/atlas. */
+const names: Record<string, string> = { "S-1": "acme/atlas" };
 const observationRow = (page: Page, id: string) =>
   page.locator("article.settings-row", {
     has: page.getByRole("heading", {
@@ -567,12 +464,6 @@ const saveSourceElsewhere = async (d: Fixture) => {
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
 };
-const formReady = (page: Page) =>
-  page.waitForFunction(() =>
-    [...document.querySelectorAll("button")].some(
-      (b) => b.textContent === "Preview and activate selection" && !b.disabled,
-    ),
-  );
 
 test("Sync & placement marks active selections and drops the marker when the source changes", async (_t, journey) => {
   const fixture = await startSettings(
@@ -583,81 +474,18 @@ test("Sync & placement marks active selections and drops the marker when the sou
     { readerFactory: reader },
   );
   const { page } = fixture;
-  assert.match((await optionText(page, "S-1")) ?? "", /· inactive$/);
   await observationRow(page, "S-1").getByText("Inactive").waitFor();
-  await previewButton(page).click();
-  await formReady(page);
-  assert.match((await optionText(page, "S-1")) ?? "", /· active$/);
+  await importButton(page).click();
+  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
   await observationRow(page, "S-1")
     .getByText("Active", { exact: true })
     .waitFor();
   assert.deepEqual(await unpairedBadges(observationRow(page, "S-1")), []);
-  assert.match((await optionText(page, "S-2")) ?? "", /· inactive$/);
+  assert.equal(await importButton(page).count(), 0);
   await saveSourceElsewhere(fixture);
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await observationRow(page, "S-1").getByText("Inactive").waitFor();
-  assert.match((await optionText(page, "S-1")) ?? "", /· inactive$/);
-});
-
-const firstActivation =
-  /^Activated acme\/atlas\. Tasks aren't imported until you refresh sources\./;
-const repeatActivation =
-  /^acme\/atlas was already active\. Tasks aren't imported until you refresh sources\./;
-/** The sentence itself, apart from the Refresh action and its status. */
-const message = async (page: Page) =>
-  (
-    await outcomeMessages(page).locator(".action-outcome-message").innerText()
-  ).trim();
-const refreshButton = (page: Page) =>
-  outcomeMessages(page).getByRole("button", {
-    name: "Refresh sources",
-  });
-
-test("first source activation names the selection, says nothing was imported and offers Refresh", async (_t, journey) => {
-  const { page } = await startSettings(
-    journey,
-    "/app/projects/:atlas/settings?tab=sync",
-    desktop,
-    undefined,
-    { readerFactory: reader },
-  );
-  await previewButton(page).click();
-  const outcome = await savedOutcome(page, firstActivation);
-  assert.equal(
-    await message(page),
-    "Activated acme/atlas. Tasks aren't imported until you refresh sources.",
-  );
-  await refreshButton(page).waitFor();
-  await observationRow(page, "S-1").getByText("Not synced yet").waitFor();
-  await refreshButton(page).click();
-  await observationRow(page, "S-1")
-    .getByText(/^Synced/)
-    .waitFor();
-  await outcome.getByText("Refresh finished.").waitFor();
-  await savedOutcome(page, firstActivation);
-  await page.setViewportSize(phone);
-  await noPageOverflow(page);
-  assert.equal(await refreshButton(page).isVisible(), true);
-});
-
-test("repeat activation says it was already active without claiming a refresh", async (_t, journey) => {
-  const { page } = await startSettings(
-    journey,
-    "/app/projects/:atlas/settings?tab=sync",
-    desktop,
-    undefined,
-    { readerFactory: reader },
-  );
-  await previewButton(page).click();
-  await savedOutcome(page, firstActivation);
-  await formReady(page);
-  await previewButton(page).click();
-  await savedOutcome(page, repeatActivation);
-  assert.equal(
-    await message(page),
-    "acme/atlas was already active. Tasks aren't imported until you refresh sources.",
-  );
-  await observationRow(page, "S-1").getByText("Not synced yet").waitFor();
+  await importButton(page).waitFor();
 });
 
 test("activation by another client after the page loaded reads as already active", async (_t, journey) => {
@@ -669,7 +497,7 @@ test("activation by another client after the page loaded reads as already active
     { readerFactory: reader },
   );
   const { page } = fixture;
-  await formReady(page);
+  await importButton(page).waitFor();
   const domain = fixture.f.service.domain();
   domain.execute({
     type: "github.activate",
@@ -679,33 +507,10 @@ test("activation by another client after the page loaded reads as already active
     selectionId: "S-1",
     expectedVersion: domain.githubConfiguration(fixture.ids.atlas).version,
   });
-  await previewButton(page).click();
-  await savedOutcome(page, repeatActivation);
-  assert.equal(
-    await message(page),
-    "acme/atlas was already active. Tasks aren't imported until you refresh sources.",
-  );
-});
-
-test("activation made before a source change does not read as current", async (_t, journey) => {
-  const fixture = await startSettings(
-    journey,
-    "/app/projects/:atlas/settings?tab=sync",
-    desktop,
-    undefined,
-    { readerFactory: reader },
-  );
-  const { page } = fixture;
-  await previewButton(page).click();
-  await savedOutcome(page, firstActivation);
-  await formReady(page);
-  await saveSourceElsewhere(fixture);
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await observationRow(page, "S-1").getByText("Inactive").waitFor();
-  assert.equal(await outcomeMessages(page).count(), 0);
-  assert.match((await optionText(page, "S-1")) ?? "", /· inactive$/);
-  await previewButton(page).click();
-  await savedOutcome(page, firstActivation);
+  await importButton(page).click();
+  await outcomeMessages(page)
+    .filter({ hasText: /acme\/atlas was already active\./ })
+    .waitFor();
 });
 
 test("observation rows of withheld selections show no activation marker", async (_t, journey) => {

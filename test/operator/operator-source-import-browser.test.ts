@@ -13,7 +13,6 @@ import {
   noPageOverflow,
   outcomeMessages,
   phone,
-  savedOutcome,
   startSettings,
 } from "../fixtures/operator-settings.js";
 
@@ -137,6 +136,7 @@ function hold() {
 
 const rowHeadings = (page: Page) =>
   page.locator("form .settings-row h3").allInnerTexts();
+const syncRows = (page: Page) => page.locator("article.settings-row");
 const row = (page: Page, text: string | RegExp) =>
   page.locator("form .settings-row", { hasText: text });
 
@@ -478,7 +478,8 @@ test("a preview that never reached the service is checked with the same key", as
   assert.equal(await importButton(page).count(), 0, "the way out is the check");
   // Leaving the tab and coming back keeps the unknown preview and its way out.
   await page.getByRole("link", { name: "Sync & placement" }).click();
-  await page.getByRole("heading", { name: "Preview and activation" }).waitFor();
+  await page.getByRole("heading", { name: "Source sync" }).waitFor();
+  await check.waitFor();
   await page.getByRole("link", { name: "GitHub source" }).click();
   await check.waitFor();
   assert.equal(seen.previews.length, 1);
@@ -544,7 +545,7 @@ test("a lost refresh reply that never reached the service is offered again after
     .waitFor();
   drop = false;
   await page.getByRole("link", { name: "Sync & placement" }).click();
-  await page.getByRole("heading", { name: "Preview and activation" }).waitFor();
+  await page.getByRole("heading", { name: "Source sync" }).waitFor();
   await page.getByRole("link", { name: "GitHub source" }).click();
   await importPanel(page).waitFor();
   const before = seen.previews.length;
@@ -573,7 +574,7 @@ test("a lost refresh reply that reached the service leaves nothing to import aft
     .filter({ hasText: "We couldn't confirm the refresh." })
     .waitFor();
   await page.getByRole("link", { name: "Sync & placement" }).click();
-  await page.getByRole("heading", { name: "Preview and activation" }).waitFor();
+  await page.getByRole("heading", { name: "Source sync" }).waitFor();
   await page.getByRole("link", { name: "GitHub source" }).click();
   await row(page, "acme/atlas")
     .getByText(/^Synced \d\d:\d\d/)
@@ -806,23 +807,79 @@ test("private query never leaves the session view", async (_t, journey) => {
 
 // ---- T4: Sync & placement -----------------------------------------------------------------
 
-test("Sync & placement keeps later refreshes and placement", async (_t, journey) => {
+test("Sync & placement previews, activates and refreshes in one press", async (_t, journey) => {
   const { page } = await start(journey, syncTab);
-  await page
-    .getByLabel("Selection to preview")
-    .selectOption({ label: "acme/atlas · repository issues · inactive" });
-  await page
-    .getByRole("button", { name: "Preview and activate selection" })
-    .click();
-  await savedOutcome(page, /^Activated acme\/atlas\. Tasks aren't imported/);
-  await page.getByRole("button", { name: "Refresh sources" }).click();
-  await row(page, "acme/atlas")
-    .or(page.locator("article.settings-row", { hasText: "acme/atlas" }))
+  const seen = track(page);
+  assert.match(
+    await importPanel(page).locator("p").first().innerText(),
+    /^acme\/atlas.* are inactive at this version\.$/,
+  );
+  await importButton(page).click();
+  await outcomeMessages(page)
+    .filter({ hasText: /^Previewed/ })
+    .waitFor();
+  await outcomeMessages(page)
+    .filter({ hasText: /Read .* completely at/ })
+    .waitFor();
+  assert.deepEqual(seen.steps, [
+    "preview S-1",
+    "preview S-2",
+    "preview S-3",
+    "refresh",
+  ]);
+  await syncRows(page)
+    .filter({ hasText: "acme/atlas" })
     .getByText(/^Synced \d\d:\d\d · 4 issues observed/)
     .first()
     .waitFor();
+  assert.equal(await importButton(page).count(), 0);
   await page.getByRole("button", { name: "Refresh all sources" }).click();
   await page.getByText("Refresh finished.", { exact: false }).first().waitFor();
+});
+
+test("Sync & placement after Preview and import now needs no action", async (_t, journey) => {
+  const { page, ids, web } = await start(journey);
+  await addAndSave(page);
+  await importButton(page).click();
+  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  const config = await page.request.get(
+    `${web.origin}/api/operator/projects/${ids.atlas}/configuration`,
+  );
+  const selections = (await config.json()).data.source.selections as {
+    active: boolean;
+  }[];
+  assert.deepEqual(
+    selections.map((s) => s.active),
+    [true, true, true, true],
+    "the service has every source active at the loaded version",
+  );
+  await page.getByRole("link", { name: "Sync & placement" }).click();
+  await page.getByRole("heading", { name: "Source sync" }).waitFor();
+  await syncRows(page).first().waitFor();
+  assert.equal(await importButton(page).count(), 0);
+  assert.equal(await importPanel(page).count(), 0);
+  assert.equal(
+    await syncRows(page).getByText("Active", { exact: true }).count(),
+    4,
+  );
+  assert.equal(await syncRows(page).getByText("Inactive").count(), 0);
+});
+
+test("Sync & placement asks again only after a source save", async (_t, journey) => {
+  const s = await start(journey);
+  const { page } = s;
+  await addAndSave(page);
+  await importButton(page).click();
+  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await saveElsewhere(s);
+  await page.getByRole("link", { name: "Sync & placement" }).click();
+  await page.getByRole("heading", { name: "Source sync" }).waitFor();
+  await importButton(page).waitFor();
+  assert.match(
+    await importPanel(page).locator("p").first().innerText(),
+    /inactive at this version\.$/,
+  );
+  await syncRows(page).getByText("Inactive").first().waitFor();
 });
 
 test("Sync rows print no raw values", async (_t, journey) => {
@@ -883,5 +940,16 @@ for (const [label, viewport] of [
         `the outcome is in view ${JSON.stringify(await target.boundingBox())}`,
       );
     assert.equal(interactions, 2);
+    await noPageOverflow(page);
+    // Looking at Sync & placement is navigation, not an interaction: it needs no action.
+    await page.getByRole("link", { name: "Sync & placement" }).click();
+    await page.getByRole("heading", { name: "Source sync" }).waitFor();
+    await syncRows(page).first().waitFor();
+    assert.equal(await importButton(page).count(), 0);
+    assert.equal(await syncRows(page).getByText("Inactive").count(), 0);
+    assert.equal(
+      await syncRows(page).getByText("Active", { exact: true }).count(),
+      4,
+    );
     await noPageOverflow(page);
   });

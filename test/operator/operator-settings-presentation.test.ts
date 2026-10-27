@@ -30,7 +30,6 @@ import {
   recoveryRecordRuns,
   readinessNextStep,
   joinNames,
-  activationLine,
   draftSourceName,
   observationLabel,
   savedLine,
@@ -892,82 +891,6 @@ test("the warning colours stay legible on the page and on a warning alert", () =
   );
   assert.ok(contrast(rgb(fg[1]), rgb(page[1])) >= 4.5, "text on the page");
   assert.ok(contrast(rgb(fg[1]), surface) >= 4.5, "text on a warning alert");
-});
-
-test("the activation line claims only a confirmed preview at the loaded source version", () => {
-  const preview = (commandType = "github.preview", alreadyActive?: boolean) =>
-    ({
-      kind: "configuration",
-      key: randomUUID(),
-      recorded: true,
-      result: {
-        commandType,
-        resourceId: randomUUID(),
-        selectionId: "S-1",
-        configVersion: 3,
-        active: true,
-        ...(alreadyActive === undefined ? {} : { alreadyActive }),
-      },
-    }) as never;
-  const activation = (
-    wasActive: boolean | undefined,
-    over: Partial<Parameters<typeof activationLine>[0]> = {},
-  ) =>
-    activationLine({
-      saved: {
-        at: Date.now(),
-        receipt: preview("github.preview", wasActive),
-      },
-      sourceVersion: 3,
-      selections: [],
-      recorded: true,
-      name: (id) => (id === "S-1" ? "acme/atlas" : id),
-      ...over,
-    });
-  const line = (...args: Parameters<typeof activation>) =>
-    activation(...args)?.line ?? null;
-  const next = "Tasks aren't imported until you refresh sources.";
-  assert.equal(line(false), `Activated acme/atlas. ${next}`);
-  assert.equal(line(true), `acme/atlas was already active. ${next}`);
-  // A receipt recorded before the prior state existed claims neither.
-  assert.equal(line(undefined), `acme/atlas is active. ${next}`);
-  // The page's own snapshot no longer matters: the receipt says it was already active.
-  assert.equal(
-    line(true, { recorded: true, selections: [{ id: "S-1", active: false }] }),
-    `acme/atlas was already active. ${next}`,
-  );
-  // A receipt for another source version never reads as current activation.
-  assert.equal(line(false, { sourceVersion: 4 }), null);
-  assert.equal(line(false, { saved: undefined }), null);
-  assert.equal(
-    line(false, {
-      saved: {
-        at: Date.now(),
-        receipt: preview("project.configure"),
-      },
-    }),
-    null,
-  );
-  // After a re-read the read itself must show the selection active.
-  assert.equal(
-    line(false, {
-      recorded: false,
-      selections: [{ id: "S-1", active: false }],
-    }),
-    "Couldn't confirm that acme/atlas is active. Preview it again.",
-  );
-  assert.equal(
-    activation(false, {
-      recorded: false,
-      selections: [{ id: "S-1", active: false }],
-    })?.refresh,
-    false,
-  );
-  assert.equal(
-    line(false, { recorded: false, selections: [{ id: "S-1", active: true }] }),
-    `Activated acme/atlas. ${next}`,
-  );
-  assert.equal(activation(false)?.refresh, true);
 });
 
 test("the phone summary appends stored counts and points to readiness when nothing matches", () => {

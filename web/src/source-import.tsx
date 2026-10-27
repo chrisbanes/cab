@@ -51,11 +51,15 @@ const phaseOf = (d: ConfigurationDraft): ConfigurationDraft["phase"] => d.phase;
 
 const named = (s: Selection): s is Named => s.id !== null;
 
-/** Saved sources with nothing imported yet: inactive, or active and never read. */
+/**
+ * Saved sources with nothing imported yet: inactive, or (unless `inactiveOnly`) active and
+ * never read.
+ */
 function unimported(
   p: Pick<TabProps, "data" | "projectId"> & {
     observations: ObservationResource;
   },
+  inactiveOnly = false,
 ) {
   const read = p.observations.state.data?.data.projects.find(
     (r) => r.projectId === p.projectId,
@@ -65,7 +69,8 @@ function unimported(
     .filter(
       (s) =>
         !s.active ||
-        (p.observations.state.data !== null &&
+        (!inactiveOnly &&
+          p.observations.state.data !== null &&
           (read?.selections.find((o) => o.selectionId === s.id)?.state ??
             "never") === "never"),
     );
@@ -91,6 +96,11 @@ export function ImportPanel(
     savePhase: ConfigurationDraft["phase"];
     /** Open this panel's links in a new tab, for a page the operator must not leave. */
     newTab?: boolean;
+    /**
+     * Offer the press only while a saved source is inactive at this version. A source that is
+     * active but never read is left to Refresh, which is not a preview.
+     */
+    inactiveOnly?: boolean;
   },
 ) {
   const { data, projectId } = p,
@@ -123,7 +133,7 @@ export function ImportPanel(
     draft = (id: string, at = version) =>
       p.drafts.get(importDraftKey(projectId, at, id), rerender),
     // Derived from the reads each render: inactive, or active but never read.
-    pending = unimported(p),
+    pending = unimported(p, p.inactiveOnly),
     targets = selections.filter((s) => !s.active),
     drafts = targets.map((s) => ({ s, d: draft(s.id) })),
     unknown = drafts.find(({ d }) => d.phase === "unknown"),
@@ -168,7 +178,7 @@ export function ImportPanel(
         .filter(named)
         .filter((s) => !s.active)
         .map((s) => s.id),
-      scope = retry?.ids ?? unimported(now).map((s) => s.id),
+      scope = retry?.ids ?? unimported(now, now.inactiveOnly).map((s) => s.id),
       unusableNow = now.data.source.credential?.usable === false;
     if (running.current || todo.some((id) => draft(id, at).phase === "pending"))
       return;
@@ -443,7 +453,9 @@ export function ImportPanel(
         <p className="body">
           {p.saved ? "Saved. " : ""}
           {names(pending.map((s) => s.id))}{" "}
-          {pending.length === 1 ? "isn't" : "aren't"} imported yet.
+          {p.inactiveOnly
+            ? `${pending.length === 1 ? "is" : "are"} inactive at this version.`
+            : `${pending.length === 1 ? "isn't" : "aren't"} imported yet.`}
         </p>
       )}
       {offered && !blocked && (
@@ -461,11 +473,13 @@ export function ImportPanel(
           </Button>
         </div>
       )}
-      <p className="metadata muted">
-        {mine
-          ? "Later refreshes and placement are in Sync & placement."
-          : "Previews and activates the saved sources at this version, then refreshes them from GitHub. Neither starts work."}
-      </p>
+      {!(mine && p.inactiveOnly) && (
+        <p className="metadata muted">
+          {mine
+            ? "Later refreshes and placement are in Sync & placement."
+            : "Previews and activates the saved sources at this version, then refreshes them from GitHub. Neither starts work."}
+        </p>
+      )}
     </section>
   );
 }
