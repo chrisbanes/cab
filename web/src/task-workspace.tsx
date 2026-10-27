@@ -3067,7 +3067,7 @@ function PullRequestLine({
           <span className="sr-only"> (opens GitHub)</span>
         </a>
       ) : (
-        <>{pullRequestReference(binding)}</>
+        pullRequestReference(binding)
       )}{" "}
       <StatusBadge tone={tone[binding.state]}>
         {pullRequestStateLabel(binding.state, binding.draft)}
