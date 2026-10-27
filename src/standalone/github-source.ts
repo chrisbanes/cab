@@ -442,8 +442,11 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
         );
         if (result.data.node.id !== selection.projectNodeId)
           throw new Error("invalid-project-identity");
-        firstFields ??= result.data.node.fields;
-        fieldDefinitions.push(...result.data.node.fields.nodes);
+        // Every items page repeats the first page of field definitions; keep it once.
+        if (!firstFields) {
+          firstFields = result.data.node.fields;
+          fieldDefinitions.push(...firstFields.nodes);
+        }
         for (const item of result.data.node.items.nodes) {
           if (item.content?.__typename !== "Issue") continue;
           const content = projectIssueSchema.parse(item.content);
