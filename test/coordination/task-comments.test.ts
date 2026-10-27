@@ -199,6 +199,70 @@ test("approval-mode operator comment requires distinct exact durable review and 
   );
   assert.equal(f.domain.task(f.taskId).state, "open");
 });
+test("a comment send rechecks the approved body against the exclusions as they are now", async (t) => {
+  const f = await deliveryFixture("reviewable-pr", true),
+    credentialName = "FIXTURE_COMMENT_SEND_CREDENTIAL",
+    marker = "ZQXcomment123";
+  t.after(() => f.close());
+  process.env[credentialName] = `fixture-${randomUUID()}`;
+  t.after(() => {
+    delete process.env[credentialName];
+  });
+  f.domain.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: f.service.delivery().configuration(f.projectId).version,
+    mode: "reviewable-pr",
+    credentialRef: `env:${credentialName}`,
+    grants: [{ action: "issue.comment", repositoryId: "R1", mode: "approval" }],
+    requiredChecks: [],
+  });
+  const api = new OperatorApi(f.service, [f.root]),
+    command = send(f, `A comment naming ${marker}`),
+    review = await api.execute({
+      type: "comment.review",
+      key: randomUUID(),
+      taskId: f.taskId,
+      operationId: command.key,
+      expectedTaskVersion: command.expectedTaskVersion,
+      body: command.body,
+    });
+  if (review.kind !== "comment-review") assert.fail("review receipt absent");
+  await api.execute({
+    type: "comment.confirm",
+    key: randomUUID(),
+    taskId: f.taskId,
+    reviewId: review.reviewId,
+    expectedRevision: review.revision,
+    materialHash: review.materialHash,
+    decision: "approved",
+  });
+  // The delivery credential's value now equals text in the approved body.
+  process.env[credentialName] = marker;
+  const sendApproved = { ...command, reviewId: review.reviewId };
+  await assert.rejects(api.execute(sendApproved), /forbidden/);
+  assert.equal(f.effects.length, 0);
+  assert.equal(
+    f.service
+      .delivery()
+      .actions()
+      .some((a) => a.operationId === command.key),
+    false,
+  );
+  assert.equal(
+    f.service.delivery().operatorReview(review.reviewId)?.decision,
+    "approved",
+  );
+  // The stored approval survives the refusal: once the text is no longer private, the send posts.
+  process.env[credentialName] = `fixture-${randomUUID()}`;
+  const result = await api.execute(sendApproved);
+  assert.equal(result.kind, "delivery");
+  if (result.kind === "delivery")
+    assert.equal(result.state, "confirmed-success");
+  assert.equal(f.effects.length, 1);
+});
 test("operator no-grant, task/Stop holds and changed policy during delayed preflight prevent provider effect", async (t) => {
   const f = await deliveryFixture("reviewable-pr", true);
   t.after(() => f.close());
