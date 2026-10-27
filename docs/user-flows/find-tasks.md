@@ -41,9 +41,9 @@ list or reloading, and always sees which filters are hiding work.
    empty panel.
 7. The first keystroke in Filter tasks adds a history entry and later ones replace
    it, so one Back returns to the list without the text. Every other filter change adds
-   an entry. Back and Forward show the filters each entry had: an entry left bare while
-   the filters were the defaults stays the defaults, instead of taking the remembered
-   set.
+   an entry. Back and Forward show the filters each entry had: an entry that a filter change
+   or Reset left bare, with the filters at their defaults, stays the defaults instead of
+   taking the remembered set.
 
 ## Budget
 

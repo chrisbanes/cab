@@ -468,7 +468,9 @@ export function TaskViews({
     query = path.includes("?") ? path.slice(path.indexOf("?")) : "",
     // An entry that was left bare while the filters were the defaults says so, so Back and
     // Forward to it show the defaults rather than whatever was remembered since.
-    bareDefaults = Boolean(history.state?.taskDefaults),
+    bareDefaults = Boolean(
+      history.state?.taskDefaults && history.state.entryUrl === location.href,
+    ),
     remembered = parseTaskFilters(rememberedTaskQuery());
   // The URL wins. A bare URL shows the remembered set at once; the effect then writes it into the URL.
   // A project page takes its project from the route and leaves the remembered one alone.
