@@ -50,6 +50,18 @@ self.addEventListener("push", (event) => {
   );
 });
 
+// A tab still running an older bundle has no listener, so a posted message alone proves nothing:
+// the tab confirms on the message's port, and an unconfirmed click opens a window instead.
+const ACK_MS = 1000;
+const routed = (client, url) => {
+  const { port1, port2 } = new MessageChannel();
+  return new Promise((resolve) => {
+    port1.onmessage = () => resolve(true);
+    client.postMessage({ type: "ensemble.notification-open", url }, [port2]);
+    setTimeout(() => resolve(false), ACK_MS);
+  }).finally(() => port1.close());
+};
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data;
@@ -75,8 +87,7 @@ self.addEventListener("notificationclick", (event) => {
         try {
           await target.focus();
           // The app routes in place, so an open tab keeps its unsaved input.
-          target.postMessage({ type: "ensemble.notification-open", url });
-          return;
+          if (await routed(target, url)) return;
         } catch {
           // A window that cannot be focused or messaged is replaced by a new one.
         }

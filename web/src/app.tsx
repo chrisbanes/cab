@@ -801,7 +801,10 @@ export function App() {
     if (!("serviceWorker" in navigator)) return;
     const onMessage = (event: MessageEvent) => {
       const path = notificationOpenPath(event, location.origin);
-      if (path) navigateRef.current(path);
+      if (!path) return;
+      navigateRef.current(path);
+      // Confirms to the worker that this tab routed; without it the worker opens a window.
+      event.ports[0]?.postMessage("routed");
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () =>

@@ -13,7 +13,8 @@ interface FakeClient {
   posted: unknown[];
   focus(): Promise<void>;
   navigate(url: string): Promise<void>;
-  postMessage(message: unknown): void;
+  acknowledges: boolean;
+  postMessage(message: unknown, transfer?: MessagePort[]): void;
 }
 
 /** The worker source, run against a fake worker scope: no browser. */
@@ -52,7 +53,13 @@ async function load(clients: FakeClient[] = []) {
       },
     },
   };
-  runInNewContext(source, { self, URL });
+  // A short timer keeps the unacknowledged cases quick; the worker's timeout is otherwise real.
+  runInNewContext(source, {
+    self,
+    URL,
+    MessageChannel,
+    setTimeout: (fn: () => void) => setTimeout(fn, 20),
+  });
   const waits: Promise<unknown>[] = [];
   const dispatch = async (type: string, event: Record<string, unknown>) => {
     listeners.get(type)?.({
@@ -173,8 +180,10 @@ const client = (url: string): FakeClient => ({
   async navigate(to: string) {
     this.navigated.push(to);
   },
-  postMessage(message: unknown) {
+  acknowledges: true,
+  postMessage(message: unknown, transfer?: MessagePort[]) {
     this.posted.push(message);
+    if (this.acknowledges) transfer?.[0]?.postMessage("routed");
   },
 });
 
@@ -219,6 +228,15 @@ test("a click with a foreign link routes an open app window to the Inbox", async
     { type: "ensemble.notification-open", url: "/app/inbox" },
   ]);
   assert.deepEqual(w.opened, []);
+});
+
+test("a tab that does not confirm routing is replaced by a new window", async () => {
+  const stale = { ...client(`${ORIGIN}/app/tasks`), acknowledges: false };
+  const w = await load([stale]);
+  await w.click("/app/inbox?request=Q");
+  assert.equal(stale.posted.length, 1);
+  assert.deepEqual(w.opened, ["/app/inbox?request=Q"]);
+  assert.deepEqual(w.closed, ["closed"]);
 });
 
 test("a window that cannot be focused or messaged is replaced by a new one", async () => {
