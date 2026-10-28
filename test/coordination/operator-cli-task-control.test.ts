@@ -482,12 +482,15 @@ test("task start-again queues a refused request again and explains what it canno
   assert.equal(r.code, 4, r.out);
   assert.equal(requests(), 1);
 
+  const requestId = randomUUID();
   r = await cli("rw", [
     "task",
     "start-again",
     task.taskId,
     "--expected-version",
     String(version()),
+    "--request-id",
+    requestId,
   ]);
   assert.equal(r.code, 0, r.err + r.out);
   const data = r.json().data;
@@ -510,6 +513,25 @@ test("task start-again queues a refused request again and explains what it canno
     r.err + r.out,
     /Start again unavailable: no request was refused/,
   );
+  assert.match(
+    r.err + r.out,
+    /repeat it with --work WORK and the same --request-id/,
+  );
+  assert.equal(requests(), 2);
+  // With the refused work and the same request id, a lost reply replays the receipt.
+  r = await cli("rw", [
+    "task",
+    "start-again",
+    task.taskId,
+    "--expected-version",
+    String(version()),
+    "--work",
+    task.workId,
+    "--request-id",
+    requestId,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.receipt.workId, data.workId);
   assert.equal(requests(), 2);
 
   // A hold that may be live is named with its recovery.

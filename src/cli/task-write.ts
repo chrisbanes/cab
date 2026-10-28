@@ -716,10 +716,10 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
             "conflict",
             startAgainUnavailableText(refusal || "nothing-refused"),
             {
-              fix: restartFix(
+              fix: `${restartFix(
                 taskId,
                 startAgainUnavailable[refusal || "nothing-refused"].destination,
-              ),
+              )} To replay a request whose reply was lost, repeat it with --work WORK and the same --request-id.`,
             },
           );
         const command = { type, taskId, expectedVersion, workId };

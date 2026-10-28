@@ -209,6 +209,9 @@ export function ResetTask({
         <DialogDescription className="body">
           {resetIrreversibleText}
         </DialogDescription>
+        {!offer.available && outcome?.kind !== "recorded" && unavailable && (
+          <p className="muted">Reset isn't offered: {unavailable.text}.</p>
+        )}
         <SendFeedback
           outcome={outcome}
           recorded="Reset. The lead starts a fresh conversation in the same workspace."
@@ -220,7 +223,7 @@ export function ResetTask({
           {outcome?.kind !== "recorded" && !uncertain && (
             <Button
               variant="destructive"
-              disabled={Boolean(sending)}
+              disabled={Boolean(sending) || !offer.available}
               onClick={() =>
                 void send(
                   operatorCommandSchema.parse({
