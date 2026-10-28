@@ -180,6 +180,7 @@ export function InterventionDetail({
   item,
   leftQueue = false,
   start,
+  startKept = false,
 }: {
   item: TaskInboxItem;
   /** The request is no longer current, so it no longer asserts that ownership is held. */
@@ -191,10 +192,13 @@ export function InterventionDetail({
         session: Session;
         task: TaskRead["data"];
         onChanged: () => void;
+        onStart: () => void;
       }
     | undefined;
+  /** A start was sent from this pane: it stays, whatever the request's code becomes. */
+  startKept?: boolean;
 }) {
-  if (item.attentionCode === "not-started" && start)
+  if ((item.attentionCode === "not-started" || startKept) && start)
     return (
       <div className="inbox-approval">
         <div className="inbox-approval-body">

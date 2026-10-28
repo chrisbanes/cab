@@ -101,6 +101,7 @@ export function TaskHeaderActions({
   const [open, setOpen] = useState(false),
     [sent, setSent] = useState(false),
     [resetOpen, setResetOpen] = useState(false),
+    [resetSent, setResetSent] = useState<string | null>(null),
     [menuOpen, setMenuOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 759px)");
   const keep = useRef<HTMLButtonElement>(null),
@@ -164,7 +165,7 @@ export function TaskHeaderActions({
         <ActionLink variant="secondary" href={`/runtime/task/${report.taskId}`}>
           Execution
         </ActionLink>
-        {report.reset && report.stop.open && (
+        {report.reset && (report.stop.open || resetSent === report.taskId) && (
           <ResetTask
             client={client}
             session={session}
@@ -172,6 +173,7 @@ export function TaskHeaderActions({
             title={report.title}
             version={report.reset.version}
             offer={report.reset.offer}
+            onSend={() => setResetSent(report.taskId)}
             onOpenChange={(next) => {
               // The trigger lives in the overflow, which stays open behind the dialog.
               if (phone) setMenuOpen(true);

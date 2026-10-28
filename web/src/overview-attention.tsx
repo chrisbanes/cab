@@ -108,9 +108,15 @@ export function NeedsYou({
     ordered = data ? orderAttention(data.items, tasks) : [],
     further = furtherRequests(ordered, shown),
     cards = ordered.slice(0, shown);
-  for (const kept of answered)
-    if (!data?.items.some((i) => i.id === kept.item.id))
+  for (const kept of answered) {
+    // A sent start keeps its card even while the request is still listed, moved or changed:
+    // the card holds the check of a lost reply.
+    const sent = kept.item.kind === "intervention";
+    const live = sent ? cards.findIndex((i) => i.id === kept.item.id) : -1;
+    if (live >= 0) cards.splice(live, 1);
+    if (sent || !data?.items.some((i) => i.id === kept.item.id))
       cards.splice(Math.min(kept.index, cards.length), 0, kept.item);
+  }
   const byId = new Map(tasks?.map((t) => [t.id, t]));
   return (
     <section className="overview-needs" aria-label="Needs you">

@@ -168,6 +168,7 @@ export function ResetTask({
   offer,
   onChanged,
   onOpenChange,
+  onSend,
 }: {
   client: OperatorClient;
   session: Session;
@@ -178,6 +179,8 @@ export function ResetTask({
   onChanged: () => void;
   /** The dialog opened or closed, for a container that must stay open behind it. */
   onOpenChange?: (open: boolean) => void;
+  /** A reset was sent: the container keeps this mounted so a lost reply can be checked. */
+  onSend?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const { send, sending, outcome, uncertain, clear } = useCommandSend(
@@ -225,9 +228,12 @@ export function ResetTask({
         <DialogDescription className="body">
           {resetIrreversibleText}
         </DialogDescription>
-        {!offer.available && outcome?.kind !== "recorded" && unavailable && (
-          <p className="muted">Reset isn't offered: {unavailable.text}.</p>
-        )}
+        {!offer.available &&
+          outcome?.kind !== "recorded" &&
+          !uncertain &&
+          unavailable && (
+            <p className="muted">Reset isn't offered: {unavailable.text}.</p>
+          )}
         <SendFeedback
           outcome={outcome}
           recorded="Reset. The lead starts a fresh conversation in the same workspace."
@@ -240,7 +246,8 @@ export function ResetTask({
             <Button
               variant="destructive"
               disabled={Boolean(sending) || !offer.available}
-              onClick={() =>
+              onClick={() => {
+                onSend?.();
                 void send(
                   operatorCommandSchema.parse({
                     type: "task.reset",
@@ -248,8 +255,8 @@ export function ResetTask({
                     taskId,
                     expectedVersion: version,
                   }),
-                )
-              }
+                );
+              }}
             >
               {sending ? "Resetting…" : "Reset task"}
             </Button>

@@ -187,12 +187,13 @@ for (const [name, viewport] of Object.entries(viewports)) {
 
     // A command the service recorded but whose reply was lost stays reachable and checkable
     // after a later read changes what is offered: the check resends the same keyed command.
-    const loseNextReply = async (type: string) => {
+    const loseNextReply = async (type: string, committed?: () => void) => {
       let armed = true;
       await page.route("**/api/operator/commands", async (route) => {
         if (armed && (route.request().postData() ?? "").includes(`"${type}"`)) {
           armed = false;
           await route.fetch();
+          committed?.();
           await route.abort();
         } else await route.fallback();
       });
@@ -206,8 +207,17 @@ for (const [name, viewport] of Object.entries(viewports)) {
     };
     const check = () =>
       page.getByRole("button", { name: "Check whether it saved" });
-    const refreshTask = () =>
-      page.getByRole("button", { name: "Refresh task" }).click();
+    // Refresh task, and wait until its read has been applied.
+    const refreshTask = async (taskId: string) => {
+      const read = page.waitForResponse(
+        (r) =>
+          r.request().method() === "GET" &&
+          new RegExp(`/api/operator/tasks/${taskId}(\\?.*)?$`).test(r.url()),
+      );
+      await page.getByRole("button", { name: "Refresh task" }).click();
+      await read;
+      await page.waitForTimeout(300);
+    };
 
     // Reset: recorded, reply lost, dialog dismissed, a read makes Reset unavailable.
     const lostReset = await refusedTask(f);
@@ -234,12 +244,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
       .getByRole("alertdialog")
       .getByRole("button", { name: "Cancel" })
       .click();
-    await refreshTask();
-    await page.waitForFunction(
-      (id) =>
-        document.querySelector("[data-task-strip]") !== null && Boolean(id),
-      lostReset.taskId,
-    );
+    await refreshTask(lostReset.taskId);
     await openReset();
     await check().click();
     await page
@@ -253,8 +258,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await loseNextReply("task.start-again");
     await startAgain().click();
     await check().waitFor();
-    await refreshTask();
-    await page.waitForTimeout(500);
+    await refreshTask(lostStart.taskId);
     await check().click();
     await page.getByText(/Queued again\./).waitFor();
     sameKeyTwice("task.start-again", lostStart.taskId);
@@ -268,13 +272,14 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await startAgain().click();
     await check().waitFor();
     // The phone's detail view has no Refresh: its next poll (every 15s) is the read.
-    if (viewport.width < 760) await page.waitForTimeout(16000);
-    else
+    if (viewport.width >= 760)
       await page
         .getByRole("button", { name: /^Refresh/ })
         .first()
         .click();
-    await page.waitForTimeout(500);
+    await page
+      .getByText(/has left the current queue/)
+      .waitFor({ timeout: 20000 });
     await check().click();
     await page.getByText(/Queued again\./).waitFor();
     sameKeyTwice("task.start-again", lostInbox.taskId);
@@ -285,14 +290,35 @@ for (const [name, viewport] of Object.entries(viewports)) {
     const lostCard = page.locator(
       `.overview-card[data-request-id="intervention:${lostHome.taskId}"]`,
     );
-    await loseNextReply("task.start-again");
+    await lostCard
+      .getByRole("button", { name: "Start again", exact: true })
+      .waitFor();
+    // The card must outlive a read that no longer lists the request: hold the Inbox read the
+    // click triggers until the service has recorded the start.
+    let release = () => {};
+    const recorded = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/operator/inbox**", async (route) => {
+      await recorded;
+      await route.fallback();
+    });
+    const dropped = page.waitForResponse(
+      async (r) =>
+        r.url().includes("/api/operator/inbox") &&
+        !(await r.text()).includes(`intervention:${lostHome.taskId}`),
+      { timeout: 20000 },
+    );
+    dropped.catch(() => {});
+    await loseNextReply("task.start-again", release);
     await lostCard
       .getByRole("button", { name: "Start again", exact: true })
       .click();
     await lostCard
       .getByRole("button", { name: "Check whether it saved" })
       .waitFor();
-    await page.waitForTimeout(500);
+    await dropped;
+    await page.waitForTimeout(300);
     await lostCard
       .getByRole("button", { name: "Check whether it saved" })
       .click();
