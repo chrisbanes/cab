@@ -838,3 +838,168 @@ test("Readiness leaves focus alone when the reader moved on before the offer fin
     "Create project",
   );
 });
+
+const elsewhereNote =
+  "A discovery credential save elsewhere isn't confirmed yet. Check it there first.";
+const checkSaved = (scope: Page | ReturnType<typeof credentialRow>) =>
+  scope.getByRole("button", { name: "Check whether it saved" });
+/** Records each command, then drops its reply so the page cannot tell it was saved. */
+const dropCommandReplies = (page: Page) =>
+  page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+
+test("A Settings one-click save that is not confirmed holds the Readiness offer", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const posts = commandPosts(page);
+  await offerButton(page).waitFor();
+  await dropCommandReplies(page);
+  try {
+    await settingsOffer(page).click();
+    await checkSaved(credentialRow(page)).waitFor();
+    // Readiness reads the credential as unconfigured, but the save may have landed.
+    assert.equal(await offerButton(page).getAttribute("aria-disabled"), "true");
+    await readinessRow(page).getByText(elsewhereNote).waitFor();
+    await offerButton(page).click({ force: true });
+    assert.equal(posts.length, 1);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await checkSaved(credentialRow(page)).click();
+  await readinessRow(page).getByText("Pass", { exact: true }).waitFor();
+  assert.equal(await readinessRow(page).getByText(elsewhereNote).count(), 0);
+  assert.equal(new Set(posts.map((p) => p.key)).size, 1);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
+test("A Readiness one-click save that is not confirmed holds the Settings credential controls", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = credentialRow(page);
+  const posts = commandPosts(page);
+  await offerButton(page).waitFor();
+  await dropCommandReplies(page);
+  try {
+    await offerButton(page).click();
+    await checkSaved(readinessRow(page)).waitFor();
+    assert.equal(
+      await settingsOffer(page).getAttribute("aria-disabled"),
+      "true",
+    );
+    assert.equal(
+      await row.getByRole("button", { name: "Set", exact: true }).isDisabled(),
+      true,
+    );
+    await row.getByText(elsewhereNote).waitFor();
+    await settingsOffer(page).click({ force: true });
+    assert.equal(posts.length, 1);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await checkSaved(readinessRow(page)).click();
+  await readinessRow(page).getByText("Pass", { exact: true }).waitFor();
+  await row
+    .getByText(
+      "GitHub discovery credential · GitHub CLI · @octo · read-only use",
+    )
+    .waitFor();
+  assert.equal(await row.getByText(elsewhereNote).count(), 0);
+  assert.equal(
+    await row.getByRole("button", { name: "Change", exact: true }).isDisabled(),
+    false,
+  );
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
+test("A Settings form save that is not confirmed holds the Readiness offer", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = credentialRow(page);
+  const posts = commandPosts(page);
+  await offerButton(page).waitFor();
+  await row.getByRole("button", { name: "Set", exact: true }).click();
+  await row.getByLabel("GitHub CLI · recommended").check();
+  await dropCommandReplies(page);
+  try {
+    await row.getByRole("button", { name: "Use this login" }).click();
+    await checkSaved(row).waitFor();
+    assert.equal(await offerButton(page).getAttribute("aria-disabled"), "true");
+    await readinessRow(page).getByText(elsewhereNote).waitFor();
+    await offerButton(page).click({ force: true });
+    assert.equal(posts.length, 1);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await checkSaved(row).click();
+  await readinessRow(page).getByText("Pass", { exact: true }).waitFor();
+  assert.equal(new Set(posts.map((p) => p.key)).size, 1);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
+test("A Settings one-click save that is not confirmed holds the setup offer", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const posts = commandPosts(page);
+  await settingsOffer(page).waitFor();
+  // The request never reaches the service, so setup still reads discovery as unconfigured.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  const use = page.getByRole("button", {
+    name: "Use GitHub CLI login (@octo)",
+  });
+  try {
+    await settingsOffer(page).click();
+    await checkSaved(credentialRow(page)).waitFor();
+    // In-app navigation keeps the unsettled draft; a reload would discard it.
+    await page.getByRole("link", { name: "Create project" }).click();
+    await use.waitFor();
+    assert.equal(await use.getAttribute("aria-disabled"), "true");
+    await page.getByText(elsewhereNote).waitFor();
+    await use.click({ force: true });
+    assert.equal(posts.length, 1);
+    await page.goBack();
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await checkSaved(credentialRow(page)).click();
+  await credentialRow(page)
+    .getByText(
+      "GitHub discovery credential · GitHub CLI · @octo · read-only use",
+    )
+    .waitFor();
+  assert.equal(new Set(posts.map((p) => p.key)).size, 1);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});

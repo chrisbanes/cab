@@ -4,6 +4,7 @@ import {
   useState,
   useReducer,
   useRef,
+  useSyncExternalStore,
   useId,
   type FormEvent,
   type ReactNode,
@@ -87,6 +88,15 @@ export function useDraft(drafts: ConfigurationDrafts, key: string) {
   const revision = d.revision;
   useEffect(() => d.committed(revision));
   return d;
+}
+/** Whether a discovery credential save outside `own` is pending or unconfirmed. */
+export function useDiscoveryUnsettled(
+  drafts: ConfigurationDrafts,
+  ...own: string[]
+) {
+  return useSyncExternalStore(drafts.subscribe, () =>
+    drafts.discoveryUnsettled(...own),
+  );
 }
 export function DraftField({
   draft,

@@ -1217,3 +1217,61 @@ test("a refused project name is cleared by the retry that records", async () => 
   assert.equal(draft.phase, "recorded");
   assert.deepEqual(draft.errors, {});
 });
+test("a discovery credential save elsewhere is unsettled until it is confirmed", async () => {
+  const drafts = new ConfigurationDrafts();
+  const offer = drafts.get("discovery.configure:offer", () => {});
+  const readiness = drafts.get("discovery.configure:readiness", () => {});
+  const unrelated = drafts.get("project.create", () => {});
+  let notified = 0;
+  const unsubscribe = drafts.subscribe(() => notified++);
+  let lost = true;
+  const client = new OperatorClient(async (_url, init) => {
+    if (lost) throw Error("lost");
+    const c = JSON.parse(String(init?.body));
+    return Response.json({
+      kind: "configuration",
+      key: c.key,
+      recorded: true,
+      result: {
+        commandType: "discovery.configure",
+        resourceId: "system:discovery",
+        configured: true,
+      },
+    });
+  });
+  const command = {
+    type: "discovery.configure" as const,
+    key: randomUUID(),
+    credentialRef: "gh:github.com",
+  };
+  assert.equal(
+    drafts.discoveryUnsettled("discovery.configure:readiness"),
+    false,
+  );
+  await offer.submit(client, command, "csrf");
+  assert.equal(offer.phase, "unknown");
+  assert.ok(notified > 0);
+  assert.equal(
+    drafts.discoveryUnsettled("discovery.configure:readiness"),
+    true,
+  );
+  assert.equal(drafts.discoveryUnsettled("discovery.configure:offer"), false);
+  assert.equal(readiness.phase, "editing");
+  // Another kind of draft in the same state is not a discovery save.
+  unrelated.reject({ name: "Enter a project name." });
+  assert.equal(
+    drafts.discoveryUnsettled("discovery.configure:readiness"),
+    true,
+  );
+  lost = false;
+  await offer.reconcile(client, "csrf");
+  assert.equal(offer.phase, "recorded");
+  assert.equal(
+    drafts.discoveryUnsettled("discovery.configure:readiness"),
+    false,
+  );
+  unsubscribe();
+  const seen = notified;
+  offer.purge();
+  assert.equal(notified, seen);
+});
