@@ -842,7 +842,8 @@ export async function saveLogin(
     origin,
     token,
     deps.fetch,
-    signal ?? deps.signal,
+    // The `signal` parameter below is the storage bound for Keychain calls, not for this check.
+    deps.signal,
   ).identity(["cli.identity"]);
   const current: CliConfig = await config.read();
   const keychain = deps.keychain();
