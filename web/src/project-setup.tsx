@@ -171,6 +171,7 @@ export function ProjectSetup(
     p.drafts,
     "discovery.configure:setup",
   );
+  const elsewhereId = useId();
   const unconfigured =
     discovery.state === "unavailable" && discovery.reason === "unconfigured";
   const [ghLogin, setGhLogin] = useState<GhLogin | null>(null);
@@ -711,6 +712,7 @@ export function ProjectSetup(
                       <Button
                         type="button"
                         aria-disabled={ghDraft.phase === "pending" || elsewhere}
+                        aria-describedby={elsewhere ? elsewhereId : undefined}
                         className="aria-disabled:opacity-50"
                         onClick={async () => {
                           if (elsewhere) return;
@@ -757,7 +759,9 @@ export function ProjectSetup(
                   </p>
                   <p className="metadata muted">{discoveryUseNote}</p>
                   {elsewhere && (
-                    <p className="metadata muted">{discoveryElsewhereNote}</p>
+                    <p id={elsewhereId} className="metadata muted">
+                      {discoveryElsewhereNote}
+                    </p>
                   )}
                 </>
               )}

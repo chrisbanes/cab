@@ -1221,7 +1221,7 @@ test("a discovery credential save elsewhere is unsettled until it is confirmed",
   const drafts = new ConfigurationDrafts();
   const offer = drafts.get("discovery.configure:offer", () => {});
   const readiness = drafts.get("discovery.configure:readiness", () => {});
-  const unrelated = drafts.get("project.create", () => {});
+  const unrelated = drafts.get("getting-started.configure", () => {});
   let notified = 0;
   const unsubscribe = drafts.subscribe(() => notified++);
   let lost = true;
@@ -1250,18 +1250,30 @@ test("a discovery credential save elsewhere is unsettled until it is confirmed",
   );
   await offer.submit(client, command, "csrf");
   assert.equal(offer.phase, "unknown");
-  assert.ok(notified > 0);
+  assert.equal(notified, 2);
   assert.equal(
     drafts.discoveryUnsettled("discovery.configure:readiness"),
     true,
   );
   assert.equal(drafts.discoveryUnsettled("discovery.configure:offer"), false);
   assert.equal(readiness.phase, "editing");
-  // Another kind of draft in the same state is not a discovery save.
-  unrelated.reject({ name: "Enter a project name." });
+  // A pending save of another kind of draft is not a discovery save.
+  void unrelated.submit(
+    new OperatorClient(() => new Promise<Response>(() => {})),
+    { type: "getting-started.configure", key: randomUUID(), dismissed: true },
+    "csrf",
+  );
+  assert.equal(unrelated.phase, "pending");
   assert.equal(
     drafts.discoveryUnsettled("discovery.configure:readiness"),
     true,
+  );
+  assert.equal(
+    drafts.discoveryUnsettled(
+      "discovery.configure:offer",
+      "discovery.configure:readiness",
+    ),
+    false,
   );
   lost = false;
   await offer.reconcile(client, "csrf");

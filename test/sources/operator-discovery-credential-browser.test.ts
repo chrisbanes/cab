@@ -868,6 +868,7 @@ test("A Settings one-click save that is not confirmed holds the Readiness offer"
     assert.equal(await offerButton(page).getAttribute("aria-disabled"), "true");
     await readinessRow(page).getByText(elsewhereNote).waitFor();
     await offerButton(page).click({ force: true });
+    await page.waitForLoadState("networkidle");
     assert.equal(posts.length, 1);
   } finally {
     await page.unroute("**/api/operator/commands");
@@ -907,6 +908,7 @@ test("A Readiness one-click save that is not confirmed holds the Settings creden
     );
     await row.getByText(elsewhereNote).waitFor();
     await settingsOffer(page).click({ force: true });
+    await page.waitForLoadState("networkidle");
     assert.equal(posts.length, 1);
   } finally {
     await page.unroute("**/api/operator/commands");
@@ -949,6 +951,7 @@ test("A Settings form save that is not confirmed holds the Readiness offer", asy
     assert.equal(await offerButton(page).getAttribute("aria-disabled"), "true");
     await readinessRow(page).getByText(elsewhereNote).waitFor();
     await offerButton(page).click({ force: true });
+    await page.waitForLoadState("networkidle");
     assert.equal(posts.length, 1);
   } finally {
     await page.unroute("**/api/operator/commands");
@@ -986,6 +989,7 @@ test("A Settings one-click save that is not confirmed holds the setup offer", as
     assert.equal(await use.getAttribute("aria-disabled"), "true");
     await page.getByText(elsewhereNote).waitFor();
     await use.click({ force: true });
+    await page.waitForLoadState("networkidle");
     assert.equal(posts.length, 1);
     await page.goBack();
   } finally {

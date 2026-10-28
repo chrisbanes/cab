@@ -3119,12 +3119,55 @@ test("the readiness picker offer is held by a Settings save that is not confirme
       .getByText("A discovery credential save elsewhere isn't confirmed yet.")
       .waitFor();
     await offer.click({ force: true });
+    await page.waitForLoadState("networkidle");
     assert.equal(posts.length, 1);
     await page.goBack();
   } finally {
     await page.unroute("**/api/operator/commands");
   }
   await check.click();
+  await page.getByLabel("Readiness Project", { exact: true }).waitFor();
+  assert.equal(new Set(posts.map((p) => p.key)).size, 1);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
+test("the readiness picker offer is held by a Settings save that is not confirmed when the tab opens", async (_t, journey) => {
+  const { f, page } = await startGhOffer(journey);
+  const posts: { key: string }[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      posts.push(r.postDataJSON());
+  });
+  const check = page
+    .getByRole("region", { name: "GitHub discovery credential" })
+    .getByRole("button", { name: "Check whether it saved" });
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  const offer = page
+    .getByRole("region", { name: "GitHub discovery credential" })
+    .getByRole("button", { name: "Use GitHub CLI login (@octo)" });
+  // The request never reaches the service, so the tab still reads the credential as unset.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  try {
+    await offer.click();
+    await check.waitFor();
+    await page.goBack();
+    await ghOffer(page).waitFor();
+    assert.equal(await ghOffer(page).getAttribute("aria-disabled"), "true");
+    await page
+      .getByText("A discovery credential save elsewhere isn't confirmed yet.")
+      .waitFor();
+    await ghOffer(page).click({ force: true });
+    await page.waitForLoadState("networkidle");
+    assert.equal(posts.length, 1);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await page.goForward();
+  await check.click();
+  await page.goBack();
   await page.getByLabel("Readiness Project", { exact: true }).waitFor();
   assert.equal(new Set(posts.map((p) => p.key)).size, 1);
   assert.equal(

@@ -2,6 +2,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -415,12 +416,14 @@ export function ReadinessLoginOffer(
       p.client.read("/api/operator/discovery", discoveryStatusSchema, signal),
     [p.client],
   );
-  const status = useOperatorResource(p.csrfToken, loader);
+  // A tab with no conditions never shows the offer, so it makes no read.
+  const status = useOperatorResource(p.csrfToken, loader, p.visible);
   const own = "discovery.configure:readiness-picker";
   const d = useDraft(p.drafts, own);
   // A new visit starts clean; an unsettled login stays until it is checked.
   useEffect(() => d.startOperation({ key: key() }), [d]);
   const elsewhere = useDiscoveryUnsettled(p.drafts, own);
+  const elsewhereId = useId();
   const box = useRef<HTMLDivElement>(null);
   const announced = useRef<number | null>(null);
   const { onRecorded } = p;
@@ -486,6 +489,7 @@ export function ReadinessLoginOffer(
             aria-disabled={
               d.phase === "pending" || d.phase === "recorded" || elsewhere
             }
+            aria-describedby={elsewhere ? elsewhereId : undefined}
             className="aria-disabled:opacity-50"
             onClick={() =>
               d.phase === "recorded" || elsewhere ? undefined : void offer()
@@ -497,7 +501,9 @@ export function ReadinessLoginOffer(
           </Button>
           <p className="metadata muted">{discoveryUseNote}</p>
           {elsewhere && (
-            <p className="metadata muted">{discoveryElsewhereNote}</p>
+            <p id={elsewhereId} className="metadata muted">
+              {discoveryElsewhereNote}
+            </p>
           )}
         </>
       )}

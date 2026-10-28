@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { z } from "zod";
 import {
   claudeTokenStatusSchema,
@@ -306,6 +306,7 @@ export function DiscoveryCredentialRow(
     "discovery.configure",
     "discovery.configure:offer",
   );
+  const elsewhereId = useId();
   const offerUnsettled =
     offer.phase === "pending" || offer.phase === "unknown" || elsewhere;
   const chooseLogin = async () => {
@@ -352,6 +353,7 @@ export function DiscoveryCredentialRow(
                   offer.phase === "recorded" ||
                   elsewhere
                 }
+                aria-describedby={elsewhere ? elsewhereId : undefined}
                 className="aria-disabled:opacity-50"
                 onClick={() =>
                   offer.phase === "recorded" || elsewhere
@@ -392,7 +394,11 @@ export function DiscoveryCredentialRow(
         )}
       </div>
       {offered !== null && <p className="metadata muted">{discoveryUseNote}</p>}
-      {elsewhere && <p className="metadata muted">{discoveryElsewhereNote}</p>}
+      {elsewhere && (
+        <p id={elsewhereId} className="metadata muted">
+          {discoveryElsewhereNote}
+        </p>
+      )}
       {!shown && <DraftMessage draft={d} />}
       {!shown && (
         <DraftMessage

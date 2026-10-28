@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useId, useRef } from "react";
 import { discoveryStatusSchema } from "../../src/operator/contracts.js";
 import { readinessSchema } from "../../src/operator/readiness.js";
 import { Button, ResourceStatus, StatusBadge } from "./components.js";
@@ -62,6 +62,7 @@ export function ReadinessPanel(
     p.drafts,
     "discovery.configure:readiness",
   );
+  const elsewhereId = useId();
   const announced = useRef<number | null>(null);
   // A recorded offer is spent once a read made after it answers and the save has been
   // announced; Clear then brings it back.
@@ -170,6 +171,7 @@ export function ReadinessPanel(
                   aria-disabled={
                     d.phase === "pending" || d.phase === "recorded" || elsewhere
                   }
+                  aria-describedby={elsewhere ? elsewhereId : undefined}
                   className="aria-disabled:opacity-50"
                   onClick={() =>
                     d.phase === "recorded" || elsewhere
@@ -183,7 +185,9 @@ export function ReadinessPanel(
                 </Button>
                 <p className="metadata muted">{discoveryUseNote}</p>
                 {elsewhere && (
-                  <p className="metadata muted">{discoveryElsewhereNote}</p>
+                  <p id={elsewhereId} className="metadata muted">
+                    {discoveryElsewhereNote}
+                  </p>
                 )}
               </>
             ) : (
