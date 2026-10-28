@@ -167,7 +167,7 @@ dimensions.
   Save draft and Create and start. Confirmed creation is distinct from admission.
   There is no attachment hint.
 - **Task detail (`03-task-detail`):** a header with the task ID, a source chip for
-  imported tasks, title, desired outcome, actions (Execution, and Stop… while the
+  imported tasks, title, desired outcome, actions (Execution, and Reset task… and Stop… while the
   task is open; there is no task pause), a status strip (state badge, readiness and holds, next actor, lead,
   updated) and tabs (Overview, Files, Changes, Review, History). Overview leads with
   any decision card, then the latest result (its criterion rows with evidence
@@ -1953,10 +1953,11 @@ Interaction notes:
   Review, and the Overview tab does not repeat those tabs as sections.
 - A link to a section or record inside a closed disclosure opens it; polls,
   refreshes and a returning Back never open or close one.
-- The task header keeps Execution and Stop… only. On a phone (`47-phone-task-overview`)
+- The task header keeps Execution, Reset task… and Stop… only (Reset task… follows Execution; the frames before
+  240 predate it). On a phone (`47-phone-task-overview`)
   the detail header has Back, the task title, a mono subtitle (the source, such as
   `acme/atlas#142`, or Local task) and one outline "Task actions" disclosure holding
-  Execution and Stop… (open in `47b-phone-task-actions-open`); the decision card sits
+  Execution, Reset task… and Stop… (open in `47b-phone-task-actions-open`); the decision card sits
   in the first viewport, and the reply follows the latest result.
 - The History tab links the retained `/task/:id` page once, as Edit task and review
   source. Approvals, handback settlement, result destinations and assignment messages
@@ -2550,10 +2551,10 @@ as follows:
   three lines; when more follows, a closed "Full desired outcome" disclosure in the
   status strip renders the whole outcome as Markdown and stays open across a
   refresh; a redacted outcome shows neither; the brief keeps the full text) and,
-  from 760px, Execution plus, while the task is open, Stop…. Below 760px
+  from 760px, Execution plus, while the task is open, Reset task… and Stop…. Below 760px
   (`47-phone-task-overview`) the header is one row: an icon-only Back (named as
   below), the one-line title over a mono subtitle (`repository#N`, or "Local task"),
-  and one outline "Task actions" control holding Execution and Stop… (open in
+  and one outline "Task actions" control holding Execution, Reset task… and Stop… (open in
   `47b-phone-task-actions-open`). The control is a native disclosure with a 44px
   summary, not an ARIA menu:
   it is the same element at every width and held open from 760px, so resizing never

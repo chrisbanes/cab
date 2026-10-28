@@ -83,6 +83,13 @@ export function StartAgainAction({
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
   );
+  // A confirmation belongs to the request it was sent for: a restarted request refused again
+  // is a new offer.
+  const sentFor =
+    outcome?.command.type === "task.start-again"
+      ? outcome.command.workId
+      : undefined;
+  const sent = offer?.available && offer.workId !== sentFor ? null : outcome;
   const unavailable =
     offer && !offer.available && offer.reason
       ? startAgainUnavailable[offer.reason]
@@ -96,7 +103,7 @@ export function StartAgainAction({
         the same workspace. Nothing is sent to the lead.
       </p>
       {offer?.available && offer.workId
-        ? outcome?.kind !== "recorded" &&
+        ? sent?.kind !== "recorded" &&
           !uncertain && (
             <Button
               variant="secondary"
@@ -117,7 +124,7 @@ export function StartAgainAction({
             </Button>
           )
         : unavailable &&
-          outcome?.kind !== "recorded" && (
+          sent?.kind !== "recorded" && (
             <>
               <p className="muted">
                 Start again isn't offered: {unavailable.text}.
@@ -129,7 +136,7 @@ export function StartAgainAction({
             </>
           )}
       <SendFeedback
-        outcome={outcome}
+        outcome={sent}
         recorded="Queued again. It is admitted under the current checks."
         conflict="Not started again: the task changed since it was read."
         check={() => void send()}
@@ -141,7 +148,7 @@ export function StartAgainAction({
 
 /**
  * Reset task, behind a confirmation that says it cannot be undone. When it is not offered the
- * control is disabled and its reason and recovery are shown beside it.
+ * control is disabled and its reason is its tooltip.
  */
 export function ResetTask({
   client,
@@ -176,22 +183,16 @@ export function ResetTask({
   if (!offer) return null;
   const unavailable = offer.reason ? resetUnavailable[offer.reason] : undefined;
   // An open dialog stays: a recorded reset makes the offer unavailable under its confirmation.
+  // Closed, the header only says why in a tooltip; the Execution link beside it leads to recovery.
   if (!offer.available && !open)
     return (
-      <>
-        <Button variant="secondary" disabled>
-          Reset task…
-        </Button>
-        {unavailable && (
-          <span className="metadata muted">
-            Reset isn't offered: {unavailable.text}.{" "}
-            <RestartDestinationLink
-              taskId={taskId}
-              destination={unavailable.destination}
-            />
-          </span>
-        )}
-      </>
+      <Button
+        variant="secondary"
+        disabled
+        title={unavailable && `Not offered: ${unavailable.text}`}
+      >
+        Reset task…
+      </Button>
     );
   return (
     <Dialog

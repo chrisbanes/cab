@@ -4425,6 +4425,12 @@ export class StandaloneService {
     );
   }
 
+  /** Whether the assignment's newest request was refused before it ran. */
+  latestNotStarted(assignmentId: string): boolean {
+    const request = this.started().schedulerStore.latest(assignmentId);
+    return request?.state === "held" && this.notStartedWork(request.workId);
+  }
+
   /** How a request bears on Start again; a refused draft turn is released elsewhere. */
   private restartRequestKind(request: TurnRequest): RestartRequestKind {
     if (request.state !== "held") return "settled";

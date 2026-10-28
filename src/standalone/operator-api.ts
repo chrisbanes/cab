@@ -2048,14 +2048,20 @@ export class OperatorApi {
     };
   }
   private selection(a: Row) {
-    return selectAssignmentExecution(a, this.service);
+    return {
+      ...selectAssignmentExecution(a, this.service),
+      assignmentId: String(a.id),
+    };
   }
-  /** The assignment's current request was refused before it ran: Start again clears it. */
+  /**
+   * The assignment's newest request was refused before it ran: Start again clears it. The
+   * current request is not enough, as it is missing once an apply moved the assignment's version.
+   */
   private notStarted(s: ReturnType<OperatorApi["selection"]>) {
-    return (
-      s.request?.state === "held" &&
-      this.service.notStartedWork(s.request.workId)
-    );
+    return s.request
+      ? s.request.state === "held" &&
+          this.service.notStartedWork(s.request.workId)
+      : this.service.latestNotStarted(s.assignmentId);
   }
   private nonStopTaskHold(
     taskId: string,

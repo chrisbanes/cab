@@ -261,6 +261,26 @@ test("Start again moves a refused follow-up's inbox batch to the new request", a
   }
 });
 
+test("a refused request still reads as not started after the assignment version moved on", async () => {
+  const f = await refusedInitial();
+  try {
+    // An assignment apply bumps the version past the refused request's captured one.
+    db(f.service)
+      .prepare(
+        "UPDATE domain_assignments SET version = version + 1 WHERE id = ?",
+      )
+      .run(f.assignmentId);
+    const read = (await new OperatorApi(f.service).readTask(f.taskId)).data;
+    assert.equal(read.startAgain?.available, true);
+    assert.equal(read.execution.state, "not-started");
+    assert.ok(read.attention.codes.includes("not-started"));
+    assert.ok(!read.attention.codes.includes("execution-uncertain"));
+  } finally {
+    await f.service.stop();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test("Start again replays by key, conflicts on other content and on a stale read", async () => {
   const f = await refusedInitial();
   try {

@@ -97,18 +97,15 @@ for (const [name, viewport] of Object.entries(viewports)) {
         .getAttribute("href"),
       `/runtime/task/${held.taskId}`,
     );
-    // Reset is disabled with its reason and recovery beside it.
+    // Reset is disabled, with its reason as the tooltip.
     if (viewport.width < 760)
       await page.locator(".task-header-overflow-toggle").click();
-    await page
-      .getByText(/Reset isn't offered: the task or an assignment is held/)
-      .waitFor();
-    assert.equal(
-      await page.getByRole("button", { name: "Reset task…" }).isDisabled(),
-      true,
+    const disabledReset = page.getByRole("button", { name: "Reset task…" });
+    assert.equal(await disabledReset.isDisabled(), true);
+    assert.match(
+      (await disabledReset.getAttribute("title")) ?? "",
+      /the task or an assignment is held/,
     );
-    assert.equal(await startAgain().count(), 0);
-    assert.equal(commands.length, 1);
 
     // The Inbox intervention offers the same action.
     await page.goto(
@@ -163,5 +160,27 @@ for (const [name, viewport] of Object.entries(viewports)) {
       commands[3]?.expectedVersion,
       Number(f.service.domain().task(reset.taskId).version),
     );
+
+    // A restarted request refused again (the task changed under it) is a new offer: the page
+    // shows Start again for it, not the earlier confirmation. Made last: Home shows few cards.
+    const again = await refusedTask(f);
+    await page.goto(`${web.origin}/app/tasks/${again.taskId}`);
+    await startAgain().click();
+    await page.getByText(/Queued again\./).waitFor();
+    assert.equal(commands.length, 5);
+    const domain = f.service.domain();
+    domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: again.projectId,
+      taskId: again.taskId,
+      expectedVersion: Number(domain.task(again.taskId).version),
+      outcome: "Changed again after the restart",
+    } as never);
+    await f.service.configureCapacity({ key: randomUUID(), globalLimit: 3 });
+    await page.getByRole("button", { name: "Refresh task" }).click();
+    await startAgain().waitFor();
+    assert.equal(commands.length, 5);
   });
 }
