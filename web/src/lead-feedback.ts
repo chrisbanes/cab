@@ -31,9 +31,6 @@ export const leadAwaitingRecoveryNotice = (name: string) =>
 
 export const draftTurnHeading = (name: string) => `Draft turn with ${name}`;
 
-export const draftTurnPlaceholder = (name: string) =>
-  `Ask ${name} to look into this task…`;
-
 export const draftTurnStart = "Start draft turn";
 
 export const draftTurnAccessNotice = (name: string) =>

@@ -3,6 +3,7 @@ import { projectFieldText } from "../operator/readiness-text.js";
 import { uuidArg } from "./browse.js";
 import { exactCommand, positiveIntFlag } from "./configure.js";
 import { CliError } from "./connections.js";
+import { reviewDecisionArgs } from "./delivery.js";
 import { keyValues } from "./render.js";
 import {
   connectWrite,
@@ -258,26 +259,8 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
         "request-id",
       ],
       async run(ctx) {
-        const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
-        const reviewId = uuidArg(ctx.values["review-id"] ?? "", "--review-id");
-        const revision = positiveIntFlag(
-          ctx.values["expected-revision"],
-          "expected-revision",
-        );
-        const materialHash = ctx.values["material-hash"] ?? "";
-        const decision = ctx.values.decision;
-        if (revision === undefined)
-          throw new CliError("usage", "--expected-revision N is required.");
-        if (!/^[a-f0-9]{64}$/.test(materialHash))
-          throw new CliError(
-            "invalid-input",
-            "--material-hash must be the 64-character hash the review printed.",
-          );
-        if (decision !== "approved" && decision !== "denied")
-          throw new CliError(
-            "invalid-input",
-            "--decision must be approved or denied.",
-          );
+        const { taskId, reviewId, revision, materialHash, decision } =
+          reviewDecisionArgs(ctx);
         const session = await connectWrite(ctx, TASK_WRITE);
         const type = "task.publish.confirm";
         const { key, digest } = await requestKey(

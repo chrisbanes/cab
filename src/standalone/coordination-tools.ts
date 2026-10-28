@@ -112,8 +112,6 @@ export function dispatchCoordinationTool(
   switch (call.tool) {
     case "ensemble_delegate":
       return store.delegate(call, externalAdmission);
-    case "ensemble_report_result":
-      return store.recordResult(call).response;
     case "ensemble_ask_question":
       return store.requestQuestion(call);
     case "ensemble_request_approval":

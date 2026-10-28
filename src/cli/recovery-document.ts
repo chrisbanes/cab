@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { z } from "zod";
 import {
@@ -12,11 +11,7 @@ import {
   recoveryRpcErrorSchema,
 } from "../core/recovery-contracts.js";
 import { writeOut } from "./browse-evidence.js";
-import {
-  canonicalJson,
-  MAX_DOCUMENT_BYTES,
-  readOwnerOnlyFile,
-} from "./change-document.js";
+import { readSealedDocument, sealDocument } from "./change-document.js";
 import { CliError } from "./connections.js";
 
 export const RECOVERY_SCHEMA = "ensemble.cli.recovery/v1";
@@ -58,20 +53,11 @@ const recoveryDocumentSchema = z
   .strict();
 export type RecoveryDocument = z.infer<typeof recoveryDocumentSchema>;
 
-const digestOf = (document: Omit<RecoveryDocument, "digest">) =>
-  createHash("sha256").update(canonicalJson(document)).digest("hex");
-
 export async function writeRecoveryDocument(
   path: string,
   document: Omit<RecoveryDocument, "digest">,
 ) {
-  const complete = { ...document, digest: digestOf(document) };
-  const body = Buffer.from(`${JSON.stringify(complete, null, 2)}\n`);
-  if (body.byteLength > MAX_DOCUMENT_BYTES)
-    throw new CliError(
-      "invalid-input",
-      "The recovery document would exceed 512 KiB.",
-    );
+  const { complete, body } = sealDocument(document, "recovery");
   return { path: await writeOut(path, body), document: complete };
 }
 
@@ -85,28 +71,18 @@ const PREPARE_FIX =
   "Prepare it first with 'ensemble recovery prepare' (see 'ensemble help recovery'), then submit the file it writes.";
 
 /** Reads an owner-only recovery document and verifies its schema and digest. */
-export async function readRecoveryDocument(
+export const readRecoveryDocument = (
   path: string,
   uid = process.getuid?.(),
-): Promise<RecoveryDocument> {
-  const text = await readOwnerOnlyFile(path, uid, invalid, PREPARE_FIX);
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw invalid("it is not JSON", PREPARE_FIX);
-  }
-  const parsed = recoveryDocumentSchema.safeParse(value);
-  if (!parsed.success)
-    throw invalid(`it is not an ${RECOVERY_SCHEMA} document`, PREPARE_FIX);
-  const { digest, ...rest } = parsed.data;
-  if (digestOf(rest) !== digest)
-    throw invalid(
-      "its digest does not match its content; prepare it again",
-      PREPARE_FIX,
-    );
-  return parsed.data;
-}
+): Promise<RecoveryDocument> =>
+  readSealedDocument(
+    path,
+    uid,
+    recoveryDocumentSchema,
+    RECOVERY_SCHEMA,
+    invalid,
+    PREPARE_FIX,
+  );
 
 const receiptAssertions = z
   .object({

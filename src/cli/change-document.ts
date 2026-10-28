@@ -69,8 +69,23 @@ export function canonicalJson(value: unknown): string {
 }
 
 /** Detects accidental or in-transit modification; it is not a MAC. */
-export const digestOf = (document: Omit<ChangeDocument, "digest">): string =>
+export const digestOf = (document: object): string =>
   createHash("sha256").update(canonicalJson(document)).digest("hex");
+
+/** Adds the digest and serializes the document, refusing one over the size limit. */
+export function sealDocument<T extends object>(
+  document: T,
+  noun: string,
+): { complete: T & { digest: string }; body: Buffer } {
+  const complete = { ...document, digest: digestOf(document) };
+  const body = Buffer.from(`${JSON.stringify(complete, null, 2)}\n`);
+  if (body.byteLength > MAX_DOCUMENT_BYTES)
+    throw new CliError(
+      "invalid-input",
+      `The ${noun} document would exceed 512 KiB.`,
+    );
+  return { complete, body };
+}
 
 /** `ensemble-<kind>-<id8>`: the default document name, without its suffix or extension. */
 function defaultStem(kind: ChangeKind, targetId: string) {
@@ -88,13 +103,7 @@ export async function writeChangeDocument(
   target: { out?: string | undefined; cwd: string },
   document: Omit<ChangeDocument, "digest">,
 ): Promise<{ path: string; document: ChangeDocument }> {
-  const complete = { ...document, digest: digestOf(document) };
-  const body = Buffer.from(`${JSON.stringify(complete, null, 2)}\n`);
-  if (body.byteLength > MAX_DOCUMENT_BYTES)
-    throw new CliError(
-      "invalid-input",
-      "The change document would exceed 512 KiB.",
-    );
+  const { complete, body } = sealDocument(document, "change");
   if (target.out !== undefined)
     return { path: await writeOut(target.out, body), document: complete };
   const stem = defaultStem(document.kind, document.target.id);
@@ -190,13 +199,16 @@ export async function readOwnerOnlyFile(
   }
 }
 
-/** Reads an owner-only regular file and verifies its schema and digest. */
-export async function readChangeDocument(
+/** Reads an owner-only regular file, parses it with `schema` and verifies its digest. */
+export async function readSealedDocument<T extends { digest: string }>(
   path: string,
+  uid: number | undefined,
+  schema: z.ZodType<T>,
+  schemaName: string,
+  invalid: (why: string, fix?: string) => CliError,
   /** The remedy for a document that is missing or unusable: how to prepare one. */
   prepare: string,
-  uid = process.getuid?.(),
-): Promise<ChangeDocument> {
+): Promise<T> {
   const text = await readOwnerOnlyFile(path, uid, invalid, prepare);
   let value: unknown;
   try {
@@ -204,9 +216,9 @@ export async function readChangeDocument(
   } catch {
     throw invalid("it is not JSON", prepare);
   }
-  const parsed = changeDocumentSchema.safeParse(value);
+  const parsed = schema.safeParse(value);
   if (!parsed.success)
-    throw invalid("it is not an ensemble.cli.change/v1 document", prepare);
+    throw invalid(`it is not an ${schemaName} document`, prepare);
   const { digest, ...rest } = parsed.data;
   if (digestOf(rest) !== digest)
     throw invalid(
@@ -215,3 +227,19 @@ export async function readChangeDocument(
     );
   return parsed.data;
 }
+
+/** Reads an owner-only regular file and verifies its schema and digest. */
+export const readChangeDocument = (
+  path: string,
+  /** The remedy for a document that is missing or unusable: how to prepare one. */
+  prepare: string,
+  uid = process.getuid?.(),
+): Promise<ChangeDocument> =>
+  readSealedDocument(
+    path,
+    uid,
+    changeDocumentSchema,
+    CHANGE_SCHEMA,
+    invalid,
+    prepare,
+  );

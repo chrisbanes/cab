@@ -118,13 +118,6 @@ export function settingsHeader(
   return null;
 }
 
-export const clock = (at: number) =>
-  new Date(at).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-
 const receiptVersion = (receipt: CommandReceipt) =>
   receipt.kind === "configuration" && "version" in receipt.result
     ? receipt.result.version
@@ -133,7 +126,7 @@ const receiptVersion = (receipt: CommandReceipt) =>
 /** "Saved 10:52" for a save this session recorded at the current version, else nothing: a version is never shown. */
 export function savedLine(version: number, saved: SavedRecord | undefined) {
   return saved && receiptVersion(saved.receipt) === version
-    ? `Saved ${clock(saved.at)}`
+    ? `Saved ${clockLabel(saved.at)}`
     : null;
 }
 

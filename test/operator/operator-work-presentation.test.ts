@@ -13,11 +13,11 @@ import {
   columnCounts,
   columns,
   filterTasks,
+  nextActor,
   operatorNext,
   parseTaskFilters,
   readyButBlocked,
   taskColumn,
-  taskNext,
   taskReasons,
   taskRouteSubtitle,
   visibleColumns,
@@ -163,7 +163,10 @@ test("columns follow the design order and Active tasks hides only terminal work"
 });
 
 test("the next actor is derived from recorded attention and state only", () => {
-  const next = (o: Overrides) => taskNext(summary(o));
+  const next = (o: Overrides) => {
+    const task = summary(o);
+    return nextActor(task.attention.codes, taskColumn(task)).text;
+  };
   assert.equal(next({ codes: ["question"] }), "Next: you · answer question");
   assert.equal(
     next({ codes: ["approval"] }),
@@ -183,7 +186,10 @@ test("the next actor is derived from recorded attention and state only", () => {
   assert.equal(next({}), "No operator decision");
   // The Uncertain column alone (no attention code) reads the same in the row and the bar.
   const columnOnly = summary({ execution: "uncertain" });
-  assert.equal(taskNext(columnOnly), "Next: you · inspect execution");
+  assert.equal(
+    next({ execution: "uncertain" }),
+    "Next: you · inspect execution",
+  );
   assert.equal(attentionCandidate([summary(), columnOnly]), columnOnly);
 });
 

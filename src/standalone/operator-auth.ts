@@ -282,13 +282,7 @@ export class OperatorAuth {
         },
         randomBytes,
       );
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "Could not initialize operator authentication"
-      ) {
-        throw error;
-      }
+    } catch {
       throw new Error("Could not initialize operator authentication");
     }
   }
