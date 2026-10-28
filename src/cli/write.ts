@@ -241,6 +241,33 @@ export async function sendCommand(
 }
 
 /**
+ * Rethrows `error`; an unknown outcome gets a retry that carries `flags`, the values this
+ * attempt sent, because the journal keeps digests only and a changed read would change the key.
+ */
+export function carryRetryFlags(
+  error: unknown,
+  key: string,
+  flags: string,
+): never {
+  if (
+    error instanceof CliError &&
+    error.code === "command-outcome-unknown" &&
+    error.extra.request
+  ) {
+    const retry = `--request-id ${key} ${flags}`;
+    throw new CliError(
+      error.code,
+      error.message.replace(`--request-id ${key}`, retry),
+      {
+        ...error.extra,
+        fix: `Do not assume either outcome: repeat the same command with ${retry} to settle it.`,
+      },
+    );
+  }
+  throw error;
+}
+
+/**
  * Runs one write and, when the service answers `conflict`, re-reads the current version
  * (best effort) and rethrows the same code and `extra`, so the exit code, request identity
  * and journal state are untouched. A failed re-read leaves the service's message.

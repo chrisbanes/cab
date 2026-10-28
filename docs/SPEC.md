@@ -72,8 +72,9 @@ that share the web UI's Stop hold; Resume clears only the operator Stop.
 `project sources|prepare-source|preview-source|place-task` inspect and change GitHub
 sources and repository links (a `github.configure` change document applied with
 `project apply`), activate a selection and place a conflicting imported task;
-`delivery get|refresh|review-comment|confirm-comment|send-comment` inspect delivery
-and drive the existing refresh and staged comment commands, and `delivery
+`delivery get|refresh|settle|review-comment|confirm-comment|send-comment` inspect delivery
+and drive the existing refresh, handback settlement and staged comment commands,
+`result deliver` delivers an undelivered result to its permitted recipient, and `delivery
 publish-review|publish-confirm|publish-send|publish-link|publish-abandon` publish a
 local task as a GitHub issue with the operator UI's own commands. `recovery
 get|prepare|submit` inspect an assignment's held generations and submit the
@@ -566,7 +567,7 @@ transient failures.
 The operator UI is a React application at `/app`, served with same-origin
 `/api/operator` JSON by the production `operator` command. Approval decisions, handback
 settlement, result-destination reconciliation and messages to delegated assignments
-are task-view controls. Controls the app does not offer remain on retained
+are task-view controls, and the CLI offers the same commands. Controls the app does not offer remain on retained
 server-rendered routes: local task edits and source review decisions on `/task/:id`;
 delivery policy on `/project/:id`; and Stop/Resume and recovery on
 `/runtime/task/:id`. They are reached from a task's History tab, Project settings'

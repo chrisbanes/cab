@@ -486,8 +486,26 @@ confirmation material, reused keys with other material, changed authority, held
 admission, a task without a bound issue) are `409`, and an approval without a grant
 is `403`; other failures stay `command-outcome-unknown`. Posted comments carry a
 hidden `<!-- ensemble-operation:ID -->` marker that the provider read-back matches.
-Installation-wide source refresh, `source.review`, handback settlement and a list of
-pending comment reviews are not CLI commands.
+Installation-wide source refresh, `source.review` and a list of pending comment
+reviews are not CLI commands.
+
+`delivery settle TASK_ID --decision accepted|closed` sends `delivery.settle`, and
+`result deliver TASK_ID RESULT_ID` sends `result.recipient`, both scoped `task:<id>`
+with the web task view's commands unchanged. Each reads the task first and sends the
+values it read as the expected values (`delivery settle`: task version, binding
+revision, policy version and PR head; `result deliver`: the result's revision), and
+the caller may pin any of them with an `--expected-*` flag. The resolved values are
+the journal material, and the journal keeps digests only; the service answers a
+recorded key before any state check, so the same `--request-id` with the same values
+replays the original `delivery-settlement` or `coordination` receipt after the
+binding revision moves or the result leaves the unresolved list. An unknown outcome
+(exit 6) therefore names `--request-id KEY` and every resolved value; `operation get`
+does not read either type. Advisory prechecks (a current settlement, a draft, closed
+or outside-changed PR for Accept, a failed provider read, an unknown or already
+delivered result, an unavailable recipient) run only for a key with no earlier
+attempt, and a service `conflict` is re-read and reported with the current values.
+`result deliver` sends only the recipient the service permits. Neither command
+merges, closes or comments, completes a task or has an undo.
 
 `delivery publish-review|publish-confirm|publish-send|publish-link|publish-abandon`
 publish a local task as a GitHub issue ([ADR-1018](../adr/1018-task-publication-in-place.md))

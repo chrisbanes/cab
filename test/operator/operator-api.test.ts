@@ -42,6 +42,7 @@ import {
 } from "../fixtures/power-events.js";
 import { mixedForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
+import { reportUnresolvedResult } from "../fixtures/unresolved-result.js";
 import {
   seedReviewTask,
   setLinkedRepository,
@@ -1105,49 +1106,7 @@ test("unresolved result supplies exact revision and permitted recipient; replay 
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const ids = await seed(f, true);
-  const workerId = randomUUID();
-  f.service.domain().execute({
-    type: "assignment.create",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: ids.projectId,
-    taskId: ids.taskId,
-    assignmentId: workerId,
-    profileId: ids.profileId,
-    brief: "Report findings",
-    resultDestination: "lead",
-    requesterAssignmentId: null,
-  });
-  f.seedPersistedState((db) =>
-    db
-      .prepare(
-        "UPDATE domain_assignments SET resultRecipientDisposition='unresolved' WHERE id=?",
-      )
-      .run(workerId),
-  );
-  f.runtime.complete(1);
-  await until(() => f.runtime.turns >= 2);
-  await until(() =>
-    f.service
-      .turnRequests()
-      .some((r) => r.assignmentId === workerId && r.state === "active"),
-  );
-  const request = f.service
-    .turnRequests()
-    .find((r) => r.assignmentId === workerId && r.state === "active");
-  assert.ok(request);
-  const work = f.service
-    .list()
-    .find((w) => w.workId === request.workId && w.state === "running");
-  assert.ok(work?.threadId && work.turnId);
-  const result = await f.runtime.callTool({
-    threadId: work.threadId,
-    turnId: work.turnId,
-    callId: "result1",
-    tool: "ensemble_report_result",
-    arguments: { summary: "Exact retained result <script>still text</script>" },
-  });
-  assert.equal(result.success, true, result.text);
+  const { workerId } = await reportUnresolvedResult(f, ids);
   let api = new OperatorApi(f.service, [f.directory]);
   let u = (await api.readTask(ids.taskId)).data.unresolvedResults[0];
   assert.ok(u?.permittedRecipient);
