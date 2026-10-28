@@ -252,7 +252,7 @@ between projects are deferred. Discovery grants no additional repository access.
 Losing readiness, leaving all selections or external closure holds new delegation
 and notifies the lead and active assignees to reach a safe stopping point. Operator resolution is needed
 to resume, except confirmed closure from this task's own delivery and the two source-caused holds
-that clear themselves: a readiness-lost or leave-selection hold is released by a later complete read
+that clear themselves: a readiness-lost or withdrawn hold (omitted, or leaving all selections) is released by a later complete read
 that lists the issue again while the task is Ready, since the source has recovered. A partial read
 releases nothing, and every other source hold, including changed text and closure, still needs
 operator resolution. External closure

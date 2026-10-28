@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
-import { startedOf } from "../fixtures/service-internals.js";
 import {
   fieldReady,
   labelAndFieldReady,
@@ -10,6 +9,7 @@ import {
   publicationFixture,
   publicationProject,
 } from "../fixtures/task-publication.js";
+import { startedOf } from "../fixtures/service-internals.js";
 
 type Fixture = Awaited<ReturnType<typeof publicationFixture>>;
 const imported = (f: Fixture, taskId: string) =>
