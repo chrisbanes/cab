@@ -23,7 +23,7 @@ test("the packed CLI installs offline and works against a real service over loop
   const dir = mkdtempSync(join(tmpdir(), "cab-cli-packed-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const project = await installPacked(dir);
-  const installed = join(project, "node_modules", "@chrisbanes", "cab");
+  const installed = join(project, "node_modules", "cab");
   assert.ok(existsSync(join(installed, "dist/src/cli/main.js")));
   assert.ok(!existsSync(join(installed, "dist/test")));
   assert.ok(existsSync(join(installed, "dist/operator/index.html")));

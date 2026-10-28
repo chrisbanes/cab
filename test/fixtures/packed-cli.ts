@@ -46,9 +46,9 @@ export async function installPacked(dir: string) {
   const packages: Lock["packages"] = {
     "": {
       name: "cab-cli-smoke",
-      dependencies: { "@chrisbanes/cab": `file:${tarball}` },
+      dependencies: { cab: `file:${tarball}` },
     },
-    "node_modules/@chrisbanes/cab": {
+    "node_modules/cab": {
       version: manifest.version,
       resolved: `file:${tarball}`,
       integrity: `sha512-${createHash("sha512").update(readFileSync(tarball)).digest("base64")}`,
@@ -66,7 +66,7 @@ export async function installPacked(dir: string) {
     JSON.stringify({
       name: "cab-cli-smoke",
       private: true,
-      dependencies: { "@chrisbanes/cab": `file:${tarball}` },
+      dependencies: { cab: `file:${tarball}` },
     }),
   );
   writeFileSync(
