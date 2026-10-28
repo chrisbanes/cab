@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   operatorCommandSchema,
   textMaxLength,
@@ -24,6 +23,7 @@ export function SendFeedback({
   details,
   check,
   review,
+  focus = true,
 }: {
   outcome: SendOutcome | null;
   recorded: string;
@@ -36,6 +36,8 @@ export function SendFeedback({
   check: () => void;
   /** Clears a conflict once the reread shows current state. */
   review?: { label: string; onClick: () => void } | undefined;
+  /** Whether the message takes focus when it appears; a message that replaces no control may not. */
+  focus?: boolean;
 }) {
   if (!outcome) return null;
   return (
@@ -57,7 +59,7 @@ export function SendFeedback({
               ? conflict
               : failed(outcome.code ?? "command-outcome-unknown")
       }
-      focus
+      focus={focus}
       action={
         outcome.kind === "unknown"
           ? { label: "Check whether it saved", onClick: check }
@@ -96,6 +98,7 @@ export function HandbackSettlement({
   const { send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${task.task.id}:settlement`,
     (c, r) =>
       r.kind === "delivery-settlement" &&
       r.key === c.key &&
@@ -220,6 +223,7 @@ export function ResultDestination({
   const { send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${task.task.id}:result:${item.resultId}`,
     (c, r) =>
       c.type === "result.recipient" &&
       r.kind === "coordination" &&
@@ -293,10 +297,10 @@ export function AssignmentMessage({
   /** Rereads the task after a recorded message or a conflict. */
   onChanged: () => void;
 }) {
-  const [text, setText] = useState("");
-  const { send, sending, outcome, uncertain } = useCommandSend(
+  const { entry, send, sending, outcome, uncertain } = useCommandSend(
     client,
     session,
+    `${taskId}:message:${assignment.assignmentId}`,
     (c, r) =>
       c.type === "message" &&
       r.kind === "coordination" &&
@@ -305,7 +309,6 @@ export function AssignmentMessage({
       r.recipientAssignmentId === c.recipientAssignmentId &&
       r.eventType === "operator-message",
     (kind) => {
-      if (kind === "recorded") setText("");
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
   );
@@ -316,7 +319,7 @@ export function AssignmentMessage({
       className="assignment-message"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!text.trim()) return;
+        if (!entry.text.trim()) return;
         void send(
           operatorCommandSchema.parse({
             type: "message",
@@ -324,7 +327,7 @@ export function AssignmentMessage({
             taskId,
             recipientAssignmentId: assignment.assignmentId,
             expectedAssignmentVersion: assignment.version,
-            message: text,
+            message: entry.text,
           }),
         );
       }}
@@ -336,9 +339,9 @@ export function AssignmentMessage({
         id={id}
         autoGrow
         maxLength={textMaxLength}
-        value={text}
+        value={entry.text}
         disabled={Boolean(sending) || uncertain}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => entry.edit(e.target.value)}
       />
       <div className="assignment-message-bar">
         <p className="metadata muted">
@@ -348,7 +351,7 @@ export function AssignmentMessage({
           <Button
             type="submit"
             variant="secondary"
-            disabled={Boolean(sending) || !text.trim()}
+            disabled={Boolean(sending) || !entry.text.trim()}
           >
             {sending ? "Sending…" : `Send to ${name}`}
           </Button>

@@ -51,6 +51,7 @@ export function ApprovalReview({
   const { send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${taskId}:approval:${approval.interactionId}`,
     (c, r) =>
       r.kind === "coordination" &&
       r.key === c.key &&

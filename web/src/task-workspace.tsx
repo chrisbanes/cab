@@ -1,8 +1,10 @@
 import { ApprovalReview } from "./approval-review.js";
+import { useSendEntry } from "./command-send.js";
 import {
   AssignmentMessage,
   HandbackSettlement,
   ResultDestination,
+  SendFeedback,
 } from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
 import { StartAgainAction, taskChangedEvent } from "./task-restart.js";
@@ -343,24 +345,6 @@ const unknownMessage = (type: OperatorCommand["type"]) =>
   `We couldn't confirm ${writeCopy(type).unknown}. Your draft is kept.`;
 const rejectedMessage = (type: OperatorCommand["type"], code: string) =>
   `${writeCopy(type).failed}: ${failureCause(code)}. Your draft is kept.`;
-/** A Results or Changes write whose response was lost: its exact request and the warning. */
-const unconfirmedOf = (
-  taskId: string,
-  input: OperatorCommand,
-  code?: string,
-) => ({
-  input: structuredClone(input),
-  outcome: {
-    tone: "warning" as const,
-    message: unknownMessage(input.type),
-    details: detailRows({
-      command: input.type,
-      resource: taskId,
-      requestKey: input.key,
-      ...(code ? { code } : {}),
-    }),
-  },
-});
 const changedMessage =
   "This task changed since you opened it. Your draft is kept.";
 /** The reply tab's description when GitHub comments are unavailable. */
@@ -402,10 +386,10 @@ export function TaskWorkspace({
     (ReplyOutcome & { from?: OperatorCommand["type"] }) | null
   >(null);
   // A Results or Changes write whose response was lost keeps its exact request in the
-  // task's state, replayed by its check, so a later click never builds a different request
-  // from the current selection, even after the page is left and reopened.
-  const unconfirmed = state.unconfirmed;
-  const auxInFlight = useRef<OperatorCommand | null>(null);
+  // session's command sends, replayed by its check, so a later click never builds a different
+  // request from the current selection, even after the page is left and reopened.
+  const auxSend = useSendEntry(`${taskId}:workspace-aux`);
+  const unconfirmed = auxSend.uncertain ? auxSend.lifecycle.frozen : null;
 
   const focusUnconfirmed = useRef(false);
   // The control whose replayed check just settled, focused once the commit enables it.
@@ -773,8 +757,6 @@ export function TaskWorkspace({
           }),
         };
       }
-      if (auxInFlight.current)
-        state.unconfirmed = unconfirmedOf(taskId, auxInFlight.current);
       sourceRequest.current++;
       sourceRead.current = null;
       if (state.sourceObservation === "pending") {
@@ -1086,11 +1068,11 @@ export function TaskWorkspace({
       void loadHistory(a.assignmentId, undefined, undefined, true);
   }, [data, loadHistory, resource.state.pending, resource.state.error]);
   async function command(input: OperatorCommand) {
-    if (pending) return;
+    if (pending || auxSend.sending) return;
     if (
       unconfirmed &&
       (input.type === "review.view" || input.type === "delivery.refresh") &&
-      input.key !== unconfirmed.input.key
+      input.key !== unconfirmed.key
     )
       return;
     const normalized = operatorCommandSchema.safeParse(input);
@@ -1141,25 +1123,24 @@ export function TaskWorkspace({
       }
       state.frozen = structuredClone(input);
     }
-    if (reply) {
-      replyInFlight.current = input.key;
-      sent.current = true;
-      setAux(null);
-    } else auxInFlight.current = structuredClone(input);
-    const replayed = unconfirmed?.input.key === input.key;
-    const outcome = await client.command(input, session.csrfToken);
-    if (!scope.current || !current()) return;
-    setPending(false);
-    auxInFlight.current = null;
-    if (replyInFlight.current === input.key) replyInFlight.current = null;
     if (!reply) {
-      if (outcome.state === "unknown") {
+      const replayed = auxSend.uncertain;
+      // The send checks the receipt's key itself; nothing else ties these two writes to a receipt.
+      const done = await auxSend.send(
+        client,
+        session.csrfToken,
+        () => true,
+        replayed ? undefined : input,
+      );
+      setPending(false);
+      if (!scope.current || !done) return;
+      const outcome = done.result;
+      if (done.kind === "unknown") {
         setAux(null);
         // The control is off now, so the check takes the focus it held.
         focusUnconfirmed.current = true;
-        state.unconfirmed = unconfirmedOf(taskId, input, outcome.code);
       } else {
-        state.unconfirmed = null;
+        auxSend.clear();
         if (replayed) focusReplay.current = input.type;
         if (outcome.state === "recorded") {
           if (outcome.receipt.kind === "comment-review")
@@ -1188,6 +1169,13 @@ export function TaskWorkspace({
       changed();
       return;
     }
+    replyInFlight.current = input.key;
+    sent.current = true;
+    setAux(null);
+    const outcome = await client.command(input, session.csrfToken);
+    if (!scope.current || !current()) return;
+    setPending(false);
+    if (replyInFlight.current === input.key) replyInFlight.current = null;
     if (state.frozen?.key !== input.key) {
       setAux({
         tone: "warning",
@@ -1577,16 +1565,15 @@ export function TaskWorkspace({
   // The check sits beside the control whose response was lost, which stays off meanwhile.
   const unconfirmedCheck = (type: "review.view" | "delivery.refresh") =>
     !pending &&
-    unconfirmed?.input.type === type && (
-      <ActionOutcome
-        tone="warning"
-        message={unconfirmed.outcome.message}
-        details={unconfirmed.outcome.details}
+    unconfirmed?.type === type && (
+      <SendFeedback
+        outcome={auxSend.outcome}
+        recorded=""
+        conflict={changedMessage}
+        unknown={unknownMessage(type)}
+        details={{ resource: taskId }}
         focus={focusUnconfirmed.current}
-        action={{
-          label: "Check whether it saved",
-          onClick: () => command(unconfirmed.input),
-        }}
+        check={() => void command(unconfirmed)}
       />
     );
   const comment = commentAvailability(data.commentPolicy);

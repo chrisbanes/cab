@@ -79,6 +79,7 @@ export function StartAgainAction({
   const { send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${taskId}:start-again`,
     (c, r) =>
       c.type === "task.start-again" &&
       r.kind === "start-again" &&
@@ -168,7 +169,6 @@ export function ResetTask({
   offer,
   onChanged,
   onOpenChange,
-  onSend,
 }: {
   client: OperatorClient;
   session: Session;
@@ -179,13 +179,12 @@ export function ResetTask({
   onChanged: () => void;
   /** The dialog opened or closed, for a container that must stay open behind it. */
   onOpenChange?: (open: boolean) => void;
-  /** A reset was sent: the container keeps this mounted so a lost reply can be checked. */
-  onSend?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const { send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${taskId}:reset`,
     (c, r) =>
       c.type === "task.reset" &&
       r.kind === "task-reset" &&
@@ -247,7 +246,6 @@ export function ResetTask({
               variant="destructive"
               disabled={Boolean(sending) || !offer.available}
               onClick={() => {
-                onSend?.();
                 void send(
                   operatorCommandSchema.parse({
                     type: "task.reset",

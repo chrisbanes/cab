@@ -871,8 +871,14 @@ language: a quiet inline line on success, and one alert with a single action whe
 a save is rejected, conflicts or has an unknown outcome. The change list is the
 confirmation; consequences are stated there, before the action, not after it.
 Identifiers, versions, command names and error codes stay available under a
-Details disclosure rather than in the message. See
-[action feedback](user-flows/feedback.md).
+Details disclosure rather than in the message. A task-view command whose outcome is
+unconfirmed (approval, settlement, result delivery, assignment message, Start again,
+Reset, question answer, viewing reference and delivery refresh) stays checkable after the
+operator leaves the task and returns in the same session; a reload, sign-out or session
+change discards it. The check resends the original key and body, and settles as refused
+only on a definite domain refusal (a conflict or an invalid-input, body-too-large,
+unsupported-media or redaction-limit rejection); an authentication, session, availability
+or transport failure keeps it unconfirmed. See [action feedback](user-flows/feedback.md).
 
 Project, task list, composer, runtime settings and assignment recovery reads
 rebuild once if project or profile instruction revisions or a project's linked

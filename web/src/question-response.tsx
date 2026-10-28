@@ -28,6 +28,7 @@ import {
   StatusBadge,
 } from "./components.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
+import { SendFeedback } from "./coordination-actions.js";
 import { Card } from "./ui/card.js";
 import { Textarea } from "./ui/textarea.js";
 import {
@@ -166,6 +167,8 @@ export function QuestionResponse({
   );
   const submit = async () => {
     if (!state || !data) return;
+    // Undefined resends the frozen answer: the check after an unconfirmed send.
+    let fresh: OperatorCommand | undefined;
     if (!state.lifecycle.uncertain) {
       if (!canEdit || !state.validate()) {
         states.changed();
@@ -207,22 +210,18 @@ export function QuestionResponse({
                 expectedRevision: state.revision,
                 answers: state.answers,
               };
-      if (!state.lifecycle.freeze(operatorCommandSchema.parse(command))) return;
+      fresh = operatorCommandSchema.parse(command);
     }
-    const command = state.lifecycle.begin();
-    if (!command) return;
-    const currentAuthentication = client.captureAuthenticationScope();
-    state.sending = true;
-    state.notice = "";
-    states.changed();
-    const result = await client.command(command, session.csrfToken);
-    if (!currentAuthentication()) return;
-    const disposition = state.settle(command, result);
-    states.changed();
-    if (disposition === "recorded") {
+    const done = await state.send.send(
+      client,
+      session.csrfToken,
+      (c, r) => state.matches(c, r),
+      fresh,
+    );
+    if (done?.kind === "recorded") {
       resource.refresh();
       onRecorded?.();
-    } else if (disposition === "conflict") resource.refresh();
+    } else if (done?.kind === "conflict") resource.refresh();
   };
   const recorded = data?.status === "recorded" || state?.outcome === "recorded",
     staleRead = Boolean(resource.state.error && resource.state.data),
@@ -466,25 +465,22 @@ export function QuestionResponse({
               </div>
               <div className="question-submit">
                 {outcome ? (
-                  <ActionOutcome
-                    key={`${state.outcome}:${state.details.requestKey}`}
-                    tone={state.outcome === "failed" ? "error" : "warning"}
-                    message={state.notice}
-                    action={
-                      state.outcome === "unknown"
-                        ? {
-                            label: "Check whether it saved",
-                            onClick: submit,
-                          }
-                        : state.outcome === "conflict"
-                          ? {
-                              label: "Review current request",
-                              onClick: resource.refresh,
-                            }
-                          : undefined
-                    }
+                  <SendFeedback
+                    outcome={state.send.outcome}
+                    recorded={answerCopy.sent}
+                    unknown={answerCopy.unknown}
+                    conflict={answerCopy.conflict}
+                    failed={answerCopy.failed}
+                    details={{
+                      resource: state.interactionId,
+                      version: state.revision,
+                    }}
+                    check={() => void submit()}
+                    review={{
+                      label: "Review current request",
+                      onClick: resource.refresh,
+                    }}
                     focus={state.outcome === "unknown" && sent.current}
-                    details={detailRows(state.details)}
                   />
                 ) : (
                   !state.sending && (

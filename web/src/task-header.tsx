@@ -2,12 +2,15 @@ import { Ellipsis } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
+  useContext,
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type { Session, TaskRead } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { CommandSendsContext } from "./command-send.js";
 import { ActionLink, Button } from "./components.js";
 import { outcomeLine } from "./presentation.js";
 import { MarkdownPreview } from "./task-files.js";
@@ -101,8 +104,14 @@ export function TaskHeaderActions({
   const [open, setOpen] = useState(false),
     [sent, setSent] = useState(false),
     [resetOpen, setResetOpen] = useState(false),
-    [resetSent, setResetSent] = useState<string | null>(null),
     [menuOpen, setMenuOpen] = useState(false);
+  // An unconfirmed reset keeps its control, so a lost reply can still be checked; otherwise the
+  // control follows the task's current offer.
+  const sends = useContext(CommandSendsContext),
+    resetUncertain = useSyncExternalStore(
+      (listener) => sends.subscribe(listener),
+      () => sends.entry(`${report.taskId}:reset`).uncertain,
+    );
   const phone = useMediaQuery("(max-width: 759px)");
   const keep = useRef<HTMLButtonElement>(null),
     overflow = useRef<HTMLDetailsElement>(null);
@@ -165,7 +174,7 @@ export function TaskHeaderActions({
         <ActionLink variant="secondary" href={`/runtime/task/${report.taskId}`}>
           Execution
         </ActionLink>
-        {report.reset && (report.stop.open || resetSent === report.taskId) && (
+        {report.reset && (report.stop.open || resetOpen || resetUncertain) && (
           <ResetTask
             client={client}
             session={session}
@@ -173,7 +182,6 @@ export function TaskHeaderActions({
             title={report.title}
             version={report.reset.version}
             offer={report.reset.offer}
-            onSend={() => setResetSent(report.taskId)}
             onOpenChange={(next) => {
               // The trigger lives in the overflow, which stays open behind the dialog.
               if (phone) setMenuOpen(true);
