@@ -25,7 +25,10 @@ import {
   type PrDeliveryObservation,
   type ProviderActionObservation,
 } from "../core/delivery.js";
+import type { PushWorkspace } from "./push-verification.js";
 import {
+  type AdoptFunction,
+  type AdoptionContext,
   type GitHubDeliveryProvider,
   GitHubHttpDeliveryProvider,
   IssueChangedRefusal,
@@ -86,8 +89,15 @@ export interface DeliveryCoordinatorOptions {
     commitSha: string;
     lastPushedSha: string | null;
   }) => Promise<PushVerification | null>;
+  /** The repository's task worktree and the base it was provisioned at; null when unavailable. */
+  taskWorkspace?: (
+    taskId: string,
+    repositoryId: string,
+  ) => Promise<PushWorkspace | null>;
   /** Test seam for the HTTPS push; production uses `pushTaskCommit`. */
   push?: PushFunction;
+  /** Test seam for the HTTPS fetch of an adopted head; production uses `adoptOutsideHead`. */
+  adopt?: AdoptFunction;
   activationAllowed?: (policy: DeliveryPolicy) => boolean;
   /** How long a status-mapping write's provider call may take before it is given up as unproved. */
   statusWriteTimeoutMs?: number;
@@ -135,6 +145,7 @@ export class DeliveryCoordinator {
       credential ?? "",
       this.options.fetcher,
       this.options.push,
+      this.options.adopt,
     );
   }
   /**
@@ -282,10 +293,27 @@ export class DeliveryCoordinator {
     const provider = this.provider(caller.projectId, policy);
     const action = record.request.action;
     let publication: PublicationContext | undefined;
-    const assigned =
-      action.kind === "branch.push" || action.kind === "branch.force-push"
-        ? this.store.taskBranch(caller.taskId, action.target.repositoryId)
-        : null;
+    let adoption: AdoptionContext | undefined;
+    const assigned = action.kind.startsWith("branch.")
+      ? this.store.taskBranch(caller.taskId, action.target.repositoryId)
+      : null;
+    if (action.kind === "branch.adopt" && assigned) {
+      const workspace = await this.options
+        .taskWorkspace?.(caller.taskId, action.target.repositoryId)
+        .catch(() => null);
+      if (!workspace?.baseCommit)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "branch-adopt-workspace-unavailable",
+          receipt: null,
+        });
+      adoption = {
+        branch: assigned.branch,
+        lastPushedSha: assigned.lastPushedSha,
+        workspacePath: workspace.workspacePath,
+        baseCommit: workspace.baseCommit,
+      };
+    }
     if (
       (action.kind === "branch.push" || action.kind === "branch.force-push") &&
       assigned
@@ -332,7 +360,7 @@ export class DeliveryCoordinator {
     try {
       before = await this.bounded(
         caller,
-        provider.preflight(action, policy, publication),
+        provider.preflight(action, policy, publication, adoption),
       );
     } catch (error) {
       // The issue no longer shows the text the operator edit replaces, or the item the Status
@@ -400,7 +428,7 @@ export class DeliveryCoordinator {
     }
     if (
       assigned?.outsideHeadSha &&
-      !publication?.outsideHeadSha &&
+      !isRecoveryAction(action) &&
       before.beforeHead !== undefined &&
       before.beforeHead === assigned.lastPushedSha
     )

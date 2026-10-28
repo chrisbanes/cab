@@ -16,6 +16,7 @@ import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
 import type { PushOutcome } from "../../src/standalone/git-push.js";
+import type { AdoptFunction } from "../../src/standalone/git-fetch.js";
 import {
   GitHubHttpDeliveryProvider,
   type PushFunction,
@@ -86,6 +87,7 @@ export function publicationWorld(
     grants?: Array<
       | "branch.push"
       | "branch.force-push"
+      | "branch.adopt"
       | "pr.create"
       | "pr.merge"
       | "pr.ready"
@@ -142,7 +144,9 @@ export function publicationWorld(
       grants: grants.map((action) => ({
         action,
         repositoryId,
-        mode: options.mode ?? "allow",
+        // Adoption is only ever grantable with approval.
+        mode:
+          action === "branch.adopt" ? "approval" : (options.mode ?? "allow"),
       })),
       requiredChecks: [],
     });
@@ -235,6 +239,14 @@ export function publicationWorld(
     return pushBehaviour === "uncertain-applied" ? "uncertain" : "pushed";
   };
 
+  /** What the fake HTTPS fetch does with an adoption, set per test; it records every request. */
+  const adopts: Array<Parameters<AdoptFunction>[0]> = [];
+  let adoptBehaviour: AdoptFunction = async () => "adopted";
+  const adopt: AdoptFunction = (request) => {
+    adopts.push(request);
+    return adoptBehaviour(request);
+  };
+
   let observed: PrDeliveryObservation | undefined;
   const wakes: Array<{ reason: string; identity: string }> = [];
   const caller: DeliveryCaller = {
@@ -251,7 +263,7 @@ export function publicationWorld(
     verify = true,
     approved = options.approved ?? false,
   ) => {
-    const real = new GitHubHttpDeliveryProvider("token", fetcher, push);
+    const real = new GitHubHttpDeliveryProvider("token", fetcher, push, adopt);
     const provider = Object.assign(Object.create(real), {
       async inspectPr() {
         if (!observed) throw new Error("no PR");
@@ -262,6 +274,10 @@ export function publicationWorld(
       providerFactory: () => provider,
       authorize: () => {},
       approved: () => approved,
+      taskWorkspace: async () => ({
+        workspacePath: tree.workspace,
+        baseCommit: tree.base,
+      }),
       feedback: (_task, reason, identity) => wakes.push({ reason, identity }),
       ...(verify
         ? {
@@ -315,10 +331,27 @@ export function publicationWorld(
       },
       caller,
     );
+  /** An adoption of the recorded outside head (or of `material`). */
+  const adoptOutside = (
+    material: Record<string, unknown> = outsideMaterial(),
+    who: DeliveryCoordinator = coordinator,
+  ) =>
+    who.submit(
+      {
+        operationId: randomUUID(),
+        action: { kind: "branch.adopt", target: { repositoryId }, ...material },
+      },
+      caller,
+    );
   return {
     ...tree,
     outsideMaterial,
     overwrite,
+    adoptOutside,
+    adopts,
+    setAdopt: (behaviour: AdoptFunction) => {
+      adoptBehaviour = behaviour;
+    },
     db,
     domain,
     store,

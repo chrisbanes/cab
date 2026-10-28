@@ -1088,6 +1088,9 @@ async function publicationWorld(mode: "allow" | "approval") {
   );
   f.grant(
     { action: "branch.push", mode },
+    // Recovery is approval-gated whatever the grant: an overwrite is granted as allow on purpose.
+    { action: "branch.force-push", mode: "allow" },
+    { action: "branch.adopt", mode: "approval" },
     { action: "pr.create", mode: "allow" },
   );
   const binding = await f.service.taskWorkspace(f.taskId);
@@ -1129,7 +1132,56 @@ async function publicationWorld(mode: "allow" | "approval") {
         draft: true,
       },
     });
-  return { f, commit, push, createPr };
+  const action = (
+    kind: "branch.force-push" | "branch.adopt",
+    material: Record<string, unknown>,
+  ) => ({ kind, target: { repositoryId: "R1" }, ...material });
+  const recover = (
+    recovery: Record<string, unknown>,
+    index: number,
+    approval?: object,
+  ) =>
+    f.call(
+      "ensemble_external_action",
+      {
+        operationId: randomUUID(),
+        action: recovery,
+        ...(approval ? { approval } : {}),
+      },
+      index,
+    );
+  /** The lead requests approval of exact recovery material and the operator approves it. */
+  const approve = async (recovery: Record<string, unknown>, turn: number) => {
+    const requested = await f.call(
+      "ensemble_request_approval",
+      {
+        action: recovery.kind,
+        target: canonicalMaterial(recovery.target),
+        material: recovery,
+      },
+      turn,
+    );
+    assert.equal(requested.success, true, requested.text);
+    const interaction = f.service
+      .coordinationView()
+      .readTask(f.taskId)
+      .approvals.at(-1);
+    assert.ok(interaction);
+    await f.terminal(turn);
+    await f.service.coordinationView().decideApproval({
+      taskId: f.taskId,
+      key: randomUUID(),
+      interactionId: interaction.interactionId,
+      expectedRevision: 1,
+      decision: "approved",
+      action: String(recovery.kind),
+      target: canonicalMaterial(recovery.target),
+      material: recovery,
+    });
+    await f.waitTurn(turn + 1);
+    return { interactionId: interaction.interactionId, expectedRevision: 2 };
+  };
+  return { f, commit, push, createPr, action, recover, approve };
 }
 
 test("an allowed push publishes the lead's commit to the assigned branch and pr.create targets only that branch", async () => {
@@ -1141,7 +1193,9 @@ test("an allowed push publishes the lead's commit to the assigned branch and pr.
     const branch = f.service.delivery().taskBranch(f.taskId, "R1")?.branch;
     assert.ok(branch);
     assert.match(pushed.text, new RegExp(branch));
-    assert.deepEqual(f.scripted.state.pushes, [{ branch, commitSha: sha }]);
+    assert.deepEqual(f.scripted.state.pushes, [
+      { branch, commitSha: sha, lease: null },
+    ]);
     assert.equal((await createPr("cb/other", sha)).success, false);
     assert.equal(f.scripted.state.created, null);
     const created = await createPr(branch, sha);
@@ -1201,6 +1255,87 @@ test("an approval-mode push waits for the operator to approve the exact commit",
     const done = await push(sha, 2, approval);
     assert.equal(done.success, true, done.text);
     assert.equal(f.scripted.state.pushes.length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+/** A pushed commit, then an outside writer moves the branch and the lead's next push records it. */
+async function outsideChange(
+  world: Awaited<ReturnType<typeof publicationWorld>>,
+) {
+  const { f, commit, push } = world;
+  const first = commit("one.txt");
+  assert.equal((await push(first)).success, true);
+  const branch = f.service.delivery().taskBranch(f.taskId, "R1")?.branch;
+  assert.ok(branch);
+  const outside = "5".repeat(40);
+  f.scripted.state.refs[branch] = outside;
+  const next = commit("two.txt");
+  assert.equal((await push(next)).success, false);
+  const recorded = f.service.delivery().taskBranch(f.taskId, "R1");
+  assert.equal(recorded?.outsideHeadSha, outside);
+  return {
+    branch,
+    first,
+    outside,
+    next,
+    material: {
+      branch,
+      outsideHeadSha: outside,
+      lastPushedSha: first,
+    },
+  };
+}
+
+test("an overwrite of an outside head waits for the operator to approve its exact material, even under an allow grant", async () => {
+  const world = await publicationWorld("allow");
+  const { f, action, recover, approve } = world;
+  try {
+    const { branch, outside, next, material } = await outsideChange(world);
+    const overwrite = action("branch.force-push", {
+      commitSha: next,
+      ...material,
+    });
+    assert.equal((await recover(overwrite, 1)).success, false);
+    assert.equal(f.scripted.state.refs[branch], outside);
+    const approval = await approve(overwrite, 1);
+    // Other material, or a different commit, is not what was approved.
+    const other = action("branch.force-push", {
+      commitSha: next,
+      ...material,
+      outsideHeadSha: "6".repeat(40),
+    });
+    assert.equal((await recover(other, 2, approval)).success, false);
+    const done = await recover(overwrite, 2, approval);
+    assert.equal(done.success, true, done.text);
+    assert.equal(f.scripted.state.refs[branch], next);
+    assert.equal(f.scripted.state.pushes.at(-1)?.lease, outside);
+    const recorded = f.service.delivery().taskBranch(f.taskId, "R1");
+    assert.equal(recorded?.outsideHeadSha, null);
+    assert.equal(recorded?.lastPushedSha, next);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an adoption of an outside head waits for the operator to approve its exact material and records the head as the lead's own", async () => {
+  const world = await publicationWorld("allow");
+  const { f, action, recover, approve } = world;
+  try {
+    const { branch, outside, material } = await outsideChange(world);
+    const adoption = action("branch.adopt", material);
+    assert.equal((await recover(adoption, 1)).success, false);
+    assert.deepEqual(f.scripted.state.adopts, []);
+    const approval = await approve(adoption, 1);
+    const done = await recover(adoption, 2, approval);
+    assert.equal(done.success, true, done.text);
+    assert.deepEqual(f.scripted.state.adopts, [{ branch, commitSha: outside }]);
+    const recorded = f.service.delivery().taskBranch(f.taskId, "R1");
+    assert.equal(recorded?.outsideHeadSha, null);
+    assert.equal(recorded?.lastPushedSha, outside);
+    // The approval is spent: the same approval cannot adopt again.
+    assert.equal((await recover(adoption, 2, approval)).success, false);
   } finally {
     await f.close();
   }

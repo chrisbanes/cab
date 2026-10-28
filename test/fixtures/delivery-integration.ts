@@ -110,7 +110,13 @@ export function scriptedDeliveryProvider() {
     threadResolves: 0,
     /** Remote branch heads by name, and the pull request opened from one. */
     refs: { main: "2".repeat(40) } as Record<string, string>,
-    pushes: [] as Array<{ branch: string; commitSha: string }>,
+    pushes: [] as Array<{
+      branch: string;
+      commitSha: string;
+      lease: string | null;
+    }>,
+    /** Outside heads fetched for adoption. */
+    adopts: [] as Array<{ branch: string; commitSha: string }>,
     created: null as null | {
       title: string;
       body: string;
@@ -382,12 +388,23 @@ export function scriptedDeliveryProvider() {
       "synthetic-release-marker",
       fetcher,
       async (request) => {
+        // A lease on any other head rejects the push, as Git does.
+        if ((state.refs[request.branch] ?? null) !== request.lease)
+          return "rejected-lease";
         state.pushes.push({
           branch: request.branch,
           commitSha: request.commitSha,
+          lease: request.lease,
         });
         state.refs[request.branch] = request.commitSha;
         return "pushed";
+      },
+      async (request) => {
+        state.adopts.push({
+          branch: request.branch,
+          commitSha: request.commitSha,
+        });
+        return "adopted";
       },
     ),
   };

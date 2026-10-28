@@ -19,6 +19,7 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
+import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import {
   actionObservationSchema,
@@ -69,6 +70,14 @@ export interface PublicationContext extends PushVerification {
   /** A later attempt of an operation whose earlier attempt may have landed late. */
   retry: boolean;
 }
+/** Offline facts for adopting an outside head: the task's branch, last push, worktree and provisioned base. */
+export interface AdoptionContext {
+  branch: string;
+  lastPushedSha: string | null;
+  workspacePath: string;
+  baseCommit: string;
+}
+export type { AdoptFunction } from "./git-fetch.js";
 export type PushFunction = (
   request: Parameters<typeof pushTaskCommit>[0],
 ) => Promise<PushOutcome>;
@@ -128,6 +137,7 @@ export interface GitHubDeliveryProvider {
     action: ExternalAction,
     policy: DeliveryPolicy,
     publication?: PublicationContext,
+    adoption?: AdoptionContext,
   ): Promise<Record<string, z.output<ReturnType<typeof z.json>>>>;
   performAction(
     record: DeliveryActionRecord,
@@ -236,6 +246,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     private readonly credential: string,
     private readonly fetcher: typeof fetch = fetch,
     private readonly push: PushFunction = pushTaskCommit,
+    private readonly adopt: AdoptFunction = adoptOutsideHead,
   ) {}
   private async request(
     path: string,
@@ -1158,9 +1169,31 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     action: ExternalAction,
     policy: DeliveryPolicy,
     publication?: PublicationContext,
+    adoption?: AdoptionContext,
   ) {
     const repo = await this.repository(action.target.repositoryId);
     if (action.kind === "issue.create") return { repositoryPath: repo.path };
+    if (action.kind === "branch.adopt") {
+      if (!adoption) throw new Error("provider-adoption-unverified");
+      const remote = await this.optionalRef(repo.path, adoption.branch);
+      // The approved head must still be the remote's; a branch back at Ensemble's push has nothing to adopt.
+      if (remote !== action.outsideHeadSha) {
+        if (remote === adoption.lastPushedSha)
+          throw new PublicationRefusal("branch-outside-cleared");
+        throw new PublicationRefusal("branch-outside-change", remote);
+      }
+      // Everything the effect needs survives a restart here, because adopt's only remote act is a read.
+      return {
+        repositoryPath: repo.path,
+        repositoryId: action.target.repositoryId,
+        branch: adoption.branch,
+        beforeHead: remote,
+        outsideHeadSha: action.outsideHeadSha,
+        lastPushedSha: adoption.lastPushedSha,
+        workspacePath: adoption.workspacePath,
+        baseCommit: adoption.baseCommit,
+      };
+    }
     if (action.kind === "branch.push" || action.kind === "branch.force-push") {
       if (!publication) throw new Error("provider-publication-unverified");
       const remote = await this.optionalRef(repo.path, publication.branch);
@@ -1316,6 +1349,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       );
     if (a.kind === "branch.push" || a.kind === "branch.force-push")
       return this.publish(record, a);
+    if (a.kind === "branch.adopt") return this.adoptOutsideHead(record, a);
     try {
       const repo = {
         path: z
@@ -1550,6 +1584,84 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       return unsettled();
     }
   }
+  /**
+   * Adopts the approved outside head: reads the ref, fetches exactly that commit, then reads the ref
+   * again. The only remote act is a read, so any failure is a confirmed no-effect failure that leaves
+   * the hold in place, and a restart simply runs the sequence again from the recorded context.
+   */
+  private async adoptOutsideHead(
+    record: DeliveryActionRecord,
+    a: Extract<ExternalAction, { kind: "branch.adopt" }>,
+  ): Promise<ProviderActionObservation> {
+    const failure = (reason: string): ProviderActionObservation => ({
+      state: "confirmed-failure",
+      reason,
+      receipt: null,
+    });
+    const at = (branch: string, headSha: string) => ({
+      nodeId: a.target.repositoryId,
+      ref: branch,
+      headSha,
+    });
+    let before: {
+      repositoryPath: string;
+      branch: string;
+      workspacePath: string;
+      baseCommit: string;
+    };
+    try {
+      before = z
+        .object({
+          repositoryPath: z.string().regex(/^\/repos\/[^/]+\/[^/]+$/),
+          branch: name,
+          workspacePath: name,
+          baseCommit: sha,
+        })
+        .parse(record.beforeState);
+    } catch {
+      return failure("branch-adopt-workspace-unavailable");
+    }
+    // A moved ref is another outside change: it is recorded and the approval is not reused.
+    const moved = (head: string | null): ProviderActionObservation => ({
+      state: "confirmed-failure",
+      reason: "branch-outside-change",
+      receipt: head ? at(before.branch, head) : null,
+    });
+    try {
+      const first = await this.optionalRef(
+        before.repositoryPath,
+        before.branch,
+      );
+      if (first !== a.outsideHeadSha) return moved(first);
+      const outcome = await this.adopt({
+        workspacePath: before.workspacePath,
+        baseCommit: before.baseCommit,
+        nameWithOwner: before.repositoryPath
+          .slice("/repos/".length)
+          .split("/")
+          .map(decodeURIComponent)
+          .join("/"),
+        commitSha: a.outsideHeadSha,
+        branch: before.branch,
+        token: this.credential,
+      });
+      if (outcome === "not-attempted")
+        return failure("branch-adopt-workspace-unavailable");
+      if (outcome === "fetch-failed")
+        return failure("branch-adopt-fetch-failed");
+      if (outcome === "not-on-base") return failure("branch-adopt-not-on-base");
+      if (outcome === "unproved") return failure("branch-adopt-unproved");
+      const last = await this.optionalRef(before.repositoryPath, before.branch);
+      if (last !== a.outsideHeadSha) return moved(last);
+      return {
+        state: "confirmed-success",
+        reason: null,
+        receipt: at(before.branch, a.outsideHeadSha),
+      };
+    } catch {
+      return failure("branch-adopt-fetch-failed");
+    }
+  }
   /** Settles a branch action from the remote ref alone. */
   private async inspectBranch(
     record: DeliveryActionRecord,
@@ -1633,6 +1745,9 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           a,
           record.observation?.pushed === true,
         );
+      // An adoption left unsettled by a restart runs again from its recorded context.
+      if (a.kind === "branch.adopt")
+        return await this.adoptOutsideHead(record, a);
       const user = z
         .object({ node_id: name, login: name.optional() })
         .parse((await this.request("/user")).json);
