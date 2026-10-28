@@ -1047,6 +1047,16 @@ test("the readiness predicate filters nothing without a rule and follows all/any
   );
 });
 
+test("the readiness predicate matches label names case-insensitively, as GitHub does", () => {
+  assert.equal(
+    evaluateReadiness(
+      { mode: "all", conditions: [{ kind: "label", name: "Ready" }] },
+      { labels: ["READY"], fields: [] },
+    ).satisfied,
+    true,
+  );
+});
+
 test("without a readiness rule, open source issues are Ready whatever their labels; closed and withdrawn are not", () => {
   const f = readinessFixture(null);
   try {

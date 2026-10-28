@@ -668,6 +668,25 @@ test("Link asks for the readiness label and the credential user's authorship, as
   );
 });
 
+test("Link matches the requested labels case-insensitively, as GitHub does", async (t) => {
+  const f = await publicationFixture();
+  t.after(() => f.close());
+  f.gh.createMode = "lost-unseen";
+  const taskId = f.task(true);
+  const { review } = await f.publish(taskId);
+  const issue = f.gh.add(
+    "Publish me",
+    `Do it\n\n${marker(review.publicationId)}`,
+  );
+  issue.labels.push("READY");
+  const linked = await f.service.linkTaskPublication({
+    taskId,
+    publicationId: review.publicationId,
+    issueNumber: issue.number,
+  });
+  assert.equal(linked.state, "converted");
+});
+
 test("a list that trails the create keeps the task Ready, and a later omission withdraws it only until it is listed again", async (t) => {
   const f = await publicationFixture();
   t.after(() => f.close());
