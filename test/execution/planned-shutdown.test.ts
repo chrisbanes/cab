@@ -46,6 +46,7 @@ class ShutdownRuntime implements Runtime {
   startTurnFailure: Error | undefined;
   readonly startTurnEntered = deferred();
   readonly resumed: string[] = [];
+  readonly prompts: string[] = [];
   readonly startedTurns: string[] = [];
   readonly interrupted: string[] = [];
   stopped = false;
@@ -95,7 +96,7 @@ class ShutdownRuntime implements Runtime {
     this.resumed.push(threadId);
   }
 
-  async startTurn() {
+  async startTurn(_threadId?: string, _workspace?: string, prompt?: string) {
     this.log.push(`${this.name}:startTurn`);
     this.startTurnEntered.resolve();
     if (this.startTurnGate) await this.until(this.startTurnGate);
@@ -104,6 +105,7 @@ class ShutdownRuntime implements Runtime {
       throw this.startTurnFailure;
     }
     const turnId = `${this.name}-turn-${++this.turns}`;
+    this.prompts.push(prompt ?? "");
     this.startedTurns.push(turnId);
     if (this.autoComplete) this.wait(turnId).resolve("completed");
     return turnId;
@@ -371,6 +373,15 @@ async function restartAndComplete(
     describe(service),
   );
   assert.deepEqual(runtimes[harness].resumed, [oldThread]);
+  // The interrupted turn may not have delivered its prompt, so both instructions go again.
+  for (const kind of ["project", "profile"])
+    assert.match(
+      runtimes[harness].prompts[0] ?? "",
+      new RegExp(
+        `^Updated ${kind} instructions\\. These replace all ${kind} instructions`,
+        "m",
+      ),
+    );
   for (const workId of [oldWorkId, requeue]) {
     assert.notEqual(stateOf(service, workId), "held", workId);
     assert.equal(

@@ -328,8 +328,8 @@ conversation replacement or recovery, or a resumed turn whose bound revision dif
 from the one the predecessor turn ran with. A changed revision is sent once, stated
 as replacing the earlier instructions, with no revision numbers in the text. The
 execution binding and execution diagnostics keep each turn's revisions and mark an
-instruction segment not sent. A turn that resumes an interrupted predecessor sends
-both again. Instructions travel as user input on both harnesses, not as Codex
+instruction segment not sent. A turn that resumes an interrupted predecessor, which may not have delivered its
+prompt, sends both again as replacements. Instructions travel as user input on both harnesses, not as Codex
 developer instructions or Claude's system prompt: Codex native-input qualification
 pins the thread's developer instructions, so changing them disqualifies the thread,
 and a conversation keeps its harness across a profile switch. Limit: a runtime's own

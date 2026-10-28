@@ -332,8 +332,8 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      `[redacted]`. An execution without a captured submission shows a
      labelled reconstruction from retained revisions instead.
      A segment the resumed thread already held is listed with its revision and
-     marked not sent, not as a gap; a turn carries each instruction revision once
-     per thread. `--compare-current` compares bound and current instruction
+     marked not sent, not as a gap; a turn normally carries each instruction
+     revision once per thread. `--compare-current` compares bound and current instruction
      revisions and profile runtime settings.
    - `logs --execution WORK_ID [--kind input|setting|runtime|tool|service]
      [--severity info|warn|error] [--after T] [--before T] [--limit N] [--cursor

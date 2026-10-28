@@ -383,14 +383,15 @@ interface PromptPart {
 }
 
 /**
- * One instruction kind's prompt part. `seenRevision` is the revision the resumed thread last
- * received; undefined means a new thread, which always gets the full text.
+ * One instruction kind's prompt part. `seenRevision` is what the resumed thread last received:
+ * undefined for a new thread, which gets the full text, and null when the thread holds
+ * instructions of unknown revision, which always get re-sent as a replacement.
  */
 const instructionPart = (
   kind: "project" | "profile",
   revision: number,
   instructions: string,
-  seenRevision?: number,
+  seenRevision?: number | null,
 ): PromptPart => {
   const name = `${kind}-instructions` as const;
   if (seenRevision === revision)
@@ -6755,12 +6756,11 @@ export class StandaloneService {
 
   /**
    * The submitted prompt's Ensemble-supplied segments, in submission order. `resumed` is the
-   * binding of the completed predecessor whose thread this turn resumes; its revisions are
-   * what the thread has already received.
+   * revisions the resumed thread has already received (null: unknown); undefined for a new thread.
    */
   private executionPromptParts(
     request: TurnRequest,
-    resumed?: TaskExecutionBinding,
+    seen?: { project: number | null; profile: number | null },
   ): PromptPart[] {
     if (request.kind === "drafting") {
       const run = this.started().drafting.require(
@@ -6882,13 +6882,13 @@ export class StandaloneService {
         "project",
         binding.instructionsRevision,
         projectInstructions,
-        resumed?.instructionsRevision,
+        seen?.project,
       ),
       instructionPart(
         "profile",
         binding.profileRevision,
         profileInstructions,
-        resumed?.profileRevision,
+        seen?.profile,
       ),
     ];
   }
@@ -7576,12 +7576,21 @@ export class StandaloneService {
       submissionStage = "turn";
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
       const settings = this.turnSettings(request);
-      // Only a completed predecessor's thread is known to hold its prompt; anything else re-sends.
+      // Only a completed predecessor is known to hold its prompt; an interrupted one
+      // (shutdown requeue) leaves the thread's instructions unknown, so they are re-sent.
       const resumed =
-        previous?.threadId && previous.state === "completed"
+        previous?.state === "completed"
           ? state.taskBinding(previous.workId)
           : undefined;
-      const promptParts = this.executionPromptParts(request, resumed);
+      const promptParts = this.executionPromptParts(
+        request,
+        previous?.threadId
+          ? {
+              project: resumed?.instructionsRevision ?? null,
+              profile: resumed?.profileRevision ?? null,
+            }
+          : undefined,
+      );
       const prompt = joinPromptParts(promptParts);
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
