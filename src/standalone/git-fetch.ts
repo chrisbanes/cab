@@ -99,7 +99,8 @@ export async function adoptOutsideHead(
   const objects = join(commonDir, "objects");
   let scratch: string | undefined;
   try {
-    const dir = (scratch = await mkdtemp(join(tmpdir(), "ensemble-adopt-")));
+    scratch = await mkdtemp(join(tmpdir(), "ensemble-adopt-"));
+    const dir = scratch;
     await mkdir(join(dir, "objects"));
     await mkdir(join(dir, "refs", "ensemble"), { recursive: true });
     await writeFile(join(dir, "HEAD"), "ref: refs/heads/main\n");

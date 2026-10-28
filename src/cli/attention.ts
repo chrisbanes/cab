@@ -229,6 +229,9 @@ const approvalGet: BrowseCommand = {
               ? "(unavailable)"
               : JSON.stringify(approval.material),
           ],
+          ...(approval.compareUrl
+            ? [["Compare", approval.compareUrl] as [string, string]]
+            : []),
           ["Approvable", approval.approvable ? "yes" : "no (deny only)"],
           ["Task holds", holds.length ? holds.join(", ") : "none"],
         ]),
