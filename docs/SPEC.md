@@ -2018,7 +2018,10 @@ refuses it, and an approval is never reused after a refusal.
   overwrite stays available. Adoption's only remote act is a read, so an adoption interrupted by
   a restart runs again from its recorded intent and records once. A failed, refused or cancelled
   adoption leaves the outside change held with no unresolved action, and the lead can request it
-  again with a new approval.
+  again with a new approval. The fetch is also bounded in size: Ensemble watches the bytes the
+  child writes to its scratch object store and stops it past 512 MiB (checked every 200 ms, so
+  approximately). That adoption is refused as `branch-adopt-too-large`, imports nothing, removes
+  the scratch repository, and keeps the outside change held with overwrite available.
 
 After either recovery succeeds the outside change clears, completion and handback settlement
 are re-evaluated against the new head (the PR is read again), and plain pushes resume. A PR that

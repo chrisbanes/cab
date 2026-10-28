@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -58,12 +59,18 @@ function repository(t: TestContext, prefix = "ensemble-git-fetch-") {
   const outsideClone = join(root, "outside");
   git(root, "clone", "-q", remote, outsideClone);
   let counter = 0;
-  const commitOutside = (from = base) => {
+  const commitOutside = (from = base, bytes = 0) => {
     git(outsideClone, "checkout", "-q", "--detach", from);
     writeFileSync(
       join(outsideClone, `outside-${++counter}.txt`),
       `${counter}\n`,
     );
+    // Incompressible, so the pack is about this size.
+    if (bytes > 0)
+      writeFileSync(
+        join(outsideClone, `outside-${counter}.bin`),
+        randomBytes(bytes),
+      );
     git(outsideClone, "add", ".");
     git(outsideClone, "commit", "-q", "-m", `outside ${counter}`);
     const sha = git(outsideClone, "rev-parse", "HEAD");
@@ -81,13 +88,14 @@ function repository(t: TestContext, prefix = "ensemble-git-fetch-") {
 function shim(
   t: TestContext,
   remote: string,
-  behaviour: { sleep?: boolean; exit?: number } = {},
+  behaviour: { sleep?: boolean; exit?: number; grow?: number } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "ensemble-git-fetch-shim-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const executable = join(directory, "git");
   const record = join(directory, "record.json");
   const started = join(directory, "started");
+  const pidFile = join(directory, "pid");
   writeFileSync(
     executable,
     `#!${process.execPath}
@@ -108,8 +116,16 @@ writeFileSync(${JSON.stringify(record)}, JSON.stringify({
 }));
 writeFileSync(${JSON.stringify(started)}, "1");
 ${
-  behaviour.sleep
-    ? "setTimeout(() => {}, 60000);"
+  behaviour.sleep || behaviour.grow
+    ? `${
+        behaviour.grow
+          ? `const { mkdirSync } = require("node:fs");
+mkdirSync(process.env.GIT_DIR + "/objects/pack", { recursive: true });
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+writeFileSync(process.env.GIT_DIR + "/objects/pack/tmp_pack_fake", Buffer.alloc(${behaviour.grow}));
+`
+          : ""
+      }setTimeout(() => {}, 60000);`
     : behaviour.exit
       ? `process.exit(${behaviour.exit});`
       : `
@@ -129,6 +145,7 @@ process.exit(r.status ?? 1);
   return {
     executable,
     started,
+    pid: () => Number(readFileSync(pidFile, "utf8")),
     recorded: () =>
       JSON.parse(readFileSync(record, "utf8")) as {
         args: string[];
@@ -380,4 +397,74 @@ test("a failed or cancelled fetch imports nothing, and an invalid request never 
       "not-attempted",
     );
   assert.equal(existsSync(never.started), false);
+});
+
+test("a fetch within the size bound is adopted", async (t) => {
+  const repo = repository(t);
+  const outside = repo.commitOutside(repo.base, 200_000);
+  const fake = shim(t, repo.remote);
+  assert.equal(
+    await adoptOutsideHead({
+      ...request(repo, fake.executable, outside),
+      maxFetchBytes: 1_000_000,
+    }),
+    "adopted",
+  );
+  assert.equal(adoptedRef(repo), outside);
+});
+
+test("a fetch over the size bound that finishes first is refused after it exits", async (t) => {
+  const repo = repository(t);
+  const outside = repo.commitOutside(repo.base, 200_000);
+  const packs = join(
+    git(
+      repo.workspace,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ),
+    "objects",
+    "pack",
+  );
+  const before = readdirSync(packs);
+  const fake = shim(t, repo.remote);
+  assert.equal(
+    await adoptOutsideHead({
+      ...request(repo, fake.executable, outside),
+      maxFetchBytes: 50_000,
+    }),
+    "too-large",
+  );
+  assert.equal(adoptedRef(repo), null);
+  assert.equal(
+    existsSync(fake.recorded().env.GIT_DIR ?? ""),
+    false,
+    "scratch removed",
+  );
+  assert.deepEqual(readdirSync(packs), before, "nothing imported");
+});
+
+test("a fetch that grows past the size bound is stopped", async (t) => {
+  const repo = repository(t);
+  const outside = repo.commitOutside();
+  const fake = shim(t, repo.remote, { grow: 5_000 });
+  const started = Date.now();
+  assert.equal(
+    await adoptOutsideHead({
+      ...request(repo, fake.executable, outside),
+      maxFetchBytes: 1_000,
+    }),
+    "too-large",
+  );
+  assert.ok(
+    Date.now() - started < 30_000,
+    "stopped well before the sleeper ends",
+  );
+  assert.throws(() => process.kill(fake.pid(), 0), { code: "ESRCH" });
+  assert.equal(
+    existsSync(fake.recorded().env.GIT_DIR ?? ""),
+    false,
+    "scratch removed",
+  );
+  assert.equal(adoptedRef(repo), null);
 });

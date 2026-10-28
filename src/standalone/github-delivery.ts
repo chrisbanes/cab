@@ -20,7 +20,11 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
-import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
+import {
+  type AdoptFunction,
+  type AdoptOutcome,
+  adoptOutsideHead,
+} from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import {
   actionObservationSchema,
@@ -78,6 +82,15 @@ export interface AdoptionContext {
   workspacePath: string;
   baseCommit: string;
 }
+/** Every adopt outcome but success has its own reason, so a new outcome cannot reach the success path. */
+const adoptFailures: Record<Exclude<AdoptOutcome, "adopted">, string> = {
+  "not-attempted": "branch-adopt-workspace-unavailable",
+  "fetch-failed": "branch-adopt-fetch-failed",
+  "too-large": "branch-adopt-too-large",
+  "not-on-base": "branch-adopt-not-on-base",
+  unproved: "branch-adopt-unproved",
+};
+
 export type { AdoptFunction } from "./git-fetch.js";
 export type PushFunction = (
   request: Parameters<typeof pushTaskCommit>[0],
@@ -1661,12 +1674,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         branch: before.branch,
         token: this.credential,
       });
-      if (outcome === "not-attempted")
-        return failure("branch-adopt-workspace-unavailable");
-      if (outcome === "fetch-failed")
-        return failure("branch-adopt-fetch-failed");
-      if (outcome === "not-on-base") return failure("branch-adopt-not-on-base");
-      if (outcome === "unproved") return failure("branch-adopt-unproved");
+      if (outcome !== "adopted") return failure(adoptFailures[outcome]);
       const last = await this.optionalRef(before.repositoryPath, before.branch);
       if (last !== a.outsideHeadSha) return moved(last);
       return {
