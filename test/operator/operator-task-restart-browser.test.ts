@@ -406,6 +406,38 @@ test("an unconfirmed Reset is still checkable from the header after leaving the 
   assert.equal(sent[1], sent[0], "same key and body");
 });
 
+test("an unconfirmed Start again whose request was recorded is still checkable after leaving the task and coming back", async (_t, j) => {
+  const hold: { browser?: Browser } = {};
+  const { page } = await openRestartPage(j, hold, "/app/tasks/TASK");
+  const sent: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      (request.postData() ?? "").includes('"task.start-again"')
+    )
+      sent.push(request.postData() ?? "");
+  });
+  // The service records the start but the reply is lost, which clears the not-started code.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await page.getByRole("button", { name: "Start again", exact: true }).click();
+  await checkButton(page).waitFor();
+  await page
+    .getByRole("link", { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/inbox/);
+  await page.goBack();
+  await checkButton(page).waitFor();
+  await page.unroute("**/api/operator/commands");
+  await checkButton(page).click();
+  await page.getByText(/Queued again\./).waitFor();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1], sent[0], "same key and body");
+});
+
 test("the header drops Reset task… once the task is no longer open", async (_t, j) => {
   const hold: { browser?: Browser } = {};
   const { f, page, task } = await openRestartPage(j, hold, "/app/tasks/TASK");
