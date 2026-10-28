@@ -7,6 +7,7 @@ import {
   closeResolved,
   endpointDigestOf,
   failureText,
+  notificationOpenPath,
   notificationState,
   revokedLabel,
   testOutcomeText,
@@ -229,4 +230,45 @@ test("row and test copy cover every reason, failure and outcome", () => {
   });
   for (const outcome of ["gone", "rejected", "unavailable", "timeout"] as const)
     assert.equal(testOutcomeText(outcome).ok, false, outcome);
+});
+
+test("a worker message opens only a same-origin /app/ address from this origin", () => {
+  const origin = "http://127.0.0.1:8787";
+  const message = (
+    url: unknown,
+    type: unknown = "ensemble.notification-open",
+  ) => ({
+    origin,
+    data: { type, url },
+  });
+  assert.equal(
+    notificationOpenPath(message("/app/inbox?task=T&request=Q"), origin),
+    "/app/inbox?task=T&request=Q",
+  );
+  assert.equal(
+    notificationOpenPath(message("/app/settings#notifications"), origin),
+    "/app/settings#notifications",
+  );
+  const refused = [
+    { origin: "https://evil.test", data: message("/app/inbox").data },
+    message("/app/inbox", "other"),
+    { origin, data: { url: "/app/inbox" } },
+    message(42),
+    message(undefined),
+    { origin, data: null },
+    { origin, data: "/app/inbox" },
+    message("https://evil.test/app/x"),
+    message("//evil.test/app/x"),
+    message("/\\evil.test/app/x"),
+    message("/api/operator/inbox"),
+    message("/app/../api/operator/inbox"),
+    message("/appx"),
+    message("javascript:alert(1)"),
+  ];
+  for (const event of refused)
+    assert.equal(
+      notificationOpenPath(event, origin),
+      null,
+      JSON.stringify(event),
+    );
 });

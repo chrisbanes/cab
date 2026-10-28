@@ -47,6 +47,7 @@ import {
   TopBar,
 } from "./components.js";
 import { ActionOutcome } from "./action-feedback.js";
+import { notificationOpenPath } from "./notifications-model.js";
 import { Alert } from "./ui/alert.js";
 import {
   isActiveColumn,
@@ -793,6 +794,22 @@ export function App() {
     setNavigationVersion((n) => n + 1);
     setDrawer(false);
   };
+  // Registered before the sign-in early returns, so a signed-out tab routes in place too.
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      const path = notificationOpenPath(event, location.origin);
+      if (!path) return;
+      navigateRef.current(path);
+      // Confirms to the worker that this tab routed; without it the worker opens a window.
+      event.ports[0]?.postMessage("routed");
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () =>
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, []);
   if (!session)
     return (
       <SignInBootstrap

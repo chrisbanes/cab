@@ -409,8 +409,7 @@ export class CoordinationView {
           : {}),
         threadId: intent.threadId,
         turnId: intent.turnId,
-      }))
-      .sort((a, b) => a.workId.localeCompare(b.workId));
+      }));
     const inbox = assignments.flatMap((row) =>
       this.coordination.inboxEvents(String(row.id)),
     );

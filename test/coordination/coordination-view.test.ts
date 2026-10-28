@@ -17,7 +17,9 @@ import {
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
+import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -650,4 +652,33 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
     await f.service.stop();
     rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+test("task history keeps execution order, not work id text order", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f);
+  // Text order puts :v10: before :v2:, and these ids would reverse the executions again.
+  const workIds = [
+    `assignment:${task.assignmentId}:v2:inbox:ffffffff-0000-4000-8000-000000000000`,
+    `assignment:${task.assignmentId}:v10:inbox:00000000-0000-4000-8000-000000000000`,
+  ];
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    workIds.forEach((workId, index) => {
+      db.prepare(
+        "INSERT INTO execution_intents (id,workId,prompt,workspace,state,accountType,sandbox,approval) VALUES (?,?,'p','/w','completed','chatgpt','workspaceWrite','never')",
+      ).run(randomUUID(), workId);
+      db.prepare(
+        "INSERT INTO task_execution_bindings (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision) VALUES (?,?,?,?,1,1,1)",
+      ).run(workId, task.taskId, task.assignmentId, index === 0 ? 2 : 10);
+    });
+  });
+  assert.deepEqual(
+    f.service
+      .coordinationView()
+      .readTask(task.taskId)
+      .history.map((entry) => entry.workId),
+    workIds,
+  );
 });

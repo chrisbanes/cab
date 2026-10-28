@@ -1,6 +1,7 @@
 // Ensemble operator push worker, served at /app/service-worker.js (scope /app/).
 // It has no fetch handler and keeps no cache, so an update can never serve a stale app.
-// A push shows a notification and a click opens the exact Inbox selection; nothing else.
+// A push shows a notification; a click routes an open tab to the exact Inbox selection in
+// place, or opens one. Nothing else.
 const FALLBACK_TITLE = "Ensemble needs you";
 const FALLBACK_URL = "/app/inbox";
 const BODY = "Open Ensemble to respond.";
@@ -49,6 +50,20 @@ self.addEventListener("push", (event) => {
   );
 });
 
+// A tab still running an older bundle has no listener, so a posted message alone proves nothing:
+// the tab confirms on the message's port, and an unconfirmed click opens a window instead (a
+// late confirmation can leave both). The window interaction a click allows is spent once, on
+// focus() or on openWindow(), so focus only after the tab confirmed.
+const ACK_MS = 500;
+const routed = (client, url) => {
+  const { port1, port2 } = new MessageChannel();
+  return new Promise((resolve) => {
+    port1.onmessage = () => resolve(true);
+    client.postMessage({ type: "ensemble.notification-open", url }, [port2]);
+    setTimeout(() => resolve(false), ACK_MS);
+  }).finally(() => port1.close());
+};
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data;
@@ -72,11 +87,13 @@ self.addEventListener("notificationclick", (event) => {
       });
       if (target) {
         try {
-          await target.focus();
-          await target.navigate(url);
-          return;
+          // The app routes in place, so an open tab keeps its unsaved input.
+          if (await routed(target, url)) {
+            await target.focus();
+            return;
+          }
         } catch {
-          // A window the worker does not control cannot be navigated; open one instead.
+          // A window that cannot be focused or messaged is replaced by a new one.
         }
       }
       await self.clients.openWindow(url);

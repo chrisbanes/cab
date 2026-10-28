@@ -10,8 +10,11 @@ interface FakeClient {
   url: string;
   focused: number;
   navigated: string[];
+  posted: unknown[];
   focus(): Promise<void>;
   navigate(url: string): Promise<void>;
+  acknowledges: boolean;
+  postMessage(message: unknown, transfer?: MessagePort[]): void;
 }
 
 /** The worker source, run against a fake worker scope: no browser. */
@@ -50,7 +53,13 @@ async function load(clients: FakeClient[] = []) {
       },
     },
   };
-  runInNewContext(source, { self, URL });
+  // A short timer keeps the unacknowledged cases quick; the worker's timeout is otherwise real.
+  runInNewContext(source, {
+    self,
+    URL,
+    MessageChannel,
+    setTimeout: (fn: () => void) => setTimeout(fn, 20),
+  });
   const waits: Promise<unknown>[] = [];
   const dispatch = async (type: string, event: Record<string, unknown>) => {
     listeners.get(type)?.({
@@ -164,15 +173,21 @@ const client = (url: string): FakeClient => ({
   url,
   focused: 0,
   navigated: [],
+  posted: [],
   async focus() {
     this.focused++;
   },
   async navigate(to: string) {
     this.navigated.push(to);
   },
+  acknowledges: true,
+  postMessage(message: unknown, transfer?: MessagePort[]) {
+    this.posted.push(message);
+    if (this.acknowledges) transfer?.[0]?.postMessage("routed");
+  },
 });
 
-test("a click focuses and navigates an open app window and never opens another", async () => {
+test("a click focuses an open app window and routes it in place, never opening another", async () => {
   const app = client(`${ORIGIN}/app/tasks`);
   const w = await load([
     client("https://other.test/app/x"),
@@ -181,7 +196,13 @@ test("a click focuses and navigates an open app window and never opens another",
   ]);
   await w.click("/app/inbox?request=runtime%3Acodex");
   assert.equal(app.focused, 1);
-  assert.deepEqual(app.navigated, ["/app/inbox?request=runtime%3Acodex"]);
+  assert.deepEqual(plain(app.posted), [
+    {
+      type: "ensemble.notification-open",
+      url: "/app/inbox?request=runtime%3Acodex",
+    },
+  ]);
+  assert.deepEqual(app.navigated, []);
   assert.deepEqual(w.opened, []);
   assert.deepEqual(w.closed, ["closed"]);
 });
@@ -199,16 +220,48 @@ test("a click on a notification with a foreign link opens the Inbox instead", as
   assert.deepEqual(w.opened, ["/app/inbox"]);
 });
 
-test("a window the worker cannot navigate is replaced by a new one", async () => {
-  const stubborn: FakeClient = {
-    ...client(`${ORIGIN}/app/inbox`),
-    async navigate() {
-      throw new Error("not controlled");
-    },
-  };
-  const w = await load([stubborn]);
+test("a click with a foreign link routes an open app window to the Inbox", async () => {
+  const app = client(`${ORIGIN}/app/tasks`);
+  const w = await load([app]);
+  await w.click("https://evil.test/");
+  assert.deepEqual(plain(app.posted), [
+    { type: "ensemble.notification-open", url: "/app/inbox" },
+  ]);
+  assert.deepEqual(w.opened, []);
+});
+
+test("a tab that does not confirm routing is replaced by a new window", async () => {
+  const stale = { ...client(`${ORIGIN}/app/tasks`), acknowledges: false };
+  const w = await load([stale]);
   await w.click("/app/inbox?request=Q");
+  assert.equal(stale.posted.length, 1);
+  assert.equal(
+    stale.focused,
+    0,
+    "the click's one window interaction opens the window",
+  );
   assert.deepEqual(w.opened, ["/app/inbox?request=Q"]);
+  assert.deepEqual(w.closed, ["closed"]);
+});
+
+test("a window that cannot be focused or messaged is replaced by a new one", async () => {
+  const refusals: Partial<FakeClient>[] = [
+    {
+      async focus() {
+        throw new Error("not allowed");
+      },
+    },
+    {
+      postMessage() {
+        throw new Error("gone");
+      },
+    },
+  ];
+  for (const refusal of refusals) {
+    const w = await load([{ ...client(`${ORIGIN}/app/inbox`), ...refusal }]);
+    await w.click("/app/inbox?request=Q");
+    assert.deepEqual(w.opened, ["/app/inbox?request=Q"]);
+  }
 });
 
 test("the worker takes over immediately and has no fetch handler", async () => {

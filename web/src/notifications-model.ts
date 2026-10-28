@@ -203,3 +203,33 @@ export function testOutcomeText(
     }
   }
 }
+
+/** What the push worker posts to an open tab when a notification is clicked. */
+export const NOTIFICATION_OPEN_MESSAGE = "ensemble.notification-open";
+
+/**
+ * The in-app address a worker message asks this tab to open, or null. Only this origin's own
+ * worker message with a same-origin /app/ address counts; the page never trusts the shape.
+ */
+export function notificationOpenPath(
+  event: { origin: string; data: unknown },
+  origin: string,
+): string | null {
+  const data = event.data as { type?: unknown; url?: unknown } | null;
+  if (
+    event.origin !== origin ||
+    typeof data !== "object" ||
+    data === null ||
+    data.type !== NOTIFICATION_OPEN_MESSAGE ||
+    typeof data.url !== "string"
+  )
+    return null;
+  try {
+    const target = new URL(data.url, origin);
+    return target.origin === origin && target.pathname.startsWith("/app/")
+      ? target.pathname + target.search + target.hash
+      : null;
+  } catch {
+    return null;
+  }
+}

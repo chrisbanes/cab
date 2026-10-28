@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Store } from "../../src/core/store.js";
+import { DomainConflictError } from "../../src/core/domain-errors.js";
 import { DomainStore, type DomainCommand } from "../../src/core/domain.js";
 import { CoordinationStore } from "../../src/core/coordination.js";
 import {
@@ -321,10 +322,18 @@ test("legacy result has absent optional metadata and first visit has no viewing 
       saved.result.resultId,
     ]);
     assert.deepEqual(f.stores.review.read(f.taskId).viewed, viewed);
-    assert.throws(
+    const refused = [
       () => f.stores.review.recordViewed(f.taskId, key, null, []),
-      /reused/,
-    );
+      () =>
+        f.stores.review.recordViewed(f.taskId, randomUUID(), randomUUID(), []),
+      () =>
+        f.stores.review.recordViewed(f.taskId, randomUUID(), null, [
+          randomUUID(),
+        ]),
+    ];
+    for (const refusal of refused) assert.throws(refusal, DomainConflictError);
+    assert.throws(refused[0]!, /reused/);
+    assert.deepEqual(f.stores.review.read(f.taskId).viewed, viewed);
     f.reopen();
     assert.deepEqual(f.stores.review.read(f.taskId).viewed, viewed);
     assert.equal(f.stores.d.task(f.taskId).state, "open");

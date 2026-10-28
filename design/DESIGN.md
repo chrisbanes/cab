@@ -684,10 +684,11 @@ header; phone states without an artboard use the desktop copy.
   (**Turn on again**). Turning on again replaces the old subscription. Permission
   withdrawn after turning on shows the blocked state.
 - Settings (account menu → `/app/settings`) is the only control surface. A notification
-  click opens or focuses Ensemble at the exact Inbox selection, signing in first at the
-  same address if the session has ended. Where the platform allows, the page closes a
-  notification once its request is no longer in a complete Inbox read; notifications are
-  never sent to close one.
+  click focuses an open Ensemble tab and routes it in place to the exact Inbox selection
+  without reloading, so unsaved input stays; with no open tab, or one that cannot route
+  (an older page), it opens one, signing in first at the same address if the session has
+  ended. Where the platform allows, the page closes a notification once its request is no
+  longer in a complete Inbox read; notifications are never sent to close one.
 - No Readiness check or Home checklist item is designed: notifications are optional,
   and an operator who leaves them off has nothing to fix. Loading and busy states are not
   drawn. Phone buttons and selects are 44 px tall. Names, hosts and times are fictional
@@ -1372,7 +1373,7 @@ file sizes/page counts illustrate metadata, not configured limits.
 | Direct task/file/comparison/result/review links | Resolve authorised task and exact requested context. Direct historical links stay historical. If missing or forbidden, explain the unavailable destination; never substitute current bytes. Without an in-session origin, offer the task/project as fallback. Exact URL syntax is an implementation choice. |
 | Retained advanced execution, approval and recovery routes | Reachable through task controls / Holds on phone. Keep the original task/request/result return anchor. Inspection never resolves ownership or execution uncertainty. |
 | Context menus and extensions | No applicable entry points are established by the current design. Native Codex/ChatGPT work is outside this design. |
-| Browser notifications (opt-in, Settings → Notifications `181`–`185`) | A click opens or focuses Ensemble at the exact Inbox selection (`/app/inbox?task=<task>&request=<request>` for a task item, `/app/inbox?request=runtime%3Acodex` for a runtime) after sign-in, and keeps that address through sign-in. It answers, approves and mutates nothing. A resolved request shows its existing state, as a resolved question does. |
+| Browser notifications (opt-in, Settings → Notifications `181`–`185`) | A click focuses an open Ensemble tab and routes it in place without reloading, keeping unsaved input, or opens one when none is open or the open one cannot route (an older page), at the exact Inbox selection (`/app/inbox?task=<task>&request=<request>` for a task item, `/app/inbox?request=runtime%3Acodex` for a runtime) after sign-in, and keeps that address through sign-in. It answers, approves and mutates nothing. A resolved request shows its existing state, as a resolved question does. |
 
 ### Desktop, phone and keyboard behaviour
 

@@ -1020,12 +1020,13 @@ export class TaskReviewStore {
   ) {
     uuid.parse(key);
     if (sourceId && !this.source(taskId, sourceId))
-      throw Error("Viewed source unavailable");
+      throw new DomainConflictError("Viewed source unavailable");
     for (const id of resultIds) {
       const r = this.db
         .prepare("SELECT taskId FROM coordination_results WHERE resultId=?")
         .get(id) as Row | undefined;
-      if (r?.taskId !== taskId) throw Error("Viewed result unavailable");
+      if (r?.taskId !== taskId)
+        throw new DomainConflictError("Viewed result unavailable");
     }
     const material = JSON.stringify({ taskId, sourceId, resultIds });
     transaction(this.db, () => {
@@ -1033,7 +1034,8 @@ export class TaskReviewStore {
         .prepare("SELECT material FROM task_review_view_receipts WHERE key=?")
         .get(key) as Row | undefined;
       if (prior) {
-        if (prior.material !== material) throw Error("Viewing key reused");
+        if (prior.material !== material)
+          throw new DomainConflictError("Viewing key reused");
       } else {
         this.db
           .prepare(
