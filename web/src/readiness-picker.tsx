@@ -77,6 +77,7 @@ export function useReadinessDiscovery(p: {
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the resolved repository list.
   useEffect(() => {
     const mine = round.current;
+    if (!p.enabled) return;
     for (const name of names) {
       const key = `p:${name}`;
       if (requested.current.has(key)) continue;
@@ -95,7 +96,7 @@ export function useReadinessDiscovery(p: {
             setProjectReads((x) => ({ ...x, [name]: unreadable })),
         );
     }
-  }, [names.join("\n"), p.client]);
+  }, [names.join("\n"), p.enabled, p.client]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the resolved repository list.
   useEffect(() => {

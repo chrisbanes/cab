@@ -10,7 +10,6 @@ import { operatorRouteAuthority } from "./operator-credentials.js";
 import type { Readiness } from "./readiness.js";
 import type { WorkspaceInspectionRequest } from "./workspace-inspection.js";
 import { workspaceComparisonReadRequestSchema } from "../operator/contracts.js";
-
 const mime: Record<string, string> = {
   js: "text/javascript; charset=utf-8",
   mjs: "text/javascript; charset=utf-8",

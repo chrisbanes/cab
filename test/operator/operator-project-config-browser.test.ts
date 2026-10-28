@@ -3059,6 +3059,29 @@ test("a Ready label is suggested from the source's repository labels and read on
   ]);
 });
 
+test("a label-only source without a Project makes no Project discovery reads", async (_t, journey) => {
+  const state: { calls: string[] } = { calls: [] };
+  const { f, ids, page } = await startDiscovery(journey, state);
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  state.calls = [];
+  await page.reload();
+  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  assert.equal(labelCalls(state), 1);
+  assert.equal(state.calls.includes("projects"), false);
+});
+
 // Atlas's saved readiness already holds the label condition "ready".
 test("a Ready label that is not on the repositories can still be typed", async (_t, journey) => {
   const { f, ids, page } = await startDiscovery(journey, { calls: [] });

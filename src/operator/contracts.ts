@@ -66,10 +66,9 @@ import {
   profileRuntimeSchema,
   supportedRuntimeSettingsSchema,
 } from "../core/execution-runtime.js";
-
 export {
-  type ExecutionHarness,
   executionHarnessLabels,
+  type ExecutionHarness,
   type ProfileRuntime,
   runtimeSummary,
   type SupportedRuntimeSettings,
