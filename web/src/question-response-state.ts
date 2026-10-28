@@ -79,6 +79,7 @@ export class QuestionResponseState {
   answers: QuestionAnswers;
   errors: Record<string, string> = Object.create(null);
   scrollTop = 0;
+  inboxScrollTop = 0;
   focusId: string | null = null;
   constructor(data: QuestionRead["data"], send = new CommandSend()) {
     if (!data.form) throw Error("Unavailable form");

@@ -23,6 +23,7 @@ import {
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { settle } from "../fixtures/restart-clock.js";
 
 const READINESS = "/api/operator/readiness";
 const TOKEN_CHECK = "/api/operator/readiness/claude-token";
@@ -115,6 +116,7 @@ for await (const line of createInterface({input: process.stdin})) {
   let result = {};
   if (message.method === "account/read") result = existsSync(${JSON.stringify(join(root, "signed-out"))}) ? {account: null} : {account: {type: "chatgpt"}};
   if (message.method === "config/read") result = {config: {approval_policy: existsSync(${JSON.stringify(join(root, "policy"))}) ? "on-request" : "never", sandbox_mode: "workspace-write"}};
+  if (message.method === "model/list") result = {data: [{model: "fixture", isDefault: true, supportedReasoningEfforts: [{reasoningEffort: "low"}]}], nextCursor: null};
   process.stdout.write(JSON.stringify({id: message.id, result}) + "\n");
 }
 `,
@@ -128,6 +130,9 @@ for await (const line of createInterface({input: process.stdin})) {
   );
   await service.start();
   t.after(() => service.stop());
+  // Startup reads the catalogue asynchronously. Keep that request outside the
+  // exact method log for the explicit login check.
+  await settle(() => service.harnessSettings("codex") !== null);
   writeFileSync(log, "");
   assert.equal(await service.verifyCodexLogin(), "verified");
   assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [

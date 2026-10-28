@@ -503,6 +503,9 @@ for (const [name, engine] of engines) {
         });
         assert.ok(departure > 60);
         await page.waitForURL(/\/app\/tasks\//);
+        // The same question can mount in the task page before Back. Its scroller
+        // must not replace the Inbox's saved departure position.
+        await page.locator(".question-content").waitFor({ state: "attached" });
         let release = () => {};
         const pending = new Promise<void>((resolve) => {
           release = resolve;
@@ -544,8 +547,21 @@ for (const [name, engine] of engines) {
           let expected = departure;
           if (takeover) {
             const bounds = (await detail.boundingBox())!;
+            const scrolling = await detail.evaluateHandle((el) => {
+              const state = { ended: false };
+              el.addEventListener(
+                "scrollend",
+                () => {
+                  state.ended = true;
+                },
+                { once: true },
+              );
+              return state;
+            });
             await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 30);
             await page.mouse.wheel(0, -120);
+            await page.waitForFunction((state) => state.ended, scrolling);
+            await scrolling.dispose();
             await page.waitForFunction(
               (limit) =>
                 document.querySelector(".inbox-detail")!.scrollTop < limit,
@@ -612,6 +628,7 @@ for (const [name, engine] of engines) {
       assert.equal(await detail.evaluate((el) => el.scrollTop), 60);
       await page.keyboard.press("Enter");
       await page.waitForURL(/\/app\/tasks\//);
+      await page.locator(".question-content").waitFor({ state: "attached" });
       await page.goBack();
       await form.getByRole("radio", { name: /^Workspace owners/ }).waitFor();
       await settle(page);

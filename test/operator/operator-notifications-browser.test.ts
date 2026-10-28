@@ -380,6 +380,10 @@ test("notifications: a click routes an open tab in place, keeping unsaved input"
   assert.equal(await click(link), true, "the tab confirmed routing");
   await selected.waitFor();
   assert.equal(page.url(), web.origin + link);
+  // The selected-request shell mounts while its question read is still pending.
+  await selected
+    .getByRole("heading", { name: "Explain", exact: true })
+    .waitFor();
   assert.ok((await selected.innerText()).includes("Explain"));
   assert.equal(
     await page.evaluate(
@@ -400,6 +404,9 @@ test("notifications: a click routes an open tab in place, keeping unsaved input"
   await page.getByLabel("Password").waitFor();
   await signInAgain(page, web.password);
   await selected.waitFor();
+  await selected
+    .getByRole("heading", { name: "Explain", exact: true })
+    .waitFor();
   assert.ok((await selected.innerText()).includes("Explain"));
 
   // A foreign address from the worker is ignored.

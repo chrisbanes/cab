@@ -371,9 +371,10 @@ for (const [name, viewport] of [
     await runtimesPanel(page)
       .getByText("Claude turned on.", { exact: true })
       .waitFor();
+    // The receipt precedes the independent runtime read that updates the switch.
+    await row.getByText("Available", { exact: true }).waitFor();
     assert.equal(await control.isChecked(), true);
     assert.equal(f.service.domain().runtimeEnabled("claude"), true);
-    await row.getByText("Available", { exact: true }).waitFor();
   });
 
 test("turning off a runtime that tasks use confirms first; Keep leaves it on and Turn off saves", async (_t, journey) => {

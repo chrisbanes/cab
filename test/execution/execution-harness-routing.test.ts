@@ -27,6 +27,7 @@ import { tmpdir } from "../fixtures/temp.js";
 class HarnessRuntime implements Runtime {
   readonly calls: string[] = [];
   readonly prompts: string[] = [];
+  readonly turnPrompts = new Map<string, string>();
   holdTurns = false;
   failNextTurn = false;
   failStart = false;
@@ -86,6 +87,7 @@ class HarnessRuntime implements Runtime {
   async startTurn(threadId: string, _workspace?: string, prompt?: string) {
     const turnId = `${this.name}-turn-${++this.turns}`;
     this.prompts.push(prompt ?? "");
+    this.turnPrompts.set(turnId, prompt ?? "");
     this.calls.push(`startTurn:${threadId}`);
     if (this.failNextTurn) {
       this.failNextTurn = false;
@@ -543,7 +545,6 @@ test("a profile change keeps a live conversation on its harness", async () => {
       () => intent(service, initial(assignmentId))?.state === "completed",
       describe,
     );
-
     execute(service, {
       type: "profile.configure",
       profileId: changing,
@@ -576,8 +577,14 @@ test("a profile change keeps a live conversation on its harness", async () => {
     assert.equal(intent(service, next)?.threadId, "codex-thread-1");
     assert.ok(runtimes.codex.calls.includes("resumeThread:codex-thread-1"));
     assert.equal(service.bindingHarness(next), "codex");
-    // Only the profile revision changed, so only it is re-sent, as a replacement.
-    const [firstPrompt, followUp] = runtimes.codex.prompts;
+    // A reporting-repair turn may precede this follow-up. Inspect the exact bound turn,
+    // not its position in the runtime's prompt list.
+    const firstPrompt = runtimes.codex.turnPrompts.get(
+      intent(service, initial(assignmentId))?.turnId ?? "",
+    );
+    const followUp = runtimes.codex.turnPrompts.get(
+      intent(service, next)?.turnId ?? "",
+    );
     assert.match(firstPrompt ?? "", /^Project instructions:\n\(none\)$/m);
     assert.match(firstPrompt ?? "", /^Profile instructions:\nbuild$/m);
     assert.match(
