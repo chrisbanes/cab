@@ -115,11 +115,12 @@ export function QuestionResponse({
     };
   }, [state, states]);
   useLayoutEffect(() => {
-    // The bounded Inbox detail owns question scrolling there; elsewhere the body does.
-    const owner =
-      content.current?.closest<HTMLElement>(".inbox-detail") ?? content.current;
+    // Inbox detail and task question content share answers, but have different scroll owners.
+    const detail = content.current?.closest<HTMLElement>(".inbox-detail"),
+      owner = detail ?? content.current,
+      position = detail ? "inboxScrollTop" : "scrollTop";
     if (!owner || !state) return;
-    const target = state.scrollTop,
+    const target = state[position],
       inputs = ["wheel", "touchstart", "pointerdown", "keydown"];
     let restoring = true;
     const observer = new ResizeObserver(() => restore());
@@ -130,7 +131,7 @@ export function QuestionResponse({
     };
     const record = () => {
       // A clamped restoration must retain its desired offset until more content arrives.
-      if (!restoring) state.scrollTop = owner.scrollTop;
+      if (!restoring) state[position] = owner.scrollTop;
     };
     const takeOver = () => {
       stopRestoring();

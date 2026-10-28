@@ -16,11 +16,24 @@ test("browse pages filter, page and reject stale cursors without changing UI def
   const api = new OperatorApi(s.f.service, [s.f.directory]);
   const read = await s.issue("read");
   const get = async (path: string) => {
-    const r = await s.bearer(read.token, path);
-    return { status: r.status, body: (await r.json()) as Json };
+    try {
+      const r = await s.bearer(read.token, path);
+      return { status: r.status, body: (await r.json()) as Json };
+    } catch (cause) {
+      throw new Error(`Browse bearer GET ${path.split("?")[0]} failed`, {
+        cause,
+      });
+    }
   };
-  const session = async (path: string) =>
-    (await (await s.sessionGet(path)).json()) as Json;
+  const session = async (path: string) => {
+    try {
+      return (await (await s.sessionGet(path)).json()) as Json;
+    } catch (cause) {
+      throw new Error(`Browse session GET ${path.split("?")[0]} failed`, {
+        cause,
+      });
+    }
+  };
 
   // 1. Task list filters over two projects with open, done and cancelled tasks.
   const review = await seedReviewTask(s.f, "Beta");

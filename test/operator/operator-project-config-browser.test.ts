@@ -3186,6 +3186,11 @@ const suggestedLabels = (page: Page, nth: number) =>
 test("a Ready label is suggested from the source's repository labels and read once per round, only while a label condition exists", async (_t, journey) => {
   const state: { calls: string[] } = { calls: [] };
   const { f, ids, page } = await startDiscovery(journey, state);
+  // The initial saved label has its own discovery round. Finish it and leave before
+  // reconfiguring, so none of that document's reads can enter the next round's count.
+  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  const url = page.url();
+  await page.goto("about:blank");
   const d = f.service.domain();
   const projectField = {
     kind: "project-field",
@@ -3207,7 +3212,7 @@ test("a Ready label is suggested from the source's repository labels and read on
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   state.calls = [];
-  await page.reload();
+  await page.goto(url);
   await page.getByLabel("Readiness Project node ID").waitFor();
   assert.equal(labelCalls(state), 0);
   await addLabelCondition(page);
@@ -3243,6 +3248,7 @@ test("a label-only source without a Project makes no Project discovery reads", a
   const { f, ids, page } = await startDiscovery(journey, state);
   const d = f.service.domain(),
     url = page.url();
+  await page.locator("input#source-conditions-0-name[list]").waitFor();
   // Leave the page so none of its reads land after the count is reset.
   await page.goto("about:blank");
   await new OperatorApi(f.service, [f.directory]).execute({
