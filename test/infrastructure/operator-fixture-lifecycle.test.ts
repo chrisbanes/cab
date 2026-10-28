@@ -355,6 +355,59 @@ test("a rejected partial web startup still owns its listener and auth", async ()
     );
 });
 
+const addressInUse = () =>
+  Object.assign(new Error("listen EADDRINUSE"), { code: "EADDRINUSE" });
+
+test("a web startup retries when its probed port was taken before the listener bound", async () => {
+  const fixture = await createOperatorFixture(null, undefined, undefined, {
+    operation: async (name, operation) => {
+      if (name === "listener-1.start") throw addressInUse();
+      await operation();
+    },
+  });
+  try {
+    const web = await fixture.startWeb();
+    const status = (name: string) =>
+      fixture.lifecycle.steps.find((step) => step.name === name)?.status;
+    assert.equal(status("listener-1.close"), "completed");
+    assert.equal(status("auth-1.close"), "completed");
+    assert.equal(
+      (await fetch(`${web.origin}/api/operator/session`)).status,
+      200,
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("a web startup gives up after three taken ports and other errors are not retried", async () => {
+  const attempts: string[] = [];
+  const fixture = await createOperatorFixture(null, undefined, undefined, {
+    operation: async (name, operation) => {
+      if (/^listener-\d+\.start$/.test(name)) {
+        attempts.push(name);
+        throw name === "listener-4.start"
+          ? Error("Injected other failure")
+          : addressInUse();
+      }
+      await operation();
+    },
+  });
+  try {
+    await assert.rejects(fixture.startWeb(), /listener-3\.start/);
+    assert.deepEqual(attempts, [
+      "listener-1.start",
+      "listener-2.start",
+      "listener-3.start",
+    ]);
+    await assert.rejects(fixture.startWeb(), /Injected other failure/);
+    assert.equal(attempts.length, 4);
+  } finally {
+    await fixture.close();
+  }
+  await assert.rejects(access(fixture.directory));
+});
+
 test("stalled listener close bounds both entry points and retains a late rejection", async () => {
   let reject!: (error: Error) => void;
   let cleanupTimeoutMs = 25;

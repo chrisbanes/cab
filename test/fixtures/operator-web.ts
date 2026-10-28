@@ -46,6 +46,7 @@ import {
 import { tmpdir } from "./temp.js";
 import {
   FixtureLifecycle,
+  FixtureStartupError,
   type FixtureLifecycleOptions,
   type FixtureStep,
   fixtureStepCompleted,
@@ -617,6 +618,26 @@ export async function createOperatorFixture<
       if (removed.status !== "dependency-skipped") directoryStep = removed;
       throwFixtureCleanup([removed]);
     },
+  };
+  // The browser's Origin must match the auth origin, so the port is picked before the
+  // listener binds and another process can take it in between: pick again, up to 3 times.
+  const startWebOnce = fixture.startWeb;
+  fixture.startWeb = async (...args) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await startWebOnce(...args);
+      } catch (error) {
+        const id = /^listener-(\d+)\.start$/.exec(
+          error instanceof FixtureStartupError ? error.step.name : "",
+        )?.[1];
+        const taken =
+          (error as { cause?: { code?: unknown } }).cause?.code ===
+          "EADDRINUSE";
+        const web = id ? listeners.get(Number(id)) : undefined;
+        if (!taken || !web || attempt >= 3) throw error;
+        throwFixtureCleanup(await closeWeb(web, true), error);
+      }
+    }
   };
   try {
     await lifecycle.start(

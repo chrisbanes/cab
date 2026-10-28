@@ -13,7 +13,12 @@ import {
   controlledGit,
   type ControlledGitEvent,
 } from "../fixtures/controlled-git.js";
-import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import {
+  spawn,
+  spawnSync,
+  execFileSync,
+  type ChildProcess,
+} from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -613,10 +618,17 @@ test("a completed worktree add followed by a bounded stall is retained without r
     assert.equal(retained?.gitUncertain, true);
     assert.equal(exists(repositoryBinding.workspacePath), true);
     await controlled.cleanup();
+    // A killed orphan answers kill(pid, 0) as a zombie until its new parent reaps it.
+    for (
+      let waited = 0;
+      processIsAlive(descendant.pid) && waited < 2000;
+      waited += 10
+    )
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
     assert.equal(
       processIsAlive(descendant.pid),
       false,
-      "fixture cleanup stopped its exact inherited-pipe descendant",
+      `fixture cleanup stopped its exact inherited-pipe descendant (ps stat: ${spawnSync("ps", ["-o", "stat=", "-p", String(descendant.pid)], { encoding: "utf8" }).stdout.trim()})`,
     );
   } finally {
     try {
