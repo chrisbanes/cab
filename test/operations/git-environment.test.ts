@@ -81,12 +81,13 @@ test("every production Git spawn uses the shared hardened environment", () => {
     );
 });
 
-test("only the push module relaxes the offline Git environment", () => {
+test("only the push and fetch modules relax the offline Git environment", () => {
   const sources = productionSources();
   const overriding = [...sources]
     .filter(([, text]) => /\benvironmentOverrides\s*:/.test(text))
     .map(([path]) => path);
   assert.deepEqual(overriding, [
+    join("src", "standalone", "git-fetch.ts"),
     join("src", "standalone", "git-push.ts"),
     join("src", "standalone", "push-verification.ts"),
   ]);

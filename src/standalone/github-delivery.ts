@@ -3,6 +3,7 @@ import {
   projectFieldChangedReason,
 } from "../operator/github-reasons.js";
 import {
+  absentBranchHead,
   isOperatorAction,
   isOperatorDeliveryCaller,
   isOperatorPublicationCaller,
@@ -63,6 +64,8 @@ export interface PublicationContext extends PushVerification {
   /** The task's assigned branch, and the commit Ensemble last pushed to it. */
   branch: string;
   lastPushedSha: string | null;
+  /** The approved outside head an overwrite replaces (git's all-zero id for a deleted branch). */
+  outsideHeadSha?: string;
   /** A later attempt of an operation whose earlier attempt may have landed late. */
   retry: boolean;
 }
@@ -74,6 +77,8 @@ export class PublicationRefusal extends Error {
   constructor(
     readonly reason:
       | "branch-outside-change"
+      /** The remote is back at Ensemble's last push: nothing outside remains to recover from. */
+      | "branch-outside-cleared"
       | "branch-not-fast-forward"
       | "branch-force-push-needs-lease",
     readonly outsideHeadSha: string | null = null,
@@ -1159,15 +1164,27 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     if (action.kind === "branch.push" || action.kind === "branch.force-push") {
       if (!publication) throw new Error("provider-publication-unverified");
       const remote = await this.optionalRef(repo.path, publication.branch);
-      // A fresh publication needs the remote exactly where Ensemble left it. Only a retry may find it
-      // already at the commit: its earlier push could have landed after the readback.
+      // An overwrite expects the approved outside head; any other publication needs the remote exactly
+      // where Ensemble left it. Only a retry may find it already at the commit: its earlier push could
+      // have landed after the readback.
+      const outside = publication.outsideHeadSha;
+      const recovery = outside !== undefined;
+      const expected = !recovery
+        ? publication.lastPushedSha
+        : outside === absentBranchHead
+          ? null
+          : outside;
       if (
-        remote !== publication.lastPushedSha &&
+        remote !== expected &&
         !(publication.retry && remote === action.commitSha)
-      )
+      ) {
+        if (recovery && remote === publication.lastPushedSha)
+          throw new PublicationRefusal("branch-outside-cleared");
         throw new PublicationRefusal("branch-outside-change", remote);
+      }
       if (action.kind === "branch.force-push") {
-        if (publication.lastPushedSha === null)
+        // An overwrite's lease is the approved outside head, so it needs no earlier push.
+        if (!recovery && publication.lastPushedSha === null)
           throw new PublicationRefusal("branch-force-push-needs-lease");
       } else if (publication.descendsFromLastPushed === false)
         throw new PublicationRefusal("branch-not-fast-forward");

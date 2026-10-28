@@ -1,6 +1,7 @@
 import { credentialFreeEnvironment } from "../core/child-environment.js";
 import {
   isOperatorAction,
+  isRecoveryAction,
   isOperatorDeliveryCaller,
   isOperatorPublicationCaller,
   isRuntimeDeliveryCaller,
@@ -319,6 +320,10 @@ export class DeliveryCoordinator {
         ...verified,
         branch: assigned.branch,
         lastPushedSha: assigned.lastPushedSha,
+        ...(action.kind === "branch.force-push" &&
+        action.outsideHeadSha !== undefined
+          ? { outsideHeadSha: action.outsideHeadSha }
+          : {}),
         // Only an earlier attempt that may have pushed can have landed late.
         retry: this.store.mayHaveLanded(record.operationId),
       };
@@ -343,6 +348,27 @@ export class DeliveryCoordinator {
         });
       if (error instanceof PublicationRefusal) {
         const outside = error.reason === "branch-outside-change";
+        if (error.reason === "branch-outside-cleared" && assigned)
+          // The remote is back at Ensemble's own push: only the head this recovery named is obsolete.
+          return this.store.recordObservation(
+            record.operationId,
+            {
+              state: "confirmed-failure",
+              reason: error.reason,
+              receipt: null,
+            },
+            () => {
+              if (
+                this.store.taskBranch(caller.taskId, assigned.repositoryId)
+                  ?.outsideHeadSha ===
+                (isRecoveryAction(action) ? action.outsideHeadSha : null)
+              )
+                this.store.clearOutsideHead(
+                  caller.taskId,
+                  assigned.repositoryId,
+                );
+            },
+          );
         return this.store.recordObservation(
           record.operationId,
           {
@@ -374,6 +400,7 @@ export class DeliveryCoordinator {
     }
     if (
       assigned?.outsideHeadSha &&
+      !publication?.outsideHeadSha &&
       before.beforeHead !== undefined &&
       before.beforeHead === assigned.lastPushedSha
     )

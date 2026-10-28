@@ -95,6 +95,8 @@ export function publicationWorld(
     mode?: "allow" | "approval";
     branchPrefix?: string;
     title?: string;
+    /** Whether the operator has approved the exact material of whatever the lead requests. */
+    approved?: boolean;
   } = {},
 ) {
   const tree = taskWorktree(t);
@@ -245,7 +247,10 @@ export function publicationWorld(
     workRevision: 1,
     conversationRevision: 1,
   };
-  const coordinatorFor = (verify = true) => {
+  const coordinatorFor = (
+    verify = true,
+    approved = options.approved ?? false,
+  ) => {
     const real = new GitHubHttpDeliveryProvider("token", fetcher, push);
     const provider = Object.assign(Object.create(real), {
       async inspectPr() {
@@ -256,7 +261,7 @@ export function publicationWorld(
     return new DeliveryCoordinator(store, {
       providerFactory: () => provider,
       authorize: () => {},
-      approved: () => false,
+      approved: () => approved,
       feedback: (_task, reason, identity) => wakes.push({ reason, identity }),
       ...(verify
         ? {
@@ -283,8 +288,37 @@ export function publicationWorld(
       },
       caller,
     );
+  /** The task branch's recorded outside change: the material a recovery names and is approved on. */
+  const outsideMaterial = () => {
+    const branch = store.taskBranch(taskId, repositoryId);
+    return {
+      branch: branch?.branch ?? "",
+      outsideHeadSha: branch?.outsideHeadSha ?? "",
+      lastPushedSha: branch?.lastPushedSha ?? null,
+    };
+  };
+  /** An overwrite of the recorded outside head (or of `material`) with `commitSha`. */
+  const overwrite = (
+    commitSha: string,
+    material: Record<string, unknown> = outsideMaterial(),
+    who: DeliveryCoordinator = coordinator,
+  ) =>
+    who.submit(
+      {
+        operationId: randomUUID(),
+        action: {
+          kind: "branch.force-push",
+          target: { repositoryId },
+          commitSha,
+          ...material,
+        },
+      },
+      caller,
+    );
   return {
     ...tree,
+    outsideMaterial,
+    overwrite,
     db,
     domain,
     store,
