@@ -143,6 +143,9 @@ export class CommandSends {
         (e.uncertain || (e.outcome && (!e.persistent || checkedHere.has(key)))),
     );
   }
+  drop(key: string) {
+    this.entries.delete(key);
+  }
   purge() {
     this.entries.clear();
     this.changed();

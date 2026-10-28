@@ -75,6 +75,7 @@ export class QuestionResponseState {
   readonly form: QuestionForm;
   readonly revision: number;
   readonly interactionId: string;
+  readonly taskId: string;
   answers: QuestionAnswers;
   errors: Record<string, string> = Object.create(null);
   scrollTop = 0;
@@ -96,6 +97,7 @@ export class QuestionResponseState {
     this.form = structuredClone(data.form);
     this.revision = data.revision;
     this.interactionId = data.interactionId;
+    this.taskId = data.taskId;
     this.answers = data.answers
       ? structuredClone(data.answers)
       : Object.fromEntries(
@@ -208,6 +210,8 @@ export class QuestionResponseStates {
     for (const listener of this.listeners) listener();
   }
   purge() {
+    for (const state of this.states.values())
+      this.sends.drop(`${state.taskId}:question:${state.interactionId}`);
     this.states.clear();
     this.changed();
   }
