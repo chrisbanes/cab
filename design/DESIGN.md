@@ -167,7 +167,7 @@ dimensions.
   Save draft and Create and start. Confirmed creation is distinct from admission.
   There is no attachment hint.
 - **Task detail (`03-task-detail`):** a header with the task ID, a source chip for
-  imported tasks, title, desired outcome, actions (Execution, and Reset task… and Stop… while the
+  imported tasks, title, desired outcome, actions (Execution, Reset task… and Stop… while the
   task is open; there is no task pause), a status strip (state badge, readiness and holds, next actor, lead,
   updated) and tabs (Overview, Files, Changes, Review, History). Overview leads with
   any decision card, then the latest result (its criterion rows with evidence
@@ -1867,7 +1867,7 @@ card; the task header carries **Reset task…** behind a confirmation. Desktop f
 | Available | `240-task-not-started-available` | `241-phone-task-not-started-available` | The "Not started" state chip in the accent tone, "Next: you · start again", and a decision card: "Your decision · not started", what Start again does (current revisions, same workspace, nothing sent to the lead) and **Start again**. The header offers **Reset task…** beside **Stop…**. |
 | Sent | `242-task-start-again-sent` | `243-phone-task-start-again-sent` | "✓ Queued again. It is admitted under the current checks." with Details, replacing the button. The task now reads as queued or waiting, and the refused request stays in the history. |
 | Unavailable | `244-task-start-again-unavailable` | `245-phone-task-start-again-unavailable` | One specimen listing each reason sentence: `nothing-refused`, `task-not-open`, `source-held`, `assignment-held`, `submission-interrupted`, `execution-unresolved`. On the page the reason replaces the button and, for `source-held`, `assignment-held`, `submission-interrupted` and `execution-unresolved`, links to the source review or the task's recovery. |
-| Reset confirm | `246-task-reset-confirm` | `247-phone-task-reset-confirm` | An alert dialog: "Reset {title}?", the sentence that every assignment's conversation is replaced and the lead starts fresh in the same workspace, that the old conversations and workspace stay readable, and that this cannot be undone. **Cancel** has the initial focus and sends nothing; **Reset task** is destructive. When Reset is not offered the header control is disabled and the dialog states the reason. On a phone the actions stack and the dialog sits at the bottom. |
+| Reset confirm | `246-task-reset-confirm` | `247-phone-task-reset-confirm` | An alert dialog: "Reset {title}?", the sentence that every assignment's conversation is replaced and the lead starts fresh in the same workspace, that the old conversations and workspace stay readable, and that this cannot be undone. **Cancel** has the initial focus and sends nothing; **Reset task** is destructive. When Reset is not offered the header control is disabled with the reason as its tooltip (a touch screen has no tooltip; the Execution link beside it and the task's holds carry the recovery), and an open dialog whose offer vanishes states the reason. On a phone the actions stack and the dialog sits at the bottom. |
 
 Interaction notes:
 

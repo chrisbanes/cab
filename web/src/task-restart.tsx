@@ -89,7 +89,8 @@ export function StartAgainAction({
     outcome?.command.type === "task.start-again"
       ? outcome.command.workId
       : undefined;
-  const sent = offer?.available && offer.workId !== sentFor ? null : outcome;
+  const sent =
+    offer?.available && offer.workId !== sentFor && !uncertain ? null : outcome;
   const unavailable =
     offer && !offer.available && offer.reason
       ? startAgainUnavailable[offer.reason]
@@ -158,6 +159,7 @@ export function ResetTask({
   version,
   offer,
   onChanged,
+  onOpenChange,
 }: {
   client: OperatorClient;
   session: Session;
@@ -166,6 +168,8 @@ export function ResetTask({
   version: number;
   offer: { available: boolean; reason?: ResetReason | undefined } | undefined;
   onChanged: () => void;
+  /** The dialog opened or closed, for a container that must stay open behind it. */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const { send, sending, outcome, uncertain, clear } = useCommandSend(
@@ -198,6 +202,7 @@ export function ResetTask({
     <Dialog
       open={open}
       onOpenChange={(next) => {
+        onOpenChange?.(next);
         setOpen(next);
         if (!next) clear();
       }}

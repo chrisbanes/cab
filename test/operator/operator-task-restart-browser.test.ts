@@ -106,6 +106,8 @@ for (const [name, viewport] of Object.entries(viewports)) {
       (await disabledReset.getAttribute("title")) ?? "",
       /the task or an assignment is held/,
     );
+    assert.equal(await startAgain().count(), 0);
+    assert.equal(commands.length, 1);
 
     // The Inbox intervention offers the same action.
     await page.goto(

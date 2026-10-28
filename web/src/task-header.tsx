@@ -100,13 +100,14 @@ export function TaskHeaderActions({
   const csrfToken = session.csrfToken;
   const [open, setOpen] = useState(false),
     [sent, setSent] = useState(false),
+    [resetOpen, setResetOpen] = useState(false),
     [menuOpen, setMenuOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 759px)");
   const keep = useRef<HTMLButtonElement>(null),
     overflow = useRef<HTMLDetailsElement>(null);
   // A tap outside closes the phone overflow; the Stop dialog's own layer is not outside.
   useEffect(() => {
-    if (!phone || open) return;
+    if (!phone || open || resetOpen) return;
     const away = (event: PointerEvent) => {
       const details = overflow.current;
       if (details?.open && !details.contains(event.target as Node)) {
@@ -117,7 +118,7 @@ export function TaskHeaderActions({
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
-  }, [phone, open]);
+  }, [phone, open, resetOpen]);
   // A page restored from the back-forward cache (after Execution or the Stop post) starts
   // closed again: the dialog and the phone overflow are visit-long overlays, not state to keep.
   useEffect(() => {
@@ -135,7 +136,7 @@ export function TaskHeaderActions({
     <details
       ref={overflow}
       className="task-header-overflow"
-      open={!phone || menuOpen || open}
+      open={!phone || menuOpen || open || resetOpen}
       onToggle={(event) => {
         if (phone) setMenuOpen(event.currentTarget.open);
       }}
@@ -171,6 +172,11 @@ export function TaskHeaderActions({
             title={report.title}
             version={report.reset.version}
             offer={report.reset.offer}
+            onOpenChange={(next) => {
+              // The trigger lives in the overflow, which stays open behind the dialog.
+              if (phone) setMenuOpen(true);
+              setResetOpen(next);
+            }}
             onChanged={() => window.dispatchEvent(new Event(taskChangedEvent))}
           />
         )}
