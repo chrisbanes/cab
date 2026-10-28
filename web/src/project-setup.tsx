@@ -89,7 +89,7 @@ const verificationKey = (r: SetupRow) => `${r.path}\n${repoOf(r)}\n${r.ref}`;
 /** What the page header needs from setup: the heading is latched for the visit. */
 export type SetupHeader = { firstRun: boolean; created: boolean };
 
-/** Frames 115–117c: guided setup recorded by one `project.create`. */
+/** Guided setup recorded by one `project.create`. */
 export function ProjectSetup(
   p: SettingsProps & {
     navigate: (href: string) => void;
@@ -275,7 +275,7 @@ export function ProjectSetup(
     d.set("githubProject", "");
   }, [projectKey]);
   const projectList = projects?.state === "ready" ? projects : null;
-  // Frame 117: exactly one linked Project is preselected until the operator chooses.
+  // Exactly one linked Project is preselected until the operator chooses.
   // biome-ignore lint/correctness/useExhaustiveDependencies: preselect only when a Project list lands or the repositories change.
   useEffect(() => {
     if (
@@ -868,7 +868,7 @@ export function ProjectSetup(
                                       });
                                       return;
                                     }
-                                    // Another repository keeps the folder (frame 116: "change the repository")
+                                    // Another repository keeps the folder ("change the repository")
                                     // and checks it again against the new repository.
                                     const next: SetupRow = {
                                       ...row,

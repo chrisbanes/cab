@@ -917,7 +917,7 @@ test("every outcome reads in plain words and keeps the receipt fields for Detail
   assert.equal(lost.details.code, "command-outcome-unknown");
 
   // The copy names no command, ID, key, number or service term; those live in Details.
-  // The one number allowed is how many fields are highlighted (frame 167).
+  // The one number allowed is how many fields are highlighted.
   for (const draft of [saved, rejected, highlighted, preflight, conflict, lost])
     assert.doesNotMatch(
       draft.notice.replace(/^Fix the \d+ highlighted/, "Fix the highlighted"),

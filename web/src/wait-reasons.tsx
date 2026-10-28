@@ -157,7 +157,7 @@ function HoldList({
 }
 
 /**
- * Frames 149–150: the first wait is primary with its Fix; the rest stay listed with
+ * The first wait is primary with its Fix; the rest stay listed with
  * their own Fix or link. The Resume project outcome stays after the wait it cleared.
  */
 export function WaitReasons({

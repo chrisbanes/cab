@@ -30,7 +30,7 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * The Overview inspector (`03-task-detail`): source facts, holds, dependencies, execution facts
+ * The Overview inspector: source facts, holds, dependencies, execution facts
  * and results. An imported task's GitHub content is a separate read-only group; nothing in it
  * writes to GitHub.
  */

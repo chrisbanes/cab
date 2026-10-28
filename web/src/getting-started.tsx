@@ -78,7 +78,7 @@ export async function configureGettingStarted(
 }
 
 /**
- * Frames 143–144. Home shows every row until a task starts a turn, then only rows that
+ * Home shows every row until a task starts a turn, then only rows that
  * need attention; the page adds Dismiss and its undo.
  */
 export function GettingStarted({

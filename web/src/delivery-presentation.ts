@@ -1,4 +1,4 @@
-// Delivery wording for the Changes tab: design/DESIGN.md -> Task detail -> Implementation status.
+// Delivery wording for the Changes tab.
 import {
   statusEventLabels,
   statusMappingActionLabel,

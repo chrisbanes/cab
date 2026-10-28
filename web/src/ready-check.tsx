@@ -20,7 +20,7 @@ import {
 import type { TabProps } from "./project-config.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 
-/** Frames 146c–146d: Import issues for the linked GitHub Project, before Resume. */
+/** Import issues for the linked GitHub Project, before Resume. */
 function ReadyCheckImport({
   settings,
   projectId,
@@ -53,7 +53,7 @@ function ReadyCheckImport({
   );
 }
 
-/** Frames 146–147: what creation saved, what would make work wait, and Resume or Keep paused. */
+/** What creation saved, what would make work wait, and Resume or Keep paused. */
 export function ReadyCheck({
   settings: p,
   draft,

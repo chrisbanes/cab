@@ -484,7 +484,7 @@ export function RuntimeSettings(p: SettingsProps) {
     </div>
   );
 }
-/** A recovery witness inside its generation's record (frames 175 and 176): evidence only. */
+/** A recovery witness inside its generation's record: evidence only. */
 function Witness({
   title,
   id,

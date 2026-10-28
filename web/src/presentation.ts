@@ -1,4 +1,4 @@
-// Shared wording rules for the operator UI: design/DESIGN.md -> Interaction notes -> Presentation.
+// Shared wording rules for the operator UI.
 
 import { clockLabel } from "../../src/operator/clock-label.js";
 export { clockLabel };

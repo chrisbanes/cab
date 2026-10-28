@@ -35,10 +35,10 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   setLinkedRepository(f, a.projectId, true);
   assert.ok(workspace);
   const beforePng = await readFile(
-      join(process.cwd(), "design/assets/command-menu-before.png"),
+      join(process.cwd(), "test/fixtures/command-menu-before.png"),
     ),
     afterPng = await readFile(
-      join(process.cwd(), "design/assets/command-menu-after.png"),
+      join(process.cwd(), "test/fixtures/command-menu-after.png"),
     ),
     before = randomUUID(),
     after = randomUUID(),

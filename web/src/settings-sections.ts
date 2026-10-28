@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { readinessCheckIds } from "../../src/operator/readiness.js";
 
-/** The Settings index sections, in the designed order (frame 114), with their stable fragments. */
+/** The Settings index sections, in the designed order, with their stable fragments. */
 export const SETTINGS_SECTIONS = [
   { id: "projects", label: "Projects" },
   { id: "runtime", label: "Runtime & recovery" },
@@ -17,7 +17,7 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 /**
  * Section order for the page and its navigation. Until a task starts a turn Readiness
- * comes first (frame 114c); an unknown start state keeps the designed order.
+ * comes first; an unknown start state keeps the designed order.
  */
 export function settingsSectionOrder(
   turnStarted: boolean | undefined,

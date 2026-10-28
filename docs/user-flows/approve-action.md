@@ -48,8 +48,6 @@ material invalidates approval".
 
 The operator CLI is outside the budget: it has no screens.
 
-Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
-
 ## Recovery
 
 - An approval decided, changed or withdrawn since it was read records nothing and

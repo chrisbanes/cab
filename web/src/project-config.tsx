@@ -218,7 +218,7 @@ function statusLine(
   return withSaved(admission, saved("project.configure", data.project.version));
 }
 
-/** Phone-first summary (frame 121): what is true now and the next step. Hidden on desktop. */
+/** Phone-first summary: what is true now and the next step. Hidden on desktop. */
 function ProjectStateCards({
   state,
   next,

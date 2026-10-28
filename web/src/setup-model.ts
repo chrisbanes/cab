@@ -368,7 +368,7 @@ export function readyCheckItems(input: {
   };
 }
 
-/** Frames 115–117b: the source credential guided setup will record, stated before Create. */
+/** The source credential guided setup will record, stated before Create. */
 export function setupSourceCredentialCopy(
   /** `undefined` while the read is pending; `null` after a failed read. */
   sourceGh: z.infer<typeof ghLoginStateSchema> | null | undefined,
@@ -380,7 +380,7 @@ export function setupSourceCredentialCopy(
 }
 
 /**
- * Frames 146–147: the recorded source credential from the configuration read. Informational
+ * The recorded source credential from the configuration read. Informational
  * only; it never blocks Resume. `undefined` is still loading, `null` a failed read.
  */
 export function sourceCredentialLine(

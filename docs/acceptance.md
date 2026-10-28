@@ -570,8 +570,7 @@ future BB releases. Exact transactions and runtime-specific test seams belong to
 
 ### Task overview and evidence
 
-The reviewed design is the [Design canvas](https://claude.ai/artifact/6JBCAUn25QRBPVnyJNCBxY) with its
-[interaction/state handoff](../design/DESIGN.md); a mockup does not prove
+The [design foundations](../design/DESIGN.md) set presentation rules; a mockup does not prove
 persistence, permissions, runtime behaviour or delivery. The behavioural contract is
 in [SPEC.md](SPEC.md#operator-interface-and-human-requests). These outcomes apply
 wherever Overview, Inbox, project and cross-project List/Board, and task detail

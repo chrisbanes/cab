@@ -22,7 +22,7 @@ const status = {
 
 /**
  * What the running service can and cannot use. Run again only re-reads. The GitHub
- * discovery row is the one place with a second action (frame 114c): when it is not
+ * discovery row is the one place with a second action: when it is not
  * configured and a gh login is signed in, the fix line gives way to the existing one-step
  * `discovery.configure` with that login. Every other state keeps the server's fix line.
  */

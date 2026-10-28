@@ -9,8 +9,7 @@ their retained destinations.
 
 The [operator interface requirements](../SPEC.md#operator-interface-and-human-requests)
 call for evidence-backed next actors, separate attention and work state, and
-progressive composer disclosure; the [design handoff](../../design/DESIGN.md)
-records the static design and the implemented differences. The composer leads
+progressive composer disclosure. The composer leads
 with project, title and outcome; one Optional settings panel (context, reference
 links, assignee and dependencies) shows a chip per supplied value or the error
 count when collapsed. Beside the fields, "If you create it now" says Starts now

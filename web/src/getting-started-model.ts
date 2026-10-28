@@ -42,7 +42,7 @@ const passes = (r: ReadinessRead, ids: readonly string[]) =>
     : null;
 
 /**
- * Frames 143–144: the checklist rows, derived from current reads on every render; no
+ * The checklist rows, derived from current reads on every render; no
  * progress is stored. A required row regresses to Needs attention when a later required
  * row is Done or a turn has started.
  */

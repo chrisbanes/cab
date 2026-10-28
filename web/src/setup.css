@@ -1,4 +1,4 @@
-/* Guided project setup and folder picker (frames 115–117c and 131). Steps 1, 2 and 3 share
+/* Guided project setup and folder picker. Steps 1, 2 and 3 share
    one column; the aside follows them in the DOM and sits beside them from 1121px, as in
    the composer. The DOM sequence is the visual sequence; nothing here reorders. */
 
@@ -167,7 +167,7 @@
     margin-top: 0;
   }
 
-  /* Frame 147: Resume and Keep paused stack at full width. */
+  /* Resume and Keep paused stack at full width. */
   .setup-ready .setup-inline-actions > * {
     flex: 1 1 100%;
   }
