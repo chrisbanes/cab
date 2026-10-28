@@ -3494,24 +3494,15 @@ export class ExecutionState {
       );
   }
 
-  /** Whether recovery recorded an identity for the work: it may have reached a runtime. */
-  hasRecoveryIdentity(workId: string): boolean {
-    return (
-      this.db
-        .prepare("SELECT 1 FROM execution_recovery_identities WHERE workId = ?")
-        .get(workId) !== undefined
-    );
-  }
-
   /**
-   * Whether any work of the task is queued, running or held other than a request refused
-   * before it ran, or holds writer, capacity or effect state. Such work may still be live.
+   * The task's work that is queued, running or held other than a request refused before it
+   * ran, or that holds writer, capacity or effect state. Unless something else resolved it
+   * (see `CoordinationStore.isHistoricalWorkResolved`), it may still be live.
    */
-  taskHasUnsettledExecution(taskId: string): boolean {
-    if (!this.hasTurnRequests) return false;
-    return (
-      this.db
-        .prepare(`SELECT request.workId, request.state FROM turn_requests request
+  unsettledTaskWorkIds(taskId: string): string[] {
+    if (!this.hasTurnRequests) return [];
+    const rows = this.db
+      .prepare(`SELECT request.workId, request.state FROM turn_requests request
           WHERE request.taskId = ? AND request.state IN ('queued','active','held')
           UNION
           SELECT intent.workId, intent.state FROM task_execution_bindings binding
@@ -3523,11 +3514,17 @@ export class ExecutionState {
               OR EXISTS (SELECT 1 FROM execution_capacity_reservations c WHERE c.workId = intent.workId)
               OR EXISTS (SELECT 1 FROM execution_pending_effects e
                 WHERE e.workId = intent.workId AND e.state = 'pending'))))`)
-        .all(taskId, taskId) as { workId: string; state: string }[]
-    ).some(
-      ({ workId, state }) =>
-        !(state === "held" && this.refusedBeforeStart(workId)),
-    );
+      .all(taskId, taskId) as { workId: string; state: string }[];
+    return [
+      ...new Set(
+        rows
+          .filter(
+            ({ workId, state }) =>
+              !(state === "held" && this.refusedBeforeStart(workId)),
+          )
+          .map(({ workId }) => workId),
+      ),
+    ];
   }
 
   /** Whether a bound, unrefused generation of the assignment is still unresolved. */

@@ -164,7 +164,7 @@ const admissionEffect = (task: TaskData | undefined): Effect =>
 /** What to run instead when Start again or Reset is unavailable, by the recovery the reason names. */
 const restartFix = (taskId: string, destination: RestartDestination) =>
   destination === "recovery"
-    ? `Run 'ensemble task get ${taskId}', then clear it with the 'ensemble recovery' commands on its assignment.`
+    ? `Run 'ensemble task get ${taskId}', then clear it with 'ensemble recovery get ASSIGNMENT_ID' and the recovery commands it names.`
     : destination === "source-review"
       ? `Review the task's source hold first; 'ensemble task get ${taskId}' names it.`
       : `Run 'ensemble task get ${taskId}' to see the task's state.`;

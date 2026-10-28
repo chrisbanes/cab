@@ -3328,9 +3328,6 @@ export class CoordinationStore {
         // The operator started it again; the refusal stays as history.
         (this.refusedBeforeStart?.(workId) &&
           this.one(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='turn_request_restarts'",
-          ) &&
-          this.one(
             "SELECT 1 FROM turn_request_restarts WHERE refusedWorkId=?",
             workId,
           )) ||

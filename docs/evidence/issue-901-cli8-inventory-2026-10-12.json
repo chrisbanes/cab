@@ -778,6 +778,40 @@
       "gap": "Added after the CLI8 live run: exercised only through the in-process CLI against a real loopback service with fixture runtimes, not through the installed binary. A draft turn cannot be retracted; Stop is the recovery."
     },
     {
+      "id": "task start-again",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator-cli-task-control.test.ts",
+        "test/task-restart.test.ts"
+      ],
+      "effect": "Queues a request that was refused before it ran again at the current revisions in the same workspace (effect queued); the refusal stays in the history and nothing is sent to the lead.",
+      "denial": "A read-only credential exits 3; a task with nothing refused, a source hold, a held assignment, a cut-off submission or any execution that may have run exits 4 with the reason and the recovery that applies, and nothing is sent.",
+      "revision": "A stale task --expected-version, or a --work that is no longer the refused request, exits 4 with nothing recorded.",
+      "retry": "A lost reply then rerun reuses the key and replays the receipt; operation get does not read coordination receipts.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI against a real loopback service with fixture runtimes, not through the installed binary."
+    },
+    {
+      "id": "task reset",
+      "kind": "command",
+      "area": "task",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": [
+        "test/operator-cli-task-control.test.ts",
+        "test/task-restart.test.ts"
+      ],
+      "effect": "Replaces every assignment's conversation and queues a fresh first turn for the project lead in the same workspace (effect queued); it cannot be undone and the old conversations and workspace stay readable.",
+      "denial": "A read-only credential exits 3; a task that is not open and Ready, has queued, running or unresolved work, or has a task, Stop, source or assignment hold exits 4 with the reason and nothing recorded.",
+      "revision": "A stale task --expected-version exits 4 with nothing recorded.",
+      "retry": "A lost reply then rerun reuses the key and replays the receipt; operation get does not read coordination receipts.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI against a real loopback service with fixture runtimes, not through the installed binary. A reset has no restore."
+    },
+    {
       "id": "task stop",
       "kind": "command",
       "area": "task",

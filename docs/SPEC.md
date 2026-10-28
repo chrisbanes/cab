@@ -1156,8 +1156,8 @@ submitting and held work stays with the `recovery` commands.
   is the target.
 - **Not offered** for a closed task (`task-not-open`), a source hold (`source-held`, review
   the source first), a held assignment (`assignment-held`), a request cut off during
-  submission (`submission-interrupted`), any other held request or a writer, ambiguity or
-  archival hold (`execution-unresolved`) or when nothing was refused (`nothing-refused`).
+  submission (`submission-interrupted`), any assignment's newest request that is held for another reason or a writer,
+  ambiguity or archival hold (`execution-unresolved`) or when nothing was refused (`nothing-refused`).
   Each refusal is a 409 `conflict` with the reason, which the task read reports as
   `startAgain`, with the recovery that applies. A Stop hold, pause or capacity does not
   block it; the new request queues and is held like any turn.

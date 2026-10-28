@@ -390,6 +390,14 @@ test("Start again is refused with its reason when something may have run", async
           .prepare("UPDATE domain_tasks SET state = 'cancelled' WHERE id = ?")
           .run(f.taskId),
     ],
+    [
+      "refused draft turn",
+      "nothing-refused",
+      (f) =>
+        db(f.service)
+          .prepare("UPDATE turn_requests SET draftTurn = 1 WHERE workId = ?")
+          .run(f.workId),
+    ],
   ];
   for (const [name, reason, seed] of seeds)
     await t.test(name, async () => {
@@ -408,7 +416,11 @@ test("Start again is refused with its reason when something may have run", async
           db(f.service).prepare("SELECT * FROM turn_request_restarts").all(),
           [],
         );
-        if (name !== "closed task" && name !== "held assignment") {
+        if (
+          name !== "closed task" &&
+          name !== "held assignment" &&
+          name !== "refused draft turn"
+        ) {
           unpause(f);
           await f.service.configureCapacity({
             key: randomUUID(),
@@ -741,6 +753,26 @@ test("Reset is refused with its reason and records nothing while anything may be
           .prepare("UPDATE domain_tasks SET state = 'done' WHERE id = ?")
           .run(f.taskId),
     ],
+    [
+      "Stop hold",
+      "task-held",
+      (f) =>
+        db(f.service)
+          .prepare(
+            "INSERT INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",
+          )
+          .run(f.taskId),
+    ],
+    [
+      "active request",
+      "execution-unresolved",
+      (f) =>
+        db(f.service)
+          .prepare(
+            "UPDATE turn_requests SET state = 'active', reason = NULL WHERE workId = ?",
+          )
+          .run(f.workId),
+    ],
   ];
   for (const [name, reason, seed] of seeds)
     await t.test(name, async () => {
@@ -769,6 +801,30 @@ test("Reset is refused with its reason and records nothing while anything may be
         rmSync(f.root, { recursive: true, force: true });
       }
     });
+});
+
+test("Reset ignores held work that a planned restart already resolved", async () => {
+  const f = await refusedInitial();
+  try {
+    // The turn was interrupted by a planned shutdown and requeued; its old request stays held.
+    db(f.service)
+      .prepare(
+        "UPDATE execution_intents SET state = 'resolved-failed', threadId = 'old-thread', turnId = 'old-turn' WHERE workId = ?",
+      )
+      .run(f.workId);
+    db(f.service)
+      .prepare(
+        `INSERT INTO execution_shutdown_resolutions
+          (interruptedWorkId, requeueWorkId, workRevision, requestSequence, threadId, turnId, harness, createdAt)
+        VALUES (?, ?, NULL, ?, 'old-thread', 'old-turn', 'codex', 1)`,
+      )
+      .run(f.workId, f.workId, f.old.sequence);
+    const read = (await new OperatorApi(f.service).readTask(f.taskId)).data;
+    assert.deepEqual(read.reset, { available: true });
+  } finally {
+    await f.service.stop();
+    rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test("Reset replays by key and conflicts on a stale read", async () => {

@@ -4436,7 +4436,7 @@ export class StandaloneService {
     return intent?.state === "submitting" ||
       (intent &&
         intent.turnId === null &&
-        state.hasRecoveryIdentity(request.workId))
+        state.recoveryIdentity(request.workId) !== undefined)
       ? "interrupted"
       : "unresolved";
   }
@@ -4474,7 +4474,7 @@ export class StandaloneService {
   }
 
   private resetFacts(taskId: string): ResetFacts {
-    const { domain, schedulerStore, state } = this.started();
+    const { domain, schedulerStore, state, coordination } = this.started();
     const task = domain.task(taskId);
     const lead = domain.leadBindings().find((item) => item.taskId === taskId);
     const assignments = domain.assignments(taskId);
@@ -4488,7 +4488,9 @@ export class StandaloneService {
       leadStarted:
         lead !== undefined &&
         schedulerStore.hasOrdinaryAssignmentWork(String(lead.assignmentId)),
-      unresolvedExecution: state.taskHasUnsettledExecution(taskId),
+      unresolvedExecution: state
+        .unsettledTaskWorkIds(taskId)
+        .some((workId) => !coordination.isHistoricalWorkResolved(workId)),
       held:
         Boolean(state.taskHold(taskId)) ||
         domain.admission(taskId).reasons.includes("source-hold") ||

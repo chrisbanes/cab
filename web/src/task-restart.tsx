@@ -141,7 +141,7 @@ export function StartAgainAction({
 
 /**
  * Reset task, behind a confirmation that says it cannot be undone. When it is not offered the
- * control is disabled and the reason and its recovery are shown in the dialog's place.
+ * control is disabled and its reason and recovery are shown beside it.
  */
 export function ResetTask({
   client,
@@ -175,6 +175,24 @@ export function ResetTask({
   );
   if (!offer) return null;
   const unavailable = offer.reason ? resetUnavailable[offer.reason] : undefined;
+  // An open dialog stays: a recorded reset makes the offer unavailable under its confirmation.
+  if (!offer.available && !open)
+    return (
+      <>
+        <Button variant="secondary" disabled>
+          Reset task…
+        </Button>
+        {unavailable && (
+          <span className="metadata muted">
+            Reset isn't offered: {unavailable.text}.{" "}
+            <RestartDestinationLink
+              taskId={taskId}
+              destination={unavailable.destination}
+            />
+          </span>
+        )}
+      </>
+    );
   return (
     <Dialog
       open={open}
@@ -184,18 +202,13 @@ export function ResetTask({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="secondary" disabled={!offer.available}>
-          Reset task…
-        </Button>
+        <Button variant="secondary">Reset task…</Button>
       </DialogTrigger>
       <DialogContent role="alertdialog" className="stop-dialog">
         <DialogTitle>Reset {title}?</DialogTitle>
         <DialogDescription className="body">
           {resetIrreversibleText}
         </DialogDescription>
-        {!offer.available && unavailable && (
-          <p className="muted">Reset isn't offered: {unavailable.text}.</p>
-        )}
         <SendFeedback
           outcome={outcome}
           recorded="Reset. The lead starts a fresh conversation in the same workspace."
@@ -207,7 +220,7 @@ export function ResetTask({
           {outcome?.kind !== "recorded" && !uncertain && (
             <Button
               variant="destructive"
-              disabled={Boolean(sending) || !offer.available}
+              disabled={Boolean(sending)}
               onClick={() =>
                 void send(
                   operatorCommandSchema.parse({

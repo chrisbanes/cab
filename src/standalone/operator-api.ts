@@ -2047,12 +2047,6 @@ export class OperatorApi {
           : null,
     };
   }
-  private startAgainRead(taskId: string) {
-    const availability = this.service.startAgainAvailability(taskId);
-    return availability.available
-      ? availability
-      : { available: false as const, reason: availability.reason };
-  }
   private selection(a: Row) {
     return selectAssignmentExecution(a, this.service);
   }
@@ -3462,7 +3456,7 @@ export class OperatorApi {
           }
         : {}),
       draftTurn: this.service.draftTurnAvailability(taskId),
-      startAgain: this.startAgainRead(taskId),
+      startAgain: this.service.startAgainAvailability(taskId),
       reset: this.service.resetAvailability(taskId),
       assignments: assignments.map((a) => {
         const s = this.selection(a),

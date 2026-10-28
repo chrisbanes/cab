@@ -236,7 +236,7 @@ test("a usage error prints the message, that command's usage and the Fix line", 
     assert.equal(err[0], `ensemble: ${message} (usage)`, name);
     assert.equal(err.at(-1), FIX, name);
     assert.equal(fixLines(r.err).length, 1, name);
-    assert.ok(err.length <= 16, name);
+    assert.ok(err.length <= 18, name);
     assert.doesNotMatch(r.err, /positional argument|'--'/, name);
     const block = err.slice(1, -1);
     if (expected === "areas") {

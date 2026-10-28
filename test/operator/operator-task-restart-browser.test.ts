@@ -92,9 +92,20 @@ for (const [name, viewport] of Object.entries(viewports)) {
       .waitFor();
     assert.equal(
       await page
+        .locator("[data-start-again]")
         .getByRole("link", { name: "Open recovery" })
         .getAttribute("href"),
       `/runtime/task/${held.taskId}`,
+    );
+    // Reset is disabled with its reason and recovery beside it.
+    if (viewport.width < 760)
+      await page.locator(".task-header-overflow-toggle").click();
+    await page
+      .getByText(/Reset isn't offered: the task or an assignment is held/)
+      .waitFor();
+    assert.equal(
+      await page.getByRole("button", { name: "Reset task…" }).isDisabled(),
+      true,
     );
     assert.equal(await startAgain().count(), 0);
     assert.equal(commands.length, 1);
