@@ -1,6 +1,7 @@
 import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
 import { inboxSummaryOf } from "./request-presentation.js";
 import { useMediaQuery } from "./use-media-query.js";
+import { CommandSends, CommandSendsContext } from "./command-send.js";
 import { QuestionResponseStates } from "./question-response-state.js";
 import {
   useCallback,
@@ -528,7 +529,10 @@ export function App() {
   const unconfirmedSignOut = useRef(false);
   const searchState = useRef(new Map<string, SearchState>());
   const taskStates = useRef(new TaskWorkspaceStates());
-  const questionStates = useRef(new QuestionResponseStates());
+  const commandSends = useRef(new CommandSends());
+  const questionStates = useRef(
+    new QuestionResponseStates(commandSends.current),
+  );
   const inboxState = useRef(new InboxState());
   // biome-ignore lint/correctness/useExhaustiveDependencies: navigation purge uses current browser entry and stable scope ref.
   const expired = useCallback(() => {
@@ -540,6 +544,7 @@ export function App() {
     drafts.current.purge();
     taskStates.current.purge();
     questionStates.current.purge();
+    commandSends.current.purge();
     inboxState.current.clear();
     searchState.current.clear();
     setSession(null);
@@ -566,6 +571,7 @@ export function App() {
         drafts.current.purge();
         taskStates.current.purge();
         questionStates.current.purge();
+        commandSends.current.purge();
         inboxState.current.clear();
         searchState.current.clear();
         if (
@@ -967,6 +973,7 @@ export function App() {
     drafts.current.purge();
     taskStates.current.purge();
     questionStates.current.purge();
+    commandSends.current.purge();
     inboxState.current.clear();
     searchState.current.clear();
     setLogoutPending(true);
@@ -1046,308 +1053,319 @@ export function App() {
     </>
   );
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="workspace-header">
-          <span className="workspace-mark" aria-hidden="true" />
-          <div>
-            <p className="body">Ensemble</p>
-            <p className="metadata muted">Personal workspace</p>
+    <CommandSendsContext.Provider value={commandSends.current}>
+      <div className="shell">
+        <aside className="sidebar">
+          <div className="workspace-header">
+            <span className="workspace-mark" aria-hidden="true" />
+            <div>
+              <p className="body">Ensemble</p>
+              <p className="metadata muted">Personal workspace</p>
+            </div>
           </div>
-        </div>
-        <SearchWorkField
-          navigate={navigate}
-          current={pathname === "/app/search"}
-        />
-        {navigation(false)}
-      </aside>
-      <div className="workspace">
-        <TopBar
-          // Not found marks no current page.
-          trail={
-            unknownRoute
-              ? []
-              : settingsPage?.trail.length
-                ? settingsPage.trail
-                : [
-                    // The page header's Back links the parent; the crumb only names it.
-                    ...(parent ? [{ label: parent.label }] : []),
-                    { label: taskReport?.title ?? title },
-                  ]
-          }
-          connection={connectionOf(workspace.state)}
-          action={
-            unknownRoute ? undefined : (
-              <ActionLink variant="primary" href={newTaskHref}>
-                New task
-              </ActionLink>
-            )
-          }
-        />
-        <main className={onInboxRoute ? "page page-inbox" : "page"}>
-          {!inboxOwnsHeader && (
-            <PageHeader
-              title={title}
-              subtitle={headerSubtitle}
-              plain={unknownRoute || Boolean(settingsPage)}
-              {...(settingsPage ? { shortTitle: settingsPage.shortTitle } : {})}
-              {...(pathname === "/app/tasks/new"
-                ? { shortTitle: "New task", compactPhone: true }
-                : {})}
-              badge={
-                onInboxRoute && inboxCount !== null
-                  ? `${inboxCount} unresolved`
-                  : undefined
-              }
-              {...(parent
-                ? { back: parent }
-                : {
-                    menu: (
-                      <MobileNavigation open={drawer} onOpenChange={setDrawer}>
-                        {navigation(true)}
-                      </MobileNavigation>
-                    ),
-                  })}
-              action={
-                taskRoute ? (
-                  // The top bar carries New task on desktop; this one serves the drawer shell.
-                  <ActionLink
-                    variant="primary"
-                    href={newTaskHref}
-                    className="page-header-new-task"
-                  >
-                    New task
-                  </ActionLink>
-                ) : ownsRefresh || inboxPhone ? undefined : (
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      refreshAll();
-                      if (pathname === "/app/inbox") tasks.refresh();
-                    }}
-                    disabled={workspace.state.pending}
-                  >
-                    Refresh
-                  </Button>
-                )
-              }
-              {...inboxHeaderProps}
-              {...taskHeaderProps}
-            />
-          )}
-          {stillSignedIn && (
-            <ActionOutcome
-              tone="warning"
-              message="We couldn't sign you out. You're still signed in."
-            />
-          )}
-          {workspace.state.data?.data.harnesses
-            .filter((h) => h.state === "unavailable")
-            .map((h) => (
-              <Alert key={h.harness} variant="destructive" role="alert">
-                {unavailableAlert(h)}
-              </Alert>
-            ))}
-          {workspace.state.status !== "fresh" && (
-            <ResourceStatus state={workspace.state} retry={workspace.refresh} />
-          )}
-          {unknownRoute ? (
-            <NotFound />
-          ) : pathname === "/app/settings/runtime" ? (
-            <RuntimeSettings
-              client={client}
-              session={session}
-              drafts={drafts.current}
-              workspace={workspace.state.data}
-              refresh={workspace.refresh}
-              refreshNonce={refreshNonce}
-            />
-          ) : /^\/app\/assignments\/[^/]+\/recovery$/.test(pathname) ? (
-            <AssignmentRecovery
-              client={client}
-              session={session}
-              drafts={drafts.current}
-              workspace={workspace.state.data}
-              refresh={workspace.refresh}
-              refreshNonce={refreshNonce}
-              assignmentId={pathname.split("/")[3] ?? ""}
-            />
-          ) : pathname === "/app/settings" ? (
-            <SettingsWorkspace
-              client={client}
-              session={session}
-              drafts={drafts.current}
-              workspace={workspace.state.data}
-              workspaceSettled={
-                workspace.state.data !== null ||
-                workspace.state.status === "error"
-              }
-              refresh={workspace.refresh}
-              refreshNonce={refreshNonce}
-            />
-          ) : pathname === "/app/settings/projects/new" ? (
-            <ProjectSetup
-              // Choosing New project again remounts, so a recorded create starts clean.
-              key={navigationVersion}
-              client={client}
-              session={session}
-              drafts={drafts.current}
-              workspace={workspace.state.data}
-              refresh={workspace.refresh}
-              navigate={navigate}
-              onHeader={setSetupHeader}
-            />
-          ) : pathname === "/app/settings/profiles/new" ? (
-            <ProfileCreate
-              client={client}
-              session={session}
-              drafts={drafts.current}
-              workspace={workspace.state.data}
-              refresh={workspace.refresh}
-            />
-          ) : /^\/app\/profiles\/[^/]+\/settings$/.test(pathname) ? (
-            <ProfileConfiguration
-              key={pathname}
-              client={client}
-              session={session}
-              drafts={drafts.current}
-              workspace={workspace.state.data}
-              refresh={workspace.refresh}
-              refreshNonce={refreshNonce}
-              profileId={pathname.split("/")[3] ?? ""}
-            />
-          ) : /^\/app\/projects\/[^/]+\/settings$/.test(pathname) ? (
-            <ProjectConfiguration
-              key={pathname}
-              client={client}
-              session={session}
-              drafts={drafts.current}
-              workspace={workspace.state.data}
-              refresh={workspace.refresh}
-              refreshNonce={refreshNonce}
-              projectId={pathname.split("/")[3] ?? ""}
-              query={query}
-            />
-          ) : pathname === "/app/tasks/new" ? (
-            <TaskComposer
-              key={session.csrfToken}
-              client={client}
-              session={session}
-              workspace={workspace.state.data}
-              initialProject={
-                new URLSearchParams(path.split("?")[1] ?? "").get("project") ??
-                ""
-              }
-              onRecorded={tasks.refresh}
-              drafts={drafts.current}
-              refresh={workspace.refresh}
-              releaseDraft={releaseDraft}
-            />
-          ) : pathname === "/app/inbox" ? (
-            <Inbox
-              client={client}
-              session={session}
-              path={path}
-              navigate={navigate}
-              state={inboxState.current}
-              questions={questionStates.current}
-              observation={workspace.state.data}
-              onSummary={setInboxRouteSummary}
-              onHeader={setInboxHeader}
-              queueRefresh={
-                inboxPhone
-                  ? {
-                      onRefresh: () => {
+          <SearchWorkField
+            navigate={navigate}
+            current={pathname === "/app/search"}
+          />
+          {navigation(false)}
+        </aside>
+        <div className="workspace">
+          <TopBar
+            // Not found marks no current page.
+            trail={
+              unknownRoute
+                ? []
+                : settingsPage?.trail.length
+                  ? settingsPage.trail
+                  : [
+                      // The page header's Back links the parent; the crumb only names it.
+                      ...(parent ? [{ label: parent.label }] : []),
+                      { label: taskReport?.title ?? title },
+                    ]
+            }
+            connection={connectionOf(workspace.state)}
+            action={
+              unknownRoute ? undefined : (
+                <ActionLink variant="primary" href={newTaskHref}>
+                  New task
+                </ActionLink>
+              )
+            }
+          />
+          <main className={onInboxRoute ? "page page-inbox" : "page"}>
+            {!inboxOwnsHeader && (
+              <PageHeader
+                title={title}
+                subtitle={headerSubtitle}
+                plain={unknownRoute || Boolean(settingsPage)}
+                {...(settingsPage
+                  ? { shortTitle: settingsPage.shortTitle }
+                  : {})}
+                {...(pathname === "/app/tasks/new"
+                  ? { shortTitle: "New task", compactPhone: true }
+                  : {})}
+                badge={
+                  onInboxRoute && inboxCount !== null
+                    ? `${inboxCount} unresolved`
+                    : undefined
+                }
+                {...(parent
+                  ? { back: parent }
+                  : {
+                      menu: (
+                        <MobileNavigation
+                          open={drawer}
+                          onOpenChange={setDrawer}
+                        >
+                          {navigation(true)}
+                        </MobileNavigation>
+                      ),
+                    })}
+                action={
+                  taskRoute ? (
+                    // The top bar carries New task on desktop; this one serves the drawer shell.
+                    <ActionLink
+                      variant="primary"
+                      href={newTaskHref}
+                      className="page-header-new-task"
+                    >
+                      New task
+                    </ActionLink>
+                  ) : ownsRefresh || inboxPhone ? undefined : (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
                         refreshAll();
-                        tasks.refresh();
-                      },
-                      refreshing: workspace.state.pending,
-                    }
-                  : undefined
-              }
-              chrome={
-                inboxOwnsHeader
-                  ? {
-                      onRefresh: () => {
-                        refreshAll();
-                        tasks.refresh();
-                      },
-                      refreshing: workspace.state.pending,
-                    }
-                  : undefined
-              }
-            />
-          ) : pathname === "/app/search" ? (
-            <Search
-              key={`${session.csrfToken}:${entryKey}`}
-              client={client}
-              session={session}
-              workspace={workspace.state.data}
-              path={path}
-              navigate={navigate}
-              onRefresh={refreshAll}
-              state={activeSearch}
-            />
-          ) : /^\/app\/tasks\/[^/]+$/.test(pathname) ? (
-            <TaskWorkspace
-              key={`${session.csrfToken}:${entryKey}`}
-              client={client}
-              session={session}
-              drafts={drafts.current}
-              taskId={pathname.split("/")[3] ?? ""}
-              path={path}
-              onRefresh={refreshAll}
-              workspace={workspace.state.data}
-              onHeader={setTaskHeader}
-              releaseDraft={releaseDraft}
-              questionStates={questionStates.current}
-              state={taskStates.current.forTask(
-                pathname.split("/")[3] ?? "",
-                entryKey,
-              )}
-            />
-          ) : pathname === "/app/getting-started" ? (
-            <GettingStarted mode="page" {...waitProps} />
-          ) : (
-            <>
-              {pathname === "/app" && (
-                <GettingStarted mode="home" {...waitProps} />
-              )}
-              {showBoard && (
-                <TaskViews
-                  state={tasks.state}
-                  requests={inboxSummary.state}
-                  refresh={() => {
-                    tasks.refresh();
-                    refreshAll();
-                  }}
-                  workspace={workspace.state.data}
-                  path={path}
-                  navigate={navigate}
-                  {...(projectId
+                        if (pathname === "/app/inbox") tasks.refresh();
+                      }}
+                      disabled={workspace.state.pending}
+                    >
+                      Refresh
+                    </Button>
+                  )
+                }
+                {...inboxHeaderProps}
+                {...taskHeaderProps}
+              />
+            )}
+            {stillSignedIn && (
+              <ActionOutcome
+                tone="warning"
+                message="We couldn't sign you out. You're still signed in."
+              />
+            )}
+            {workspace.state.data?.data.harnesses
+              .filter((h) => h.state === "unavailable")
+              .map((h) => (
+                <Alert key={h.harness} variant="destructive" role="alert">
+                  {unavailableAlert(h)}
+                </Alert>
+              ))}
+            {workspace.state.status !== "fresh" && (
+              <ResourceStatus
+                state={workspace.state}
+                retry={workspace.refresh}
+              />
+            )}
+            {unknownRoute ? (
+              <NotFound />
+            ) : pathname === "/app/settings/runtime" ? (
+              <RuntimeSettings
+                client={client}
+                session={session}
+                drafts={drafts.current}
+                workspace={workspace.state.data}
+                refresh={workspace.refresh}
+                refreshNonce={refreshNonce}
+              />
+            ) : /^\/app\/assignments\/[^/]+\/recovery$/.test(pathname) ? (
+              <AssignmentRecovery
+                client={client}
+                session={session}
+                drafts={drafts.current}
+                workspace={workspace.state.data}
+                refresh={workspace.refresh}
+                refreshNonce={refreshNonce}
+                assignmentId={pathname.split("/")[3] ?? ""}
+              />
+            ) : pathname === "/app/settings" ? (
+              <SettingsWorkspace
+                client={client}
+                session={session}
+                drafts={drafts.current}
+                workspace={workspace.state.data}
+                workspaceSettled={
+                  workspace.state.data !== null ||
+                  workspace.state.status === "error"
+                }
+                refresh={workspace.refresh}
+                refreshNonce={refreshNonce}
+              />
+            ) : pathname === "/app/settings/projects/new" ? (
+              <ProjectSetup
+                // Choosing New project again remounts, so a recorded create starts clean.
+                key={navigationVersion}
+                client={client}
+                session={session}
+                drafts={drafts.current}
+                workspace={workspace.state.data}
+                refresh={workspace.refresh}
+                navigate={navigate}
+                onHeader={setSetupHeader}
+              />
+            ) : pathname === "/app/settings/profiles/new" ? (
+              <ProfileCreate
+                client={client}
+                session={session}
+                drafts={drafts.current}
+                workspace={workspace.state.data}
+                refresh={workspace.refresh}
+              />
+            ) : /^\/app\/profiles\/[^/]+\/settings$/.test(pathname) ? (
+              <ProfileConfiguration
+                key={pathname}
+                client={client}
+                session={session}
+                drafts={drafts.current}
+                workspace={workspace.state.data}
+                refresh={workspace.refresh}
+                refreshNonce={refreshNonce}
+                profileId={pathname.split("/")[3] ?? ""}
+              />
+            ) : /^\/app\/projects\/[^/]+\/settings$/.test(pathname) ? (
+              <ProjectConfiguration
+                key={pathname}
+                client={client}
+                session={session}
+                drafts={drafts.current}
+                workspace={workspace.state.data}
+                refresh={workspace.refresh}
+                refreshNonce={refreshNonce}
+                projectId={pathname.split("/")[3] ?? ""}
+                query={query}
+              />
+            ) : pathname === "/app/tasks/new" ? (
+              <TaskComposer
+                key={session.csrfToken}
+                client={client}
+                session={session}
+                workspace={workspace.state.data}
+                initialProject={
+                  new URLSearchParams(path.split("?")[1] ?? "").get(
+                    "project",
+                  ) ?? ""
+                }
+                onRecorded={tasks.refresh}
+                drafts={drafts.current}
+                refresh={workspace.refresh}
+                releaseDraft={releaseDraft}
+              />
+            ) : pathname === "/app/inbox" ? (
+              <Inbox
+                client={client}
+                session={session}
+                path={path}
+                navigate={navigate}
+                state={inboxState.current}
+                questions={questionStates.current}
+                observation={workspace.state.data}
+                onSummary={setInboxRouteSummary}
+                onHeader={setInboxHeader}
+                queueRefresh={
+                  inboxPhone
                     ? {
-                        projectId,
-                        resume: {
-                          ...waitProps,
-                          onChanged: () => {
-                            tasks.refresh();
-                            refreshAll();
-                          },
+                        onRefresh: () => {
+                          refreshAll();
+                          tasks.refresh();
                         },
+                        refreshing: workspace.state.pending,
                       }
-                    : {})}
-                  overview={pathname === "/app"}
-                  operator={
-                    pathname === "/app"
-                      ? { client, session, questions: questionStates.current }
-                      : undefined
-                  }
-                />
-              )}
-            </>
-          )}
-        </main>
+                    : undefined
+                }
+                chrome={
+                  inboxOwnsHeader
+                    ? {
+                        onRefresh: () => {
+                          refreshAll();
+                          tasks.refresh();
+                        },
+                        refreshing: workspace.state.pending,
+                      }
+                    : undefined
+                }
+              />
+            ) : pathname === "/app/search" ? (
+              <Search
+                key={`${session.csrfToken}:${entryKey}`}
+                client={client}
+                session={session}
+                workspace={workspace.state.data}
+                path={path}
+                navigate={navigate}
+                onRefresh={refreshAll}
+                state={activeSearch}
+              />
+            ) : /^\/app\/tasks\/[^/]+$/.test(pathname) ? (
+              <TaskWorkspace
+                key={`${session.csrfToken}:${entryKey}`}
+                client={client}
+                session={session}
+                drafts={drafts.current}
+                taskId={pathname.split("/")[3] ?? ""}
+                path={path}
+                onRefresh={refreshAll}
+                workspace={workspace.state.data}
+                onHeader={setTaskHeader}
+                releaseDraft={releaseDraft}
+                questionStates={questionStates.current}
+                state={taskStates.current.forTask(
+                  pathname.split("/")[3] ?? "",
+                  entryKey,
+                )}
+              />
+            ) : pathname === "/app/getting-started" ? (
+              <GettingStarted mode="page" {...waitProps} />
+            ) : (
+              <>
+                {pathname === "/app" && (
+                  <GettingStarted mode="home" {...waitProps} />
+                )}
+                {showBoard && (
+                  <TaskViews
+                    state={tasks.state}
+                    requests={inboxSummary.state}
+                    refresh={() => {
+                      tasks.refresh();
+                      refreshAll();
+                    }}
+                    workspace={workspace.state.data}
+                    path={path}
+                    navigate={navigate}
+                    {...(projectId
+                      ? {
+                          projectId,
+                          resume: {
+                            ...waitProps,
+                            onChanged: () => {
+                              tasks.refresh();
+                              refreshAll();
+                            },
+                          },
+                        }
+                      : {})}
+                    overview={pathname === "/app"}
+                    operator={
+                      pathname === "/app"
+                        ? { client, session, questions: questionStates.current }
+                        : undefined
+                    }
+                  />
+                )}
+              </>
+            )}
+          </main>
+        </div>
       </div>
-    </div>
+    </CommandSendsContext.Provider>
   );
 }

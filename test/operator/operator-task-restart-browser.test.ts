@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { type Browser, chromium, type Page } from "playwright";
-import { browserSuite } from "../fixtures/browser-diagnostics.js";
+import { type Browser, chromium, type Locator, type Page } from "playwright";
+import {
+  browserSuite,
+  type BrowserJourney,
+} from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { configure, until } from "../fixtures/completed-lead.js";
 import { refusedTask } from "../fixtures/refused-task.js";
@@ -326,3 +329,214 @@ for (const [name, viewport] of Object.entries(viewports)) {
     sameKeyTwice("task.start-again", lostHome.taskId);
   });
 }
+
+async function openRestartPage(
+  j: BrowserJourney,
+  hold: { browser?: Browser },
+  first: string,
+) {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  j.cleanup(
+    (primary) => f.close(hold.browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const task = await refusedTask(f);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  hold.browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await hold.browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  await stubReadiness(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(`${web.origin}${first.replace("TASK", task.taskId)}`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.locator("main.page h1").waitFor();
+  return { f, task, web, page };
+}
+const checkButton = (scope: Page | Locator) =>
+  scope.getByRole("button", { name: "Check whether it saved" });
+
+test("an unconfirmed Reset is still checkable from the header after leaving the task and coming back", async (_t, j) => {
+  const hold: { browser?: Browser } = {};
+  const { page } = await openRestartPage(j, hold, "/app/tasks/TASK");
+  const sent: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      (request.postData() ?? "").includes('"task.reset"')
+    )
+      sent.push(request.postData() ?? "");
+  });
+  await page.locator("[data-task-strip]").waitFor();
+  // The send never reaches the service, so Reset is still on offer when the task is reopened.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await page.getByRole("button", { name: "Reset task…" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByRole("button", { name: "Reset task", exact: true }).click();
+  await checkButton(dialog).waitFor();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  await page
+    .getByRole("link", { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/inbox/);
+  await page.goBack();
+  await page.locator("[data-task-strip]").waitFor();
+  await page.getByRole("button", { name: "Reset task…" }).click();
+  await checkButton(dialog).waitFor();
+  assert.equal(
+    await dialog
+      .getByRole("button", { name: "Reset task", exact: true })
+      .count(),
+    0,
+    "an unconfirmed reset is checked, not sent again",
+  );
+  await page.unroute("**/api/operator/commands");
+  await checkButton(dialog).click();
+  await dialog
+    .getByText(/Reset\. The lead starts a fresh conversation/)
+    .waitFor();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1], sent[0], "same key and body");
+});
+
+test("an unconfirmed Start again whose request was recorded is still checkable after leaving the task and coming back", async (_t, j) => {
+  const hold: { browser?: Browser } = {};
+  const { page } = await openRestartPage(j, hold, "/app/tasks/TASK");
+  const sent: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      (request.postData() ?? "").includes('"task.start-again"')
+    )
+      sent.push(request.postData() ?? "");
+  });
+  // The service records the start but the reply is lost, which clears the not-started code.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await page.getByRole("button", { name: "Start again", exact: true }).click();
+  await checkButton(page).waitFor();
+  await page
+    .getByRole("link", { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/inbox/);
+  await page.goBack();
+  await checkButton(page).waitFor();
+  await page.unroute("**/api/operator/commands");
+  await checkButton(page).click();
+  await page.getByText(/Queued again\./).waitFor();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1], sent[0], "same key and body");
+});
+
+test("the header drops Reset task… once the task is no longer open", async (_t, j) => {
+  const hold: { browser?: Browser } = {};
+  const { f, page, task } = await openRestartPage(j, hold, "/app/tasks/TASK");
+  await page.locator("[data-task-strip]").waitFor();
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await page.getByRole("button", { name: "Reset task…" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByRole("button", { name: "Reset task", exact: true }).click();
+  await checkButton(dialog).waitFor();
+  await page.unroute("**/api/operator/commands");
+  await checkButton(dialog).click();
+  await dialog
+    .getByText(/Reset\. The lead starts a fresh conversation/)
+    .waitFor();
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await dialog.waitFor({ state: "detached" });
+
+  // The task finishes elsewhere; nothing about the checked reset keeps its control in the header.
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE domain_tasks SET state = 'done', version = version + 1 WHERE id = ?",
+    ).run(task.taskId);
+  });
+  await page.getByRole("button", { name: "Refresh task" }).click();
+  await page
+    .locator(".page-header .task-header-actions")
+    .getByRole("link", { name: "Execution" })
+    .waitFor();
+  await page.waitForFunction(
+    () =>
+      !document
+        .querySelector("[data-task-strip] .task-state")
+        ?.textContent?.includes("Not started"),
+  );
+  assert.equal(
+    await page
+      .locator(".page-header .task-header-actions")
+      .getByRole("button", { name: "Reset task…" })
+      .count(),
+    0,
+  );
+});
+
+test("Home counts a kept Start again card once in its N more total", async (_t, j) => {
+  const hold: { browser?: Browser } = {};
+  const { f, page, task, web } = await openRestartPage(
+    j,
+    hold,
+    "/app/tasks/TASK",
+  );
+  // Home shows its Needs you cards once a task has started a turn: let this one run.
+  await page.getByRole("button", { name: "Start again", exact: true }).click();
+  await page.getByText(/Queued again\./).waitFor();
+  configure(f, task.projectId, false);
+  await f.service.configureCapacity({ key: randomUUID(), globalLimit: 8 });
+  await until(() => f.runtime.hasPending(1), "the restarted turn starts");
+
+  // Home lists equal interventions by task id: keep the last of three, then add one ahead of it.
+  const ids = [
+    (await refusedTask(f)).taskId,
+    (await refusedTask(f)).taskId,
+    (await refusedTask(f)).taskId,
+  ].sort((a, b) => a.localeCompare(b));
+  const kept = ids.at(-1)!;
+  const card = (taskId: string) =>
+    page.locator(`.overview-card[data-request-id="intervention:${taskId}"]`);
+  const overflow = page.locator(".overview-overflow");
+  await page.goto(`${web.origin}/app`);
+  await card(kept).waitFor();
+  assert.equal(await overflow.count(), 0);
+  // The send never reaches the service, so the request stays listed.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await card(kept)
+    .getByRole("button", { name: "Start again", exact: true })
+    .click();
+  await checkButton(card(kept)).waitFor();
+
+  let ahead: string | undefined;
+  for (let tries = 0; !ahead && tries < 12; tries++) {
+    const added = (await refusedTask(f)).taskId;
+    ids.push(added);
+    if (added.localeCompare(kept) < 0) ahead = added;
+  }
+  assert.ok(ahead, "a new request sorts ahead of the kept one");
+  await page
+    .getByRole("button", { name: "Refresh tasks", exact: true })
+    .click();
+  await card(ahead).waitFor();
+  // The kept card is shown beyond the first three; the count leaves it out.
+  assert.equal(await card(kept).count(), 1);
+  const shown = await page.locator(".overview-card").count();
+  assert.ok(shown > 3, "the kept card is the fourth shown");
+  assert.equal(
+    (await overflow.count()) === 0
+      ? 0
+      : Number((await overflow.innerText()).match(/^(\d+) more/)?.[1]),
+    ids.length - shown,
+  );
+});

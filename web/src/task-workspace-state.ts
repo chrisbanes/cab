@@ -186,8 +186,6 @@ class TaskReplyState {
   destination: "lead" | "github" = "lead";
   reference: FeedbackReference | undefined;
   frozen: OperatorCommand | null = null;
-  /** A Results or Changes write whose response was lost: its exact request and warning. */
-  unconfirmed: { input: OperatorCommand; outcome: ReplyOutcome } | null = null;
   commentReview: Extract<CommandReceipt, { kind: "comment-review" }> | null =
     null;
   private notices: Record<"lead" | "github", ReplyOutcome | null> = {
@@ -338,12 +336,6 @@ export class TaskWorkspaceState {
   }
   set frozen(value: TaskReplyState["frozen"]) {
     this.reply.frozen = value;
-  }
-  get unconfirmed() {
-    return this.reply.unconfirmed;
-  }
-  set unconfirmed(value: TaskReplyState["unconfirmed"]) {
-    this.reply.unconfirmed = value;
   }
   get commentReview() {
     return this.reply.commentReview;

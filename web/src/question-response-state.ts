@@ -9,7 +9,7 @@ import type {
   CommandReceipt,
 } from "../../src/operator/contracts.js";
 import type { CommandState } from "./api.js";
-import { CommandLifecycle } from "./command-lifecycle.js";
+import { CommandSend, CommandSends } from "./command-send.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 
 /** Validation issues by question id (`""` for the form), empty when the answers are valid. */
@@ -71,26 +71,33 @@ export const answerCopy = {
 
 export type QuestionOutcome = "recorded" | "unknown" | "conflict" | "failed";
 export class QuestionResponseState {
-  readonly lifecycle = new CommandLifecycle<OperatorCommand>();
+  readonly send: CommandSend;
   readonly form: QuestionForm;
   readonly revision: number;
   readonly interactionId: string;
+  readonly taskId: string;
   answers: QuestionAnswers;
   errors: Record<string, string> = Object.create(null);
-  /** The plain message the last settled send left behind; empty while none has. */
-  notice = "";
-  /** The receipt fields behind `notice`, shown only in its collapsed Details. */
-  details: ReceiptDetails = {};
-  sending = false;
   scrollTop = 0;
   focusId: string | null = null;
-  /** How the last submission ended; null until one settles. */
-  outcome: QuestionOutcome | null = null;
-  constructor(data: QuestionRead["data"]) {
+  constructor(data: QuestionRead["data"], send = new CommandSend()) {
     if (!data.form) throw Error("Unavailable form");
+    this.send = send;
+    // The task page checks this answer if its card is not shown.
+    send.persistent = true;
+    send.matches = (c, r) => this.matches(c, r);
+    send.copy = {
+      recorded: answerCopy.sent,
+      conflict: answerCopy.conflict,
+      unknown: answerCopy.unknown,
+      failed: answerCopy.failed,
+      details: { resource: data.interactionId, version: data.revision },
+      review: "Review current request",
+    };
     this.form = structuredClone(data.form);
     this.revision = data.revision;
     this.interactionId = data.interactionId;
+    this.taskId = data.taskId;
     this.answers = data.answers
       ? structuredClone(data.answers)
       : Object.fromEntries(
@@ -121,32 +128,45 @@ export class QuestionResponseState {
           receipt.eventType === "question-answer")
     );
   }
-  /** Settle the send of `command`: the disposition, plain message and receipt fields. */
-  settle(command: OperatorCommand, result: CommandState) {
-    this.sending = false;
-    const disposition = this.lifecycle.settle(result, (c, r) =>
-      this.matches(c, r),
-    );
-    this.outcome = disposition === "rejected" ? "failed" : disposition;
-    const code = result.state === "recorded" ? undefined : result.code;
-    const receipt = this.lifecycle.receipt;
-    this.details = {
-      command: command.type,
+  get lifecycle() {
+    return this.send.lifecycle;
+  }
+  get sending() {
+    return Boolean(this.send.sending);
+  }
+  /** How the last submission ended; null until one settles. */
+  get outcome(): QuestionOutcome | null {
+    return this.send.outcome?.kind ?? null;
+  }
+  /** The plain message the last settled send left behind; empty while none has. */
+  get notice() {
+    const sent = this.send.outcome;
+    if (!sent || this.sending) return "";
+    return sent.kind === "recorded"
+      ? answerCopy.sent
+      : sent.kind === "unknown"
+        ? answerCopy.unknown
+        : sent.kind === "conflict"
+          ? answerCopy.conflict
+          : answerCopy.failed(sent.code ?? "command-outcome-unknown");
+  }
+  /** The receipt fields behind `notice`, shown only in its collapsed Details. */
+  get details(): ReceiptDetails {
+    const sent = this.send.outcome,
+      receipt = this.lifecycle.receipt;
+    if (!sent) return {};
+    return {
+      command: sent.command.type,
       resource: this.interactionId,
       version: this.revision,
-      requestKey: command.key,
+      requestKey: sent.command.key,
       ...(receipt ? { kind: receipt.kind } : {}),
-      ...(code ? { code } : {}),
+      ...(sent.code ? { code: sent.code } : {}),
     };
-    this.notice =
-      disposition === "recorded"
-        ? answerCopy.sent
-        : disposition === "unknown"
-          ? answerCopy.unknown
-          : disposition === "conflict"
-            ? answerCopy.conflict
-            : answerCopy.failed(code ?? "command-outcome-unknown");
-    return disposition;
+  }
+  /** Settle the send of `command`; the message and receipt fields follow from its outcome. */
+  settle(command: OperatorCommand, result: CommandState) {
+    return this.send.settle(command, result, (c, r) => this.matches(c, r));
   }
   setAnswer(id: string, value: QuestionAnswers[string]) {
     if (this.sending || this.lifecycle.uncertain || this.lifecycle.receipt)
@@ -158,11 +178,16 @@ export class QuestionResponseState {
 export class QuestionResponseStates {
   private states = new Map<string, QuestionResponseState>();
   private listeners = new Set<() => void>();
+  /** Each answer's send lives in the session registry, so the task page can check it too. */
+  constructor(private readonly sends = new CommandSends()) {}
   forQuestion(data: QuestionRead["data"]) {
     const key = `${data.taskId}:${data.interactionId}`;
     let state = this.states.get(key);
     if (!state) {
-      state = new QuestionResponseState(data);
+      state = new QuestionResponseState(
+        data,
+        this.sends.entry(`${data.taskId}:question:${data.interactionId}`),
+      );
       this.states.set(key, state);
     }
     return state;
@@ -175,14 +200,20 @@ export class QuestionResponseStates {
   }
   subscribe(listener: () => void) {
     this.listeners.add(listener);
+    const stop = this.sends.subscribe(listener);
     return () => {
       this.listeners.delete(listener);
+      stop();
     };
   }
   changed() {
     for (const listener of this.listeners) listener();
+    // The task page decides from the registry whether a card is shown.
+    this.sends.changed();
   }
   purge() {
+    for (const state of this.states.values())
+      this.sends.drop(`${state.taskId}:question:${state.interactionId}`);
     this.states.clear();
     this.changed();
   }

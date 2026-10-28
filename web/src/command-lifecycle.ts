@@ -8,6 +8,13 @@ export type CommandDisposition =
   | "unknown"
   | "conflict"
   | "rejected";
+/** Codes that say the service read the request and refused it; anything else may not have reached it. */
+const refusalCodes = new Set([
+  "invalid-input",
+  "body-too-large",
+  "unsupported-media",
+  "redaction-limit",
+]);
 /** Owns the original validated operation; consumers own validation and effects. */
 export class CommandLifecycle<C extends OperatorCommand> {
   private command: C | null = null;
@@ -46,6 +53,8 @@ export class CommandLifecycle<C extends OperatorCommand> {
   settle(
     result: CommandState,
     matches: (command: C, receipt: CommandReceipt) => boolean,
+    /** An unconfirmed command settles as refused when a resend gets a definite domain refusal. */
+    options: { settleRefusal?: boolean } = {},
   ): CommandDisposition {
     const command = this.command;
     this.sending = false;
@@ -59,8 +68,11 @@ export class CommandLifecycle<C extends OperatorCommand> {
       this.unknown = false;
       return "recorded";
     }
+    const refused =
+      result.state === "conflict" ||
+      (result.state === "rejected" && refusalCodes.has(result.code));
     if (
-      this.unknown ||
+      (this.unknown && !(options.settleRefusal && refused)) ||
       result.state === "unknown" ||
       result.state === "recorded"
     ) {

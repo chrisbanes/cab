@@ -106,7 +106,6 @@ export function NeedsYou({
   const data = requests.data,
     total = inboxSummaryOf(requests)?.count,
     ordered = data ? orderAttention(data.items, tasks) : [],
-    further = furtherRequests(ordered, shown),
     cards = ordered.slice(0, shown);
   for (const kept of answered) {
     // A sent start keeps its card even while the request is still listed, moved or changed:
@@ -117,6 +116,11 @@ export function NeedsYou({
     if (sent || !data?.items.some((i) => i.id === kept.item.id))
       cards.splice(Math.min(kept.index, cards.length), 0, kept.item);
   }
+  // A kept card is already on screen, so the count leaves it out.
+  const further = furtherRequests(
+    ordered.filter((i) => !cards.some((c) => c.id === i.id)),
+    0,
+  );
   const byId = new Map(tasks?.map((t) => [t.id, t]));
   return (
     <section className="overview-needs" aria-label="Needs you">

@@ -1,13 +1,19 @@
-import { useState } from "react";
 import {
   operatorCommandSchema,
   textMaxLength,
   type Session,
   type TaskRead,
 } from "../../src/operator/contracts.js";
+import { useEffect, useReducer, useRef } from "react";
 import type { OperatorClient } from "./api.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
-import { useCommandSend, type SendOutcome } from "./command-send.js";
+import {
+  type CommandSend,
+  type SendCopy,
+  type SendOutcome,
+  useCommandSend,
+  useCommandSends,
+} from "./command-send.js";
 import { Button, ShortId } from "./components.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { Textarea } from "./ui/textarea.js";
@@ -24,19 +30,39 @@ export function SendFeedback({
   details,
   check,
   review,
+  focus = true,
+  entry,
 }: {
   outcome: SendOutcome | null;
-  recorded: string;
+  recorded: SendCopy["recorded"];
   conflict: string;
-  unknown?: string;
-  failed?: (code: string) => string;
+  unknown?: string | undefined;
+  failed?: ((code: string) => string) | undefined;
   /** Receipt fields beyond the command and request key, shown in Details. */
-  details?: ReceiptDetails;
+  details?: ReceiptDetails | undefined;
   /** Resends the frozen command after an unknown outcome. */
   check: () => void;
   /** Clears a conflict once the reread shows current state. */
   review?: { label: string; onClick: () => void } | undefined;
+  /** Whether the message takes focus when it appears; a message that replaces no control may not. */
+  focus?: boolean;
+  /** Keeps this wording on the entry, so the task page can show the check once this is gone. */
+  entry?: CommandSend;
 }) {
+  // A send's message already there when its component mounted is not news: it never takes focus.
+  const inherited = useRef(entry?.outcome);
+  focus = focus && (!entry || outcome !== inherited.current);
+  useEffect(() => {
+    if (entry)
+      entry.copy = {
+        recorded,
+        conflict,
+        unknown,
+        failed,
+        details,
+        review: review?.label,
+      };
+  });
   if (!outcome) return null;
   return (
     <ActionOutcome
@@ -50,14 +76,16 @@ export function SendFeedback({
       }
       message={
         outcome.kind === "recorded"
-          ? recorded
+          ? typeof recorded === "function"
+            ? recorded(outcome.command)
+            : recorded
           : outcome.kind === "unknown"
             ? unknown
             : outcome.kind === "conflict"
               ? conflict
               : failed(outcome.code ?? "command-outcome-unknown")
       }
-      focus
+      focus={focus}
       action={
         outcome.kind === "unknown"
           ? { label: "Check whether it saved", onClick: check }
@@ -79,7 +107,20 @@ export function SendFeedback({
  * A reviewable PR's handback, settled by the operator: Accept covers the shown head and policy
  * version only; Settle as closed sends the outcome back. Neither writes to GitHub.
  */
-export function HandbackSettlement({
+export function HandbackSettlement(props: {
+  client: OperatorClient;
+  session: Session;
+  task: Task;
+  /** Rereads the task after a recorded settlement or a conflict. */
+  onChanged: () => void;
+}) {
+  const d = props.task.delivery;
+  // Hidden, it mounts nothing, so a retained check is shown by the task page instead.
+  if (d?.mode !== "reviewable-pr" || !d.binding || d.binding.state === "MERGED")
+    return null;
+  return <HandbackSettlementCard {...props} />;
+}
+function HandbackSettlementCard({
   client,
   session,
   task,
@@ -88,14 +129,14 @@ export function HandbackSettlement({
   client: OperatorClient;
   session: Session;
   task: Task;
-  /** Rereads the task after a recorded settlement or a conflict. */
   onChanged: () => void;
 }) {
   const d = task.delivery,
     b = d?.binding;
-  const { send, sending, outcome, uncertain, clear } = useCommandSend(
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${task.task.id}:settlement`,
     (c, r) =>
       r.kind === "delivery-settlement" &&
       r.key === c.key &&
@@ -189,6 +230,7 @@ export function HandbackSettlement({
       )}
       {/* A recorded settlement is the status line above, once the reread shows it. */}
       <SendFeedback
+        entry={entry}
         outcome={outcome?.kind === "recorded" ? null : outcome}
         recorded="Handback settled."
         conflict="Not settled: the PR, branch or policy changed since it was read. Refresh delivery status and review the current head."
@@ -217,9 +259,10 @@ export function ResultDestination({
   const recipient = item.permittedRecipient,
     result = task.results.find((r) => r.resultId === item.resultId),
     source = task.assignments.find((a) => a.assignmentId === item.assignmentId);
-  const { send, sending, outcome, uncertain, clear } = useCommandSend(
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${task.task.id}:result:${item.resultId}`,
     (c, r) =>
       c.type === "result.recipient" &&
       r.kind === "coordination" &&
@@ -268,8 +311,18 @@ export function ResultDestination({
         </p>
       )}
       <SendFeedback
+        entry={entry}
         outcome={outcome}
-        recorded={`Delivered to ${name}. It arrives on the next eligible turn.`}
+        recorded={(c) => {
+          // The recipient the command named, not whoever is permitted by the latest read.
+          const to =
+            c.type === "result.recipient"
+              ? task.assignments.find(
+                  (a) => a.assignmentId === c.recipientAssignmentId,
+                )?.name
+              : undefined;
+          return `Delivered to ${to ?? name}. It arrives on the next eligible turn.`;
+        }}
         conflict="Not delivered: this result's destination changed since it was read."
         check={() => void send()}
         review={{ label: "Review current state", onClick: clear }}
@@ -293,10 +346,11 @@ export function AssignmentMessage({
   /** Rereads the task after a recorded message or a conflict. */
   onChanged: () => void;
 }) {
-  const [text, setText] = useState("");
-  const { send, sending, outcome, uncertain } = useCommandSend(
+  const [, draftEdited] = useReducer((n: number) => n + 1, 0);
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${taskId}:message:${assignment.assignmentId}`,
     (c, r) =>
       c.type === "message" &&
       r.kind === "coordination" &&
@@ -305,7 +359,6 @@ export function AssignmentMessage({
       r.recipientAssignmentId === c.recipientAssignmentId &&
       r.eventType === "operator-message",
     (kind) => {
-      if (kind === "recorded") setText("");
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
   );
@@ -316,7 +369,7 @@ export function AssignmentMessage({
       className="assignment-message"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!text.trim()) return;
+        if (!entry.text.trim()) return;
         void send(
           operatorCommandSchema.parse({
             type: "message",
@@ -324,7 +377,7 @@ export function AssignmentMessage({
             taskId,
             recipientAssignmentId: assignment.assignmentId,
             expectedAssignmentVersion: assignment.version,
-            message: text,
+            message: entry.text,
           }),
         );
       }}
@@ -336,9 +389,12 @@ export function AssignmentMessage({
         id={id}
         autoGrow
         maxLength={textMaxLength}
-        value={text}
+        value={entry.text}
         disabled={Boolean(sending) || uncertain}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          entry.edit(e.target.value);
+          draftEdited();
+        }}
       />
       <div className="assignment-message-bar">
         <p className="metadata muted">
@@ -348,18 +404,83 @@ export function AssignmentMessage({
           <Button
             type="submit"
             variant="secondary"
-            disabled={Boolean(sending) || !text.trim()}
+            disabled={Boolean(sending) || !entry.text.trim()}
           >
             {sending ? "Sending…" : `Send to ${name}`}
           </Button>
         )}
       </div>
       <SendFeedback
+        entry={entry}
         outcome={outcome}
         recorded={`Sent to ${name}.`}
         conflict={`Not sent: ${name} changed since it was read. Your message is still here.`}
+        review={{ label: "Review current state", onClick: clear }}
         check={() => void send()}
       />
     </form>
   );
+}
+
+/**
+ * The task's sends that still need a check, or were just recorded, and that no other part of the
+ * page shows: the service may already have acted, so their resource can have left the lists.
+ */
+export function RetainedSends({
+  client,
+  session,
+  taskId,
+  onChanged,
+}: {
+  client: OperatorClient;
+  session: Session;
+  taskId: string;
+  /** Rereads the task after a recorded send or a conflict. */
+  onChanged: () => void;
+}) {
+  const sends = useCommandSends(),
+    [, render] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => sends.subscribe(render), [sends]);
+  // Answers keep their outcome elsewhere: this list shows one only if it checked it.
+  const checkedHere = useRef(new Set<string>());
+  // What changed elsewhere (recorded, or refused) is reread once, whoever sent it.
+  const reread = useRef(new Set<string>());
+  const settled = sends
+    .retained(taskId, checkedHere.current)
+    .filter(
+      ([, e]) =>
+        e.outcome?.kind === "recorded" || e.outcome?.kind === "conflict",
+    )
+    .map(([key, e]) => `${key}:${e.outcome?.kind}:${e.outcome?.command.key}`);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per newly settled send.
+  useEffect(() => {
+    const fresh = settled.filter((id) => !reread.current.has(id));
+    for (const id of fresh) reread.current.add(id);
+    if (fresh.length) onChanged();
+  }, [settled.join()]);
+  // A recorded confirmation belongs to this visit.
+  useEffect(
+    () => () => {
+      for (const [, e] of sends.retained(taskId, checkedHere.current))
+        if (!e.uncertain && !e.persistent) e.outcome = null;
+    },
+    [sends, taskId],
+  );
+  return sends.retained(taskId, checkedHere.current).map(([key, entry]) => (
+    <SendFeedback
+      key={key}
+      outcome={entry.outcome}
+      {...entry.copy!}
+      review={
+        entry.copy?.review
+          ? { label: entry.copy.review, onClick: () => entry.clear() }
+          : undefined
+      }
+      focus={false}
+      check={() => {
+        checkedHere.current.add(key);
+        void entry.send(client, session.csrfToken, entry.matches!);
+      }}
+    />
+  ));
 }

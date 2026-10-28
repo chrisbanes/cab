@@ -200,3 +200,58 @@ test("a receipt predicate cannot mutate the original command used for later reco
   assert.deepEqual(lifecycle.begin(), command);
   assert.equal(lifecycle.bytes, JSON.stringify(command));
 });
+test("an opted-in resend settles as refused only on a definite domain refusal", () => {
+  const unconfirmed = () => {
+    const l = new CommandLifecycle<typeof command>();
+    l.freeze(command);
+    l.begin();
+    l.settle(
+      { state: "unknown", command, code: "command-outcome-unknown" },
+      matches,
+    );
+    l.begin();
+    return l;
+  };
+  for (const [state, code] of [
+    ["conflict", "conflict"],
+    ["rejected", "invalid-input"],
+    ["rejected", "body-too-large"],
+    ["rejected", "unsupported-media"],
+    ["rejected", "redaction-limit"],
+  ] as const) {
+    const l = unconfirmed();
+    assert.equal(
+      l.settle({ state, command, code }, matches, { settleRefusal: true }),
+      state,
+      code,
+    );
+    assert.equal(l.frozen, null, code);
+    assert.equal(l.uncertain, false, code);
+  }
+  for (const result of [
+    { state: "rejected", command, code: "forbidden" },
+    { state: "rejected", command, code: "unauthenticated" },
+    { state: "rejected", command, code: "insufficient-scope" },
+    { state: "rejected", command, code: "unavailable" },
+    { state: "rejected", command, code: "not-found" },
+    { state: "unknown", command, code: "command-outcome-unknown" },
+  ] as const) {
+    const l = unconfirmed();
+    assert.equal(
+      l.settle(result, matches, { settleRefusal: true }),
+      "unknown",
+      result.code,
+    );
+    assert.equal(l.bytes, JSON.stringify(command), result.code);
+    assert.equal(l.uncertain, true, result.code);
+  }
+  // A recorded receipt that does not match the original stays unconfirmed.
+  const mismatch = unconfirmed();
+  assert.equal(
+    mismatch.settle({ state: "recorded", receipt }, () => false, {
+      settleRefusal: true,
+    }),
+    "unknown",
+  );
+  assert.equal(mismatch.uncertain, true);
+});

@@ -48,9 +48,10 @@ export function ApprovalReview({
   /** Rereads the task after a recorded decision or a conflict. */
   onChanged: () => void;
 }) {
-  const { send, sending, outcome, uncertain, clear } = useCommandSend(
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
+    `${taskId}:approval:${approval.interactionId}`,
     (c, r) =>
       r.kind === "coordination" &&
       r.key === c.key &&
@@ -146,14 +147,19 @@ export function ApprovalReview({
       )}
       {!approval.materialUnavailable && <Material value={approval.material} />}
       <SendFeedback
+        entry={entry}
         outcome={outcome}
-        recorded={copy[outcomeDecision ?? "approved"]}
+        recorded={(c) => copy[decided(c) ?? "approved"]}
         conflict={copy.conflict}
         unknown={copy.unknown}
         failed={copy.failed}
         details={{
           resource: approval.interactionId,
-          version: approval.revision,
+          // The revision the decision was bound to, not a later one a reread brought in.
+          version:
+            outcome?.command.type === "approval.decide"
+              ? outcome.command.expectedRevision
+              : approval.revision,
         }}
         check={() => void send()}
         // The conflict already reread the task; this shows its current material.

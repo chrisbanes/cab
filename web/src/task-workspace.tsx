@@ -1,8 +1,11 @@
 import { ApprovalReview } from "./approval-review.js";
+import { useSendEntry } from "./command-send.js";
 import {
   AssignmentMessage,
   HandbackSettlement,
   ResultDestination,
+  RetainedSends,
+  SendFeedback,
 } from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
 import { StartAgainAction, taskChangedEvent } from "./task-restart.js";
@@ -343,24 +346,6 @@ const unknownMessage = (type: OperatorCommand["type"]) =>
   `We couldn't confirm ${writeCopy(type).unknown}. Your draft is kept.`;
 const rejectedMessage = (type: OperatorCommand["type"], code: string) =>
   `${writeCopy(type).failed}: ${failureCause(code)}. Your draft is kept.`;
-/** A Results or Changes write whose response was lost: its exact request and the warning. */
-const unconfirmedOf = (
-  taskId: string,
-  input: OperatorCommand,
-  code?: string,
-) => ({
-  input: structuredClone(input),
-  outcome: {
-    tone: "warning" as const,
-    message: unknownMessage(input.type),
-    details: detailRows({
-      command: input.type,
-      resource: taskId,
-      requestKey: input.key,
-      ...(code ? { code } : {}),
-    }),
-  },
-});
 const changedMessage =
   "This task changed since you opened it. Your draft is kept.";
 /** The reply tab's description when GitHub comments are unavailable. */
@@ -402,11 +387,19 @@ export function TaskWorkspace({
     (ReplyOutcome & { from?: OperatorCommand["type"] }) | null
   >(null);
   // A Results or Changes write whose response was lost keeps its exact request in the
-  // task's state, replayed by its check, so a later click never builds a different request
-  // from the current selection, even after the page is left and reopened.
-  const unconfirmed = state.unconfirmed;
-  const auxInFlight = useRef<OperatorCommand | null>(null);
+  // session's command sends, replayed by its check, so a later click never builds a different
+  // request from the current selection, even after the page is left and reopened.
+  const auxSend = useSendEntry(`${taskId}:workspace-aux`);
+  const unconfirmed = auxSend.uncertain ? auxSend.lifecycle.frozen : null;
 
+  // A refusal belongs to the visit that saw it; one that arrives while away waits for the next.
+  useEffect(
+    () => () => {
+      if (auxSend.outcome && auxSend.outcome.kind !== "unknown")
+        auxSend.outcome = null;
+    },
+    [auxSend],
+  );
   const focusUnconfirmed = useRef(false);
   // The control whose replayed check just settled, focused once the commit enables it.
   const focusReplay = useRef<string | null>(null);
@@ -423,8 +416,10 @@ export function TaskWorkspace({
     changed = () => render((n) => n + 1);
   const [histories, setHistory] = useState<Record<string, History>>({}),
     [historyErrors, setHistoryErrors] = useState<Record<string, string>>({}),
-    [pending, setPending] = useState(false),
+    [sendingNow, setPending] = useState(false),
     [updates, setUpdates] = useState(false);
+  // A write sent before the page was left may still be in flight when it is reopened.
+  const pending = sendingNow || Boolean(auxSend.sending);
   const historyRequests = useRef(new Map<string, number>());
   const invalidateHistory = (clear = true) => {
     for (const [id, revision] of historyRequests.current)
@@ -773,8 +768,6 @@ export function TaskWorkspace({
           }),
         };
       }
-      if (auxInFlight.current)
-        state.unconfirmed = unconfirmedOf(taskId, auxInFlight.current);
       sourceRequest.current++;
       sourceRead.current = null;
       if (state.sourceObservation === "pending") {
@@ -1090,7 +1083,7 @@ export function TaskWorkspace({
     if (
       unconfirmed &&
       (input.type === "review.view" || input.type === "delivery.refresh") &&
-      input.key !== unconfirmed.input.key
+      input.key !== unconfirmed.key
     )
       return;
     const normalized = operatorCommandSchema.safeParse(input);
@@ -1141,25 +1134,24 @@ export function TaskWorkspace({
       }
       state.frozen = structuredClone(input);
     }
-    if (reply) {
-      replyInFlight.current = input.key;
-      sent.current = true;
-      setAux(null);
-    } else auxInFlight.current = structuredClone(input);
-    const replayed = unconfirmed?.input.key === input.key;
-    const outcome = await client.command(input, session.csrfToken);
-    if (!scope.current || !current()) return;
-    setPending(false);
-    auxInFlight.current = null;
-    if (replyInFlight.current === input.key) replyInFlight.current = null;
     if (!reply) {
-      if (outcome.state === "unknown") {
+      const replayed = auxSend.uncertain;
+      // The send checks the receipt's key itself; nothing else ties these two writes to a receipt.
+      const done = await auxSend.send(
+        client,
+        session.csrfToken,
+        () => true,
+        replayed ? undefined : input,
+      );
+      setPending(false);
+      if (!scope.current || !done) return;
+      const outcome = done.result;
+      if (done.kind === "unknown") {
         setAux(null);
         // The control is off now, so the check takes the focus it held.
         focusUnconfirmed.current = true;
-        state.unconfirmed = unconfirmedOf(taskId, input, outcome.code);
       } else {
-        state.unconfirmed = null;
+        auxSend.clear();
         if (replayed) focusReplay.current = input.type;
         if (outcome.state === "recorded") {
           if (outcome.receipt.kind === "comment-review")
@@ -1188,6 +1180,13 @@ export function TaskWorkspace({
       changed();
       return;
     }
+    replyInFlight.current = input.key;
+    sent.current = true;
+    setAux(null);
+    const outcome = await client.command(input, session.csrfToken);
+    if (!scope.current || !current()) return;
+    setPending(false);
+    if (replyInFlight.current === input.key) replyInFlight.current = null;
     if (state.frozen?.key !== input.key) {
       setAux({
         tone: "warning",
@@ -1574,19 +1573,28 @@ export function TaskWorkspace({
     : deliveryOutcome
       ? null
       : (aux ?? state.notice);
-  // The check sits beside the control whose response was lost, which stays off meanwhile.
+  // The check sits beside the control whose response was lost, which stays off meanwhile. A
+  // refusal that arrived while the page was away is shown there too, until it is reviewed.
+  const refusedAway =
+    auxSend.outcome?.kind === "conflict" || auxSend.outcome?.kind === "failed"
+      ? auxSend.outcome
+      : null;
   const unconfirmedCheck = (type: "review.view" | "delivery.refresh") =>
     !pending &&
-    unconfirmed?.input.type === type && (
-      <ActionOutcome
-        tone="warning"
-        message={unconfirmed.outcome.message}
-        details={unconfirmed.outcome.details}
-        focus={focusUnconfirmed.current}
-        action={{
-          label: "Check whether it saved",
-          onClick: () => command(unconfirmed.input),
+    (unconfirmed?.type === type || refusedAway?.command.type === type) && (
+      <SendFeedback
+        outcome={auxSend.outcome}
+        recorded=""
+        conflict={changedMessage}
+        unknown={unknownMessage(type)}
+        failed={(code) => rejectedMessage(type, code)}
+        details={{ resource: taskId }}
+        review={{
+          label: "Review current state",
+          onClick: () => auxSend.clear(),
         }}
+        focus={focusUnconfirmed.current}
+        check={() => unconfirmed && void command(unconfirmed)}
       />
     );
   const comment = commentAvailability(data.commentPolicy);
@@ -1864,6 +1872,13 @@ export function TaskWorkspace({
               ? { review: "A review write needs a check" }
               : {}
           }
+        />
+        {/* Above the tabs: a send whose control is gone is checked from any of them. */}
+        <RetainedSends
+          client={client}
+          session={session}
+          taskId={taskId}
+          onChanged={refreshAll}
         />
         {updates && (
           <Button
