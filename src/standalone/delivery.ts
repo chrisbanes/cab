@@ -176,7 +176,9 @@ export class DeliveryCoordinator {
     try {
       this.options.feedback?.(
         taskId,
-        `The task branch changed outside Ensemble (head ${sha ?? "deleted"}). Review the branch before publishing again.`,
+        sha
+          ? `The task branch changed outside Ensemble (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it, with branch, outsideHeadSha and lastPushedSha as the approval material. Both need the operator's approval.`
+          : "The task branch was deleted outside Ensemble. Request branch.force-push naming outsideHeadSha 0000000000000000000000000000000000000000 to recreate it, with the operator's approval. A deleted branch cannot be adopted.",
         `outside-push:${repositoryId}:${sha ?? "absent"}`,
       );
     } catch {

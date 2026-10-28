@@ -8,8 +8,14 @@ import {
   until,
   scriptedDeliveryProvider,
 } from "../fixtures/delivery-integration.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { canonicalMaterial } from "../../src/core/delivery.js";
+import {
+  githubCompareUrl,
+  OperatorApi,
+} from "../../src/standalone/operator-api.js";
+import {
+  absentBranchHead,
+  canonicalMaterial,
+} from "../../src/core/delivery.js";
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {
   test(`assembled ${mode} uses production HTTP parsing, own closure, terminal completion and durable reopen`, async () => {
@@ -1300,6 +1306,14 @@ test("an overwrite of an outside head waits for the operator to approve its exac
     assert.equal((await recover(overwrite, 1)).success, false);
     assert.equal(f.scripted.state.refs[branch], outside);
     const approval = await approve(overwrite, 1);
+    // The approval view names GitHub's comparison from the last push to the outside head.
+    const shown = (
+      await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+    ).data.approvals.at(-1);
+    assert.equal(
+      shown?.compareUrl,
+      `https://github.com/org/repo/compare/${material.lastPushedSha}...${outside}`,
+    );
     // Other material, or a different commit, is not what was approved.
     const other = action("branch.force-push", {
       commitSha: next,
@@ -1339,4 +1353,20 @@ test("an adoption of an outside head waits for the operator to approve its exact
   } finally {
     await f.close();
   }
+});
+
+test("a compare link names a verified repository and the outside change only", () => {
+  const last = "a".repeat(40),
+    outside = "b".repeat(40);
+  assert.equal(
+    githubCompareUrl("acme/app", last, outside),
+    `https://github.com/acme/app/compare/${last}...${outside}`,
+  );
+  assert.equal(
+    githubCompareUrl("acme/app", null, outside),
+    `https://github.com/acme/app/commit/${outside}`,
+  );
+  for (const name of [null, "../app", "acme/..", "acme/app/extra", "a b/c"])
+    assert.equal(githubCompareUrl(name, last, outside), null, String(name));
+  assert.equal(githubCompareUrl("acme/app", last, absentBranchHead), null);
 });

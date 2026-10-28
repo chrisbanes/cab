@@ -358,3 +358,25 @@ test("an adoption whose remote returned to Ensemble's push clears the stale reco
   assert.equal(w.adopts.length, 0);
   assert.equal(branchOf(w)?.outsideHeadSha, null);
 });
+
+test("the outside-change wake names both recovery actions for a head and only overwrite for a deleted branch", async (t) => {
+  const w = adoptWorld(t);
+  const first = w.commit();
+  await w.submit("branch.push", first);
+  w.remote.head = outside;
+  await w.submit("branch.push", w.commit());
+  const [head] = w.wakes;
+  assert.equal(head?.identity, `outside-push:${repositoryId}:${outside}`);
+  assert.match(head?.reason ?? "", /branch\.adopt/);
+  assert.match(head?.reason ?? "", /branch\.force-push/);
+  assert.match(head?.reason ?? "", /operator's approval/);
+
+  const deleted = adoptWorld(t);
+  await deleted.submit("branch.push", deleted.commit());
+  deleted.remote.head = null;
+  await deleted.submit("branch.push", deleted.commit());
+  const [gone] = deleted.wakes;
+  assert.equal(gone?.identity, `outside-push:${repositoryId}:absent`);
+  assert.match(gone?.reason ?? "", /branch\.force-push/);
+  assert.doesNotMatch(gone?.reason ?? "", /request branch\.adopt/);
+});

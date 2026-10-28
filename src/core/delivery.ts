@@ -1811,6 +1811,23 @@ export class DeliveryStore {
       .get(taskId, repositoryId);
     return row ? taskBranchSchema.parse(row) : null;
   }
+  /**
+   * The `owner/name` of a repository as the provider verified it for the task's latest begun branch
+   * action there, which exists whenever Ensemble pushed or adopted; null before any.
+   */
+  verifiedRepositoryName(taskId: string, repositoryId: string): string | null {
+    for (const a of this.actions(taskId).reverse()) {
+      const path = a.beforeState?.repositoryPath;
+      const found =
+        a.request.action.kind.startsWith("branch.") &&
+        a.request.action.target.repositoryId === repositoryId &&
+        typeof path === "string"
+          ? /^\/repos\/([^/]+\/[^/]+)$/.exec(path)
+          : null;
+      if (found?.[1]) return found[1];
+    }
+    return null;
+  }
   taskBranches(taskId: string): TaskBranch[] {
     return this.db
       .prepare(
