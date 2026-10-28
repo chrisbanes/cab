@@ -1741,6 +1741,8 @@ async function importedWorkspaceService(options: {
   extra?: IssueSnapshot[];
   /** The first turn runs until released, holding the project's capacity. */
   blockFirstTurn?: boolean;
+  /** Every other turn stays active until `close()`, so the test can observe it. */
+  holdTurns?: boolean;
 }) {
   const root = realpathSync(
     mkdtempSync(join(tmpdir(), "ensemble-github-imported-workspace-")),
@@ -1779,6 +1781,11 @@ async function importedWorkspaceService(options: {
   const firstTurn = new Promise<void>((resolve) => {
     release = resolve;
   });
+  let releaseHeld = () => {};
+  const heldTurns = new Promise<void>((resolve) => {
+    releaseHeld = resolve;
+  });
+  let waitedTurns = 0;
   let blockersFail = false;
   const service = new StandaloneService(
     join(root, "data"),
@@ -1796,8 +1803,9 @@ async function importedWorkspaceService(options: {
       },
       async interruptTurn() {},
       async waitForTurn() {
-        if (options.blockFirstTurn && startedWorkspaces.length === 1)
-          await firstTurn;
+        waitedTurns += 1;
+        if (options.blockFirstTurn && waitedTurns === 1) await firstTurn;
+        else if (options.holdTurns) await heldTurns;
         return "completed" as const;
       },
     }),
@@ -1928,6 +1936,7 @@ async function importedWorkspaceService(options: {
         await new Promise<void>((resolve) => setTimeout(resolve, 50));
     },
     async close() {
+      releaseHeld();
       await service.stop();
       rmSync(root, { recursive: true, force: true });
     },
@@ -1961,7 +1970,7 @@ test("an admitted imported task's turn provisions a workspace from its linked so
 });
 
 test("an imported task's initial turn is queued only once admissible", async () => {
-  const f = await importedWorkspaceService({ paused: true });
+  const f = await importedWorkspaceService({ paused: true, holdTurns: true });
   try {
     await f.settle(() => false);
     assert.equal(f.request("I_1"), undefined);
@@ -1975,7 +1984,7 @@ test("an imported task's initial turn is queued only once admissible", async () 
 });
 
 test("a queued imported turn that never ran takes the current task, profile and instructions revisions when admitted", async () => {
-  const f = await importedWorkspaceService({ paused: false });
+  const f = await importedWorkspaceService({ paused: false, holdTurns: true });
   try {
     const waiting = () => f.request("I_3")?.reason ?? "";
     await f.settle(() => /not linked/.test(waiting()));
@@ -2026,6 +2035,7 @@ test("a first turn waiting for capacity takes revisions changed by a profile edi
     paused: true,
     extra: [{ ...issue, nodeId: "I_4", number: 4, title: "Second ready" }],
     blockFirstTurn: true,
+    holdTurns: true,
   });
   try {
     await f.service.configureCapacity({

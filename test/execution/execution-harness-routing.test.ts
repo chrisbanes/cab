@@ -1464,10 +1464,12 @@ test("a secondary runtime with pending startup does not block healthy work", asy
   const runtimes = fakes();
   let release!: () => void;
   let childAlive = false;
+  let claudeStartSettled = false;
   runtimes.claude.start = () =>
     new Promise<void>((resolve) => {
       release = resolve;
     }).then(() => {
+      claudeStartSettled = true;
       childAlive = true;
     });
   const stop = runtimes.claude.stop.bind(runtimes.claude);
@@ -1493,15 +1495,17 @@ test("a secondary runtime with pending startup does not block healthy work", asy
   const started = service.start();
   let deadline: NodeJS.Timeout | undefined;
   try {
-    assert.equal(
-      await Promise.race([
-        started.then(() => "started"),
-        new Promise((resolve) => {
-          deadline = setTimeout(() => resolve("stalled"), 1000);
-        }),
-      ]),
-      "started",
-    );
+    // The timer only stops a regression from hanging the suite.
+    await Promise.race([
+      started,
+      new Promise<never>((_, reject) => {
+        deadline = setTimeout(
+          () => reject(new Error("service.start() hung on Claude's start()")),
+          10_000,
+        );
+      }),
+    ]);
+    assert.equal(claudeStartSettled, false);
     assert.equal(runtimes.claude.stops, 1);
     const lead = profile(service, "codex");
     const worker = profile(service, "claude");
