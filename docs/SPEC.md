@@ -196,7 +196,7 @@ boundaries. Typed judgments and confidence are not proof of correctness or autho
 The operator admits local work or configures the source's optional readiness rule.
 Unready tasks run no turns, except that the operator can start a
 [draft turn](#draft-turns) of the lead; the lead cannot grant readiness. For
-GitHub, a rule uses simple all/any label and Project-field conditions; nested
+GitHub, a rule uses simple all/any label (matched case-insensitively) and Project-field conditions; nested
 expressions are deferred. A new project's source has no rule, and the operator may
 add or remove one: with no rule, every open imported issue with current source
 membership satisfies readiness whatever its labels or Project fields. Absence of a
@@ -1853,8 +1853,8 @@ on the repository it recorded and, after the create, only on the issue it create
 `{title, body + marker, labels}`; read-back pages the credential user's issues since the record
 was made (not the search index), ignores pull requests and requires exactly one issue whose body
 is the posted body, with the same title and every label (names match case-insensitively), by the credential user. An item add is read
-back from the issue's Project items. Link reads the named issue and requires the marker and the
-exact text. A Ready task's publication is the only non-service caller exempt from the readiness
+back from the issue's Project items. Link reads the named issue and requires the marker, the
+exact text and every label (names match case-insensitively). A Ready task's publication is the only non-service caller exempt from the readiness
 refusals, and only for the label or option the rule names.
 
 The operator can edit the bound issue's title and body through `issue.edit` on the same

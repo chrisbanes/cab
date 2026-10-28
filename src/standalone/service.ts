@@ -65,6 +65,7 @@ import {
   supportedRuntimeSettingsSchema,
 } from "../core/execution-runtime.js";
 import { GitHubSourceStore } from "../core/github-source.js";
+import { hasLabelName } from "../core/github-source-contracts.js";
 import { Store } from "../core/store.js";
 import {
   type CommandReceipt,
@@ -3690,7 +3691,7 @@ export class StandaloneService {
       inspected.title !== review.issue.title ||
       inspected.body !==
         `${review.issue.body}\n\n${publicationMarker(command.publicationId)}` ||
-      !review.issue.labels.every((l) => inspected.labels.includes(l))
+      !review.issue.labels.every((l) => hasLabelName(inspected.labels, l))
     )
       throw new DomainConflictError(
         "That issue does not carry this publication's marker",

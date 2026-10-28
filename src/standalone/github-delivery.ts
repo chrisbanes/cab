@@ -8,6 +8,7 @@ import {
   isOperatorDeliveryCaller,
   isOperatorPublicationCaller,
 } from "../core/delivery.js";
+import { hasLabelName } from "../core/github-source-contracts.js";
 import { publicationMarker } from "../core/task-publication-contracts.js";
 import { DomainPolicyError } from "../core/domain.js";
 import { z } from "zod";
@@ -167,9 +168,11 @@ const page = z.object({
   endCursor: z.string().nullable(),
 });
 const prQuery = deliveryDocuments.EnsembleDeliveryPr;
-/** GitHub matches label names case-insensitively. */
 const hasLabel = (labels: { name: string }[], name: string): boolean =>
-  labels.some((v) => v.name.toLowerCase() === name.toLowerCase());
+  hasLabelName(
+    labels.map((v) => v.name),
+    name,
+  );
 
 class ProviderFailure extends Error {
   constructor(

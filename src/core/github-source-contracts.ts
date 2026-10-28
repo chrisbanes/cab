@@ -56,6 +56,12 @@ export type Readiness = z.output<typeof readinessSchema>;
 export type ReadinessCondition = z.output<typeof readinessConditionSchema>;
 type ProjectField = z.output<typeof projectFieldsSchema>[number];
 
+/** GitHub matches label names case-insensitively. */
+export const hasLabelName = (
+  labels: readonly string[],
+  name: string,
+): boolean => labels.some((l) => l.toLowerCase() === name.toLowerCase());
+
 /**
  * The readiness predicate over one issue's labels and Project fields. A `null` rule
  * filters nothing. `unmet` lists the unsatisfied conditions (all) or, when none is
@@ -68,7 +74,7 @@ export function evaluateReadiness(
   if (!rule) return { satisfied: true, unmet: [] };
   const unmet = rule.conditions.filter((c) =>
     c.kind === "label"
-      ? !facts.labels.includes(c.name)
+      ? !hasLabelName(facts.labels, c.name)
       : !facts.fields.some(
           (f) =>
             f.projectNodeId === c.projectNodeId &&
