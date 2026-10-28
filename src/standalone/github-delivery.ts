@@ -1730,6 +1730,13 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
             receipt: null,
             retryable: true,
           };
+    // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved
+    // it, and an ambiguous attempt keeps its possible ownership of the commit it may have landed.
+    const ambiguous =
+      !pushed &&
+      (record.state === "attempting" ||
+        (record.observation?.state === "uncertain" && !rejected) ||
+        record.observation?.ambiguous === true);
     // An overwrite that found the branch back at Ensemble's own push has nothing left to replace.
     if (
       !pushed &&
@@ -1742,14 +1749,8 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         state: "confirmed-failure",
         reason: "branch-outside-cleared",
         receipt: null,
+        ...(ambiguous ? { ambiguous: true } : {}),
       };
-    // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved
-    // it, and an ambiguous attempt keeps its possible ownership of the commit it may have landed.
-    const ambiguous =
-      !pushed &&
-      (record.state === "attempting" ||
-        (record.observation?.state === "uncertain" && !rejected) ||
-        record.observation?.ambiguous === true);
     return pushed
       ? success(remote ? { outsideHeadSha: remote } : { outsideDeleted: true })
       : {

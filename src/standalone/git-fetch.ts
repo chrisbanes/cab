@@ -7,6 +7,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeBranchName } from "../core/delivery.js";
@@ -195,9 +196,15 @@ export async function adoptOutsideHead(
     await mkdir(target, { recursive: true });
     for (const extension of [".pack", ".idx"])
       for (const name of names.filter((n) => n.endsWith(extension))) {
-        const aside = join(target, `tmp_ensemble_${name}`);
-        await copyFile(join(packs, name), aside);
-        await rename(aside, join(target, name));
+        // A unique aside name: a leftover read-only file or a concurrent import never collides.
+        const aside = join(target, `tmp_ensemble_${randomUUID()}_${name}`);
+        try {
+          await copyFile(join(packs, name), aside);
+          await rename(aside, join(target, name));
+        } catch (error) {
+          await rm(aside, { force: true });
+          throw error;
+        }
       }
     // A ref keeps the imported objects from being pruned. Git runs without the worktree's hooks and
     // without a credential.

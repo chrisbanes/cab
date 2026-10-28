@@ -457,3 +457,17 @@ test("a repository with no push or adoption has no verified name for a compare l
   );
   assert.equal(w.store.verifiedRepositoryName(w.taskId, "R9"), null);
 });
+
+test("an overwrite of unknown outcome that finds the branch back at the last push stays marked as possibly landed", async (t) => {
+  const w = publicationWorld(t, { approved: true });
+  const first = await withOutsideHead(w);
+  w.setPush("uncertain-lost");
+  const record = await w.overwrite(w.amend());
+  assert.equal(record.state, "uncertain");
+  w.remote.head = first;
+  await w.coordinatorFor().reconcile();
+  const settled = w.store.action(record.operationId);
+  assert.equal(settled.observation?.reason, "branch-outside-cleared");
+  assert.equal(branchOf(w)?.outsideHeadSha, null);
+  assert.ok(w.store.mayHaveLanded(record.operationId));
+});
