@@ -4041,7 +4041,7 @@ export class OperatorApi {
     const payload =
       item.state !== "available"
         ? null
-        : instruction && excluded
+        : instruction && excluded && "text" in (item.payload as object)
           ? { ...(item.payload as object), text: "[redacted]" }
           : boundDetail(item.payload, excluded);
     const unavailable = item.state === "available" && payload === undefined;
@@ -4244,17 +4244,25 @@ export class OperatorApi {
       const segments = items.flatMap((item) => {
         const name = segmentNames.find((n) => n === item.name);
         if (!name) return [];
-        const payload = item.payload as { text?: unknown; revision?: unknown };
+        const payload = item.payload as {
+          text?: unknown;
+          revision?: unknown;
+          sent?: unknown;
+        };
+        // Recorded but not submitted: the thread already held this revision.
+        const sent = payload?.sent !== false;
         const excluded = name.endsWith("-instructions") ? disclosing : general;
         const bounded =
           item.state === "available" && typeof payload?.text === "string"
             ? boundDetail(payload.text, excluded, 64 * 1024)
             : undefined;
         const text = typeof bounded === "string" ? bounded : undefined;
-        const unavailable = item.state === "available" && text === undefined;
+        const unavailable =
+          item.state === "available" && sent && text === undefined;
         return [
           {
             name,
+            sent,
             revision:
               typeof payload?.revision === "number" ? payload.revision : null,
             state: unavailable ? ("omitted" as const) : item.state,

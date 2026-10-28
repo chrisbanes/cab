@@ -331,8 +331,10 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      paths stay redacted, and `logs` shows instruction segments only as
      `[redacted]`. An execution without a captured submission shows a
      labelled reconstruction from retained revisions instead.
-     `--compare-current` compares bound and current instruction revisions and
-     profile runtime settings.
+     A segment the resumed thread already held is listed with its revision and
+     marked not sent, not as a gap; a turn carries each instruction revision once
+     per thread. `--compare-current` compares bound and current instruction
+     revisions and profile runtime settings.
    - `logs --execution WORK_ID [--kind input|setting|runtime|tool|service]
      [--severity info|warn|error] [--after T] [--before T] [--limit N] [--cursor
      TOKEN]` reads one ascending page; `data.resumeCursor` always resumes after it.

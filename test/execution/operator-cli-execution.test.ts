@@ -12,9 +12,12 @@ import { startCliService } from "../fixtures/operator-cli.js";
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
 
-async function setup(t: { after(fn: () => unknown): void }) {
+async function setup(
+  t: { after(fn: () => unknown): void },
+  options: { unchanged?: boolean } = {},
+) {
   const s = await startCliService(t);
-  const seed = await seedExecutionDiagnostics(s.f);
+  const seed = await seedExecutionDiagnostics(s.f, options);
   t.after(seed.cleanup);
   const h = harness(t);
   const read = await s.issue("read", "execution-ro");
@@ -357,4 +360,13 @@ test("a service without execution capabilities is unsupported after identity onl
   assert.equal(r.code, 7);
   assert.equal(r.json().error.code, "unsupported-service");
   assert.equal(fake.hits.length, seen + 1);
+});
+
+test("execution inputs mark instruction segments the thread already held", async (t) => {
+  const { seed, h, ok } = await setup(t, { unchanged: true });
+  const human = await h.run(["execution", "inputs", seed.unchanged]);
+  assert.match(human.out, /\[not sent: the thread already has this revision\]/);
+  const { coverage } = await ok(["execution", "inputs", seed.unchanged]);
+  assert.ok(!coverage.gaps.includes("item-omitted"));
+  assert.ok(!coverage.gaps.includes("redaction-unavailable"));
 });

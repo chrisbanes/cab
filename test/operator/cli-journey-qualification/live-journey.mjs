@@ -178,7 +178,7 @@ class ScriptedRuntime extends OperatorFixtureRuntime {
       aggregatedOutput: "1\n",
     });
     const phrase =
-      /Captured profile instructions[\s\S]*CLI8_REQUIRED_PHRASE: ([\w-]+)/.exec(
+      /(?:Updated profile instructions[^\n]*|Profile instructions:)[\s\S]*CLI8_REQUIRED_PHRASE: ([\w-]+)/.exec(
         prompt,
       )?.[1];
     await this.callTool({

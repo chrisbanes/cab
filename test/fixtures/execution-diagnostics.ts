@@ -43,12 +43,13 @@ function request(
  */
 export async function seedExecutionDiagnostics(
   f: Fixture,
-  options: { now?: () => number } = {},
+  options: { now?: () => number; unchanged?: boolean } = {},
 ) {
   const seeded = await seedInstructionHistory(f);
   const captured = `assignment:${seeded.assignmentA}:captured`,
     absent = `assignment:${seeded.assignmentA}:absent`,
-    direct = "direct-run-1";
+    direct = "direct-run-1",
+    unchanged = `assignment:${seeded.assignmentA}:unchanged`;
   const profileOne = seeded.text.profile[0] ?? "";
   const leak = `${instructionSecret} ${f.directory}/notes token=hunter2`;
   f.seedPersistedState((db) => {
@@ -65,6 +66,45 @@ export async function seedExecutionDiagnostics(
       state: "held",
     });
     request(db, direct, { kind: "direct" });
+    // A resumed turn whose thread already held both instruction revisions.
+    if (options.unchanged) {
+      request(db, unchanged, {
+        taskId: seeded.taskA,
+        projectId: seeded.projectA,
+        assignmentId: seeded.assignmentA,
+      });
+      const resumed = new ExecutionDiagnosticsStore(db);
+      resumed.begin({
+        workId: unchanged,
+        taskId: seeded.taskA,
+        projectId: seeded.projectA,
+        assignmentId: seeded.assignmentA,
+        assignmentVersion: 1,
+        instructionsRevision: 1,
+        profileRevision: 1,
+        conversationRevision: 1,
+        harness: "codex",
+        mode: "enhanced",
+        eventSource: "supported",
+      });
+      resumed.bindThread(unchanged, "thread-seeded");
+      resumed.bindTurn(unchanged, "turn-unchanged");
+      const note = (name: string, payload: Record<string, unknown>) =>
+        resumed.record(
+          unchanged,
+          "input",
+          name,
+          "info",
+          undefined,
+          payload,
+          [],
+        );
+      note("request", { text: "Continue." });
+      note("project-instructions", { revision: 1, sent: false });
+      note("profile-instructions", { revision: 1, sent: false });
+      note("submitted", { bytes: 9, sha256: "b".repeat(64) });
+      resumed.finish(unchanged);
+    }
     const store = new ExecutionDiagnosticsStore(db, {
       ...(options.now ? { now: options.now } : {}),
     });
@@ -98,12 +138,12 @@ export async function seedExecutionDiagnostics(
     input("review-references", "Captured review references (JSON): {}");
     input(
       "project-instructions",
-      `Captured project instructions (revision 1):\n${seeded.text.project[0]} ${leak}`,
+      `Project instructions:\n${seeded.text.project[0]} ${leak}`,
       1,
     );
     input(
       "profile-instructions",
-      `Captured profile instructions (revision 1):\n${profileOne} ${leak}`,
+      `Profile instructions:\n${profileOne} ${leak}`,
       1,
     );
     store.record(
@@ -150,5 +190,5 @@ export async function seedExecutionDiagnostics(
     );
     store.finish(captured);
   });
-  return { ...seeded, captured, absent, direct, profileOne, leak };
+  return { ...seeded, captured, absent, direct, unchanged, profileOne, leak };
 }

@@ -434,8 +434,8 @@ export async function runQualification(options = {}) {
           assert.match(prompt, /Assignment role: project (lead|assignee)\./);
           for (const label of [
             "Captured review references (JSON):",
-            "Captured project instructions (revision 1):",
-            "Captured profile instructions (revision 1):",
+            "Project instructions:",
+            "Profile instructions:",
           ])
             assert.ok(
               prompt.includes(label),

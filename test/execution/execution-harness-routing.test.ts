@@ -26,6 +26,7 @@ import { tmpdir } from "../fixtures/temp.js";
 /** Records every call so each test can prove which harness ran the work. */
 class HarnessRuntime implements Runtime {
   readonly calls: string[] = [];
+  readonly prompts: string[] = [];
   holdTurns = false;
   failNextTurn = false;
   failStart = false;
@@ -82,8 +83,9 @@ class HarnessRuntime implements Runtime {
   async resumeThread(threadId: string) {
     this.calls.push(`resumeThread:${threadId}`);
   }
-  async startTurn(threadId: string) {
+  async startTurn(threadId: string, _workspace?: string, prompt?: string) {
     const turnId = `${this.name}-turn-${++this.turns}`;
+    this.prompts.push(prompt ?? "");
     this.calls.push(`startTurn:${threadId}`);
     if (this.failNextTurn) {
       this.failNextTurn = false;
@@ -574,6 +576,15 @@ test("a profile change keeps a live conversation on its harness", async () => {
     assert.equal(intent(service, next)?.threadId, "codex-thread-1");
     assert.ok(runtimes.codex.calls.includes("resumeThread:codex-thread-1"));
     assert.equal(service.bindingHarness(next), "codex");
+    // Only the profile revision changed, so only it is re-sent, as a replacement.
+    const [firstPrompt, followUp] = runtimes.codex.prompts;
+    assert.match(firstPrompt ?? "", /^Project instructions:\n\(none\)$/m);
+    assert.match(firstPrompt ?? "", /^Profile instructions:\nbuild$/m);
+    assert.match(
+      followUp ?? "",
+      /^Updated profile instructions\. These replace all profile instructions given earlier in this conversation:\nbuild$/m,
+    );
+    assert.doesNotMatch(followUp ?? "", /project instructions/i);
     assert.deepEqual(runtimes.claude.calls, []);
 
     const second = await task(service, projectId, [changing]);
@@ -587,6 +598,34 @@ test("a profile change keeps a live conversation on its harness", async () => {
       "startThread",
       "startTurn:claude-thread-1",
     ]);
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a Claude conversation omits unchanged instructions on its follow-up", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-claude-once-"));
+  const runtimes = fakes();
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    const lead = profile(service, "claude");
+    const projectId = project(service, lead);
+    const first = await task(service, projectId, [lead]);
+    const assignmentId = first.assignmentIds[0] ?? "";
+    await waitUntil(
+      () => intent(service, initial(assignmentId))?.state === "completed",
+      describe,
+    );
+    // The initial turn reports no result, so its repair turn resumes the same thread.
+    await waitUntil(() => runtimes.claude.prompts.length >= 2, describe);
+    assert.ok(runtimes.claude.calls.includes("resumeThread:claude-thread-1"));
+    const [firstPrompt, followUp] = runtimes.claude.prompts;
+    assert.match(firstPrompt ?? "", /^Project instructions:/m);
+    assert.match(firstPrompt ?? "", /^Profile instructions:/m);
+    assert.doesNotMatch(followUp ?? "", /instructions:/i);
   } finally {
     await service.stop();
     rmSync(root, { recursive: true, force: true });
