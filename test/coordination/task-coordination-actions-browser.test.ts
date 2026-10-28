@@ -264,6 +264,57 @@ test("a result delivery the service already recorded is still checkable after re
   assert.equal(commands[1]?.raw, commands[0]?.raw, "same key and body");
 });
 
+test("a retained check that the service refuses shows the refusal and can be dismissed", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  const hold: { browser?: Browser } = {};
+  j.cleanup(
+    (primary) => f.close(hold.browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { a, unresolved } = await seedCoordination(f);
+  const { page, commands } = await openTask(f, j, a.taskId, hold);
+  const row = page.locator(
+    `#decisions .decision[data-record-id="${unresolved.resultId}"]`,
+  );
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await row.getByRole("button", { name: "Deliver to Task lead" }).click();
+  await check(row).waitFor();
+  // Someone else settles the destination, so the result leaves the undelivered list.
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE coordination_unresolved_result_destinations SET status = 'resolved', revision = revision + 1 WHERE resultId = ?",
+    ).run(unresolved.resultId);
+  });
+  await page
+    .getByRole("link", { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/inbox/);
+  await page.goBack();
+  await check(page).waitFor();
+  assert.equal(await row.count(), 0);
+
+  await page.unroute("**/api/operator/commands");
+  await check(page).click();
+  await page
+    .getByText(
+      "Not delivered: this result's destination changed since it was read.",
+    )
+    .waitFor();
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1]?.raw, commands[0]?.raw, "same key and body");
+  assert.equal(await check(page).count(), 0);
+  await page.getByRole("button", { name: "Review current state" }).click();
+  await page
+    .getByText(
+      "Not delivered: this result's destination changed since it was read.",
+    )
+    .waitFor({ state: "detached" });
+});
+
 test("a check settles as refused only on a definite refusal, and a new session starts clean", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),

@@ -4,7 +4,7 @@ import {
   type Session,
   type TaskRead,
 } from "../../src/operator/contracts.js";
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import type { OperatorClient } from "./api.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
 import {
@@ -48,6 +48,9 @@ export function SendFeedback({
   /** Keeps this wording on the entry, so the task page can show the check once this is gone. */
   entry?: CommandSend;
 }) {
+  // A message that was already there when this mounted is not news: it never takes focus.
+  const arrived = useRef(outcome);
+  focus = focus && outcome !== arrived.current;
   useEffect(() => {
     if (entry)
       entry.copy = {
@@ -429,7 +432,7 @@ export function RetainedSends({
   useEffect(
     () => () => {
       for (const [, e] of sends.retained(taskId))
-        if (e.outcome?.kind === "recorded") e.outcome = null;
+        if (!e.uncertain) e.outcome = null;
     },
     [sends, taskId],
   );

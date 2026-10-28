@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useReducer,
   useRef,
 } from "react";
@@ -126,7 +127,10 @@ export class CommandSends {
   changed() {
     for (const listener of this.listeners) listener();
   }
-  /** A task's sends still waiting to be checked, or just recorded, that no mounted component shows. */
+  /**
+   * A task's sends that still wait for a check, or settled without a mounted component to say
+   * how (recorded, refused or failed), and that no mounted component shows.
+   */
   retained(taskId: string) {
     return [...this.entries].filter(
       ([key, e]) =>
@@ -134,7 +138,7 @@ export class CommandSends {
         e.copy &&
         e.matches &&
         e.onSettled.size === 0 &&
-        (e.uncertain || e.outcome?.kind === "recorded"),
+        (e.uncertain || e.outcome),
     );
   }
   purge() {
@@ -172,15 +176,17 @@ export function useCommandSend(
     latest = useRef(onSettled);
   latest.current = onSettled;
   entry.matches = matches;
-  useEffect(() => {
+  // Layout, so a consumer is counted before the task page decides nobody shows this send.
+  useLayoutEffect(() => {
     const settled = (kind: SendOutcome["kind"]) => latest.current?.(kind);
     entry.onSettled.add(settled);
     // The task page shows a send no mounted component shows; tell it who does now.
     sends.changed();
     return () => {
       entry.onSettled.delete(settled);
-      // A recorded confirmation belongs to the visit that sent it, not to the next one.
-      if (entry.outcome?.kind === "recorded") entry.outcome = null;
+      // A settled outcome belongs to the visit that saw it, not to the next one.
+      if (entry.outcome && entry.outcome.kind !== "unknown")
+        entry.outcome = null;
       sends.changed();
     };
   }, [entry, sends]);
