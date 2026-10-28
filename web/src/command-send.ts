@@ -21,7 +21,11 @@ export type SendOutcome = {
   code?: string | undefined;
 };
 type Matches = (command: OperatorCommand, receipt: CommandReceipt) => boolean;
-/** The wording a send's outcome reads in, kept so another screen can show it after a remount. */
+/**
+ * The wording a send's outcome reads in, kept so another screen can show it after a remount.
+ * Wording that varies with what was submitted must be a function of the command; the rest must
+ * not read props that can change after the send.
+ */
 export type SendCopy = {
   /** Wording that depends on what was submitted (Approve or Deny) reads it from the command. */
   recorded: string | ((command: OperatorCommand) => string);

@@ -313,7 +313,16 @@ export function ResultDestination({
       <SendFeedback
         entry={entry}
         outcome={outcome}
-        recorded={`Delivered to ${name}. It arrives on the next eligible turn.`}
+        recorded={(c) => {
+          // The recipient the command named, not whoever is permitted by the latest read.
+          const to =
+            c.type === "result.recipient"
+              ? task.assignments.find(
+                  (a) => a.assignmentId === c.recipientAssignmentId,
+                )?.name
+              : undefined;
+          return `Delivered to ${to ?? name}. It arrives on the next eligible turn.`;
+        }}
         conflict="Not delivered: this result's destination changed since it was read."
         check={() => void send()}
         review={{ label: "Review current state", onClick: clear }}

@@ -155,7 +155,11 @@ export function ApprovalReview({
         failed={copy.failed}
         details={{
           resource: approval.interactionId,
-          version: approval.revision,
+          // The revision the decision was bound to, not a later one a reread brought in.
+          version:
+            outcome?.command.type === "approval.decide"
+              ? outcome.command.expectedRevision
+              : approval.revision,
         }}
         check={() => void send()}
         // The conflict already reread the task; this shows its current material.
