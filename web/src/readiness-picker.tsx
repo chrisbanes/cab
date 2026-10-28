@@ -458,6 +458,7 @@ export function ReadinessLoginOffer(
     d.phase !== "unknown"
       ? read.gh.login
       : null;
+  const idle = login === null && d.phase === "editing";
   const offer = () =>
     d.submit(
       p.client,
@@ -469,7 +470,12 @@ export function ReadinessLoginOffer(
       p.csrfToken,
     );
   return (
-    <div ref={box} className="settings-rows">
+    <div
+      ref={box}
+      // Takes no row of the panel's grid while there is nothing to offer or say.
+      hidden={idle}
+      className={idle ? undefined : "settings-rows"}
+    >
       {login !== null && (
         <>
           <Button
