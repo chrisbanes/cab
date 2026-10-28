@@ -726,9 +726,11 @@ check then replaces the setup form, and its primary action resumes the project a
 opens the composer, and its secondary action keeps it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
 CLI login (`gh:github.com`), which Settings recommends, and which setup (step 3, opened or not), the Settings
-discovery credential row and the Readiness GitHub discovery row each offer in one
-step, with the keychain caveat, when the service detects it. Discovery never reads with a login the operator did
-not choose for it. The discovery credential is excluded from agent and helper environments.
+discovery credential row, the Readiness GitHub discovery row and the project-configuration
+readiness conditions each offer in one step, with the keychain caveat, when the service
+detects it. These surfaces share one credential state: while a save from any of them is
+unconfirmed, the others keep their offer and controls but do not act, until it is checked.
+Discovery never reads with a login the operator did not choose for it. The discovery credential is excluded from agent and helper environments.
 Discovery, source selection and a linked GitHub Project do not grant repository
 access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { z } from "zod";
 import {
   claudeTokenStatusSchema,
@@ -16,6 +16,7 @@ import {
   locked,
   type SettingsProps,
   submitDraft,
+  useDiscoveryUnsettled,
   useDraft,
   useHeaderRefresh,
 } from "./settings.js";
@@ -198,6 +199,10 @@ const envName = /^[A-Z][A-Z0-9_]*$/;
 export const discoveryUseNote =
   "Ensemble only reads GitHub with this credential and removes it from agent and helper environments. If agents can reach this Mac's keychain they could run gh themselves; Ensemble does not prevent that.";
 
+/** Under an offer or the credential controls while another surface's save is unconfirmed. */
+export const discoveryElsewhereNote =
+  "A discovery credential save elsewhere isn't confirmed yet. Check it there first.";
+
 /** The installation's read-only GitHub discovery credential. */
 export function DiscoveryCredentialRow(
   p: SettingsProps & {
@@ -295,7 +300,15 @@ export function DiscoveryCredentialRow(
       : null;
   // Until the one-click save is settled, no other credential write may start: Check whether it
   // saved resends the original command, which would overwrite a newer reference.
-  const offerUnsettled = offer.phase === "pending" || offer.phase === "unknown";
+  // The same holds for a save from another surface (Readiness, project setup).
+  const elsewhere = useDiscoveryUnsettled(
+    p.drafts,
+    "discovery.configure",
+    "discovery.configure:offer",
+  );
+  const elsewhereId = useId();
+  const offerUnsettled =
+    offer.phase === "pending" || offer.phase === "unknown" || elsewhere;
   const chooseLogin = async () => {
     await offer.submit(
       p.client,
@@ -336,11 +349,16 @@ export function DiscoveryCredentialRow(
                 // Stays in place while saving so focus is not dropped; a pending or recorded
                 // save is not sent twice.
                 aria-disabled={
-                  offer.phase === "pending" || offer.phase === "recorded"
+                  offer.phase === "pending" ||
+                  offer.phase === "recorded" ||
+                  elsewhere
                 }
+                aria-describedby={elsewhere ? elsewhereId : undefined}
                 className="aria-disabled:opacity-50"
                 onClick={() =>
-                  offer.phase === "recorded" ? undefined : void chooseLogin()
+                  offer.phase === "recorded" || elsewhere
+                    ? undefined
+                    : void chooseLogin()
                 }
               >
                 {offer.phase === "pending"
@@ -376,6 +394,11 @@ export function DiscoveryCredentialRow(
         )}
       </div>
       {offered !== null && <p className="metadata muted">{discoveryUseNote}</p>}
+      {elsewhere && (
+        <p id={elsewhereId} className="metadata muted">
+          {discoveryElsewhereNote}
+        </p>
+      )}
       {!shown && <DraftMessage draft={d} />}
       {!shown && (
         <DraftMessage
@@ -446,7 +469,9 @@ export function DiscoveryCredentialRow(
             client={p.client}
             session={p.session}
             label={source === "gh" ? "Use this login" : "Save reference"}
-            saveDisabled={source === "gh" && gh?.state !== "signed-in"}
+            saveDisabled={
+              elsewhere || (source === "gh" && gh?.state !== "signed-in")
+            }
             refresh={reread}
             success={null}
           />

@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useId, useRef } from "react";
 import { discoveryStatusSchema } from "../../src/operator/contracts.js";
 import { readinessSchema } from "../../src/operator/readiness.js";
 import { Button, ResourceStatus, StatusBadge } from "./components.js";
-import { discoveryUseNote } from "./discovery-credential.js";
+import {
+  discoveryElsewhereNote,
+  discoveryUseNote,
+} from "./discovery-credential.js";
 import { useOperatorResource } from "./resource.js";
 import {
   DraftMessage,
   key,
   Panel,
+  useDiscoveryUnsettled,
   useDraft,
   useHeaderRefresh,
   type SettingsProps,
@@ -54,6 +58,11 @@ export function ReadinessPanel(
   const checks = readiness.state.data?.data.checks;
   const d = useDraft(p.drafts, "discovery.configure:readiness");
   useEffect(() => d.startOperation({ key: key() }), [d]);
+  const elsewhere = useDiscoveryUnsettled(
+    p.drafts,
+    "discovery.configure:readiness",
+  );
+  const elsewhereId = useId();
   const announced = useRef<number | null>(null);
   // A recorded offer is spent once a read made after it answers and the save has been
   // announced; Clear then brings it back.
@@ -160,11 +169,14 @@ export function ReadinessPanel(
                   // Stays in place while saving so focus is not dropped; the pending
                   // save and a recorded one are not sent twice.
                   aria-disabled={
-                    d.phase === "pending" || d.phase === "recorded"
+                    d.phase === "pending" || d.phase === "recorded" || elsewhere
                   }
+                  aria-describedby={elsewhere ? elsewhereId : undefined}
                   className="aria-disabled:opacity-50"
                   onClick={() =>
-                    d.phase === "recorded" ? undefined : void offer()
+                    d.phase === "recorded" || elsewhere
+                      ? undefined
+                      : void offer()
                   }
                 >
                   {d.phase === "pending"
@@ -172,6 +184,11 @@ export function ReadinessPanel(
                     : `Use GitHub CLI login (@${offered})`}
                 </Button>
                 <p className="metadata muted">{discoveryUseNote}</p>
+                {elsewhere && (
+                  <p id={elsewhereId} className="metadata muted">
+                    {discoveryElsewhereNote}
+                  </p>
+                )}
               </>
             ) : (
               c.fix && <p className="identifier">{c.fix}</p>

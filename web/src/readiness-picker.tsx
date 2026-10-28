@@ -1,8 +1,16 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { Check } from "lucide-react";
 import type { z } from "zod";
 import {
   discoveryLabelsSchema,
+  discoveryStatusSchema,
   discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
@@ -10,6 +18,10 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { Button } from "./components.js";
+import {
+  discoveryElsewhereNote,
+  discoveryUseNote,
+} from "./discovery-credential.js";
 import {
   type ConditionIds,
   type FieldsRead,
@@ -25,7 +37,15 @@ import {
   selectProject,
   unlistedLabelNote,
 } from "./readiness-discovery.js";
+import { useOperatorResource } from "./resource.js";
 import type { SourceRow } from "./settings-changes.js";
+import {
+  DraftMessage,
+  key,
+  useDiscoveryUnsettled,
+  useDraft,
+  type SettingsProps,
+} from "./settings.js";
 import { NativeSelect } from "./ui/native-select.js";
 
 const unreadable = { state: "unavailable", reason: "unreadable" } as const;
@@ -51,24 +71,29 @@ export function useReadinessDiscovery(p: {
   const [fieldReads, setFieldReads] = useState<Record<string, FieldsRead>>({});
   const [labelReads, setLabelReads] = useState<Record<string, LabelsRead>>({});
   const on = p.enabled || p.labels;
+  // Counts the rounds started on request; a new one forgets every read, so typed fallbacks end.
+  const [generation, setGeneration] = useState(0);
   const requested = useRef(new Set<string>());
   const round = useRef(0);
+  const forget = () => {
+    setRepositories(undefined);
+    setProjectReads({});
+    setFieldReads({});
+    setLabelReads({});
+  };
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the session (CSRF token) changes.
   useEffect(() => {
     if (!on) return;
     const mine = ++round.current;
     requested.current.clear();
-    setRepositories(undefined);
-    setProjectReads({});
-    setFieldReads({});
-    setLabelReads({});
+    forget();
     p.client
       .read("/api/operator/discovery/repositories", discoveryRepositoriesSchema)
       .then(
         (r) => mine === round.current && setRepositories(r.data),
         () => mine === round.current && setRepositories(unreadable),
       );
-  }, [p.client, p.csrfToken, on]);
+  }, [p.client, p.csrfToken, on, generation]);
 
   const names =
     repositories?.state === "ready" && !repositories.truncated
@@ -157,6 +182,13 @@ export function useReadinessDiscovery(p: {
     choices,
     fieldReads,
     labels: labelChoices(repositories, p.saved, labelReads),
+    generation,
+    /** Reads everything again, such as after the discovery credential was set. */
+    refresh: () => {
+      // Together with the new round, so no render shows the old reads under it.
+      forget();
+      setGeneration((n) => n + 1);
+    },
   };
 }
 export type ReadinessDiscovery = ReturnType<typeof useReadinessDiscovery>;
@@ -280,6 +312,12 @@ export function ProjectFieldPicker(p: {
   };
   const state = rowState(ids, p.discovery.choices, p.discovery.fieldReads);
   const sticky = useRef<string | null>(null);
+  // Only a new round of reads (the credential changed) lets a typed row become a picker.
+  const round = useRef(p.discovery.generation);
+  if (round.current !== p.discovery.generation) {
+    round.current = p.discovery.generation;
+    sticky.current = null;
+  }
   if (state.state === "typed") sticky.current = state.note;
   if (sticky.current !== null)
     return (
@@ -356,5 +394,124 @@ export function ProjectFieldPicker(p: {
         loading || !field,
       )}
     </>
+  );
+}
+
+/**
+ * The one-click `discovery.configure` with the signed-in GitHub CLI login, above the readiness
+ * conditions, for a credential that is not configured (their Projects and fields are then typed
+ * as node IDs). It is held like the other offers while a save elsewhere is unconfirmed.
+ */
+export function ReadinessLoginOffer(
+  p: Pick<SettingsProps, "drafts" | "client"> & {
+    csrfToken: string;
+    /** A rule of at least one condition exists; the offer is shown for nothing else. */
+    visible: boolean;
+    /** The login was saved; read what the credential unlocks again. `moveFocus` if focus was here. */
+    onRecorded: (moveFocus: boolean) => void;
+  },
+) {
+  const loader = useCallback(
+    (signal: AbortSignal) =>
+      p.client.read("/api/operator/discovery", discoveryStatusSchema, signal),
+    [p.client],
+  );
+  // A tab with no conditions never shows the offer, so it makes no read.
+  const status = useOperatorResource(p.csrfToken, loader, p.visible);
+  const own = "discovery.configure:readiness-picker";
+  const d = useDraft(p.drafts, own);
+  // A new visit starts clean; an unsettled login stays until it is checked.
+  useEffect(() => d.startOperation({ key: key() }), [d]);
+  const elsewhere = useDiscoveryUnsettled(p.drafts, own);
+  const elsewhereId = useId();
+  const box = useRef<HTMLDivElement>(null);
+  const announced = useRef<number | null>(null);
+  const { onRecorded } = p;
+  const { refresh } = status;
+  // A recorded save is announced once, whichever instance sent it. Focus moves with it only
+  // if it was still on the offer, or nowhere: the offer leaves once discovery reads as set.
+  useEffect(() => {
+    if (d.phase !== "recorded" || d.savedAt === null) return;
+    if (announced.current === d.savedAt) return;
+    announced.current = d.savedAt;
+    refresh();
+    const at = document.activeElement;
+    onRecorded(at === document.body || Boolean(box.current?.contains(at)));
+  }, [d, d.phase, d.savedAt, refresh, onRecorded]);
+  // A recorded offer is spent once a read made after it answers.
+  const { fetchedAt, pending } = status.state;
+  useEffect(() => {
+    if (
+      d.phase === "recorded" &&
+      !pending &&
+      fetchedAt !== null &&
+      d.savedAt !== null &&
+      announced.current === d.savedAt &&
+      fetchedAt >= d.savedAt
+    )
+      d.startOperation({ key: key() });
+  }, [d, d.phase, d.savedAt, pending, fetchedAt]);
+  const read = status.state.data?.data;
+  const login =
+    p.visible &&
+    !status.state.error &&
+    read &&
+    !read.configured &&
+    read.gh.state === "signed-in" &&
+    d.phase !== "unknown"
+      ? read.gh.login
+      : null;
+  const idle = login === null && d.phase === "editing";
+  const offer = () =>
+    d.submit(
+      p.client,
+      {
+        type: "discovery.configure",
+        key: d.values.key,
+        credentialRef: "gh:github.com",
+      },
+      p.csrfToken,
+    );
+  return (
+    <div
+      ref={box}
+      // Takes no row of the panel's grid while there is nothing to offer or say.
+      hidden={idle}
+      className={idle ? undefined : "settings-rows"}
+    >
+      {login !== null && (
+        <>
+          <Button
+            type="button"
+            variant="secondary"
+            // Stays in place while saving so focus is not dropped; a pending, a recorded or
+            // another surface's unconfirmed save is not sent over.
+            aria-disabled={
+              d.phase === "pending" || d.phase === "recorded" || elsewhere
+            }
+            aria-describedby={elsewhere ? elsewhereId : undefined}
+            className="aria-disabled:opacity-50"
+            onClick={() =>
+              d.phase === "recorded" || elsewhere ? undefined : void offer()
+            }
+          >
+            {d.phase === "pending"
+              ? "Saving…"
+              : `Use GitHub CLI login (@${login})`}
+          </Button>
+          <p className="metadata muted">{discoveryUseNote}</p>
+          {elsewhere && (
+            <p id={elsewhereId} className="metadata muted">
+              {discoveryElsewhereNote}
+            </p>
+          )}
+        </>
+      )}
+      <DraftMessage
+        draft={d}
+        success={null}
+        check={() => d.reconcile(p.client, p.csrfToken)}
+      />
+    </div>
   );
 }

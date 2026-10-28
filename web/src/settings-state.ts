@@ -222,6 +222,7 @@ export class ConfigurationDraft {
   constructor(
     private render: () => void = () => {},
     private onSaved: (receipt: CommandReceipt) => void = () => {},
+    private onChanged: () => void = () => {},
   ) {}
   bind(render: () => void) {
     this.render = render;
@@ -229,6 +230,7 @@ export class ConfigurationDraft {
   private changed = () => {
     this.revision++;
     this.render();
+    this.onChanged();
   };
   /** The page committed a render that shows every change up to `revision`. */
   committed(revision: number) {
@@ -577,9 +579,29 @@ export interface SavedRecord {
   at: number;
   receipt: CommandReceipt;
 }
+/** Every draft that sends `discovery.configure` has a key under this prefix. */
+const discoveryKey = "discovery.configure";
 export class ConfigurationDrafts {
   private drafts = new Map<string, ConfigurationDraft>();
   private savedRecords = new Map<string, SavedRecord>();
+  private listeners = new Set<() => void>();
+  /** Calls `listener` when a discovery credential draft changes; returns the unsubscribe. */
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
+  };
+  /**
+   * Whether a discovery credential save other than the `own` drafts is pending or unknown.
+   * Such a save may still change the credential, so no other surface may offer or send one.
+   */
+  discoveryUnsettled(...own: string[]) {
+    return [...this.drafts].some(
+      ([key, draft]) =>
+        key.startsWith(discoveryKey) &&
+        !own.includes(key) &&
+        (draft.phase === "pending" || draft.phase === "unknown"),
+    );
+  }
   saved(key: string) {
     return this.savedRecords.get(key);
   }
@@ -611,8 +633,13 @@ export class ConfigurationDrafts {
   get(key: string, render: () => void) {
     let draft = this.drafts.get(key);
     if (!draft) {
-      draft = new ConfigurationDraft(render, (receipt) =>
-        this.savedRecords.set(key, { at: Date.now(), receipt }),
+      draft = new ConfigurationDraft(
+        render,
+        (receipt) => this.savedRecords.set(key, { at: Date.now(), receipt }),
+        () => {
+          if (key.startsWith(discoveryKey))
+            for (const listener of this.listeners) listener();
+        },
       );
       this.drafts.set(key, draft);
     }
@@ -623,5 +650,6 @@ export class ConfigurationDrafts {
     for (const draft of this.drafts.values()) draft.purge();
     this.drafts.clear();
     this.savedRecords.clear();
+    for (const listener of this.listeners) listener();
   }
 }

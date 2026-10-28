@@ -35,6 +35,7 @@ import {
   locked,
   sendDraft,
   type SettingsProps,
+  useDiscoveryUnsettled,
   useDraft,
 } from "./settings.js";
 import {
@@ -52,7 +53,11 @@ import {
   typeRepository,
   verificationCopy,
 } from "./setup-model.js";
-import { discoveryUseNote, type GhLogin } from "./discovery-credential.js";
+import {
+  discoveryElsewhereNote,
+  discoveryUseNote,
+  type GhLogin,
+} from "./discovery-credential.js";
 import { settingsSectionHref } from "./settings-sections.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -162,6 +167,11 @@ export function ProjectSetup(
   const ghDraft = useDraft(p.drafts, "discovery.configure:setup");
   // A new visit starts clean; an unsettled login stays until it is checked.
   useEffect(() => ghDraft.startOperation({ key: key() }), [ghDraft]);
+  const elsewhere = useDiscoveryUnsettled(
+    p.drafts,
+    "discovery.configure:setup",
+  );
+  const elsewhereId = useId();
   const unconfigured =
     discovery.state === "unavailable" && discovery.reason === "unconfigured";
   const [ghLogin, setGhLogin] = useState<GhLogin | null>(null);
@@ -701,9 +711,11 @@ export function ProjectSetup(
                     {offer && (
                       <Button
                         type="button"
-                        aria-disabled={ghDraft.phase === "pending"}
+                        aria-disabled={ghDraft.phase === "pending" || elsewhere}
+                        aria-describedby={elsewhere ? elsewhereId : undefined}
                         className="aria-disabled:opacity-50"
                         onClick={async () => {
+                          if (elsewhere) return;
                           await ghDraft.submit(
                             p.client,
                             {
@@ -746,6 +758,11 @@ export function ProjectSetup(
                     CLI on this Mac.
                   </p>
                   <p className="metadata muted">{discoveryUseNote}</p>
+                  {elsewhere && (
+                    <p id={elsewhereId} className="metadata muted">
+                      {discoveryElsewhereNote}
+                    </p>
+                  )}
                 </>
               )}
             <DraftMessage
