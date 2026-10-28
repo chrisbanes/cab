@@ -204,7 +204,8 @@ export function ResetTask({
       onOpenChange={(next) => {
         onOpenChange?.(next);
         setOpen(next);
-        if (!next) clear();
+        // An unconfirmed reset keeps its feedback, so it can still be checked.
+        if (!next && !uncertain) clear();
       }}
     >
       <DialogTrigger asChild>

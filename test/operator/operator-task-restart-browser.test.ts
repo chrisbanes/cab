@@ -184,5 +184,50 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await page.getByRole("button", { name: "Refresh task" }).click();
     await startAgain().waitFor();
     assert.equal(commands.length, 5);
+
+    // A reset whose outcome is unknown stays checkable after the dialog is dismissed.
+    const unknown = await refusedTask(f);
+    await page.goto(`${web.origin}/app/tasks/${unknown.taskId}`);
+    await page.locator("[data-task-strip]").waitFor();
+    let lost = true;
+    await page.route("**/api/operator/commands", async (route) => {
+      if (lost && (route.request().postData() ?? "").includes('"task.reset"')) {
+        lost = false;
+        await route.abort();
+      } else await route.continue();
+    });
+    const openReset = async () => {
+      if (
+        viewport.width < 760 &&
+        !(await page
+          .locator("details.task-header-overflow")
+          .evaluate((d) => (d as HTMLDetailsElement).open))
+      )
+        await page.locator(".task-header-overflow-toggle").click();
+      await page.getByRole("button", { name: "Reset task…" }).click();
+    };
+    await openReset();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Reset task", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Check whether it saved" })
+      .waitFor();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Cancel" })
+      .click();
+    await openReset();
+    await page.getByRole("button", { name: "Check whether it saved" }).click();
+    await page
+      .getByText(/Reset\. The lead starts a fresh conversation/)
+      .waitFor();
+    // The check resends the same keyed command: no second reset is recorded.
+    const resets = commands.filter(
+      (c) => c.type === "task.reset" && c.taskId === unknown.taskId,
+    );
+    assert.equal(resets.length, 2);
+    assert.equal(resets[0]?.key, resets[1]?.key);
   });
 }
