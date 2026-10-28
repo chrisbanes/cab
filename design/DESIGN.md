@@ -1177,7 +1177,8 @@ newer work appears; it does not silently retarget.
   Ensemble did not push adds an `Outside push <short commit>` warning badge, or `Branch deleted` when the remote branch is absent. One
   line under the list says Ensemble assigns and pushes these branches, flags a head
   it did not push and will not push that branch again until it returns to
-  Ensemble's last push. `69-changes-delivery` and
+  Ensemble's last push, or the lead adopts that head or overwrites it with the
+  operator's approval. `69-changes-delivery` and
   `70-phone-changes-delivery` show one pushed branch and one with an outside push.
 - **Returning:** Back through the journey restores the previous section and
   reading anchor. External evidence opens with task context retained; returning
@@ -2019,6 +2020,13 @@ Interaction notes:
   `237-phone-task-approval-review`). The panel replaces the request's decision card and
   shows the status badge, requester, the request prompt, then Exact action, Target and
   Version (revision and short material hash) as one bordered list.
+- A recovery from an outside change on a task branch (`branch.adopt`, or `branch.force-push`
+  naming the outside head) adds one "Compare on GitHub" link under the facts, built by the
+  server from a verified repository name to GitHub's comparison from Ensemble's last push to
+  the outside head (the outside commit alone when nothing was pushed). It opens GitHub in a
+  new tab and is absent for a deleted branch or an unverified repository name. The branch,
+  outside head and last push are material fields like any other, and the decision states
+  stay as below, including Check whether it saved after an unknown outcome.
 - Material to approve lists the material's top-level fields as a key/value list; a
   string keeps its line breaks and a nested value is shown as indented JSON. Exact JSON
   sits behind a disclosure, open by default when the material is not an object.

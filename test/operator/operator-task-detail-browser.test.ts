@@ -1561,6 +1561,70 @@ test("An approval request opens the approval review, not the question form", asy
   );
 });
 
+test("A recovery approval shows its exact material and a GitHub compare link, and never a foreign link", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedOwnApproval(f);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const compare = `https://github.com/acme/app/compare/${"a".repeat(40)}...${"b".repeat(40)}`;
+  const material = {
+    kind: "branch.adopt",
+    target: { repositoryId: "R1" },
+    branch: "ensemble/aaaa1111-ship-it",
+    outsideHeadSha: "b".repeat(40),
+    lastPushedSha: "a".repeat(40),
+  };
+  let link: string | undefined = compare;
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.approvals[0].material = material;
+      if (link) json.data.approvals[0].compareUrl = link;
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page.goto(
+    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
+  );
+  const panel = page.locator(
+    `.approval-review[data-record-id="${a.interactionId}"]`,
+  );
+  const anchor = panel.getByRole("link", { name: /Compare on GitHub/ });
+  await anchor.waitFor();
+  assert.equal(await anchor.getAttribute("href"), compare);
+  assert.equal(await anchor.getAttribute("rel"), "noopener noreferrer");
+  assert.deepEqual(
+    await panel.locator(".approval-material-fields dt").allInnerTexts(),
+    ["kind", "target", "branch", "outsideHeadSha", "lastPushedSha"],
+  );
+  // No link without server-verified repository naming.
+  link = undefined;
+  await page.reload();
+  await panel
+    .getByRole("button", { name: "Approve this exact material" })
+    .waitFor();
+  assert.equal(
+    await panel.getByRole("link", { name: /Compare on GitHub/ }).count(),
+    0,
+  );
+});
+
 /** A signed-in page on a fresh fixture, with every command POST recorded. */
 async function openFixture(
   j: BrowserJourney,
@@ -3254,7 +3318,7 @@ test("The delivery block links the PR, says its state and blockers in words, and
   await branchLine.getByText("Outside push cccccccc").waitFor();
   await changes
     .getByText(
-      "Ensemble assigns and pushes these. A head it did not push is flagged, and Ensemble will not push that branch again until it returns to Ensemble's last push.",
+      "Ensemble assigns and pushes these. A head it did not push is flagged, and Ensemble will not push that branch again until it returns to Ensemble's last push, or the lead adopts that head or overwrites it with your approval.",
       { exact: true },
     )
     .waitFor();

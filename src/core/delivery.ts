@@ -36,6 +36,7 @@ export const actionKinds = [
   "pr.thread.resolve",
   "branch.push",
   "branch.force-push",
+  "branch.adopt",
 ] as const;
 export const defaultBranchPrefix = "ensemble/";
 /** Git's all-zero id, recorded as the outside head when the remote branch is absent. */
@@ -89,7 +90,11 @@ export const deliveryPolicySchema = z
             fieldNodeId: identity.optional(),
             optionNodeIds: z.array(identity).optional(),
           })
-          .strict(),
+          .strict()
+          .refine(
+            (g) => g.action !== "branch.adopt" || g.mode === "approval",
+            "branch.adopt is only grantable with approval",
+          ),
       )
       .max(256),
     requiredChecks: z
@@ -124,6 +129,15 @@ const prTargetSchema = targetSchema
   .strict();
 const branchTargetSchema = z.object({ repositoryId: identity }).strict();
 const commitSha = z.string().regex(/^[0-9a-f]{40}$/);
+/**
+ * What a recovery from an outside change names: the task branch, the outside head (git's all-zero id
+ * for a deleted branch) and the commit Ensemble last pushed. The approval binds all three.
+ */
+const recoveryMaterial = {
+  branch: identity,
+  outsideHeadSha: commitSha,
+  lastPushedSha: commitSha.nullable(),
+};
 const threadTargetSchema = targetSchema
   .extend({ threadNodeId: identity })
   .strict();
@@ -270,6 +284,27 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
       kind: z.literal("branch.force-push"),
       target: branchTargetSchema,
       commitSha,
+      // Present only to overwrite an outside head: all of it or none.
+      branch: recoveryMaterial.branch.optional(),
+      outsideHeadSha: recoveryMaterial.outsideHeadSha.optional(),
+      lastPushedSha: recoveryMaterial.lastPushedSha.optional(),
+    })
+    .strict()
+    .refine(
+      (v) =>
+        [v.branch, v.outsideHeadSha, v.lastPushedSha].every(
+          (m) => m === undefined,
+        ) ||
+        [v.branch, v.outsideHeadSha, v.lastPushedSha].every(
+          (m) => m !== undefined,
+        ),
+      "Recovery material needs branch, outsideHeadSha and lastPushedSha together",
+    ),
+  z
+    .object({
+      kind: z.literal("branch.adopt"),
+      target: branchTargetSchema,
+      ...recoveryMaterial,
     })
     .strict(),
 ]);
@@ -404,6 +439,19 @@ export function isOperatorAction(
   return (
     action.kind === "issue.comment" ||
     (action.kind === "issue.edit" && action.expected !== undefined)
+  );
+}
+/** A recovery from an outside change: an overwrite naming the outside head, or an adoption of it. */
+export function isRecoveryAction(action: ExternalAction): action is
+  | Extract<ExternalAction, { kind: "branch.adopt" }>
+  | (Extract<ExternalAction, { kind: "branch.force-push" }> & {
+      branch: string;
+      outsideHeadSha: string;
+      lastPushedSha: string | null;
+    }) {
+  return (
+    action.kind === "branch.adopt" ||
+    (action.kind === "branch.force-push" && action.outsideHeadSha !== undefined)
   );
 }
 export const operatorCommentReviewSchema = z
@@ -845,10 +893,30 @@ export class DeliveryStore {
         action.kind === "issue.edit" ||
         action.kind === "pr.edit" ||
         // The confirmed publication review is the approval in either grant mode.
-        isOperatorPublicationCaller(binding)) &&
+        isOperatorPublicationCaller(binding) ||
+        // A recovery is never covered by an `allow` grant.
+        isRecoveryAction(action)) &&
       !approved
     )
       throw new Error("Exact material approval required");
+    if (isRecoveryAction(action)) {
+      const branch = this.taskBranch(
+        binding.taskId,
+        action.target.repositoryId,
+      );
+      // Re-run after the provider's last await, so a record that moved since approval refuses.
+      if (
+        branch?.branch !== action.branch ||
+        branch.outsideHeadSha !== action.outsideHeadSha ||
+        branch.lastPushedSha !== action.lastPushedSha
+      )
+        throw new Error("Recovery material is not the recorded outside change");
+      if (
+        action.kind === "branch.adopt" &&
+        action.outsideHeadSha === absentBranchHead
+      )
+        throw new Error("A deleted branch cannot be adopted");
+    }
     if (action.kind === "pr.merge" && policy.mode !== "through-merge")
       throw new Error("Project delivery mode forbids merge");
     if ("headRef" in action.target) {
@@ -1743,6 +1811,23 @@ export class DeliveryStore {
       .get(taskId, repositoryId);
     return row ? taskBranchSchema.parse(row) : null;
   }
+  /**
+   * The `owner/name` of a repository as the provider verified it for the task's latest begun branch
+   * action there, which exists whenever Ensemble pushed or adopted; null before any.
+   */
+  verifiedRepositoryName(taskId: string, repositoryId: string): string | null {
+    for (const a of this.actions(taskId).reverse()) {
+      const path = a.beforeState?.repositoryPath;
+      const found =
+        a.request.action.kind.startsWith("branch.") &&
+        a.request.action.target.repositoryId === repositoryId &&
+        typeof path === "string"
+          ? /^\/repos\/([^/]+\/[^/]+)$/.exec(path)
+          : null;
+      if (found?.[1]) return found[1];
+    }
+    return null;
+  }
   taskBranches(taskId: string): TaskBranch[] {
     return this.db
       .prepare(
@@ -1799,18 +1884,31 @@ export class DeliveryStore {
     }
     throw new Error("Task branch could not be assigned");
   }
-  /** Commits Ensemble pushed, or may have pushed (an attempt that may have landed), for the repository. */
+  /**
+   * Commits Ensemble pushed, or may have pushed (an attempt that may have landed), for the repository,
+   * and the outside head a confirmed recovery replaced or adopted: a PR that still shows it is lagging
+   * behind the recovery, not an outside change.
+   */
   private pushedShas(taskId: string, repositoryId: string): Set<string> {
     return new Set(
-      this.actions(taskId).flatMap((a) =>
-        (a.state === "confirmed-success" ||
-          this.mayHaveLanded(a.operationId)) &&
-        a.request.action.kind.startsWith("branch.") &&
-        a.request.action.target.repositoryId === repositoryId &&
-        "commitSha" in a.request.action
-          ? [a.request.action.commitSha]
-          : [],
-      ),
+      this.actions(taskId).flatMap((a) => {
+        const action = a.request.action;
+        if (
+          !action.kind.startsWith("branch.") ||
+          action.target.repositoryId !== repositoryId
+        )
+          return [];
+        const settled = a.state === "confirmed-success";
+        return [
+          ...((settled || this.mayHaveLanded(a.operationId)) &&
+          "commitSha" in action
+            ? [action.commitSha]
+            : []),
+          ...(settled && isRecoveryAction(action)
+            ? [action.outsideHeadSha]
+            : []),
+        ];
+      }),
     );
   }
   delivery(taskId: string): PrDeliveryBinding | null {

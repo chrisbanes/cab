@@ -1249,6 +1249,8 @@ const interaction = z
     materialHash: hash.nullable(),
     material: materialSchema.nullable(),
     approvable: z.boolean(),
+    /** For a recovery from an outside change: GitHub's view of what the outside writer changed. */
+    compareUrl: z.url().startsWith("https://github.com/").optional(),
     materialUnavailable: z.boolean(),
     response: safeText,
     revision,

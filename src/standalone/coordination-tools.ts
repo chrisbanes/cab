@@ -23,7 +23,7 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
     type: "function",
     name: "ensemble_external_action",
     description:
-      "Request an exact policy-authorized GitHub action. Intent precedes effect; uncertain actions hold this task. Never run git push: commit in your worktree, then request branch.push (or branch.force-push after rewriting history) with that commit SHA. Ensemble pushes it to this task's assigned branch and the receipt names the branch; use that branch as the pr.create headRef. Uncommitted changes are never pushed.",
+      "Request an exact policy-authorized GitHub action. Intent precedes effect; uncertain actions hold this task. Never run git push: commit in your worktree, then request branch.push (or branch.force-push after rewriting history) with that commit SHA. Ensemble pushes it to this task's assigned branch and the receipt names the branch; use that branch as the pr.create headRef. Uncommitted changes are never pushed. After an outside change on the branch, recover with the operator's approval of the exact material {branch, outsideHeadSha, lastPushedSha}: branch.adopt keeps the outside head as the branch's recorded head (merge or rebase it in your worktree, then push), and branch.force-push with that material and your commit overwrites it.",
     inputSchema: z.toJSONSchema(externalActionArgumentsSchema),
   },
   {

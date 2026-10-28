@@ -4,7 +4,12 @@ import { deliveryDocuments } from "../../../src/standalone/github-delivery.js";
 
 const id = z.string().min(1).max(512);
 const fixtureRepository = "chrisbanes/ensemble-s07a-fixture";
-const publicationActions = ["branch.push", "pr.create"] as const;
+const publicationActions = [
+  "branch.push",
+  "branch.force-push",
+  "branch.adopt",
+  "pr.create",
+] as const;
 const exactActions = (actions: readonly string[]) =>
   actions.length === publicationActions.length &&
   publicationActions.every((a) => actions.includes(a));
@@ -58,7 +63,8 @@ const queryDocuments = new Set<string>(
 
 /**
  * Enforces a separately supplied exact grant: only api.github.com, only the fixture repository, one
- * draft PR from a recorded `s07a-pub/` branch, and cleanup of exactly what the run recorded.
+ * draft PR from a recorded `s07a-pub/` branch, two outside commits on that branch, and cleanup of exactly
+ * what the run recorded.
  */
 export class PublicationGuard {
   readonly manifest: PublicationManifest;
@@ -68,6 +74,9 @@ export class PublicationGuard {
   private branch: string | undefined;
   private pr: number | undefined;
   private created = false;
+  /** Outside commits the harness made on the scratch branch, and the fast-forward moves that published them. */
+  private outsideCommits = 0;
+  private outsideMoves = 0;
   readonly writes: string[] = [];
   constructor(manifestText: string, grant: unknown, now = Date.now()) {
     if (grant === undefined) throw new Error("Named live grant is required");
@@ -117,6 +126,12 @@ export class PublicationGuard {
       (this.branch !== undefined && request.branch !== this.branch)
     )
       throw new Error("guard: unexpected push target");
+  }
+  /** The adopt fetch is held to the same repository and recorded branch as the push. */
+  assertAdopt(request: { nameWithOwner: string; branch: string }) {
+    this.assertPush(request);
+    if (this.branch === undefined)
+      throw new Error("guard: unexpected adopt target");
   }
   assertRequest(input: string | URL | Request, init: RequestInit = {}) {
     this.current();
@@ -173,6 +188,25 @@ export class PublicationGuard {
       body === JSON.stringify({ state: "closed" })
     ) {
       // Cleanup: close exactly the recorded PR.
+    } else if (
+      // The harness plays the outside writer: a commit whose only parent is the current head and whose
+      // tree is that head's, then a fast-forward (never forced) move of the scratch branch onto it.
+      method === "POST" &&
+      branch &&
+      url.pathname === `${this.root}/git/commits` &&
+      this.outsideCommits < 2 &&
+      (JSON.parse(body ?? "{}") as { parents?: unknown[] }).parents?.length ===
+        1
+    ) {
+      this.outsideCommits++;
+    } else if (
+      method === "PATCH" &&
+      branch &&
+      url.pathname === `${this.root}/git/refs/heads/${branch}` &&
+      this.outsideMoves < 2 &&
+      (JSON.parse(body ?? "{}") as { force?: unknown }).force === false
+    ) {
+      this.outsideMoves++;
     } else if (
       method === "DELETE" &&
       branch &&

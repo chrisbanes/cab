@@ -3198,7 +3198,8 @@ function Changes({
         <p>
           Ensemble assigns and pushes these. A head it did not push is flagged,
           and Ensemble will not push that branch again until it returns to
-          Ensemble's last push.
+          Ensemble's last push, or the lead adopts that head or overwrites it
+          with your approval.
         </p>
       )}
       {d?.binding && (

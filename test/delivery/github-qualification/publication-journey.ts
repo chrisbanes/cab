@@ -14,11 +14,16 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   DeliveryStore,
+  isRecoveryAction,
   type DeliveryCaller,
 } from "../../../src/core/delivery.js";
 import { DomainStore } from "../../../src/core/domain.js";
 import { Store } from "../../../src/core/store.js";
 import { DeliveryCoordinator } from "../../../src/standalone/delivery.js";
+import {
+  type AdoptFunction,
+  adoptOutsideHead,
+} from "../../../src/standalone/git-fetch.js";
 import { pushTaskCommit } from "../../../src/standalone/git-push.js";
 import {
   GitHubHttpDeliveryProvider,
@@ -37,6 +42,8 @@ export interface PublicationJourneyOptions {
   fetcher?: typeof fetch;
   /** The HTTPS push; tests pass a fake. */
   push?: PushFunction;
+  /** The HTTPS fetch of an adopted head; tests pass a fake. */
+  adopt?: AdoptFunction;
   /** Independent readbacks of the remote branch head and the PR head (production uses the `gh` CLI). */
   readRef(branch: string): string | null;
   readPrHead(number: number): string;
@@ -73,7 +80,8 @@ function filesContaining(directory: string, needle: string): string[] {
 /**
  * One bounded publication on the fixture repository: a real task worktree, Ensemble's coordinator and
  * HTTPS push for a first commit, `pr.create` on the assigned branch, and a repair push to the same
- * branch. Cleanup (closing the PR, deleting the scratch head) is the harness's own, because Ensemble
+ * branch. Then the harness plays an outside writer twice: the first outside commit is overwritten, the
+ * second is adopted and pushed on top of, each recovery approved as the operator would. Cleanup (closing the PR, deleting the scratch head) is the harness's own, because Ensemble
  * never deletes branches. Never throws for an assertion: returns the evidence with `publication: "failed"`.
  */
 export async function runPublicationJourney(
@@ -211,7 +219,11 @@ export async function runPublicationJourney(
       grants: manifest.actions.map((action) => ({
         action,
         repositoryId,
-        mode: "allow" as const,
+        // Adoption is only grantable with approval.
+        mode:
+          action === "branch.adopt"
+            ? ("approval" as const)
+            : ("allow" as const),
       })),
       requiredChecks: [],
     });
@@ -235,14 +247,28 @@ export async function runPublicationJourney(
       pushes++;
       return (options.push ?? pushTaskCommit)(request);
     };
-    const real = new GitHubHttpDeliveryProvider(token, guardedFetch, push);
+    const adopt: AdoptFunction = async (request) => {
+      guard.assertAdopt(request);
+      return (options.adopt ?? adoptOutsideHead)(request);
+    };
+    const real = new GitHubHttpDeliveryProvider(
+      token,
+      guardedFetch,
+      push,
+      adopt,
+    );
     const provider = options.inspectPr
       ? Object.assign(Object.create(real), { inspectPr: options.inspectPr })
       : real;
     const coordinator = new DeliveryCoordinator(store, {
       providerFactory: () => provider,
       authorize: () => {},
-      approved: () => false,
+      // The harness stands in for the operator's approval of a recovery, and of nothing else.
+      approved: (request) => isRecoveryAction(request.action),
+      taskWorkspace: async () => ({
+        workspacePath: workspace,
+        baseCommit: base,
+      }),
       leadAssignmentId: () => caller.assignmentId,
       feedback: (_task, _reason, identity) => wakes.push(identity),
       verifyPush: async (input) =>
@@ -325,6 +351,127 @@ export async function runPublicationJourney(
     if (wakes.some((w) => w.startsWith("outside-push:")))
       throw new Error("An outside push was reported");
 
+    // The harness plays the outside writer: a commit on top of the branch head, moved there by a
+    // fast-forward through the REST API, which the lead then finds at its next plain push.
+    const outsideMove = async (parent: string, label: string) => {
+      const found = await api(
+        "GET",
+        `/repos/${fullName}/git/commits/${parent}`,
+      );
+      const tree = (found.json as { tree: { sha: string } }).tree.sha;
+      const made = await api("POST", `/repos/${fullName}/git/commits`, {
+        message: `Outside change ${label} ${runId}`,
+        tree,
+        parents: [parent],
+      });
+      const outside = (made.json as { sha?: string } | null)?.sha;
+      if (!outside) throw new Error(`Outside commit ${label} was not created`);
+      const moved = await api(
+        "PATCH",
+        `/repos/${fullName}/git/refs/heads/${branch}`,
+        { sha: outside, force: false },
+      );
+      if (moved.status !== 200 || options.readRef(branch ?? "") !== outside)
+        throw new Error(`Outside commit ${label} did not move the branch`);
+      return outside;
+    };
+    const mustRefuseOutside = async (label: string, sha: string) => {
+      const refused = await submit({
+        kind: "branch.push",
+        target: { repositoryId },
+        commitSha: sha,
+      });
+      if (refused.observation?.reason !== "branch-outside-change")
+        throw new Error(`${label}: the outside change was not detected`);
+      const recorded = store.taskBranch(taskId, repositoryId);
+      if (!recorded?.outsideHeadSha || !branch)
+        throw new Error(`${label}: no outside head was recorded`);
+      return recorded;
+    };
+
+    // Overwrite: the outside head is replaced under a lease on it.
+    const outsideOne = await outsideMove(second, "one");
+    const thirdLocal = commit(`publication-${runId}-overwrite.md`);
+    const heldOne = await mustRefuseOutside("overwrite", thirdLocal);
+    if (heldOne.outsideHeadSha !== outsideOne)
+      throw new Error("The recorded outside head is not the outside commit");
+    mustSucceed(
+      "overwrite",
+      await submit({
+        kind: "branch.force-push",
+        target: { repositoryId },
+        commitSha: thirdLocal,
+        branch: heldOne.branch,
+        outsideHeadSha: outsideOne,
+        lastPushedSha: heldOne.lastPushedSha,
+      }),
+    );
+    if (options.readRef(branch) !== thirdLocal)
+      throw new Error("Remote branch is not the overwriting commit");
+    if (store.taskBranch(taskId, repositoryId)?.outsideHeadSha !== null)
+      throw new Error("The outside change did not clear after the overwrite");
+
+    // Adopt: the second outside commit is kept, integrated offline and pushed on top of.
+    const outsideTwo = await outsideMove(thirdLocal, "two");
+    const diverged = commit(`publication-${runId}-adopt.md`);
+    const heldTwo = await mustRefuseOutside("adopt", diverged);
+    if (heldTwo.outsideHeadSha !== outsideTwo)
+      throw new Error("The recorded outside head is not the second commit");
+    mustSucceed(
+      "adopt",
+      await submit({
+        kind: "branch.adopt",
+        target: { repositoryId },
+        branch: heldTwo.branch,
+        outsideHeadSha: outsideTwo,
+        lastPushedSha: heldTwo.lastPushedSha,
+      }),
+    );
+    const adopted = store.taskBranch(taskId, repositoryId);
+    if (
+      adopted?.lastPushedSha !== outsideTwo ||
+      adopted.outsideHeadSha !== null
+    )
+      throw new Error("The adopted head was not recorded as the last push");
+    // The agent's integration: merge the adopted head in the worktree, which adopt never touched.
+    git(workspace, [
+      "-c",
+      "user.name=Ensemble qualification",
+      "-c",
+      "user.email=qualification@example.invalid",
+      "merge",
+      "--quiet",
+      "--no-edit",
+      outsideTwo,
+    ]);
+    const merged = git(workspace, ["rev-parse", "HEAD"]);
+    mustSucceed(
+      "push after adopt",
+      await submit({
+        kind: "branch.push",
+        target: { repositoryId },
+        commitSha: merged,
+      }),
+    );
+    if (options.readRef(branch) !== merged)
+      throw new Error(
+        "Remote branch is not the merge on top of the adopted head",
+      );
+    if (options.readPrHead(pull.number) !== merged)
+      throw new Error("PR head did not advance to the merge");
+    if (store.delivery(taskId)?.observation.headSha !== merged)
+      throw new Error("Ensemble's PR observation did not advance");
+    const recoveryWakes = wakes.filter((w) => w.startsWith("outside-push:"));
+    if (
+      recoveryWakes.join() !==
+      [outsideOne, outsideTwo]
+        .map((sha) => `outside-push:${repositoryId}:${sha}`)
+        .join()
+    )
+      throw new Error("The lead was not woken once per outside change");
+    if (store.completionBlockers(taskId).includes("task-branch-outside-change"))
+      throw new Error("The outside change still holds completion");
+
     // The credential is nowhere Ensemble or the harness wrote.
     const leaked = [
       ...filesContaining(root, token),
@@ -342,9 +489,14 @@ export async function runPublicationJourney(
       branch,
       firstCommit: first,
       repairCommit: second,
+      overwrite: "passed",
+      adopt: "passed",
+      outsideCommits: [outsideOne, outsideTwo],
+      overwriteCommit: thirdLocal,
+      adoptedMergeCommit: merged,
       pullRequest: pull.number,
       pushes,
-      outsidePushEvents: 0,
+      outsidePushEvents: 2,
       credentialExposures: 0,
     });
   } catch (error) {

@@ -9,6 +9,7 @@ import type { OperatorClient } from "./api.js";
 import { useCommandSend } from "./command-send.js";
 import { SendFeedback } from "./coordination-actions.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
+import { safePullRequestUrl } from "./delivery-presentation.js";
 import { failureCause } from "./outcome-copy.js";
 
 type Approval = TaskRead["data"]["approvals"][number];
@@ -130,6 +131,19 @@ export function ApprovalReview({
           )}
         </dd>
       </dl>
+      {safePullRequestUrl(approval.compareUrl) && (
+        <p className="body">
+          <a
+            href={approval.compareUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Compare on GitHub
+            <span className="sr-only"> (opens GitHub)</span>
+          </a>
+          {" · the outside change on the task branch"}
+        </p>
+      )}
       {!approval.materialUnavailable && <Material value={approval.material} />}
       <SendFeedback
         outcome={outcome}

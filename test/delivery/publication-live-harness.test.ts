@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, type TestContext } from "node:test";
+import type { AdoptFunction } from "../../src/standalone/git-fetch.js";
 import type { PushFunction } from "../../src/standalone/github-delivery.js";
 import { git } from "../fixtures/publication.js";
 import {
@@ -25,6 +26,12 @@ const fullName = "chrisbanes/ensemble-s07a-fixture";
 const repositoryNode = "R_fixture";
 const token = "ghp_live_publication_secret_0123456789";
 
+const actions = [
+  "branch.push",
+  "branch.force-push",
+  "branch.adopt",
+  "pr.create",
+];
 const manifest = () => ({
   version: 1,
   provider: "github.com",
@@ -36,7 +43,7 @@ const manifest = () => ({
     defaultBranch: "qualification",
   },
   credential: "gh-cli",
-  actions: ["branch.push", "pr.create"],
+  actions,
   runtimeTurnLimit: 0,
   branchPrefix: "s07a-pub/",
 });
@@ -52,7 +59,7 @@ function files(
     repositoryNodeId: repositoryNode,
     repositoryVisibility: "public",
     credential: "gh-cli",
-    actions: ["branch.push", "pr.create"],
+    actions,
     runtimeTurnLimit: 0,
     expiresAt,
     cleanup: { closeRecordedPrs: true, deleteRecordedHeads: true },
@@ -88,7 +95,8 @@ test("the publication guard enforces the exact grant and the fixture's resources
     },
     { branchPrefix: "cb/" },
     { credential: "env:S07A_GITHUB_TOKEN" },
-    { actions: ["branch.push", "pr.create", "pr.merge"] },
+    { actions: [...actions, "pr.merge"] },
+    { actions: ["branch.push", "pr.create"] },
     { runtimeTurnLimit: 4 },
   ])
     assert.equal(
@@ -143,6 +151,69 @@ test("the publication guard enforces the exact grant and the fixture's resources
         draft: true,
       }),
     }),
+  );
+  // The outside writer: commits with one parent and non-forced moves of the recorded branch, twice.
+  for (const method of ["POST", "PATCH"] as const)
+    for (let i = 0; i < 2; i++)
+      g.assertRequest(
+        api(
+          method === "POST"
+            ? `${root}/git/commits`
+            : `${root}/git/refs/heads/s07a-pub/abc`,
+        ),
+        {
+          method,
+          body: JSON.stringify(
+            method === "POST"
+              ? { message: "m", tree: "t", parents: ["p"] }
+              : { sha: "a".repeat(40), force: false },
+          ),
+        },
+      );
+  // Each refusal is its own rule, so each is tried on a guard with its allowance unspent.
+  for (const [path, body, method] of [
+    [`${root}/git/refs/heads/s07a-pub/abc`, { sha: "a", force: true }, "PATCH"],
+    [
+      `${root}/git/refs/heads/qualification`,
+      { sha: "a", force: false },
+      "PATCH",
+    ],
+    [`${root}/git/commits`, { message: "m", tree: "t", parents: [] }, "POST"],
+    [
+      `${root}/git/commits`,
+      { message: "m", tree: "t", parents: ["p", "q"] },
+      "POST",
+    ],
+  ] as const) {
+    const fresh = new PublicationGuard(f.raw, f.grant);
+    fresh.recordBranch("s07a-pub/abc");
+    assert.throws(
+      () =>
+        fresh.assertRequest(api(path), { method, body: JSON.stringify(body) }),
+      /guard/,
+      `${method} ${path} ${JSON.stringify(body)}`,
+    );
+  }
+  // A third outside commit or move is beyond the grant.
+  for (const [path, method, body] of [
+    [
+      `${root}/git/commits`,
+      "POST",
+      { message: "m", tree: "t", parents: ["p"] },
+    ],
+    [
+      `${root}/git/refs/heads/s07a-pub/abc`,
+      "PATCH",
+      { sha: "a", force: false },
+    ],
+  ] as const)
+    assert.throws(
+      () => g.assertRequest(api(path), { method, body: JSON.stringify(body) }),
+      /guard/,
+    );
+  g.assertAdopt({ nameWithOwner: fullName, branch: "s07a-pub/abc" });
+  assert.throws(() =>
+    g.assertAdopt({ nameWithOwner: fullName, branch: "s07a-pub/other" }),
   );
   g.assertRequest(api(`${root}/git/refs/heads/s07a-pub/abc`), {
     method: "DELETE",
@@ -225,6 +296,8 @@ function fakeWorld(t: TestContext) {
   git(remote, "add", ".");
   git(remote, "commit", "-q", "-m", "fixture base");
   const baseSha = git(remote, "rev-parse", "HEAD");
+  // The fake GitHub serves any object it holds, as a real one serves a reachable commit by sha.
+  git(remote, "config", "uploadpack.allowAnySHA1InWant", "true");
   const refs: Record<string, string> = { qualification: baseSha };
   let pull: null | {
     title: string;
@@ -302,7 +375,50 @@ function fakeWorld(t: TestContext) {
       pull.state = "closed";
       return Response.json({});
     }
+    // The harness's outside writer: GitHub's git-data API, backed by the fake's own repository.
+    const commitsPrefix = `${root}/git/commits/`;
+    if (method === "GET" && url.pathname.startsWith(commitsPrefix))
+      return Response.json({
+        sha: url.pathname.slice(commitsPrefix.length),
+        tree: {
+          sha: git(
+            remote,
+            "rev-parse",
+            `${url.pathname.slice(commitsPrefix.length)}^{tree}`,
+          ),
+        },
+      });
+    if (method === "POST" && url.pathname === `${root}/git/commits`) {
+      const b = sent() as { message: string; tree: string; parents: string[] };
+      const sha = git(
+        remote,
+        "commit-tree",
+        b.tree,
+        "-p",
+        String(b.parents[0]),
+        "-m",
+        b.message,
+      );
+      return Response.json({ sha }, { status: 201 });
+    }
     const refsPrefix = `${root}/git/refs/heads/`;
+    if (method === "PATCH" && url.pathname.startsWith(refsPrefix)) {
+      const b = sent() as { sha: string; force: boolean };
+      const branch = url.pathname.slice(refsPrefix.length);
+      const current = refs[branch];
+      // A fast-forward only: the new commit's parent is the current head.
+      if (
+        b.force !== false ||
+        !current ||
+        git(remote, "rev-parse", `${b.sha}^`) !== current
+      )
+        return Response.json(
+          { message: "Update is not a fast forward" },
+          { status: 422 },
+        );
+      refs[branch] = b.sha;
+      return Response.json({ ref: `refs/heads/${branch}` });
+    }
     if (method === "DELETE" && url.pathname.startsWith(refsPrefix)) {
       delete refs[url.pathname.slice(refsPrefix.length)];
       return new Response(null, { status: 204 });
@@ -315,16 +431,36 @@ function fakeWorld(t: TestContext) {
     async (request) => {
       assert.equal(request.token, token);
       if (outcome === "pushed") {
+        // The lease is Git's own: another head rejects the push.
+        if ((refs[request.branch] ?? null) !== request.lease)
+          return "rejected-lease";
+        // The objects reach the fake GitHub with the push.
+        git(remote, "fetch", "-q", request.workspacePath, request.commitSha);
         refs[request.branch] = request.commitSha;
         pushed.push(request.commitSha);
       }
       return outcome;
     };
+  /** Adoption: the outside commit comes from the fake GitHub into the worktree under Ensemble's ref. */
+  const adopted: string[] = [];
+  const adopt: AdoptFunction = async (request) => {
+    assert.equal(request.token, token);
+    git(request.workspacePath, "fetch", "-q", remote, request.commitSha);
+    git(
+      request.workspacePath,
+      "update-ref",
+      `refs/ensemble/adopted/${request.branch}`,
+      request.commitSha,
+    );
+    adopted.push(request.commitSha);
+    return "adopted";
+  };
   return {
     remote,
     refs,
     requests,
     pushed,
+    adopted,
     push,
     fetcher,
     pullState: () => pull?.state,
@@ -337,6 +473,7 @@ function fakeWorld(t: TestContext) {
         cloneUrl: remote,
         fetcher,
         push: push(outcome),
+        adopt,
         readRef: (branch: string) => refs[branch] ?? null,
         readPrHead: () => refs[pull?.head ?? ""] ?? "",
         inspectPr: async () => ({
@@ -361,15 +498,29 @@ function fakeWorld(t: TestContext) {
   };
 }
 
-test("the publication journey publishes, opens the PR, pushes a repair and cleans up what it created", async (t) => {
+test("the publication journey publishes, opens the PR, repairs, then recovers from two outside changes by overwrite and adopt, and cleans up what it created", async (t) => {
   const world = fakeWorld(t);
   const evidence = await runPublicationJourney(world.options());
   assert.equal(evidence.failure, undefined);
   assert.equal(evidence.publication, "passed");
+  assert.equal(evidence.overwrite, "passed");
+  assert.equal(evidence.adopt, "passed");
   assert.equal(evidence.cleanup, "verified");
   assert.equal(evidence.turns, 0);
-  assert.equal(evidence.pushes, 2);
-  assert.equal(world.pushed.length, 2);
+  // First, repair, overwrite and the push on top of the adopted head; the refused ones never reach Git.
+  assert.equal(evidence.pushes, 4);
+  assert.equal(world.pushed.length, 4);
+  assert.equal(evidence.outsidePushEvents, 2);
+  const [one, two] = evidence.outsideCommits as string[];
+  assert.deepEqual(
+    world.adopted,
+    [two],
+    "only the second outside head is adopted",
+  );
+  assert.ok(
+    !world.pushed.includes(String(one)),
+    "the first outside head was overwritten, not pushed",
+  );
   assert.match(String(evidence.branch), /^s07a-pub\/[0-9a-f]{8}-publication-/);
   assert.equal(world.pullState(), "closed");
   assert.deepEqual(
@@ -380,7 +531,7 @@ test("the publication journey publishes, opens the PR, pushes a repair and clean
   assert.equal(JSON.stringify(evidence).includes(token), false);
   assert.deepEqual(
     (evidence.writes as string[]).map((w) => w.split(" ")[0]),
-    ["POST", "PATCH", "DELETE"],
+    ["POST", "POST", "PATCH", "POST", "PATCH", "PATCH", "DELETE"],
   );
 });
 

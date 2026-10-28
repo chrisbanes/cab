@@ -3,6 +3,7 @@ import {
   projectFieldChangedReason,
 } from "../operator/github-reasons.js";
 import {
+  absentBranchHead,
   isOperatorAction,
   isOperatorDeliveryCaller,
   isOperatorPublicationCaller,
@@ -18,6 +19,7 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
+import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import {
   actionObservationSchema,
@@ -63,9 +65,19 @@ export interface PublicationContext extends PushVerification {
   /** The task's assigned branch, and the commit Ensemble last pushed to it. */
   branch: string;
   lastPushedSha: string | null;
+  /** The approved outside head an overwrite replaces (git's all-zero id for a deleted branch). */
+  outsideHeadSha?: string;
   /** A later attempt of an operation whose earlier attempt may have landed late. */
   retry: boolean;
 }
+/** Offline facts for adopting an outside head: the task's branch, last push, worktree and provisioned base. */
+export interface AdoptionContext {
+  branch: string;
+  lastPushedSha: string | null;
+  workspacePath: string;
+  baseCommit: string;
+}
+export type { AdoptFunction } from "./git-fetch.js";
 export type PushFunction = (
   request: Parameters<typeof pushTaskCommit>[0],
 ) => Promise<PushOutcome>;
@@ -74,6 +86,8 @@ export class PublicationRefusal extends Error {
   constructor(
     readonly reason:
       | "branch-outside-change"
+      /** The remote is back at Ensemble's last push: nothing outside remains to recover from. */
+      | "branch-outside-cleared"
       | "branch-not-fast-forward"
       | "branch-force-push-needs-lease",
     readonly outsideHeadSha: string | null = null,
@@ -123,6 +137,7 @@ export interface GitHubDeliveryProvider {
     action: ExternalAction,
     policy: DeliveryPolicy,
     publication?: PublicationContext,
+    adoption?: AdoptionContext,
   ): Promise<Record<string, z.output<ReturnType<typeof z.json>>>>;
   performAction(
     record: DeliveryActionRecord,
@@ -231,6 +246,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     private readonly credential: string,
     private readonly fetcher: typeof fetch = fetch,
     private readonly push: PushFunction = pushTaskCommit,
+    private readonly adopt: AdoptFunction = adoptOutsideHead,
   ) {}
   private async request(
     path: string,
@@ -1153,21 +1169,55 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     action: ExternalAction,
     policy: DeliveryPolicy,
     publication?: PublicationContext,
+    adoption?: AdoptionContext,
   ) {
     const repo = await this.repository(action.target.repositoryId);
     if (action.kind === "issue.create") return { repositoryPath: repo.path };
+    if (action.kind === "branch.adopt") {
+      if (!adoption) throw new Error("provider-adoption-unverified");
+      const remote = await this.optionalRef(repo.path, adoption.branch);
+      // The approved head must still be the remote's; a branch back at Ensemble's push has nothing to adopt.
+      if (remote !== action.outsideHeadSha) {
+        if (remote === adoption.lastPushedSha)
+          throw new PublicationRefusal("branch-outside-cleared");
+        throw new PublicationRefusal("branch-outside-change", remote);
+      }
+      // Everything the effect needs survives a restart here, because adopt's only remote act is a read.
+      return {
+        repositoryPath: repo.path,
+        repositoryId: action.target.repositoryId,
+        branch: adoption.branch,
+        beforeHead: remote,
+        outsideHeadSha: action.outsideHeadSha,
+        lastPushedSha: adoption.lastPushedSha,
+        workspacePath: adoption.workspacePath,
+        baseCommit: adoption.baseCommit,
+      };
+    }
     if (action.kind === "branch.push" || action.kind === "branch.force-push") {
       if (!publication) throw new Error("provider-publication-unverified");
       const remote = await this.optionalRef(repo.path, publication.branch);
-      // A fresh publication needs the remote exactly where Ensemble left it. Only a retry may find it
-      // already at the commit: its earlier push could have landed after the readback.
+      // An overwrite expects the approved outside head; any other publication needs the remote exactly
+      // where Ensemble left it. Only a retry may find it already at the commit: its earlier push could
+      // have landed after the readback.
+      const outside = publication.outsideHeadSha;
+      const recovery = outside !== undefined;
+      const expected = !recovery
+        ? publication.lastPushedSha
+        : outside === absentBranchHead
+          ? null
+          : outside;
       if (
-        remote !== publication.lastPushedSha &&
+        remote !== expected &&
         !(publication.retry && remote === action.commitSha)
-      )
+      ) {
+        if (recovery && remote === publication.lastPushedSha)
+          throw new PublicationRefusal("branch-outside-cleared");
         throw new PublicationRefusal("branch-outside-change", remote);
+      }
       if (action.kind === "branch.force-push") {
-        if (publication.lastPushedSha === null)
+        // An overwrite's lease is the approved outside head, so it needs no earlier push.
+        if (!recovery && publication.lastPushedSha === null)
           throw new PublicationRefusal("branch-force-push-needs-lease");
       } else if (publication.descendsFromLastPushed === false)
         throw new PublicationRefusal("branch-not-fast-forward");
@@ -1299,6 +1349,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       );
     if (a.kind === "branch.push" || a.kind === "branch.force-push")
       return this.publish(record, a);
+    if (a.kind === "branch.adopt") return this.adoptOutsideHead(record, a);
     try {
       const repo = {
         path: z
@@ -1494,6 +1545,13 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         }
         if (head === before.beforeHead)
           return outcomeFailure ?? rejectedUnsettled();
+        // An overwrite whose lease failed because the branch is back at Ensemble's own push.
+        if (
+          a.kind === "branch.force-push" &&
+          a.outsideHeadSha !== undefined &&
+          head === before.lastPushedSha
+        )
+          return failure("branch-outside-cleared");
         if (head === a.commitSha)
           return before.retry ? unsettled() : outside(head);
         return outside(head);
@@ -1533,6 +1591,90 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       return unsettled();
     }
   }
+  /**
+   * Adopts the approved outside head: reads the ref, fetches exactly that commit, then reads the ref
+   * again. The only remote act is a read, so any failure is a confirmed no-effect failure that leaves
+   * the hold in place, and a restart simply runs the sequence again from the recorded context.
+   */
+  private async adoptOutsideHead(
+    record: DeliveryActionRecord,
+    a: Extract<ExternalAction, { kind: "branch.adopt" }>,
+  ): Promise<ProviderActionObservation> {
+    const failure = (reason: string): ProviderActionObservation => ({
+      state: "confirmed-failure",
+      reason,
+      receipt: null,
+    });
+    const at = (branch: string, headSha: string) => ({
+      nodeId: a.target.repositoryId,
+      ref: branch,
+      headSha,
+    });
+    let before: {
+      repositoryPath: string;
+      branch: string;
+      workspacePath: string;
+      baseCommit: string;
+      lastPushedSha: string | null;
+    };
+    try {
+      before = z
+        .object({
+          repositoryPath: z.string().regex(/^\/repos\/[^/]+\/[^/]+$/),
+          branch: name,
+          workspacePath: name,
+          baseCommit: sha,
+          lastPushedSha: sha.nullable(),
+        })
+        .parse(record.beforeState);
+    } catch {
+      return failure("branch-adopt-workspace-unavailable");
+    }
+    // A moved ref is another outside change: it is recorded and the approval is not reused.
+    // A branch back at Ensemble's own last push is not an outside change: nothing remains to recover from.
+    const moved = (head: string | null): ProviderActionObservation =>
+      head !== null && head === before.lastPushedSha
+        ? failure("branch-outside-cleared")
+        : {
+            state: "confirmed-failure",
+            reason: "branch-outside-change",
+            receipt: head ? at(before.branch, head) : null,
+          };
+    try {
+      const first = await this.optionalRef(
+        before.repositoryPath,
+        before.branch,
+      );
+      if (first !== a.outsideHeadSha) return moved(first);
+      const outcome = await this.adopt({
+        workspacePath: before.workspacePath,
+        baseCommit: before.baseCommit,
+        nameWithOwner: before.repositoryPath
+          .slice("/repos/".length)
+          .split("/")
+          .map(decodeURIComponent)
+          .join("/"),
+        commitSha: a.outsideHeadSha,
+        branch: before.branch,
+        token: this.credential,
+      });
+      if (outcome === "not-attempted")
+        return failure("branch-adopt-workspace-unavailable");
+      if (outcome === "fetch-failed")
+        return failure("branch-adopt-fetch-failed");
+      if (outcome === "not-on-base") return failure("branch-adopt-not-on-base");
+      if (outcome === "unproved") return failure("branch-adopt-unproved");
+      const last = await this.optionalRef(before.repositoryPath, before.branch);
+      if (last !== a.outsideHeadSha) return moved(last);
+      return {
+        state: "confirmed-success",
+        reason: null,
+        receipt: at(before.branch, a.outsideHeadSha),
+      };
+    } catch {
+      return failure("branch-adopt-fetch-failed");
+    }
+  }
   /** Settles a branch action from the remote ref alone. */
   private async inspectBranch(
     record: DeliveryActionRecord,
@@ -1544,6 +1686,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       .object({
         branch: name,
         beforeHead: sha.nullable(),
+        lastPushedSha: sha.nullable().optional(),
         uncommittedEntries: z.number().int().nonnegative(),
       })
       .parse(record.beforeState);
@@ -1594,6 +1737,20 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       (record.state === "attempting" ||
         (record.observation?.state === "uncertain" && !rejected) ||
         record.observation?.ambiguous === true);
+    // An overwrite that found the branch back at Ensemble's own push has nothing left to replace.
+    if (
+      !pushed &&
+      a.kind === "branch.force-push" &&
+      a.outsideHeadSha !== undefined &&
+      remote !== null &&
+      remote === before.lastPushedSha
+    )
+      return {
+        state: "confirmed-failure",
+        reason: "branch-outside-cleared",
+        receipt: null,
+        ...(ambiguous ? { ambiguous: true } : {}),
+      };
     return pushed
       ? success(remote ? { outsideHeadSha: remote } : { outsideDeleted: true })
       : {
@@ -1607,8 +1764,12 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation> {
     try {
-      const a = record.request.action,
-        repo = await this.repository(a.target.repositoryId),
+      const a = record.request.action;
+      // An adoption left unsettled by a restart runs again from its recorded context; it needs no
+      // repository read of its own, so an outage here can never leave it unproved.
+      if (a.kind === "branch.adopt")
+        return await this.adoptOutsideHead(record, a);
+      const repo = await this.repository(a.target.repositoryId),
         marker = `<!-- ensemble-operation:${record.operationId} -->`;
       if (a.kind === "branch.push" || a.kind === "branch.force-push")
         return await this.inspectBranch(

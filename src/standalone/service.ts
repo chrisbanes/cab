@@ -144,7 +144,7 @@ import {
 import { DeliveryCoordinator, unresolvedThreadSummary } from "./delivery.js";
 import { StatusMappingStore } from "../core/status-mapping.js";
 import { StatusMappingWriter, statusMappingEvent } from "./status-mapping.js";
-import { verifyTaskPush } from "./push-verification.js";
+import { type PushWorkspace, verifyTaskPush } from "./push-verification.js";
 import {
   type DiagnosticKind,
   type DiagnosticLimits,
@@ -979,6 +979,25 @@ export class StandaloneService {
       const taskPublications = new TaskPublicationStore(db);
       // Read by activationAllowed and the Claude turn environment; set by spawnEnvironment.
       let runtimeSpawnSnapshot: NodeJS.ProcessEnv | undefined;
+      /** The task worktree of a repository and the base commit it was provisioned at. */
+      const taskWorkspace = async (
+        taskId: string,
+        repositoryId: string,
+      ): Promise<PushWorkspace | null> => {
+        const binding = await workspaces.get(taskId),
+          repository =
+            binding?.state === "ready"
+              ? binding.repositories.find(
+                  (r) => r.repositoryId === repositoryId,
+                )
+              : undefined;
+        return repository
+          ? {
+              workspacePath: repository.workspacePath,
+              baseCommit: repository.commit,
+            }
+          : null;
+      };
       const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
         ...(this.options.delivery?.fetcher
           ? { fetcher: this.options.delivery.fetcher }
@@ -1067,28 +1086,16 @@ export class StandaloneService {
             reason,
             identity,
           ),
+        taskWorkspace,
         verifyPush: async ({
           taskId,
           repositoryId,
           commitSha,
           lastPushedSha,
         }) => {
-          const binding = await workspaces.get(taskId),
-            repository =
-              binding?.state === "ready"
-                ? binding.repositories.find(
-                    (r) => r.repositoryId === repositoryId,
-                  )
-                : undefined;
-          return repository
-            ? verifyTaskPush(
-                {
-                  workspacePath: repository.workspacePath,
-                  baseCommit: repository.commit,
-                },
-                commitSha,
-                lastPushedSha,
-              )
+          const workspace = await taskWorkspace(taskId, repositoryId);
+          return workspace
+            ? verifyTaskPush(workspace, commitSha, lastPushedSha)
             : null;
         },
         approved: (request, caller) =>

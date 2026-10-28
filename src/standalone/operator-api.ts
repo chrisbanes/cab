@@ -19,7 +19,13 @@ import type {
   TaskCompletionRequest,
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
-import { isOperatorDeliveryCaller, materialDigest } from "../core/delivery.js";
+import {
+  absentBranchHead,
+  externalActionSchema,
+  isOperatorDeliveryCaller,
+  isRecoveryAction,
+  materialDigest,
+} from "../core/delivery.js";
 import {
   redactionExclusionLimits,
   withinRedactionLimits,
@@ -508,6 +514,29 @@ export function githubPullUrl(
   )
     return null;
   return `https://github.com/${repositoryName}/pull/${number}`;
+}
+
+/**
+ * GitHub's comparison of what an outside writer changed on a task branch: from the last commit
+ * Ensemble pushed to the outside head, or just the outside commit when nothing was pushed. The name
+ * must be one verified for the repository, and neither path segment may be a dot segment. A deleted
+ * branch has no head to show.
+ */
+export function githubCompareUrl(
+  repositoryName: string | null,
+  lastPushedSha: string | null,
+  outsideHeadSha: string,
+) {
+  if (
+    !repositoryName ||
+    outsideHeadSha === absentBranchHead ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryName) ||
+    repositoryName.split("/").some((part) => part === "." || part === "..")
+  )
+    return null;
+  return lastPushedSha
+    ? `https://github.com/${repositoryName}/compare/${lastPushedSha}...${outsideHeadSha}`
+    : `https://github.com/${repositoryName}/commit/${outsideHeadSha}`;
 }
 
 /** See `OperatorApi.exclusionBase`; one read attempt owns it. */
@@ -3326,6 +3355,11 @@ export class OperatorApi {
         }
       } catch {}
     }
+    const recovery = externalActionSchema.safeParse(material);
+    const compareUrl =
+      recovery.success && isRecoveryAction(recovery.data)
+        ? this.recoveryCompareUrl(i.taskId, recovery.data, excluded)
+        : null;
     return {
       interactionId: i.interactionId,
       taskId: i.taskId,
@@ -3346,12 +3380,38 @@ export class OperatorApi {
         !materialUnavailable &&
         this.disclosable(i.action, excluded) &&
         this.disclosable(i.target, excluded),
+      ...(compareUrl ? { compareUrl } : {}),
       materialUnavailable,
       response: this.safe(i.response, excluded),
       revision: i.revision,
       createdAt: i.createdAt,
       updatedAt: i.updatedAt,
     };
+  }
+  /** The compare link of a recovery's material, named for the source repository or the one a push verified. */
+  private recoveryCompareUrl(
+    taskId: string,
+    recovery: {
+      target: { repositoryId: string };
+      outsideHeadSha: string;
+      lastPushedSha: string | null;
+    },
+    excluded: readonly string[] | undefined,
+  ) {
+    const repositoryId = recovery.target.repositoryId,
+      identity = this.identity(taskId),
+      name =
+        identity?.repositoryId === repositoryId
+          ? this.service.githubSources().issue(identity.nodeId)?.repositoryName
+          : this.service
+              .delivery()
+              .verifiedRepositoryName(taskId, repositoryId);
+    const url = githubCompareUrl(
+      name ? String(name) : null,
+      recovery.lastPushedSha,
+      recovery.outsideHeadSha,
+    );
+    return url && this.disclosable(url, excluded) ? url : null;
   }
   private completion(c: TaskCompletionRequest) {
     return {
