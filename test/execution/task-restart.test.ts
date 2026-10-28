@@ -722,29 +722,35 @@ test("Reset after completed turns replaces every conversation and restarts only 
     assert.equal(f.runtime.turns, turns + 1);
   } finally {
     releaseFreshTurn.resolve();
-    if (freshTurnStarted) {
-      await waitUntil(
-        () => freshTurnFinished,
-        "fresh lead handler completes during teardown",
-        () => f.service.turnRequests(),
-      );
-      if (freshWorkId) {
+    try {
+      if (freshTurnStarted) {
         await waitUntil(
-          () =>
-            !f.service
-              .turnRequests()
-              .some(
-                (r) =>
-                  r.workId === freshWorkId &&
-                  (r.state === "queued" || r.state === "active"),
-              ),
-          "fresh lead turn teardown settles",
+          () => freshTurnFinished,
+          "fresh lead handler completes during teardown",
           () => f.service.turnRequests(),
         );
+        if (freshWorkId) {
+          await waitUntil(
+            () =>
+              !f.service
+                .turnRequests()
+                .some(
+                  (r) =>
+                    r.workId === freshWorkId &&
+                    (r.state === "queued" || r.state === "active"),
+                ),
+            "fresh lead turn teardown settles",
+            () => f.service.turnRequests(),
+          );
+        }
+      }
+    } finally {
+      try {
+        await f.service.stop();
+      } finally {
+        rmSync(f.root, { recursive: true, force: true });
       }
     }
-    await f.service.stop();
-    rmSync(f.root, { recursive: true, force: true });
   }
 });
 
