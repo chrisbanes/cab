@@ -57,6 +57,7 @@ import { NativeSelect } from "./ui/native-select.js";
 import {
   ProjectFieldOptions,
   ProjectFieldPicker,
+  ReadinessLoginOffer,
   ReadyLabelPicker,
   useReadinessDiscovery,
 } from "./readiness-picker.js";
@@ -643,6 +644,17 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 />
               );
             })}
+            <ReadinessLoginOffer
+              drafts={p.drafts}
+              client={p.client}
+              csrfToken={p.session.csrfToken}
+              visible={conditions.length > 0}
+              onRecorded={(moveFocus) => {
+                readinessDiscovery.refresh();
+                if (moveFocus)
+                  document.getElementById(readinessAnchor)?.focus();
+              }}
+            />
             <fieldset
               id={readinessAnchor}
               disabled={isLocked}
