@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import type { z } from "zod";
 import {
+  discoveryLabelsSchema,
   discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
@@ -12,6 +13,8 @@ import { Button } from "./components.js";
 import {
   type ConditionIds,
   type FieldsRead,
+  type LabelsRead,
+  labelChoices,
   linkedRepositoryNames,
   type ProjectsRead,
   projectChoices,
@@ -20,6 +23,7 @@ import {
   sameCondition,
   selectField,
   selectProject,
+  unlistedLabelNote,
 } from "./readiness-discovery.js";
 import type { SourceRow } from "./settings-changes.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -28,12 +32,15 @@ const unreadable = { state: "unavailable", reason: "unreadable" } as const;
 
 /**
  * Reads, while a Project-field condition exists, the repositories, each saved link's Projects
- * and the fields of each listed Project a row names. Each read is made once per session round.
+ * and the fields of each listed Project a row names; while a label condition exists, the
+ * repositories and each saved link's labels. Each read is made once per session round.
  */
 export function useReadinessDiscovery(p: {
   client: OperatorClient;
   csrfToken: string;
   enabled: boolean;
+  /** Whether a label condition exists. */
+  labels: boolean;
   saved: { repositoryId: string }[];
   projectIds: string[];
 }) {
@@ -42,23 +49,26 @@ export function useReadinessDiscovery(p: {
     Record<string, ProjectsRead>
   >({});
   const [fieldReads, setFieldReads] = useState<Record<string, FieldsRead>>({});
+  const [labelReads, setLabelReads] = useState<Record<string, LabelsRead>>({});
+  const on = p.enabled || p.labels;
   const requested = useRef(new Set<string>());
   const round = useRef(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the session (CSRF token) changes.
   useEffect(() => {
-    if (!p.enabled) return;
+    if (!on) return;
     const mine = ++round.current;
     requested.current.clear();
     setRepositories(undefined);
     setProjectReads({});
     setFieldReads({});
+    setLabelReads({});
     p.client
       .read("/api/operator/discovery/repositories", discoveryRepositoriesSchema)
       .then(
         (r) => mine === round.current && setRepositories(r.data),
         () => mine === round.current && setRepositories(unreadable),
       );
-  }, [p.client, p.csrfToken, p.enabled]);
+  }, [p.client, p.csrfToken, on]);
 
   const names =
     repositories?.state === "ready" && !repositories.truncated
@@ -67,6 +77,7 @@ export function useReadinessDiscovery(p: {
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the resolved repository list.
   useEffect(() => {
     const mine = round.current;
+    if (!p.enabled) return;
     for (const name of names) {
       const key = `p:${name}`;
       if (requested.current.has(key)) continue;
@@ -85,7 +96,31 @@ export function useReadinessDiscovery(p: {
             setProjectReads((x) => ({ ...x, [name]: unreadable })),
         );
     }
-  }, [names.join("\n"), p.client]);
+  }, [names.join("\n"), p.enabled, p.client]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the resolved repository list.
+  useEffect(() => {
+    const mine = round.current;
+    if (!p.labels) return;
+    for (const name of names) {
+      const key = `l:${name}`;
+      if (requested.current.has(key)) continue;
+      requested.current.add(key);
+      p.client
+        .read(
+          `/api/operator/discovery/labels?repository=${encodeURIComponent(name)}`,
+          discoveryLabelsSchema,
+        )
+        .then(
+          (r) =>
+            mine === round.current &&
+            setLabelReads((x) => ({ ...x, [name]: r.data })),
+          () =>
+            mine === round.current &&
+            setLabelReads((x) => ({ ...x, [name]: unreadable })),
+        );
+    }
+  }, [names.join("\n"), p.labels, p.client]);
 
   const choices = projectChoices(repositories, p.saved, projectReads);
   // Only listed Project IDs are requested, never arbitrary typed text.
@@ -118,7 +153,11 @@ export function useReadinessDiscovery(p: {
     }
   }, [wanted.join("\n"), p.client]);
 
-  return { choices, fieldReads };
+  return {
+    choices,
+    fieldReads,
+    labels: labelChoices(repositories, p.saved, labelReads),
+  };
 }
 export type ReadinessDiscovery = ReturnType<typeof useReadinessDiscovery>;
 
@@ -181,6 +220,43 @@ export function ProjectFieldOptions(p: {
         Choosing one adds it as a readiness condition; Save applies it.
       </p>
     </div>
+  );
+}
+
+/**
+ * The Ready label input. The listed labels are suggestions only: any typed name is kept, so a
+ * label that doesn't exist yet, or a saved one that is no longer listed, saves as typed.
+ */
+export function ReadyLabelPicker(p: {
+  index: number;
+  value: string;
+  discovery: ReadinessDiscovery;
+  /** The text input, given the id of the datalist that suggests labels, if any. */
+  input: (list: string | undefined) => ReactNode;
+}) {
+  const { labels } = p.discovery;
+  const list = `source-conditions-${p.index}-labels`;
+  const ready = labels.state === "ready";
+  return (
+    <>
+      {p.input(ready ? list : undefined)}
+      {ready && (
+        <datalist id={list}>
+          {labels.labels.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+      )}
+      {labels.state === "typed" && labels.note && (
+        <p className="metadata muted">{labels.note}</p>
+      )}
+      {ready &&
+        labels.labels.length > 0 &&
+        p.value !== "" &&
+        !labels.labels.includes(p.value) && (
+          <p className="metadata muted">{unlistedLabelNote}</p>
+        )}
+    </>
   );
 }
 

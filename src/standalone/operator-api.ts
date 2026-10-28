@@ -86,6 +86,7 @@ import {
   configurationImpactSchema,
   deliveryReadSchema,
   discoveryBranchesSchema,
+  discoveryLabelsSchema,
   discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
@@ -6346,6 +6347,12 @@ export class OperatorApi {
     const [owner, name] = this.discoveryRepository(query);
     return this.discoveryRead(discoveryBranchesSchema, (r) =>
       r.branches(owner, name),
+    );
+  }
+  readDiscoveryLabels(query: URLSearchParams) {
+    const [owner, name] = this.discoveryRepository(query);
+    return this.discoveryRead(discoveryLabelsSchema, (r) =>
+      r.labels(owner, name),
     );
   }
   readDiscoveryProjects(query: URLSearchParams) {

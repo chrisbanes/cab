@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   type FieldsRead,
+  labelChoices,
+  type LabelsRead,
   linkedRepositoryNames,
   type ProjectsRead,
   projectChoices,
@@ -233,5 +235,64 @@ test("choosing a Project clears field and option, and choosing a field clears th
   assert.deepEqual(
     selectField(ids("PVT_a", "F_old", "O_old"), "F_new"),
     ids("PVT_a", "F_new"),
+  );
+});
+
+test("labels are the linked repositories' labels, deduplicated by exact name, or a typed fallback", () => {
+  const labels = (names: string[], truncated = false): LabelsRead => ({
+    state: "ready",
+    labels: names,
+    truncated,
+  });
+  const both = [{ repositoryId: "R_atlas" }, { repositoryId: "R_relay" }];
+  const note = (c: ReturnType<typeof labelChoices>) =>
+    c.state === "typed" ? (c.note ?? "") : c.state;
+  assert.equal(labelChoices(undefined, both, {}).state, "loading");
+  assert.equal(
+    labelChoices(repositories, both, { "Acme/Atlas": labels(["bug"]) }).state,
+    "loading",
+  );
+  assert.deepEqual(
+    labelChoices(repositories, both, {
+      "Acme/Atlas": labels(["bug", "ready"]),
+      "acme/relay": labels(["Ready", "ready", "triage"]),
+      // A read for a repository the source no longer links is ignored.
+      "acme/gone": labels(["stale"]),
+    }),
+    { state: "ready", labels: ["bug", "ready", "Ready", "triage"] },
+  );
+  assert.deepEqual(
+    labelChoices(repositories, [{ repositoryId: "R_gone" }], {}),
+    {
+      state: "ready",
+      labels: [],
+    },
+  );
+  // No discovery credential is the plain field's baseline: typed, with no note.
+  assert.deepEqual(
+    labelChoices({ state: "unavailable", reason: "unconfigured" }, both, {}),
+    { state: "typed", note: undefined },
+  );
+  assert.match(
+    note(
+      labelChoices({ state: "unavailable", reason: "unauthorized" }, both, {}),
+    ),
+    /^GitHub discovery is unavailable: GitHub rejected the credential\. Type the label\.$/,
+  );
+  assert.match(
+    note(
+      labelChoices(repositories, both, {
+        "Acme/Atlas": { state: "unavailable", reason: "rate-limited" },
+      }),
+    ),
+    /rate limit.* Type the label\.$/,
+  );
+  assert.match(
+    note(labelChoices(repositories, both, { "Acme/Atlas": labels([], true) })),
+    /too many results.* Type the label\.$/,
+  );
+  assert.match(
+    note(labelChoices({ ...repositories, truncated: true }, both, {})),
+    /too many results/,
   );
 });

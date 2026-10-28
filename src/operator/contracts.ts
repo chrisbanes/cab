@@ -3673,6 +3673,9 @@ export const discoveryRepositoriesSchema = discoveryRead({
 export const discoveryBranchesSchema = discoveryRead({
   branches: z.array(z.string().min(1).max(255)).max(500),
 });
+export const discoveryLabelsSchema = discoveryRead({
+  labels: z.array(z.string().min(1).max(255)).max(500),
+});
 const discoveredProjectSchema = z
   .object({
     projectNodeId: z.string().min(1).max(512),

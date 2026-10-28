@@ -106,7 +106,40 @@ test("repositories follow Link pages and mark truncation after ten pages", async
   );
   assert.equal(b.truncated, true);
   assert.equal(branches.calls.length, 5);
-  for (const call of [...two.calls, ...endless.calls, ...branches.calls]) {
+  const one = fake(() => json([{ name: "bug" }, { name: "ready" }]));
+  assert.deepEqual(
+    await new GitHubDiscoveryReader(token, one.fetcher).labels("acme", "atlas"),
+    { labels: ["bug", "ready"], truncated: false },
+  );
+  assert.equal(
+    one.calls[0]?.url,
+    "https://api.github.com/repos/acme/atlas/labels?per_page=100",
+  );
+  const manyLabels = fake((_, i) =>
+    json([{ name: `l${i}` }], {
+      headers: {
+        link: `<https://api.github.com/x?page=${i + 2}>; rel="next"`,
+      },
+    }),
+  );
+  const l = await new GitHubDiscoveryReader(token, manyLabels.fetcher).labels(
+    "acme",
+    "atlas",
+  );
+  assert.equal(l.truncated, true);
+  assert.equal(manyLabels.calls.length, 5);
+  const malformed = fake(() => json([{ name: 1 }]));
+  await assert.rejects(
+    new GitHubDiscoveryReader(token, malformed.fetcher).labels("acme", "atlas"),
+    { reason: "unreadable" },
+  );
+  for (const call of [
+    ...two.calls,
+    ...endless.calls,
+    ...branches.calls,
+    ...one.calls,
+    ...manyLabels.calls,
+  ]) {
     assert.equal(call.method, "GET");
     assert.equal(new URL(call.url).origin, "https://api.github.com");
     assert.equal(call.auth, `Bearer ${token}`);

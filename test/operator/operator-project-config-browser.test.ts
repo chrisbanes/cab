@@ -2916,6 +2916,7 @@ test("a readiness Project-field condition keeps typed node IDs when discovery fa
     await addProjectFieldCondition(page);
     await page
       .getByText("GitHub discovery is unavailable", { exact: false })
+      .first()
       .waitFor();
     assert.equal(
       await page.getByLabel("Readiness Project", { exact: true }).count(),
@@ -2991,6 +2992,177 @@ test("a saved readiness condition that discovery does not list stays typed, edit
       fieldNodeId: "PVTSSF_gone",
       optionNodeId: "PVTSSO_other",
     },
+  ]);
+});
+
+const addLabelCondition = (page: Page) =>
+  page.getByRole("button", { name: "Add readiness condition" }).click();
+const labelCalls = (state: { calls: string[] }) =>
+  state.calls.filter((c) => c === "labels").length;
+const suggestedLabels = (page: Page, nth: number) =>
+  page
+    .locator(`datalist#source-conditions-${nth}-labels option`)
+    .evaluateAll((o) => o.map((x) => x.getAttribute("value")));
+
+test("a Ready label is suggested from the source's repository labels and read once per round, only while a label condition exists", async (_t, journey) => {
+  const state: { calls: string[] } = { calls: [] };
+  const { f, ids, page } = await startDiscovery(journey, state);
+  const d = f.service.domain();
+  const projectField = {
+    kind: "project-field",
+    projectNodeId: "PVT_gone",
+    fieldNodeId: "PVTSSF_gone",
+    optionNodeId: "PVTSSO_gone",
+  } as const;
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [projectField] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  state.calls = [];
+  await page.reload();
+  await page.getByLabel("Readiness Project node ID").waitFor();
+  assert.equal(labelCalls(state), 0);
+  await addLabelCondition(page);
+  const ready = page.getByLabel("Ready label");
+  await page.locator("input#source-conditions-1-name[list]").waitFor();
+  assert.equal(await ready.getAttribute("list"), "source-conditions-1-labels");
+  assert.deepEqual(await suggestedLabels(page, 1), [
+    "bug",
+    "ready",
+    "needs-review",
+  ]);
+  await ready.fill("ready");
+  await addLabelCondition(page);
+  await page.getByLabel("Ready label").last().fill("bug");
+  assert.deepEqual(await suggestedLabels(page, 2), [
+    "bug",
+    "ready",
+    "needs-review",
+  ]);
+  assert.equal(labelCalls(state), 1);
+  await captureBrowserEvidence(page, "readiness-label-picker");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.deepEqual(d.githubConfiguration(ids.atlas).readiness?.conditions, [
+    projectField,
+    { kind: "label", name: "ready" },
+    { kind: "label", name: "bug" },
+  ]);
+});
+
+test("a label-only source without a Project makes no Project discovery reads", async (_t, journey) => {
+  const state: { calls: string[] } = { calls: [] };
+  const { f, ids, page } = await startDiscovery(journey, state);
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  state.calls = [];
+  await page.reload();
+  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  assert.equal(labelCalls(state), 1);
+  assert.equal(state.calls.includes("projects"), false);
+});
+
+// Atlas's saved readiness already holds the label condition "ready".
+test("a Ready label that is not on the repositories can still be typed", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, { calls: [] });
+  const input = page.getByLabel("Ready label");
+  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  const note = page.getByText(
+    "This label is not on the source's repositories",
+    {
+      exact: false,
+    },
+  );
+  assert.equal(await input.inputValue(), "ready");
+  assert.equal(await note.count(), 0);
+  await input.fill("ship-it");
+  await note.waitFor();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.deepEqual(
+    f.service.domain().githubConfiguration(ids.atlas).readiness?.conditions,
+    [{ kind: "label", name: "ship-it" }],
+  );
+});
+
+test("a Ready label stays a typed field when discovery fails or is truncated", async (_t, journey) => {
+  for (const state of [
+    { truncated: true },
+    { failure: new DiscoveryFailure("unauthorized") },
+  ]) {
+    const { f, ids, page } = await startDiscovery(journey, state);
+    await page.getByText("Type the label.", { exact: false }).waitFor();
+    const input = page.getByLabel("Ready label");
+    assert.equal(await input.getAttribute("list"), null);
+    await input.fill("ship-it");
+    await page
+      .getByRole("button", { name: "Save changes", exact: true })
+      .click();
+    await savedOutcome(page);
+    assert.deepEqual(
+      f.service.domain().githubConfiguration(ids.atlas).readiness?.conditions,
+      [{ kind: "label", name: "ship-it" }],
+    );
+  }
+});
+
+test("a saved Ready label that discovery does not list stays shown and savable", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, { calls: [] });
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "gone" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  await page.reload();
+  const input = page.getByLabel("Ready label");
+  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  await page
+    .getByText("This label is not on the source's repositories", {
+      exact: false,
+    })
+    .waitFor();
+  assert.equal(await input.inputValue(), "gone");
+  assert.deepEqual(await suggestedLabels(page, 0), [
+    "bug",
+    "ready",
+    "needs-review",
+  ]);
+  await page
+    .getByLabel("Closed GitHub issues", { exact: true })
+    .selectOption("done");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.deepEqual(d.githubConfiguration(ids.atlas).readiness?.conditions, [
+    { kind: "label", name: "gone" },
   ]);
 });
 

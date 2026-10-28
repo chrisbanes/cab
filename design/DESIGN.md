@@ -2108,6 +2108,12 @@ Interaction notes:
   (`121-phone-atlas-configuration`, `128-phone-assignment-recovery`).
 - Readiness Project-field conditions choose the GitHub Project, field and option by
   name from discovery, falling back to typed node IDs when discovery is unavailable.
+- A readiness Label condition's Ready label is a searchable input suggesting the
+  labels of the source's repositories, deduplicated by name. Typing any name still
+  works; when discovery fails or is truncated the input stays a plain field with a
+  note (none when no discovery credential is configured), and a name the
+  repositories don't list reads "This label is not on the source's repositories; it
+  saves as typed."
 - Settings section links (`114-settings-index`) are real `/app/settings#section` links:
   each jump adds one history entry, scrolls to the section and focuses its heading. Back
   and Forward to an entry with a saved position restore it instead; a reload keeps the
@@ -2843,6 +2849,9 @@ frames 114 and 118–128 as follows:
   "Filter kept · private" instead of the drawn filter, with its node ID in Details.
   Readiness Project-field conditions pick the Project, field and option by name from
   discovery and fall back to typed node IDs when discovery is unavailable or truncated.
+  A Ready label suggests the labels of the source's repositories from the same
+  discovery (`119-project-config-github-source`), shows a note under the input when a
+  read fails or the value isn't listed, and keeps whatever was typed or saved.
   A GitHub source save deletes the stored activation of each
   removed selection and keeps the stored activation of each kept one. The save
   raises the source version, and activation counts only at the version it was

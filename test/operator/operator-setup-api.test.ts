@@ -154,7 +154,9 @@ test("the discovery credential reference is set, shown only as configured and cl
 test("discovery reads list through the injected reader, fail closed and store nothing", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
-  const state: { failure?: Error; calls: string[] } = { calls: [] };
+  const state: { failure?: Error; calls: string[]; truncated?: boolean } = {
+    calls: [],
+  };
   let constructed = 0;
   const factory = fakeDiscovery(state);
   const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
@@ -196,6 +198,18 @@ test("discovery reads list through the injected reader, fail closed and store no
     branches: ["develop", "main"],
     truncated: false,
   });
+  assert.deepEqual((await api.readDiscoveryLabels(query)).data, {
+    state: "ready",
+    labels: ["bug", "ready", "needs-review"],
+    truncated: false,
+  });
+  state.truncated = true;
+  const truncatedLabels = (await api.readDiscoveryLabels(query)).data;
+  assert.equal(
+    truncatedLabels.state === "ready" && truncatedLabels.truncated,
+    true,
+  );
+  state.truncated = false;
   const projects = (await api.readDiscoveryProjects(query)).data;
   assert.equal(
     projects.state === "ready" && projects.linked[0]?.title,
@@ -206,10 +220,20 @@ test("discovery reads list through the injected reader, fail closed and store no
     state: "unavailable",
     reason: "unauthorized",
   });
+  assert.deepEqual((await api.readDiscoveryLabels(query)).data, {
+    state: "unavailable",
+    reason: "unauthorized",
+  });
   state.failure = new Error("PRIVATE FAILURE DETAIL");
   const failed = await api.readDiscoveryBranches(query);
   assert.deepEqual(failed.data, { state: "unavailable", reason: "unreadable" });
   assert.equal(JSON.stringify(failed).includes("PRIVATE"), false);
+  const failedLabels = await api.readDiscoveryLabels(query);
+  assert.deepEqual(failedLabels.data, {
+    state: "unavailable",
+    reason: "unreadable",
+  });
+  assert.equal(JSON.stringify(failedLabels).includes("PRIVATE"), false);
   assert.deepEqual(counts(), before);
   for (const bad of [
     new URLSearchParams(),
@@ -586,6 +610,7 @@ test("setup routes require an operator session, CSRF and same origin and are not
     "/api/operator/discovery",
     "/api/operator/discovery/repositories",
     "/api/operator/discovery/branches?repository=acme/atlas",
+    "/api/operator/discovery/labels?repository=acme/atlas",
     "/api/operator/discovery/projects?repository=acme/atlas",
     "/api/operator/discovery/project-fields?project=PVT_atlas",
   ]) {
@@ -600,6 +625,8 @@ test("setup routes require an operator session, CSRF and same origin and are not
   for (const path of [
     "/api/operator/discovery/branches",
     "/api/operator/discovery/branches?repository=acme/atlas&repository=acme/relay",
+    "/api/operator/discovery/labels",
+    "/api/operator/discovery/labels?repository=../x",
     "/api/operator/discovery/projects?repository=../x",
     "/api/operator/discovery/project-fields",
     "/api/operator/discovery/project-fields?project=",
@@ -807,6 +834,7 @@ test("a discovery result read with a credential that changed meanwhile is read a
         };
       },
       branches: async () => ({ branches: [], truncated: false }),
+      labels: async () => ({ labels: [], truncated: false }),
       projects: async () => ({
         ownerLogin: "acme",
         linked: [],

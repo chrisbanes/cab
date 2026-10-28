@@ -57,6 +57,7 @@ import { NativeSelect } from "./ui/native-select.js";
 import {
   ProjectFieldOptions,
   ProjectFieldPicker,
+  ReadyLabelPicker,
   useReadinessDiscovery,
 } from "./readiness-picker.js";
 import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
@@ -173,6 +174,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     enabled:
       conditions.some((r) => r.kind === "project-field") ||
       hasProjectSource(data.source),
+    labels: conditions.some((r) => r.kind === "label"),
     saved: data.source.repositories.map((r) => ({
       repositoryId: r.repositoryId ?? "",
     })),
@@ -242,6 +244,8 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     fallback = "",
     /** Replaces the plain row update, for a saved value that tracks its baseline. */
     change?: (value: string) => void,
+    /** The id of a datalist that suggests values. */
+    list?: string,
   ) => (
     <label className="field body" htmlFor={`source-${field}-${index}-${name}`}>
       {label}
@@ -249,6 +253,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         className="control"
         id={`source-${field}-${index}-${name}`}
         aria-label={label}
+        list={list}
         aria-invalid={Boolean(rowError(field, index, name))}
         aria-describedby={
           rowError(field, index, name) ? `source-${field}-error` : undefined
@@ -723,7 +728,22 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                       </NativeSelect>
                     </label>
                     {r.kind === "label" ? (
-                      input("conditions", i, "name", "Ready label")
+                      <ReadyLabelPicker
+                        index={i}
+                        value={String(r.name ?? "")}
+                        discovery={readinessDiscovery}
+                        input={(list) =>
+                          input(
+                            "conditions",
+                            i,
+                            "name",
+                            "Ready label",
+                            "",
+                            undefined,
+                            list,
+                          )
+                        }
+                      />
                     ) : (
                       <ProjectFieldPicker
                         index={i}
