@@ -49,7 +49,10 @@ agent turns run with network off. Delivery scope lives in
   remote ref. Adopting an outside head adds one fetch child under the same isolation: it
   fetches exactly one sha from the verified repository in a scratch repository, with
   `core.alternateRefsCommand` neutralised so Git never runs in the agent-writable
-  alternate and `transfer.fsckObjects` on. The ancestry proof runs in the scratch
+  alternate and `transfer.fsckObjects` on. The fetch is also bounded in size: Ensemble
+  watches the bytes the child writes to its scratch object store, stops it past 512 MiB
+  (checked every 200 ms, so the stop is approximate by about one interval of transfer)
+  and refuses the adoption. The ancestry proof runs in the scratch
   repository with no credential and rehashes every commit it reads, including those
   the alternate supplies, and Git runs against the worktree afterwards only to write an
   Ensemble-owned ref, without its hooks or a credential.

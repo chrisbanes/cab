@@ -5,6 +5,7 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -22,6 +23,8 @@ export type AdoptOutcome =
   | "not-attempted"
   /** The fetch failed, timed out or was cancelled. Nothing was imported. */
   | "fetch-failed"
+  /** The fetch wrote more than the size bound to the scratch object store. It was stopped and nothing was imported. */
+  | "too-large"
   /** The fetched head is provably not built on the task's provisioned base. */
   | "not-on-base"
   /** Git could not prove the head's ancestry, or could not import it. */
@@ -40,6 +43,8 @@ export interface AdoptRequest {
   signal?: AbortSignal;
   /** Test-only override of the Git executable. */
   executable?: string;
+  /** Test-only override of the size bound. */
+  maxFetchBytes?: number;
 }
 export type AdoptFunction = (request: AdoptRequest) => Promise<AdoptOutcome>;
 
@@ -51,12 +56,32 @@ const bounds = {
   observationMs: 5_000,
   maxOutputBytes: 64 * 1024,
 };
+// The fetch has no size limit of its own, so the parent measures what the child has written.
+const defaultMaxFetchBytes = 512 * 1024 * 1024;
+const sizeCheckMs = 200;
 const proofBounds = {
   timeoutMs: 30_000,
   terminationGraceMs: 2_000,
   observationMs: 2_000,
   maxOutputBytes: 1024 * 1024,
 };
+
+/** Total bytes of the files under `dir`; files that vanish mid-walk count as zero. */
+async function storedBytes(dir: string): Promise<number> {
+  let total = 0;
+  for (const entry of await readdir(dir, {
+    recursive: true,
+    withFileTypes: true,
+  })) {
+    if (!entry.isFile()) continue;
+    const size = await stat(join(entry.parentPath, entry.name)).then(
+      (s) => s.size,
+      () => 0,
+    );
+    total += size;
+  }
+  return total;
+}
 
 /**
  * Fetches one commit by its sha from the verified github.com repository over HTTPS, proves it descends
@@ -68,6 +93,10 @@ const proofBounds = {
  * agent-writable repository while the token exists. The token exists only in the fetch child's
  * environment (and its credential helper's). The ancestry proof reads the scratch repository's hashed
  * objects. The worktree's `HEAD`, index, local commits and files are never touched.
+ *
+ * The fetch is bounded in size as well as time: while it runs, the bytes in the scratch object store
+ * are polled and the child is stopped once they pass 512 MiB (approximately: by about one poll
+ * interval of transfer), and the adoption is refused as `too-large`.
  */
 export async function adoptOutsideHead(
   request: AdoptRequest,
@@ -118,9 +147,31 @@ export async function adoptOutsideHead(
       GIT_GRAFT_FILE: "/dev/null",
       HOME: dir,
     };
+    const limit = request.maxFetchBytes ?? defaultMaxFetchBytes;
+    const scratchObjects = join(dir, "objects");
+    const stop = new AbortController();
+    let oversize = false;
+    let measuring = false;
+    const watcher = setInterval(() => {
+      if (measuring) return;
+      measuring = true;
+      storedBytes(scratchObjects)
+        .then((bytes) => {
+          if (bytes <= limit) return;
+          oversize = true;
+          stop.abort();
+        })
+        .catch(() => {})
+        .finally(() => {
+          measuring = false;
+        });
+    }, sizeCheckMs);
     const fetched = await runGit({
       ...common,
       ...bounds,
+      signal: request.signal
+        ? AbortSignal.any([request.signal, stop.signal])
+        : stop.signal,
       args: [
         "-c",
         "credential.helper=",
@@ -163,7 +214,13 @@ export async function adoptOutsideHead(
         ENSEMBLE_PUSH_PATH: `${nameWithOwner}.git`,
         ENSEMBLE_PUSH_TOKEN: token,
       },
-    });
+    }).finally(() => clearInterval(watcher));
+    // A fetch that finished between polls is measured once more; nothing is proved or imported.
+    if (
+      oversize ||
+      (fetched.status === "ok" && (await storedBytes(scratchObjects)) > limit)
+    )
+      return "too-large";
     if (fetched.status === "interrupted" && !fetched.spawned)
       return "not-attempted";
     if (fetched.status !== "ok") return "fetch-failed";

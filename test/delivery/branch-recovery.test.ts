@@ -225,6 +225,20 @@ test("an adoption the fetch cannot place on the base is refused, keeps the hold 
   assert.ok(!holds(w));
 });
 
+test("an adoption over the size bound is refused, keeps the hold and leaves overwrite available", async (t) => {
+  const w = adoptWorld(t);
+  await withOutsideHead(w);
+  w.setAdopt(async () => "too-large");
+  const record = await w.adoptOutside();
+  assert.equal(record.state, "confirmed-failure");
+  assert.equal(record.observation?.reason, "branch-adopt-too-large");
+  assert.equal(branchOf(w)?.outsideHeadSha, outside);
+  assert.ok(holds(w));
+  const overwritten = await w.overwrite(w.amend());
+  assert.equal(overwritten.state, "confirmed-success");
+  assert.ok(!holds(w));
+});
+
 test("a remote that moved before or during the adoption is another outside change and spends the approval", async (t) => {
   const w = adoptWorld(t);
   await withOutsideHead(w);
@@ -281,6 +295,7 @@ test("a failed adoption leaves the hold without blocking the task, and the lead 
   await withOutsideHead(w);
   for (const [outcome, reason] of [
     ["fetch-failed", "branch-adopt-fetch-failed"],
+    ["too-large", "branch-adopt-too-large"],
     ["unproved", "branch-adopt-unproved"],
     ["not-attempted", "branch-adopt-workspace-unavailable"],
   ] as const) {
