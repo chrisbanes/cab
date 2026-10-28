@@ -5,6 +5,7 @@ import {
   ResultDestination,
 } from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
+import { StartAgainAction, taskChangedEvent } from "./task-restart.js";
 import {
   CommandNetworkLine,
   ExecutionNotices,
@@ -716,6 +717,15 @@ export function TaskWorkspace({
     refresh();
     onRefresh?.();
   };
+  const [startedAgain, setStartedAgain] = useState<string | null>(null);
+  // The header's Reset task sits outside this page and asks it to reread.
+  const refreshRef = useRef(refreshAll);
+  refreshRef.current = refreshAll;
+  useEffect(() => {
+    const reread = () => refreshRef.current();
+    window.addEventListener(taskChangedEvent, reread);
+    return () => window.removeEventListener(taskChangedEvent, reread);
+  }, []);
   const pollRef = useRef(poll);
   pollRef.current = poll;
   const captureRef = useRef(capture);
@@ -1991,6 +2001,19 @@ export function TaskWorkspace({
                       Message the lead
                     </ActionLink>
                   </div>
+                )}
+                {/* Kept after it is recorded, so the confirmation outlives the code it cleared. */}
+                {(data.attention.codes.includes("not-started") ||
+                  startedAgain === taskId) && (
+                  <StartAgainAction
+                    client={client}
+                    session={session}
+                    task={data}
+                    onChanged={() => {
+                      setStartedAgain(taskId);
+                      refreshAll();
+                    }}
+                  />
                 )}
                 {nextActor.code === "execution-uncertain" &&
                   !data.execution.holds.uncertainty && (

@@ -111,6 +111,8 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
   const paused =
     execution.state === "paused" ||
     data.admission.reasons.includes("project-paused");
+  if (execution.state === "not-started" && !execution.holds.uncertainty)
+    return "Not started · refused before it ran";
   return execution.holds.stop || execution.state === "stopping"
     ? "Stopping; effects may continue"
     : execution.holds.uncertainty || execution.state === "uncertain"

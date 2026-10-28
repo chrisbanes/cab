@@ -952,7 +952,8 @@ export function App() {
         action: (
           <TaskHeaderActions
             report={taskReport}
-            csrfToken={session.csrfToken}
+            client={client}
+            session={session}
           />
         ),
       }

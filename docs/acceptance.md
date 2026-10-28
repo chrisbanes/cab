@@ -735,6 +735,23 @@ per-turn read-only policy is proved by the
 | Codex sends the read-only policy for a draft turn and workspace-write again on the next turn; Claude lists only its temporary base as writable | `codex-runtime.test.ts`, `claude-runtime.test.ts` |
 | The task page starts one draft turn, explains each unavailable reason without sending, shows the queued pause, and keeps typed text after a confirmed refusal (1366 px, 390 px) | `operator-task-draft-turn-browser.test.ts` |
 
+## Start again and Reset task
+
+Start again clears a request refused before it ran, and Reset task starts a task's
+conversations again; neither forces an execution that may be live. The service, API, CLI
+and operator UI are covered by deterministic suites.
+
+| Criteria | Evidence |
+| --- | --- |
+| Start again requeues a refused first turn at the current task, profile and instructions revisions in the same workspace, leaves the refused request, intent and refusal unchanged, sends nothing to the lead, reads as Not started (not Uncertain) with an Inbox intervention, and lets the task complete | `task-restart.test.ts` |
+| A refused follow-up's inbox batch moves to the new request with its events delivered once, and a refused restart stays eligible across a service restart | `task-restart.test.ts` |
+| Replay returns the same receipt; another request under the key, a stale version and a stale `workId` conflict and record nothing | `task-restart.test.ts` |
+| Start again is refused with its reason and records nothing for a recorded thread, turn, writer admission, capacity reservation, pending effect, stop target, recovery identity, submitting intent, held assignment, writer hold or closed task; the availability rules are unit tested | `task-restart.test.ts`, `task-restart-rules.test.ts` |
+| Reset replaces every assignment's conversation and queues one fresh first turn for the lead in the same workspace, after a refused or completed lead turn, keeps old history readable, restarts no worker, and refuses while anything is queued, running, held or unresolved | `task-restart.test.ts`, `task-restart-rules.test.ts` |
+| The CLI sends both commands, refuses an excluded state with the shared reason and recovery, and says a reset cannot be undone | `operator-cli-task-control.test.ts`, `operator-cli-inventory.test.ts` |
+| The task page, Inbox and Home offer Start again and send one command; an unavailable reason shows its recovery link and sends nothing; the Reset dialog says it cannot be undone and Cancel sends nothing (1366 px, 390 px) | `operator-task-restart-browser.test.ts` |
+| Not started and Uncertain are distinct states, columns and attention codes | `operator-task-strip.test.ts`, `refused-initial-continuation.test.ts` |
+
 ## State and recovery boundary cases
 
 These state the product failure cases with standalone ownership. They are required

@@ -1769,6 +1769,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
       "Paused",
       "Stopping",
       "Uncertain",
+      "Not started",
       "Draft",
       "Done",
       "Cancelled",
@@ -1870,7 +1871,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
   // Active tasks with only Done added shows the terminal column the filter names.
   await page.goto(`${web.origin}/app/tasks?view=board&state=Done&ready=any`);
   await page.locator(".board-column").first().waitFor();
-  assert.equal(await page.locator(".board-column").count(), 8);
+  assert.equal(await page.locator(".board-column").count(), 9);
   assert.equal(
     await page.locator("#column-Done .board-column-count").innerText(),
     "1",
@@ -1897,7 +1898,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
           ] as const,
       ),
     );
-  assert.equal(empties.length, 8);
+  assert.equal(empties.length, 9);
   for (const [id, empty, width] of empties)
     if (id === "column-Done") assert.equal(empty, null);
     else {
@@ -1923,7 +1924,7 @@ test("board headings show every count, with collapsed empty columns and drawn ca
   assert.equal(
     new Set(tabs.map((r) => Math.round(r.top))).size,
     1,
-    "9 tabs share one scrolling row",
+    "10 tabs share one scrolling row",
   );
   await bar.getByRole("button", { name: /^Waiting · / }).click();
   assert.equal(await bar.locator('[aria-pressed="true"]').count(), 1);
@@ -1959,11 +1960,11 @@ test("board headings show every count, with collapsed empty columns and drawn ca
   await bar.getByRole("button", { name: /^Ready · / }).click();
   const first = page.getByRole("button", { name: /^Previous column/ });
   assert.equal(await first.isDisabled(), true);
-  assert.equal(await first.innerText(), "1 of 9");
+  assert.equal(await first.innerText(), "1 of 10");
   await bar.getByRole("button", { name: /^Cancelled · / }).click();
   const last = page.getByRole("button", { name: /^Next column/ });
   assert.equal(await last.isDisabled(), true);
-  assert.equal(await last.innerText(), "9 of 9");
+  assert.equal(await last.innerText(), "10 of 10");
   await bar.getByRole("button", { name: /^Uncertain · / }).click();
   await shot(page, "390-board-uncertain");
 
@@ -2185,22 +2186,29 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
       };
     });
 
-  // (a) Seven populated Active columns, equal and all on one screen.
+  // (a) Seven populated Active columns, equal and all on one screen, beside the empty
+  // Not started rail.
   const one = await layout();
-  assert.equal(one.columns.length, 7);
-  assert.ok(one.columns.every((c) => !c.empty && c.inside && c.width >= 140));
-  const widths = one.columns.map((c) => c.width);
+  assert.equal(one.columns.length, 8);
+  assert.deepEqual(
+    one.columns.filter((c) => c.empty).map((c) => c.id),
+    ["column-Not started"],
+  );
+  const populated = one.columns.filter((c) => !c.empty);
+  assert.ok(one.columns.every((c) => c.inside));
+  assert.ok(populated.every((c) => c.width >= 140));
+  const widths = populated.map((c) => c.width);
   assert.ok(Math.max(...widths) - Math.min(...widths) <= 1, `${widths}`);
   assert.ok(one.scrollWidth <= one.clientWidth, "board does not scroll");
   assert.ok(await noPageOverflow(page));
   assert.equal(await page.evaluate(() => scrollX), 0);
   await shot(page, "1366-board-all-columns");
 
-  // (b) Nine columns overflow into the board, never the page; Back restores its scroll.
+  // (b) Ten columns overflow into the board, never the page; Back restores its scroll.
   await page.goto(`${web.origin}/app/tasks?view=board&state=all&ready=any`);
   await page.locator(".board-column").first().waitFor();
   const all = await layout();
-  assert.equal(all.columns.length, 9);
+  assert.equal(all.columns.length, 10);
   assert.ok(all.scrollWidth > all.clientWidth);
   assert.ok(await noPageOverflow(page));
   const scrolled = await page
@@ -2242,7 +2250,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
       clipped: e.scrollHeight > e.clientHeight + 1,
     })),
   );
-  assert.equal(rails.filter((r) => r.empty).length, 7);
+  assert.equal(rails.filter((r) => r.empty).length, 8);
   for (const rail of rails)
     if (rail.empty) {
       assert.ok(rail.width >= 40 && rail.width <= 60, JSON.stringify(rail));
@@ -2382,7 +2390,7 @@ test("the board column chips render only below the shell breakpoint", async (_t,
           `${e.querySelector(".board-column-name")?.textContent?.trim()} · ${e.querySelector(".board-column-count")?.textContent?.trim()}`,
       ),
     );
-  assert.equal(headings.length, 9);
+  assert.equal(headings.length, 10);
   assert.deepEqual(
     (await bar.getByRole("button").allInnerTexts()).map((t) =>
       t.replace(/\s+/g, " ").trim(),

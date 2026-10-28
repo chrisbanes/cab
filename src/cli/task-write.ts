@@ -4,6 +4,14 @@ import {
   taskSchema,
 } from "../operator/contracts.js";
 import { draftTurnUnavailableText } from "../operator/draft-turn-copy.js";
+import {
+  type RestartDestination,
+  resetIrreversibleText,
+  resetUnavailable,
+  resetUnavailableText,
+  startAgainUnavailable,
+  startAgainUnavailableText,
+} from "../operator/task-restart-copy.js";
 import { taskColumnOf } from "../operator/task-presentation.js";
 import { cliFix, type Wait, waitLabels } from "../operator/wait-reasons.js";
 import { uuidArg } from "./browse.js";
@@ -152,6 +160,14 @@ const admissionEffect = (task: TaskData | undefined): Effect =>
   task?.task.state === "open" && task.task.ready && task.admission.eligible
     ? "queued"
     : "saved";
+
+/** What to run instead when Start again or Reset is unavailable, by the recovery the reason names. */
+const restartFix = (taskId: string, destination: RestartDestination) =>
+  destination === "recovery"
+    ? `Run 'ensemble task get ${taskId}', then clear it with the 'ensemble recovery' commands on its assignment.`
+    : destination === "source-review"
+      ? `Review the task's source hold first; 'ensemble task get ${taskId}' names it.`
+      : `Run 'ensemble task get ${taskId}' to see the task's state.`;
 
 export function writeOutput(o: {
   request: RequestIdentity;
@@ -669,6 +685,143 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
           data: {
             workId: receipt.kind === "draft-turn" ? receipt.workId : null,
           },
+        });
+      },
+    },
+  ],
+  [
+    "task start-again",
+    {
+      usage:
+        "task start-again TASK_ID --expected-version N [--work WORK] [--request-id UUID]",
+      positionals: 1,
+      expects:
+        "--expected-version: the task's version ('ensemble task get TASK_ID'); required. --work defaults to the refused request that read names.",
+      flags: ["expected-version", "work", "request-id"],
+      async run(ctx) {
+        const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
+        const expectedVersion = requiredVersion(ctx);
+        const session = await connectWrite(ctx, TASK_WRITE);
+        const task = (await readTask(session, taskId)).data;
+        const available = task.startAgain;
+        const workId =
+          ctx.values.work ??
+          (available?.available ? available.workId : undefined);
+        const type = "task.start-again";
+        const scope = `task:${taskId}`;
+        const refusal = available && !available.available && available.reason;
+        // A retry of an earlier attempt must reach the service, which replays or refuses.
+        if (!workId)
+          throw new CliError(
+            "conflict",
+            startAgainUnavailableText(refusal || "nothing-refused"),
+            {
+              fix: restartFix(
+                taskId,
+                startAgainUnavailable[refusal || "nothing-refused"].destination,
+              ),
+            },
+          );
+        const command = { type, taskId, expectedVersion, workId };
+        const { key, digest, reused } = await chooseKey(
+          ctx,
+          session,
+          { scope, type },
+          command,
+        );
+        const { receipt, request } = await withConflictRemedy(
+          () =>
+            sendCommand(ctx, session, {
+              scope,
+              type,
+              key,
+              digest,
+              resource: taskId,
+              command: exactCommand(command, key),
+              match: (r) => r.kind === "start-again" && r.taskId === taskId,
+            }),
+          taskVersion(session, taskId, expectedVersion),
+        );
+        const restarted = receipt.kind === "start-again" ? receipt : undefined;
+        return writeOutput({
+          request,
+          receipt,
+          reused,
+          effect: "queued",
+          summary: "Queued the refused request again",
+          lines: [
+            ["Task", taskId],
+            ["Refused work", restarted?.refusedWorkId ?? ""],
+            ["Work", restarted?.workId ?? ""],
+          ],
+          notes: [
+            "Re-captured the turn at the current task, profile and instructions revisions and queued it under every current admission check, in the task's workspace. The refused request and its refusal stay in the history; nothing was sent to the lead.",
+          ],
+          data: { workId: restarted?.workId ?? null },
+        });
+      },
+    },
+  ],
+  [
+    "task reset",
+    {
+      usage: "task reset TASK_ID --expected-version N [--request-id UUID]",
+      positionals: 1,
+      expects:
+        "--expected-version: the task's version ('ensemble task get TASK_ID'); required.",
+      flags: ["expected-version", "request-id"],
+      async run(ctx) {
+        const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
+        const expectedVersion = requiredVersion(ctx);
+        const session = await connectWrite(ctx, TASK_WRITE);
+        const task = (await readTask(session, taskId)).data;
+        const type = "task.reset";
+        const scope = `task:${taskId}`;
+        const command = { type, taskId, expectedVersion };
+        const { key, digest, reused } = await chooseKey(
+          ctx,
+          session,
+          { scope, type },
+          command,
+        );
+        const refusal = task.reset;
+        if (!reused && refusal && !refusal.available && refusal.reason)
+          throw new CliError("conflict", resetUnavailableText(refusal.reason), {
+            fix: restartFix(
+              taskId,
+              resetUnavailable[refusal.reason].destination,
+            ),
+          });
+        const { receipt, request } = await withConflictRemedy(
+          () =>
+            sendCommand(ctx, session, {
+              scope,
+              type,
+              key,
+              digest,
+              resource: taskId,
+              command: exactCommand(command, key),
+              match: (r) => r.kind === "task-reset" && r.taskId === taskId,
+            }),
+          taskVersion(session, taskId, expectedVersion),
+        );
+        const reset = receipt.kind === "task-reset" ? receipt : undefined;
+        return writeOutput({
+          request,
+          receipt,
+          reused,
+          effect: "queued",
+          summary: "Reset the task",
+          lines: [
+            ["Task", taskId],
+            [
+              "Conversations replaced",
+              String(reset?.conversations.length ?? 0),
+            ],
+            ["Work", reset?.workId ?? ""],
+          ],
+          notes: [resetIrreversibleText],
+          data: { workId: reset?.workId ?? null },
         });
       },
     },

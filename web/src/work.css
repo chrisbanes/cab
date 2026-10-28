@@ -603,6 +603,12 @@
   --state-border: var(--risk-border);
 }
 
+.task-state[data-column="Not started"] {
+  --state: var(--accent-text);
+  --state-soft: #6366f11f;
+  --state-border: #6366f159;
+}
+
 .task-state[data-column="Done"] {
   --state: var(--ok);
   --state-soft: var(--ok-soft);

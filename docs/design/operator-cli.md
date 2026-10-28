@@ -433,8 +433,8 @@ The CLI exits 2 with `change-document-invalid` or `wrong-service` and 5 with
 `journal-unavailable` before sending anything.
 
 Task and attention writes (`task create|configure|add-dependency|remove-dependency|
-message|follow-up|draft-turn|stop|resume`, `question answer`, `approval decide`) drive the
-existing operator commands unchanged (`task draft-turn` sends `task.draft-turn {key, taskId, expectedVersion, message}` and gets a `draft-turn {taskId, leadAssignmentId, workId}` receipt), plus two receipted commands on the same
+message|follow-up|draft-turn|start-again|reset|stop|resume`, `question answer`, `approval decide`) drive the
+existing operator commands unchanged (`task draft-turn` sends `task.draft-turn {key, taskId, expectedVersion, message}` and gets a `draft-turn {taskId, leadAssignmentId, workId}` receipt; `task start-again TASK_ID --expected-version N [--work WORK]` sends `task.start-again {key, taskId, expectedVersion, workId}`, taking `workId` from the task read's `startAgain` when `--work` is omitted, and gets a `start-again {taskId, assignmentId, refusedWorkId, workId}` receipt; `task reset TASK_ID --expected-version N` sends `task.reset {key, taskId, expectedVersion}`, gets a `task-reset {taskId, leadAssignmentId, workId, conversations}` receipt and prints that a reset cannot be undone; both print the shared reason and the recovery that applies when the task read says they are unavailable), plus two receipted commands on the same
 route: `task.stop` and `task.resume` (`{key, taskId, expectedVersion?}`). Their
 receipts, `task-stop {taskId, cancellationRequested}` and `task-resume {taskId,
 stopCleared, requeued}`, are recorded in one transaction with the Stop hold change,

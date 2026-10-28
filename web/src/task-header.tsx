@@ -6,7 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { TaskRead } from "../../src/operator/contracts.js";
+import type { Session, TaskRead } from "../../src/operator/contracts.js";
+import type { OperatorClient } from "./api.js";
 import { ActionLink, Button } from "./components.js";
 import { outcomeLine } from "./presentation.js";
 import { MarkdownPreview } from "./task-files.js";
@@ -20,6 +21,7 @@ import {
 } from "./task-overview.js";
 import { type TaskTab, taskTabs } from "./task-tabs.js";
 import { useMediaQuery } from "./use-media-query.js";
+import { ResetTask, taskChangedEvent } from "./task-restart.js";
 import { stateIcons } from "./task-views.js";
 import {
   Dialog,
@@ -39,6 +41,11 @@ export interface TaskHeaderReport {
   identity: string;
   back: { href: string; label: string; ariaLabel: string; history: boolean };
   stop: { affected: string; held: boolean; open: boolean };
+  /** Reset task: whether it is offered, the task version it is sent with and why not. */
+  reset: {
+    offer: NonNullable<TaskRead["data"]["reset"]>;
+    version: number;
+  } | null;
 }
 
 export function taskHeaderReport(
@@ -69,6 +76,9 @@ export function taskHeaderReport(
           history: false,
         },
     stop: { affected, held, open: data.task.state === "open" },
+    reset: data.reset
+      ? { offer: data.reset, version: data.task.version }
+      : null,
   };
 }
 
@@ -80,11 +90,14 @@ export function taskHeaderReport(
  */
 export function TaskHeaderActions({
   report,
-  csrfToken,
+  client,
+  session,
 }: {
   report: TaskHeaderReport;
-  csrfToken: string;
+  client: OperatorClient;
+  session: Session;
 }) {
+  const csrfToken = session.csrfToken;
   const [open, setOpen] = useState(false),
     [sent, setSent] = useState(false),
     [menuOpen, setMenuOpen] = useState(false);
@@ -150,6 +163,17 @@ export function TaskHeaderActions({
         <ActionLink variant="secondary" href={`/runtime/task/${report.taskId}`}>
           Execution
         </ActionLink>
+        {report.reset && report.stop.open && (
+          <ResetTask
+            client={client}
+            session={session}
+            taskId={report.taskId}
+            title={report.title}
+            version={report.reset.version}
+            offer={report.reset.offer}
+            onChanged={() => window.dispatchEvent(new Event(taskChangedEvent))}
+          />
+        )}
         {report.stop.held ? (
           <Button variant="destructive" disabled>
             Stop requested

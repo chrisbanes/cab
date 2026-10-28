@@ -9,6 +9,7 @@ export const columns = [
   "Paused",
   "Stopping",
   "Uncertain",
+  "Not started",
   "Draft",
   "Done",
   "Cancelled",
@@ -18,6 +19,7 @@ export function taskColumn(task: TaskListSummary): TaskColumn {
   const s = task.execution.state;
   if (s === "stopping") return "Stopping";
   if (s === "uncertain") return "Uncertain";
+  if (s === "not-started") return "Not started";
   if (s === "running" || s === "starting") return "Running";
   if (task.state === "done") return "Done";
   if (task.state === "cancelled") return "Cancelled";
@@ -60,6 +62,7 @@ export function taskColumnOf(
     s = execution.state;
   if (execution.holds.stop || s === "stopping") return "Stopping";
   if (execution.holds.uncertainty || s === "uncertain") return "Uncertain";
+  if (s === "not-started") return "Not started";
   if (s === "running" || s === "starting") return "Running";
   if (task.state === "done") return "Done";
   if (task.state === "cancelled") return "Cancelled";

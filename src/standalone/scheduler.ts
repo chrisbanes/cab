@@ -315,6 +315,15 @@ export class SchedulerStore {
     return row ? this.parse(row as Record<string, unknown>) : undefined;
   }
 
+  /** The assignment's newest assignment request, whatever its version or state. */
+  latest(assignmentId: string): TurnRequest | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM turn_requests WHERE assignmentId = ?
+        AND kind = 'assignment' ORDER BY sequence DESC LIMIT 1`)
+      .get(assignmentId);
+    return row ? this.parse(row as Record<string, unknown>) : undefined;
+  }
+
   /** Whether the assignment has any turn that is not a draft turn. */
   hasOrdinaryAssignmentWork(assignmentId: string): boolean {
     return (

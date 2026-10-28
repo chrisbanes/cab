@@ -2,7 +2,8 @@
 
 **Status:** built. The Inbox intervention and task holds link to the assignment
 recovery page, and `test/operator/operator-triage-uncertainty-browser.test.ts`
-asserts the budget below at 1366 × 900 and 390 × 844.
+asserts the budget below at 1366 × 900 and 390 × 844. The Not started section is asserted
+by `test/operator/operator-task-restart-browser.test.ts`.
 
 ## Goal
 
@@ -36,6 +37,34 @@ Recovery that releases a generation needs the evidence-bearing operations whose
 3. Older generations in the same state are collapsed under one line with a count.
 4. The next supported step is the only primary action; advanced destinations are
    listed as links.
+
+## Not started: refused before it ran
+
+A request the service refused at admission because its captured revisions no longer
+matched, with nothing recorded as having run, is **Not started**, not Uncertain. It
+raises the `not-started` attention code, and Start again is its one action, offered
+beside the state:
+
+- Task detail, in the decisions beside the task: **Start again**.
+- Inbox intervention: the request pane's **Start again**.
+- Home "Needs you" card: **Start again** in the card.
+- `ensemble task start-again TASK_ID --expected-version N`.
+
+Start again re-captures the request at the current task, profile and instructions
+revisions and queues it under every current admission check, in the same workspace.
+The refused request and its refusal stay in the history, and nothing is sent to the
+lead. It is one interaction at each entry point and sends exactly one command.
+
+When Start again is not offered (a source hold, a held assignment, a request cut off
+during submission or any execution that may have run), the same place shows why and
+links to the recovery or the source review that applies. A task whose turn ran or
+may have run stays Uncertain and follows the steps above.
+
+**Reset task** is the other way to start work again: it replaces every assignment's
+conversation and starts the lead fresh in the same workspace, from the task header
+(with a confirmation that says it cannot be undone) or `ensemble task reset`. It is
+offered only when nothing is queued, running or unresolved and the task has no hold.
+The old conversation and workspace stay readable.
 
 ## Budget
 

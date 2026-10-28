@@ -471,6 +471,7 @@ export class CoordinationStore {
     private readonly reconciledAssignmentProof?: (
       workId: string,
     ) => ReconciledAssignmentProof | undefined,
+    private readonly refusedBeforeStart?: (workId: string) => boolean,
   ) {
     this.domain = domain ?? new DomainStore(db);
     this.isNeverAdmittedRefusedAssignmentWork =
@@ -3324,6 +3325,15 @@ export class CoordinationStore {
   isHistoricalWorkResolved(workId: string): boolean {
     return Boolean(
       this.isNeverAdmittedRefusedAssignmentWork?.(workId) ||
+        // The operator started it again; the refusal stays as history.
+        (this.refusedBeforeStart?.(workId) &&
+          this.one(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='turn_request_restarts'",
+          ) &&
+          this.one(
+            "SELECT 1 FROM turn_request_restarts WHERE refusedWorkId=?",
+            workId,
+          )) ||
         this.hasRecoveryContinuation(workId) ||
         // Planned shutdown released it and queued its successor.
         (this.one(
@@ -3667,6 +3677,26 @@ export class CoordinationStore {
       }
 
       return this.deleteQueuedBatchKeepingEvents(batch);
+    });
+  }
+
+  /**
+   * Must run inside a transaction. Releases the queued batch of a request refused before it
+   * ran, keeping its events, so they bind again to the request that replaces it.
+   */
+  releaseRefusedDeliveryWithinTransaction(deliveryWorkId: string): boolean {
+    const workId = z.string().min(1).max(512).parse(deliveryWorkId);
+    const batch = this.one(
+      `SELECT batchId, taskId, recipientAssignmentId, highWaterSequence
+      FROM coordination_delivery_batches WHERE deliveryWorkId = ? AND state = 'queued'`,
+      workId,
+    );
+    if (!batch || !this.refusedBeforeStart?.(workId)) return false;
+    return this.deleteQueuedBatchKeepingEvents({
+      batchId: String(batch.batchId),
+      taskId: String(batch.taskId),
+      recipientAssignmentId: String(batch.recipientAssignmentId),
+      highWaterSequence: Number(batch.highWaterSequence),
     });
   }
 

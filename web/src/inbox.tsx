@@ -213,11 +213,14 @@ export function Inbox({
   const task = useInboxTask(
     client,
     session,
-    // An intervention below the inspector width shows nothing from the task read.
+    // An intervention below the inspector width shows nothing from the task read, except the
+    // Start again it offers in place.
     selectedId &&
       taskId &&
       !runtimeId &&
-      (inspector || selected?.kind !== "intervention")
+      (inspector ||
+        selected?.kind !== "intervention" ||
+        selected.attentionCode === "not-started")
       ? taskId
       : null,
     resource.state.fetchedAt,
@@ -654,7 +657,20 @@ export function Inbox({
               ) : selected?.kind === "runtime" ? (
                 <RuntimeDetail item={selected} />
               ) : selected ? (
-                <InterventionDetail item={selected} leftQueue={leftQueue} />
+                <InterventionDetail
+                  item={selected}
+                  leftQueue={leftQueue}
+                  start={
+                    task.state.data
+                      ? {
+                          client,
+                          session,
+                          task: task.state.data.data,
+                          onChanged: resource.refresh,
+                        }
+                      : undefined
+                  }
+                />
               ) : (
                 <p>Selected request is unavailable.</p>
               )}

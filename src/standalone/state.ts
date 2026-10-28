@@ -45,6 +45,11 @@ export type TaskControlReceipt = Extract<
   { kind: "task-stop" | "task-resume" }
 >;
 export type DraftTurnReceipt = Extract<CommandReceipt, { kind: "draft-turn" }>;
+export type StartAgainReceipt = Extract<
+  CommandReceipt,
+  { kind: "start-again" }
+>;
+export type TaskResetReceipt = Extract<CommandReceipt, { kind: "task-reset" }>;
 
 const stopTargetColumns = `(
       taskId TEXT NOT NULL,
@@ -539,6 +544,12 @@ export class ExecutionState {
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       reason TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS turn_request_restarts (
+      refusedWorkId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
+      workId TEXT NOT NULL UNIQUE,
+      taskId TEXT NOT NULL,
+      key TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS execution_capacity_reservations (
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       projectId TEXT,
@@ -867,7 +878,7 @@ export class ExecutionState {
           'Assignment result has not been committed')`,
       );
       for (const { workId } of unresolvedAssignments)
-        if (!this.isNeverAdmittedRefusedAssignmentWork(workId))
+        if (!this.refusedBeforeStart(workId))
           recordPendingAssignmentResult.run(workId);
     }
   }
@@ -946,27 +957,23 @@ export class ExecutionState {
   }
 
   /**
-   * Runs `record` and stores the draft-turn receipt in one transaction, so a refusal or
-   * failure leaves nothing behind. Same key and content replays the receipt; other
-   * content under the key, or a stale task version, conflicts.
+   * Runs `record` and stores its receipt in one transaction, so a refusal or failure leaves
+   * nothing behind. Same key and content replays the receipt; other content under the key,
+   * or a stale task version, conflicts.
    */
-  recordDraftTurn(
-    command: {
-      key: string;
+  private recordReceipted<R extends { kind: string }>(
+    material: {
+      type: string;
       taskId: string;
       expectedVersion: number;
-      message: string;
+      [field: string]: unknown;
     },
-    record: () => { leadAssignmentId: string; workId: string },
-  ): { receipt: DraftTurnReceipt; replayed: boolean } {
-    const id = z.string().uuid().parse(command.taskId);
-    const key = z.string().uuid().parse(command.key);
-    const payloadHash = materialDigest({
-      type: "task.draft-turn",
-      taskId: id,
-      expectedVersion: command.expectedVersion,
-      message: command.message,
-    });
+    keyValue: string,
+    receiptOf: (base: { key: string; recorded: true; taskId: string }) => R,
+  ): { receipt: R; replayed: boolean } {
+    const id = z.string().uuid().parse(material.taskId);
+    const key = z.string().uuid().parse(keyValue);
+    const payloadHash = materialDigest({ ...material, taskId: id });
     return transaction(this.db, () => {
       const stored = this.db
         .prepare(
@@ -978,23 +985,14 @@ export class ExecutionState {
       if (stored) {
         if (stored.payloadHash !== payloadHash)
           throw new DomainConflictError("Request key reused for other content");
-        return {
-          receipt: JSON.parse(stored.receiptJson) as DraftTurnReceipt,
-          replayed: true,
-        };
+        return { receipt: JSON.parse(stored.receiptJson) as R, replayed: true };
       }
       const row = this.db
         .prepare("SELECT version FROM domain_tasks WHERE id = ?")
         .get(id) as { version: number } | undefined;
-      if (row?.version !== command.expectedVersion)
+      if (row?.version !== material.expectedVersion)
         throw new DomainConflictError("Task version conflict");
-      const receipt: DraftTurnReceipt = {
-        kind: "draft-turn",
-        key,
-        recorded: true,
-        taskId: id,
-        ...record(),
-      };
+      const receipt = receiptOf({ key, recorded: true, taskId: id });
       this.db
         .prepare(
           "INSERT INTO task_control_receipts (taskId, key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?, ?)",
@@ -1002,6 +1000,90 @@ export class ExecutionState {
         .run(id, key, payloadHash, JSON.stringify(receipt), Date.now());
       return { receipt, replayed: false };
     });
+  }
+
+  recordDraftTurn(
+    command: {
+      key: string;
+      taskId: string;
+      expectedVersion: number;
+      message: string;
+    },
+    record: () => { leadAssignmentId: string; workId: string },
+  ): { receipt: DraftTurnReceipt; replayed: boolean } {
+    return this.recordReceipted(
+      {
+        type: "task.draft-turn",
+        taskId: command.taskId,
+        expectedVersion: command.expectedVersion,
+        message: command.message,
+      },
+      command.key,
+      (base) => ({ kind: "draft-turn" as const, ...base, ...record() }),
+    );
+  }
+
+  /** Queues a new request in place of the refused `command.workId`; the refusal stays in history. */
+  recordStartAgain(
+    command: {
+      key: string;
+      taskId: string;
+      expectedVersion: number;
+      workId: string;
+    },
+    record: () => { assignmentId: string; workId: string },
+  ): { receipt: StartAgainReceipt; replayed: boolean } {
+    return this.recordReceipted(
+      {
+        type: "task.start-again",
+        taskId: command.taskId,
+        expectedVersion: command.expectedVersion,
+        workId: command.workId,
+      },
+      command.key,
+      (base) => {
+        const { assignmentId, workId } = record();
+        return {
+          kind: "start-again" as const,
+          ...base,
+          assignmentId,
+          refusedWorkId: command.workId,
+          workId,
+        };
+      },
+    );
+  }
+
+  recordTaskReset(
+    command: { key: string; taskId: string; expectedVersion: number },
+    record: () => Omit<
+      TaskResetReceipt,
+      "kind" | "key" | "recorded" | "taskId"
+    >,
+  ): { receipt: TaskResetReceipt; replayed: boolean } {
+    return this.recordReceipted(
+      {
+        type: "task.reset",
+        taskId: command.taskId,
+        expectedVersion: command.expectedVersion,
+      },
+      command.key,
+      (base) => ({ kind: "task-reset" as const, ...base, ...record() }),
+    );
+  }
+
+  /** Links a refused request to the request that replaced it; the refusal itself stays. */
+  recordRestart(
+    refusedWorkId: string,
+    workId: string,
+    taskId: string,
+    key: string,
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO turn_request_restarts (refusedWorkId, workId, taskId, key) VALUES (?, ?, ?, ?)",
+      )
+      .run(refusedWorkId, workId, taskId, key);
   }
 
   /** A completed draft turn expects no result, so its result effect is not left pending. */
@@ -1862,22 +1944,19 @@ export class ExecutionState {
   }
 
   /**
-   * A revision refusal is ignorable only when the exact held request and
-   * intent still match their immutable refusal, identify canonical initial work
-   * or a durable inbox event, and have no evidence of runtime admission or effects.
-   * Current assignment eligibility is checked by admission/delivery withdrawal,
-   * not here, so this historical proof remains stable after later completion.
+   * Witness-only proof that an assignment request was refused at admission before it ran:
+   * the exact held request and intent still match their immutable revision refusal, and
+   * nothing records a thread, turn, writer admission, capacity reservation, recovery
+   * identity, pending effect or stop target. It does not look at the refusal's reasons
+   * or the work identity; admission applies again when the work is requeued.
    */
-  isNeverAdmittedRefusedAssignmentWork(workId: string): boolean {
+  refusedBeforeStart(workId: string): boolean {
+    return this.refusedBeforeStartRow(workId) !== undefined;
+  }
+
+  private refusedBeforeStartRow(workId: string) {
     const id = z.string().min(1).max(512).parse(workId);
-    if (
-      !this.hasTurnRequests ||
-      this.db
-        .prepare(`SELECT 1 FROM sqlite_master
-          WHERE type = 'table' AND name = 'coordination_inbox_events'`)
-        .get() === undefined
-    )
-      return false;
+    if (!this.hasTurnRequests) return undefined;
     const row = this.db
       .prepare(`SELECT request.kind, request.draftTurn, request.taskId, request.projectId,
         request.assignmentId, request.taskVersion, request.assignmentVersion,
@@ -1967,14 +2046,40 @@ export class ExecutionState {
       row.hasCapacityReservation !== 0 ||
       row.hasRecoveryIdentity !== 0 ||
       row.hasPendingEffect !== 0 ||
-      row.hasStopTarget !== 0
+      row.hasStopTarget !== 0 ||
+      !row.refusalReason.startsWith(refusedRevisionPrefix) ||
+      !row.refusalReason.endsWith(")")
+    )
+      return undefined;
+    return {
+      id,
+      draftTurn: row.draftTurn,
+      taskId: row.taskId,
+      assignmentId: row.assignmentId,
+      assignmentVersion: row.assignmentVersion,
+      refusalReason: row.refusalReason,
+    };
+  }
+
+  /**
+   * A revision refusal is ignorable only when it is `refusedBeforeStart`, its reasons are
+   * the safe revision changes, and it identifies canonical initial work or a durable inbox
+   * event. Current assignment eligibility is checked by admission/delivery withdrawal,
+   * not here, so this historical proof remains stable after later completion.
+   */
+  isNeverAdmittedRefusedAssignmentWork(workId: string): boolean {
+    if (
+      this.db
+        .prepare(`SELECT 1 FROM sqlite_master
+          WHERE type = 'table' AND name = 'coordination_inbox_events'`)
+        .get() === undefined
     )
       return false;
-
+    const row = this.refusedBeforeStartRow(workId);
+    if (!row) return false;
+    const id = row.id;
     const initial = id === `assignment:${row.assignmentId}:initial`;
     const refusal = row.refusalReason;
-    if (!refusal.startsWith(refusedRevisionPrefix) || !refusal.endsWith(")"))
-      return false;
     const reasons = refusal.slice(refusedRevisionPrefix.length, -1).split(", ");
     // A refused draft turn is history on the same evidence; its stale task is the extra reason.
     if (row.draftTurn === 1)
@@ -3387,6 +3492,42 @@ export class ExecutionState {
         z.string().min(1).max(1000).parse(reason),
         z.string().min(1).max(512).parse(workId),
       );
+  }
+
+  /** Whether recovery recorded an identity for the work: it may have reached a runtime. */
+  hasRecoveryIdentity(workId: string): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM execution_recovery_identities WHERE workId = ?")
+        .get(workId) !== undefined
+    );
+  }
+
+  /**
+   * Whether any work of the task is queued, running or held other than a request refused
+   * before it ran, or holds writer, capacity or effect state. Such work may still be live.
+   */
+  taskHasUnsettledExecution(taskId: string): boolean {
+    if (!this.hasTurnRequests) return false;
+    return (
+      this.db
+        .prepare(`SELECT request.workId, request.state FROM turn_requests request
+          WHERE request.taskId = ? AND request.state IN ('queued','active','held')
+          UNION
+          SELECT intent.workId, intent.state FROM task_execution_bindings binding
+          JOIN execution_intents intent ON intent.workId = binding.workId
+          WHERE binding.taskId = ? AND (
+            intent.state IN ('ready','capacity-waiting','held','submitting','running')
+            OR (intent.state NOT IN ('completed','reconciled','resolved-failed') AND (
+              EXISTS (SELECT 1 FROM task_writer_admissions a WHERE a.workId = intent.workId)
+              OR EXISTS (SELECT 1 FROM execution_capacity_reservations c WHERE c.workId = intent.workId)
+              OR EXISTS (SELECT 1 FROM execution_pending_effects e
+                WHERE e.workId = intent.workId AND e.state = 'pending'))))`)
+        .all(taskId, taskId) as { workId: string; state: string }[]
+    ).some(
+      ({ workId, state }) =>
+        !(state === "held" && this.refusedBeforeStart(workId)),
+    );
   }
 
   /** Whether a bound, unrefused generation of the assignment is still unresolved. */

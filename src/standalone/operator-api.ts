@@ -167,6 +167,10 @@ import type {
 } from "./coordination-view.js";
 import { DraftTurnUnavailableError } from "./draft-turn.js";
 import {
+  ResetUnavailableError,
+  StartAgainUnavailableError,
+} from "./task-restart.js";
+import {
   boundDetail,
   DiagnosticCursorError,
   type DiagnosticExecution,
@@ -2043,8 +2047,21 @@ export class OperatorApi {
           : null,
     };
   }
+  private startAgainRead(taskId: string) {
+    const availability = this.service.startAgainAvailability(taskId);
+    return availability.available
+      ? availability
+      : { available: false as const, reason: availability.reason };
+  }
   private selection(a: Row) {
     return selectAssignmentExecution(a, this.service);
+  }
+  /** The assignment's current request was refused before it ran: Start again clears it. */
+  private notStarted(s: ReturnType<OperatorApi["selection"]>) {
+    return (
+      s.request?.state === "held" &&
+      this.service.notStartedWork(s.request.workId)
+    );
   }
   private nonStopTaskHold(
     taskId: string,
@@ -2076,7 +2093,9 @@ export class OperatorApi {
     else if (
       holds.uncertainty ||
       holds.task ||
-      selections.some((s) => s.request?.state === "held") ||
+      selections.some(
+        (s) => s.request?.state === "held" && !this.notStarted(s),
+      ) ||
       selections.some(
         (s) =>
           (s.record?.holds.writer || s.record?.holds.capacity) &&
@@ -2106,7 +2125,10 @@ export class OperatorApi {
       reasonCodes.push("runtime-unconfirmed");
     } else if (task.state === "done") state = "completed";
     else if (task.state === "cancelled") state = "cancelled";
-    else if (this.domain().project(String(task.projectId)).paused) {
+    else if (selections.some((s) => this.notStarted(s))) {
+      state = "not-started";
+      reasonCodes.push("refused-before-start");
+    } else if (this.domain().project(String(task.projectId)).paused) {
       state = "paused";
       reasonCodes.push("project-paused");
     } else if (!this.domain().admission(String(task.id)).eligible) {
@@ -2689,7 +2711,7 @@ export class OperatorApi {
           s.request?.state === "active" &&
           ["running", "submitting"].includes(s.intent?.state ?? "");
         return (
-          s.request?.state === "held" ||
+          (s.request?.state === "held" && !this.notStarted(s)) ||
           (s.request?.state === "active" && !confirmed) ||
           Boolean(
             (s.record?.holds.writer || s.record?.holds.capacity) && !confirmed,
@@ -2697,6 +2719,13 @@ export class OperatorApi {
         );
       });
     add("execution-uncertain", uncertain ? 1 : 0);
+    add(
+      "not-started",
+      task.state === "open" &&
+        assignments.some((a) => this.notStarted(this.selection(a)))
+        ? 1
+        : 0,
+    );
     add(
       "lead-review",
       assignments.length === 0 &&
@@ -3433,6 +3462,8 @@ export class OperatorApi {
           }
         : {}),
       draftTurn: this.service.draftTurnAvailability(taskId),
+      startAgain: this.startAgainRead(taskId),
+      reset: this.service.resetAvailability(taskId),
       assignments: assignments.map((a) => {
         const s = this.selection(a),
           request = s.request;
@@ -7368,6 +7399,29 @@ export class OperatorApi {
           );
         } catch (error) {
           if (error instanceof DraftTurnUnavailableError)
+            throw new OperatorApiError(
+              409,
+              "conflict",
+              undefined,
+              undefined,
+              error.message,
+            );
+          throw error;
+        }
+      }
+      if (c.type === "task.start-again" || c.type === "task.reset") {
+        this.requireTask(c.taskId);
+        try {
+          return commandReceiptSchema.parse(
+            c.type === "task.reset"
+              ? await this.service.resetTask(c)
+              : await this.service.startAgain(c),
+          );
+        } catch (error) {
+          if (
+            error instanceof StartAgainUnavailableError ||
+            error instanceof ResetUnavailableError
+          )
             throw new OperatorApiError(
               409,
               "conflict",

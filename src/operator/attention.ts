@@ -8,6 +8,7 @@ import type {
 /** A task's attention codes, in the precedence that names who acts next. */
 export const attentionCodes = [
   "execution-uncertain",
+  "not-started",
   "approval",
   "question",
   "unresolved-result",
@@ -34,6 +35,12 @@ export const attentionNext: Record<
     action: "inspect execution",
     reason: "Execution ownership is uncertain",
     inboxAction: "Inspect execution",
+  },
+  "not-started": {
+    operator: true,
+    action: "start again",
+    reason: "Refused before it started; nothing ran",
+    inboxAction: "Start again",
   },
   approval: {
     operator: true,

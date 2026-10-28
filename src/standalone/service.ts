@@ -237,13 +237,24 @@ import {
 } from "./scheduler.js";
 import { SchedulerWakeQueries } from "./scheduler-wake-queries.js";
 import {
+  type ResetFacts,
+  ResetUnavailableError,
+  resetAvailability,
+  type RestartRequestKind,
+  type StartAgainFacts,
+  StartAgainUnavailableError,
+  startAgainAvailability,
+} from "./task-restart.js";
+import {
   type CoordinationExecutionBinding,
   type ExecutionIntent,
   ExecutionState,
   harnessRetrySupported,
   type DraftTurnReceipt,
+  type StartAgainReceipt,
   type StopTarget,
   type TaskControlReceipt,
+  type TaskResetReceipt,
   type TaskExecutionBinding,
   type TaskExecutionBindingRecord,
   type TaskExecutionContext,
@@ -899,6 +910,7 @@ export class StandaloneService {
           (this.callbacks.get(workId)?.size ?? 0) === 0
             ? state.reconciledAssignmentProof(workId)
             : undefined,
+        (workId) => state.refusedBeforeStart(workId),
       );
       coordination.migrate();
       // After every table the wake queries read has migrated.
@@ -4398,14 +4410,234 @@ export class StandaloneService {
       });
       return { leadAssignmentId: leadId, workId: delivery.deliveryWorkId };
     });
-    if (!replayed) {
-      // Post-commit: the receipt stands even if the wake fails.
-      const generation = this.generation;
-      if (generation)
-        this.observeBackgroundFailure(generation, "domain-wake", () =>
-          this.wakeScheduler(0, generation),
-        );
-    }
+    if (!replayed) this.wakeAfterCommit();
+    return receipt;
+  }
+
+  /** Whether an assignment request was refused before it ran and so can be started again. */
+  notStartedWork(workId: string): boolean {
+    const request = this.started().schedulerStore.find(workId);
+    return (
+      request !== undefined &&
+      request.kind === "assignment" &&
+      !request.draftTurn &&
+      this.started().state.refusedBeforeStart(workId)
+    );
+  }
+
+  /** How a request bears on Start again; a refused draft turn is released elsewhere. */
+  private restartRequestKind(request: TurnRequest): RestartRequestKind {
+    if (request.state !== "held") return "settled";
+    const { state } = this.started();
+    if (this.notStartedWork(request.workId)) return "refused";
+    if (request.draftTurn && state.refusedBeforeStart(request.workId))
+      return "settled";
+    const intent = state.byWorkId(request.workId);
+    return intent?.state === "submitting" ||
+      (intent &&
+        intent.turnId === null &&
+        state.hasRecoveryIdentity(request.workId))
+      ? "interrupted"
+      : "unresolved";
+  }
+
+  private startAgainFacts(taskId: string): StartAgainFacts {
+    const { domain, schedulerStore, state } = this.started();
+    return {
+      taskState: z
+        .enum(["open", "done", "cancelled"])
+        .parse(domain.task(taskId).state),
+      sourceHeld: domain.admission(taskId).reasons.includes("source-hold"),
+      nonStopHold: state.hasNonStopTaskHold(taskId),
+      assignments: domain.assignments(taskId).map((assignment) => {
+        const request = schedulerStore.latest(String(assignment.id));
+        return {
+          assignmentId: String(assignment.id),
+          held: assignment.state === "held",
+          ...(request
+            ? {
+                request: {
+                  workId: request.workId,
+                  sequence: request.sequence,
+                  kind: this.restartRequestKind(request),
+                },
+              }
+            : {}),
+        };
+      }),
+    };
+  }
+
+  /** Whether the operator can start a refused request again, and which one. */
+  startAgainAvailability(taskId: string) {
+    return startAgainAvailability(this.startAgainFacts(taskId));
+  }
+
+  private resetFacts(taskId: string): ResetFacts {
+    const { domain, schedulerStore, state } = this.started();
+    const task = domain.task(taskId);
+    const lead = domain.leadBindings().find((item) => item.taskId === taskId);
+    const assignments = domain.assignments(taskId);
+    return {
+      taskState: z.enum(["open", "done", "cancelled"]).parse(task.state),
+      ready: Number(task.ready) === 1,
+      leadConfigured:
+        typeof domain.project(String(task.projectId)).leadProfileId ===
+        "string",
+      // A lead that never ran an ordinary turn has no conversation to replace.
+      leadStarted:
+        lead !== undefined &&
+        schedulerStore.hasOrdinaryAssignmentWork(String(lead.assignmentId)),
+      unresolvedExecution: state.taskHasUnsettledExecution(taskId),
+      held:
+        Boolean(state.taskHold(taskId)) ||
+        domain.admission(taskId).reasons.includes("source-hold") ||
+        assignments.some((assignment) => assignment.state === "held"),
+    };
+  }
+
+  /** Whether the operator can reset the task now, and why not. */
+  resetAvailability(taskId: string) {
+    return resetAvailability(this.resetFacts(taskId));
+  }
+
+  /**
+   * Queues a fresh request for an assignment in place of `replaced`, inside the caller's
+   * transaction. It takes the current profile and instructions revisions and the task as it is
+   * now, keeps the assignment's workspace, and rebinds the replaced request's queued inbox
+   * batch with the events still waiting. The replaced request and its refusal stay.
+   */
+  private queueFreshTurn(
+    taskId: string,
+    assignmentId: string,
+    workSuffix: string,
+    replaced: { workId: string; key: string } | undefined,
+  ): string {
+    const { domain, coordination, schedulerStore, state } = this.started();
+    if (replaced)
+      coordination.releaseRefusedDeliveryWithinTransaction(replaced.workId);
+    const assignment = domain.applyCurrentRevisions(assignmentId);
+    const task = domain.task(taskId);
+    const version = Number(assignment.version);
+    const workId = `assignment:${assignmentId}:v${version}:${workSuffix}`;
+    const delivery = coordination.bindDeliveryBatchWithinTransaction(
+      assignmentId,
+      workId,
+      version,
+    );
+    if (delivery && delivery.deliveryWorkId !== workId)
+      throw new DomainConflictError("Inbox batch is bound to other work");
+    const previousWorkId =
+      state.latestCompletedAssignmentWork(assignmentId) ?? null;
+    schedulerStore.createAssignment(
+      {
+        taskId,
+        projectId: String(assignment.projectId),
+        assignmentId,
+        taskVersion: Number(task.version),
+        assignmentVersion: version,
+        instructionsRevision: Number(assignment.instructionsRevision),
+        profileRevision: Number(assignment.profileRevision),
+        // A conversation that has not seen the brief gets the task as it is now.
+        prompt: this.assignmentPrompt(
+          String(assignment.brief),
+          delivery,
+          previousWorkId === null ||
+            schedulerStore.find(previousWorkId)?.draftTurn
+            ? currentTaskOf(task)
+            : undefined,
+        ),
+        previousWorkId,
+      },
+      { requestKey: workId, workId },
+    );
+    if (replaced)
+      state.recordRestart(replaced.workId, workId, taskId, replaced.key);
+    return workId;
+  }
+
+  /** Post-commit: the receipt stands even if the wake fails. */
+  private wakeAfterCommit(): void {
+    const generation = this.generation;
+    if (generation)
+      this.observeBackgroundFailure(generation, "domain-wake", () =>
+        this.wakeScheduler(0, generation),
+      );
+  }
+
+  /**
+   * Queues the request refused before it ran again, at the current revisions and under
+   * every current admission check. Nothing is sent to the lead.
+   */
+  async startAgain(command: {
+    key: string;
+    taskId: string;
+    expectedVersion: number;
+    workId: string;
+  }): Promise<StartAgainReceipt> {
+    const { state } = this.started();
+    this.domain().task(command.taskId);
+    const { receipt, replayed } = state.recordStartAgain(command, () => {
+      const availability = this.startAgainAvailability(command.taskId);
+      if (!availability.available)
+        throw new StartAgainUnavailableError(availability.reason);
+      // The read named a request that is no longer the one to start again.
+      if (availability.workId !== command.workId)
+        throw new DomainConflictError("Start again target changed");
+      return {
+        assignmentId: availability.assignmentId,
+        workId: this.queueFreshTurn(
+          command.taskId,
+          availability.assignmentId,
+          `restart:${command.key}`,
+          { workId: availability.workId, key: command.key },
+        ),
+      };
+    });
+    if (!replayed) this.wakeAfterCommit();
+    return receipt;
+  }
+
+  /**
+   * Replaces every assignment's conversation and queues a fresh first turn for the lead in the
+   * same workspace. It is not undone: the old conversations and workspace stay readable.
+   */
+  async resetTask(command: {
+    key: string;
+    taskId: string;
+    expectedVersion: number;
+  }): Promise<TaskResetReceipt> {
+    const { state, domain, schedulerStore } = this.started();
+    this.domain().task(command.taskId);
+    const { receipt, replayed } = state.recordTaskReset(command, () => {
+      const availability = this.resetAvailability(command.taskId);
+      if (!availability.available)
+        throw new ResetUnavailableError(availability.reason);
+      const lead = domain.ensureLeadAssignmentWithinTransaction(command.taskId);
+      if (!lead) throw new ResetUnavailableError("lead-unconfigured");
+      const leadAssignmentId = String(lead.id);
+      const latest = schedulerStore.latest(leadAssignmentId);
+      domain.reopenCompletedAssignment(leadAssignmentId);
+      const conversations = domain
+        .assignments(command.taskId)
+        .map((assignment) => ({
+          assignmentId: String(assignment.id),
+          revision: state.replaceConversation(String(assignment.id)),
+        }));
+      return {
+        leadAssignmentId,
+        workId: this.queueFreshTurn(
+          command.taskId,
+          leadAssignmentId,
+          `reset:${command.key}`,
+          latest && this.notStartedWork(latest.workId)
+            ? { workId: latest.workId, key: command.key }
+            : undefined,
+        ),
+        conversations,
+      };
+    });
+    if (!replayed) this.wakeAfterCommit();
     return receipt;
   }
 

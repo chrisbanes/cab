@@ -24,6 +24,7 @@ import {
   projectRows,
 } from "./overview-model.js";
 import { QuestionHolds } from "./question-response.js";
+import { StartAgainAction } from "./task-restart.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {
   inboxSummaryOf,
@@ -292,6 +293,17 @@ function RequestCard({
           head={head}
           respond={respond}
         />
+      ) : item.kind === "intervention" &&
+        item.attentionCode === "not-started" &&
+        operator ? (
+        <StartAgainCard
+          item={item}
+          operator={operator}
+          observedAt={observedAt}
+          onRecorded={onRecorded}
+          head={head}
+          respond={respond}
+        />
       ) : (
         <>
           {head(null)}
@@ -398,6 +410,43 @@ function QuestionCard({
         observedAt={observedAt}
         onRecorded={onRecorded}
       />
+    </>
+  );
+}
+
+/** A request refused before it ran: Start again in place once its task has been read. */
+function StartAgainCard({
+  item,
+  operator: { client, session },
+  observedAt,
+  onRecorded,
+  head,
+  respond,
+}: CardParts & { onRecorded: () => void }) {
+  const resource = useInboxTask(
+      client,
+      session,
+      item.taskId,
+      observedAt,
+      "request",
+    ),
+    task = resource.state.data?.data;
+  return (
+    <>
+      {head(null)}
+      {task ? (
+        <StartAgainAction
+          client={client}
+          session={session}
+          task={task}
+          onChanged={() => {
+            void resource.refresh();
+            onRecorded();
+          }}
+        />
+      ) : (
+        respond
+      )}
     </>
   );
 }
