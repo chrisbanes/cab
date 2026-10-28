@@ -165,7 +165,7 @@ test("production local review composes exact multi-origin anchors and sends one 
 
   // Current file: select lines 2–3 and comment.
   const files = page.locator("#files");
-  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await openFile(page, /review\.txt/);
   await files.getByRole("button", { name: "Line 2: second" }).click();
   await files
     .getByRole("button", { name: "Line 3: third" })
@@ -325,7 +325,7 @@ test("production local review composes exact multi-origin anchors and sends one 
 
   // An unsent draft does not cross sign-out.
   await openTaskTab(page, "Files");
-  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await openFile(page, /review\.txt/);
   await files.getByRole("button", { name: "Line 1: first" }).click();
   await files
     .getByRole("button", { name: "Add review comment", exact: true })
@@ -376,6 +376,33 @@ test("production local review composes exact multi-origin anchors and sends one 
   assert.deepEqual(pageErrors, []);
 });
 
+/**
+ * Opens a file in Files and waits for its preview to settle. The service bounds its Git ignore
+ * check, so under load the first read can answer "Preview is unavailable"; the operator's
+ * recovery is Refresh, used here at most twice. Any other non-ready preview fails at once.
+ */
+async function openFile(page: Page, name: RegExp) {
+  const files = page.locator("#files");
+  await files.getByRole("button", { name }).click();
+  const ready = files.getByRole("toolbar", { name: "Source presentation" });
+  const status = files.getByText(/^Preview is /);
+  for (let refreshes = 0; ; refreshes++) {
+    await ready.or(status).waitFor();
+    if (await ready.isVisible()) return;
+    const text = (await status.textContent()) ?? "";
+    if (!text.startsWith("Preview is unavailable") || refreshes === 2)
+      throw new Error(`The preview of ${name} did not become ready: ${text}`);
+    const read = page.waitForResponse((response) =>
+      new URL(response.url()).pathname.endsWith("/preview"),
+    );
+    await files.getByRole("button", { name: "Refresh", exact: true }).click();
+    await read;
+    await files
+      .locator('button[aria-busy="false"]', { hasText: "Refresh" })
+      .waitFor();
+  }
+}
+
 /** Selects one current-file line of review.txt, opening the file first when it is not open. */
 async function selectLine(page: Page, line: string) {
   await openTaskTab(page, "Files");
@@ -384,7 +411,7 @@ async function selectLine(page: Page, line: string) {
   const file = files.getByRole("button", { name: /review\.txt/ });
   const target = files.getByRole("button", { name: line });
   await file.or(target).first().waitFor();
-  if (!(await target.isVisible())) await file.click();
+  if (!(await target.isVisible())) await openFile(page, /review\.txt/);
   await target.click();
 }
 
@@ -496,7 +523,7 @@ test("a refused comment save shows one plain alert, keeps the text and puts the 
     web.password,
   );
   const files = page.locator("#files");
-  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await openFile(page, /review\.txt/);
   await files.getByRole("button", { name: "Line 2: second" }).click();
   await files
     .getByRole("button", { name: "Add review comment", exact: true })
@@ -549,7 +576,7 @@ test("a comment save whose response is lost stays one exact request until it is 
     web.password,
   );
   const files = page.locator("#files");
-  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await openFile(page, /review\.txt/);
   await files.getByRole("button", { name: "Line 2: second" }).click();
   await files
     .getByRole("button", { name: "Add review comment", exact: true })
@@ -1017,7 +1044,7 @@ async function loseStageAnswer(
     web.password,
   );
   const files = page.locator("#files");
-  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await openFile(page, /review\.txt/);
   await files.getByRole("button", { name: "Line 2: second" }).click();
   await files
     .getByRole("button", { name: "Add review comment", exact: true })
@@ -1220,7 +1247,7 @@ test("a refused replay on a new entry is reported in the panel and does not bloc
   // The leftover composer does not hold the Add button: a new comment can start here.
   await openTaskTab(page, "Files");
   const files = page.locator("#files");
-  await files.getByRole("button", { name: /diff\.txt/ }).click();
+  await openFile(page, /diff\.txt/);
   await files.getByRole("button", { name: "Line 1: keep" }).click();
   await files
     .getByRole("button", { name: "Add review comment", exact: true })
@@ -1262,7 +1289,7 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
     });
   }, refusal);
   await openTaskTab(page, "Files");
-  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await openFile(page, /review\.txt/);
   await files
     .getByRole("form", { name: "Review comment" })
     .getByText(refusal, { exact: true })
@@ -1289,7 +1316,7 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
   assert.equal(await page.getByText(refusal, { exact: true }).count(), 1);
   // A comment started elsewhere replaces that composer, and its refusal goes with it.
   await openTaskTab(page, "Files");
-  await files.getByRole("button", { name: /diff\.txt/ }).click();
+  await openFile(page, /diff\.txt/);
   await files.getByRole("button", { name: "Line 1: keep" }).click();
   await files
     .getByRole("button", { name: "Add review comment", exact: true })
@@ -1583,7 +1610,7 @@ test("phone local review comments and sends to a receipt using the keyboard", as
     web.password,
   );
   const files = page.locator("#files");
-  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await openFile(page, /review\.txt/);
   await files.getByRole("button", { name: "Line 2: second" }).click();
   const add = files.getByRole("button", {
     name: "Add review comment",
