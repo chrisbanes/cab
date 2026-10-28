@@ -388,3 +388,408 @@ test("delivery publish-send says a later step is waiting, not that the create is
   assert.doesNotMatch(sent.out, /publish-link|publish-abandon/);
   assert.equal(w.f.gh.posts, 1);
 });
+
+type World = Awaited<ReturnType<typeof deliveryWorld>>;
+type Pins = { v: number; r: number; p: number; h: string };
+
+/** The four values `delivery settle` checks, as the task read shows them. */
+async function pinsOf(w: World): Promise<Pins> {
+  const read = await w.task();
+  return {
+    v: read.task.version,
+    r: read.delivery.binding.revision,
+    p: read.delivery.policyVersion,
+    h: read.delivery.binding.headSha,
+  };
+}
+const pinFlags = (p: Pins) => [
+  "--expected-task-version",
+  String(p.v),
+  "--expected-delivery-revision",
+  String(p.r),
+  "--expected-policy-version",
+  String(p.p),
+  "--expected-head-sha",
+  p.h,
+];
+const settleArgs = (w: World, ...rest: string[]) => [
+  "delivery",
+  "settle",
+  w.f.taskId,
+  ...rest,
+];
+const settlementRows = (w: World) => {
+  let n = -1;
+  w.f.seedPersistedState((db) => {
+    n = (
+      db
+        .prepare("SELECT count(*) AS n FROM delivery_settlement_receipts")
+        .get() as { n: number }
+    ).n;
+  });
+  return n;
+};
+/** A fetch that counts command POSTs, and runs `beforePost` ahead of each. */
+function countingFetch(beforePost: () => void = () => {}) {
+  const counter = {
+    posts: 0,
+    fetch: (async (input, init) => {
+      if (String(input).endsWith("/api/operator/commands")) {
+        counter.posts++;
+        beforePost();
+      }
+      return fetch(input, init);
+    }) as typeof fetch,
+  };
+  return counter;
+}
+
+test("delivery settle records the decision once, replays it after the revision moves and refuses a changed request", async (t) => {
+  const w = await deliveryWorld(t);
+  await w.f.register();
+  const before = await pinsOf(w);
+  const awaiting = await w.h.run([
+    "delivery",
+    "get",
+    w.f.taskId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(
+    awaiting.out,
+    new RegExp(
+      `Handback: +awaiting settlement for head ${before.h.slice(0, 12)} \\(binding revision ${before.r}\\)`,
+    ),
+  );
+
+  const first = await w.ok(
+    "rw",
+    settleArgs(w, "--decision", "accepted", "--request-id", randomUUID()),
+  );
+  const key = first.request.key as string;
+  assert.deepEqual(first.data.receipt, {
+    kind: "delivery-settlement",
+    key,
+    recorded: true,
+    taskId: w.f.taskId,
+    decision: "accepted",
+    revision: before.r + 1,
+  });
+  assert.deepEqual(first.data.pins, {
+    taskVersion: before.v,
+    deliveryRevision: before.r,
+    policyVersion: before.p,
+    headSha: before.h,
+  });
+  const after = await w.task();
+  assert.deepEqual(after.delivery.binding.settlement, {
+    decision: "accepted",
+    headSha: before.h,
+  });
+  const human = await w.h.run([
+    ...settleArgs(w, "--decision", "accepted", ...pinFlags(before)),
+    "--request-id",
+    key,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(human.code, 0, human.err);
+  assert.match(human.out, /does not merge, close or comment/);
+  assert.match(human.out, /does not complete the task/);
+  assert.match(human.out, /cannot be undone/);
+  const accepted = await w.h.run([
+    "delivery",
+    "get",
+    w.f.taskId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(
+    accepted.out,
+    new RegExp(
+      `Handback: +accepted for head ${before.h.slice(0, 12)} \\(binding revision ${before.r + 1}\\)`,
+    ),
+  );
+
+  // The binding revision has moved; the same request and pins replay the receipt.
+  const digest = databaseDigest(w.s.f);
+  const replay = await w.ok(
+    "rw",
+    settleArgs(
+      w,
+      "--decision",
+      "accepted",
+      ...pinFlags(before),
+      "--request-id",
+      key,
+    ),
+  );
+  assert.deepEqual(replay.data.receipt, first.data.receipt);
+  assert.equal(replay.data.reusedRequest, true);
+  assert.equal(databaseDigest(w.s.f), digest);
+  assert.equal(settlementRows(w), 1);
+  // The journal also finds the key without --request-id when the pins are the same.
+  const journaled = await w.ok(
+    "rw",
+    settleArgs(w, "--decision", "accepted", ...pinFlags(before)),
+  );
+  assert.equal(journaled.request.key, key);
+  // The session path replays the same body to the same receipt.
+  const session = await w.s.sessionPost("/api/operator/commands", {
+    type: "delivery.settle",
+    key,
+    taskId: w.f.taskId,
+    expectedTaskVersion: before.v,
+    expectedDeliveryRevision: before.r,
+    expectedPolicyVersion: before.p,
+    expectedHeadSha: before.h,
+    decision: "accepted",
+  });
+  assert.deepEqual(await session.json(), first.data.receipt);
+
+  // A reused key with other material conflicts and records nothing.
+  for (const other of [
+    ["--decision", "closed", ...pinFlags(before)],
+    ["--decision", "accepted", ...pinFlags({ ...before, v: before.v + 1 })],
+  ]) {
+    const conflict = await w.cli(
+      "rw",
+      settleArgs(w, ...other, "--request-id", key),
+    );
+    assert.equal(conflict.code, 4, conflict.out);
+    assert.equal(conflict.json().error.code, "conflict");
+  }
+  assert.equal(settlementRows(w), 1);
+  assert.deepEqual((await w.task()).delivery.binding.settlement, {
+    decision: "accepted",
+    headSha: before.h,
+  });
+
+  // A pin-less rerun reads the new revision, so it is a new request: refused, nothing sent.
+  const wire = countingFetch();
+  const again = await w.cli("rw", settleArgs(w, "--decision", "accepted"), {
+    fetch: wire.fetch,
+  });
+  assert.equal(again.code, 4, again.out);
+  assert.match(again.json().error.message, /already settled as accepted/);
+  assert.equal(wire.posts, 0);
+  assert.equal(settlementRows(w), 1);
+});
+
+test("delivery settle names the current values for a stale pin or a race and records nothing", async (t) => {
+  const w = await deliveryWorld(t);
+  await w.f.register();
+  const now = await pinsOf(w);
+  const stale: [string, string][] = [
+    ["--expected-task-version", String(now.v + 1)],
+    ["--expected-delivery-revision", String(now.r + 1)],
+    ["--expected-policy-version", String(now.p + 1)],
+    ["--expected-head-sha", "9".repeat(40)],
+  ];
+  for (const [flag, value] of stale) {
+    const refused = await w.cli(
+      "rw",
+      settleArgs(w, "--decision", "accepted", flag, value),
+    );
+    assert.equal(refused.code, 4, `${flag}: ${refused.out}`);
+    const { error } = refused.json();
+    assert.equal(error.code, "conflict");
+    assert.ok(
+      error.message.includes(
+        `task version ${now.v}, binding revision ${now.r}, policy version ${now.p}, head ${now.h.slice(0, 12)}`,
+      ),
+      error.message,
+    );
+    const human = await w.h.run([
+      ...settleArgs(w, "--decision", "accepted", flag, value),
+      "--connection",
+      "rw",
+    ]);
+    assert.equal(human.code, 4);
+    assert.equal(human.err.match(/^Fix:/gm)?.length, 1, human.err);
+  }
+  assert.equal((await w.task()).delivery.binding.settlement ?? null, null);
+  assert.equal(settlementRows(w), 0);
+
+  // The head moves after the CLI read and before its POST.
+  const racing = countingFetch(() => {
+    w.scripted.head = "3".repeat(40);
+  });
+  const raced = await w.cli("rw", settleArgs(w, "--decision", "accepted"), {
+    fetch: racing.fetch,
+  });
+  assert.equal(raced.code, 4, raced.out);
+  assert.equal(raced.json().error.code, "conflict");
+  assert.equal(racing.posts, 1);
+  assert.equal(settlementRows(w), 0);
+});
+
+test("delivery settle refuses accepting a draft, closed or outside-changed PR, and settling as closed stays possible", async (t) => {
+  const draft = await deliveryWorld(t);
+  await draft.f.register();
+  draft.scripted.draft = true;
+  await draft.ok("rw", ["delivery", "refresh", draft.f.taskId]);
+  const wire = countingFetch();
+  const refusedDraft = await draft.cli(
+    "rw",
+    settleArgs(draft, "--decision", "accepted"),
+    { fetch: wire.fetch },
+  );
+  assert.equal(refusedDraft.code, 4, refusedDraft.out);
+  assert.match(refusedDraft.json().error.message, /draft/);
+  assert.equal(wire.posts, 0);
+  assert.equal(settlementRows(draft), 0);
+  const closedDraft = await draft.ok(
+    "rw",
+    settleArgs(draft, "--decision", "closed"),
+  );
+  assert.equal(closedDraft.data.receipt.decision, "closed");
+  assert.match(
+    (
+      await draft.h.run([
+        "delivery",
+        "get",
+        draft.f.taskId,
+        "--connection",
+        "ro",
+      ])
+    ).out,
+    /Handback: +settled as closed/,
+  );
+
+  const closed = await deliveryWorld(t);
+  await closed.f.register();
+  closed.scripted.closed = true;
+  await closed.ok("rw", ["delivery", "refresh", closed.f.taskId]);
+  const refusedClosed = await closed.cli(
+    "rw",
+    settleArgs(closed, "--decision", "accepted"),
+  );
+  assert.equal(refusedClosed.code, 4, refusedClosed.out);
+  assert.match(refusedClosed.json().error.message, /closed/);
+  assert.equal(
+    (await closed.ok("rw", settleArgs(closed, "--decision", "closed"))).data
+      .receipt.decision,
+    "closed",
+  );
+
+  const outside = await deliveryWorld(t);
+  await outside.f.register();
+  outside.f.seedPersistedState((db) =>
+    db
+      .prepare("INSERT INTO delivery_task_branches VALUES (?,?,?,?,?,1)")
+      .run(
+        outside.f.taskId,
+        "R1",
+        "ensemble/12345678-fix-it",
+        "a".repeat(40),
+        "b".repeat(40),
+      ),
+  );
+  await outside.ok("rw", ["delivery", "refresh", outside.f.taskId]);
+  const refusedOutside = await outside.cli(
+    "rw",
+    settleArgs(outside, "--decision", "accepted"),
+  );
+  assert.equal(refusedOutside.code, 4, refusedOutside.out);
+  assert.match(refusedOutside.json().error.message, /outside Ensemble/);
+  assert.equal(settlementRows(outside), 0);
+
+  // An unreadable provider asks for a refresh first.
+  const outage = await deliveryWorld(t);
+  await outage.f.register();
+  outage.scripted.outage = true;
+  await outage.ok("rw", ["delivery", "refresh", outage.f.taskId]);
+  const refusedRead = await outage.cli(
+    "rw",
+    settleArgs(outage, "--decision", "closed"),
+  );
+  assert.equal(refusedRead.code, 4, refusedRead.out);
+  assert.match(refusedRead.json().error.message, /last GitHub read failed/);
+  const readHuman = await outage.h.run([
+    ...settleArgs(outage, "--decision", "closed"),
+    "--connection",
+    "rw",
+  ]);
+  assert.match(readHuman.err, /Fix: .*delivery refresh/);
+  assert.equal(settlementRows(outage), 0);
+});
+
+test("delivery settle keeps the request identity and pins when the reply is lost, and rejects a wrong receipt", async (t) => {
+  const w = await deliveryWorld(t);
+  await w.f.register();
+  const now = await pinsOf(w);
+  const lost = await w.cli("rw", settleArgs(w, "--decision", "accepted"), {
+    fetch: w.lostReply,
+  });
+  assert.equal(lost.code, 6, lost.out);
+  const message = lost.json().error.message as string;
+  const key = lost.json().error.request.key as string;
+  assert.ok(message.includes(`--request-id ${key} `), message);
+  for (const flag of pinFlags(now)) assert.ok(message.includes(flag), flag);
+  assert.doesNotMatch(message, /operation get/);
+  // The applied send moved the revision; the printed identity and pins replay it.
+  assert.equal(settlementRows(w), 1);
+  const rerun = await w.ok(
+    "rw",
+    settleArgs(
+      w,
+      "--decision",
+      "accepted",
+      "--request-id",
+      key,
+      ...pinFlags(now),
+    ),
+  );
+  assert.equal(rerun.request.key, key);
+  assert.equal(rerun.data.receipt.kind, "delivery-settlement");
+  assert.equal(settlementRows(w), 1);
+
+  const other = await deliveryWorld(t);
+  await other.f.register();
+  const wrong: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init);
+    if (!String(input).endsWith("/api/operator/commands")) return response;
+    const body = JSON.parse(String(init?.body));
+    return Response.json({
+      kind: "review",
+      key: body.key,
+      recorded: true,
+      taskId: other.f.taskId,
+      operation: "delivery.refresh",
+    });
+  };
+  const mismatched = await other.cli(
+    "rw",
+    settleArgs(other, "--decision", "accepted"),
+    { fetch: wrong },
+  );
+  assert.equal(mismatched.code, 6, mismatched.out);
+  assert.match(mismatched.json().error.message, /not the expected receipt/);
+});
+
+test("delivery settle sends nothing for a read-only credential, bad flags or a task without a reviewable PR", async (t) => {
+  const w = await deliveryWorld(t);
+  await w.f.register();
+  const wire = countingFetch();
+  const run = (connection: "ro" | "rw", ...args: string[]) =>
+    w.cli(connection, settleArgs(w, ...args), { fetch: wire.fetch });
+  assert.equal((await run("ro", "--decision", "accepted")).code, 3);
+  assert.equal((await run("rw")).code, 2);
+  assert.notEqual((await run("rw", "--decision", "maybe")).code, 0);
+  assert.notEqual(
+    (await run("rw", "--decision", "closed", "--expected-head-sha", "abc"))
+      .code,
+    0,
+  );
+  const local = await deliveryWorld(t, "allow", true);
+  const refused = await local.cli(
+    "rw",
+    settleArgs(local, "--decision", "closed"),
+    { fetch: wire.fetch },
+  );
+  assert.equal(refused.code, 4, refused.out);
+  assert.match(refused.json().error.message, /no reviewable pull request/);
+  assert.equal(wire.posts, 0);
+  assert.equal(settlementRows(w), 0);
+});

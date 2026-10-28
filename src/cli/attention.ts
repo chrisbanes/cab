@@ -25,8 +25,19 @@ import { exactCommand, positiveIntFlag, readTextFile } from "./configure.js";
 import { CliError } from "./connections.js";
 import { taskHeldLabels } from "./remedy.js";
 import { keyValues, oneLine, table, unavailable } from "./render.js";
-import { connectWrite, readTask, writeOutput } from "./task-write.js";
-import { chooseKey, sendCommand, type WriteCommand } from "./write.js";
+import {
+  connectWrite,
+  readAfter,
+  readTask,
+  writeOutput,
+} from "./task-write.js";
+import {
+  carryRetryFlags,
+  chooseKey,
+  requestKey,
+  sendCommand,
+  type WriteCommand,
+} from "./write.js";
 
 const ATTENTION_WRITE = ["cli.identity", "attention.read", "attention.write"];
 const ids = (positionals: string[]) => ({
@@ -518,6 +529,145 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
             "The requester receives the decision on its next eligible turn; Stop, pause and other holds are unchanged.",
             "A decision cannot be changed; a changed request is a new approval.",
           ],
+        });
+      },
+    },
+  ],
+  [
+    "result deliver",
+    {
+      usage:
+        "result deliver TASK_ID RESULT_ID [--expected-revision N] [--request-id UUID]",
+      positionals: 2,
+      expects:
+        "--expected-revision: the undelivered result's revision ('ensemble task get TASK_ID --output json' lists data.unresolvedResults); omitted, the revision this command reads first.",
+      flags: ["expected-revision", "request-id"],
+      async run(ctx) {
+        const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
+        const resultId = uuidArg(ctx.positionals[3] ?? "", "RESULT_ID");
+        const pinned = positiveIntFlag(
+          ctx.values["expected-revision"],
+          "expected-revision",
+        );
+        const session = await connectWrite(ctx, [
+          ...ATTENTION_WRITE,
+          "task.read",
+        ]);
+        const read = (await readTask(session, taskId)).data;
+        const item = read.unresolvedResults.find(
+          (r) => r.resultId === resultId,
+        );
+        const row = read.results.find((r) => r.resultId === resultId);
+        if (!row && !item)
+          throw new CliError("not-found", `No such result on task ${taskId}.`, {
+            fix: `Run 'ensemble result list ${taskId}' to see its results.`,
+          });
+        const nameOf = (id: string) =>
+          read.assignments.find((a) => a.assignmentId === id)?.name ?? id;
+        const delivered = (id: string | null | undefined) =>
+          new CliError(
+            "conflict",
+            id
+              ? `The result was already delivered to ${nameOf(id)}.`
+              : "The result is not waiting for a destination.",
+            {
+              fix: `Run 'ensemble result get ${taskId} ${resultId}' to see where it went. If an earlier attempt's reply was lost, rerun it with its --request-id and --expected-revision.`,
+            },
+          );
+        if (
+          item &&
+          (item.availability !== "available" || !item.permittedRecipient)
+        )
+          throw new CliError(
+            "policy-denied",
+            "No lead or requester on this task can receive it; the result stays undelivered. Nothing was sent.",
+            {
+              fix: `Run 'ensemble task get ${taskId}' to see the task's assignments.`,
+            },
+          );
+        // A delivered result has left unresolvedResults, so a replay rebuilds its material from the record.
+        const revision = pinned ?? item?.revision;
+        const recipientId =
+          item?.permittedRecipient?.assignmentId ?? row?.recipientAssignmentId;
+        if (revision === undefined || !recipientId)
+          throw delivered(row?.recipientAssignmentId);
+        const scope = `task:${taskId}`;
+        const { key, digest, reached } = await requestKey(
+          ctx,
+          session,
+          { scope, type: "result.recipient" },
+          [resultId, revision, recipientId],
+        );
+        if (!reached) {
+          if (!item) throw delivered(recipientId);
+          if (item.revision !== revision)
+            throw new CliError(
+              "conflict",
+              `The result is at revision ${item.revision}, not ${revision}. Nothing was sent.`,
+              {
+                fix: `Retry with --expected-revision ${item.revision}, or omit it to use the current revision.`,
+              },
+            );
+        }
+        const { receipt, request } = await sendCommand(ctx, session, {
+          scope,
+          type: "result.recipient",
+          key,
+          digest,
+          resource: resultId,
+          command: exactCommand(
+            {
+              type: "result.recipient",
+              taskId,
+              resultId,
+              expectedRevision: revision,
+              recipientAssignmentId: recipientId,
+            },
+            key,
+          ),
+          match: (r) =>
+            r.kind === "coordination" &&
+            r.taskId === taskId &&
+            r.recipientAssignmentId === recipientId,
+        }).catch(async (error: unknown) => {
+          if (error instanceof CliError && error.code === "conflict") {
+            const now = await readAfter(session, taskId);
+            const current = now?.unresolvedResults.find(
+              (r) => r.resultId === resultId,
+            );
+            throw new CliError(
+              "conflict",
+              `Not delivered; nothing was recorded. ${
+                current
+                  ? `The result is now at revision ${current.revision}${current.permittedRecipient ? "" : " with no permitted recipient"}, and you sent revision ${revision}.`
+                  : now
+                    ? "The result is no longer waiting for a destination, or this request ID was used with other material."
+                    : "Its destination changed since it was read, or this request ID was used with other material."
+              }`,
+              {
+                ...error.extra,
+                fix: `Run 'ensemble task get ${taskId}' to see the result's current state, then rerun (omit --expected-revision to use the current revision, and use a new --request-id if you reused one).`,
+              },
+            );
+          }
+          return carryRetryFlags(error, key, `--expected-revision ${revision}`);
+        });
+        return writeOutput({
+          request,
+          receipt,
+          reused: reached,
+          effect: "queued",
+          summary: `Delivered result ${resultId}`,
+          lines: [
+            ["Task", taskId],
+            ["Recipient", `${nameOf(recipientId)} (${recipientId})`],
+            ["Revision", String(revision)],
+          ],
+          notes: [
+            "It arrives on the recipient's next eligible turn; holds and admission still decide, and this does not complete the task.",
+            "The destination cannot be redirected or undone.",
+          ],
+          data: { resultId, recipientAssignmentId: recipientId, revision },
         });
       },
     },

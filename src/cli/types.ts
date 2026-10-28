@@ -115,6 +115,9 @@ export type Values = {
   selection?: string | undefined;
   "body-file"?: string | undefined;
   "expected-task-version"?: string | undefined;
+  "expected-delivery-revision"?: string | undefined;
+  "expected-policy-version"?: string | undefined;
+  "expected-head-sha"?: string | undefined;
   "review-id"?: string | undefined;
   work?: string | undefined;
   "evidence-file"?: string | undefined;

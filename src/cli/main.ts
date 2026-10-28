@@ -174,7 +174,13 @@ review records a new pending review instead, and nothing is posted.
 delivery publish-send creates a public GitHub issue and turns the local task into
 it; nothing takes that back (close the issue on GitHub), and a publish-confirm
 decision is final. publish-abandon gives up on a create whose outcome is unknown
-and may leave a duplicate issue.`;
+and may leave a duplicate issue. delivery settle records your handback decision for
+the pull request head, delivery policy version and task version it was read at; it
+does not merge, close or comment on GitHub, does not complete the task, and has no
+undo (a new push or policy change needs a new settlement).`;
+const RESULT_NOTE = `Results: result deliver sends an undelivered result to the one recipient the service
+permits (a lead or requester); it cannot be redirected or undone, and by itself
+does not complete the task.`;
 const RECOVERY_NOTE = `Recovery: recovery prepare writes an owner-only document from the observed
 generation identity plus your --evidence-file; nothing is inferred, defaulted or
 confirmed by a flag. recovery submit sends it once. Adoption, recovery and
@@ -191,6 +197,7 @@ const AREA_NOTES: Record<string, string[]> = {
   delivery: [DELIVERY_NOTE],
   project: [DELIVERY_NOTE],
   recovery: [RECOVERY_NOTE],
+  result: [RESULT_NOTE],
 };
 
 const ORIGIN_NOTE =
@@ -241,7 +248,7 @@ ${indented([...COMMAND_USAGE].flatMap(([key, usage]) => helpEntry(key, usage))).
 
 ${SERVICE_USAGE}
 ${OPTIONS_HELP}
-${[TASK_NOTE, RUNTIME_NOTE, DELIVERY_NOTE, RECOVERY_NOTE].join("\n\n")}
+${[TASK_NOTE, RUNTIME_NOTE, DELIVERY_NOTE, RESULT_NOTE, RECOVERY_NOTE].join("\n\n")}
 
 ${ORIGIN_NOTE}
 `;
@@ -338,6 +345,9 @@ export const OPTIONS = {
   selection: { type: "string" },
   "body-file": { type: "string" },
   "expected-task-version": { type: "string" },
+  "expected-delivery-revision": { type: "string" },
+  "expected-policy-version": { type: "string" },
+  "expected-head-sha": { type: "string" },
   "review-id": { type: "string" },
   target: { type: "string" },
   "publication-id": { type: "string" },

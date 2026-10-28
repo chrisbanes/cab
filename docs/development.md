@@ -440,6 +440,14 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      --decision approved|denied --expected-revision N [--material-hash HASH]` sends
      exactly what the service disclosed; the hash is required whenever material was
      recorded. Withheld or legacy material can only be denied.
+   - `result deliver TASK_ID RESULT_ID [--expected-revision N]` sends an undelivered
+     result (`task get TASK_ID --output json` lists `data.unresolvedResults`) to the one
+     recipient the service permits, the same `result.recipient` command as the task
+     view. An omitted `--expected-revision` is the revision the command reads first.
+     It refuses an unknown result, a result already delivered and a result whose
+     recipient is unavailable, sending nothing. Delivery cannot be redirected or
+     undone, and it does not complete the task: the recipient receives the result on
+     its next eligible turn, subject to holds and admission.
    - `task stop TASK_ID [--expected-version N]` is best-effort cancellation: new
      turns are held, and effects may continue until termination is verified. It
      reads nothing first. `task resume TASK_ID [--expected-version N]` clears only
@@ -510,6 +518,18 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      retryable ones) and re-reads every registered PR, then reports `outcome:
      complete|partial` for the task. A failed provider read or an unsettled action
      is `partial` (exit 0, gap `evidence-gap`), never "refreshed".
+   - `delivery settle TASK_ID --decision accepted|closed
+     [--expected-task-version N] [--expected-delivery-revision N]
+     [--expected-policy-version N] [--expected-head-sha SHA]` records the handback
+     settlement of a reviewable PR, the same `delivery.settle` command as the task
+     view; `delivery get` shows the four values. An omitted pin is the value the
+     command read first, and the service refuses any that is stale. Either decision is
+     refused for a merged PR, a failed last provider read or a handback already
+     settled for the current head; Accept is also refused for a draft or closed PR
+     and a task branch with an outside push, while Settle as closed stays possible on
+     a closed PR. It covers
+     that head and policy version only, does not merge, close or comment on the PR,
+     does not complete the task and cannot be undone.
    - `delivery review-comment TASK_ID --body-file FILE --expected-task-version N`
      records a pending review and posts nothing. `delivery confirm-comment TASK_ID
      --review-id R --expected-revision N --material-hash HASH --decision
@@ -535,7 +555,10 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    `uncertain`, `attempting` or `prepared` send exits 6: do not resend with a new
    key, run `delivery refresh` and then `delivery get`. `operation get` reads
    `github.configure` and `github.preview` receipts; placements, refreshes and
-   comments are settled by rerunning with the same key.
+   comments are settled by rerunning with the same key. `delivery settle` and
+   `result deliver` are settled by rerunning with the printed `--request-id` and the
+   `--expected-*` values, because a recorded settlement moves the binding revision and
+   a recorded delivery leaves the unresolved list; `operation get` does not read them.
 
 9. Evidence-bearing recovery. `recovery get ASSIGNMENT_ID` and `recovery prepare`
    work with either scope; `recovery submit` needs a read/write credential (a

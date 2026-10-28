@@ -1026,6 +1026,20 @@
       "gap": "An approval whose target is withheld cannot be decided through the CLI (fails closed, 409). Decisions are irreversible. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
+      "id": "result deliver",
+      "kind": "command",
+      "area": "result/artifact/delivery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": ["test/coordination/operator-cli-result-delivery.test.ts"],
+      "effect": "Delivers an undelivered result to the one recipient the service permits (result.recipient) with the session API's coordination receipt; the recipient receives it on its next eligible turn and the task is not completed by it.",
+      "denial": "A read-only credential exits 3 and the command route is not called; an unknown result exits 2; a result with no available permitted recipient is refused with nothing sent.",
+      "revision": "A stale --expected-revision exits 4 naming the current revision; a destination that stops being permitted between the read and the send exits 4 from the service; a result that already has a destination is refused as delivered. Nothing is recorded in any case.",
+      "retry": "The same --request-id and --expected-revision replay the original receipt after the result leaves the unresolved list and after a service restart, with one inbox message; a lost reply exits 6 naming --request-id and --expected-revision (operation get does not read result.recipient receipts); a reused key with other material exits 4.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Delivery is final and cannot be redirected or undone. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
       "id": "execution list",
       "kind": "command",
       "area": "execution/logs",
@@ -1294,6 +1308,20 @@
       "observation": "synthetic",
       "state": "bounded",
       "gap": "Refresh is installation-wide (stated in the output). Scripted GitHub only; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
+      "id": "delivery settle",
+      "kind": "command",
+      "area": "result/artifact/delivery",
+      "scenarios": ["CLI02", "CLI04"],
+      "evidence": ["test/delivery/operator-cli-delivery.test.ts"],
+      "effect": "Records the operator's handback settlement (accepted or closed) of a reviewable PR for the head, delivery policy version and task version it was read at, with the delivery-settlement receipt; it does not merge, close, comment or complete the task.",
+      "denial": "A read-only credential exits 3 and the command route is not called; a missing or invalid --decision, a malformed --expected-head-sha and a task without a reviewable PR send nothing; accepting a draft or closed PR, or a task branch with an outside push, is refused with nothing sent, while settling as closed stays possible on a closed PR.",
+      "revision": "A stale task version, binding revision, policy version or head exits 4 naming the current values and records nothing; the omitted value is the one the command read first.",
+      "retry": "The same --request-id and pins replay the original receipt after the binding revision moves; a lost reply exits 6 naming --request-id and the pins (operation get does not read delivery.settle receipts); a reused key with other material exits 4; a pin-less rerun after the settlement is refused as already settled.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "A settlement is final for one head and policy version and has no undo. Scripted GitHub only; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "delivery review-comment",

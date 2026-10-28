@@ -10,14 +10,17 @@ import {
   type BrowseCommand,
   browseOutput,
   type CoverageGap,
+  enumArg,
   uuidArg,
 } from "./browse.js";
 import { exactCommand, positiveIntFlag, readTextFile } from "./configure.js";
 import { CliError } from "./connections.js";
 import { keyValues, table, unavailable } from "./render.js";
+import { connectWrite, readAfter, writeOutput } from "./task-write.js";
 import type { ServiceClient } from "./transport.js";
 import type { RequestIdentity } from "./types.js";
 import {
+  carryRetryFlags,
   optionalRequestId,
   requestKey,
   type Session,
@@ -90,6 +93,32 @@ const actionRows = (actions: Action[]) =>
     ]),
   );
 
+const AWAITING_SETTLEMENT = "reviewable-pr-awaiting-current-settlement";
+/** A settlement is current only while completion does not await a new one (the web control's rule). */
+const currentSettlement = (d: Delivery) =>
+  d.binding?.settlement && !d.blockers.includes(AWAITING_SETTLEMENT)
+    ? d.binding.settlement
+    : null;
+
+function handbackLine(d: Delivery, b: NonNullable<Delivery["binding"]>) {
+  const s = currentSettlement(d);
+  const at = `binding revision ${b.revision}`;
+  return s
+    ? s.decision === "accepted"
+      ? `accepted for head ${s.headSha.slice(0, 12)} (${at})`
+      : `settled as closed (${at})`
+    : `awaiting settlement for head ${b.headSha.slice(0, 12)} (${at})`;
+}
+
+const noHandback = (taskId: string) =>
+  new CliError(
+    "policy-denied",
+    "This task has no reviewable pull request handback to settle. Nothing was sent.",
+    {
+      fix: `Run 'ensemble delivery get ${taskId}' to see the task's delivery.`,
+    },
+  );
+
 function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
   const d = view.delivery,
     p = view.commentPolicy,
@@ -121,6 +150,9 @@ function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
           ? `${b.repositoryName}#${b.number} ${b.state} head ${b.headSha.slice(0, 12)}, observed ${b.observedAt}${b.readError ? `, last read failed: ${b.readError}` : ""}`
           : "none registered",
       ],
+      ...(d && b && d.mode === "reviewable-pr"
+        ? [["Handback", handbackLine(d, b)] as [string, string]]
+        : []),
       ...(d?.branches ?? []).map((r): [string, string] => [
         "Branch",
         `${r.repositoryName} ${unavailable(r.branch)} pushed ${r.lastPushedSha?.slice(0, 12) ?? "nothing yet"}${r.outsideHeadSha ? (r.outsideHeadSha === absentBranchHead ? ", branch deleted" : `, outside push ${r.outsideHeadSha.slice(0, 12)}`) : ""}`,
@@ -353,6 +385,195 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             ...deliveryLines(view),
           ].join("\n"),
         };
+      },
+    },
+  ],
+  [
+    "delivery settle",
+    {
+      usage:
+        "delivery settle TASK_ID --decision accepted|closed [--expected-task-version N] [--expected-delivery-revision N] [--expected-policy-version N] [--expected-head-sha SHA] [--request-id UUID]",
+      positionals: 1,
+      expects:
+        "--expected-task-version: the task's version; --expected-delivery-revision: the PR binding's revision; --expected-policy-version: the delivery policy's version; --expected-head-sha: the PR head ('ensemble delivery get TASK_ID' shows them); omitted, the value this command reads first. The decision is final: it does not merge, close or comment, and has no undo.",
+      flags: [
+        "decision",
+        "expected-task-version",
+        "expected-delivery-revision",
+        "expected-policy-version",
+        "expected-head-sha",
+        "request-id",
+      ],
+      async run(ctx) {
+        const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
+        const decision = enumArg(
+          ctx.values.decision,
+          ["accepted", "closed"],
+          "--decision",
+        );
+        if (!decision)
+          throw new CliError(
+            "usage",
+            "--decision accepted|closed is required.",
+          );
+        const pinned = {
+          taskVersion: positiveIntFlag(
+            ctx.values["expected-task-version"],
+            "expected-task-version",
+          ),
+          deliveryRevision: positiveIntFlag(
+            ctx.values["expected-delivery-revision"],
+            "expected-delivery-revision",
+          ),
+          policyVersion: positiveIntFlag(
+            ctx.values["expected-policy-version"],
+            "expected-policy-version",
+          ),
+          headSha: ctx.values["expected-head-sha"],
+        };
+        if (
+          pinned.headSha !== undefined &&
+          !/^[0-9a-f]{40}$/.test(pinned.headSha)
+        )
+          throw new CliError(
+            "invalid-input",
+            "--expected-head-sha must be the 40-character lowercase hex head of the pull request.",
+          );
+        const session = await connectWrite(ctx, [
+          "cli.identity",
+          "task.read",
+          "delivery.write",
+        ]);
+        const read = await readTask(session.client, taskId);
+        const d = read.data.delivery,
+          b = d?.binding;
+        // An omitted pin is the value this read saw.
+        const pins = {
+          taskVersion: pinned.taskVersion ?? read.data.task.version,
+          deliveryRevision: pinned.deliveryRevision ?? b?.revision,
+          policyVersion: pinned.policyVersion ?? d?.policyVersion,
+          headSha: pinned.headSha ?? b?.headSha,
+        };
+        if (
+          pins.deliveryRevision === undefined ||
+          pins.policyVersion === undefined ||
+          pins.headSha === undefined
+        )
+          throw noHandback(taskId);
+        const { key, digest, reached } = await keyFor(
+          ctx,
+          session,
+          "delivery.settle",
+          taskId,
+          [
+            decision,
+            pins.taskVersion,
+            pins.deliveryRevision,
+            pins.policyVersion,
+            pins.headSha,
+          ],
+        );
+        const refuse = (message: string, fix: string) => {
+          throw new CliError("conflict", `${message} Nothing was sent.`, {
+            fix,
+          });
+        };
+        // Advisory only, and never for a key that may already have applied: the service decides.
+        if (!reached) {
+          if (!d || !b || d.mode !== "reviewable-pr") throw noHandback(taskId);
+          const view = `Run 'ensemble delivery get ${taskId}' to see the handback.`;
+          const settled = currentSettlement(d);
+          if (settled)
+            refuse(
+              `The handback is already settled as ${settled.decision} for head ${settled.headSha.slice(0, 12)}.`,
+              `${view} If an earlier attempt's reply was lost, it was recorded; a new push or policy change needs a new settlement.`,
+            );
+          if (b.state === "MERGED")
+            refuse("The pull request is already merged.", view);
+          if (b.readError)
+            refuse(
+              `The last GitHub read failed (${b.readError}).`,
+              `Run 'ensemble delivery refresh ${taskId}', then settle again.`,
+            );
+          if (decision === "accepted") {
+            if (b.draft)
+              refuse(
+                "The pull request is a draft, so it cannot be accepted.",
+                `Mark it ready for review on GitHub and run 'ensemble delivery refresh ${taskId}', or settle it as closed.`,
+              );
+            if (b.state === "CLOSED")
+              refuse(
+                "The pull request is closed, so it cannot be accepted.",
+                `Reopen it on GitHub and run 'ensemble delivery refresh ${taskId}', or settle it as closed.`,
+              );
+            if (d.blockers.includes("task-branch-outside-change"))
+              refuse(
+                "The task branch has a push from outside Ensemble, so the handback cannot be accepted.",
+                `${view} Settle it as closed, or resolve the outside change first.`,
+              );
+          }
+        }
+        const sent = `task version ${pins.taskVersion}, binding revision ${pins.deliveryRevision}, policy version ${pins.policyVersion}, head ${pins.headSha.slice(0, 12)}`;
+        const { receipt, request } = await sendCommand(ctx, session, {
+          scope: scope(taskId),
+          type: "delivery.settle",
+          key,
+          digest,
+          resource: taskId,
+          command: exactCommand(
+            {
+              type: "delivery.settle",
+              taskId,
+              expectedTaskVersion: pins.taskVersion,
+              expectedDeliveryRevision: pins.deliveryRevision,
+              expectedPolicyVersion: pins.policyVersion,
+              expectedHeadSha: pins.headSha,
+              decision,
+            },
+            key,
+          ),
+          match: (r) =>
+            r.kind === "delivery-settlement" &&
+            r.taskId === taskId &&
+            r.decision === decision,
+        }).catch(async (error: unknown) => {
+          if (error instanceof CliError && error.code === "conflict") {
+            const now = await readAfter(session, taskId);
+            const nb = now?.delivery?.binding;
+            const current = nb
+              ? `task version ${now?.task.version}, binding revision ${nb.revision}, policy version ${now?.delivery?.policyVersion}, head ${nb.headSha.slice(0, 12)}`
+              : "not readable now";
+            throw new CliError(
+              "conflict",
+              `Not settled; nothing was recorded. The service refused it: the pull request, branch or policy no longer matches what was sent, the pull request is not reviewable, or this request ID was used with other material. Sent: ${sent}. Current: ${current}.`,
+              {
+                ...error.extra,
+                fix: `Run 'ensemble delivery get ${taskId}' to review the current head and policy, then rerun (omit the --expected-* flags to use the current values, and use a new --request-id if you reused one).`,
+              },
+            );
+          }
+          return carryRetryFlags(
+            error,
+            key,
+            `--expected-task-version ${pins.taskVersion} --expected-delivery-revision ${pins.deliveryRevision} --expected-policy-version ${pins.policyVersion} --expected-head-sha ${pins.headSha}`,
+          );
+        });
+        return writeOutput({
+          request,
+          receipt,
+          reused: reached,
+          effect: "saved",
+          summary: `Settled the handback as ${decision} for head ${pins.headSha.slice(0, 12)}`,
+          lines: [
+            ["Task", taskId],
+            ["Bound to", sent],
+          ],
+          notes: [
+            "This does not merge, close or comment on the pull request, and does not complete the task.",
+            "It covers this head and policy version only; a new push or policy change needs a new settlement. It cannot be undone.",
+          ],
+          data: { decision, pins },
+        });
       },
     },
   ],
