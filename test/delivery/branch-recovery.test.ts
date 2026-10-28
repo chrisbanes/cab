@@ -380,3 +380,80 @@ test("the outside-change wake names both recovery actions for a head and only ov
   assert.match(gone?.reason ?? "", /branch\.force-push/);
   assert.doesNotMatch(gone?.reason ?? "", /request branch\.adopt/);
 });
+
+test("a PR still showing the head a recovery replaced or adopted is lagging, not another outside change", async (t) => {
+  const adopting = adoptWorld(t);
+  const { outside: adoptedHead, next } = await withRealOutsideHead(adopting);
+  const branch = branchOf(adopting)?.branch ?? "";
+  adopting.showPr(adoptedHead, branch);
+  await adopting.adoptOutside();
+  adopting.wakes.length = 0;
+  // The PR has not caught up with the push on top of the adopted head.
+  adopting.store.transaction(() =>
+    adopting.store.registerPrWithinTransaction(
+      adopting.caller,
+      adopting.showPr(adoptedHead, branch),
+      adopting.caller.assignmentId,
+    ),
+  );
+  assert.equal(
+    (await adopting.submit("branch.push", next)).state,
+    "confirmed-success",
+  );
+  assert.equal(branchOf(adopting)?.outsideHeadSha, null);
+  assert.deepEqual(adopting.wakes, []);
+
+  const overwriting = publicationWorld(t, { approved: true });
+  await withOutsideHead(overwriting);
+  const heldBranch = branchOf(overwriting)?.branch ?? "";
+  overwriting.showPr(outside, heldBranch);
+  overwriting.store.transaction(() =>
+    overwriting.store.registerPrWithinTransaction(
+      overwriting.caller,
+      overwriting.showPr(outside, heldBranch),
+      overwriting.caller.assignmentId,
+    ),
+  );
+  overwriting.wakes.length = 0;
+  const replacement = overwriting.amend();
+  assert.equal(
+    (await overwriting.overwrite(replacement)).state,
+    "confirmed-success",
+  );
+  assert.equal(branchOf(overwriting)?.outsideHeadSha, null);
+  assert.deepEqual(overwriting.wakes, []);
+});
+
+test("a branch that returns to Ensemble's own push during a recovery clears the record without waking the lead", async (t) => {
+  const adopting = adoptWorld(t);
+  const first = await withOutsideHead(adopting);
+  adopting.setAdopt(async () => {
+    adopting.remote.head = first;
+    return "adopted";
+  });
+  const record = await adopting.adoptOutside();
+  assert.equal(record.observation?.reason, "branch-outside-cleared");
+  assert.equal(branchOf(adopting)?.outsideHeadSha, null);
+  assert.equal(branchOf(adopting)?.lastPushedSha, first);
+  assert.deepEqual(adopting.wakes, []);
+
+  // An overwrite whose lease failed because the branch is back at the last push.
+  const overwriting = publicationWorld(t, { approved: true });
+  const pushed = await withOutsideHead(overwriting);
+  const material = overwriting.outsideMaterial();
+  overwriting.raceBeforeNextPush(pushed);
+  const refused = await overwriting.overwrite(overwriting.commit(), material);
+  assert.equal(refused.observation?.reason, "branch-outside-cleared");
+  assert.equal(branchOf(overwriting)?.outsideHeadSha, null);
+  assert.deepEqual(overwriting.wakes, []);
+});
+
+test("a repository with no push or adoption has no verified name for a compare link", async (t) => {
+  const w = publicationWorld(t, { approved: true });
+  await withOutsideHead(w);
+  assert.equal(
+    w.store.verifiedRepositoryName(w.taskId, repositoryId),
+    "org/repo",
+  );
+  assert.equal(w.store.verifiedRepositoryName(w.taskId, "R9"), null);
+});

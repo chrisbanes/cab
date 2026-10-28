@@ -1884,18 +1884,31 @@ export class DeliveryStore {
     }
     throw new Error("Task branch could not be assigned");
   }
-  /** Commits Ensemble pushed, or may have pushed (an attempt that may have landed), for the repository. */
+  /**
+   * Commits Ensemble pushed, or may have pushed (an attempt that may have landed), for the repository,
+   * and the outside head a confirmed recovery replaced or adopted: a PR that still shows it is lagging
+   * behind the recovery, not an outside change.
+   */
   private pushedShas(taskId: string, repositoryId: string): Set<string> {
     return new Set(
-      this.actions(taskId).flatMap((a) =>
-        (a.state === "confirmed-success" ||
-          this.mayHaveLanded(a.operationId)) &&
-        a.request.action.kind.startsWith("branch.") &&
-        a.request.action.target.repositoryId === repositoryId &&
-        "commitSha" in a.request.action
-          ? [a.request.action.commitSha]
-          : [],
-      ),
+      this.actions(taskId).flatMap((a) => {
+        const action = a.request.action;
+        if (
+          !action.kind.startsWith("branch.") ||
+          action.target.repositoryId !== repositoryId
+        )
+          return [];
+        const settled = a.state === "confirmed-success";
+        return [
+          ...((settled || this.mayHaveLanded(a.operationId)) &&
+          "commitSha" in action
+            ? [action.commitSha]
+            : []),
+          ...(settled && isRecoveryAction(action)
+            ? [action.outsideHeadSha]
+            : []),
+        ];
+      }),
     );
   }
   delivery(taskId: string): PrDeliveryBinding | null {

@@ -1,9 +1,9 @@
 import {
-  constants as fsConstants,
   copyFile,
   mkdir,
   mkdtemp,
   readdir,
+  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -184,22 +184,21 @@ export async function adoptOutsideHead(
     if (onBase === false) return "not-on-base";
     if (onBase !== true) return "unproved";
 
-    // Packs go in whole, `.pack` before the `.idx` that makes Git find it; an existing file is left.
+    // Packs go in whole and atomically (copied aside, then renamed), `.pack` before the `.idx` that
+    // makes Git find it, so a crash or a concurrent Git never sees half a file. Same name, same content.
     const packs = join(dir, "objects", "pack");
     // A head the worktree already has fetches nothing, and needs no import.
     const names = (await readdir(packs).catch(() => [])).filter(
       (n) => n.endsWith(".pack") || n.endsWith(".idx"),
     );
-    await mkdir(join(objects, "pack"), { recursive: true });
+    const target = join(objects, "pack");
+    await mkdir(target, { recursive: true });
     for (const extension of [".pack", ".idx"])
-      for (const name of names.filter((n) => n.endsWith(extension)))
-        await copyFile(
-          join(packs, name),
-          join(objects, "pack", name),
-          fsConstants.COPYFILE_EXCL,
-        ).catch((error: NodeJS.ErrnoException) => {
-          if (error.code !== "EEXIST") throw error;
-        });
+      for (const name of names.filter((n) => n.endsWith(extension))) {
+        const aside = join(target, `tmp_ensemble_${name}`);
+        await copyFile(join(packs, name), aside);
+        await rename(aside, join(target, name));
+      }
     // A ref keeps the imported objects from being pruned. Git runs without the worktree's hooks and
     // without a credential.
     const kept = await runGit({

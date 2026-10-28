@@ -1,5 +1,6 @@
 import { credentialFreeEnvironment } from "../core/child-environment.js";
 import {
+  absentBranchHead,
   isOperatorAction,
   isRecoveryAction,
   isOperatorDeliveryCaller,
@@ -174,11 +175,14 @@ export class DeliveryCoordinator {
     sha: string | null,
   ) {
     try {
+      // The recovery's approval binds exactly these values, so the lead gets them as recorded.
+      const recorded = this.store.taskBranch(taskId, repositoryId);
+      const material = `branch ${recorded?.branch ?? "unknown"}, outsideHeadSha ${sha ?? absentBranchHead}, lastPushedSha ${recorded?.lastPushedSha ?? "null"}`;
       this.options.feedback?.(
         taskId,
         sha
-          ? `The task branch changed outside Ensemble (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it, with branch, outsideHeadSha and lastPushedSha as the approval material. Both need the operator's approval.`
-          : "The task branch was deleted outside Ensemble. Request branch.force-push naming outsideHeadSha 0000000000000000000000000000000000000000 to recreate it, with the operator's approval. A deleted branch cannot be adopted.",
+          ? `The task branch changed outside Ensemble (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it. Both need the operator's approval of exactly this material: ${material}.`
+          : `The task branch was deleted outside Ensemble. Request branch.force-push to recreate it, with the operator's approval of exactly this material: ${material}. A deleted branch cannot be adopted.`,
         `outside-push:${repositoryId}:${sha ?? "absent"}`,
       );
     } catch {
@@ -379,26 +383,11 @@ export class DeliveryCoordinator {
       if (error instanceof PublicationRefusal) {
         const outside = error.reason === "branch-outside-change";
         if (error.reason === "branch-outside-cleared" && assigned)
-          // The remote is back at Ensemble's own push: only the head this recovery named is obsolete.
-          return this.store.recordObservation(
-            record.operationId,
-            {
-              state: "confirmed-failure",
-              reason: error.reason,
-              receipt: null,
-            },
-            () => {
-              if (
-                this.store.taskBranch(caller.taskId, assigned.repositoryId)
-                  ?.outsideHeadSha ===
-                (isRecoveryAction(action) ? action.outsideHeadSha : null)
-              )
-                this.store.clearOutsideHead(
-                  caller.taskId,
-                  assigned.repositoryId,
-                );
-            },
-          );
+          return this.recordPublicationAware(record, {
+            state: "confirmed-failure",
+            reason: error.reason,
+            receipt: null,
+          });
         return this.store.recordObservation(
           record.operationId,
           {
@@ -517,18 +506,27 @@ export class DeliveryCoordinator {
           : observation.outsideDeleted
             ? null
             : undefined);
-    return this.store.recordObservation(
-      record.operationId,
-      observation,
-      () =>
-        action.kind.startsWith("branch.") &&
-        outside !== undefined &&
+    return this.store.recordObservation(record.operationId, observation, () => {
+      if (observation.reason === "branch-outside-cleared") {
+        // The branch is back at Ensemble's own push: only the head this recovery named is obsolete.
+        const named = isRecoveryAction(action) ? action.outsideHeadSha : null;
+        if (
+          this.store.taskBranch(
+            record.binding.taskId,
+            action.target.repositoryId,
+          )?.outsideHeadSha === named
+        )
+          this.store.clearOutsideHead(
+            record.binding.taskId,
+            action.target.repositoryId,
+          );
+      } else if (action.kind.startsWith("branch.") && outside !== undefined)
         this.outsidePush(
           record.binding.taskId,
           action.target.repositoryId,
           outside,
-        ),
-    );
+        );
+    });
   }
   async registerPr(input: unknown, caller: DeliveryCaller) {
     if (!isRuntimeDeliveryCaller(caller))

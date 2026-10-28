@@ -1545,6 +1545,13 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         }
         if (head === before.beforeHead)
           return outcomeFailure ?? rejectedUnsettled();
+        // An overwrite whose lease failed because the branch is back at Ensemble's own push.
+        if (
+          a.kind === "branch.force-push" &&
+          a.outsideHeadSha !== undefined &&
+          head === before.lastPushedSha
+        )
+          return failure("branch-outside-cleared");
         if (head === a.commitSha)
           return before.retry ? unsettled() : outside(head);
         return outside(head);
@@ -1608,6 +1615,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       branch: string;
       workspacePath: string;
       baseCommit: string;
+      lastPushedSha: string | null;
     };
     try {
       before = z
@@ -1616,17 +1624,22 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           branch: name,
           workspacePath: name,
           baseCommit: sha,
+          lastPushedSha: sha.nullable(),
         })
         .parse(record.beforeState);
     } catch {
       return failure("branch-adopt-workspace-unavailable");
     }
     // A moved ref is another outside change: it is recorded and the approval is not reused.
-    const moved = (head: string | null): ProviderActionObservation => ({
-      state: "confirmed-failure",
-      reason: "branch-outside-change",
-      receipt: head ? at(before.branch, head) : null,
-    });
+    // A branch back at Ensemble's own last push is not an outside change: nothing remains to recover from.
+    const moved = (head: string | null): ProviderActionObservation =>
+      head !== null && head === before.lastPushedSha
+        ? failure("branch-outside-cleared")
+        : {
+            state: "confirmed-failure",
+            reason: "branch-outside-change",
+            receipt: head ? at(before.branch, head) : null,
+          };
     try {
       const first = await this.optionalRef(
         before.repositoryPath,
@@ -1673,6 +1686,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       .object({
         branch: name,
         beforeHead: sha.nullable(),
+        lastPushedSha: sha.nullable().optional(),
         uncommittedEntries: z.number().int().nonnegative(),
       })
       .parse(record.beforeState);
@@ -1716,6 +1730,19 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
             receipt: null,
             retryable: true,
           };
+    // An overwrite that found the branch back at Ensemble's own push has nothing left to replace.
+    if (
+      !pushed &&
+      a.kind === "branch.force-push" &&
+      a.outsideHeadSha !== undefined &&
+      remote !== null &&
+      remote === before.lastPushedSha
+    )
+      return {
+        state: "confirmed-failure",
+        reason: "branch-outside-cleared",
+        receipt: null,
+      };
     // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved
     // it, and an ambiguous attempt keeps its possible ownership of the commit it may have landed.
     const ambiguous =
@@ -1736,8 +1763,12 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation> {
     try {
-      const a = record.request.action,
-        repo = await this.repository(a.target.repositoryId),
+      const a = record.request.action;
+      // An adoption left unsettled by a restart runs again from its recorded context; it needs no
+      // repository read of its own, so an outage here can never leave it unproved.
+      if (a.kind === "branch.adopt")
+        return await this.adoptOutsideHead(record, a);
+      const repo = await this.repository(a.target.repositoryId),
         marker = `<!-- ensemble-operation:${record.operationId} -->`;
       if (a.kind === "branch.push" || a.kind === "branch.force-push")
         return await this.inspectBranch(
@@ -1745,9 +1776,6 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           a,
           record.observation?.pushed === true,
         );
-      // An adoption left unsettled by a restart runs again from its recorded context.
-      if (a.kind === "branch.adopt")
-        return await this.adoptOutsideHead(record, a);
       const user = z
         .object({ node_id: name, login: name.optional() })
         .parse((await this.request("/user")).json);
