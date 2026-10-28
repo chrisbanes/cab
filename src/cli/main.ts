@@ -695,6 +695,11 @@ async function run(
         `Next:    ${next.text}${next.operator ? ` (ensemble inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
+        ...read.data.unresolvedResults.map((r) =>
+          r.availability === "available"
+            ? `Undelivered result ${r.resultId}: ensemble result deliver ${task.id} ${r.resultId}`
+            : `Undelivered result ${r.resultId}: no lead or requester can receive it now`,
+        ),
         ...(task.outcome ? ["", task.outcome] : []),
       ].join("\n"),
     };

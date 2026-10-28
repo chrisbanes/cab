@@ -143,7 +143,14 @@ const inboxList: BrowseCommand = {
                     oneLine(i.reason, 60),
                   ],
             ),
+          ) +
+          (items.some(
+            (i) =>
+              i.kind === "intervention" &&
+              i.attentionCode === "unresolved-result",
           )
+            ? "\nAn undelivered result's 'ensemble task get TASK_ID' names its 'ensemble result deliver' command."
+            : "")
         : "Nothing needs attention.",
     });
   },

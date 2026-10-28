@@ -181,6 +181,11 @@ const resultGet: BrowseCommand = {
           ["Created", isoTime(result.createdAt)],
           ["Destination", result.destinationDisposition],
         ]),
+        ...(result.destinationDisposition === "unresolved"
+          ? [
+              `If 'ensemble task get ${result.taskId}' lists it as undelivered, send it with 'ensemble result deliver ${result.taskId} ${result.resultId}'.`,
+            ]
+          : []),
         "",
         unavailable(result.summary),
         ...(m

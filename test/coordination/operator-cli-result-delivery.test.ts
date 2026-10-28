@@ -77,6 +77,16 @@ test("result deliver sends the result to its permitted recipient once and replay
   const w = await resultWorld(t);
   const before = await w.item();
   const recipient = before.permittedRecipient.assignmentId as string;
+  const command = `ensemble result deliver ${w.taskId} ${w.resultId}`;
+  const shown = await w.h.run(["task", "get", w.taskId, "--connection", "rw"]);
+  assert.ok(shown.out.includes(command), shown.out + shown.err);
+  const result = await w.h.run([
+    ...["result", "get", w.taskId, w.resultId],
+    ...["--connection", "rw"],
+  ]);
+  assert.ok(result.out.includes(command), result.out + result.err);
+  const inbox = await w.h.run(["inbox", "list", "--connection", "rw"]);
+  assert.match(inbox.out, /names its 'ensemble result deliver' command/);
   const key = randomUUID();
   const first = await w.cli("rw", w.deliverArgs("--request-id", key));
   assert.equal(first.code, 0, first.out + first.err);
