@@ -208,6 +208,8 @@ export class QuestionResponseStates {
   }
   changed() {
     for (const listener of this.listeners) listener();
+    // The task page decides from the registry whether a card is shown.
+    this.sends.changed();
   }
   purge() {
     for (const state of this.states.values())

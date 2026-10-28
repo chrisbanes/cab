@@ -215,6 +215,20 @@ test("an answer the service recorded but whose reply was lost is checkable when 
   await page.locator("main.page h1").waitFor();
   assert.equal(await form.count(), 0, "the question card is not shown");
   await check().waitFor();
+  // Opening the request never shows a second check; leaving brings the first back.
+  const go = (path: string) =>
+    page.evaluate((to) => {
+      history.pushState(null, "", to);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, path);
+  await go(`/app/tasks/${a.taskId}?request=${a.interactionId}`);
+  await form.waitFor();
+  await page.waitForTimeout(500);
+  assert.ok((await check().count()) <= 1, "never two checks at once");
+  await go(`/app/tasks/${a.taskId}`);
+  await form.waitFor({ state: "detached" });
+  await check().waitFor();
+  assert.equal(await check().count(), 1);
   await page.unroute("**/api/operator/commands");
   await check().click();
   await page

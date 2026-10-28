@@ -1594,7 +1594,7 @@ export function TaskWorkspace({
           onClick: () => auxSend.clear(),
         }}
         focus={focusUnconfirmed.current}
-        check={() => void command(unconfirmed!)}
+        check={() => unconfirmed && void command(unconfirmed)}
       />
     );
   const comment = commentAvailability(data.commentPolicy);
