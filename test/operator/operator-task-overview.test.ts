@@ -9,9 +9,10 @@ import {
   briefParts,
   criterionRows,
   originLabel,
-  sourceLine,
+  sourceFacts,
   stopConsequences,
-  taskStatusLine,
+  taskIdentity,
+  taskReadiness,
 } from "../../web/src/task-overview.js";
 
 type Data = TaskRead["data"];
@@ -135,24 +136,23 @@ test("criterionRows reports recorded outcomes and never an aggregate", () => {
   assert.equal(criterionRows(data, resultId, sourceId)[0]?.stale, true);
 });
 
-test("taskStatusLine states recorded state, wait and lead", () => {
+test("taskReadiness states recorded state and wait", () => {
   const base = {
     task: { state: "open", ready: true },
     execution: { state: "idle", holds },
     admission: { reasons: [] },
     waits: [],
     source: null,
-    lead: { name: "Mira" },
   };
   const line = (patch: Record<string, unknown>) =>
-    taskStatusLine({ ...base, ...patch } as unknown as Data);
-  assert.equal(line({}), "Ready / Accountable project lead: Mira");
+    taskReadiness({ ...base, ...patch } as unknown as Data);
+  assert.equal(line({}), "Ready");
   assert.equal(
     line({
       task: { state: "open", ready: false },
       source: { closure: "held" },
     }),
-    "Held · closed on GitHub / Accountable project lead: Mira",
+    "Held · closed on GitHub",
   );
   assert.equal(
     line({
@@ -160,30 +160,27 @@ test("taskStatusLine states recorded state, wait and lead", () => {
       source: { closure: "held" },
       execution: { state: "running", holds },
     }),
-    "Held · closed on GitHub · running / Accountable project lead: Mira",
+    "Held · closed on GitHub · running",
   );
   assert.equal(
     line({
       task: { state: "open", ready: false },
       source: { closure: "unattributed" },
     }),
-    "Held · closure not attributed to Ensemble / Accountable project lead: Mira",
+    "Held · closure not attributed to Ensemble",
   );
   assert.equal(
     line({
       task: { state: "done", ready: false },
       source: { closure: "completed" },
     }),
-    "Done · closed on GitHub / Accountable project lead: Mira",
+    "Done · closed on GitHub",
   );
   assert.equal(
     line({ task: { state: "done", ready: false }, source: { closure: null } }),
-    "Done / Accountable project lead: Mira",
+    "Done",
   );
-  assert.equal(
-    line({ task: { state: "open", ready: false } }),
-    "Draft / Accountable project lead: Mira",
-  );
+  assert.equal(line({ task: { state: "open", ready: false } }), "Draft");
   const rule = {
     kind: "rule",
     mode: "all",
@@ -201,7 +198,7 @@ test("taskStatusLine states recorded state, wait and lead", () => {
         },
       },
     }),
-    "Draft · missing label `ready` / Accountable project lead: Mira",
+    "Draft · missing label `ready`",
   );
   for (const outcome of ["matched", "not-evaluated"])
     assert.equal(
@@ -209,7 +206,7 @@ test("taskStatusLine states recorded state, wait and lead", () => {
         task: { state: "open", ready: false },
         source: { closure: null, readiness: { rule, outcome, unmet: [] } },
       }),
-      "Draft / Accountable project lead: Mira",
+      "Draft",
     );
   assert.equal(
     line({
@@ -221,7 +218,7 @@ test("taskStatusLine states recorded state, wait and lead", () => {
         ],
       },
     }),
-    "Ready · waiting on acme/design-system#87 / Accountable project lead: Mira",
+    "Ready · waiting on acme/design-system#87",
   );
   // A label that starts with a proper noun keeps its capitals mid-sentence.
   assert.equal(
@@ -229,30 +226,27 @@ test("taskStatusLine states recorded state, wait and lead", () => {
       admission: { reasons: ["imported-blockers-unknown"] },
       waits: [{ code: "imported-blockers-unknown" }],
     }),
-    "Ready · GitHub dependencies unconfirmed / Accountable project lead: Mira",
+    "Ready · GitHub dependencies unconfirmed",
   );
   // The header names the first wait in the flow's order.
   assert.equal(
     line({ waits: [{ code: "local-dependency" }, { code: "capacity" }] }),
-    "Ready · blocked by a task dependency / Accountable project lead: Mira",
+    "Ready · blocked by a task dependency",
   );
   assert.equal(
     line({ execution: { state: "stopping", holds: { ...holds, stop: true } } }),
-    "Stopping; effects may continue / Accountable project lead: Mira",
+    "Stopping; effects may continue",
   );
   assert.equal(
     line({
       execution: { state: "uncertain", holds: { ...holds, uncertainty: true } },
     }),
-    "Execution uncertain / Accountable project lead: Mira",
+    "Execution uncertain",
   );
-  assert.equal(
-    line({ task: { state: "done", ready: true } }),
-    "Done / Accountable project lead: Mira",
-  );
+  assert.equal(line({ task: { state: "done", ready: true } }), "Done");
   assert.equal(
     line({ task: { state: "cancelled", ready: true } }),
-    "Cancelled / Accountable project lead: Mira",
+    "Cancelled",
   );
   // A paused project outranks readiness and other waits, as on the Board.
   assert.equal(
@@ -260,14 +254,14 @@ test("taskStatusLine states recorded state, wait and lead", () => {
       task: { state: "open", ready: false },
       admission: { reasons: ["task-unready", "project-paused"] },
     }),
-    "Draft · project paused / Accountable project lead: Mira",
+    "Draft · project paused",
   );
   assert.equal(
     line({
       admission: { reasons: ["local-dependency", "project-paused"] },
       execution: { state: "paused", holds },
     }),
-    "Ready · project paused / Accountable project lead: Mira",
+    "Ready · project paused",
   );
   // Execution facts outrank the terminal task state, as in OperatorApi.execution().
   assert.equal(
@@ -275,32 +269,28 @@ test("taskStatusLine states recorded state, wait and lead", () => {
       task: { state: "done", ready: true },
       execution: { state: "stopping", holds: { ...holds, stop: true } },
     }),
-    "Stopping; effects may continue / Accountable project lead: Mira",
+    "Stopping; effects may continue",
   );
   assert.equal(
     line({
       task: { state: "cancelled", ready: true },
       execution: { state: "uncertain", holds },
     }),
-    "Execution uncertain / Accountable project lead: Mira",
+    "Execution uncertain",
   );
   assert.equal(
     line({
       task: { state: "done", ready: true },
       execution: { state: "running", holds },
     }),
-    "Done · running / Accountable project lead: Mira",
+    "Done · running",
   );
   assert.equal(
     line({
       task: { state: "open", ready: false },
       execution: { state: "uncertain", holds },
     }),
-    "Execution uncertain / Accountable project lead: Mira",
-  );
-  assert.equal(
-    line({ lead: null }),
-    "Ready / Accountable project lead: Unconfigured",
+    "Execution uncertain",
   );
 });
 
@@ -446,7 +436,7 @@ test("optionalSummary counts supplied values and lets errors win", () => {
   );
 });
 
-test("sourceLine reports the latest successful sync across every selection", () => {
+test("sourceFacts reports the latest successful sync across every selection", () => {
   const membership = (lastSuccessfulAt: string | null) => ({
     sync: { lastSuccessfulAt },
   });
@@ -456,17 +446,17 @@ test("sourceLine reports the latest successful sync across every selection", () 
       number: 142,
       state: "open",
       memberships,
-    }) as unknown as Data["source"];
-  assert.equal(sourceLine(null), "Local task");
+    }) as unknown as NonNullable<Data["source"]>;
+  assert.equal(taskIdentity({ source: null }).label, "Local task");
   assert.equal(
-    sourceLine(
+    sourceFacts(
       source([
         membership(null),
         membership("2026-10-10T11:02:00Z"),
         membership("2026-10-09T08:00:00Z"),
       ]),
-    ),
-    "GitHub · acme/atlas#142 · open · last successful sync 2026-10-10T11:02:00Z · read-only requirements",
+    ).synced,
+    "2026-10-10T11:02:00Z",
   );
-  assert.match(sourceLine(source([membership(null)])), /no successful sync/);
+  assert.equal(sourceFacts(source([membership(null)])).synced, null);
 });

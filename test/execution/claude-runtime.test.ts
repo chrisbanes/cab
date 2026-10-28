@@ -751,7 +751,7 @@ test("the Claude token never appears in anything the runtime emits", async () =>
   }
 });
 
-test("the PreToolUse hook records every call and denies calls outside policy", async () => {
+test("the PreToolUse hook allows calls inside policy and denies the rest", async () => {
   const decisions: unknown[] = [];
   let outside = "";
   const f = fixture({
@@ -799,24 +799,6 @@ test("the PreToolUse hook records every call and denies calls outside policy", a
       assert.equal(denied(index)?.permissionDecision, "deny");
       assert.ok(denied(index)?.permissionDecisionReason);
     }
-    assert.deepEqual(
-      f.runtime.toolLedger(threadId, turnId).map((entry) => entry.decision),
-      [
-        "allow",
-        "deny",
-        "deny",
-        "deny",
-        "deny",
-        "deny",
-        "deny",
-        "allow",
-        "deny",
-      ],
-    );
-    assert.equal(
-      f.runtime.toolLedger(threadId, turnId)[5]?.toolName,
-      "WebFetch",
-    );
   } finally {
     await f.cleanup();
   }

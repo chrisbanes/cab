@@ -237,6 +237,31 @@ function reviewLines(r: ReviewReceipt) {
 const UNKNOWN_GUIDANCE = (taskId: string, key: string) =>
   `Do not resend with a new --request-id. Run 'ensemble delivery refresh ${taskId}', then 'ensemble delivery get ${taskId}' (operation ${key}); rerunning this exact command replays the recorded outcome.`;
 
+/** Parses and validates the flags shared by the review-confirm commands. */
+export function reviewDecisionArgs(ctx: WriteContext) {
+  const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
+  const reviewId = uuidArg(ctx.values["review-id"] ?? "", "--review-id");
+  const revision = positiveIntFlag(
+    ctx.values["expected-revision"],
+    "expected-revision",
+  );
+  const materialHash = ctx.values["material-hash"] ?? "";
+  const decision = ctx.values.decision;
+  if (revision === undefined)
+    throw new CliError("usage", "--expected-revision N is required.");
+  if (!/^[a-f0-9]{64}$/.test(materialHash))
+    throw new CliError(
+      "invalid-input",
+      "--material-hash must be the 64-character hash the review printed.",
+    );
+  if (decision !== "approved" && decision !== "denied")
+    throw new CliError(
+      "invalid-input",
+      "--decision must be approved or denied.",
+    );
+  return { taskId, reviewId, revision, materialHash, decision };
+}
+
 export const deliveryBrowseCommands: [string, BrowseCommand][] = [
   ["delivery get", getCommand],
 ];
@@ -412,26 +437,8 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         "request-id",
       ],
       async run(ctx) {
-        const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
-        const reviewId = uuidArg(ctx.values["review-id"] ?? "", "--review-id");
-        const revision = positiveIntFlag(
-          ctx.values["expected-revision"],
-          "expected-revision",
-        );
-        const materialHash = ctx.values["material-hash"] ?? "";
-        const decision = ctx.values.decision;
-        if (revision === undefined)
-          throw new CliError("usage", "--expected-revision N is required.");
-        if (!/^[a-f0-9]{64}$/.test(materialHash))
-          throw new CliError(
-            "invalid-input",
-            "--material-hash must be the 64-character hash the review printed.",
-          );
-        if (decision !== "approved" && decision !== "denied")
-          throw new CliError(
-            "invalid-input",
-            "--decision must be approved or denied.",
-          );
+        const { taskId, reviewId, revision, materialHash, decision } =
+          reviewDecisionArgs(ctx);
         const session = await ctx.connect([
           "cli.identity",
           "task.read",

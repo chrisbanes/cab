@@ -142,11 +142,6 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
                       : `Ready · ${execution.state}`;
 }
 
-/** The readiness text, then the accountable lead. */
-export function taskStatusLine(data: StatusData) {
-  return `${taskReadiness(data)} / Accountable project lead: ${data.lead?.name ?? "Unconfigured"}`;
-}
-
 /** Who acts next, from the task read's attention codes by the List's rule (`nextActor`). */
 export const taskNextActor = (
   data: Pick<Data, "task" | "execution" | "admission" | "source" | "attention">,
@@ -282,13 +277,6 @@ export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
     runtime: executionSummary(a).line,
     state: assignmentStates[a.state],
   };
-}
-
-/** The task's source identity and its latest successful sync across every selection. */
-export function sourceLine(source: Data["source"]) {
-  if (!source) return "Local task";
-  const { state, synced } = sourceFacts(source);
-  return `GitHub · ${source.repositoryName ?? "repository unavailable"}#${source.number ?? "?"} · ${state ?? "state unknown"} · ${synced ? `last successful sync ${synced}` : "no successful sync"} · read-only requirements`;
 }
 
 /** The view a task was opened from, for the header Back label. */

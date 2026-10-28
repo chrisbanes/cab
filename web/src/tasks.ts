@@ -244,8 +244,6 @@ export function capacityNotice(tasks: readonly TaskListSummary[]) {
 export const isUncertain = (task: TaskListSummary) =>
   task.attention.codes.includes("execution-uncertain") ||
   taskColumn(task) === "Uncertain";
-export const taskNext = (task: TaskListSummary) =>
-  nextActor(task.attention.codes, taskColumn(task)).text;
 /** One rule for "Next: you": the row and card text and the card's attention tone. */
 export const operatorNext = (task: TaskListSummary) =>
   nextActor(task.attention.codes, taskColumn(task)).operator;

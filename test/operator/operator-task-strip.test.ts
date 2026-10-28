@@ -10,7 +10,7 @@ import {
   taskIdentity,
   taskNextActor,
 } from "../../web/src/task-overview.js";
-import { operatorNext, taskNext } from "../../web/src/tasks.js";
+import { nextActor, operatorNext, taskColumn } from "../../web/src/tasks.js";
 import { summary } from "../fixtures/task-summary.js";
 
 type Data = TaskRead["data"];
@@ -108,7 +108,10 @@ test("taskNextActor reads the List's next actor from the same attention codes", 
     );
     const row = summary({ codes, execution });
     assert.equal(read.text, text, JSON.stringify(codes));
-    assert.equal(read.text, taskNext(row));
+    assert.equal(
+      read.text,
+      nextActor(row.attention.codes, taskColumn(row)).text,
+    );
     assert.equal(read.operator, operatorNext(row));
   }
   for (const [state, text] of [
@@ -117,7 +120,7 @@ test("taskNextActor reads the List's next actor from the same attention codes", 
   ] as const) {
     const read = taskNextActor(data({ task: { state, version: 3 } }));
     assert.equal(read.text, text);
-    assert.equal(read.text, taskNext(summary({ state })));
+    assert.equal(read.text, nextActor([], taskColumn(summary({ state }))).text);
   }
 });
 

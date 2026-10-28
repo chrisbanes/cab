@@ -119,7 +119,6 @@ const disallowedTools = [
   "ExitPlanMode",
 ];
 const maxPendingToolUses = 256;
-const maxLedgerEntries = 256;
 const maxRetainedSettledTurns = 64;
 const instructionFiles = ["AGENTS.md", "CLAUDE.md"];
 const maxInstructionFileBytes = 32 * 1024;
@@ -461,11 +460,6 @@ interface ClaudeTurn {
   pendingToolUses: Map<string, string[]>;
   pendingCount: number;
   roots: readonly string[];
-  ledger: Array<{
-    toolUseId: string;
-    toolName: string;
-    decision: "allow" | "deny";
-  }>;
   release: (released: boolean) => void;
   started: ReturnType<typeof deferred<void>>;
   settled: ReturnType<typeof deferred<TurnOutcome>>;
@@ -554,12 +548,6 @@ export class ClaudeRuntime implements Runtime {
       fileToolConfinement: "hook" as const,
       limits: [...claudePolicyLimits],
     };
-  }
-
-  /** Bounded per-turn record of tool names and decisions; never inputs. */
-  toolLedger(threadId: string, turnId: string) {
-    const turn = this.turns.get(turnId);
-    return turn?.threadId === threadId ? [...turn.ledger] : [];
   }
 
   /** Removes a released task's sandbox temporary base. */
@@ -872,7 +860,6 @@ export class ClaudeRuntime implements Runtime {
       pendingToolUses: new Map(),
       pendingCount: 0,
       roots: writable,
-      ledger: [],
       release: (released) => {
         turn.released = released;
         release(released);
@@ -986,7 +973,7 @@ export class ClaudeRuntime implements Runtime {
     const turn = this.turns.get(turnId);
     if (!turn || turn.threadId !== threadId)
       throw new Error("Runtime terminal evidence unavailable");
-    // Settled turns stay readable (ledger) until retain() evicts them.
+    // Settled turns stay readable until retain() evicts them.
     const outcome = await turn.settled.promise;
     try {
       // Binds evidence recorded before the service bound this turn.
@@ -1244,27 +1231,16 @@ export class ClaudeRuntime implements Runtime {
     }
   }
 
-  /** Records every call and denies those outside Ensemble's policy. */
+  /** Denies calls outside Ensemble's policy. */
   private async preToolUse(turn: ClaudeTurn, raw: unknown) {
     const input = hookInputSchema.safeParse(raw);
-    const record = (decision: "allow" | "deny") => {
-      if (input.success && turn.ledger.length < maxLedgerEntries)
-        turn.ledger.push({
-          toolUseId: input.data.tool_use_id,
-          toolName: input.data.tool_name.slice(0, 128),
-          decision,
-        });
-    };
-    const deny = (reason: string) => {
-      record("deny");
-      return {
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse" as const,
-          permissionDecision: "deny" as const,
-          permissionDecisionReason: reason,
-        },
-      };
-    };
+    const deny = (reason: string) => ({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse" as const,
+        permissionDecision: "deny" as const,
+        permissionDecisionReason: reason,
+      },
+    });
     if (!input.success) return deny("Ensemble could not read this tool call");
     const { tool_name: name, tool_input: toolInput } = input.data;
     const fields = z.record(z.string(), z.unknown()).safeParse(toolInput);
@@ -1293,7 +1269,6 @@ export class ClaudeRuntime implements Runtime {
       turn.pendingToolUses.set(key, queue);
       turn.pendingCount++;
     }
-    record("allow");
     return {};
   }
 

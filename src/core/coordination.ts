@@ -3187,7 +3187,7 @@ export class CoordinationStore {
         ) ||
         this.one(
           `SELECT 1 AS found FROM coordination_delivery_batches
-        WHERE recipientAssignmentId = ? AND state IN ('queued', 'held') LIMIT 1`,
+        WHERE recipientAssignmentId = ? AND state = 'queued' LIMIT 1`,
           assignment,
         ),
     );
