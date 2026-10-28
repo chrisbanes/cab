@@ -1210,6 +1210,37 @@ test("a readiness-lost hold releases only once the task is Ready again, and a pa
   }
 });
 
+for (const [name, lose] of [
+  [
+    "readiness loss",
+    (f: ReturnType<typeof readinessFixture>) =>
+      f.read("repo", [f.at("I_1", { labels: [] })]),
+  ],
+  [
+    "withdrawal",
+    (f: ReturnType<typeof readinessFixture>) => f.read("repo", []),
+  ],
+] as const)
+  test(`a closed hold survives a reopen, ${name} and a Ready re-listing`, () => {
+    const f = readinessFixture(readyLabel);
+    const hold = () => [
+      f.sources.hold("I_1")?.active,
+      f.sources.hold("I_1")?.reason,
+    ];
+    try {
+      f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+      f.read("repo", [f.at("I_1", { labels: ["ready"], state: "closed" })]);
+      assert.deepEqual(hold(), [1, "closed"]);
+      f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+      assert.deepEqual(hold(), [1, "closed"]);
+      lose(f);
+      f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+      assert.deepEqual(hold(), [1, "closed"]);
+    } finally {
+      f.db.close();
+    }
+  });
+
 test("re-listing releases no changed-text hold, and leaves a project pause alone", () => {
   const f = readinessFixture(readyLabel);
   const reason = () => f.sources.hold("I_1")?.reason;

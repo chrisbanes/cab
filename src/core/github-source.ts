@@ -1383,12 +1383,15 @@ export class GitHubSourceStore {
     } else if (
       Number(row.ready) === 1 &&
       !ready &&
-      // A pending or unattributed own-delivery closure proof keeps its explained hold.
+      // A closure hold, or a pending or unattributed own-delivery closure proof, keeps its reason:
+      // only the operator resolves it, so a later readiness loss or withdrawal must not make it self-releasing.
       !(
         hold?.active &&
-        ["closure-read-unavailable", "closure-attribution-unproved"].includes(
-          String(hold.reason),
-        )
+        [
+          "closed",
+          "closure-read-unavailable",
+          "closure-attribution-unproved",
+        ].includes(String(hold.reason))
       )
     )
       this.setSourceHold(
