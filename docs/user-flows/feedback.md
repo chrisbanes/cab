@@ -61,7 +61,8 @@ The operator CLI keeps its receipt output.
 - "Check whether it saved" resubmits the exact original request, so it never
   duplicates an effect.
 - On the task view an unconfirmed command keeps its check after the operator leaves
-  the task and comes back in the same session. A reload, sign-out or session change
+  the task and comes back in the same session, even when the service already acted and
+  the item has left its list. A reload, sign-out or session change
   discards it. If the check meets a definite refusal (the item changed or the request
   is invalid) it settles as refused with the usual conflict or rejection message;
   a sign-in, session, availability or network failure leaves the check in place.

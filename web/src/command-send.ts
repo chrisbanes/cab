@@ -12,6 +12,7 @@ import type {
 } from "../../src/operator/contracts.js";
 import type { CommandState, OperatorClient } from "./api.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
+import type { ReceiptDetails } from "./outcome-copy.js";
 
 export type SendOutcome = {
   kind: "recorded" | "unknown" | "conflict" | "failed";
@@ -19,6 +20,15 @@ export type SendOutcome = {
   code?: string | undefined;
 };
 type Matches = (command: OperatorCommand, receipt: CommandReceipt) => boolean;
+/** The wording a send's outcome reads in, kept so another screen can show it after a remount. */
+export type SendCopy = {
+  recorded: string;
+  conflict: string;
+  unknown?: string | undefined;
+  failed?: ((code: string) => string) | undefined;
+  details?: ReceiptDetails | undefined;
+  review?: string | undefined;
+};
 
 /**
  * One operator command at a time, sent once per key. `send(…, command)` freezes and sends a new
@@ -31,6 +41,9 @@ export class CommandSend {
   outcome: SendOutcome | null = null;
   /** The draft behind this command; cleared once it is recorded. */
   text = "";
+  /** What a component using this entry last showed: lets the task page check it once that component is gone. */
+  copy?: SendCopy | undefined;
+  matches?: Matches | undefined;
   /** Run when a send settles while a component using this entry is mounted. */
   readonly onSettled = new Set<(kind: SendOutcome["kind"]) => void>();
   constructor(private readonly changed: () => void = () => {}) {}
@@ -113,6 +126,17 @@ export class CommandSends {
   changed() {
     for (const listener of this.listeners) listener();
   }
+  /** A task's sends still waiting to be checked, or just recorded, that no mounted component shows. */
+  retained(taskId: string) {
+    return [...this.entries].filter(
+      ([key, e]) =>
+        key.startsWith(`${taskId}:`) &&
+        e.copy &&
+        e.matches &&
+        e.onSettled.size === 0 &&
+        (e.uncertain || e.outcome?.kind === "recorded"),
+    );
+  }
   purge() {
     this.entries.clear();
     this.changed();
@@ -143,18 +167,23 @@ export function useCommandSend(
   /** Runs once each send settles while this component is mounted, with how it ended. */
   onSettled?: (kind: SendOutcome["kind"]) => void,
 ) {
-  const entry = useSendEntry(key),
+  const sends = useCommandSends(),
+    entry = useSendEntry(key),
     latest = useRef(onSettled);
   latest.current = onSettled;
+  entry.matches = matches;
   useEffect(() => {
     const settled = (kind: SendOutcome["kind"]) => latest.current?.(kind);
     entry.onSettled.add(settled);
+    // The task page shows a send no mounted component shows; tell it who does now.
+    sends.changed();
     return () => {
       entry.onSettled.delete(settled);
       // A recorded confirmation belongs to the visit that sent it, not to the next one.
       if (entry.outcome?.kind === "recorded") entry.outcome = null;
+      sends.changed();
     };
-  }, [entry]);
+  }, [entry, sends]);
   return {
     entry,
     send: (command?: OperatorCommand) =>

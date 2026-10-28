@@ -4,6 +4,7 @@ import {
   AssignmentMessage,
   HandbackSettlement,
   ResultDestination,
+  RetainedSends,
   SendFeedback,
 } from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
@@ -390,10 +391,6 @@ export function TaskWorkspace({
   // request from the current selection, even after the page is left and reopened.
   const auxSend = useSendEntry(`${taskId}:workspace-aux`);
   const unconfirmed = auxSend.uncertain ? auxSend.lifecycle.frozen : null;
-  // A start the service recorded clears its code: its check, and then its confirmation, stay.
-  const startAgainSend = useSendEntry(`${taskId}:start-again`),
-    startAgainKept =
-      startAgainSend.uncertain || startAgainSend.outcome?.kind === "recorded";
 
   const focusUnconfirmed = useRef(false);
   // The control whose replayed check just settled, focused once the commit enables it.
@@ -1997,8 +1994,7 @@ export function TaskWorkspace({
                 )}
                 {/* Kept once sent, so a confirmation or a check outlives the code it cleared. */}
                 {(data.attention.codes.includes("not-started") ||
-                  startedAgain === taskId ||
-                  startAgainKept) && (
+                  startedAgain === taskId) && (
                   <StartAgainAction
                     client={client}
                     session={session}
@@ -2007,6 +2003,12 @@ export function TaskWorkspace({
                     onChanged={refreshAll}
                   />
                 )}
+                <RetainedSends
+                  client={client}
+                  session={session}
+                  taskId={taskId}
+                  onChanged={refreshAll}
+                />
                 {nextActor.code === "execution-uncertain" &&
                   !data.execution.holds.uncertainty && (
                     <ActionLink

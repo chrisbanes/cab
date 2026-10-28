@@ -76,7 +76,7 @@ export function StartAgainAction({
 }) {
   const taskId = task.task.id,
     offer = task.startAgain;
-  const { send, sending, outcome, uncertain, clear } = useCommandSend(
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
     `${taskId}:start-again`,
@@ -146,6 +146,7 @@ export function StartAgainAction({
             </>
           )}
       <SendFeedback
+        entry={entry}
         outcome={sent}
         recorded="Queued again. It is admitted under the current checks."
         conflict="Not started again: the task changed since it was read."
@@ -181,7 +182,7 @@ export function ResetTask({
   onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const { send, sending, outcome, uncertain, clear } = useCommandSend(
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
     `${taskId}:reset`,
@@ -234,6 +235,7 @@ export function ResetTask({
             <p className="muted">Reset isn't offered: {unavailable.text}.</p>
           )}
         <SendFeedback
+          entry={entry}
           outcome={outcome}
           recorded="Reset. The lead starts a fresh conversation in the same workspace."
           conflict="Not reset: the task changed since it was read."

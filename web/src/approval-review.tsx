@@ -48,7 +48,7 @@ export function ApprovalReview({
   /** Rereads the task after a recorded decision or a conflict. */
   onChanged: () => void;
 }) {
-  const { send, sending, outcome, uncertain, clear } = useCommandSend(
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
     `${taskId}:approval:${approval.interactionId}`,
@@ -147,6 +147,7 @@ export function ApprovalReview({
       )}
       {!approval.materialUnavailable && <Material value={approval.material} />}
       <SendFeedback
+        entry={entry}
         outcome={outcome}
         recorded={copy[outcomeDecision ?? "approved"]}
         conflict={copy.conflict}

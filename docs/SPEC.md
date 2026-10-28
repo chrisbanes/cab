@@ -874,7 +874,8 @@ Identifiers, versions, command names and error codes stay available under a
 Details disclosure rather than in the message. A task-view command whose outcome is
 unconfirmed (approval, settlement, result delivery, assignment message, Start again,
 Reset, question answer, viewing reference and delivery refresh) stays checkable after the
-operator leaves the task and returns in the same session; a reload, sign-out or session
+operator leaves the task and returns in the same session, on the task page even when the
+service already acted and the item has left its list; a reload, sign-out or session
 change discards it. The check resends the original key and body, and settles as refused
 only on a definite domain refusal (a conflict or an invalid-input, body-too-large,
 unsupported-media or redaction-limit rejection); an authentication, session, availability

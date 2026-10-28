@@ -221,6 +221,49 @@ test("an unconfirmed result delivery is still checkable after leaving the task a
   );
 });
 
+test("a result delivery the service already recorded is still checkable after returning, though its row is gone", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  const hold: { browser?: Browser } = {};
+  j.cleanup(
+    (primary) => f.close(hold.browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { a, unresolved } = await seedCoordination(f);
+  const { page, commands } = await openTask(f, j, a.taskId, hold);
+  const row = page.locator(
+    `#decisions .decision[data-record-id="${unresolved.resultId}"]`,
+  );
+  // The request reaches the service but its reply is lost.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await row.getByRole("button", { name: "Deliver to Task lead" }).click();
+  await check(row).waitFor();
+  assert.equal(
+    f.service.coordinationView().readTask(a.taskId).unresolvedResults.length,
+    0,
+  );
+
+  await page
+    .getByRole("link", { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/inbox/);
+  await page.goBack();
+  // The result is no longer listed as undelivered, yet its check is still on the task page.
+  await check(page).waitFor();
+  assert.equal(await row.count(), 0);
+  await page.unroute("**/api/operator/commands");
+  await check(page).click();
+  await page.getByText(/^Delivered to Task lead\./).waitFor();
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1]?.raw, commands[0]?.raw, "same key and body");
+});
+
 test("a check settles as refused only on a definite refusal, and a new session starts clean", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
