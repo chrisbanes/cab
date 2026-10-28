@@ -6755,7 +6755,7 @@ export class StandaloneService {
   }
 
   /**
-   * The submitted prompt's Ensemble-supplied segments, in submission order. `resumed` is the
+   * The submitted prompt's Ensemble-supplied segments, in submission order. `seen` is the
    * revisions the resumed thread has already received (null: unknown); undefined for a new thread.
    */
   private executionPromptParts(
