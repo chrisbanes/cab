@@ -7,7 +7,10 @@ import { DatabaseSync } from "node:sqlite";
 import { mock, test } from "node:test";
 import { DeliveryStore } from "../../src/core/delivery.js";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
-import { evaluateReadiness } from "../../src/core/github-source-contracts.js";
+import {
+  evaluateReadiness,
+  type Readiness,
+} from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
 import { LocalOperatorUi } from "../../src/standalone/operator.js";
@@ -440,7 +443,13 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
   }
 });
 
-function closedIssueWorld(closedIssues: "skip" | "done") {
+function closedIssueWorld(
+  closedIssues: "skip" | "done",
+  readiness: Readiness = {
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  },
+) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-github-closed-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   new Store(db).ensureHost("test");
@@ -480,10 +489,7 @@ function closedIssueWorld(closedIssues: "skip" | "done") {
             },
           ]
         : [],
-      readiness: {
-        mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
-      },
+      readiness,
       closedIssues: mode,
       repositories: [],
     });
@@ -1802,12 +1808,13 @@ function recordOwnClosure(
   w: ReturnType<typeof closedIssueWorld>,
   operationId: string,
   closedEventId: string | null = "CE1",
+  snapshot: Partial<IssueSnapshot> = {},
 ) {
   assert.equal(
     w.sources.recordDeliveryClosure(
       w.projectId,
       w.domain.githubConfiguration(w.projectId).version,
-      { ...issue, state: "closed", projectFields: [] },
+      { ...issue, state: "closed", projectFields: [], ...snapshot },
       operationId,
       null,
       closedEventId,
@@ -1859,6 +1866,70 @@ for (const mode of ["done", "skip"] as const)
       w.close();
     }
   });
+
+test("an own closure keeps a closure hold a sync recorded first, under a Project-field rule", () => {
+  const w = closedIssueWorld("done", {
+    mode: "all",
+    conditions: [
+      { kind: "label", name: "ready" },
+      {
+        kind: "project-field",
+        projectNodeId: "P_1",
+        fieldNodeId: "F_1",
+        optionNodeId: "O_1",
+      },
+    ],
+  });
+  try {
+    const taskId = String(w.observe({})?.id);
+    const operationId = confirmOwnClose(w, taskId);
+    w.observe({ state: "closed" });
+    assert.equal(w.hold()?.reason, "closed");
+    // The delivery provider's closure snapshot always has empty projectFields.
+    recordOwnClosure(w, operationId);
+    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+    // Readiness unmet at closure is still reported.
+    recordOwnClosure(w, operationId, "CE1", { labels: [] });
+    assert.equal(w.hold()?.reason, "readiness-lost");
+  } finally {
+    w.close();
+  }
+});
+
+test("an own closure with readiness held records a closure hold, whatever the label case", () => {
+  const w = closedIssueWorld("done", {
+    mode: "all",
+    conditions: [{ kind: "label", name: "Ready" }],
+  });
+  try {
+    const taskId = String(w.observe({ labels: ["Ready"] })?.id);
+    recordOwnClosure(w, confirmOwnClose(w, taskId), "CE1", {
+      labels: ["READY"],
+    });
+    assert.equal(w.hold()?.reason, "closed");
+  } finally {
+    w.close();
+  }
+});
+
+test("an own closure over unmet readiness reports readiness-lost; a later loss on an open issue does too", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    recordOwnClosure(w, confirmOwnClose(w, taskId), "CE1", { labels: [] });
+    assert.equal(w.hold()?.reason, "readiness-lost");
+  } finally {
+    w.close();
+  }
+  const open = closedIssueWorld("done");
+  try {
+    open.observe({});
+    open.observe({ labels: [] });
+    assert.equal(open.hold()?.reason, "readiness-lost");
+  } finally {
+    open.close();
+  }
+});
 
 test("an own closure without supersession is never provider-completed", () => {
   const w = closedIssueWorld("done");
