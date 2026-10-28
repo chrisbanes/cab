@@ -441,7 +441,8 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      exactly what the service disclosed; the hash is required whenever material was
      recorded. Withheld or legacy material can only be denied.
    - `result deliver TASK_ID RESULT_ID [--expected-revision N]` sends an undelivered
-     result (`task get TASK_ID --output json` lists `data.unresolvedResults`) to the one
+     result (`task get TASK_ID` prints each one's `result deliver` command; its JSON
+     lists `data.unresolvedResults`, and `result get` and `inbox list` point there) to the one
      recipient the service permits, the same `result.recipient` command as the task
      view. An omitted `--expected-revision` is the revision the command reads first.
      It refuses an unknown result, a result already delivered and a result whose
