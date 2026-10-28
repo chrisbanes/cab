@@ -81,7 +81,7 @@ const modelList = z.object({
   nextCursor: z.string().nullable().optional(),
 });
 const maxModelListPages = 8;
-/** A quarter of V8's string limit: a longer line would throw while decoding, inside a stream handler. */
+/** A safety margin under V8's ~512 Mi-character string limit, which would throw inside a stream handler. */
 export const maxAppServerLineBytes = 128 * 1024 * 1024;
 const defaultSettingsRetryMs = 30_000;
 const maxSettingsRetryMs = 10 * 60_000;
@@ -699,11 +699,10 @@ interface NativeEndpoint {
   turnEnded: boolean;
 }
 
-/** One private stdio App Server process. It never sends an approval grant. */
 /**
  * Delivers each newline-terminated line of `stream` as UTF-8, plus a final unterminated one at end.
- * A line over `maxAppServerLineBytes` is dropped and reported once through `onOverflow`; the
- * stream is not read after that.
+ * A line over `maxAppServerLineBytes` is dropped and reported once through `onOverflow`; later
+ * data is discarded.
  */
 function splitLines(
   stream: NodeJS.ReadableStream,
@@ -749,6 +748,7 @@ function splitLines(
   });
 }
 
+/** One private stdio App Server process. It never sends an approval grant. */
 export class CodexRuntime implements Runtime {
   readonly harness = "codex" as const;
   private child: ChildProcessWithoutNullStreams | undefined;
