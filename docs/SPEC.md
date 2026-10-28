@@ -1970,9 +1970,45 @@ timeout, cancellation or unobserved exit is uncertain, is settled by reading the
 replayed blindly. Ensemble does not delete branches or push tags or other remotes; merged branches
 follow the repository's head-branch deletion setting. Ensemble cannot prevent a push made with
 ambient host credentials once a project's command network access is enabled; it detects the
-result as an outside change. A task branch whose head was changed outside stays refused until the
-remote returns to the last pushed commit. The bounded live run is in the
-[branch publication evidence](evidence/2026-10-19-branch-publication.md).
+result as an outside change. Plain pushes to a task branch whose head was changed outside stay
+refused until the branch is recovered or the remote returns to the last pushed commit.
+
+Recovery is requested by the lead after the outside-change wake and is always approved by the
+operator, whatever the grants: it is never covered by an `allow` grant, and the service,
+operator-delivery and publication callers cannot use it. Both paths name the task branch, the
+outside head (git's all-zero id for a deleted branch) and the commit Ensemble last pushed (null
+before any push); the approval binds all of it, and the approval view shows these values with a
+GitHub compare link from the last push to the outside head (the outside commit alone when nothing was
+pushed; no link for a deleted branch). The values must still be the task branch's recorded outside
+change when the approval is used and again immediately before the effect, so a record that moved
+refuses it, and an approval is never reused after a refusal.
+
+- **Overwrite** is `branch.force-push` carrying that material and the commit to push. It needs a
+  `branch.force-push` grant for the repository in either mode, but naming an outside head always
+  forces approval. The push leases against the approved outside head (expecting the branch absent
+  after a deletion, which recreates it), so a remote that moved since approval rejects it. The
+  new head is recorded as another outside change, the lead is woken again and the approval is
+  spent. A remote back at the last push clears the record without pushing. Success follows the
+  push lifecycle (intent before effect, readback, no blind replay) and records the commit as the
+  last push.
+- **Adopt** is `branch.adopt`, grantable per repository with `approval` only and not offered for a
+  deleted branch. Ensemble reads the remote ref, fetches exactly that one commit from the
+  verified github.com repository over HTTPS in an isolated child (the credential reaches only
+  that child's environment; ADR-1016), proves from rehashed objects that the commit descends from
+  the task's provisioned base, imports the objects into the worktree's object store under an
+  Ensemble-owned ref (`refs/ensemble/adopted/<task branch>`), reads the remote ref again and
+  records the commit as the last push. It does not require descent from the previous last push,
+  so a maintainer's rebase can be adopted, and it never moves the worktree's `HEAD`, index, local
+  commits or files: the agent integrates the outside commits offline, and the next `branch.push`
+  must descend from the adopted head. A head that does not descend from the base is refused and
+  overwrite stays available. Adoption's only remote act is a read, so an adoption interrupted by
+  a restart runs again from its recorded intent and records once. A failed, refused or cancelled
+  adoption leaves the outside change held with no unresolved action, and the lead can request it
+  again with a new approval.
+
+After either recovery succeeds the outside change clears, completion and handback settlement
+are re-evaluated against the new head (the PR is read again), and plain pushes resume. The bounded
+live runs are in the [branch publication evidence](evidence/2026-10-19-branch-publication.md).
 
 The lead explicitly submits merge or issue closure with its current reviewed result
 set. Shared completion checks run with the current action intent transition, excluding

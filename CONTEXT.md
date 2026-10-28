@@ -170,6 +170,18 @@ to; agents cannot choose or push it. A PR created for the task uses it as its he
 A remote head on it that Ensemble did not push is an outside change.
 _Avoid_: Head branch when meaning the assigned, Ensemble-published branch
 
+**Outside change**:
+A task branch head that Ensemble did not push, or a deleted branch, seen at a push or
+on the task's PR. Plain pushes are refused and completion held until the lead recovers
+the branch, with the operator's approval, by overwriting the outside head or adopting it.
+_Avoid_: Outside push
+
+**Branch adoption**:
+The recovery that records an outside head as the task branch's last push after proving
+it descends from the task's provisioned base, without moving the task workspace. The
+agent then integrates the outside commits offline and pushes on top of the adopted head.
+_Avoid_: Merge or sync when meaning the record Ensemble keeps
+
 **Current workspace contents**:
 The files observed in a task workspace at an identified inspection time. They may
 change as work continues and do not represent a historical result.

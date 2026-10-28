@@ -1,9 +1,10 @@
 // Bounded live qualification of task commit publication: a real task worktree, Ensemble's coordinator
-// and HTTPS push for a first commit, `pr.create` on the assigned branch, then a repair push.
+// and HTTPS push for a first commit, `pr.create` on the assigned branch, then a repair push, then
+// recovery from two harness-made outside commits: one overwritten, one adopted and pushed on top of.
 // Run manually after `npm run build`:
 //   node test/delivery/github-qualification/live-publication.mjs --live --manifest ABS --grant ABS [--result ABS]
-// Writes only to the maintainer-owned fixture repository (one scratch branch, one draft PR) under the
-// named manifest and grant. The GitHub credential comes in-process from the product's `ghToken()` and
+// Writes only to the maintainer-owned fixture repository (one scratch branch, one draft PR, two outside
+// commits on that branch) under the named manifest and grant. The GitHub credential comes in-process from the product's `ghToken()` and
 // reaches only the push child's environment and the guarded REST client; it is never printed or stored.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -69,5 +70,10 @@ evidence.source = {
 const text = JSON.stringify(evidence, null, 2);
 if (resultPath) writeFileSync(resultPath, `${text}\n`);
 console.log(text);
-if (evidence.publication !== "passed" || evidence.cleanup !== "verified")
+if (
+  evidence.publication !== "passed" ||
+  evidence.overwrite !== "passed" ||
+  evidence.adopt !== "passed" ||
+  evidence.cleanup !== "verified"
+)
   process.exitCode = 1;

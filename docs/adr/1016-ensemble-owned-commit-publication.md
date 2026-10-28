@@ -35,7 +35,8 @@ agent turns run with network off. Delivery scope lives in
   the task's PR, is an **outside change**: the push is refused, the lead is woken, handback
   settlement is invalidated and completion held. PR actions naming the task branch need the
   commit Ensemble last pushed. A rewritten history means the next review covers the whole
-  new head.
+  new head. After an outside change the lead may request a recovery, either
+  `branch.force-push` that names the outside head (overwrite) or `branch.adopt` (keep it).
 - Transport is the one exception to Ensemble's offline Git: HTTPS to the verified
   github.com repository only, with the delivery credential supplied to that single
   push child through its environment, never in argv, any Git configuration, a file or
@@ -45,7 +46,12 @@ agent turns run with network off. Delivery scope lives in
   the explicit command line is the whole configuration, and the credential helper
   answers only for the exact repository over HTTPS. Time and output are bounded; a
   timeout, cancellation or unobserved exit is uncertain and is settled by reading the
-  remote ref.
+  remote ref. Adopting an outside head adds one fetch child under the same isolation: it
+  fetches exactly one sha from the verified repository in a scratch repository, with
+  `core.alternateRefsCommand` neutralised so Git never runs in the agent-writable
+  alternate and `transfer.fsckObjects` on. The ancestry proof reads only the scratch
+  repository's rehashed objects, with no credential, and Git runs against the worktree
+  afterwards only to write an Ensemble-owned ref, without its hooks or a credential.
 - Ensemble does not delete branches, push tags or forks, or poll for pushes without a
   PR. Merged branches follow the repository's own head-branch deletion setting.
 
@@ -54,9 +60,13 @@ agent turns run with network off. Delivery scope lives in
 Ensemble cannot prevent a push made with ambient host credentials once a project's command
 network access is enabled ([#1191](https://github.com/chrisbanes/ensemble/issues/1191)). It
 detects the result as an outside change, and discloses the limit. An outside change
-also ends Ensemble's publication to that branch until the remote head returns to the
-commit Ensemble last pushed, because that commit is the only lease; adopting an
-outside head needs a separate operator action that this decision does not provide.
+also ends Ensemble's plain publication to that branch until the remote head returns to the
+commit Ensemble last pushed, because that commit is the only lease. The way out is a
+recovery the lead requests and the operator always approves, never covered by an `allow`
+grant: `branch.force-push` naming the outside head overwrites it under a lease on that
+head, and `branch.adopt` (grantable with approval only) records it as the branch's own
+after the fetch child proves it descends from the provisioned base. Both bind the branch,
+the outside head and the commit Ensemble last pushed.
 
 ## Considered options
 

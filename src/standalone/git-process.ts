@@ -23,7 +23,7 @@ export interface GitRunOptions {
   maxOutputBytes: number;
   signal?: AbortSignal;
   /**
-   * Applied over the offline `gitEnvironment()`. Only `git-push.ts` (which enables the one HTTPS
+   * Applied over the offline `gitEnvironment()`. Only `git-push.ts` and `git-fetch.ts` (which enable the one HTTPS
    * transport) and `push-verification.ts` (which only hardens object reads) pass this, as a
    * structural test enforces: every other Git child stays without transports.
    */

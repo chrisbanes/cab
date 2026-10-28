@@ -382,7 +382,12 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   a task commit, opened the PR and pushed a repair commit to the same branch, with
   verified cleanup; it was coordinator-level with no model turns, and a real foreign
   push, force-push and approval mode were not exercised live. Evidence:
-  [branch publication](evidence/2026-10-19-branch-publication.md).
+  [branch publication](evidence/2026-10-19-branch-publication.md). Recovery from an outside
+  change (#1206) is **Bounded** by deterministic tests only so far: the approval-gated overwrite
+  and adoption, their binding and refusals, a remote that moves after approval, restart
+  mid-recovery, the isolated fetch child and the approval view (`branch-recovery`, `git-fetch`,
+  `delivery-integration`, `operator-task-detail-browser`, `publication-live-harness`); its bounded
+  live run is pending.
 - **Status mapping** (#1194, ADR-1017) — **Bounded.** Deterministic tests cover the
   mapping save rules (grants, in-flight readiness, unavailable source, versions), the service
   caller's authority and its readiness exemption, each event's write once per transition, the
