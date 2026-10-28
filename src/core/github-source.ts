@@ -1198,20 +1198,14 @@ export class GitHubSourceStore {
         .get(snapshot.nodeId) as Row | undefined;
       this.updateReadiness(String(issue.taskId), true);
       const rule = parseRule(config.readiness);
-      // Without a rule, readiness cannot be lost: the closure is plainly closed.
-      const labelProof =
-        rule === null ||
-        (rule.conditions.every((c) => c.kind === "label") &&
-          (rule.mode === "all"
-            ? rule.conditions.every(
-                (c) => c.kind === "label" && snapshot.labels.includes(c.name),
-              )
-            : rule.conditions.some(
-                (c) => c.kind === "label" && snapshot.labels.includes(c.name),
-              )));
+      // The closure read carries no Project fields and closing changes none: use those last observed.
+      const readinessProof = evaluateReadiness(rule, {
+        labels: snapshot.labels,
+        fields: this.readinessFacts({ ...issue, projectId }).fields,
+      }).satisfied;
       const hold = priorHold;
       if (
-        labelProof &&
+        readinessProof &&
         (!hold?.active ||
           [
             "closed",
@@ -1221,7 +1215,7 @@ export class GitHubSourceStore {
           ].includes(String(hold.reason)))
       )
         this.setSourceHold(snapshot.nodeId, "closed");
-      else if (!labelProof && (!hold?.active || hold.reason === "closed"))
+      else if (!readinessProof && (!hold?.active || hold.reason === "closed"))
         this.setSourceHold(snapshot.nodeId, "readiness-lost");
       else if (hold?.active)
         this.setSourceHold(snapshot.nodeId, String(hold.reason));
