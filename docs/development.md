@@ -523,9 +523,11 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      [--expected-policy-version N] [--expected-head-sha SHA]` records the handback
      settlement of a reviewable PR, the same `delivery.settle` command as the task
      view; `delivery get` shows the four values. An omitted pin is the value the
-     command read first, and the service refuses any that is stale. Accept is
-     refused for a draft or closed PR, a PR whose last read failed and a task branch
-     with an outside push; Settle as closed stays possible on a closed PR. It covers
+     command read first, and the service refuses any that is stale. Either decision is
+     refused for a merged PR, a failed last provider read or a handback already
+     settled for the current head; Accept is also refused for a draft or closed PR
+     and a task branch with an outside push, while Settle as closed stays possible on
+     a closed PR. It covers
      that head and policy version only, does not merge, close or comment on the PR,
      does not complete the task and cannot be undone.
    - `delivery review-comment TASK_ID --body-file FILE --expected-task-version N`

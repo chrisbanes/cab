@@ -27,6 +27,7 @@ import { fixLine, nextLine, taskHeldLabels } from "./remedy.js";
 import { keyValues } from "./render.js";
 import type { RequestIdentity } from "./types.js";
 import {
+  carryRetryFlags,
   chooseKey,
   derivedUuid,
   type Session,
@@ -250,22 +251,8 @@ async function domainTaskWrite(
     taskVersion(session, taskId, fields.expectedVersion as number),
   ).catch((error: unknown) => {
     // The settling retry must carry the version this attempt sent, or its digest differs.
-    if (
-      filled &&
-      error instanceof CliError &&
-      error.code === "command-outcome-unknown" &&
-      error.extra.request
-    ) {
-      const flags = `--request-id ${key} --expected-version ${read.version}`;
-      throw new CliError(
-        error.code,
-        error.message.replace(`--request-id ${key}`, flags),
-        {
-          ...error.extra,
-          fix: `Do not assume either outcome: repeat the same command with ${flags} to settle it.`,
-        },
-      );
-    }
+    if (filled)
+      return carryRetryFlags(error, key, `--expected-version ${read.version}`);
     throw error;
   });
   const after = await readAfter(session, taskId);

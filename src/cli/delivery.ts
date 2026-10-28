@@ -16,7 +16,7 @@ import {
 import { exactCommand, positiveIntFlag, readTextFile } from "./configure.js";
 import { CliError } from "./connections.js";
 import { keyValues, table, unavailable } from "./render.js";
-import { connectWrite, writeOutput } from "./task-write.js";
+import { connectWrite, readAfter, writeOutput } from "./task-write.js";
 import type { ServiceClient } from "./transport.js";
 import type { RequestIdentity } from "./types.js";
 import {
@@ -110,6 +110,15 @@ function handbackLine(d: Delivery, b: NonNullable<Delivery["binding"]>) {
     : `awaiting settlement for head ${b.headSha.slice(0, 12)} (${at})`;
 }
 
+const noHandback = (taskId: string) =>
+  new CliError(
+    "policy-denied",
+    "This task has no reviewable pull request handback to settle. Nothing was sent.",
+    {
+      fix: `Run 'ensemble delivery get ${taskId}' to see the task's delivery.`,
+    },
+  );
+
 function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
   const d = view.delivery,
     p = view.commentPolicy,
@@ -141,7 +150,7 @@ function deliveryLines(view: ReturnType<typeof deliveryView>): string[] {
           ? `${b.repositoryName}#${b.number} ${b.state} head ${b.headSha.slice(0, 12)}, observed ${b.observedAt}${b.readError ? `, last read failed: ${b.readError}` : ""}`
           : "none registered",
       ],
-      ...(d && b && d.mode === "reviewable-pr" && b.state !== "MERGED"
+      ...(d && b && d.mode === "reviewable-pr"
         ? [["Handback", handbackLine(d, b)] as [string, string]]
         : []),
       ...(d?.branches ?? []).map((r): [string, string] => [
@@ -446,20 +455,11 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           headSha: pinned.headSha ?? b?.headSha,
         };
         if (
-          !d ||
-          !b ||
-          d.mode !== "reviewable-pr" ||
           pins.deliveryRevision === undefined ||
           pins.policyVersion === undefined ||
           pins.headSha === undefined
         )
-          throw new CliError(
-            "policy-denied",
-            "This task has no reviewable pull request handback to settle. Nothing was sent.",
-            {
-              fix: `Run 'ensemble delivery get ${taskId}' to see the task's delivery.`,
-            },
-          );
+          throw noHandback(taskId);
         const { key, digest, reached } = await keyFor(
           ctx,
           session,
@@ -480,6 +480,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         };
         // Advisory only, and never for a key that may already have applied: the service decides.
         if (!reached) {
+          if (!d || !b || d.mode !== "reviewable-pr") throw noHandback(taskId);
           const view = `Run 'ensemble delivery get ${taskId}' to see the handback.`;
           const settled = currentSettlement(d);
           if (settled)
@@ -537,9 +538,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             r.decision === decision,
         }).catch(async (error: unknown) => {
           if (error instanceof CliError && error.code === "conflict") {
-            const now = await readTask(session.client, taskId)
-              .then((r) => r.data)
-              .catch(() => undefined);
+            const now = await readAfter(session, taskId);
             const nb = now?.delivery?.binding;
             const current = nb
               ? `task version ${now?.task.version}, binding revision ${nb.revision}, policy version ${now?.delivery?.policyVersion}, head ${nb.headSha.slice(0, 12)}`

@@ -73,10 +73,10 @@ that share the web UI's Stop hold; Resume clears only the operator Stop.
 sources and repository links (a `github.configure` change document applied with
 `project apply`), activate a selection and place a conflicting imported task;
 `delivery get|refresh|settle|review-comment|confirm-comment|send-comment` inspect delivery
-and drive the existing refresh, handback settlement and staged comment commands,
-`result deliver` delivers an undelivered result to its permitted recipient, and `delivery
-publish-review|publish-confirm|publish-send|publish-link|publish-abandon` publish a
-local task as a GitHub issue with the operator UI's own commands. `recovery
+and drive the existing refresh, handback settlement and staged comment commands;
+`result deliver` delivers an undelivered result to its permitted recipient; and
+`delivery publish-review|publish-confirm|publish-send|publish-link|publish-abandon`
+publish a local task as a GitHub issue with the operator UI's own commands. `recovery
 get|prepare|submit` inspect an assignment's held generations and submit the
 existing adoption, pre-turn and no-turn recovery and conversation-replacement
 commands from an owner-only, digest-bound document built from observed identity and
