@@ -5,7 +5,7 @@ before execution. The TypeScript implementation runs the `check` job in
 `.github/workflows/ci.yml`; required checks must still be verified from the target
 branch's live protection rules and rulesets.
 
-The [standalone delivery issues](https://github.com/chrisbanes/ensemble/issues/649) own current
+The [standalone delivery issues](https://github.com/chrisbanes/cab/issues/649) own current
 scope, sequencing and slice completion criteria; native dependencies govern dispatch.
 Do not maintain a parallel repo delivery plan. A stale ready label on a historical
 T01–T12 ticket does not authorize implementing the retired BB path: reconcile its
@@ -14,7 +14,7 @@ live scope and capability dependencies with the delivery issues before dispatch.
 ## Repository
 
 - Host: `github.com`
-- Repository: `chrisbanes/ensemble`
+- Repository: `chrisbanes/cab`
 - Default branch: `main`
 - Base branch: `main`
 
