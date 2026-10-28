@@ -2002,17 +2002,15 @@ export function TaskWorkspace({
                     </ActionLink>
                   </div>
                 )}
-                {/* Kept after it is recorded, so the confirmation outlives the code it cleared. */}
+                {/* Kept once sent, so a confirmation or a check outlives the code it cleared. */}
                 {(data.attention.codes.includes("not-started") ||
                   startedAgain === taskId) && (
                   <StartAgainAction
                     client={client}
                     session={session}
                     task={data}
-                    onChanged={() => {
-                      setStartedAgain(taskId);
-                      refreshAll();
-                    }}
+                    onStart={() => setStartedAgain(taskId)}
+                    onChanged={refreshAll}
                   />
                 )}
                 {nextActor.code === "execution-uncertain" &&

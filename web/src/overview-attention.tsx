@@ -439,6 +439,8 @@ function StartAgainCard({
           client={client}
           session={session}
           task={task}
+          // Kept in place from the send on, as for an answered question, so a lost reply stays checkable.
+          onStart={onRecorded}
           onChanged={() => {
             void resource.refresh();
             onRecorded();

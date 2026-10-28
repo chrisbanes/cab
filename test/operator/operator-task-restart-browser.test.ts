@@ -185,17 +185,35 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await startAgain().waitFor();
     assert.equal(commands.length, 5);
 
-    // A reset whose outcome is unknown stays checkable after the dialog is dismissed.
-    const unknown = await refusedTask(f);
-    await page.goto(`${web.origin}/app/tasks/${unknown.taskId}`);
+    // A command the service recorded but whose reply was lost stays reachable and checkable
+    // after a later read changes what is offered: the check resends the same keyed command.
+    const loseNextReply = async (type: string) => {
+      let armed = true;
+      await page.route("**/api/operator/commands", async (route) => {
+        if (armed && (route.request().postData() ?? "").includes(`"${type}"`)) {
+          armed = false;
+          await route.fetch();
+          await route.abort();
+        } else await route.fallback();
+      });
+    };
+    const sameKeyTwice = (type: string, taskId: string) => {
+      const sent = commands.filter(
+        (c) => c.type === type && c.taskId === taskId,
+      );
+      assert.equal(sent.length, 2, type);
+      assert.equal(sent[0]?.key, sent[1]?.key, type);
+    };
+    const check = () =>
+      page.getByRole("button", { name: "Check whether it saved" });
+    const refreshTask = () =>
+      page.getByRole("button", { name: "Refresh task" }).click();
+
+    // Reset: recorded, reply lost, dialog dismissed, a read makes Reset unavailable.
+    const lostReset = await refusedTask(f);
+    await page.goto(`${web.origin}/app/tasks/${lostReset.taskId}`);
     await page.locator("[data-task-strip]").waitFor();
-    let lost = true;
-    await page.route("**/api/operator/commands", async (route) => {
-      if (lost && (route.request().postData() ?? "").includes('"task.reset"')) {
-        lost = false;
-        await route.abort();
-      } else await route.continue();
-    });
+    await loseNextReply("task.reset");
     const openReset = async () => {
       if (
         viewport.width < 760 &&
@@ -211,23 +229,74 @@ for (const [name, viewport] of Object.entries(viewports)) {
       .getByRole("alertdialog")
       .getByRole("button", { name: "Reset task", exact: true })
       .click();
-    await page
-      .getByRole("button", { name: "Check whether it saved" })
-      .waitFor();
+    await check().waitFor();
     await page
       .getByRole("alertdialog")
       .getByRole("button", { name: "Cancel" })
       .click();
+    await refreshTask();
+    await page.waitForFunction(
+      (id) =>
+        document.querySelector("[data-task-strip]") !== null && Boolean(id),
+      lostReset.taskId,
+    );
     await openReset();
-    await page.getByRole("button", { name: "Check whether it saved" }).click();
+    await check().click();
     await page
       .getByText(/Reset\. The lead starts a fresh conversation/)
       .waitFor();
-    // The check resends the same keyed command: no second reset is recorded.
-    const resets = commands.filter(
-      (c) => c.type === "task.reset" && c.taskId === unknown.taskId,
+    sameKeyTwice("task.reset", lostReset.taskId);
+
+    // Start again on the task page: recorded, reply lost, a read drops the not-started code.
+    const lostStart = await refusedTask(f);
+    await page.goto(`${web.origin}/app/tasks/${lostStart.taskId}`);
+    await loseNextReply("task.start-again");
+    await startAgain().click();
+    await check().waitFor();
+    await refreshTask();
+    await page.waitForTimeout(500);
+    await check().click();
+    await page.getByText(/Queued again\./).waitFor();
+    sameKeyTwice("task.start-again", lostStart.taskId);
+
+    // The same in the Inbox, where a refresh drops the request from the queue.
+    const lostInbox = await refusedTask(f);
+    await page.goto(
+      `${web.origin}/app/inbox?task=${lostInbox.taskId}&request=${encodeURIComponent(`intervention:${lostInbox.taskId}`)}`,
     );
-    assert.equal(resets.length, 2);
-    assert.equal(resets[0]?.key, resets[1]?.key);
+    await loseNextReply("task.start-again");
+    await startAgain().click();
+    await check().waitFor();
+    // The phone's detail view has no Refresh: its next poll (every 15s) is the read.
+    if (viewport.width < 760) await page.waitForTimeout(16000);
+    else
+      await page
+        .getByRole("button", { name: /^Refresh/ })
+        .first()
+        .click();
+    await page.waitForTimeout(500);
+    await check().click();
+    await page.getByText(/Queued again\./).waitFor();
+    sameKeyTwice("task.start-again", lostInbox.taskId);
+
+    // And in Home's card, which re-reads the Inbox as soon as the start is sent.
+    const lostHome = await refusedTask(f);
+    await page.goto(`${web.origin}/app`);
+    const lostCard = page.locator(
+      `.overview-card[data-request-id="intervention:${lostHome.taskId}"]`,
+    );
+    await loseNextReply("task.start-again");
+    await lostCard
+      .getByRole("button", { name: "Start again", exact: true })
+      .click();
+    await lostCard
+      .getByRole("button", { name: "Check whether it saved" })
+      .waitFor();
+    await page.waitForTimeout(500);
+    await lostCard
+      .getByRole("button", { name: "Check whether it saved" })
+      .click();
+    await lostCard.getByText(/Queued again\./).waitFor();
+    sameKeyTwice("task.start-again", lostHome.taskId);
   });
 }

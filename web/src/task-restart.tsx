@@ -61,12 +61,18 @@ export function StartAgainAction({
   session,
   task,
   onChanged,
+  onStart,
 }: {
   client: OperatorClient;
   session: Session;
   task: Task;
   /** Rereads the task after a recorded start or a conflict. */
   onChanged: () => void;
+  /**
+   * A start was sent. The container keeps this mounted from now on: a lost reply is checked here
+   * after a later read has dropped the offer, so it must outlive the offer.
+   */
+  onStart?: () => void;
 }) {
   const taskId = task.task.id,
     offer = task.startAgain;
@@ -109,7 +115,8 @@ export function StartAgainAction({
             <Button
               variant="secondary"
               disabled={Boolean(sending)}
-              onClick={() =>
+              onClick={() => {
+                onStart?.();
                 void send(
                   operatorCommandSchema.parse({
                     type: "task.start-again",
@@ -118,14 +125,15 @@ export function StartAgainAction({
                     expectedVersion: task.task.version,
                     workId: offer.workId,
                   }),
-                )
-              }
+                );
+              }}
             >
               {sending ? "Starting…" : "Start again"}
             </Button>
           )
         : unavailable &&
-          sent?.kind !== "recorded" && (
+          sent?.kind !== "recorded" &&
+          !uncertain && (
             <>
               <p className="muted">
                 Start again isn't offered: {unavailable.text}.
@@ -186,9 +194,10 @@ export function ResetTask({
   );
   if (!offer) return null;
   const unavailable = offer.reason ? resetUnavailable[offer.reason] : undefined;
-  // An open dialog stays: a recorded reset makes the offer unavailable under its confirmation.
+  // An open dialog stays: a recorded reset makes the offer unavailable under its confirmation,
+  // and so does an unconfirmed one, which must stay reachable to be checked.
   // Closed, the header only says why in a tooltip; the Execution link beside it leads to recovery.
-  if (!offer.available && !open)
+  if (!offer.available && !open && !uncertain)
     return (
       <Button
         variant="secondary"
