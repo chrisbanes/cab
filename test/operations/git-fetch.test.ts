@@ -121,8 +121,8 @@ ${
         behaviour.grow
           ? `const { mkdirSync } = require("node:fs");
 mkdirSync(process.env.GIT_DIR + "/objects/pack", { recursive: true });
-writeFileSync(process.env.GIT_DIR + "/objects/pack/tmp_pack_fake", Buffer.alloc(${behaviour.grow}));
 writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+writeFileSync(process.env.GIT_DIR + "/objects/pack/tmp_pack_fake", Buffer.alloc(${behaviour.grow}));
 `
           : ""
       }setTimeout(() => {}, 60000);`
