@@ -66,6 +66,8 @@ export class ServiceClient {
     readonly origin: string,
     private readonly token: string,
     private readonly fetcher: typeof fetch = fetch,
+    /** Stops reads only: a write that may have been sent keeps its own outcome-unknown path. */
+    private readonly signal?: AbortSignal,
   ) {}
 
   /** One GET with redirects refused; the caller reads the body of a 2xx response. */
@@ -76,6 +78,7 @@ export class ServiceClient {
       response = await this.fetcher(`${this.origin}${path}`, {
         // Never follow a redirect: it would forward the bearer credential.
         redirect: "manual",
+        ...(this.signal ? { signal: this.signal } : {}),
         headers: {
           accept,
           authorization: `Bearer ${this.token}`,

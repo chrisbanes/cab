@@ -7434,10 +7434,6 @@ export class StandaloneService {
     const state = this.started().state;
     const harness = harnessForWork(state, request.workId);
     const runtime = this.runtimes.get(harness);
-    if (!runtime) throw new Error("Runtime unavailable");
-    // Shutdown settles active work, so a failed runtime must not leave it pending.
-    const guard = <T>(work: Promise<T>) =>
-      this.untilFailure(runtime, work, runtimeFailedError);
     let submissionStage: "resume" | "thread" | "bound" | "turn" = "thread";
     let captureThreadId: string | undefined;
     let turnCapture: WorkspaceTurnCaptureRecord | undefined;
@@ -7508,6 +7504,12 @@ export class StandaloneService {
       }
     }
     try {
+      // Inside the try so a runtime removed after admission holds the intent with a reason.
+      if (!runtime)
+        throw new Error("Runtime unavailable before task turn submission");
+      // Shutdown settles active work, so a failed runtime must not leave it pending.
+      const guard = <T>(work: Promise<T>) =>
+        this.untilFailure(runtime, work, runtimeFailedError);
       // Admitted task work submits during planned shutdown, so it binds and is interrupted.
       if (
         !generation ||

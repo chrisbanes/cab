@@ -1257,6 +1257,34 @@ test("a refused or unresolved connection names the origin and no request id", as
   assert.equal(fixLines(reset.err).length, 1);
 });
 
+test("an interrupt aborts a stalled read", async (t) => {
+  const o = await startCliOperator(t);
+  const controller = new AbortController();
+  let seen: AbortSignal | null | undefined;
+  const stalled: typeof fetch = (input, init) =>
+    String(input).endsWith("/api/operator/cli")
+      ? new Promise((_, reject) => {
+          seen = init?.signal;
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason),
+          );
+          setTimeout(() => controller.abort(), 10);
+        })
+      : fetch(input, init);
+  const r = await Promise.race([
+    o.cli("ro", ["task", "list"], {
+      fetch: stalled,
+      signal: controller.signal,
+    }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("read was not interrupted")), 2000),
+    ),
+  ]);
+  assert.ok(seen);
+  assert.equal(r.code, 5);
+  assert.equal(r.json().error.code, "unavailable");
+});
+
 test("a TLS verification failure has no request id in human output", async (t) => {
   const h = harness(t);
   const args = [

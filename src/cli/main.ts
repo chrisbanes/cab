@@ -773,6 +773,7 @@ async function connect(
     connectionOrigin(connection.url),
     token,
     deps.fetch,
+    deps.signal,
   );
   const identity = await client.identity(capabilities);
   if (identity.service.installationId !== connection.installationId)
@@ -837,9 +838,12 @@ export async function saveLogin(
   signal?: AbortSignal,
 ) {
   // Validate before storing anything.
-  const identity = await new ServiceClient(origin, token, deps.fetch).identity([
-    "cli.identity",
-  ]);
+  const identity = await new ServiceClient(
+    origin,
+    token,
+    deps.fetch,
+    signal ?? deps.signal,
+  ).identity(["cli.identity"]);
   const current: CliConfig = await config.read();
   const keychain = deps.keychain();
   const priorKeychain =

@@ -25,7 +25,6 @@ import {
   type RuntimeUserInputRequest,
 } from "./native-input.js";
 import { EventEmitter } from "node:events";
-import { createInterface } from "node:readline";
 import { z } from "zod";
 import { supportedRuntimeSettingsSchema } from "../core/execution-runtime.js";
 import type { ExecutionHarness } from "./execution-harness.js";
@@ -82,6 +81,8 @@ const modelList = z.object({
   nextCursor: z.string().nullable().optional(),
 });
 const maxModelListPages = 8;
+/** A quarter of V8's string limit: a longer line would throw while decoding, inside a stream handler. */
+export const maxAppServerLineBytes = 128 * 1024 * 1024;
 const defaultSettingsRetryMs = 30_000;
 const maxSettingsRetryMs = 10 * 60_000;
 const qualifiedCodexVersion = "codex-cli 0.159.0";
@@ -699,6 +700,55 @@ interface NativeEndpoint {
 }
 
 /** One private stdio App Server process. It never sends an approval grant. */
+/**
+ * Delivers each newline-terminated line of `stream` as UTF-8, plus a final unterminated one at end.
+ * A line over `maxAppServerLineBytes` is dropped and reported once through `onOverflow`; the
+ * stream is not read after that.
+ */
+function splitLines(
+  stream: NodeJS.ReadableStream,
+  onLine: (line: string) => void,
+  onOverflow: () => void,
+): void {
+  let pending: Buffer[] = [];
+  let size = 0;
+  let overflowed = false;
+  const take = (piece: Buffer): boolean => {
+    size += piece.length;
+    if (size > maxAppServerLineBytes) {
+      overflowed = true;
+      pending = [];
+      onOverflow();
+      return false;
+    }
+    pending.push(piece);
+    return true;
+  };
+  const emit = () => {
+    const line = Buffer.concat(pending);
+    pending = [];
+    size = 0;
+    const end = line.at(-1) === 0x0d ? line.length - 1 : line.length;
+    onLine(line.toString("utf8", 0, end));
+  };
+  stream.on("data", (chunk: Buffer) => {
+    let start = 0;
+    while (!overflowed) {
+      const newline = chunk.indexOf(0x0a, start);
+      if (newline === -1) {
+        take(chunk.subarray(start));
+        return;
+      }
+      if (!take(chunk.subarray(start, newline))) return;
+      emit();
+      start = newline + 1;
+    }
+  });
+  stream.on("end", () => {
+    if (!overflowed && size > 0) emit();
+  });
+}
+
 export class CodexRuntime implements Runtime {
   readonly harness = "codex" as const;
   private child: ChildProcessWithoutNullStreams | undefined;
@@ -1763,8 +1813,16 @@ export class CodexRuntime implements Runtime {
     // Diagnostics may contain sensitive data. Drain without retaining or logging
     // them so a full stderr pipe cannot stall JSON-RPC on stdout.
     child.stderr.resume();
-    createInterface({ input: child.stdout }).on("line", (line) =>
-      this.receive(child, line),
+    splitLines(
+      child.stdout,
+      (line) => this.receive(child, line),
+      () =>
+        this.failChild(
+          child,
+          new Error(
+            `Codex App Server stdout line exceeds ${maxAppServerLineBytes} bytes`,
+          ),
+        ),
     );
     // Without stdout no terminal can arrive, so pending turn waits would never settle.
     child.stdout.on("close", () =>
