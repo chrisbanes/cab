@@ -4,6 +4,7 @@ import {
   type Session,
   type TaskRead,
 } from "../../src/operator/contracts.js";
+import { useReducer } from "react";
 import type { OperatorClient } from "./api.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
 import { useCommandSend, type SendOutcome } from "./command-send.js";
@@ -297,6 +298,7 @@ export function AssignmentMessage({
   /** Rereads the task after a recorded message or a conflict. */
   onChanged: () => void;
 }) {
+  const [, draftEdited] = useReducer((n: number) => n + 1, 0);
   const { entry, send, sending, outcome, uncertain } = useCommandSend(
     client,
     session,
@@ -341,7 +343,10 @@ export function AssignmentMessage({
         maxLength={textMaxLength}
         value={entry.text}
         disabled={Boolean(sending) || uncertain}
-        onChange={(e) => entry.edit(e.target.value)}
+        onChange={(e) => {
+          entry.edit(e.target.value);
+          draftEdited();
+        }}
       />
       <div className="assignment-message-bar">
         <p className="metadata muted">

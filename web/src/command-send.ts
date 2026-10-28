@@ -41,9 +41,9 @@ export class CommandSend {
     this.outcome = null;
     this.changed();
   }
+  /** Keeps the draft without notifying: the one component showing it re-renders itself. */
   edit(text: string) {
     this.text = text;
-    this.changed();
   }
   /**
    * How the send settled and the service's answer, or null when nothing was sent or the session
@@ -104,12 +104,12 @@ export class CommandSends {
     }
     return entry;
   }
-  subscribe(listener: () => void) {
+  subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
-  }
+  };
   changed() {
     for (const listener of this.listeners) listener();
   }
@@ -118,11 +118,16 @@ export class CommandSends {
     this.changed();
   }
 }
-export const CommandSendsContext = createContext(new CommandSends());
+export const CommandSendsContext = createContext<CommandSends | null>(null);
+export function useCommandSends() {
+  const sends = useContext(CommandSendsContext);
+  if (!sends) throw Error("CommandSendsContext is not provided");
+  return sends;
+}
 
 /** The entry for `key`, re-rendering the component whenever any entry changes. */
 export function useSendEntry(key: string) {
-  const sends = useContext(CommandSendsContext),
+  const sends = useCommandSends(),
     [, render] = useReducer((n: number) => n + 1, 0);
   useEffect(() => sends.subscribe(render), [sends]);
   return sends.entry(key);

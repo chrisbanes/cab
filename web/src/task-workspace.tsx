@@ -407,8 +407,10 @@ export function TaskWorkspace({
     changed = () => render((n) => n + 1);
   const [histories, setHistory] = useState<Record<string, History>>({}),
     [historyErrors, setHistoryErrors] = useState<Record<string, string>>({}),
-    [pending, setPending] = useState(false),
+    [sendingNow, setPending] = useState(false),
     [updates, setUpdates] = useState(false);
+  // A write sent before the page was left may still be in flight when it is reopened.
+  const pending = sendingNow || Boolean(auxSend.sending);
   const historyRequests = useRef(new Map<string, number>());
   const invalidateHistory = (clear = true) => {
     for (const [id, revision] of historyRequests.current)
@@ -1068,7 +1070,7 @@ export function TaskWorkspace({
       void loadHistory(a.assignmentId, undefined, undefined, true);
   }, [data, loadHistory, resource.state.pending, resource.state.error]);
   async function command(input: OperatorCommand) {
-    if (pending || auxSend.sending) return;
+    if (pending) return;
     if (
       unconfirmed &&
       (input.type === "review.view" || input.type === "delivery.refresh") &&

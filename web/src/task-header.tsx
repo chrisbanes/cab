@@ -2,7 +2,6 @@ import { Ellipsis } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactNode,
-  useContext,
   useEffect,
   useRef,
   useState,
@@ -10,7 +9,7 @@ import {
 } from "react";
 import type { Session, TaskRead } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { CommandSendsContext } from "./command-send.js";
+import { useCommandSends } from "./command-send.js";
 import { ActionLink, Button } from "./components.js";
 import { outcomeLine } from "./presentation.js";
 import { MarkdownPreview } from "./task-files.js";
@@ -107,9 +106,9 @@ export function TaskHeaderActions({
     [menuOpen, setMenuOpen] = useState(false);
   // An unconfirmed reset keeps its control, so a lost reply can still be checked; otherwise the
   // control follows the task's current offer.
-  const sends = useContext(CommandSendsContext),
+  const sends = useCommandSends(),
     resetUncertain = useSyncExternalStore(
-      (listener) => sends.subscribe(listener),
+      sends.subscribe,
       () => sends.entry(`${report.taskId}:reset`).uncertain,
     );
   const phone = useMediaQuery("(max-width: 759px)");
