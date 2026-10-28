@@ -210,11 +210,11 @@ export function Inbox({
         (!state.kind || item.kind === state.kind),
     ),
   ).flatMap((group) => group.items);
-  // One read of the selected request's task serves its holds, approval facts and the inspector.
   // A sent start is kept only for the selection it was sent from; another selection drops the
   // pane (and its command), so the flag must not describe a later one.
   // biome-ignore lint/correctness/useExhaustiveDependencies: clears exactly when the selection changes.
   useEffect(() => setStartSentFor(null), [selectedId]);
+  // One read of the selected request's task serves its holds, approval facts and the inspector.
   const task = useInboxTask(
     client,
     session,
