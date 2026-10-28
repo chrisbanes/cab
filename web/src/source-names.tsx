@@ -71,6 +71,7 @@ export function useSavedSourceNames(p: TabProps) {
     client: p.client,
     csrfToken: p.session.csrfToken,
     enabled: hasProjectSource(data.source),
+    labels: false,
     saved: data.source.repositories.map((r) => ({
       repositoryId: r.repositoryId ?? "",
     })),

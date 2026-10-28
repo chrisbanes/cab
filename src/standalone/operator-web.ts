@@ -10,6 +10,7 @@ import { operatorRouteAuthority } from "./operator-credentials.js";
 import type { Readiness } from "./readiness.js";
 import type { WorkspaceInspectionRequest } from "./workspace-inspection.js";
 import { workspaceComparisonReadRequestSchema } from "../operator/contracts.js";
+
 const mime: Record<string, string> = {
   js: "text/javascript; charset=utf-8",
   mjs: "text/javascript; charset=utf-8",
@@ -242,6 +243,8 @@ export class OperatorWebBoundary {
     if (path === "/api/operator/inbox") return this.api.readInbox(query);
     if (path === "/api/operator/discovery/branches")
       return this.api.readDiscoveryBranches(query);
+    if (path === "/api/operator/discovery/labels")
+      return this.api.readDiscoveryLabels(query);
     if (path === "/api/operator/discovery/projects")
       return this.api.readDiscoveryProjects(query);
     if (path === "/api/operator/discovery/project-fields")

@@ -95,6 +95,18 @@ export function fakeDiscovery(
         truncated: Boolean(state.truncated),
       };
     },
+    async labels(_owner, name) {
+      fail("labels");
+      return {
+        labels:
+          name === "atlas"
+            ? ["bug", "ready", "needs-review"]
+            : name === "relay"
+              ? ["ready", "triage"]
+              : [],
+        truncated: Boolean(state.truncated),
+      };
+    },
     async projectFields(project) {
       fail("projectFields");
       const option = (name: string, id: string) => ({

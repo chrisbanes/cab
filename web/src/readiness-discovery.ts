@@ -1,5 +1,6 @@
 /** Pure rules for the readiness Project-field picker; no React. */
 import type {
+  discoveryLabelsSchema,
   discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
@@ -13,6 +14,7 @@ type Data<T extends z.ZodType> =
 export type RepositoriesRead = Data<typeof discoveryRepositoriesSchema>;
 export type ProjectsRead = Data<typeof discoveryProjectsSchema>;
 export type FieldsRead = Data<typeof discoveryProjectFieldsSchema>;
+export type LabelsRead = Data<typeof discoveryLabelsSchema>;
 type ReadyFields = Extract<FieldsRead, { state: "ready" }>["fields"];
 
 export interface ProjectChoice {
@@ -36,21 +38,25 @@ export type PickerState =
   | { state: "picker"; projects: ProjectChoice[]; fields: ReadyFields };
 
 const typeIds = " Type the node IDs.";
+const typeLabel = " Type the label.";
 const unavailableNote = (
   read: Extract<
-    RepositoriesRead | ProjectsRead | FieldsRead,
+    RepositoriesRead | ProjectsRead | FieldsRead | LabelsRead,
     { state: "unavailable" }
   >,
+  listed = "Projects and fields",
+  type = typeIds,
 ) =>
   (read.reason === "unconfigured"
-    ? "GitHub discovery is unavailable: no discovery credential is configured, so Projects and fields can't be listed."
-    : discoveryReasonCopy(read.reason)) + typeIds;
-const truncatedNote =
-  "GitHub discovery is unavailable: there are too many results to list in full." +
-  typeIds;
+    ? `GitHub discovery is unavailable: no discovery credential is configured, so ${listed} can't be listed.`
+    : discoveryReasonCopy(read.reason)) + type;
+const truncatedNote = (type = typeIds) =>
+  `GitHub discovery is unavailable: there are too many results to list in full.${type}`;
 const noProjectNote =
   "No GitHub Project is linked to a repository of this source, so none can be listed." +
   typeIds;
+export const unlistedLabelNote =
+  "This label is not on the source's repositories; it saves as typed.";
 const unlistedNote =
   "These IDs are not in the discovered lists, so they stay as typed node IDs.";
 
@@ -85,7 +91,7 @@ export function projectChoices(
   if (!repositories) return { state: "loading" };
   if (repositories.state === "unavailable")
     return { state: "typed", note: unavailableNote(repositories) };
-  if (repositories.truncated) return { state: "typed", note: truncatedNote };
+  if (repositories.truncated) return { state: "typed", note: truncatedNote() };
   const found = new Map<
     string,
     { title: string; owner: string; number: number }
@@ -96,7 +102,7 @@ export function projectChoices(
     if (!read) return { state: "loading" };
     if (read.state === "unavailable")
       return { state: "typed", note: unavailableNote(read) };
-    if (read.truncated) return { state: "typed", note: truncatedNote };
+    if (read.truncated) return { state: "typed", note: truncatedNote() };
     for (const p of read.linked)
       found.set(p.projectNodeId, {
         title: p.title || "Untitled Project",
@@ -119,6 +125,36 @@ export function projectChoices(
   };
 }
 
+/**
+ * The labels of the source's linked repositories, deduplicated by exact name (readiness matches
+ * exactly), or why the Ready label control cannot list them and stays a plain typed field.
+ */
+export function labelChoices(
+  repositories: RepositoriesRead | undefined,
+  saved: { repositoryId: string }[],
+  labelReads: Record<string, LabelsRead | undefined>,
+):
+  | { state: "loading" }
+  | { state: "typed"; note: string }
+  | { state: "ready"; labels: string[] } {
+  if (!repositories) return { state: "loading" };
+  const note = (read: LabelsRead | RepositoriesRead) =>
+    read.state === "unavailable"
+      ? unavailableNote(read, "labels", typeLabel)
+      : truncatedNote(typeLabel);
+  if (repositories.state === "unavailable" || repositories.truncated)
+    return { state: "typed", note: note(repositories) };
+  const labels = new Set<string>();
+  for (const name of linkedRepositoryNames(saved, repositories.repositories)) {
+    const read = labelReads[name];
+    if (!read) return { state: "loading" };
+    if (read.state === "unavailable" || read.truncated)
+      return { state: "typed", note: note(read) };
+    for (const label of read.labels) labels.add(label);
+  }
+  return { state: "ready", labels: [...labels] };
+}
+
 /** Whether a condition row shows name selects, waits, or keeps typed node IDs. */
 export function rowState(
   ids: ConditionIds,
@@ -138,7 +174,7 @@ export function rowState(
   if (!read) return { state: "loading", projects: choices.projects };
   if (read.state === "unavailable")
     return { state: "typed", note: unavailableNote(read) };
-  if (read.truncated) return { state: "typed", note: truncatedNote };
+  if (read.truncated) return { state: "typed", note: truncatedNote() };
   const field = read.fields.find((f) => f.fieldNodeId === fieldNodeId);
   if (
     (fieldNodeId && !field) ||

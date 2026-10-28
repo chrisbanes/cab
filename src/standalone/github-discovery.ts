@@ -48,6 +48,10 @@ export interface DiscoveryReader {
     owner: string,
     name: string,
   ): Promise<{ branches: string[]; truncated: boolean }>;
+  labels(
+    owner: string,
+    name: string,
+  ): Promise<{ labels: string[]; truncated: boolean }>;
   projects(
     owner: string,
     name: string,
@@ -72,7 +76,7 @@ const repositoryPage = z.array(
     default_branch: z.string().min(1).max(255),
   }),
 );
-const branchPage = z.array(z.object({ name: z.string().min(1).max(255) }));
+const namePage = z.array(z.object({ name: z.string().min(1).max(255) }));
 const projectConnection = z.object({
   nodes: z.array(
     z
@@ -235,10 +239,19 @@ export class GitHubDiscoveryReader implements DiscoveryReader {
   async branches(owner: string, name: string) {
     const { items, truncated } = await this.pages(
       `${githubApi}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/branches?per_page=100`,
-      branchPage,
+      namePage,
       5,
     );
     return { branches: items.map((b) => b.name), truncated };
+  }
+
+  async labels(owner: string, name: string) {
+    const { items, truncated } = await this.pages(
+      `${githubApi}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/labels?per_page=100`,
+      namePage,
+      5,
+    );
+    return { labels: items.map((l) => l.name), truncated };
   }
 
   /** POST one fixed GraphQL query; GitHub reports errors and limits as HTTP 200. */
