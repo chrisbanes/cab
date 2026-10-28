@@ -2,7 +2,7 @@
 
 Status: **bounded live recovery qualified at the coordinator level.** One run on the
 maintainer's fixture repository published a task commit with `branch.push`, opened a draft
-PR with `pr.create`, pushed a repair, then met two real foreign heads on the task branch.
+PR with `pr.create`, pushed a repair, then met two outside heads on the task branch.
 It recovered the first with an approved `branch.force-push` overwrite and the second with an
 approved `branch.adopt`, and pushed a merge on top of the adopted head. It is not a service
 or lead-turn run: the harness drove the real delivery coordinator, provider, HTTPS push and
@@ -81,7 +81,7 @@ Pass conditions, each checked by the harness:
   assigned branch with Ensemble's PR observation following the head.
 - **Overwrite.** The first outside commit (`c23d5cfb`, a child of the repair commit) moved the
   branch by a fast-forward through the REST API. The lead's next plain push was refused as an
-  outside change, the outside head was recorded and the lead woken once. The approved
+  outside change, the outside head was recorded and the lead's wake recorded once. The approved
   `branch.force-push` naming that head, the branch and the last push replaced it with
   `6702e01f` under a lease on `c23d5cfb`; the remote equalled the overwriting commit and the
   outside change cleared.

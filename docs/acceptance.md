@@ -381,14 +381,14 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   `publication-live-harness`). One bounded live run on the fixture repository published
   a task commit, opened the PR and pushed a repair commit to the same branch, with
   verified cleanup; it was coordinator-level with no model turns, and a real foreign
-  push, force-push and approval mode were not exercised live. Evidence:
+  push, force-push and approval mode were not exercised live in that run. Evidence:
   [branch publication](evidence/2026-10-19-branch-publication.md). Recovery from an outside
   change (#1206) is **Bounded.** Deterministic tests cover the approval-gated overwrite
   and adoption, their binding and refusals, a remote that moves after approval, restart
   mid-recovery, the isolated fetch child and the approval view (`branch-recovery`, `git-fetch`,
   `delivery-integration`, `operator-task-detail-browser`, `publication-live-harness`). One bounded
-  live run on the fixture repository overwrote one real foreign head and adopted another, then
-  pushed on top of the adopted head, with verified cleanup; it was coordinator-level with no model
+  live run on the fixture repository overwrote one harness-made outside head and adopted another
+  (made through the git-data API, not a foreign `git push`), then pushed on top of the adopted head, with verified cleanup; it was coordinator-level with no model
   turns and a harness stand-in for the operator's approval. Evidence:
   [branch recovery](evidence/2026-10-28-branch-recovery.md).
 - **Status mapping** (#1194, ADR-1017) — **Bounded.** Deterministic tests cover the
