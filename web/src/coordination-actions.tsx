@@ -9,6 +9,7 @@ import type { OperatorClient } from "./api.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
 import {
   type CommandSend,
+  type SendCopy,
   type SendOutcome,
   useCommandSend,
   useCommandSends,
@@ -33,7 +34,7 @@ export function SendFeedback({
   entry,
 }: {
   outcome: SendOutcome | null;
-  recorded: string;
+  recorded: SendCopy["recorded"];
   conflict: string;
   unknown?: string | undefined;
   failed?: ((code: string) => string) | undefined;
@@ -75,7 +76,9 @@ export function SendFeedback({
       }
       message={
         outcome.kind === "recorded"
-          ? recorded
+          ? typeof recorded === "function"
+            ? recorded(outcome.command)
+            : recorded
           : outcome.kind === "unknown"
             ? unknown
             : outcome.kind === "conflict"

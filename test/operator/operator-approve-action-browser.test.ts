@@ -208,3 +208,88 @@ for (const [label, viewport] of [
     assert.equal(interactions, 2);
   });
 }
+
+const denied = /^Denied\. Nothing was approved/;
+const taskPath = (s: Awaited<ReturnType<typeof start>>) =>
+  `/app/tasks/${s.taskId}`;
+/** Leaves the task through the Inbox link, then reopens it by its plain address. */
+async function leaveAndReopen(s: Awaited<ReturnType<typeof start>>) {
+  await s.page
+    .getByRole("link", { name: /^Inbox/ })
+    .first()
+    .click();
+  await s.page.waitForURL(/\/app\/inbox/);
+  return async () => {
+    await s.page.evaluate((path) => {
+      history.pushState(null, "", path);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, taskPath(s));
+    await s.page.locator("main.page h1").waitFor();
+  };
+}
+
+test("a denial sent before leaving the task reads as a denial when its response lands while away", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId }) => `/app/tasks/${taskId}`,
+  );
+  const open = s.page
+    .locator(`#decisions .decision[data-record-id="${s.interactionId}"]`)
+    .getByRole("link", { name: review, exact: true });
+  await open.click();
+  const { item } = await arriveAtApproval(s);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await s.page.route("**/api/operator/commands", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await item.getByRole("button", { name: "Deny", exact: true }).click();
+  const reopen = await leaveAndReopen(s);
+  release();
+  await s.page.waitForTimeout(500);
+  await reopen();
+  await s.page.getByText(denied).waitFor();
+  assert.equal(await s.page.getByText(/^Approved\./).count(), 0);
+  assert.equal(
+    s.f.service.coordinationView().readTask(s.taskId).approvals[0]!.status,
+    "denied",
+  );
+});
+
+test("a denial whose response was lost reads as a denial when checked after returning", async (_t, journey) => {
+  const s = await start(
+    journey,
+    desktop,
+    ({ taskId }) => `/app/tasks/${taskId}`,
+  );
+  await s.page
+    .locator(`#decisions .decision[data-record-id="${s.interactionId}"]`)
+    .getByRole("link", { name: review, exact: true })
+    .click();
+  const { item } = await arriveAtApproval(s);
+  await s.page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await item.getByRole("button", { name: "Deny", exact: true }).click();
+  await item
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .waitFor();
+  const reopen = await leaveAndReopen(s);
+  await reopen();
+  const check = s.page.getByRole("button", {
+    name: "Check whether it saved",
+    exact: true,
+  });
+  await check.waitFor();
+  await s.page.unroute("**/api/operator/commands");
+  await check.click();
+  await s.page.getByText(denied).waitFor();
+  assert.equal(await s.page.getByText(/^Approved\./).count(), 0);
+  assert.equal(s.posts.length, 2);
+  assert.equal(s.posts[1]!.decision, "denied");
+});

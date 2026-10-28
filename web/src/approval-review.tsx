@@ -149,7 +149,7 @@ export function ApprovalReview({
       <SendFeedback
         entry={entry}
         outcome={outcome}
-        recorded={copy[outcomeDecision ?? "approved"]}
+        recorded={(c) => copy[decided(c) ?? "approved"]}
         conflict={copy.conflict}
         unknown={copy.unknown}
         failed={copy.failed}
