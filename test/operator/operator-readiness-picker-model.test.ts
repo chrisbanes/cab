@@ -246,7 +246,7 @@ test("labels are the linked repositories' labels, deduplicated by exact name, or
   });
   const both = [{ repositoryId: "R_atlas" }, { repositoryId: "R_relay" }];
   const note = (c: ReturnType<typeof labelChoices>) =>
-    c.state === "typed" ? c.note : c.state;
+    c.state === "typed" ? (c.note ?? "") : c.state;
   assert.equal(labelChoices(undefined, both, {}).state, "loading");
   assert.equal(
     labelChoices(repositories, both, { "Acme/Atlas": labels(["bug"]) }).state,
@@ -268,11 +268,16 @@ test("labels are the linked repositories' labels, deduplicated by exact name, or
       labels: [],
     },
   );
+  // No discovery credential is the plain field's baseline: typed, with no note.
+  assert.deepEqual(
+    labelChoices({ state: "unavailable", reason: "unconfigured" }, both, {}),
+    { state: "typed", note: undefined },
+  );
   assert.match(
     note(
-      labelChoices({ state: "unavailable", reason: "unconfigured" }, both, {}),
+      labelChoices({ state: "unavailable", reason: "unauthorized" }, both, {}),
     ),
-    /^GitHub discovery is unavailable: no discovery credential is configured, so labels can't be listed\. Type the label\.$/,
+    /^GitHub discovery is unavailable: GitHub rejected the credential\. Type the label\.$/,
   );
   assert.match(
     note(

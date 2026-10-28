@@ -247,7 +247,7 @@ export function ReadyLabelPicker(p: {
           ))}
         </datalist>
       )}
-      {labels.state === "typed" && (
+      {labels.state === "typed" && labels.note && (
         <p className="metadata muted">{labels.note}</p>
       )}
       {ready &&

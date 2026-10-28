@@ -44,11 +44,10 @@ const unavailableNote = (
     RepositoriesRead | ProjectsRead | FieldsRead | LabelsRead,
     { state: "unavailable" }
   >,
-  listed = "Projects and fields",
   type = typeIds,
 ) =>
   (read.reason === "unconfigured"
-    ? `GitHub discovery is unavailable: no discovery credential is configured, so ${listed} can't be listed.`
+    ? "GitHub discovery is unavailable: no discovery credential is configured, so Projects and fields can't be listed."
     : discoveryReasonCopy(read.reason)) + type;
 const truncatedNote = (type = typeIds) =>
   `GitHub discovery is unavailable: there are too many results to list in full.${type}`;
@@ -127,7 +126,8 @@ export function projectChoices(
 
 /**
  * The labels of the source's linked repositories, deduplicated by exact name (readiness matches
- * exactly), or why the Ready label control cannot list them and stays a plain typed field.
+ * exactly), or why the Ready label control cannot list them and stays a plain typed field. An
+ * unconfigured discovery credential is the plain field's baseline, so it carries no note.
  */
 export function labelChoices(
   repositories: RepositoriesRead | undefined,
@@ -135,12 +135,14 @@ export function labelChoices(
   labelReads: Record<string, LabelsRead | undefined>,
 ):
   | { state: "loading" }
-  | { state: "typed"; note: string }
+  | { state: "typed"; note: string | undefined }
   | { state: "ready"; labels: string[] } {
   if (!repositories) return { state: "loading" };
   const note = (read: LabelsRead | RepositoriesRead) =>
     read.state === "unavailable"
-      ? unavailableNote(read, "labels", typeLabel)
+      ? read.reason === "unconfigured"
+        ? undefined
+        : unavailableNote(read, typeLabel)
       : truncatedNote(typeLabel);
   if (repositories.state === "unavailable" || repositories.truncated)
     return { state: "typed", note: note(repositories) };
