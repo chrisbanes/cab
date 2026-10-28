@@ -5,6 +5,7 @@ import type { Locator, Page } from "playwright";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
+import { createFakeGh } from "../fixtures/fake-gh.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { fakeDiscovery } from "../fixtures/setup-home.js";
 import {
@@ -2997,6 +2998,184 @@ test("a saved readiness condition that discovery does not list stays typed, edit
 
 const addLabelCondition = (page: Page) =>
   page.getByRole("button", { name: "Add readiness condition" }).click();
+/**
+ * Atlas's GitHub tab with discovery unconfigured, a fake `gh` login and a saved Project-field
+ * condition, so its Project and field are typed node IDs until a credential is set.
+ */
+async function startGhOffer(
+  journey: Parameters<typeof startSettings>[0],
+  signedIn = true,
+) {
+  const gh = createFakeGh(signedIn ? "signed-in" : "not-signed-in");
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const started = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+    undefined,
+    undefined,
+    {
+      serviceOptions: { ghExecutable: gh.executable },
+      setup: { discovery: fakeDiscovery({}), ghExecutable: gh.executable },
+    },
+  );
+  const { f, ids, page } = started;
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "PVT_atlas",
+          fieldNodeId: "PVTSSF_status",
+          optionNodeId: "PVTSSO_ready",
+        },
+      ],
+    },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  await page.reload();
+  await page.getByLabel("Readiness Project node ID").waitFor();
+  return started;
+}
+const ghOffer = (page: Page) =>
+  page.getByRole("button", { name: "Use GitHub CLI login (@octo)" });
+
+test("the readiness picker offers the signed-in GitHub CLI login and lists choices once it is set", async (_t, journey) => {
+  const { f, page } = await startGhOffer(journey);
+  const caveat = page.getByText("If agents can reach this Mac's keychain", {
+    exact: false,
+  });
+  await ghOffer(page).waitFor();
+  assert.equal(await ghOffer(page).count(), 1);
+  await caveat.waitFor();
+  await ghOffer(page).click();
+  await page.getByLabel("Readiness Project", { exact: true }).waitFor();
+  await page
+    .getByLabel("Readiness Project node ID")
+    .waitFor({ state: "detached" });
+  await ghOffer(page).waitFor({ state: "detached" });
+  assert.equal(await caveat.count(), 0);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.id),
+    "source-readiness",
+  );
+});
+
+test("the readiness picker offers no GitHub CLI login without a signed-in gh or with discovery set", async (_t, journey) => {
+  const { page } = await startGhOffer(journey, false);
+  await page.getByLabel("Readiness Project node ID").waitFor();
+  await page.waitForLoadState("networkidle");
+  assert.equal(await ghOffer(page).count(), 0);
+  const configured = await startDiscovery(journey, { calls: [] });
+  await configured.page.getByLabel("Ready label").waitFor();
+  await configured.page.waitForLoadState("networkidle");
+  assert.equal(await ghOffer(configured.page).count(), 0);
+});
+
+test("the readiness picker offer is held by a Settings save that is not confirmed", async (_t, journey) => {
+  const { f, page } = await startGhOffer(journey);
+  const posts: { key: string }[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      posts.push(r.postDataJSON());
+  });
+  await ghOffer(page).waitFor();
+  const check = page.getByRole("button", { name: "Check whether it saved" });
+  // The request never reaches the service, so Settings still reads the credential as unset.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  try {
+    await ghOffer(page).click();
+    await check.waitFor();
+    assert.equal(await ghOffer(page).count(), 0);
+    // Settings, reached inside the app, holds its offer and controls until this is checked.
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    const row = page.getByRole("region", {
+      name: "GitHub discovery credential",
+    });
+    const offer = row.getByRole("button", {
+      name: "Use GitHub CLI login (@octo)",
+    });
+    await offer.waitFor();
+    assert.equal(await offer.getAttribute("aria-disabled"), "true");
+    assert.equal(
+      await row.getByRole("button", { name: "Set", exact: true }).isDisabled(),
+      true,
+    );
+    await row
+      .getByText("A discovery credential save elsewhere isn't confirmed yet.")
+      .waitFor();
+    await offer.click({ force: true });
+    await page.waitForLoadState("networkidle");
+    assert.equal(posts.length, 1);
+    await page.goBack();
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await check.click();
+  await page.getByLabel("Readiness Project", { exact: true }).waitFor();
+  assert.equal(new Set(posts.map((p) => p.key)).size, 1);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
+test("the readiness picker offer is held by a Settings save that is not confirmed when the tab opens", async (_t, journey) => {
+  const { f, page } = await startGhOffer(journey);
+  const posts: { key: string }[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      posts.push(r.postDataJSON());
+  });
+  const check = page
+    .getByRole("region", { name: "GitHub discovery credential" })
+    .getByRole("button", { name: "Check whether it saved" });
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  const offer = page
+    .getByRole("region", { name: "GitHub discovery credential" })
+    .getByRole("button", { name: "Use GitHub CLI login (@octo)" });
+  // The request never reaches the service, so the tab still reads the credential as unset.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  try {
+    await offer.click();
+    await check.waitFor();
+    await page.goBack();
+    await ghOffer(page).waitFor();
+    assert.equal(await ghOffer(page).getAttribute("aria-disabled"), "true");
+    await page
+      .getByText("A discovery credential save elsewhere isn't confirmed yet.")
+      .waitFor();
+    await ghOffer(page).click({ force: true });
+    await page.waitForLoadState("networkidle");
+    assert.equal(posts.length, 1);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await page.goForward();
+  await check.click();
+  await page.goBack();
+  await page.getByLabel("Readiness Project", { exact: true }).waitFor();
+  assert.equal(new Set(posts.map((p) => p.key)).size, 1);
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
 const labelCalls = (state: { calls: string[] }) =>
   state.calls.filter((c) => c === "labels").length;
 const suggestedLabels = (page: Page, nth: number) =>
