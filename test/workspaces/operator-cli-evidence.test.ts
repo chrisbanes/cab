@@ -316,8 +316,8 @@ test("retained gaps stay gaps and a digest mismatch keeps no file", async (t) =>
       response
         .writeHead(200, {
           "content-type": "image/png",
-          "x-ensemble-sha256": digest("other"),
-          "x-ensemble-evidence-source": "retained",
+          "x-cab-sha256": digest("other"),
+          "x-cab-evidence-source": "retained",
         })
         .end(png);
   });

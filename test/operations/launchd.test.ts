@@ -30,7 +30,7 @@ function createFixture(): {
   root: string;
   configuration: LaunchAgentConfiguration;
 } {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-launchd-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-launchd-")));
   chmodSync(root, 0o700);
   const dataDirectory = join(root, "private & <data>");
   const authDirectory = join(root, "auth");
@@ -44,7 +44,7 @@ function createFixture(): {
   return {
     root,
     configuration: {
-      label: "com.example.ensemble.disposable",
+      label: "com.example.cab.disposable",
       nodePath: process.execPath,
       cliPath,
       dataDirectory,
@@ -123,8 +123,8 @@ function assertLaunchAgentFields(
     .join("\n");
   const environmentXml = Object.entries({
     PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-    ENSEMBLE_OPERATOR_AUTH_FILE: configuration.authFile,
-    ENSEMBLE_OPERATOR_ORIGIN: configuration.origin,
+    CAB_OPERATOR_AUTH_FILE: configuration.authFile,
+    CAB_OPERATOR_ORIGIN: configuration.origin,
   })
     .map(
       ([key, value]) =>
@@ -204,13 +204,13 @@ test("LaunchAgent rejects unsafe identities, paths, origins, ports, and system t
     assert.throws(() =>
       writeLaunchAgent(
         configuration,
-        "/Library/LaunchDaemons/com.example.ensemble.plist",
+        "/Library/LaunchDaemons/com.example.cab.plist",
       ),
     );
     assert.throws(() =>
       writeLaunchAgent(
         configuration,
-        "/Library/LaunchAgents/com.example.ensemble.plist",
+        "/Library/LaunchAgents/com.example.cab.plist",
       ),
     );
   } finally {
@@ -298,9 +298,9 @@ test("LaunchAgent delivers diagnostic retention values the service accepts", () 
     const plist = renderLaunchAgent(configuration);
     assert.ok(
       plist.includes(
-        "    <key>ENSEMBLE_OPERATOR_ORIGIN</key>\n    <string>http://127.0.0.1:28787</string>\n" +
-          "    <key>ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS</key>\n    <string>7</string>\n" +
-          "    <key>ENSEMBLE_DIAGNOSTIC_STORAGE_MIB</key>\n    <string>256</string>\n  </dict>",
+        "    <key>CAB_OPERATOR_ORIGIN</key>\n    <string>http://127.0.0.1:28787</string>\n" +
+          "    <key>CAB_DIAGNOSTIC_RETENTION_DAYS</key>\n    <string>7</string>\n" +
+          "    <key>CAB_DIAGNOSTIC_STORAGE_MIB</key>\n    <string>256</string>\n  </dict>",
       ),
     );
     writeLaunchAgent(configuration, plistPath);
@@ -312,10 +312,10 @@ test("LaunchAgent delivers diagnostic retention values the service accepts", () 
     const only = environmentOf(
       renderLaunchAgent({ ...fixture.configuration, diagnosticStorageMib: 16 }),
     );
-    assert.equal(only.ENSEMBLE_DIAGNOSTIC_STORAGE_MIB, "16");
-    assert.equal("ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS" in only, false);
+    assert.equal(only.CAB_DIAGNOSTIC_STORAGE_MIB, "16");
+    assert.equal("CAB_DIAGNOSTIC_RETENTION_DAYS" in only, false);
     const none = renderLaunchAgent(fixture.configuration);
-    assert.equal(none.includes("ENSEMBLE_DIAGNOSTIC"), false);
+    assert.equal(none.includes("CAB_DIAGNOSTIC"), false);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -390,8 +390,8 @@ test("operations CLI renders diagnostic retention options and refuses bad ones",
     assert.equal(ok.status, 0, ok.stderr);
     assert.equal(`${ok.stdout}${ok.stderr}`.includes(fixture.root), false);
     const env = environmentOf(readFileSync(plistPath, "utf8"));
-    assert.equal(env.ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS, "7");
-    assert.equal(env.ENSEMBLE_DIAGNOSTIC_STORAGE_MIB, "256");
+    assert.equal(env.CAB_DIAGNOSTIC_RETENTION_DAYS, "7");
+    assert.equal(env.CAB_DIAGNOSTIC_STORAGE_MIB, "256");
 
     for (const bad of [
       ["--diagnostic-retention-days", "366"],
@@ -451,7 +451,7 @@ test("daemon plist renders UserName and HOME with the LaunchAgent environment an
     GH_TOKEN: "canary-gh-1144",
     GITHUB_TOKEN: "canary-github-1144",
     CLAUDE_CODE_OAUTH_TOKEN: "canary-claude-1144",
-    ENSEMBLE_DELIVERY_TOKEN: "canary-delivery-1144",
+    CAB_DELIVERY_TOKEN: "canary-delivery-1144",
   };
   const saved = Object.fromEntries(
     Object.keys(canaries).map((key) => [key, process.env[key]]),
@@ -467,9 +467,9 @@ test("daemon plist renders UserName and HOME with the LaunchAgent environment an
     assert.deepEqual(environmentKeys(plist), [
       "PATH",
       "HOME",
-      "ENSEMBLE_OPERATOR_AUTH_FILE",
-      "ENSEMBLE_OPERATOR_ORIGIN",
-      "ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS",
+      "CAB_OPERATOR_AUTH_FILE",
+      "CAB_OPERATOR_ORIGIN",
+      "CAB_DIAGNOSTIC_RETENTION_DAYS",
     ]);
     assert.match(
       plist,
@@ -521,8 +521,8 @@ test("daemon plist fields are absent from the LaunchAgent", () => {
     assert.equal(plist.includes("<key>HOME</key>"), false);
     assert.deepEqual(environmentKeys(plist), [
       "PATH",
-      "ENSEMBLE_OPERATOR_AUTH_FILE",
-      "ENSEMBLE_OPERATOR_ORIGIN",
+      "CAB_OPERATOR_AUTH_FILE",
+      "CAB_OPERATOR_ORIGIN",
     ]);
     // The daemon rendering differs from it only by the two added entries.
     const daemon = renderLaunchAgent(withDaemonAccount(fixture));
@@ -592,7 +592,7 @@ test("assertNotRoot refuses uid 0 with a fixed message and allows others", () =>
     (error: Error) =>
       error.message === ROOT_REFUSAL &&
       error.message ===
-        "Ensemble does not run as root; run it as the account that owns the service" &&
+        "cab does not run as root; run it as the account that owns the service" &&
       !error.message.includes("/"),
   );
   assert.doesNotThrow(() => assertNotRoot(501));
@@ -616,7 +616,7 @@ test("the service entry point refuses root before main runs", () => {
   assert.equal(result.status, 1);
   assert.equal(
     result.stderr.trim(),
-    "Ensemble does not run as root; run it as the account that owns the service",
+    "cab does not run as root; run it as the account that owns the service",
   );
 });
 
@@ -637,6 +637,6 @@ test("the service entry point refuses an effective uid of 0 before main runs", (
   assert.equal(result.status, 1);
   assert.equal(
     result.stderr.trim(),
-    "Ensemble does not run as root; run it as the account that owns the service",
+    "cab does not run as root; run it as the account that owns the service",
   );
 });

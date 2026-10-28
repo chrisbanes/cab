@@ -16,9 +16,7 @@ import { renderLaunchAgent } from "../../src/standalone/launchd.js";
 test("generated macOS LaunchAgent environment captures complete boot birth and process identity without sbin in PATH", {
   skip: process.platform !== "darwin",
 }, () => {
-  const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-termination-")),
-  );
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-termination-")));
   chmodSync(root, 0o700);
   try {
     const data = join(root, "data"),
@@ -27,11 +25,11 @@ test("generated macOS LaunchAgent environment captures complete boot birth and p
     for (const path of [data, auth, logs]) mkdirSync(path, { mode: 0o700 });
     const authFile = join(auth, "auth.json");
     writeFileSync(authFile, "{}", { mode: 0o600 });
-    const plist = join(root, "com.example.ensemble.identity.plist");
+    const plist = join(root, "com.example.cab.identity.plist");
     writeFileSync(
       plist,
       renderLaunchAgent({
-        label: "com.example.ensemble.identity",
+        label: "com.example.cab.identity",
         nodePath: realpathSync(process.execPath),
         cliPath: resolve("dist/src/standalone/cli.js"),
         dataDirectory: data,
@@ -51,8 +49,8 @@ test("generated macOS LaunchAgent environment captures complete boot birth and p
       ),
     ) as Record<string, string>;
     assert.deepEqual(Object.keys(env).sort(), [
-      "ENSEMBLE_OPERATOR_AUTH_FILE",
-      "ENSEMBLE_OPERATOR_ORIGIN",
+      "CAB_OPERATOR_AUTH_FILE",
+      "CAB_OPERATOR_ORIGIN",
       "PATH",
     ]);
     assert.equal(env.PATH, "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");

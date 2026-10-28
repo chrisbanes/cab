@@ -20,14 +20,18 @@ import { installPacked } from "../fixtures/packed-cli.js";
 const run = promisify(execFile);
 
 test("the packed CLI installs offline and works against a real service over loopback and verified HTTPS", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-cli-packed-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-cli-packed-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const project = await installPacked(dir);
-  const installed = join(project, "node_modules", "ensemble");
+  const installed = join(project, "node_modules", "@chrisbanes", "cab");
+  assert.equal(
+    JSON.parse(readFileSync(join(installed, "package.json"), "utf8")).name,
+    "@chrisbanes/cab",
+  );
   assert.ok(existsSync(join(installed, "dist/src/cli/main.js")));
   assert.ok(!existsSync(join(installed, "dist/test")));
   assert.ok(existsSync(join(installed, "dist/operator/index.html")));
-  const bin = join(project, "node_modules", ".bin", "ensemble");
+  const bin = join(project, "node_modules", ".bin", "cab");
   const config = join(dir, "config");
   const cli = async (args: string[], env: Record<string, string> = {}) => {
     try {
@@ -36,7 +40,7 @@ test("the packed CLI installs offline and works against a real service over loop
         env: {
           PATH: process.env.PATH ?? "",
           HOME: dir,
-          ENSEMBLE_CLI_CONFIG_DIR: config,
+          CAB_CLI_CONFIG_DIR: config,
           ...env,
         },
       });
@@ -55,7 +59,7 @@ test("the packed CLI installs offline and works against a real service over loop
   const { version } = JSON.parse(readFileSync("package.json", "utf8"));
   assert.deepEqual(await cli(["--version"]), {
     code: 0,
-    out: `ensemble ${version}\n`,
+    out: `cab ${version}\n`,
     err: "",
   });
 
@@ -79,7 +83,7 @@ test("the packed CLI installs offline and works against a real service over loop
   r = await cli(["task", "get", s.taskId, "--output", "json"]);
   assert.equal(r.code, 0, r.err);
   const envelope = JSON.parse(r.out);
-  assert.equal(envelope.schema, "ensemble.cli/v1");
+  assert.equal(envelope.schema, "cab.cli/v1");
   assert.equal(envelope.data.task.id, s.taskId);
   r = await cli(["project", "list", "--output", "json"]);
   assert.equal(r.code, 0, r.err);
@@ -208,7 +212,7 @@ test("the packed CLI installs offline and works against a real service over loop
   assert.equal(r.code, 2, r.err);
   assert.equal(JSON.parse(r.out).error.code, "not-found");
   r = await cli(["task", "get", s.taskId], {
-    ENSEMBLE_MANAGED_ASSIGNMENT: "1",
+    CAB_MANAGED_ASSIGNMENT: "1",
   });
   assert.equal(r.code, 3);
   r = await cli(["auth", "logout", "--connection", "local"]);

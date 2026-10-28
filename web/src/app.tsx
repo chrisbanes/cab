@@ -1059,7 +1059,7 @@ export function App() {
           <div className="workspace-header">
             <span className="workspace-mark" aria-hidden="true" />
             <div>
-              <p className="body">Ensemble</p>
+              <p className="body">cab</p>
               <p className="metadata muted">Personal workspace</p>
             </div>
           </div>

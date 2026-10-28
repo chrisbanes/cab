@@ -155,7 +155,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const)
       const p = f.getPr();
       assert.equal(
         (
-          await f.call("ensemble_register_pr", {
+          await f.call("cab_register_pr", {
             repositoryId: "R1",
             prNumber: 7,
             expectedPrNodeId: "P7",
@@ -164,7 +164,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const)
         ).success,
         true,
       );
-      const result = await f.call("ensemble_external_action", {
+      const result = await f.call("cab_external_action", {
         operationId: randomUUID(),
         action: {
           kind: "issue.close",
@@ -183,7 +183,7 @@ async function registerFixturePr(
 ) {
   assert.equal(
     (
-      await f.call("ensemble_register_pr", {
+      await f.call("cab_register_pr", {
         repositoryId: "R1",
         prNumber: 7,
         expectedPrNodeId: "P7",
@@ -225,7 +225,7 @@ async function settleFixturePr(f: Awaited<ReturnType<typeof deliveryFixture>>) {
 async function closeFixtureIssue(
   f: Awaited<ReturnType<typeof deliveryFixture>>,
 ) {
-  return f.call("ensemble_external_action", {
+  return f.call("cab_external_action", {
     operationId: randomUUID(),
     action: {
       kind: "issue.close",
@@ -362,7 +362,7 @@ test("running retained lead performs explicit through-merge only after all exist
     const p = f.getPr();
     assert.equal(
       (
-        await f.call("ensemble_register_pr", {
+        await f.call("cab_register_pr", {
           repositoryId: "R1",
           prNumber: 7,
           expectedPrNodeId: "P7",
@@ -382,7 +382,7 @@ test("running retained lead performs explicit through-merge only after all exist
     f.setPr({ ...p, mergeBlockers: ["check-build-unproved"] });
     assert.equal(
       (
-        await f.call("ensemble_external_action", {
+        await f.call("cab_external_action", {
           operationId: randomUUID(),
           action: {
             kind: "pr.merge",
@@ -396,7 +396,7 @@ test("running retained lead performs explicit through-merge only after all exist
     );
     assert.equal(f.effects.length, 0);
     f.setPr(p);
-    const result = await f.call("ensemble_external_action", {
+    const result = await f.call("cab_external_action", {
       operationId: randomUUID(),
       action: {
         kind: "pr.merge",
@@ -422,7 +422,7 @@ test("reviewable delivery retains lead waiting and requires fresh operator settl
     const p = f.getPr();
     assert.equal(
       (
-        await f.call("ensemble_register_pr", {
+        await f.call("cab_register_pr", {
           repositoryId: "R1",
           prNumber: 7,
           expectedPrNodeId: "P7",
@@ -431,7 +431,7 @@ test("reviewable delivery retains lead waiting and requires fresh operator settl
       ).success,
       true,
     );
-    const completion = await f.call("ensemble_request_completion", {
+    const completion = await f.call("cab_request_completion", {
       reviewedResultIds: [],
     });
     assert.equal(completion.success, false);
@@ -466,13 +466,8 @@ test("reviewable delivery retains lead waiting and requires fresh operator settl
     });
     await f.waitTurn(1);
     assert.equal(
-      (
-        await f.call(
-          "ensemble_request_completion",
-          { reviewedResultIds: [] },
-          1,
-        )
-      ).success,
+      (await f.call("cab_request_completion", { reviewedResultIds: [] }, 1))
+        .success,
       true,
     );
     f.turns[1]?.release();
@@ -691,7 +686,7 @@ test("imported service completes after own merge with actual open-only discovery
   try {
     assert.equal(
       (
-        await f.call("ensemble_register_pr", {
+        await f.call("cab_register_pr", {
           repositoryId: "R1",
           prNumber: 7,
           expectedPrNodeId: "P7",
@@ -700,7 +695,7 @@ test("imported service completes after own merge with actual open-only discovery
       ).success,
       true,
     );
-    const merged = await f.call("ensemble_external_action", {
+    const merged = await f.call("cab_external_action", {
       operationId: randomUUID(),
       action: {
         kind: "pr.merge",
@@ -727,13 +722,8 @@ test("imported service completes after own merge with actual open-only discovery
     f.turns[0]?.release();
     await f.waitTurn(1);
     assert.equal(
-      (
-        await f.call(
-          "ensemble_request_completion",
-          { reviewedResultIds: [] },
-          1,
-        )
-      ).success,
+      (await f.call("cab_request_completion", { reviewedResultIds: [] }, 1))
+        .success,
       true,
     );
     f.turns[1]?.release();
@@ -754,7 +744,7 @@ test("own merge cannot hide simultaneous independent readiness label loss", asyn
   try {
     assert.equal(
       (
-        await f.call("ensemble_register_pr", {
+        await f.call("cab_register_pr", {
           repositoryId: "R1",
           prNumber: 7,
           expectedPrNodeId: "P7",
@@ -766,7 +756,7 @@ test("own merge cannot hide simultaneous independent readiness label loss", asyn
     f.setSourceLabels([]);
     assert.equal(
       (
-        await f.call("ensemble_external_action", {
+        await f.call("cab_external_action", {
           operationId: randomUUID(),
           action: {
             kind: "pr.merge",
@@ -821,7 +811,7 @@ async function treatClosureAs(f: Fixture, closedIssues: "done" | "skip") {
 }
 async function mergeFixturePr(f: Fixture) {
   await registerFixturePr(f);
-  const merged = await f.call("ensemble_external_action", {
+  const merged = await f.call("cab_external_action", {
     operationId: randomUUID(),
     action: {
       kind: "pr.merge",
@@ -929,13 +919,8 @@ test("an own closure that is never reopened is not provider-completed", async ()
     f.turns[0]?.release();
     await f.waitTurn(1);
     assert.equal(
-      (
-        await f.call(
-          "ensemble_request_completion",
-          { reviewedResultIds: [] },
-          1,
-        )
-      ).success,
+      (await f.call("cab_request_completion", { reviewedResultIds: [] }, 1))
+        .success,
       true,
     );
     await settleInto(f, "done");
@@ -1052,13 +1037,8 @@ test("a done task's confirmed own closure is not re-read on refresh", async () =
     f.turns[0]?.release();
     await f.waitTurn(1);
     assert.equal(
-      (
-        await f.call(
-          "ensemble_request_completion",
-          { reviewedResultIds: [] },
-          1,
-        )
-      ).success,
+      (await f.call("cab_request_completion", { reviewedResultIds: [] }, 1))
+        .success,
       true,
     );
     await settleInto(f, "done");
@@ -1086,7 +1066,7 @@ test("a confirmed merge keeps its successful receipt when the follow-up refresh 
       async () => {
         throw new Error("refresh failed");
       };
-    const merged = await f.call("ensemble_external_action", {
+    const merged = await f.call("cab_external_action", {
       operationId: randomUUID(),
       action: {
         kind: "pr.merge",

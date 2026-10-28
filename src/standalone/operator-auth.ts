@@ -8,7 +8,7 @@ import { constants } from "node:fs";
 import { link, lstat, open, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
-const FORMAT = "ensemble-operator-auth";
+const FORMAT = "cab-operator-auth";
 const KEY_LENGTH = 32;
 const SALT_LENGTH = 16;
 const SCRYPT_COST = 16_384;

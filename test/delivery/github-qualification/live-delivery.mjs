@@ -60,7 +60,7 @@ const guard = new FixtureGuard(
   ),
   m = guard.manifest;
 guard.assertCredentialReference(m.credentialRef);
-const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s07a-live-"))),
+const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s07a-live-"))),
   data = join(root, "data");
 mkdirSync(data, { mode: 0o700 });
 const evidence = {
@@ -435,7 +435,7 @@ function projectInstructions(j, ids) {
       method: "squash",
       reviewedResultIds: [],
     };
-  return `You own only this synthetic GitHub delivery task. No filesystem edits, Git commands, delegation, source/policy configuration, runtime tools, arbitrary URLs or credentials. Use the bound Ensemble tools. Every waiting turn calls ensemble_register_pr with ${JSON.stringify(register)} and ends with a short final message immediately; do not poll within a turn. Do not report_result as task lead. Use reviewedResultIds=[] for this child-free fixture. INITIAL: register the prepared PR, use ensemble_external_action for issue.comment ${JSON.stringify({ operationId: ids.comment, action: { kind: "issue.comment", target: { repositoryId: m.repository.nodeId, nodeId: j.issue.nodeId, number: j.issue.number }, body: "S07a confirmed progress" } })}, issue.labels ${JSON.stringify({ operationId: ids.labels, action: { kind: "issue.labels", target: { repositoryId: m.repository.nodeId, nodeId: j.issue.nodeId, number: j.issue.number }, add: [m.progressLabel], remove: [] } })}, project.field ${JSON.stringify({ operationId: ids.field, action: { kind: "project.field", target: { repositoryId: m.repository.nodeId, nodeId: j.issue.nodeId, number: j.issue.number }, projectNodeId: m.project.nodeId, itemNodeId: j.issue.itemNodeId, fieldNodeId: m.project.fieldNodeId, optionNodeId: m.project.progressOptionId } })}. Mark the PR ready using ${JSON.stringify({ operationId: ids.ready, action: { kind: "pr.ready", target } })} if currently draft. Attempt ${JSON.stringify({ operationId: ids.blockedMerge, action: merge })} once; handback policy denies merge and through-merge's failing s07a-ci holds it. ${j.mode === "reviewable-pr" ? `Then request exact approval with ensemble_request_approval arguments ${JSON.stringify({ action: "pr.edit", target: canonicalMaterial(target), material: edit })}. If denied, request a NEW exact approval for the same edit and end. If approved, submit ${JSON.stringify({ operationId: ids.edit, action: edit })} with the genuine interactionId/current expectedRevision from that approved interaction. Never reuse denial material or invent approval. After confirmed edit, wait. New CI/review feedback: consume and acknowledge the current feedback, re-register and end. Operator accepted/closed handback: request ensemble_request_completion with reviewedResultIds=[] and end.` : `After fresh feedback reports s07a-ci success, submit ${JSON.stringify({ operationId: ids.passingMerge, action: merge })}; do not reuse the permanently held operation. After confirmed merge, end. On the NEXT eligible lead turn with merge/own-closure feedback, request ensemble_request_completion with reviewedResultIds=[] and end.`}`;
+  return `You own only this synthetic GitHub delivery task. No filesystem edits, Git commands, delegation, source/policy configuration, runtime tools, arbitrary URLs or credentials. Use the bound cab tools. Every waiting turn calls cab_register_pr with ${JSON.stringify(register)} and ends with a short final message immediately; do not poll within a turn. Do not report_result as task lead. Use reviewedResultIds=[] for this child-free fixture. INITIAL: register the prepared PR, use cab_external_action for issue.comment ${JSON.stringify({ operationId: ids.comment, action: { kind: "issue.comment", target: { repositoryId: m.repository.nodeId, nodeId: j.issue.nodeId, number: j.issue.number }, body: "S07a confirmed progress" } })}, issue.labels ${JSON.stringify({ operationId: ids.labels, action: { kind: "issue.labels", target: { repositoryId: m.repository.nodeId, nodeId: j.issue.nodeId, number: j.issue.number }, add: [m.progressLabel], remove: [] } })}, project.field ${JSON.stringify({ operationId: ids.field, action: { kind: "project.field", target: { repositoryId: m.repository.nodeId, nodeId: j.issue.nodeId, number: j.issue.number }, projectNodeId: m.project.nodeId, itemNodeId: j.issue.itemNodeId, fieldNodeId: m.project.fieldNodeId, optionNodeId: m.project.progressOptionId } })}. Mark the PR ready using ${JSON.stringify({ operationId: ids.ready, action: { kind: "pr.ready", target } })} if currently draft. Attempt ${JSON.stringify({ operationId: ids.blockedMerge, action: merge })} once; handback policy denies merge and through-merge's failing s07a-ci holds it. ${j.mode === "reviewable-pr" ? `Then request exact approval with cab_request_approval arguments ${JSON.stringify({ action: "pr.edit", target: canonicalMaterial(target), material: edit })}. If denied, request a NEW exact approval for the same edit and end. If approved, submit ${JSON.stringify({ operationId: ids.edit, action: edit })} with the genuine interactionId/current expectedRevision from that approved interaction. Never reuse denial material or invent approval. After confirmed edit, wait. New CI/review feedback: consume and acknowledge the current feedback, re-register and end. Operator accepted/closed handback: request cab_request_completion with reviewedResultIds=[] and end.` : `After fresh feedback reports s07a-ci success, submit ${JSON.stringify({ operationId: ids.passingMerge, action: merge })}; do not reuse the permanently held operation. After confirmed merge, end. On the NEXT eligible lead turn with merge/own-closure feedback, request cab_request_completion with reviewedResultIds=[] and end.`}`;
 }
 let stage = "provider-identity";
 try {
@@ -527,7 +527,7 @@ try {
       profileId: j.profileId,
       name: `S07a ${j.mode} lead`,
       instructions:
-        "Follow exact project fixture phases using only registered Ensemble tools. End each cooperative waiting turn immediately.",
+        "Follow exact project fixture phases using only registered cab tools. End each cooperative waiting turn immediately.",
       capabilities: "GitHub delivery",
     });
     command(domain, {
@@ -573,7 +573,7 @@ try {
           kind: "repository",
           repositoryId: m.repository.nodeId,
           owner: "chrisbanes",
-          name: "ensemble-s07a-fixture",
+          name: "cab-s07a-fixture",
         },
       ],
       readiness: {

@@ -80,7 +80,7 @@ const noHorizontalScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 
 const savedOnDevice =
-  "Unfinished input saved on this device · not yet an Ensemble draft";
+  "Unfinished input saved on this device · not yet a cab draft";
 
 const box = async (page: Page, label: string) =>
   (await page.getByLabel(label, { exact: true }).boundingBox())!;
@@ -171,6 +171,10 @@ test("Composer shows the inherited panel, one Optional settings panel and the st
     false,
   );
   await page.getByLabel("Task title").fill("Publish a keyboard guide");
+  assert.equal(
+    await page.getByLabel("Task title").getAttribute("placeholder"),
+    "Where to?",
+  );
   await page.getByLabel("Desired outcome").fill("Publish the guide.");
   await summary.focus();
   await page.keyboard.press("Enter");
@@ -417,7 +421,7 @@ test("Composer never claims on-device saving when storage fails", async (_t, j) 
   await page.addInitScript(() => {
     const setItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function (key: string, value: string) {
-      if (key === "ensemble.ui03.composer.v1") throw Error("quota");
+      if (key === "cab.ui03.composer.v1") throw Error("quota");
       setItem.call(this, key, value);
     };
   });

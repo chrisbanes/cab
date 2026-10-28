@@ -45,7 +45,7 @@ export interface PrIdentity {
   expectedPrNodeId: string;
   expectedHeadSha: string;
 }
-/** Fresh provider facts about an issue Ensemble's delivery closed; classification is the caller's. */
+/** Fresh provider facts about an issue cab's delivery closed; classification is the caller's. */
 export type ClosedIssueInspection =
   | { state: "open" }
   | {
@@ -63,11 +63,11 @@ export interface PushVerification {
   workspacePath: string;
   /** Changed or untracked worktree entries; they are never pushed. */
   uncommittedEntries: number;
-  /** Whether the commit descends from the last commit Ensemble pushed; null before the first push. */
+  /** Whether the commit descends from the last commit cab pushed; null before the first push. */
   descendsFromLastPushed: boolean | null;
 }
 export interface PublicationContext extends PushVerification {
-  /** The task's assigned branch, and the commit Ensemble last pushed to it. */
+  /** The task's assigned branch, and the commit cab last pushed to it. */
   branch: string;
   lastPushedSha: string | null;
   /** The approved outside head an overwrite replaces (git's all-zero id for a deleted branch). */
@@ -95,12 +95,12 @@ export type { AdoptFunction } from "./git-fetch.js";
 export type PushFunction = (
   request: Parameters<typeof pushTaskCommit>[0],
 ) => Promise<PushOutcome>;
-/** A publication refused at preflight; `outsideHeadSha` names a remote head Ensemble did not push. */
+/** A publication refused at preflight; `outsideHeadSha` names a remote head cab did not push. */
 export class PublicationRefusal extends Error {
   constructor(
     readonly reason:
       | "branch-outside-change"
-      /** The remote is back at Ensemble's last push: nothing outside remains to recover from. */
+      /** The remote is back at cab's last push: nothing outside remains to recover from. */
       | "branch-outside-cleared"
       | "branch-not-fast-forward"
       | "branch-force-push-needs-lease",
@@ -162,17 +162,17 @@ export interface GitHubDeliveryProvider {
   ): Promise<PrDeliveryObservation>;
 }
 export const deliveryDocuments = {
-  EnsembleDeliveryPr: `query EnsembleDeliveryPr($id:ID!,$after:String){node(id:$id){... on PullRequest{id number repository{id nameWithOwner} baseRefName headRefName headRefOid baseRefOid state isDraft merged mergeable mergeStateStatus reviewDecision isMergeQueueEnabled closingIssuesReferences(first:100){nodes{id state repository{id}} pageInfo{hasNextPage endCursor}} baseRef{target{oid} branchProtectionRule{requiresDeployments requiredDeploymentEnvironments requiresStrictStatusChecks}} reviewThreads(first:100,after:$after){nodes{id isResolved firstComment:comments(first:1){nodes{id}} latestComment:comments(last:1){nodes{id}}} pageInfo{hasNextPage endCursor}}}}}`,
-  EnsembleDeliveryRepository: `query EnsembleDeliveryRepository($id:ID!){node(id:$id){... on Repository{id nameWithOwner}}}`,
-  EnsembleDeliveryClosure: `query EnsembleDeliveryClosure($id:ID!){node(id:$id){... on Issue{id repository{id} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{id closer{__typename ... on PullRequest{id}}}}}}}}`,
-  EnsembleDeliveryField: `query EnsembleDeliveryField($item:ID!,$field:ID!,$after:String){node(id:$item){... on ProjectV2Item{id project{id} content{... on Issue{id repository{id}}} fieldValues(first:100,after:$after){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}}} field:node(id:$field){... on ProjectV2SingleSelectField{id options{id} project{id}}}}`,
-  EnsembleDeliveryProject: `mutation EnsembleDeliveryProject($project:ID!,$item:ID!,$field:ID!,$option:String!){updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
-  EnsembleDeliveryItemAdd: `mutation EnsembleDeliveryItemAdd($project:ID!,$content:ID!){addProjectV2ItemById(input:{projectId:$project,contentId:$content}){item{id}}}`,
-  EnsembleDeliveryIssueItems: `query EnsembleDeliveryIssueItems($id:ID!,$after:String){node(id:$id){... on Issue{id repository{id} projectItems(first:100,after:$after){nodes{id project{id}} pageInfo{hasNextPage endCursor}}}}}`,
-  EnsembleDeliveryThread: `query EnsembleDeliveryThread($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{id isResolved resolvedBy{id} pullRequest{id number repository{id}} latestComment:comments(last:1){nodes{id}} comments(first:100,after:$after){nodes{id body state author{__typename ... on User{id}}} pageInfo{hasNextPage endCursor}}}}}`,
-  EnsembleDeliveryThreadReply: `mutation EnsembleDeliveryThreadReply($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{id}}}`,
-  EnsembleDeliveryThreadResolve: `mutation EnsembleDeliveryThreadResolve($thread:ID!){resolveReviewThread(input:{threadId:$thread}){thread{id isResolved}}}`,
-  EnsembleDeliveryReady: `mutation EnsembleDeliveryReady($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
+  CabDeliveryPr: `query CabDeliveryPr($id:ID!,$after:String){node(id:$id){... on PullRequest{id number repository{id nameWithOwner} baseRefName headRefName headRefOid baseRefOid state isDraft merged mergeable mergeStateStatus reviewDecision isMergeQueueEnabled closingIssuesReferences(first:100){nodes{id state repository{id}} pageInfo{hasNextPage endCursor}} baseRef{target{oid} branchProtectionRule{requiresDeployments requiredDeploymentEnvironments requiresStrictStatusChecks}} reviewThreads(first:100,after:$after){nodes{id isResolved firstComment:comments(first:1){nodes{id}} latestComment:comments(last:1){nodes{id}}} pageInfo{hasNextPage endCursor}}}}}`,
+  CabDeliveryRepository: `query CabDeliveryRepository($id:ID!){node(id:$id){... on Repository{id nameWithOwner}}}`,
+  CabDeliveryClosure: `query CabDeliveryClosure($id:ID!){node(id:$id){... on Issue{id repository{id} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{id closer{__typename ... on PullRequest{id}}}}}}}}`,
+  CabDeliveryField: `query CabDeliveryField($item:ID!,$field:ID!,$after:String){node(id:$item){... on ProjectV2Item{id project{id} content{... on Issue{id repository{id}}} fieldValues(first:100,after:$after){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}}} field:node(id:$field){... on ProjectV2SingleSelectField{id options{id} project{id}}}}`,
+  CabDeliveryProject: `mutation CabDeliveryProject($project:ID!,$item:ID!,$field:ID!,$option:String!){updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
+  CabDeliveryItemAdd: `mutation CabDeliveryItemAdd($project:ID!,$content:ID!){addProjectV2ItemById(input:{projectId:$project,contentId:$content}){item{id}}}`,
+  CabDeliveryIssueItems: `query CabDeliveryIssueItems($id:ID!,$after:String){node(id:$id){... on Issue{id repository{id} projectItems(first:100,after:$after){nodes{id project{id}} pageInfo{hasNextPage endCursor}}}}}`,
+  CabDeliveryThread: `query CabDeliveryThread($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{id isResolved resolvedBy{id} pullRequest{id number repository{id}} latestComment:comments(last:1){nodes{id}} comments(first:100,after:$after){nodes{id body state author{__typename ... on User{id}}} pageInfo{hasNextPage endCursor}}}}}`,
+  CabDeliveryThreadReply: `mutation CabDeliveryThreadReply($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{id}}}`,
+  CabDeliveryThreadResolve: `mutation CabDeliveryThreadResolve($thread:ID!){resolveReviewThread(input:{threadId:$thread}){thread{id isResolved}}}`,
+  CabDeliveryReady: `mutation CabDeliveryReady($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
 } as const;
 const name = z.string().min(1);
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
@@ -180,7 +180,7 @@ const page = z.object({
   hasNextPage: z.boolean(),
   endCursor: z.string().nullable(),
 });
-const prQuery = deliveryDocuments.EnsembleDeliveryPr;
+const prQuery = deliveryDocuments.CabDeliveryPr;
 const hasLabel = (labels: { name: string }[], name: string): boolean =>
   hasLabelName(
     labels.map((v) => v.name),
@@ -339,9 +339,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           nameWithOwner: z.string().regex(/^[^/]+\/[^/]+$/),
         }),
       })
-      .parse(
-        await this.graph(deliveryDocuments.EnsembleDeliveryRepository, { id }),
-      );
+      .parse(await this.graph(deliveryDocuments.CabDeliveryRepository, { id }));
     if (data.node.id !== id) throw new Error("provider-repository-mismatch");
     const path = `/repos/${data.node.nameWithOwner.split("/").map(encodeURIComponent).join("/")}`;
     const repo = z
@@ -461,7 +459,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           }),
         })
         .parse(
-          await this.graph(deliveryDocuments.EnsembleDeliveryThread, {
+          await this.graph(deliveryDocuments.CabDeliveryThread, {
             id,
             after: cursor,
           }),
@@ -519,7 +517,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         }),
       })
       .parse(
-        await this.graph(deliveryDocuments.EnsembleDeliveryClosure, {
+        await this.graph(deliveryDocuments.CabDeliveryClosure, {
           id: target.nodeId,
         }),
       );
@@ -581,7 +579,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           }),
         })
         .parse(
-          await this.graph(deliveryDocuments.EnsembleDeliveryIssueItems, {
+          await this.graph(deliveryDocuments.CabDeliveryIssueItems, {
             id: action.target.nodeId,
             after: cursor,
           }),
@@ -667,7 +665,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           }),
         })
         .parse(
-          await this.graph(deliveryDocuments.EnsembleDeliveryField, {
+          await this.graph(deliveryDocuments.CabDeliveryField, {
             item: action.itemNodeId,
             field: action.fieldNodeId,
             after: cursor,
@@ -1192,7 +1190,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     if (action.kind === "branch.adopt") {
       if (!adoption) throw new Error("provider-adoption-unverified");
       const remote = await this.optionalRef(repo.path, adoption.branch);
-      // The approved head must still be the remote's; a branch back at Ensemble's push has nothing to adopt.
+      // The approved head must still be the remote's; a branch back at cab's push has nothing to adopt.
       if (remote !== action.outsideHeadSha) {
         if (remote === adoption.lastPushedSha)
           throw new PublicationRefusal("branch-outside-cleared");
@@ -1214,7 +1212,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       if (!publication) throw new Error("provider-publication-unverified");
       const remote = await this.optionalRef(repo.path, publication.branch);
       // An overwrite expects the approved outside head; any other publication needs the remote exactly
-      // where Ensemble left it. Only a retry may find it already at the commit: its earlier push could
+      // where cab left it. Only a retry may find it already at the commit: its earlier push could
       // have landed after the readback.
       const outside = publication.outsideHeadSha;
       const recovery = outside !== undefined;
@@ -1373,7 +1371,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           .regex(/^\/repos\/[^/]+\/[^/]+$/)
           .parse(record.beforeState?.repositoryPath),
       };
-      const marker = `<!-- ensemble-operation:${record.operationId} -->`;
+      const marker = `<!-- cab-operation:${record.operationId} -->`;
       switch (a.kind) {
         case "issue.create":
           await this.request(`${repo.path}/issues`, "POST", {
@@ -1383,7 +1381,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           });
           break;
         case "project.item.add":
-          await this.graph(deliveryDocuments.EnsembleDeliveryItemAdd, {
+          await this.graph(deliveryDocuments.CabDeliveryItemAdd, {
             project: a.projectNodeId,
             content: a.target.nodeId,
           });
@@ -1429,7 +1427,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           );
           break;
         case "project.field":
-          await this.graph(deliveryDocuments.EnsembleDeliveryProject, {
+          await this.graph(deliveryDocuments.CabDeliveryProject, {
             project: a.projectNodeId,
             item: a.itemNodeId,
             field: a.fieldNodeId,
@@ -1453,18 +1451,18 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           );
           break;
         case "pr.ready":
-          await this.graph(deliveryDocuments.EnsembleDeliveryReady, {
+          await this.graph(deliveryDocuments.CabDeliveryReady, {
             id: a.target.nodeId,
           });
           break;
         case "pr.thread.reply":
-          await this.graph(deliveryDocuments.EnsembleDeliveryThreadReply, {
+          await this.graph(deliveryDocuments.CabDeliveryThreadReply, {
             thread: a.target.threadNodeId,
             body: `${a.body}\n\n${marker}`,
           });
           break;
         case "pr.thread.resolve":
-          await this.graph(deliveryDocuments.EnsembleDeliveryThreadResolve, {
+          await this.graph(deliveryDocuments.CabDeliveryThreadResolve, {
             thread: a.target.threadNodeId,
           });
           break;
@@ -1561,7 +1559,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         }
         if (head === before.beforeHead)
           return outcomeFailure ?? rejectedUnsettled();
-        // An overwrite whose lease failed because the branch is back at Ensemble's own push.
+        // An overwrite whose lease failed because the branch is back at cab's own push.
         if (
           a.kind === "branch.force-push" &&
           a.outsideHeadSha !== undefined &&
@@ -1647,7 +1645,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       return failure("branch-adopt-workspace-unavailable");
     }
     // A moved ref is another outside change: it is recorded and the approval is not reused.
-    // A branch back at Ensemble's own last push is not an outside change: nothing remains to recover from.
+    // A branch back at cab's own last push is not an outside change: nothing remains to recover from.
     const moved = (head: string | null): ProviderActionObservation =>
       head !== null && head === before.lastPushedSha
         ? failure("branch-outside-cleared")
@@ -1748,7 +1746,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       (record.state === "attempting" ||
         (record.observation?.state === "uncertain" && !rejected) ||
         record.observation?.ambiguous === true);
-    // An overwrite that found the branch back at Ensemble's own push has nothing left to replace.
+    // An overwrite that found the branch back at cab's own push has nothing left to replace.
     if (
       !pushed &&
       a.kind === "branch.force-push" &&
@@ -1781,7 +1779,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       if (a.kind === "branch.adopt")
         return await this.adoptOutsideHead(record, a);
       const repo = await this.repository(a.target.repositoryId),
-        marker = `<!-- ensemble-operation:${record.operationId} -->`;
+        marker = `<!-- cab-operation:${record.operationId} -->`;
       if (a.kind === "branch.push" || a.kind === "branch.force-push")
         return await this.inspectBranch(
           record,

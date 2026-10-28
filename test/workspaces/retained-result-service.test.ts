@@ -158,7 +158,7 @@ function turnCapture(
 }
 
 async function filesystemFixture() {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-retained-fs-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-retained-fs-"));
   const db = new DatabaseSync(join(directory, "workspace.sqlite"));
   new Store(db).ensureHost("retained-evidence-capture-test");
   const manager = new WorkspaceManager(
@@ -256,7 +256,7 @@ test("native result capture retains exact workspace bytes in SQLite and receipt 
     threadId: work.threadId,
     turnId: work.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: {
       summary: "Exact evidence callback",
       review: {
@@ -373,7 +373,7 @@ test("native callback after a task metadata update records an empty manifest and
     threadId: work.threadId,
     turnId: work.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary: "No eligible evidence links" },
   };
   const response = await f.runtime.callTool(call);

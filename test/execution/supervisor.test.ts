@@ -136,7 +136,7 @@ class SupervisorRuntime implements Runtime {
       threadId,
       turnId,
       callId: `fixture-question-${threadId}-${turnId}`,
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: {
         question: "Supervisor fixture is waiting for the next step",
       },
@@ -189,7 +189,7 @@ function createService(
 }
 
 async function fixture(options?: ServiceOptions) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-supervisor-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-supervisor-"));
   const runtime = new SupervisorRuntime();
   const service = createService(join(root, "data"), runtime, options);
   const execute = (command: Record<string, unknown>) =>

@@ -176,7 +176,7 @@ test("lost create response is reconciled only by complete exact-author marker re
       if (partial) throw new Error("page lost");
       const c = {
         node_id: "C1",
-        body: `Reviewed text\n\n<!-- ensemble-operation:${record.operationId} -->`,
+        body: `Reviewed text\n\n<!-- cab-operation:${record.operationId} -->`,
         user: { node_id: "U1" },
       };
       return Response.json(duplicate ? [c, { ...c, node_id: "C2" }] : [c]);
@@ -267,7 +267,7 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
     }
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
-      if (body.query.includes("EnsembleDeliveryPr")) {
+      if (body.query.includes("CabDeliveryPr")) {
         assert.match(body.query, /isMergeQueueEnabled/);
         assert.match(body.query, /requiresDeployments/);
         assert.match(body.query, /requiredDeploymentEnvironments/);
@@ -484,7 +484,7 @@ test("fresh closed-issue readback reports the latest ClosedEvent and its closer 
     const url = new URL(String(input));
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
-      if (body.query.includes("EnsembleDeliveryClosure")) {
+      if (body.query.includes("CabDeliveryClosure")) {
         assert.match(body.query, /ClosedEvent\{id closer/);
         return Response.json({
           data: {
@@ -665,8 +665,8 @@ test("all eleven concrete action transports preserve exact target, incremental l
     merge_method: "squash",
   });
   assert.deepEqual(writes[2]?.body, { labels: ["progress"] });
-  assert.match(JSON.stringify(writes[0]?.body), /ensemble-operation:/);
-  assert.match(JSON.stringify(writes[5]?.body), /ensemble-operation:/);
+  assert.match(JSON.stringify(writes[0]?.body), /cab-operation:/);
+  assert.match(JSON.stringify(writes[5]?.body), /cab-operation:/);
 });
 
 test("legacy signature/update restrictions hold and linear history restricts merge method", async () => {
@@ -698,7 +698,7 @@ function redirectFixture(routes: Record<string, () => Response>) {
     if (url.pathname === "/graphql")
       return Response.json({
         data: {
-          node: String(init?.body).includes("EnsembleDeliveryClosure")
+          node: String(init?.body).includes("CabDeliveryClosure")
             ? {
                 id: "I7",
                 repository: { id: "R1" },
@@ -861,7 +861,7 @@ test("pr.create readback queries only the exact head and base and tolerates a de
     body: "Body",
     draft: true,
   };
-  const marker = `<!-- ensemble-operation:${record.operationId} -->`;
+  const marker = `<!-- cab-operation:${record.operationId} -->`;
   const listings: URL[] = [];
   const unmarked = new GitHubHttpDeliveryProvider(
     "fixture-marker",
@@ -1021,11 +1021,11 @@ function threadFixture() {
     assert.equal(url.pathname, "/graphql");
     const { query, variables } = JSON.parse(String(init?.body));
     const operation = /^(?:query|mutation) (\w+)/.exec(query)?.[1];
-    if (operation === "EnsembleDeliveryRepository")
+    if (operation === "CabDeliveryRepository")
       return Response.json({
         data: { node: { id: "R1", nameWithOwner: "org/repo" } },
       });
-    if (operation === "EnsembleDeliveryThread")
+    if (operation === "CabDeliveryThread")
       return Response.json({
         data: {
           node: {
@@ -1047,7 +1047,7 @@ function threadFixture() {
         },
       });
     if (state.status !== 200) return new Response("", { status: state.status });
-    if (operation === "EnsembleDeliveryThreadReply") {
+    if (operation === "CabDeliveryThreadReply") {
       state.replies++;
       assert.equal(variables.thread, "T1");
       if (state.graphqlErrors)
@@ -1072,7 +1072,7 @@ function threadFixture() {
         state: state.replyState,
         author: "U1",
       });
-    } else if (operation === "EnsembleDeliveryThreadResolve") {
+    } else if (operation === "CabDeliveryThreadResolve") {
       state.resolves++;
       assert.deepEqual(variables, { thread: "T1" });
       state.resolved = true;
@@ -1123,7 +1123,7 @@ test("thread reply is confirmed only by one exact submitted marker comment by th
   assert.equal(f.state.replies, 1);
   assert.match(
     f.state.comments[1]?.body ?? "",
-    /^Fixed in abc\n\n<!-- ensemble-operation:/,
+    /^Fixed in abc\n\n<!-- cab-operation:/,
   );
   const exact = f.state.comments[1];
   assert.ok(exact);
@@ -1385,11 +1385,11 @@ function projectStatusFixture(
       query: string;
       variables: Record<string, string>;
     };
-    if (query.includes("EnsembleDeliveryRepository"))
+    if (query.includes("CabDeliveryRepository"))
       return Response.json({
         data: { node: { id: "R1", nameWithOwner: "org/repo" } },
       });
-    if (query.includes("mutation EnsembleDeliveryProject")) {
+    if (query.includes("mutation CabDeliveryProject")) {
       mutations.push(variables);
       status = movedAfterWrite ?? variables.option ?? null;
       return Response.json({ data: {} });
@@ -1550,17 +1550,17 @@ function issueFetcher(state: {
     const url = new URL(String(input));
     if (url.pathname === "/graphql") {
       const query = String(JSON.parse(String(init?.body)).query);
-      if (query.includes("EnsembleDeliveryRepository"))
+      if (query.includes("CabDeliveryRepository"))
         return Response.json({
           data: { node: { id: "R1", nameWithOwner: "org/repo" } },
         });
-      if (query.includes("EnsembleDeliveryItemAdd")) {
+      if (query.includes("CabDeliveryItemAdd")) {
         state.itemAdds = (state.itemAdds ?? 0) + 1;
         return Response.json({
           data: { addProjectV2ItemById: { item: { id: "ITEM1" } } },
         });
       }
-      if (query.includes("EnsembleDeliveryIssueItems"))
+      if (query.includes("CabDeliveryIssueItems"))
         return Response.json({
           data: {
             node: {
@@ -1598,7 +1598,7 @@ function issueFetcher(state: {
         number: 7,
         state: "open",
         title: "Publish me",
-        body: `Do the thing\n\n<!-- ensemble-operation:${state.lists.length ? "x" : "y"} -->`,
+        body: `Do the thing\n\n<!-- cab-operation:${state.lists.length ? "x" : "y"} -->`,
         labels: [{ name: "ready" }],
         user: { node_id: "U1" },
       });
@@ -1612,7 +1612,7 @@ const markerIssue = (
   node_id: "I7",
   number: 7,
   title: "Publish me",
-  body: `Do the thing\n\n<!-- ensemble-operation:${record.operationId} -->`,
+  body: `Do the thing\n\n<!-- cab-operation:${record.operationId} -->`,
   labels: [{ name: "ready" }],
   user: { node_id: "U1" },
   ...patch,

@@ -6,7 +6,7 @@ or a delivery plan. Design confirmation does not itself dispatch implementation.
 ## Purpose
 
 Give the operator and external agents a command-line interface for inspecting
-and managing Ensemble, including diagnosing agent-profile instructions and
+and managing cab, including diagnosing agent-profile instructions and
 task execution. Use the domain vocabulary in [CONTEXT.md](../../CONTEXT.md).
 
 ## Scope
@@ -30,7 +30,7 @@ expiry. Credential and transport details are specified below.
 
 Reuse existing configuration controls. Enabling and disabling each execution
 runtime for the installation is a supported mutation (`runtime enable|disable`,
-ADR-1012). Expose other runtime and model settings read-only where Ensemble has no
+ADR-1012). Expose other runtime and model settings read-only where cab has no
 supported edit operation. Adding profile-level model or effort controls is outside
 this release.
 
@@ -68,7 +68,7 @@ needs. Revisit with composer drafting.
 
 ## Diagnostic evidence
 
-Add richer bounded capture for future executions: Ensemble-supplied instructions
+Add richer bounded capture for future executions: cab-supplied instructions
 and settings, runtime events and available tool calls/results. Apply redaction
 and size limits. Preserve explicit gaps for unavailable, omitted or historical
 material; do not imply that older executions have newly captured evidence.
@@ -78,7 +78,7 @@ future capture; it does not erase existing records.
 
 Expose historical instruction/configuration revisions alongside current values
 so an external agent can compare the execution's inputs with current settings.
-Do not describe Ensemble's captured inputs as the runtime's complete effective
+Do not describe cab's captured inputs as the runtime's complete effective
 prompt or claim visibility into provider-internal context.
 
 Use separate records for supplied execution inputs, observed runtime settings,
@@ -202,11 +202,11 @@ assignments retain their bound revisions and may become stale under existing
 admission rules. Adoption is a separate, version-checked assignment action using
 the current instructions for the next turn. An active turn is not rewritten.
 
-A change document (`ensemble.cli.change/v1`) holds exactly one typed command
+A change document (`cab.cli.change/v1`) holds exactly one typed command
 without its request key: `profile.create`, `profile.configure`, `project.create`,
 `project.configure`, `routing.configure` or `capacity.configure`. The design's
 `create` verbs are `prepare-create` followed by `apply`. A prepare writes the
-document to `--out FILE`, or by default to a new `./ensemble-<kind>-<id8>.json` that
+document to `--out FILE`, or by default to a new `./cab-<kind>-<id8>.json` that
 never overwrites a file; `apply --file FILE --dry-run` prints the stored change
 without connecting, and `apply` says when it replays a request this machine
 recorded. The document's SHA-256 digest covers
@@ -277,7 +277,7 @@ use the live service rather than opening its database from the client.
 
 Managed assignment execution must not receive operator credentials through
 service-provided environment variables, prompts or tool configuration. CLI use
-from an Ensemble-managed assignment rejects operator authentication. This is a
+from a cab-managed assignment rejects operator authentication. This is a
 guard against accidental privilege crossing, not an OS isolation claim: runtime
 and deployment controls still govern same-user file/process access and alternate
 HTTP clients. Do not claim the CLI prevents a same-user agent from accessing an
@@ -285,9 +285,9 @@ explicitly available host credential.
 
 ## Command surface
 
-Command names follow Ensemble's domain: task, assignment, agent profile and
+Command names follow cab's domain: task, assignment, agent profile and
 execution. There is no workflow graph or new assignment-stage system.
-Provide a packaged `ensemble` executable usable outside this repository, keeping
+Provide a packaged `cab` executable usable outside this repository, keeping
 the existing local operations CLI compatible. Reuse the repository's supported
 Node.js version and package tooling; distribution follows
 [ADR-1011](../adr/1011-packaging-and-distribution.md).
@@ -316,17 +316,17 @@ No generic command bypasses the typed operation contracts.
 Representative syntax (IDs are placeholders):
 
 ```sh
-ensemble --connection home profile get PROFILE --output json
-ensemble --connection home task get TASK --output json
-ensemble --connection home execution list --task TASK --output json
-ensemble --connection home execution inputs EXECUTION --compare-current --output json
-ensemble --connection home logs --execution EXECUTION --cursor CURSOR --output json
-ensemble --connection home doctor --output json
-ensemble --connection home profile prepare PROFILE --instructions-file instructions.md --expected-version 4 --out change.json
-ensemble --connection home profile apply --file change.json --request-id REQUEST
-ensemble --connection home profile prepare PROFILE --model MODEL --effort high --out change.json
-ensemble --connection home assignment apply-current ASSIGNMENT --expected-version 7 --request-id REQUEST
-ensemble --connection home operation get REQUEST --scope SCOPE --output json
+cab --connection home profile get PROFILE --output json
+cab --connection home task get TASK --output json
+cab --connection home execution list --task TASK --output json
+cab --connection home execution inputs EXECUTION --compare-current --output json
+cab --connection home logs --execution EXECUTION --cursor CURSOR --output json
+cab --connection home doctor --output json
+cab --connection home profile prepare PROFILE --instructions-file instructions.md --expected-version 4 --out change.json
+cab --connection home profile apply --file change.json --request-id REQUEST
+cab --connection home profile prepare PROFILE --model MODEL --effort high --out change.json
+cab --connection home assignment apply-current ASSIGNMENT --expected-version 7 --request-id REQUEST
+cab --connection home operation get REQUEST --scope SCOPE --output json
 ```
 
 ### Writes and execution effects
@@ -381,7 +381,7 @@ statuses distinguish invalid input (2), authentication/authorization (3),
 revision/policy conflict (4), unavailability including TLS and redirect rejection
 (5; this includes `redaction-limit`, when the service holds more private material than
 it can redact against), uncertain outcomes (6) and an unsupported service version or capability (7).
-The JSON envelope schema is `ensemble.cli/v1`.
+The JSON envelope schema is `cab.cli/v1`.
 
 List reads add `pagination: {limit, maxLimit, returned, nextCursor}` to the
 envelope, and every browse read adds `coverage: {observedAt, complete, gaps, notes}`
@@ -397,9 +397,9 @@ returns `409`, which the CLI reports as `cursor-stale` (exit 4) with an instruct
 to restart without `--cursor`. A task-list page whose catalog membership changed
 since the previous page reports `catalog-changed` and `continuity: "changed"`.
 Downloaded artifacts and evidence items are written only to a new `--out` file
-(mode `0600`) after the service's `x-ensemble-sha256` digest, or the item's recorded
+(mode `0600`) after the service's `x-cab-sha256` digest, or the item's recorded
 digest and size, verify; a mismatch is `integrity-mismatch` (exit 5) and leaves no
-file. `x-ensemble-evidence-source` distinguishes retained bytes from a pre-retention
+file. `x-cab-evidence-source` distinguishes retained bytes from a pre-retention
 result's still-matching recorded workspace file.
 
 Advertise service API version and capabilities. Older clients ignore additive
@@ -485,7 +485,7 @@ finds recorded is also exit 6. Definite comment rejections (stale task, review o
 confirmation material, reused keys with other material, changed authority, held
 admission, a task without a bound issue) are `409`, and an approval without a grant
 is `403`; other failures stay `command-outcome-unknown`. Posted comments carry a
-hidden `<!-- ensemble-operation:ID -->` marker that the provider read-back matches.
+hidden `<!-- cab-operation:ID -->` marker that the provider read-back matches.
 Installation-wide source refresh, `source.review` and a list of pending comment
 reviews are not CLI commands.
 
@@ -518,7 +518,7 @@ publication keyed by `--request-id`, and a replay answers where it is without se
 `publish-link TASK_ID --publication-id ID --issue N` accepts an issue only if it carries the
 create's marker and text, and `publish-abandon` warns that a duplicate may exist. The commands
 live under `delivery` because the task area's usage block stays within one screen. Creating the
-issue is irreversible from Ensemble; closing it on GitHub is the only recovery.
+issue is irreversible from cab; closing it on GitHub is the only recovery.
 
 Recovery drives the five existing evidence-bearing operations through receipted
 commands on `POST /api/operator/commands`, scoped `assignment:<id>`:
@@ -545,8 +545,8 @@ eligibility with closed blockers (`not-held`, `ownership-released`,
 `unresolved-execution`). It discloses the held process identity to both credential
 scopes as permitted diagnostic content; a string redaction would change reads
 `null` and blocks the paths that would send it. `recovery prepare` writes an
-`ensemble.cli.recovery/v1` document (owner-only, at most 512 KiB, canonical-JSON
-SHA-256 digest) from that read plus a strict `ensemble.cli.recovery-evidence/v1`
+`cab.cli.recovery/v1` document (owner-only, at most 512 KiB, canonical-JSON
+SHA-256 digest) from that read plus a strict `cab.cli.recovery-evidence/v1`
 operator file; attestations remain operator assertions the service cannot verify.
 `recovery submit` uses the default journal key rule: an identical rerun replays, and
 a definitely refused key is not reused. Adoption, recovery and replacement are
@@ -583,5 +583,5 @@ cutover gates. The scenarios correspond in order to the journeys below.
    expiry, pagination, version conflicts and ambiguous responses.
 
 These scenarios complement existing acceptance requirements for the CLI release.
-Delivery scope and sequencing belong to [epic #893](https://github.com/chrisbanes/ensemble/issues/893)
+Delivery scope and sequencing belong to [epic #893](https://github.com/chrisbanes/cab/issues/893)
 and its native sub-issues; this document is not a parallel implementation plan.

@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "../fixtures/temp.js";
 
 test("test evidence refuses a twenty-fifth file without modifying its owned directory", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-evidence-files-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-evidence-files-"));
   try {
     const directory = await createTestEvidenceDirectory(
       "limits",
@@ -45,7 +45,7 @@ test("test evidence refuses a twenty-fifth file without modifying its owned dire
 });
 
 test("evidence writes reject traversal unowned names and symlink targets", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-evidence-paths-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-evidence-paths-"));
   try {
     const directory = await createTestEvidenceDirectory(
       "limits",
@@ -79,7 +79,7 @@ test("evidence writes reject traversal unowned names and symlink targets", async
 });
 
 test("evidence metadata PNG and directory byte bounds reject excess data before writing", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-evidence-bytes-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-evidence-bytes-"));
   try {
     const directory = await createTestEvidenceDirectory(
       "limits",

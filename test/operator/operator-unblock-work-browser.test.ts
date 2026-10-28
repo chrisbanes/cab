@@ -50,7 +50,7 @@ const waits = (page: Page) => page.locator(".wait-reasons"),
       .filter({ hasText: "Project paused" })
       .getByRole("button", { name: "Fix: Resume project" }),
   checklist = (page: Page) =>
-    page.getByRole("region", { name: "Get Ensemble running" });
+    page.getByRole("region", { name: "Get cab running" });
 
 const entries: Record<string, Entry> = {
   "task detail": {

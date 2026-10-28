@@ -178,7 +178,7 @@ test("three-start lifecycle: paused review, reporting repair, then a stopped rev
     threadId: third.threadId,
     turnId: third.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: {
       summary: "Turn three result",
       review: {

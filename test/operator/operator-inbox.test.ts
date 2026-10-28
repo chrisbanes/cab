@@ -124,7 +124,7 @@ test("Inbox headlines are the approval action, a plain prompt, or null for an in
       threadId: started.work.threadId!,
       turnId: started.work.turnId!,
       callId: randomUUID(),
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Which release channel should we use?" },
     });
     assert.equal(call.success, true, call.text);
@@ -190,7 +190,7 @@ test("a native question whose recorded answer is withheld has no headline, as it
       threadId: started.work.threadId!,
       turnId: started.work.turnId!,
       callId: randomUUID(),
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Where should this run?" },
     });
     assert.equal(call.success, true, call.text);

@@ -470,7 +470,7 @@ test("browser API guards, absolute expiry, successful logout and restart reject 
     );
     await reenterHome(page);
     assert.equal((await response).status(), 200);
-    await page.getByRole("region", { name: "Get Ensemble running" }).waitFor();
+    await page.getByRole("region", { name: "Get cab running" }).waitFor();
     // Readiness and discovery reads that re-entering Home starts settle before the clock moves again.
     await page.waitForLoadState("networkidle");
   }
@@ -512,7 +512,7 @@ test("browser API guards, absolute expiry, successful logout and restart reject 
   assert.ok(
     authenticatedState.cookies.some(
       (cookie) =>
-        cookie.name === "ensemble_operator_session" && cookie.value.length > 0,
+        cookie.name === "cab_operator_session" && cookie.value.length > 0,
     ),
   );
   const oldBrowser = browser;

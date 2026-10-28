@@ -507,7 +507,7 @@ export class OperatorPush {
         subscriptionId: id,
         plaintext: JSON.stringify({
           v: 1,
-          title: "Test notification from Ensemble",
+          title: "Test notification from cab",
           url: "/app/settings#notifications",
           tag: "test:notification",
         } satisfies PushPayload),

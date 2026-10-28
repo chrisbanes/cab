@@ -233,7 +233,7 @@ function sourceRepository(root: string): { path: string; commit: string } {
 
 /** One data directory that outlives service restarts inside a test. */
 function world(t: { after: (fn: () => Promise<void> | void) => void }) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-drafting-service-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-drafting-service-"));
   const previous = process.env[CLAUDE_TOKEN_NAME];
   process.env[CLAUDE_TOKEN_NAME] = "drafting-claude-token-canary";
   const services: StandaloneService[] = [];
@@ -283,7 +283,7 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
                       try {
                         // Like the CLI, a tool call is announced to the hook first.
                         await session.hook(
-                          `mcp__ensemble__${name}`,
+                          `mcp__cab__${name}`,
                           args,
                           `toolu_${randomUUID()}`,
                         );
@@ -583,7 +583,7 @@ function firstTurn(harness: ExecutionHarness, opened: Opened) {
   if (!session) return undefined;
   const tools =
     (
-      session.options.mcpServers?.ensemble as unknown as
+      session.options.mcpServers?.cab as unknown as
         | { instance: { tools: Array<{ name: string }> } }
         | undefined
     )?.instance.tools ?? [];
@@ -1691,7 +1691,7 @@ test("an assignment thread is never offered the proposal tool, and the tool refu
     threadId: "draft-thread-1",
     turnId: "draft-turn-2",
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary: "x" },
   });
   assert.equal(coordination.success, false);

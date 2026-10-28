@@ -125,14 +125,14 @@ test("a valid push shows the payload's title, tag and link, for a task and for a
     url: "/app/inbox?request=runtime%3Acodex",
   });
   // The body is fixed text; nothing from the payload becomes body content.
-  assert.equal(w.shown[0]?.options.body, "Open Ensemble to respond.");
+  assert.equal(w.shown[0]?.options.body, "Open cab to respond.");
 });
 
 test("the Settings link of a test notification is accepted", async () => {
   const w = await load();
   await w.push({
     v: 1,
-    title: "Test notification from Ensemble",
+    title: "Test notification from cab",
     url: "/app/settings#notifications",
     tag: "test:notification",
   });
@@ -164,7 +164,7 @@ test("an invalid link, version, shape or payload shows the fixed notification li
   for (const payload of bad) await w.push(payload);
   assert.equal(w.shown.length, bad.length);
   for (const note of w.shown) {
-    assert.equal(note.title, "Ensemble needs you");
+    assert.equal(note.title, "cab needs you");
     assert.deepEqual(plain(note.options.data), { url: "/app/inbox" });
   }
 });
@@ -198,7 +198,7 @@ test("a click focuses an open app window and routes it in place, never opening a
   assert.equal(app.focused, 1);
   assert.deepEqual(plain(app.posted), [
     {
-      type: "ensemble.notification-open",
+      type: "cab.notification-open",
       url: "/app/inbox?request=runtime%3Acodex",
     },
   ]);
@@ -225,7 +225,7 @@ test("a click with a foreign link routes an open app window to the Inbox", async
   const w = await load([app]);
   await w.click("https://evil.test/");
   assert.deepEqual(plain(app.posted), [
-    { type: "ensemble.notification-open", url: "/app/inbox" },
+    { type: "cab.notification-open", url: "/app/inbox" },
   ]);
   assert.deepEqual(w.opened, []);
 });

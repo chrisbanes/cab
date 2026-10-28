@@ -140,7 +140,7 @@ test("project sources reads selections, links and observations without private t
   assert.match(humanCounts.out, /3 observed · 3 open · 0 match label `ready`/);
   assert.match(
     humanCounts.out,
-    /^S-1: No open item matches the readiness rule \(label `ready`\); imported tasks stay Draft until one does\. Change readiness with 'ensemble project prepare-source'\.$/m,
+    /^S-1: No open item matches the readiness rule \(label `ready`\); imported tasks stay Draft until one does\. Change readiness with 'cab project prepare-source'\.$/m,
   );
   for (const secret of [...PRIVATE, w.ids.checkout])
     assert.ok(!humanCounts.out.includes(secret), secret);
@@ -778,7 +778,7 @@ test("project prepare-source defaults its document into the working directory", 
     ],
     { cwd },
   );
-  const name = `ensemble-github-configure-${w.ids.atlas.slice(0, 8)}.json`;
+  const name = `cab-github-configure-${w.ids.atlas.slice(0, 8)}.json`;
   assert.equal(prepared.data.file, join(cwd, name));
   assert.deepEqual(readdirSync(cwd), [name]);
   const dry = await w.ok("rw", [

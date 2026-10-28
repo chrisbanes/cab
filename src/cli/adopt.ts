@@ -20,7 +20,7 @@ export const adoptCommands = new Map<string, WriteCommand>([
         "assignment apply-current ASSIGNMENT_ID --expected-version N [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the assignment's version ('ensemble assignment get ASSIGNMENT_ID'); required.",
+        "--expected-version: the assignment's version ('cab assignment get ASSIGNMENT_ID'); required.",
       flags: ["expected-version", "request-id"],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "ASSIGNMENT_ID");
@@ -68,7 +68,7 @@ export const adoptCommands = new Map<string, WriteCommand>([
           {
             subject: `Assignment ${id}`,
             sent: expected,
-            read: `ensemble assignment get ${id}`,
+            read: `cab assignment get ${id}`,
             current: () =>
               session.client
                 .get(`/api/operator/assignments/${id}`, assignmentDetailSchema)

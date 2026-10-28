@@ -12,7 +12,7 @@ import { tmpdir } from "../fixtures/temp.js";
 browserTest(
   "timed-out execution preserves a live client and writes sanitized bounded diagnostics",
   async () => {
-    const root = await mkdtemp(join(tmpdir(), "ensemble-browser-diagnostics-"));
+    const root = await mkdtemp(join(tmpdir(), "cab-browser-diagnostics-"));
     const browser = await chromium.launch();
     const page = await browser.newPage();
     const secret = "SYNTHETIC_SECRET_MUST_NOT_BE_ARTIFACTED";
@@ -123,7 +123,7 @@ browserTest(
 browserTest(
   "screenshot failure remains secondary and a non-diagnostic root is rejected",
   async () => {
-    const root = await mkdtemp(join(tmpdir(), "ensemble-screenshot-failure-"));
+    const root = await mkdtemp(join(tmpdir(), "cab-screenshot-failure-"));
     const browser = await chromium.launch();
     const page = await browser.newPage();
     await page.close();
@@ -176,7 +176,7 @@ browserTest(
 );
 
 test("local listener rejection preserves the assertion and backing state while other listeners close", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-local-cleanup-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-local-cleanup-"));
   const calls: string[] = [];
   const original = Error("Original local fixture assertion");
   try {
@@ -235,7 +235,7 @@ test("local listener rejection preserves the assertion and backing state while o
 });
 
 test("evidence write failure remains secondary to the original assertion", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-write-diagnostics-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-write-diagnostics-"));
   const original = Error("Original synthetic assertion must remain primary");
   try {
     await assert.rejects(
@@ -269,7 +269,7 @@ test("evidence write failure remains secondary to the original assertion", async
 });
 
 test("a stalled local listener leaves auth and backing state held while its sibling closes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-stalled-local-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-stalled-local-"));
   const calls: string[] = [];
   let finish!: () => void;
   const original = Error("Original local assertion with pending listener");
@@ -336,9 +336,7 @@ test("a stalled local listener leaves auth and backing state held while its sibl
 browserTest(
   "screenshots stay in distinct configured suite evidence directories",
   async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), "ensemble-screenshot-diagnostics-"),
-    );
+    const root = await mkdtemp(join(tmpdir(), "cab-screenshot-diagnostics-"));
     const browser = await chromium.launch();
     const page = await browser.newPage();
     await page.setContent("<h1>Synthetic browser fixture</h1>");
@@ -380,7 +378,7 @@ browserTest(
 test("overall expiry bounds a stalled cleanup and labels its uncertain outcome", {
   timeout: 5000,
 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-overall-diagnostics-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-overall-diagnostics-"));
   let finish!: () => void;
   let entered!: () => void;
   const cleanupStarted = new Promise<void>((resolve) => {
@@ -476,7 +474,7 @@ test("overall expiry bounds a stalled cleanup and labels its uncertain outcome",
 });
 
 test("partial shared startup retains its original owner and reports rejected cleanup", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-partial-diagnostics-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-partial-diagnostics-"));
   let original: (Error & { fixture?: { directory: string } }) | undefined;
   try {
     let failure: unknown;

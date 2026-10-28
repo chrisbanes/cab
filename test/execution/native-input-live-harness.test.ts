@@ -876,7 +876,7 @@ for (const boundary of ["startup", "service-stop", "verification"] as const)
     );
     let executable = nativeFixture;
     if (boundary !== "startup") {
-      const root = mkdtempSync(join(tmpdir(), "ensemble-ui01-slow-start-"));
+      const root = mkdtempSync(join(tmpdir(), "cab-ui01-slow-start-"));
       t.after(() => rmSync(root, { recursive: true, force: true }));
       executable = join(root, "delayed-native-fixture.mjs");
       writeFileSync(
@@ -985,7 +985,7 @@ test("service fixture seam rejects unbounded budgets before execution", async ()
 
 test("service finite grant is exact-head/resource/budget bound and atomically consumed once without execution", async (t) => {
   const { consumeServiceGrant } = await probe();
-  const root = mkdtempSync(join(tmpdir(), "ensemble-ui01-grant-fixture-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-ui01-grant-fixture-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const grant = {
     grantId: randomUUID(),

@@ -18,7 +18,7 @@ function diagnosticStream() {
     const value = pending.replace(/^# /, "").trim();
     pending = "";
     const allowed =
-      /^(ensemble-test-evidence (stdout|stderr) synthetic-ci-probe|AssertionError \[ERR_ASSERTION\]: Injected CI browser assertion remains primary|[ℹ#] (tests|suites|pass|fail|cancelled|skipped|todo) \d+)$/.test(
+      /^(cab-test-evidence (stdout|stderr) synthetic-ci-probe|AssertionError \[ERR_ASSERTION\]: Injected CI browser assertion remains primary|[ℹ#] (tests|suites|pass|fail|cancelled|skipped|todo) \d+)$/.test(
         value,
       );
     if (allowed && result.lines.length < 40) result.lines.push(value);
@@ -430,8 +430,8 @@ async function main() {
   const result = await runTestProcess(args, {
     env: {
       ...process.env,
-      ENSEMBLE_TEST_PROFILE: options.profile,
-      ENSEMBLE_TEST_BROWSER_ENGINE: {
+      CAB_TEST_PROFILE: options.profile,
+      CAB_TEST_BROWSER_ENGINE: {
         all: "all",
         chromium: "chromium",
         service: "none",

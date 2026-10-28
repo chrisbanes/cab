@@ -35,7 +35,7 @@ async function authFileFixture(
     loginLockoutMs?: number;
   } = {},
 ) {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-operator-auth-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-operator-auth-"));
   chmodSync(directory, 0o700);
   const authFile = join(directory, "operator-auth.json");
   const randomBytes = randomSource();

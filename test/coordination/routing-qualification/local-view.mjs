@@ -78,8 +78,8 @@ function section(title, rows) {
 
 function render(view) {
   const rows = (items, toText) => items.map(toText);
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Ensemble local coordination view</title></head><body>
-    <h1>Ensemble local coordination view</h1>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>cab local coordination view</title></head><body>
+    <h1>cab local coordination view</h1>
     <section><h2>Task identity</h2><dl>
       <dt>Title</dt><dd>${escapeHtml(view.task.title)}</dd>
       <dt>Task ID</dt><dd>${escapeHtml(view.task.id)}</dd>
@@ -148,9 +148,7 @@ async function waitUntil(predicate) {
   }
 }
 
-const root = realpathSync(
-  mkdtempSync(join(tmpdir(), "ensemble-s04b-local-view-")),
-);
+const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s04b-local-view-")));
 const runtime = new SmokeRuntime();
 const service = new StandaloneService(
   join(root, "data"),

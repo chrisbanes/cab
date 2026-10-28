@@ -2828,7 +2828,7 @@ export class StandaloneService {
     if (!runtime?.effectivePolicy || this.runtimeUnavailableSince.has(harness))
       return null;
     // Any absolute workspace: the disclosure names roots by category only.
-    const workspace = "/ensemble-task-workspace";
+    const workspace = "/cab-task-workspace";
     try {
       return claudePolicyDisclosure(
         runtime.effectivePolicy(workspace),
@@ -2987,7 +2987,7 @@ export class StandaloneService {
     const evidence = this.retainedEvidence();
     const operatorApi = new OperatorApi(this, [
       this.dataDir,
-      process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "",
+      process.env.CAB_OPERATOR_AUTH_FILE ?? "",
     ]);
     const currentPolicy = async () => {
       const policy = await operatorApi.retainedEvidencePolicy(request.taskId);
@@ -3289,7 +3289,7 @@ export class StandaloneService {
       threadId: intent.threadId,
       turnId: intent.turnId,
       callId: "delivery-authority",
-      tool: "ensemble_external_action",
+      tool: "cab_external_action",
       arguments: {},
     });
     if (canonicalMaterial(current) !== canonicalMaterial(caller))
@@ -4122,10 +4122,7 @@ export class StandaloneService {
       taskVersion: Number(task.version),
       visibility: this.taskWorkspaceVisibility(taskId),
       ...(binding ? { binding } : {}),
-      controlPaths: [
-        this.dataDir,
-        process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "",
-      ],
+      controlPaths: [this.dataDir, process.env.CAB_OPERATOR_AUTH_FILE ?? ""],
     };
   }
 
@@ -4758,7 +4755,7 @@ export class StandaloneService {
         coordination.recoveryDispositionForWork(workId) ===
           "operator-reconciled")
     )
-      this.holdKnownSurvivor(workId, "late Ensemble callback");
+      this.holdKnownSurvivor(workId, "late cab callback");
     const set = this.callbacks.get(workId) ?? new Set<Promise<unknown>>();
     set.add(callback);
     this.callbacks.set(workId, set);
@@ -5104,7 +5101,7 @@ export class StandaloneService {
         return Promise.resolve({ text: decision.text, success: false });
     }
     if (
-      call.tool === "ensemble_report_result" &&
+      call.tool === "cab_report_result" &&
       (binding.requestSequence === null || binding.admittedTaskVersion === null)
     )
       return Promise.resolve({
@@ -5115,7 +5112,7 @@ export class StandaloneService {
     let capturedDeliveryCaller: RuntimeDeliveryCaller | undefined;
     const pending = Promise.resolve()
       .then(async () => {
-        if (call.tool === "ensemble_external_action") {
+        if (call.tool === "cab_external_action") {
           const caller = coordination.deliveryCaller(call as CoordinationCall);
           capturedDeliveryCaller = caller;
           const result = await this.started().deliveryCoordinator.submit(
@@ -5156,7 +5153,7 @@ export class StandaloneService {
             );
           return response;
         }
-        if (call.tool === "ensemble_register_pr") {
+        if (call.tool === "cab_register_pr") {
           const caller = coordination.deliveryCaller(call as CoordinationCall);
           capturedDeliveryCaller = caller;
           const result = await this.started().deliveryCoordinator.registerPr(
@@ -5173,7 +5170,7 @@ export class StandaloneService {
           );
         }
         let response: CoordinationToolResponse;
-        if (call.tool === "ensemble_report_result") {
+        if (call.tool === "cab_report_result") {
           const resultCall = call as CoordinationCall;
           let candidate:
             | Awaited<ReturnType<typeof captureRetainedResultEvidence>>
@@ -5192,7 +5189,7 @@ export class StandaloneService {
           ) {
             const api = new OperatorApi(this, [
               this.dataDir,
-              process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "",
+              process.env.CAB_OPERATOR_AUTH_FILE ?? "",
             ]);
             const policy = () =>
               api.retainedEvidencePolicy(binding.taskId).then((value) =>
@@ -5289,8 +5286,8 @@ export class StandaloneService {
       })
       .catch((error: unknown) => {
         const deliveryCall =
-          call.tool === "ensemble_external_action" ||
-          call.tool === "ensemble_register_pr";
+          call.tool === "cab_external_action" ||
+          call.tool === "cab_register_pr";
         const response = {
           text: deliveryCall
             ? "Delivery request rejected or held"
@@ -6756,7 +6753,7 @@ export class StandaloneService {
   }
 
   /**
-   * The submitted prompt's Ensemble-supplied segments, in submission order. `seen` is the
+   * The submitted prompt's cab-supplied segments, in submission order. `seen` is the
    * revisions the resumed thread has already received (null: unknown); undefined for a new thread.
    */
   private executionPromptParts(
@@ -6845,7 +6842,7 @@ export class StandaloneService {
     );
     const roleContext = leadBinding
       ? "Assignment role: project lead. You are accountable for coordinating this task, reviewing its results, and deciding whether to request completion."
-      : "Assignment role: project assignee. The project lead remains accountable for coordinating this task and reviewing its results before completion. Report your result and durable next action through Ensemble.";
+      : "Assignment role: project assignee. The project lead remains accountable for coordinating this task and reviewing its results before completion. Report your result and durable next action through cab.";
     const capture = (() => {
       try {
         return this.taskReview().contextForWork(
@@ -7807,10 +7804,7 @@ export class StandaloneService {
         outcome === "completed" &&
         (this.callbacks.get(request.workId)?.size ?? 0) > 0
       ) {
-        state.hold(
-          intent.id,
-          "Ensemble callback is unfinished at terminal status",
-        );
+        state.hold(intent.id, "cab callback is unfinished at terminal status");
         if (turnCapture)
           turnCapture = this.persistUnsettledTurnCapture(
             turnCapture,

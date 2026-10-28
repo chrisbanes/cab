@@ -171,9 +171,7 @@ export async function runQualification(options = {}) {
   }
   let root;
   try {
-    root = mkdtempSync(
-      join(realpathSync(tmpdir()), "ensemble-ui07-qualification-"),
-    );
+    root = mkdtempSync(join(realpathSync(tmpdir()), "cab-ui07-qualification-"));
     chmodSync(root, 0o700);
   } catch (error) {
     const failure = {
@@ -518,7 +516,7 @@ export async function runQualification(options = {}) {
               callbackPending = true;
               const reporting = listener({
                 ...call,
-                tool: "ensemble_report_result",
+                tool: "cab_report_result",
                 arguments: {
                   summary: "UI07 exact native answer consumption observed",
                 },

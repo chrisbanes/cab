@@ -1,19 +1,20 @@
 ![Colourful abstract shapes coming together as an ensemble.](docs/assets/ensemble-hero.png)
 
-# Ensemble
+# cab
 
-**Delegate the task. Keep the bigger picture.**
+cab coordinates coding agents across your projects.
 
-Ensemble is being built to coordinate a team of agents across your projects.
+**Get your work from A to B.**
+
 Give a task to a project lead, let it organise the work, and keep track of the
 results and decisions that need you. Your instructions shape how the agents
-work; Ensemble keeps track of who's responsible and what happens next.
+work; cab keeps track of who's responsible and what happens next.
 
 > **In development.** The service and operator UI exist, but the complete
 > task-to-delivery journey is still being built and qualified. This isn't a
 > ready-to-install release yet.
 
-[Follow the roadmap](https://github.com/chrisbanes/ensemble/issues/649) ·
+[Follow the roadmap](https://github.com/chrisbanes/cab/issues/649) ·
 [Current status](#where-it-stands) · [Development](#development)
 
 ## Give it an outcome
@@ -34,7 +35,7 @@ working.
 
 ## A team with a shared memory of the work
 
-Ensemble's design centres on a few things that become important once several
+cab's design centres on a few things that become important once several
 agents are working at once:
 
 - **Projects with their own context.** Keep tasks, repositories, agent profiles,
@@ -44,25 +45,25 @@ agents are working at once:
   when an agent needs a new conversation. Keep the task's working files with
   the task.
 - **Room for parallel work.** Let agents delegate independent assignments while
-  Ensemble manages shared execution capacity and access to task workspaces.
+  cab manages shared execution capacity and access to task workspaces.
 - **A place for your attention.** See questions, approval requests, results and
   recovery state in the operator UI, with the context needed to respond.
 
 ## Why I'm building this
 
-Ensemble grew out of my `run-github-project` workflow. I'm building a standalone
+cab grew out of my `run-github-project` workflow. I'm building a standalone
 service to coordinate work across multiple projects, with project leads
 responsible for outcomes and a durable record of the work between agents.
 
 The development method belongs in the instructions I give those agents.
-Ensemble's job is to support their coordination and give me somewhere to see
+cab's job is to support their coordination and give me somewhere to see
 what's happening and step in when needed.
 
 ## Where it stands
 
-Ensemble is a **TypeScript, Node.js and SQLite** service with **Codex App Server**
+cab is a **TypeScript, Node.js and SQLite** service with **Codex App Server**
 executing agent turns. The first release targets macOS and a private web interface,
-using a separate Ensemble login. [Epic #649](https://github.com/chrisbanes/ensemble/issues/649)
+using a separate cab login. [Epic #649](https://github.com/chrisbanes/cab/issues/649)
 owns delivery scope and status.
 
 **Implemented**
@@ -83,16 +84,16 @@ owns delivery scope and status.
   nothing is saved until Save draft or Create and start. It is not a read-only
   sandbox, and the operator CLI does not offer it.
 - **Draft turns.** On a task that is not Ready, the operator can start one read-only
-  turn of the project lead from the task page or `ensemble task draft-turn`. The lead
+  turn of the project lead from the task page or `cab task draft-turn`. The lead
   can read, investigate, ask questions and, where granted, comment on or label the
   issue; delegation, writes, pull request actions, results and completion are refused,
   and the task stays not Ready. Codex runs it with a read-only sandbox policy and
-  command network access off; Ensemble claims no independent sandbox.
+  command network access off; cab claims no independent sandbox.
 - **Start again and Reset task.** A request refused at admission before it ran shows as
   Not started, not Uncertain. Start again, from the task page, the Inbox, Home or
-  `ensemble task start-again`, queues it again at the current revisions in the same
+  `cab task start-again`, queues it again at the current revisions in the same
   workspace and keeps the refusal in the history. Reset task, from the task header or
-  `ensemble task reset`, replaces every assignment's conversation and starts the lead
+  `cab task reset`, replaces every assignment's conversation and starts the lead
   fresh in the same workspace; it cannot be undone. Neither forces an execution that may
   still be running: those stay with the `recovery` commands.
 - **Improve with lead.** On an open imported task, the project lead reads the linked
@@ -100,13 +101,13 @@ owns delivery scope and status.
   the source issue. The operator edits the proposal, reviews the full current and
   proposed text, and sends it as one GitHub issue edit under the repository's
   `issue.edit` grant. The edit is refused before any write if the issue changed on
-  GitHub after the draft started. It cannot be undone from Ensemble, and the
+  GitHub after the draft started. It cannot be undone from cab, and the
   operator CLI does not offer it.
-- **Status mapping.** A project can map four of Ensemble's work events (first turn
+- **Status mapping.** A project can map four of cab's work events (first turn
   started, PR handed back, stopped or blocked, Done) to options of its linked GitHub
   Project's Status, set on the GitHub source tab. The service writes them through the
   delivery lifecycle under `allow` Project field grants, only for tasks already Ready (or Done once the issue is closed),
-  and skips a write when the card moved on GitHub since Ensemble last saw it. The
+  and skips a write when the card moved on GitHub since cab last saw it. The
   operator CLI cannot edit the mapping; the writes show on the task and never hold it
   ([ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
 - **Publish to GitHub.** The operator can turn a never-started local task into a GitHub
@@ -139,7 +140,7 @@ owns delivery scope and status.
   approval, an intervention or an exhausted runtime) with a link that opens the exact
   request after sign-in, a test notification, and revocation. It is qualified on the
   host's own browser only; phone delivery is not qualified
-  ([#1150](https://github.com/chrisbanes/ensemble/issues/1150)).
+  ([#1150](https://github.com/chrisbanes/cab/issues/1150)).
 - **Settings.** Guided paused-project setup (GitHub discovery of repositories, refs
   and Projects with a typed fallback, a service folder picker and checkout
   verification, one create command) and profile setup, explicit private
@@ -148,14 +149,14 @@ owns delivery scope and status.
   with provider-owned readiness and dependency holds; operators can inspect and
   refresh source state. Scoped delivery records durable intents, confirmed readback,
   retained PR feedback and operator settlement controls.
-- **Operations.** `ensemble service install`, `upgrade` and `uninstall` manage a
+- **Operations.** `cab service install`, `upgrade` and `uninstall` manage a
   per-user macOS LaunchAgent bound to an unpacked release; upgrade stops the job,
   takes a verified snapshot and checks readiness, and a failure leaves the job
   stopped. `service install --mode daemon` is an opt-in LaunchDaemon that starts at
-  boot and prints the `sudo` steps to install it; its real-host behavior is unproved. `ensemble snapshot create|verify|restore` provides offline database
+  boot and prints the `sudo` steps to install it; its real-host behavior is unproved. `cab snapshot create|verify|restore` provides offline database
   backup, verification and restore
   ([standalone operations](docs/operations/standalone-macos.md)).
-- **Operator CLI (authentication, browsing, configuration, diagnostics, task operation, sources, delivery and recovery).** A packaged `ensemble`
+- **Operator CLI (authentication, browsing, configuration, diagnostics, task operation, sources, delivery and recovery).** A packaged `cab`
   executable logs in to the running service with a revocable read-only or read/write
   credential issued from Settings, manages named connections and browses projects,
   profiles, tasks, assignments, instruction revisions, conversation history, results
@@ -182,7 +183,7 @@ owns delivery scope and status.
   [development](docs/development.md#operator-cli).
 - **Claude runtime.** Profiles may select a Claude Code runtime
   ([ADR-1008](docs/adr/1008-claude-code-execution-harness.md)). The operator turns
-  each runtime on or off live in Settings → Runtime or with `ensemble runtime`, and
+  each runtime on or off live in Settings → Runtime or with `cab runtime`, and
   no runtime is required ([ADR-1012](docs/adr/1012-operator-controlled-runtime-enablement.md));
   new profiles default to the first enabled runtime, Codex first. Bounded live journeys qualified it with limits
   ([evidence](docs/evidence/issue-827-claude-journeys-2026-10-12.md)): a Claude-only
@@ -206,9 +207,9 @@ each acceptance scenario to its evidence and disposition.
 **Not yet qualified**
 
 - **Release and cutover.** Operational release is not qualified. Physical
-  sleep/wake behaviour ([#732](https://github.com/chrisbanes/ensemble/issues/732))
+  sleep/wake behaviour ([#732](https://github.com/chrisbanes/cab/issues/732))
   and access from an independent device are unproved. The Haze cutover
-  ([#761](https://github.com/chrisbanes/ensemble/issues/761)) is a separate, reviewed
+  ([#761](https://github.com/chrisbanes/cab/issues/761)) is a separate, reviewed
   step ([proposal](docs/operations/standalone-cutover-proposal.md)); the installed
   Haze prototype stays in place until then.
 - **Packaging.** `scripts/package-release.mjs` builds a self-contained `darwin-arm64`
@@ -216,7 +217,7 @@ each acceptance scenario to its evidence and disposition.
   GitHub Release ([standalone operations](docs/operations/standalone-macos.md#release-build));
   no release has been published
   ([ADR-1011](docs/adr/1011-packaging-and-distribution.md)).
-- **Isolation.** Ensemble relies on the execution runtime and host for isolation.
+- **Isolation.** cab relies on the execution runtime and host for isolation.
   Broad host-permitted reads remain enabled, command network access is off unless the
   operator enables it per project, and Stop is best-effort: unresolved work
   can remain held for reconciliation. See the
@@ -225,7 +226,7 @@ each acceptance scenario to its evidence and disposition.
 - **Deferred integrations.** Optional ChatGPT daily operations/events and native Codex
   task visibility/handover are deferred until after the standalone MVP. Planning,
   probes and implementation are paused under
-  [epic #734](https://github.com/chrisbanes/ensemble/issues/734) until Chris explicitly
+  [epic #734](https://github.com/chrisbanes/cab/issues/734) until Chris explicitly
   reopens the work; they do not gate release. Their requirements and unproved
   feasibility evidence are retained in
   [ADR-1006](docs/adr/1006-chatgpt-and-native-codex.md) and the
@@ -250,7 +251,7 @@ npm run check
 The checks cover types, lint, formatting, compilation and tests, including the
 operator's browser tests. `npm run test:fixture-preflight` checks writable temporary
 storage, real listeners, browser cleanup and evidence from an expected assertion
-failure. Set `ENSEMBLE_TEST_EVIDENCE_DIR` to an absolute, dedicated directory to
+failure. Set `CAB_TEST_EVIDENCE_DIR` to an absolute, dedicated directory to
 retain bounded synthetic screenshots, phase manifests and allowlisted diagnostic
 logs. Test deadlines end waiting; they do not prove execution termination or
 complete cleanup. Live runtime qualification is a separate, explicit step.

@@ -67,7 +67,7 @@ let runtime;
 let phase;
 try {
   stage("fixture");
-  root = mkdtempSync(join(tmpdir(), "ensemble-network-live-"));
+  root = mkdtempSync(join(tmpdir(), "cab-network-live-"));
   chmodSync(root, 0o700);
   const dataDir = join(root, "data");
   service = new StandaloneService(
@@ -141,7 +141,7 @@ try {
         "Disposable network probe.",
         `Marker: net-live-${label}`,
         `Run exactly this one shell command in the current directory: ${command}`,
-        "Then reply with one short sentence and end the turn. Do not call any Ensemble tool.",
+        "Then reply with one short sentence and end the turn. Do not call any cab tool.",
       ].join("\n"),
       ready: false,
     });

@@ -197,7 +197,7 @@ const envName = /^[A-Z][A-Z0-9_]*$/;
 
 /** The keychain caveat shown beside every one-click offer and in the form. */
 export const discoveryUseNote =
-  "Ensemble only reads GitHub with this credential and removes it from agent and helper environments. If agents can reach this Mac's keychain they could run gh themselves; Ensemble does not prevent that.";
+  "cab only reads GitHub with this credential and removes it from agent and helper environments. If agents can reach this Mac's keychain they could run gh themselves; cab does not prevent that.";
 
 /** Under an offer or the credential controls while another surface's save is unconfirmed. */
 export const discoveryElsewhereNote =
@@ -495,7 +495,7 @@ export function DiscoveryCredentialRow(
   );
 }
 
-const claudeTokenPath = "/.ensemble/claude/claude-token";
+const claudeTokenPath = "/.cab/claude/claude-token";
 /** `~`, `$HOME` or `${HOME}` at the start of a reference, with or without `file:`. */
 const homeForm = /^(?:file:)?(?:~|\$HOME|\$\{HOME\})(?=\/|$)/;
 

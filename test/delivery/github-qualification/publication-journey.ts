@@ -78,10 +78,10 @@ function filesContaining(directory: string, needle: string): string[] {
 }
 
 /**
- * One bounded publication on the fixture repository: a real task worktree, Ensemble's coordinator and
+ * One bounded publication on the fixture repository: a real task worktree, cab's coordinator and
  * HTTPS push for a first commit, `pr.create` on the assigned branch, and a repair push to the same
  * branch. Then the harness plays an outside writer twice: the first outside commit is overwritten, the
- * second is adopted and pushed on top of, each recovery approved as the operator would. Cleanup (closing the PR, deleting the scratch head) is the harness's own, because Ensemble
+ * second is adopted and pushed on top of, each recovery approved as the operator would. Cleanup (closing the PR, deleting the scratch head) is the harness's own, because cab
  * never deletes branches. Never throws for an assertion: returns the evidence with `publication: "failed"`.
  */
 export async function runPublicationJourney(
@@ -101,7 +101,7 @@ export async function runPublicationJourney(
     publication: "failed",
     cleanup: "unverified",
   };
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s07a-pub-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s07a-pub-")));
   const db = new DatabaseSync(":memory:");
   let branch: string | undefined;
   let prNumber: number | undefined;
@@ -172,7 +172,7 @@ export async function runPublicationJourney(
       git(workspace, ["add", "."]);
       git(workspace, [
         "-c",
-        "user.name=Ensemble qualification",
+        "user.name=cab qualification",
         "-c",
         "user.email=qualification@example.invalid",
         "commit",
@@ -312,7 +312,7 @@ export async function runPublicationJourney(
         expectedHeadSha: first,
       },
       title: `Publication qualification ${runId}`,
-      body: "Bounded Ensemble publication qualification. Closed by the harness.",
+      body: "Bounded cab publication qualification. Closed by the harness.",
       draft: true,
     });
     mustSucceed("pr.create", created);
@@ -347,7 +347,7 @@ export async function runPublicationJourney(
       throw new Error("PR head did not advance to the repair commit");
     const observedHead = store.delivery(taskId)?.observation.headSha;
     if (observedHead !== second)
-      throw new Error("Ensemble's PR observation did not advance");
+      throw new Error("cab's PR observation did not advance");
     if (wakes.some((w) => w.startsWith("outside-push:")))
       throw new Error("An outside push was reported");
 
@@ -436,7 +436,7 @@ export async function runPublicationJourney(
     // The agent's integration: merge the adopted head in the worktree, which adopt never touched.
     git(workspace, [
       "-c",
-      "user.name=Ensemble qualification",
+      "user.name=cab qualification",
       "-c",
       "user.email=qualification@example.invalid",
       "merge",
@@ -460,7 +460,7 @@ export async function runPublicationJourney(
     if (options.readPrHead(pull.number) !== merged)
       throw new Error("PR head did not advance to the merge");
     if (store.delivery(taskId)?.observation.headSha !== merged)
-      throw new Error("Ensemble's PR observation did not advance");
+      throw new Error("cab's PR observation did not advance");
     const recoveryWakes = wakes.filter((w) => w.startsWith("outside-push:"));
     if (
       recoveryWakes.join() !==
@@ -472,7 +472,7 @@ export async function runPublicationJourney(
     if (store.completionBlockers(taskId).includes("task-branch-outside-change"))
       throw new Error("The outside change still holds completion");
 
-    // The credential is nowhere Ensemble or the harness wrote.
+    // The credential is nowhere cab or the harness wrote.
     const leaked = [
       ...filesContaining(root, token),
       ...[

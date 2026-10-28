@@ -71,7 +71,7 @@ export async function run({ root, token }) {
   hits = 0;
 
   const nonce = randomUUID().slice(0, 8);
-  const unique = `/tmp/ensemble-c0-${nonce}`;
+  const unique = `/tmp/cab-c0-${nonce}`;
   const targets = {
     inside: join(workspace, "sbx-inside.txt"),
     outside: join(root, "outside", "sbx-outside.txt"),

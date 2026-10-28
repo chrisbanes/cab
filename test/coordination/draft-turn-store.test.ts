@@ -11,7 +11,7 @@ const ask = (threadId: string, turnId: string) => ({
   threadId,
   turnId,
   callId: `ask-${turnId}`,
-  tool: "ensemble_ask_question",
+  tool: "cab_ask_question",
   arguments: { question: "Which repository?" },
 });
 

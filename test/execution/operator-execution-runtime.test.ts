@@ -226,7 +226,7 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
     const unavailable = waitRoute(assignment({ waitReason: reason }));
     assert.equal(
       unavailable?.message,
-      "The Claude runtime is unavailable. Ensemble restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Queued work waits; running work is held, see Recovery.",
+      "The Claude runtime is unavailable. cab restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Queued work waits; running work is held, see Recovery.",
     );
     assert.deepEqual(routes(reason), [
       "/app/settings/runtime",
@@ -285,7 +285,7 @@ test("the profile runtime note names the recovery for each cause", () => {
   assert.doesNotMatch(missing ?? "", /Turn it on/);
   assert.equal(
     harnessNote({ ...base("codex"), state: "unavailable", since: 1 }),
-    "The Codex runtime is unavailable. Ensemble restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Assignments using this profile wait meanwhile and never fall back to another runtime.",
+    "The Codex runtime is unavailable. cab restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Assignments using this profile wait meanwhile and never fall back to another runtime.",
   );
 });
 
@@ -334,7 +334,7 @@ test("Claude policy disclosure names roots by category and keeps the runtime's l
   );
   assert.ok(
     redirected.lines.some((l) =>
-      /Ensemble's hook, not by the operating system/.test(l),
+      /cab's hook, not by the operating system/.test(l),
     ),
   );
   assert.deepEqual(redirected.limits, base.limits);

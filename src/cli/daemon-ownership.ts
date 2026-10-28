@@ -2,7 +2,7 @@
  * Who owns a LaunchDaemon install: the one pure decision behind `service install --mode
  * daemon` verification and `service uninstall` completion, so the two cannot disagree.
  *
- * What Ensemble has seen of the service is recorded as `Observed`. Observations only ever
+ * What the CLI has seen of the service is recorded as `Observed`. Observations only ever
  * move up (never seen, then loaded, then an identified process), and an identity is
  * dropped only when its exit is confirmed. A job that was loaded but had no pid yet is
  * not "never started": launchd may have started it a moment later, so it is held to the

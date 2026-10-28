@@ -31,7 +31,7 @@ import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 
 test("operator-owned GitHub configuration survives restart and rejects stale or agent changes", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-config-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-config-"));
   const file = join(root, "service.sqlite");
   const projectId = randomUUID();
   let db = new DatabaseSync(file);
@@ -53,7 +53,7 @@ test("operator-owned GitHub configuration survives restart and rejects stale or 
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+      credentialRef: "env:CAB_TEST_GITHUB",
       selections: [
         {
           id: "repo",
@@ -113,12 +113,12 @@ test("operator-owned GitHub configuration survives restart and rejects stale or 
     assert.equal(config.version, 2);
     assert.deepEqual(config.selections, command.selections);
     assert.deepEqual(config.readiness, command.readiness);
-    assert.equal(config.credentialRef, "env:ENSEMBLE_TEST_GITHUB");
+    assert.equal(config.credentialRef, "env:CAB_TEST_GITHUB");
     assert.doesNotMatch(JSON.stringify(config), /secret-value/);
     const html = new LocalOperatorUi(domain).project(projectId);
     assert.match(html, /data-command="github\.configure"/);
     assert.match(html, /status:ready/);
-    assert.doesNotMatch(html, /env:ENSEMBLE_TEST_GITHUB|secret-value/);
+    assert.doesNotMatch(html, /env:CAB_TEST_GITHUB|secret-value/);
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
@@ -126,7 +126,7 @@ test("operator-owned GitHub configuration survives restart and rejects stale or 
 });
 
 test("a version-matched successful source preview activates only that selection", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-preview-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-preview-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   try {
@@ -147,7 +147,7 @@ test("a version-matched successful source preview activates only that selection"
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+      credentialRef: "env:CAB_TEST_GITHUB",
       selections: [
         {
           id: "repo",
@@ -192,7 +192,7 @@ test("a version-matched successful source preview activates only that selection"
       key: randomUUID(),
       projectId,
       expectedVersion: 2,
-      credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+      credentialRef: "env:CAB_TEST_GITHUB",
       selections: [
         {
           id: "repo",
@@ -222,7 +222,7 @@ test("a version-matched successful source preview activates only that selection"
 });
 
 test("github.activate reports whether the selection was already active at the source version", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-activation-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-activation-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   try {
@@ -244,7 +244,7 @@ test("github.activate reports whether the selection was already active at the so
         key: randomUUID(),
         projectId,
         expectedVersion,
-        credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+        credentialRef: "env:CAB_TEST_GITHUB",
         selections: ["repo", "other"].map((name) => ({
           id: name,
           kind: "repository" as const,
@@ -297,7 +297,7 @@ test("github.activate reports whether the selection was already active at the so
 });
 
 test("operator pages distinguish GitHub sync, provenance and source holds while escaping provider text", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-ui-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-ui-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   try {
     new Store(db).ensureHost("test");
@@ -320,7 +320,7 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+      credentialRef: "env:CAB_TEST_GITHUB",
       selections: [
         {
           id: "repo",
@@ -388,7 +388,7 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
     assert.match(task, /imported-blockers-unknown/);
     assert.match(task, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
     assert.doesNotMatch(project + task, /<script>|<img src=x/);
-    assert.doesNotMatch(project + task, /ENSEMBLE_TEST_GITHUB|fixture-token/);
+    assert.doesNotMatch(project + task, /CAB_TEST_GITHUB|fixture-token/);
     assert.match(project, /1 observed · 1 open · 1 match any of label `ready`/);
     assert.doesNotMatch(project, /No open item matches/);
     // The label is removed on GitHub: nothing matches and the task names why.
@@ -438,13 +438,13 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
 browserTest(
   "GitHub source pages and refresh inherit authenticated origin and CSRF guards",
   async (_t, journey) => {
-    const previousSource = process.env.ENSEMBLE_TEST_GITHUB;
-    process.env.ENSEMBLE_TEST_GITHUB = "fixture-source-page-token";
+    const previousSource = process.env.CAB_TEST_GITHUB;
+    process.env.CAB_TEST_GITHUB = "fixture-source-page-token";
     _t.after(() => {
-      if (previousSource === undefined) delete process.env.ENSEMBLE_TEST_GITHUB;
-      else process.env.ENSEMBLE_TEST_GITHUB = previousSource;
+      if (previousSource === undefined) delete process.env.CAB_TEST_GITHUB;
+      else process.env.CAB_TEST_GITHUB = previousSource;
     });
-    const root = mkdtempSync(join(tmpdir(), "ensemble-github-http-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-github-http-"));
     const db = new DatabaseSync(join(root, "db.sqlite"));
     let http: LocalOperatorHttp | undefined;
     let auth: OperatorAuth | undefined;
@@ -496,7 +496,7 @@ browserTest(
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+      credentialRef: "env:CAB_TEST_GITHUB",
       selections: [
         {
           id: "repo",
@@ -554,7 +554,7 @@ browserTest(
       key: randomUUID(),
       projectId: otherProjectId,
       expectedVersion: 1,
-      credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+      credentialRef: "env:CAB_TEST_GITHUB",
       selections: [
         {
           id: "repo",
@@ -766,7 +766,7 @@ browserTest(
 );
 
 test("linked repository verification is asynchronous and stale configuration cannot commit", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-async-config-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-async-config-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   let release!: () => void;
@@ -798,7 +798,7 @@ test("linked repository verification is asynchronous and stale configuration can
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+      credentialRef: "env:CAB_TEST_GITHUB",
       selections: [],
       readiness: {
         mode: "any" as const,
@@ -854,7 +854,7 @@ test("linked repository verification is asynchronous and stale configuration can
 });
 
 test("malformed repository verification output fails as an internal result error", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-invalid-result-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-invalid-result-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   let malformed = true;
@@ -913,7 +913,7 @@ test("malformed repository verification output fails as an internal result error
 });
 
 test("duplicate verified repository identities roll back and corrupt receipts fail closed", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-duplicate-result-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-duplicate-result-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   let duplicate = true;
@@ -1007,9 +1007,7 @@ test("duplicate verified repository identities roll back and corrupt receipts fa
 });
 
 test("verified GitHub command duplicates share correlation and replay without rechecking", async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-github-correlated-replay-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-github-correlated-replay-"));
   const filename = join(root, "db.sqlite");
   const projectId = randomUUID();
   let db = new DatabaseSync(filename);
@@ -1099,7 +1097,7 @@ test("verified GitHub command duplicates share correlation and replay without re
 });
 
 test("existing standalone projects acquire inactive source configuration on migration", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-migration-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-migration-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   try {
@@ -1142,7 +1140,7 @@ test("existing standalone projects acquire inactive source configuration on migr
 });
 
 test("saved readiness rules, including label ready, are untouched by migration and restart", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-saved-rules-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-saved-rules-"));
   const file = join(root, "db.sqlite");
   let db = new DatabaseSync(file);
   const rules = {
@@ -1200,7 +1198,7 @@ test("saved readiness rules, including label ready, are untouched by migration a
 });
 
 test("readiness rule is added, removed and re-added through keyed, versioned configuration", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-readiness-cycle-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-readiness-cycle-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   try {
@@ -1258,7 +1256,7 @@ test("readiness rule is added, removed and re-added through keyed, versioned con
 });
 
 test("the HTML project page names the readiness state and its form removes or sets a rule", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-readiness-html-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-readiness-html-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   try {
@@ -1312,7 +1310,7 @@ test("the HTML project page names the readiness state and its form removes or se
 });
 
 test("closed-issue mode defaults to skip and changes only through keyed, versioned configuration", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-closed-mode-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-closed-mode-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
   try {
@@ -1428,7 +1426,7 @@ test("closed-issue mode defaults to skip and changes only through keyed, version
 
 test("imported task provisioning requires the project's exact linked Git repository", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-provision-")),
+    mkdtempSync(join(tmpdir(), "cab-github-provision-")),
   );
   const repository = join(root, "source");
   mkdirSync(repository);
@@ -1505,7 +1503,7 @@ test("imported task provisioning requires the project's exact linked Git reposit
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+      credentialRef: "env:CAB_TEST_GITHUB",
       selections: [
         {
           id: "repo",

@@ -37,7 +37,7 @@ function command(service: StandaloneService, body: Record<string, unknown>) {
 }
 
 test("assignment history reads stay bounded, sanitized and scoped, with omissions and immutable generations after restart", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-history-read-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-history-read-"));
   const dataDir = join(root, "data");
   let currentSecret = "";
   const createService = () =>

@@ -62,7 +62,7 @@ const response: RoutingChoiceResponse = {
 };
 
 test("live call budget is durable and reserves before invoking the client", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-"));
   const path = join(root, "ledger.sqlite");
   let budget = new SqliteLiveCallBudget(path, 4);
   let calls = 0;
@@ -91,7 +91,7 @@ test("live call budget is durable and reserves before invoking the client", asyn
 });
 
 test("failed provider calls consume budget and a fifth call never reaches it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-"));
   const path = join(root, "ledger.sqlite");
   const budget = new SqliteLiveCallBudget(path, 4);
   let calls = 0;
@@ -117,7 +117,7 @@ test("failed provider calls consume budget and a fifth call never reaches it", a
 });
 
 test("competing wrappers cannot reserve more than the configured ceiling", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-"));
   const path = join(root, "ledger.sqlite");
   const first = new SqliteLiveCallBudget(path, 4);
   const second = new SqliteLiveCallBudget(path, 4);
@@ -159,7 +159,7 @@ test("competing wrappers cannot reserve more than the configured ceiling", async
 });
 
 test("controller can explicitly expand a legacy fully reserved budget and reopen it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-expand-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-expand-"));
   const path = join(root, "ledger.sqlite");
   createLegacyBudget(path, 4);
   insertUnrelatedTable(path);
@@ -225,7 +225,7 @@ test("controller can explicitly expand a legacy fully reserved budget and reopen
 });
 
 test("ordinary budget construction cannot change an existing ceiling", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-fixed-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-fixed-"));
   const path = join(root, "ledger.sqlite");
   let budget: SqliteLiveCallBudget | undefined;
   try {
@@ -248,7 +248,7 @@ test("ordinary budget construction cannot change an existing ceiling", () => {
 
 test("a new twenty-call ledger must pass through explicit controller expansion", () => {
   const root = mkdtempSync(
-    join(tmpdir(), "ensemble-s05-call-budget-explicit-create-"),
+    join(tmpdir(), "cab-s05-call-budget-explicit-create-"),
   );
   const path = join(root, "ledger.sqlite");
   try {
@@ -264,7 +264,7 @@ test("a new twenty-call ledger must pass through explicit controller expansion",
 
 test("an existing SQLite file needs an exact expanded budget row", () => {
   const root = mkdtempSync(
-    join(tmpdir(), "ensemble-s05-call-budget-existing-create-"),
+    join(tmpdir(), "cab-s05-call-budget-existing-create-"),
   );
   const emptyPath = join(root, "empty.sqlite");
   const unrelatedPath = join(root, "unrelated.sqlite");
@@ -333,7 +333,7 @@ test("an existing SQLite file needs an exact expanded budget row", () => {
 });
 
 test("budget expansion refuses stale snapshots and invalid ceilings without mutation", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-guards-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-guards-"));
   const path = join(root, "ledger.sqlite");
   const missingPath = join(root, "missing.sqlite");
   createLegacyBudget(path, 2);
@@ -396,7 +396,7 @@ test("budget expansion refuses stale snapshots and invalid ceilings without muta
 });
 
 test("budget expansion rejects extra rows and preserves the original ledger", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-rows-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-rows-"));
   const path = join(root, "ledger.sqlite");
   createLegacyBudget(path, 2);
   const database = new DatabaseSync(path);
@@ -438,7 +438,7 @@ test("budget expansion rejects extra rows and preserves the original ledger", ()
 });
 
 test("budget expansion refuses a legacy ledger referenced by another table", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-fk-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-fk-"));
   const path = join(root, "ledger.sqlite");
   createLegacyBudget(path, 2);
   const database = new DatabaseSync(path);
@@ -479,7 +479,7 @@ test("budget expansion refuses a legacy ledger referenced by another table", () 
 test("budget expansion refuses ledgers containing views or triggers", () => {
   for (const dependency of ["view", "trigger"] as const) {
     const root = mkdtempSync(
-      join(tmpdir(), `ensemble-s05-call-budget-${dependency}-`),
+      join(tmpdir(), `cab-s05-call-budget-${dependency}-`),
     );
     const path = join(root, "ledger.sqlite");
     createLegacyBudget(path, 2);
@@ -553,7 +553,7 @@ test("budget expansion refuses ledgers containing views or triggers", () => {
 });
 
 test("budget expansion rejects an unexpected table shape without discarding it", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-call-budget-shape-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-shape-"));
   const path = join(root, "ledger.sqlite");
   const database = new DatabaseSync(path);
   try {
@@ -600,9 +600,7 @@ test("budget expansion rejects an unexpected table shape without discarding it",
 });
 
 test("failed legacy rebuild rolls back and preserves unrelated tables", () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-s05-call-budget-rollback-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-call-budget-rollback-"));
   const path = join(root, "ledger.sqlite");
   createLegacyBudget(path, 2);
   insertUnrelatedTable(path);

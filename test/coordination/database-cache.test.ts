@@ -229,7 +229,7 @@ test("identical SQL in separate databases has independent statements and data", 
 });
 
 test("failed close invalidates wrappers and a later close retries the same handle", () => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-database-cache-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-database-cache-"));
   const filename = join(directory, "cache.db");
   const raw = new DatabaseSync(filename);
   const counts = counted(raw);

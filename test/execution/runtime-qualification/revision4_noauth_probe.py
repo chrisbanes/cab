@@ -47,7 +47,7 @@ def ask(rid, method, params):
 
 
 try:
-    initialized = ask(1, "initialize", {"clientInfo": {"name": "ensemble_s01_noauth", "title": "Ensemble S01 No Auth", "version": "0.1.0"}})
+    initialized = ask(1, "initialize", {"clientInfo": {"name": "cab_s01_noauth", "title": "cab S01 No Auth", "version": "0.1.0"}})
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()
     account = ask(2, "account/read", {})

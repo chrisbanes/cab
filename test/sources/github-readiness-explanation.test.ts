@@ -26,7 +26,7 @@ const at = (n: number, state: "open" | "closed" = "open"): IssueSnapshot => ({
 });
 
 test("readiness counts and unmet reasons come from stored observations without provider reads", async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-readiness-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-readiness-")));
   const previous = process.env.FIXTURE_READINESS_TOKEN;
   process.env.FIXTURE_READINESS_TOKEN = "readiness-token";
   const reads = { selection: 0, blockers: 0, status: 0 };

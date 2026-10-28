@@ -12,7 +12,7 @@ import {
 const DAY = 24 * 60 * 60 * 1000;
 
 function fixture(t: { after(fn: () => void): void }) {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-credentials-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-credentials-"));
   const path = join(dir, "state.db");
   const db = new DatabaseSync(path);
   t.after(() => {
@@ -143,15 +143,15 @@ test("managed assignment environment marks children and drops CLI selection", ()
   assert.deepEqual(
     managedAssignmentEnvironment({
       PATH: "/bin",
-      ENSEMBLE_CONNECTION: "home",
-      ENSEMBLE_CLI_CONFIG_DIR: "/tmp/cli",
-      ENSEMBLE_CLI_ANYTHING: "x",
-      ENSEMBLE_OTHER: "kept",
+      CAB_CONNECTION: "home",
+      CAB_CLI_CONFIG_DIR: "/tmp/cli",
+      CAB_CLI_ANYTHING: "x",
+      CAB_OTHER: "kept",
     }),
     {
       PATH: "/bin",
-      ENSEMBLE_OTHER: "kept",
-      ENSEMBLE_MANAGED_ASSIGNMENT: "1",
+      CAB_OTHER: "kept",
+      CAB_MANAGED_ASSIGNMENT: "1",
     },
   );
 });

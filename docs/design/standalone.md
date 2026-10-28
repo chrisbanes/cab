@@ -4,7 +4,7 @@ The service ownership decision is [ADR-1004](../adr/1004-standalone-service.md);
 assignment routing and project-lead accountability follow
 [ADR-1005](../adr/1005-service-assignment-routing.md). Runtime-specific contracts
 below require bounded evidence before dependent implementation. GitHub issues under
-[epic #649](https://github.com/chrisbanes/ensemble/issues/649) own delivery scope
+[epic #649](https://github.com/chrisbanes/cab/issues/649) own delivery scope
 and status.
 
 The service implements durable request admission, shared writer/capacity limits,
@@ -23,7 +23,7 @@ unproved.
 
 [ADR-1006](../adr/1006-chatgpt-and-native-codex.md) retains optional ChatGPT daily
 operations/events and native Codex visibility/handover as post-MVP requirements,
-paused under [epic #734](https://github.com/chrisbanes/ensemble/issues/734) until
+paused under [epic #734](https://github.com/chrisbanes/cab/issues/734) until
 explicitly reopened. The MVP uses the private web UI and Codex App Server and does
 not wait for X01–X08. The future plugin would add a narrow authenticated HTTPS MCP
 endpoint; runtime access, existing holds and reviewed cutover remain unchanged. The
@@ -39,7 +39,7 @@ endpoint; runtime access, existing holds and reviewed cutover remain unchanged. 
 - Do not silently switch authentication or add API billing if unattended use fails.
 - Deliver the first deployment on Chris's Mac; Linux qualification follows later.
 - Serve a web operator interface with private remote access from Chris's own devices
-  over Tailscale, with a separate authenticated Ensemble operator session.
+  over Tailscale, with a separate authenticated cab operator session.
 - Admitted execution may survive crashes and Stop is best-effort. Uncertain
   ownership remains held until independently resolved.
 - Normal successful final turns permit cooperative handoff under the specification;
@@ -85,7 +85,7 @@ plugin system without a concrete need.
 The runtime integration supplies agent execution, not project scheduling or an
 independently draining queue. “Build ourselves” covers the coordination product;
 model interaction and agent tools use Codex. Qualify its App Server protocol in
-S01 rather than assuming documented operations satisfy Ensemble's guarantees.
+S01 rather than assuming documented operations satisfy cab's guarantees.
 
 ## Accountability and assignment routing
 
@@ -115,7 +115,7 @@ known to occur before submission can remain pending; ambiguous submission stays
 uncertain until reconciled. Do not copy the prototype's two-method `WorkerHost`
 interface into a broader API before the first runtime establishes the needed contract.
 
-A queued intent cannot execute independently of a healthy Ensemble admission path.
+A queued intent cannot execute independently of a healthy cab admission path.
 The supervisor must serialize admission with pause/stop and reject obsolete work
 revisions. Define the exact point that separates an active turn from queued work,
 and prove pause/stop races on either side. Checking an enabled flag and then
@@ -127,7 +127,7 @@ observations or submission acceptance are uncertain. Reattach only when the same
 live execution is uniquely identified. Stored history and conversation resume do
 not prove that capability. Unsupported live reattachment leads to visible uncertainty
 and operator recovery, not a universal S01 failure or blind replay. No queued work
-may gain admission while Ensemble is unavailable.
+may gain admission while cab is unavailable.
 
 On startup, restore holds and reconcile execution/writer ownership before enabling
 dispatch. Automatically resume previously enabled, now-eligible standalone work
@@ -153,31 +153,31 @@ Human answers use the same durable mechanism; approval additionally
 binds exact reviewed action/material. Recheck permissions when executing an action.
 
 The UI calls validated core commands. Runtime tool callers receive a binding created
-by Ensemble, not authority inferred from their payload. Define operator access,
+by cab, not authority inferred from their payload. Define operator access,
 secret handling and the selected runtime's filesystem/network controls before remote
 exposure or execution-access claims. Single-operator does not mean unauthenticated
 network access. No new project security sandbox is implied by service ownership.
 
 ## Runtime trust boundary
 
-Ensemble trusts Codex's successful terminal turn status for its bound thread/turn
-as the runtime's normal-completion report. Ensemble persists that report, waits
+cab trusts Codex's successful terminal turn status for its bound thread/turn
+as the runtime's normal-completion report. cab persists that report, waits
 for its own registered callbacks to end, checks other holds and known unfinished
 execution, and serializes writer/capacity release with successor admission.
 An existing crash, Stop or uncertainty hold cannot be cleared by a late terminal
 report; the separate recovery procedure still applies.
 
-Ensemble owns durable admission, identity/generation checks, callback authorization,
+cab owns durable admission, identity/generation checks, callback authorization,
 results, cancellation requests and uncertainty holds. Codex owns its built-in
 tool execution and reports its lifecycle. Runtime/deployment controls provide
-execution restrictions; Ensemble must select the approved policy and enforce
+execution restrictions; cab must select the approved policy and enforce
 permissions on its own tools and integrations. It must not call the unsandboxed
 `thread/shellCommand` route for task execution.
 
 Detailed tool items and stored history are diagnostic evidence, not an exhaustive
 ledger of all effects or an independent termination proof. Missing diagnostic
 items alone do not block normal handoff; a known unfinished action, conflicting
-terminal report, missing terminal identity/status or unfinished Ensemble callback
+terminal report, missing terminal identity/status or unfinished cab callback
 does. This explicitly accepts incomplete observation, possible unobserved effects
 and overlapping writers after normal success, including detached children. It
 does not establish the policy or audit trail of an unobserved action.
@@ -317,8 +317,8 @@ This limits command writes, not reads outside the workspace. Inventory effective
 temporary write roots and protected paths; do not advertise task-root-only writes
 without checking them. Host-readable files, inherited environment and credentials
 may remain accessible. Command network controls do not establish a boundary for
-Ensemble integrations, MCP/app tools, model transport or web tools; inventory those
-surfaces and their permissions separately. Ensemble enforces policy in its own
+cab integrations, MCP/app tools, model transport or web tools; inventory those
+surfaces and their permissions separately. cab enforces policy in its own
 tools, without claiming to sandbox all ambient shell/API access.
 
 The [App Server protocol](https://learn.chatgpt.com/docs/app-server) documents these
@@ -364,7 +364,7 @@ Graceful shutdown stops admission, records a transient shutdown Stop target for 
 submitting or running task turn and interrupts it through the Stop interrupt
 lifecycle (a submission is interrupted once its turn binds), then waits one bounded
 interval, `shutdownWaitMs`, five seconds by default. When the exact bound turn
-reports a failed terminal status after an acknowledged interrupt, every Ensemble
+reports a failed terminal status after an acknowledged interrupt, every cab
 callback has ended, no survivor is known and no pending effect other than the turn's
 own `assignment-result` remains, one transaction settles that effect as superseded,
 releases writer ownership and capacity, resolves the generation and requeues the same
@@ -418,9 +418,9 @@ server. Backup uses Node's SQLite backup API (qualified on Node 24.21.0 and
 the final commit marker. The manifest binds the supported schema version and
 fingerprint, SQLite file digest, deterministic typed logical-content digest,
 and source marker, and records the creating Node version as provenance. Restore reserves a distinct nonexistent data directory,
-creates `.ensemble-restore-incomplete` immediately, verifies the copied
-database, writes a new empty `.ensemble-owner.sqlite`, and atomically promotes
-the sentinel to `.ensemble-standalone` last. The destination owner file is
+creates `.cab-restore-incomplete` immediately, verifies the copied
+database, writes a new empty `.cab-owner.sqlite`, and atomically promotes
+the sentinel to `.cab-standalone` last. The destination owner file is
 fresh installation metadata, not a copy of the source owner or any WAL/journal
 file. Offline backup requires the existing owner file to be a regular,
 non-symlink file and acquires its SQLite lock; it never creates source metadata.

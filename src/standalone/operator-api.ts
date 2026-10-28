@@ -519,7 +519,7 @@ export function githubPullUrl(
 
 /**
  * GitHub's comparison of what an outside writer changed on a task branch: from the last commit
- * Ensemble pushed to the outside head, or just the outside commit when nothing was pushed. The name
+ * cab pushed to the outside head, or just the outside commit when nothing was pushed. The name
  * must be one verified for the repository, and neither path segment may be a dot segment. A deleted
  * branch has no head to show.
  */
@@ -2710,7 +2710,7 @@ export class OperatorApi {
       }
     };
     add("question", view.questions.filter((i) => i.status === "open").length);
-    // An answer recorded for a native question that Ensemble has not yet confirmed delivering.
+    // An answer recorded for a native question that cab has not yet confirmed delivering.
     add(
       "question-delivery",
       view.questions.filter(
@@ -2997,7 +2997,7 @@ export class OperatorApi {
         }
       | undefined,
   ) {
-    const source = native ? "native" : own ? "ensemble" : "plain";
+    const source = native ? "native" : own ? "cab" : "plain";
     const form =
       own?.form ??
       (native
@@ -3232,7 +3232,7 @@ export class OperatorApi {
             (!native || native.deliveryState === "confirmed")
           )
             continue;
-          // A recorded answer whose native delivery is unresolved stays listed, as Ensemble's.
+          // A recorded answer whose native delivery is unresolved stays listed, as cab's.
           const delivering = q.status === "answered";
           const requester = this.domain()
             .assignments(taskId)
@@ -6210,7 +6210,7 @@ export class OperatorApi {
       operatorCommandSchema.safeParse({
         type: "claude-token.configure",
         key: randomUUID(),
-        credentialRef: `file:${home}/.ensemble/claude/claude-token`,
+        credentialRef: `file:${home}/.cab/claude/claude-token`,
       }).success;
     return setupHomeSchema.parse({
       data: { home: usable ? home : null },

@@ -28,7 +28,7 @@ const windows = {
 
 /** A temporary script standing in for Git; returns its path and a marker-file path. */
 function script(t: TestContext, body: string) {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-git-process-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-git-process-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const executable = join(directory, "git");
   writeFileSync(executable, `#!/bin/sh\n${body}\n`);
@@ -136,7 +136,7 @@ test("an abort after spawn stops the child; an already-aborted signal never spaw
 
 test("a missing executable resolves as a failure that never spawned", async () => {
   assert.deepEqual(
-    await run({ executable: join(tmpdir(), "ensemble-no-such-git") }),
+    await run({ executable: join(tmpdir(), "cab-no-such-git") }),
     {
       status: "interrupted",
       kind: "failed",

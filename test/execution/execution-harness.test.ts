@@ -80,7 +80,7 @@ test("power supervision follows harness runtimes unless explicitly configured", 
 });
 
 test("existing bindings and runtime evidence read as Codex after migration", () => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-harness-migration-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-harness-migration-"));
   const filename = join(directory, "standalone.sqlite");
   const db = new DatabaseSync(filename);
   try {
@@ -253,7 +253,7 @@ test("new bindings and runtime evidence persist harness-neutral Codex facts", ()
 });
 
 test("existing profiles read as Codex after migration and unknown runtimes fail closed", () => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-profile-runtime-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-profile-runtime-"));
   const db = new DatabaseSync(join(directory, "standalone.sqlite"));
   try {
     new Store(db).ensureHost("profile-runtime-migration-test");

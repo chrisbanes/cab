@@ -28,7 +28,7 @@ function nextCommand(): string {
 }
 
 function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-coordination-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-coordination-"));
   const filename = join(directory, "coordination.sqlite");
   let db = new DatabaseSync(filename);
   let domain!: DomainStore;
@@ -233,7 +233,7 @@ function report(
     threadId,
     turnId,
     callId,
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary },
   };
 }
@@ -742,7 +742,7 @@ test("delegation derives same-task requester identity and replays exactly once",
       threadId: "thread-child-a",
       turnId: "turn-child-a",
       callId: "call-delegate",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: { profileId: workerProfile, brief: "Focused child work" },
     };
     const first = f.coordination.delegate(call);
@@ -815,7 +815,7 @@ test("delegation rejects withdrawn domain admission without a child or receipt",
         threadId: "thread-child-a",
         turnId: "turn-child-a",
         callId: `call-withdrawn-${withdrawal}`,
-        tool: "ensemble_delegate",
+        tool: "cab_delegate",
         arguments: { profileId: workerProfile, brief: "Must not start." },
       };
       assert.throws(() => f.coordination.delegate(call), /admission/i);
@@ -850,7 +850,7 @@ test("delegation checks the external task hold inside its write transaction", ()
       threadId: "thread-child-a",
       turnId: "turn-child-a",
       callId: "call-external-hold",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: { profileId: workerProfile, brief: "Must not start." },
     };
     assert.throws(
@@ -885,7 +885,7 @@ test("questions and approvals stay in operator attention until one exact respons
       threadId: "thread-child-a",
       turnId: "turn-child-a",
       callId: "call-question",
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Which supported format should I use?" },
     });
     const questionId = questionResponse.text.split(" ").at(-1) ?? "";
@@ -898,7 +898,7 @@ test("questions and approvals stay in operator attention until one exact respons
       threadId: "thread-nested-a",
       turnId: "turn-nested-a",
       callId: "call-approval",
-      tool: "ensemble_request_approval",
+      tool: "cab_request_approval",
       arguments: { action: "publish", target: "artifact-4", material },
     });
     const approvalId = approvalResponse.text.split(" ").at(-1) ?? "";
@@ -1085,7 +1085,7 @@ test("approval denial and profile revocation never authorize", () => {
       threadId: "thread-child-a",
       turnId: "turn-child-a",
       callId: "call-approval-denied",
-      tool: "ensemble_request_approval",
+      tool: "cab_request_approval",
       arguments: { action: "delete", target: "file-A", material },
     });
     const interactionId = response.text.split(" ").at(-1) ?? "";
@@ -1115,7 +1115,7 @@ test("approval denial and profile revocation never authorize", () => {
       threadId: "thread-nested-a",
       turnId: "turn-nested-a",
       callId: "call-approval-revocation",
-      tool: "ensemble_request_approval",
+      tool: "cab_request_approval",
       arguments: { action: "publish", material },
     });
     const approvalId = approval.text.split(" ").at(-1) ?? "";
@@ -1159,7 +1159,7 @@ test("legacy open approvals migrate without material and can only be denied", ()
       threadId: "thread-nested-a",
       turnId: "turn-nested-a",
       callId: "call-legacy-approval",
-      tool: "ensemble_request_approval",
+      tool: "cab_request_approval",
       arguments: { action: "publish", target: "legacy-artifact", material },
     });
     const interactionId = response.text.split(" ").at(-1) ?? "";
@@ -1367,7 +1367,7 @@ test("follow-up reuses the completed assignment and binds the exact result", () 
       threadId: "thread-lead-a",
       turnId: "turn-lead-a",
       callId: "call-follow-up",
-      tool: "ensemble_request_follow_up",
+      tool: "cab_request_follow_up",
       arguments: {
         resultId: result.resultId,
         instructions: "Add regression coverage.",
@@ -2030,14 +2030,14 @@ test("binding-sourced tool receipts record the caller's binding identity", () =>
       threadId: "thread-child-a",
       turnId: "turn-child-a",
       callId: "call-del",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: { profileId: workerProfile, brief: "Sub" },
     });
     f.coordination.requestQuestion({
       threadId: "thread-nested-a",
       turnId: "turn-nested-a",
       callId: "call-q",
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Which?" },
     });
     assert.deepEqual(receiptIdentity(f, "call-del"), {
@@ -2356,7 +2356,7 @@ test("completion requires current lead work and all durable task gates", () => {
       threadId: "thread-lead",
       turnId: "turn-lead",
       callId: "call-task-completion",
-      tool: "ensemble_request_completion",
+      tool: "cab_request_completion",
       arguments: {
         reviewedResultIds: [workerResult.resultId, nestedResult.resultId],
       },
@@ -2371,7 +2371,7 @@ test("completion requires current lead work and all durable task gates", () => {
       threadId: "thread-lead",
       turnId: "turn-lead",
       callId: "call-completion-question",
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Confirm the release note summary." },
     });
     f.db
@@ -2595,7 +2595,7 @@ test("stale lead completion is durably rejected and cannot finalize later", () =
       threadId: "thread-stale-lead",
       turnId: "turn-stale-lead",
       callId: "call-stale-completion",
-      tool: "ensemble_request_completion",
+      tool: "cab_request_completion",
       arguments: {
         reviewedResultIds: [workerResult.resultId, nestedResult.resultId],
       },
@@ -2666,7 +2666,7 @@ test("failed lead terminal rejection leaves its exact result effect pending", ()
       threadId: "thread-failed-lead",
       turnId: "turn-failed-lead",
       callId: "call-failed-completion",
-      tool: "ensemble_request_completion",
+      tool: "cab_request_completion",
       arguments: { reviewedResultIds: [] },
     });
     const requestId = response.text.split(" ").at(-1) ?? "";
@@ -2710,7 +2710,7 @@ test("a successful durable delegation settles only that work effect without comp
       threadId: "thread-lead-delegate",
       turnId: "turn-lead-delegate",
       callId: "call-durable-delegation",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: { profileId: workerProfile, brief: "Check the parser." },
     });
     assert.equal(delegation.success, true);

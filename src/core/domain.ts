@@ -1713,7 +1713,7 @@ export class DomainStore {
       return "completed";
     if (row?.state === "open" && Number(row.unattributed) === 1)
       return "unattributed";
-    // Ensemble's own closure, proved or awaiting proof, is not provider closure.
+    // cab's own closure, proved or awaiting proof, is not provider closure.
     return row?.state === "open" &&
       row.observedState === "closed" &&
       Number(row.ownProofPending) === 0 &&

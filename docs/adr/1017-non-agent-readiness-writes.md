@@ -6,11 +6,11 @@ status: accepted
 
 An imported task is Ready by the project's readiness rule, which can name a Project
 field such as Status or a label. Agents and the operator are refused any write to a field
-or label the rule names, so Ensemble's own work can never change what makes a task
-Ready. Two features need such a write from a caller that is neither: reflecting Ensemble's
-work onto a Project's Status ([#1194](https://github.com/chrisbanes/ensemble/issues/1194)),
+or label the rule names, so cab's own work can never change what makes a task
+Ready. Two features need such a write from a caller that is neither: reflecting cab's
+work onto a Project's Status ([#1194](https://github.com/chrisbanes/cab/issues/1194)),
 and publishing a Ready local task as an issue that the rule still accepts
-([#1167](https://github.com/chrisbanes/ensemble/issues/1167)). The glossary defines
+([#1167](https://github.com/chrisbanes/cab/issues/1167)). The glossary defines
 **Status mapping** and **Task publication**.
 
 ## Decision
@@ -33,7 +33,7 @@ caller type, so a new one is a new decision that extends this record, not a flag
     Ready, because only a task that already is qualifies. The one exception is Done on
     closure: a done task whose issue is observed closed may have its mapped Done option
     written although it is no longer Ready, since a closed issue cannot be Ready; the write
-    is refused if the option is one the readiness rule accepts, only against the Status Ensemble last wrote or read while the task was Ready (a Status a
+    is refused if the option is one the readiness rule accepts, only against the Status cab last wrote or read while the task was Ready (a Status a
     human set since is skipped), and only for a task the mapping saw before it was done, so closed issues a source imports already done are never written.
   - An in-flight event (first turn started, PR handed back) may write only an option
     that keeps the task Ready: the readiness rule is evaluated on the task's stored
@@ -41,7 +41,7 @@ caller type, so a new one is a new decision that extends this record, not a flag
     rule's conditions and again at write. A terminal event (stopped, uncertain or
     blocked, Done) may write an option that removes readiness; the ordinary
     readiness-lost hold then applies on the next sync.
-  - The write is conditional on the Status Ensemble last observed: the provider reads
+  - The write is conditional on the Status cab last observed: the provider reads
     the item first and writes nothing when it differs. A move between that read and the
     mutation is an accepted race, detected on readback.
   - Its records do not hold the task. Unresolved status-mapping actions are excluded

@@ -93,7 +93,7 @@ note, **Cancel** and then **Create paused project** at every width.
   changed elsewhere asks for a review before Resume is sent again; the review
   judges the project's current lead on fresh reads before Resume unlocks.
 - Closing or reloading setup before Create discards the draft; the browser's leave
-  prompt warns when any field has changed. Moving to another page in Ensemble keeps
+  prompt warns when any field has changed. Moving to another page in cab keeps
   the draft for the session.
 - Reloading after Create shows a blank "Create project" form for a second project,
   with no ready check and no leave prompt. A project created in another tab does not

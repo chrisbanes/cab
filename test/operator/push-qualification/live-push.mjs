@@ -2,7 +2,7 @@
 //
 // It runs the real operator UI and notifier over a disposable fixture service (a fake runtime, so no model
 // turn), drives the host's installed Chrome through Playwright in a fresh temporary profile, and sends real
-// Web Push through the browser's own push service. It never touches the installed Ensemble service, its port,
+// Web Push through the browser's own push service. It never touches the installed cab service, its port,
 // state or auth file, the user's browser profile, or any credential. Run it with `--live` after `npm run build`.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -122,7 +122,7 @@ try {
 
   // A persistent context over a fresh temporary profile: Chrome refuses push registration in the
   // off-the-record contexts Playwright otherwise creates ("Registration failed - permission denied").
-  profileDir = mkdtempSync(join(tmpdir(), "ensemble-push-profile-"));
+  profileDir = mkdtempSync(join(tmpdir(), "cab-push-profile-"));
   const context = await chromium.launchPersistentContext(profileDir, {
     channel: "chrome",
     headless: false,
@@ -216,7 +216,7 @@ try {
         JSON.stringify(call),
       );
       const { ms } = await waitForShown(
-        (n) => n.title === "Test notification from Ensemble",
+        (n) => n.title === "Test notification from cab",
         "test",
       );
       return { pushStatus: call.status, shownAfterMs: ms };

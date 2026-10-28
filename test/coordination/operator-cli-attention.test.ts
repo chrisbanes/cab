@@ -93,8 +93,8 @@ test("inbox list filters and pages on the server with read-only credentials", as
     "ro",
   ]);
   assert.equal(databaseDigest(s.f), before, "reads change nothing");
-  assert.match(human.out, /More: ensemble inbox list .*--limit 1 --cursor /);
-  assert.match(human.out, new RegExp(`ensemble task get ${iv.taskId}`));
+  assert.match(human.out, /More: cab inbox list .*--limit 1 --cursor /);
+  assert.match(human.out, new RegExp(`cab task get ${iv.taskId}`));
   // A token from other filters is refused locally; one the service rejects is stale.
   const first = await cli("ro", ["inbox", "list", "--limit", "1"]);
   const token = first.json().pagination.nextCursor;
@@ -143,7 +143,7 @@ test("inbox list prints and filters the runtime item", async (t) => {
     "--connection",
     "ro",
   ]);
-  assert.match(human.out, /runtime\s+codex\s+\(ensemble runtime list\)/);
+  assert.match(human.out, /runtime\s+codex\s+\(cab runtime list\)/);
   assert.match(human.out, /Restart retries exhausted/);
 
   // Unfiltered it leads the list; a project excludes it; an unknown kind names the choices.
@@ -327,7 +327,7 @@ test("a plain question sends question.answer; the same answer over the session A
   const o = await startCliOperator(t);
   const plain = await ownInteraction(
     o,
-    "ensemble_ask_question",
+    "cab_ask_question",
     { question: "Which branch?" },
     "Plain question",
   );
@@ -357,7 +357,7 @@ test("a plain question sends question.answer; the same answer over the session A
   const viaCli = r.json().data.receipt;
   const other = await ownInteraction(
     o,
-    "ensemble_ask_question",
+    "cab_ask_question",
     { question: "Which tag?" },
     "Plain session",
   );
@@ -640,7 +640,7 @@ test("approval get and decide bind the exact action, revision and material", asy
   // Withheld material can only be denied.
   const withheld = await ownInteraction(
     o,
-    "ensemble_request_approval",
+    "cab_request_approval",
     {
       action: "Push the branch",
       target: "acme/atlas",
@@ -678,7 +678,7 @@ test("approval get and decide bind the exact action, revision and material", asy
   // A legacy approval with no recorded material can only be denied.
   const legacy = await ownInteraction(
     o,
-    "ensemble_request_approval",
+    "cab_request_approval",
     {
       action: "Tag a release",
       target: "acme/atlas",

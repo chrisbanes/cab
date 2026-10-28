@@ -32,7 +32,7 @@ const issue: IssueSnapshot = {
 };
 
 test("overlapping complete selections converge on one imported task; partial reads retain memberships", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-reconcile-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-reconcile-"));
   const file = join(root, "db.sqlite");
   const projectId = randomUUID();
   let db = new DatabaseSync(file);
@@ -197,7 +197,7 @@ test("overlapping complete selections converge on one imported task; partial rea
 });
 
 test("unowned cross-project overlap waits for operator placement; assigned task keeps its chosen project", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-placement-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-placement-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const first = randomUUID();
   const second = randomUUID();
@@ -450,7 +450,7 @@ function closedIssueWorld(
     conditions: [{ kind: "label", name: "ready" }],
   },
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-closed-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-closed-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   new Store(db).ensureHost("test");
   const domain = new DomainStore(db);
@@ -1755,7 +1755,7 @@ test("a partial read adds the closed issues it skips; a complete read replaces t
   }
 });
 
-/** Confirms an Ensemble `issue.close` of I_1 for the task and returns its operation. */
+/** Confirms a cab `issue.close` of I_1 for the task and returns its operation. */
 function confirmOwnClose(
   w: ReturnType<typeof closedIssueWorld>,
   taskId: string,
@@ -1949,7 +1949,7 @@ test("an own closure without supersession is never provider-completed", () => {
   }
 });
 
-test("a later Ensemble closure after supersession is own again", () => {
+test("a later cab closure after supersession is own again", () => {
   const w = closedIssueWorld("done");
   try {
     const taskId = String(w.observe({})?.id);
@@ -2026,7 +2026,7 @@ test("supersession keeps unrelated holds", () => {
 });
 
 test("migration adds supersession storage and keeps delivery closures", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-closure-migration-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-closure-migration-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   try {
     new Store(db).ensureHost("test");

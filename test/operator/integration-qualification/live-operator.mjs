@@ -136,7 +136,7 @@ class ObservedCodexRuntime extends CodexRuntime {
   onToolCall(listener) {
     super.onToolCall(async (call) => {
       const result = await listener(call);
-      if (call.tool !== "ensemble_ask_question") return result;
+      if (call.tool !== "cab_ask_question") return result;
       const intent = activeService
         ?.list()
         .find(
@@ -226,7 +226,7 @@ async function run() {
   };
 
   progress("disposable-fixture-setup");
-  root = mkdtempSync(join(tmpdir(), "ensemble-s04d-operator-"));
+  root = mkdtempSync(join(tmpdir(), "cab-s04d-operator-"));
   chmodSync(root, 0o700);
   evidence.fixture.created = true;
   dataDir = join(root, "data");
@@ -260,7 +260,7 @@ async function run() {
     profileId,
     name: "S04d live operator lead",
     instructions:
-      "Use only the registered Ensemble coordination tools for this task.",
+      "Use only the registered cab coordination tools for this task.",
     capabilities: "task coordination",
   });
   command({
@@ -289,8 +289,8 @@ async function run() {
     taskId,
     title: "S04d live operator question and Stop",
     outcome: [
-      "This is a disposable live operator-integration probe. Use only the registered Ensemble coordination tools. Do not use shell, filesystem, browser, network, or any other tools.",
-      "Call ensemble_ask_question exactly once with question text S04D_OPERATOR_QUESTION_V1: Please confirm the operator review checkpoint. Do not attempt to answer the question. After the call, end the turn without using any more tools.",
+      "This is a disposable live operator-integration probe. Use only the registered cab coordination tools. Do not use shell, filesystem, browser, network, or any other tools.",
+      "Call cab_ask_question exactly once with question text S04D_OPERATOR_QUESTION_V1: Please confirm the operator review checkpoint. Do not attempt to answer the question. After the call, end the turn without using any more tools.",
     ].join("\n"),
     ready: false,
   });

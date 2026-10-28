@@ -168,7 +168,7 @@ export class DeliveryCoordinator {
       }),
     ]).finally(() => clearTimeout(timer));
   }
-  /** Wakes the lead when a push found, or the PR shows, a branch head Ensemble did not push. */
+  /** Wakes the lead when a push found, or the PR shows, a branch head cab did not push. */
   private outsidePush(
     taskId: string,
     repositoryId: string,
@@ -181,8 +181,8 @@ export class DeliveryCoordinator {
       this.options.feedback?.(
         taskId,
         sha
-          ? `The task branch changed outside Ensemble (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it. Both need the operator's approval of exactly this material: ${material}.`
-          : `The task branch was deleted outside Ensemble. Request branch.force-push to recreate it, with the operator's approval of exactly this material: ${material}. A deleted branch cannot be adopted.`,
+          ? `The task branch changed outside cab (head ${sha}). Review it, then request branch.adopt to keep that head or branch.force-push naming it to overwrite it. Both need the operator's approval of exactly this material: ${material}.`
+          : `The task branch was deleted outside cab. Request branch.force-push to recreate it, with the operator's approval of exactly this material: ${material}. A deleted branch cannot be adopted.`,
         `outside-push:${repositoryId}:${sha ?? "absent"}`,
       );
     } catch {
@@ -508,7 +508,7 @@ export class DeliveryCoordinator {
             : undefined);
     return this.store.recordObservation(record.operationId, observation, () => {
       if (observation.reason === "branch-outside-cleared") {
-        // The branch is back at Ensemble's own push: only the head this recovery named is obsolete.
+        // The branch is back at cab's own push: only the head this recovery named is obsolete.
         const named = isRecoveryAction(action) ? action.outsideHeadSha : null;
         if (
           this.store.taskBranch(

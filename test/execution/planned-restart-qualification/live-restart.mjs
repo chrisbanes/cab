@@ -18,7 +18,7 @@ const result = {
   cleanup: {
     fixtureCreated: false,
     fixtureRemoved: false,
-    scope: "temporary Ensemble data and workspace directories only",
+    scope: "temporary cab data and workspace directories only",
   },
   failure: null,
 };
@@ -84,7 +84,7 @@ async function run() {
     timeout: 10_000,
   }).trim();
 
-  root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-planned-restart-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "cab-planned-restart-")));
   result.cleanup.fixtureCreated = true;
   const dataDir = join(root, "data");
   mkdirSync(root, { recursive: true });

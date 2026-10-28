@@ -798,7 +798,7 @@ export class GitHubSourceStore {
         seen.add(issue.nodeId);
         const existing = this.issue(issue.nodeId);
         let taskId: string;
-        // An issue Ensemble is publishing is not new: its task is converted when the create resolves.
+        // An issue cab is publishing is not new: its task is converted when the create resolves.
         if (!existing && this.publishingIssue(issue)) continue;
         if (!existing) {
           // A closed issue is imported, as Done, only by a Done-mode source on a complete read.
@@ -1040,7 +1040,7 @@ export class GitHubSourceStore {
         // The create's confirmed issue is known by identity; one still unproved only by its marker.
         row.issueNodeId === issue.nodeId ||
         issue.body.includes(
-          `<!-- ensemble-operation:${String(row.publicationId)} -->`,
+          `<!-- cab-operation:${String(row.publicationId)} -->`,
         ),
     );
   }

@@ -94,7 +94,7 @@ def response(rid, timeout=45):
 
 try:
     print(json.dumps({"at": stamp(), "server": process(server.pid)}), flush=True)
-    send("initialize", 1, {"clientInfo": {"name": "ensemble_s01_tree", "title": "Ensemble S01 Tree", "version": "0.1.0"}})
+    send("initialize", 1, {"clientInfo": {"name": "cab_s01_tree", "title": "cab S01 Tree", "version": "0.1.0"}})
     response(1)
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

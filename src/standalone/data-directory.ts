@@ -12,9 +12,9 @@ import { lstat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
-export const STANDALONE_MARKER_NAME = ".ensemble-standalone";
-export const STANDALONE_MARKER_CONTENTS = "ensemble-standalone-v1\n";
-export const STANDALONE_OWNER_NAME = ".ensemble-owner.sqlite";
+export const STANDALONE_MARKER_NAME = ".cab-standalone";
+export const STANDALONE_MARKER_CONTENTS = "cab-standalone-v1\n";
+export const STANDALONE_OWNER_NAME = ".cab-owner.sqlite";
 
 /**
  * Require a lexical absolute directory path whose existing components are all

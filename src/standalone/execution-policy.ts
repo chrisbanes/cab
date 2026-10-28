@@ -15,7 +15,7 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
     ],
     limits: [
       "Stricter isolation, exhaustive ambient access containment, and universal descendant containment are not proved.",
-      "Codex runs with the operator's existing runtime login; Ensemble does not provide an independent execution sandbox.",
+      "Codex runs with the operator's existing runtime login; cab does not provide an independent execution sandbox.",
       commandNetworkDisclosure,
     ],
   };
@@ -54,7 +54,7 @@ export function claudePolicyDisclosure(
           ]
         : []),
       "Command network access is denied. There are no interactive approvals.",
-      "File-editing tools are confined to the same roots by Ensemble's hook, not by the operating system.",
+      "File-editing tools are confined to the same roots by cab's hook, not by the operating system.",
     ],
     limits: policy.limits,
   };

@@ -6,7 +6,7 @@ const fixtureRepository = "chrisbanes/ensemble-s07a-fixture";
 const owner = "chrisbanes";
 /** The maintainer's own Project 6 and every Project linked to this repository are never touched. */
 const forbiddenProjectNumber = 6;
-const forbiddenRepository = "chrisbanes/ensemble";
+const forbiddenRepository = "chrisbanes/cab";
 
 /** What the maintainer's manifest names for the bounded status-mapping run. */
 export const statusMappingManifestSchema = z
@@ -64,7 +64,7 @@ export const statusOptionNames = [
 
 /** The filters a scratch Project source may use: none, or issues only. */
 export const projectFilters = ["", "is:issue"] as const;
-export const projectTitle = (runId: string) => `ensemble-1194-${runId}`;
+export const projectTitle = (runId: string) => `cab-1194-${runId}`;
 export const issueTitle = (runId: string) =>
   `Status mapping qualification ${runId}`;
 
@@ -81,12 +81,12 @@ export const harnessDocuments = {
 
 /** The operation prefixes of the product's own documents a run may send. */
 const productOperations = [
-  "query EnsembleDeliveryRepository",
-  "query EnsembleDeliveryField",
-  "mutation EnsembleDeliveryProject",
-  "query EnsembleProjectPage",
-  "query EnsembleProjectFieldValues",
-  "query EnsembleProjectFields",
+  "query CabDeliveryRepository",
+  "query CabDeliveryField",
+  "mutation CabDeliveryProject",
+  "query CabProjectPage",
+  "query CabProjectFieldValues",
+  "query CabProjectFields",
 ] as const;
 
 /**
@@ -217,7 +217,7 @@ export class StatusMappingGuard {
           !this.ids.has(value)
         )
           throw new Error(`guard: unexpected id ${key}`);
-      if (query.startsWith("mutation EnsembleDeliveryProject")) {
+      if (query.startsWith("mutation CabDeliveryProject")) {
         if (
           !this.project ||
           variables.project !== this.project.nodeId ||

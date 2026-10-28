@@ -208,7 +208,7 @@ const sourcesCommand: BrowseCommand = {
           const warning = zeroMatchWarning(o.counts, rule);
           return warning
             ? [
-                `${unavailable(o.selectionId)}: ${warning} Change readiness with 'ensemble project prepare-source'.`,
+                `${unavailable(o.selectionId)}: ${warning} Change readiness with 'cab project prepare-source'.`,
               ]
             : [];
         }),
@@ -245,7 +245,7 @@ const sourcesCommand: BrowseCommand = {
         ...(placements.length
           ? [
               "",
-              "Placement conflicts (choose with 'ensemble project place-task'):",
+              "Placement conflicts (choose with 'cab project place-task'):",
               table(
                 ["Task", "Version", "Title", "Choices"],
                 placements.map((p) => [
@@ -352,7 +352,7 @@ export function sourceEditCommand(
       "conflict",
       "A saved selection or repository link cannot be named in this read, so the CLI cannot keep it. Nothing was prepared.",
       {
-        fix: `Review the saved source with 'ensemble project sources ${projectId}'.`,
+        fix: `Review the saved source with 'cab project sources ${projectId}'.`,
       },
     );
   const unavailableRule = source.readiness.kind === "unavailable";
@@ -361,7 +361,7 @@ export function sourceEditCommand(
       "conflict",
       'The saved readiness cannot be read; replace it with "readiness" in the edit file. Nothing was prepared.',
       {
-        fix: `Add a "readiness" rule to the edit file, then run 'ensemble project prepare-source ${projectId}' again.`,
+        fix: `Add a "readiness" rule to the edit file, then run 'cab project prepare-source ${projectId}' again.`,
       },
     );
   const saved = source.selections.map((s) => ({ ...s, id: String(s.id) }));
@@ -533,7 +533,7 @@ export function sourceEditCommand(
       to: edit.credentialRef === null ? "none" : "set (reference not shown)",
     });
   const notes = [
-    "Saving makes every selection inactive until it is previewed again at the new version with 'ensemble project preview-source'; new selections are added inactive.",
+    "Saving makes every selection inactive until it is previewed again at the new version with 'cab project preview-source'; new selections are added inactive.",
     "Saving marks this project's source observations incomplete until the next sync refresh, and imported blockers become unknown.",
     ...(remove.length
       ? [
@@ -581,7 +581,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
         "project prepare-source PROJECT_ID [--out FILE] --edit-file FILE [--expected-version N]",
       positionals: 1,
       expects:
-        "--expected-version: the source configuration's version ('Source version' in 'ensemble project sources PROJECT_ID'); omitted, the version this command reads.",
+        "--expected-version: the source configuration's version ('Source version' in 'cab project sources PROJECT_ID'); omitted, the version this command reads.",
       flags: ["out", "edit-file", "expected-version"],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
@@ -610,7 +610,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
         "project preview-source PROJECT_ID --selection ID --expected-version N [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the source configuration's version ('Source version' in 'ensemble project sources PROJECT_ID'); required.",
+        "--expected-version: the source configuration's version ('Source version' in 'cab project sources PROJECT_ID'); required.",
       flags: ["selection", "expected-version", "request-id"],
       async run(ctx) {
         const projectId = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
@@ -652,7 +652,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
               "conflict",
               sourceCredentialExplanation(reason),
               {
-                fix: `Fix the credential as described above, then run 'ensemble project preview-source ${projectId}' again.`,
+                fix: `Fix the credential as described above, then run 'cab project preview-source ${projectId}' again.`,
               },
             );
           }
@@ -681,7 +681,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
               sourceCredentialExplanation(error.extra.credentialReason),
               {
                 ...error.extra,
-                fix: `Fix the credential as described above, then run 'ensemble project preview-source ${projectId}' again.`,
+                fix: `Fix the credential as described above, then run 'cab project preview-source ${projectId}' again.`,
               },
             );
           if (error instanceof CliError && error.code === "conflict")
@@ -690,7 +690,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
               "Not activated: the source version changed, the selection is unknown, or the provider read was incomplete. Nothing is active from this request.",
               {
                 ...error.extra,
-                fix: `Run 'ensemble project sources ${projectId}', then preview again with --expected-version set to its version.`,
+                fix: `Run 'cab project sources ${projectId}', then preview again with --expected-version set to its version.`,
               },
             );
           throw error;
@@ -747,7 +747,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
         "project place-task TASK_ID --to PROJECT_ID --expected-version N [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the placement conflict's version (the Version column of 'ensemble project sources PROJECT_ID' for the task's current project); required.",
+        "--expected-version: the placement conflict's version (the Version column of 'cab project sources PROJECT_ID' for the task's current project); required.",
       flags: ["to", "expected-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -784,7 +784,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
               "conflict",
               "The task has no placement conflict to resolve. Nothing was sent.",
               {
-                fix: `Run 'ensemble task get ${taskId}' to see where the task is placed.`,
+                fix: `Run 'cab task get ${taskId}' to see where the task is placed.`,
               },
             );
           checkExpected(placement.version, expected, "run this command again");
@@ -818,7 +818,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
             "Not placed: the task changed, already has an assignment, or the chosen project no longer matches it. The task is unchanged.",
             {
               ...error.extra,
-              fix: `Run 'ensemble task get ${taskId}', then place it again with the version shown by 'ensemble project sources ${before.projectId}'.`,
+              fix: `Run 'cab task get ${taskId}', then place it again with the version shown by 'cab project sources ${before.projectId}'.`,
             },
           );
         });

@@ -612,7 +612,7 @@ for (const [limitCase, sourceBody] of [
           threadId: w.threadId,
           turnId: w.turnId,
           callId: randomUUID(),
-          tool: "ensemble_report_result",
+          tool: "cab_report_result",
           arguments: {
             summary: "Reported source coverage gap",
             review: { sourceId: source.sourceId },

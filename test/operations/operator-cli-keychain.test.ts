@@ -9,12 +9,12 @@ import {
 } from "../../src/cli/connections.js";
 
 const live =
-  process.platform === "darwin" && process.env.ENSEMBLE_KEYCHAIN_LIVE === "1";
+  process.platform === "darwin" && process.env.CAB_KEYCHAIN_LIVE === "1";
 
 test("the macOS Keychain stores, reads and deletes a token without exposing it in argv", {
-  skip: live ? false : "set ENSEMBLE_KEYCHAIN_LIVE=1 on macOS",
+  skip: live ? false : "set CAB_KEYCHAIN_LIVE=1 on macOS",
 }, async () => {
-  const service = `ensemble-cli-test-${randomUUID()}`;
+  const service = `cab-cli-test-${randomUUID()}`;
   const token = `ens_${randomUUID()}_${randomBytes(32).toString("base64url")}`;
   const argvSamples: string[] = [];
   // Samples every spawned `security` process's argv while it runs.

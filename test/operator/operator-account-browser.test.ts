@@ -261,7 +261,7 @@ for (const viewport of viewports)
     await heading.waitFor();
     await page
       .getByText(
-        "This address doesn't match an Ensemble page. Nothing was changed.",
+        "This address doesn't match a cab page. Nothing was changed.",
         { exact: true },
       )
       .waitFor();
@@ -623,7 +623,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   });
   await page.goto(`${web.origin}/app`);
   await submitPassword(page, web.password);
-  const checklist = page.getByRole("region", { name: "Get Ensemble running" });
+  const checklist = page.getByRole("region", { name: "Get cab running" });
   await checklist.waitFor();
   const trigger = page.getByRole("button", {
     name: "Operator account",
@@ -765,7 +765,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
     type: "claude-token.configure",
     actor: "operator",
     key: randomUUID(),
-    credentialRef: "env:ENSEMBLE_GETTING_STARTED_MISSING_TOKEN",
+    credentialRef: "env:CAB_GETTING_STARTED_MISSING_TOKEN",
   });
   await page.reload();
   const claude = checklist.getByRole("listitem", {
@@ -805,7 +805,7 @@ async function routeReadiness(page: Page, codexLogin: { pass: boolean }) {
 }
 /** The page content below the heading: only the getting-started card on a first-run Home. */
 async function assertOnlyCard(page: Page) {
-  const card = page.getByRole("region", { name: "Get Ensemble running" });
+  const card = page.getByRole("region", { name: "Get cab running" });
   await card.waitFor();
   assert.deepEqual(
     await page.evaluate(() =>
@@ -813,7 +813,7 @@ async function assertOnlyCard(page: Page) {
         .filter((el) => !el.matches("header, .page-header"))
         .map((el) => el.getAttribute("aria-label")),
     ),
-    ["Get Ensemble running"],
+    ["Get cab running"],
   );
   for (const region of ["Needs you", "Across your projects"])
     assert.equal(await page.getByRole("region", { name: region }).count(), 0);
@@ -929,7 +929,7 @@ test("Home keeps the card until a task starts a turn, then shows the board", asy
     .getByRole("link", { name: "Never started" })
     .waitFor();
   assert.equal(
-    await page.getByRole("region", { name: "Get Ensemble running" }).count(),
+    await page.getByRole("region", { name: "Get cab running" }).count(),
     0,
   );
 
@@ -944,7 +944,7 @@ test("Home keeps the card until a task starts a turn, then shows the board", asy
   await submitPassword(other, web.password);
   await other.getByRole("region", { name: "Across your projects" }).waitFor();
   assert.equal(
-    await other.getByRole("region", { name: "Get Ensemble running" }).count(),
+    await other.getByRole("region", { name: "Get cab running" }).count(),
     0,
   );
   await page.reload();
@@ -985,7 +985,7 @@ for (const viewport of viewports)
     );
     await page.goto(`${web.origin}/app/getting-started`);
     await page
-      .getByRole("region", { name: "Get Ensemble running" })
+      .getByRole("region", { name: "Get cab running" })
       .getByText(/@fixture-user/)
       .waitFor();
     assert.equal(
@@ -1026,7 +1026,7 @@ test("Home first run when the checklist reads fail", async (_t, journey) => {
   await submitPassword(page, web.password);
   await page.getByText("Projects are unavailable. Try again.").waitFor();
   assert.equal(
-    await page.getByRole("region", { name: "Get Ensemble running" }).count(),
+    await page.getByRole("region", { name: "Get cab running" }).count(),
     0,
   );
   assert.equal(

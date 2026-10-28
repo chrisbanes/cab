@@ -1,10 +1,10 @@
-// Ensemble operator push worker, served at /app/service-worker.js (scope /app/).
+// cab operator push worker, served at /app/service-worker.js (scope /app/).
 // It has no fetch handler and keeps no cache, so an update can never serve a stale app.
 // A push shows a notification; a click routes an open tab to the exact Inbox selection in
 // place, or opens one. Nothing else.
-const FALLBACK_TITLE = "Ensemble needs you";
+const FALLBACK_TITLE = "cab needs you";
 const FALLBACK_URL = "/app/inbox";
-const BODY = "Open Ensemble to respond.";
+const BODY = "Open cab to respond.";
 
 // The server only ever sends an Inbox link or the Settings link; anything else is ignored.
 const safeUrl = (url) =>
@@ -59,7 +59,7 @@ const routed = (client, url) => {
   const { port1, port2 } = new MessageChannel();
   return new Promise((resolve) => {
     port1.onmessage = () => resolve(true);
-    client.postMessage({ type: "ensemble.notification-open", url }, [port2]);
+    client.postMessage({ type: "cab.notification-open", url }, [port2]);
     setTimeout(() => resolve(false), ACK_MS);
   }).finally(() => port1.close());
 };

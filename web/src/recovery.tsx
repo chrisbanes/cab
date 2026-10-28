@@ -553,7 +553,7 @@ function RecoveryRecord({ r }: { r: RecoveryRecordData }) {
           source={r.noTurnSubmission.source}
         >
           An operator confirmed that no turn was sent for this attempt. An idle
-          conversation may still exist that Ensemble hasn't seen.
+          conversation may still exist that cab hasn't seen.
         </Witness>
       )}
       <p className="metadata muted">

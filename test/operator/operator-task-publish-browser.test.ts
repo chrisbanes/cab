@@ -145,7 +145,7 @@ for (const [name, viewport] of viewports) {
     await facts.getByText("ready", { exact: true }).waitFor();
     await facts.getByText(/Matches the selection: yes/).waitFor();
     await panel(page)
-      .getByText(/public issue in org\/repo\. Ensemble can’t delete it/)
+      .getByText(/public issue in org\/repo\. cab can’t delete it/)
       .waitFor();
     assert.equal(gh.posts, 0, "nothing is created before Publish");
     assert.equal(await noOverflow(page), true);
@@ -240,7 +240,7 @@ test("a publication whose create is still being resolved links to the issue that
     f.service.latestPublication(taskId)?.publication.review.publicationId ?? "";
   const real = gh.add(
     "Ship the toolbar",
-    `Make the toolbar usable.\n\n<!-- ensemble-operation:${publicationId} -->`,
+    `Make the toolbar usable.\n\n<!-- cab-operation:${publicationId} -->`,
     ["ready"],
   );
   await panel(page).getByLabel("Issue number").fill(String(real.number));

@@ -167,9 +167,7 @@ export async function runQualification(options = {}) {
   }
   let root;
   try {
-    root = mkdtempSync(
-      join(realpathSync(tmpdir()), "ensemble-ui04-qualification-"),
-    );
+    root = mkdtempSync(join(realpathSync(tmpdir()), "cab-ui04-qualification-"));
     chmodSync(root, 0o700);
   } catch (error) {
     const failure = {
@@ -367,7 +365,7 @@ export async function runQualification(options = {}) {
             thread,
             workspace,
             [
-              "Synthetic repository-free UI04 callback qualification. Do not use shell, file, network, browser, delegation, questions or other tools. Invoke ensemble_report_result exactly once with the JSON below and end this turn. These are unverified synthetic transport records, not product validation claims.",
+              "Synthetic repository-free UI04 callback qualification. Do not use shell, file, network, browser, delegation, questions or other tools. Invoke cab_report_result exactly once with the JSON below and end this turn. These are unverified synthetic transport records, not product validation claims.",
               `UI04_CALLBACK_JSON=${JSON.stringify(expected)}`,
             ].join("\n"),
           );
@@ -375,11 +373,7 @@ export async function runQualification(options = {}) {
         runtime.onToolCall = (listener) =>
           onTool(async (call) => {
             try {
-              assert.equal(
-                call.tool,
-                "ensemble_report_result",
-                "unexpected-tool",
-              );
+              assert.equal(call.tool, "cab_report_result", "unexpected-tool");
               assert.equal(
                 evidence.counts.reports++,
                 0,

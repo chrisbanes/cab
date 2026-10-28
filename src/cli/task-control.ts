@@ -24,7 +24,7 @@ const control = (verb: "stop" | "resume"): [string, WriteCommand] => [
     usage: `task ${verb} TASK_ID [--expected-version N] [--request-id UUID]`,
     positionals: 1,
     expects:
-      "--expected-version: the task's version ('ensemble task get TASK_ID'); omitted, no version check.",
+      "--expected-version: the task's version ('cab task get TASK_ID'); omitted, no version check.",
     flags: ["expected-version", "request-id"],
     async run(ctx) {
       const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");

@@ -182,7 +182,7 @@ export async function seedExecutionDiagnostics(
     store.record(
       captured,
       "tool",
-      "ensemble_report_result",
+      "cab_report_result",
       "info",
       "call-1",
       { arguments: { note: "ok" }, success: true },

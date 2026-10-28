@@ -10,7 +10,7 @@ import type { CliError } from "./connections.js";
  */
 export const fixLine = (text: string) => `Fix: ${text}`;
 /**
- * `command` is a runnable `ensemble ...` command, not prose. The task views' `Next:` line is a
+ * `command` is a runnable `cab ...` command, not prose. The task views' `Next:` line is a
  * different thing: it names who acts next (`nextText`), not a command to run.
  */
 export const nextLine = (command: string) => `Next: ${command}`;
@@ -58,35 +58,35 @@ export function nextText(codes: readonly AttentionCode[], column: TaskColumn) {
   return { text: text.replace(/^Next: /, ""), operator };
 }
 
-const LOGIN = "run 'ensemble auth login' to store a credential again";
-const LIST = "'ensemble connection list' shows the saved connections";
+const LOGIN = "run 'cab auth login' to store a credential again";
+const LIST = "'cab connection list' shows the saved connections";
 
 /** One entry per key of `EXIT` in main.ts; a test keeps the two in step. */
 export const DEFAULT_FIX: Record<string, string> = {
-  usage: "Run 'ensemble --help'.",
+  usage: "Run 'cab --help'.",
   "invalid-input":
-    "Correct the option named above; 'ensemble --help --all' lists each command's options.",
+    "Correct the option named above; 'cab --help --all' lists each command's options.",
   "invalid-url":
     "Use https://HOST[:PORT] or http://127.0.0.1:PORT with no path.",
   "invalid-token-file":
     "Put the token alone in a file only you can read (chmod 600) and pass it with --token-file PATH.",
-  "invalid-configuration": `Correct the connections file named above, then check it with 'ensemble connection list'.`,
+  "invalid-configuration": `Correct the connections file named above, then check it with 'cab connection list'.`,
   "connection-ambiguous":
-    "Pass --connection NAME, or run 'ensemble connection use NAME' to set the default.",
-  "connection-not-found": `Run 'ensemble auth login --connection NAME --url ORIGIN'; ${LIST}.`,
+    "Pass --connection NAME, or run 'cab connection use NAME' to set the default.",
+  "connection-not-found": `Run 'cab auth login --connection NAME --url ORIGIN'; ${LIST}.`,
   "not-found":
-    "Check the ID against the matching list command, for example 'ensemble task list'.",
+    "Check the ID against the matching list command, for example 'cab task list'.",
   "credential-invalid": `The service refused the credential (expired or revoked); ${LOGIN}.`,
   "credential-not-found":
-    "Run 'ensemble auth login' to store a credential for this connection.",
+    "Run 'cab auth login' to store a credential for this connection.",
   "insufficient-scope":
-    "Log in with a read-write credential: 'ensemble auth login --connection NAME --url ORIGIN --token-file PATH'.",
+    "Log in with a read-write credential: 'cab auth login --connection NAME --url ORIGIN --token-file PATH'.",
   forbidden: `This credential may not do that; ${LOGIN} with one that may.`,
   unauthenticated: `The credential was refused; ${LOGIN}.`,
   "managed-assignment":
-    "Run the command from your own terminal, outside the Ensemble-managed assignment.",
+    "Run the command from your own terminal, outside the cab-managed assignment.",
   "credential-store-unavailable":
-    "On macOS unlock the Keychain and retry; otherwise log in with a token file: 'ensemble auth login --connection NAME --url ORIGIN --token-file PATH'.",
+    "On macOS unlock the Keychain and retry; otherwise log in with a token file: 'cab auth login --connection NAME --url ORIGIN --token-file PATH'.",
   "service-identity-changed": `Check the URL (${LIST}); if the service was reinstalled, ${LOGIN}.`,
   "output-exists":
     "Choose a path that does not exist yet, or move the existing file first.",
@@ -100,7 +100,7 @@ export const DEFAULT_FIX: Record<string, string> = {
     "Prepare the change again with the matching 'prepare' command.",
   "wrong-service": `Use the connection for the installation the file was prepared against (${LIST}).`,
   "journal-unavailable":
-    "Make the CLI state directory (ENSEMBLE_CLI_CONFIG_DIR, default ~/.config/ensemble) writable by you, then retry.",
+    "Make the CLI state directory (CAB_CLI_CONFIG_DIR, default ~/.config/cab) writable by you, then retry.",
   "cursor-stale":
     "Repeat the command without --cursor to restart from the first page.",
   unavailable: `Check that the service is running and reachable, then retry (${LIST}).`,
@@ -118,7 +118,7 @@ export const DEFAULT_FIX: Record<string, string> = {
 /** For codes outside `EXIT`, such as service-returned ones; keyed by the category main.ts derives. */
 export const CATEGORY_FIX: Record<string, string> = {
   usage:
-    "Correct the command and run it again; 'ensemble --help --all' lists the options.",
+    "Correct the command and run it again; 'cab --help --all' lists the options.",
   authentication: `Check the credential, or ${LOGIN}.`,
   conflict:
     "Read the current state with the matching 'get' command, then retry.",
@@ -139,7 +139,7 @@ export function remedyFor(error: CliError, category: string): string {
     DEFAULT_FIX[error.code] ??
     CATEGORY_FIX[category] ??
     CATEGORY_FIX.unavailable ??
-    "Run 'ensemble --help'.";
+    "Run 'cab --help'.";
   // A path or ID inside a fix must not be able to start a second line.
   return fix.replace(/\s*[\r\n]+\s*/g, " ");
 }

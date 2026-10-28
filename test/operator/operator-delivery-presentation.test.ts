@@ -102,7 +102,7 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
       state: "confirmed-failure",
       reason: "provider-project-field-changed",
     }),
-    "Status mapping (PR handed back for review) · project.field: confirmed-failure · Skipped: Status changed on GitHub since Ensemble last saw it. · operation op-1",
+    "Status mapping (PR handed back for review) · project.field: confirmed-failure · Skipped: Status changed on GitHub since cab last saw it. · operation op-1",
   );
   // The same code on an agent action keeps its raw reason.
   assert.match(

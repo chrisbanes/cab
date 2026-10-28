@@ -73,7 +73,7 @@ function fixture(
     resolveExecutable?: () => Promise<string | null>;
   } = {},
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-claude-runtime-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-claude-runtime-"));
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
   const safetyFixture = runtimeSafetyFixture();
@@ -211,10 +211,10 @@ test("every coordination tool converts to a real SDK MCP tool without defaults",
         async () => ({ content: [] }),
       ),
     );
-    const server = sdk.createSdkMcpServer({ name: "ensemble", tools });
-    assert.equal(server.name, "ensemble");
+    const server = sdk.createSdkMcpServer({ name: "cab", tools });
+    assert.equal(server.name, "cab");
     const reported = coordinationTools.find(
-      (tool) => tool.name === "ensemble_report_result",
+      (tool) => tool.name === "cab_report_result",
     );
     assert.ok(reported);
     // Defaults would make handler arguments differ from the hooked input.
@@ -299,7 +299,7 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       "Write",
       "Edit",
       "Bash",
-      "mcp__ensemble__*",
+      "mcp__cab__*",
     ]);
     assert.deepEqual(options.disallowedTools, [
       "AskUserQuestion",
@@ -649,14 +649,10 @@ test("coordination calls carry the hook's tool-use ID and uncorrelated calls are
       async function* (session) {
         yield init(sessionOf(session));
         const args = { question: "Which?" };
-        await session.hook(
-          "mcp__ensemble__ensemble_ask_question",
-          args,
-          "toolu_9",
-        );
-        outcomes.push(await session.callTool("ensemble_ask_question", args));
+        await session.hook("mcp__cab__cab_ask_question", args, "toolu_9");
+        outcomes.push(await session.callTool("cab_ask_question", args));
         outcomes.push(
-          await session.callTool("ensemble_ask_question", {
+          await session.callTool("cab_ask_question", {
             question: "Other",
           }),
         );
@@ -673,7 +669,7 @@ test("coordination calls carry the hook's tool-use ID and uncorrelated calls are
     const threadId = await f.runtime.startThread(f.workspace, [
       {
         type: "function",
-        name: "ensemble_ask_question",
+        name: "cab_ask_question",
         description: "Ask",
         inputSchema: {
           type: "object",
@@ -689,12 +685,12 @@ test("coordination calls carry the hook's tool-use ID and uncorrelated calls are
         threadId,
         turnId,
         callId: "toolu_9",
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: "Which?" },
       },
     ]);
     assert.deepEqual(outcomes[0], {
-      content: [{ type: "text", text: "ok:ensemble_ask_question" }],
+      content: [{ type: "text", text: "ok:cab_ask_question" }],
       isError: false,
     });
     assert.equal((outcomes[1] as { isError: boolean }).isError, true);
@@ -978,33 +974,25 @@ test("coordination arguments parsed by the advertised schema keep their hook cor
   const outcomes: Array<{ isError: boolean }> = [];
   const resultId = "70000000-0000-4000-8000-000000000001";
   const inputs: Array<[string, Record<string, unknown>]> = [
-    ["ensemble_report_result", { summary: "Done" }],
-    ["ensemble_request_completion", { reviewedResultIds: [resultId] }],
-    ["ensemble_ask_question", { question: "Which?" }],
-    ["ensemble_request_follow_up", { resultId, instructions: "Again" }],
+    ["cab_report_result", { summary: "Done" }],
+    ["cab_request_completion", { reviewedResultIds: [resultId] }],
+    ["cab_ask_question", { question: "Which?" }],
+    ["cab_request_follow_up", { resultId, instructions: "Again" }],
   ];
   const f = fixture({
     scripts: [
       async function* (session) {
         yield init(sessionOf(session));
         for (const [index, [name, args]] of inputs.entries()) {
-          await session.hook(
-            `mcp__ensemble__${name}`,
-            args,
-            `toolu_ok_${index}`,
-          );
+          await session.hook(`mcp__cab__${name}`, args, `toolu_ok_${index}`);
           outcomes.push(
             (await session.callTool(name, args)) as { isError: boolean },
           );
         }
         const extra = { question: "Which?", unexpected: true };
-        await session.hook(
-          "mcp__ensemble__ensemble_ask_question",
-          extra,
-          "toolu_extra",
-        );
+        await session.hook("mcp__cab__cab_ask_question", extra, "toolu_extra");
         outcomes.push(
-          (await session.callTool("ensemble_ask_question", extra)) as {
+          (await session.callTool("cab_ask_question", extra)) as {
             isError: boolean;
           },
         );

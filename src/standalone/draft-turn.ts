@@ -70,10 +70,7 @@ export const draftTurnInstruction = [
   "You cannot make the task Ready.",
 ].join(" ");
 
-const allowedTools = new Set([
-  "ensemble_ask_question",
-  "ensemble_request_approval",
-]);
+const allowedTools = new Set(["cab_ask_question", "cab_request_approval"]);
 const allowedExternalActions = new Set(["issue.comment", "issue.labels"]);
 
 export type DraftTurnToolDecision =
@@ -86,7 +83,7 @@ export function draftTurnToolDecision(
   args: unknown,
 ): DraftTurnToolDecision {
   if (allowedTools.has(tool)) return { allowed: true };
-  if (tool === "ensemble_external_action") {
+  if (tool === "cab_external_action") {
     const kind = (args as { action?: { kind?: unknown } } | null)?.action?.kind;
     return typeof kind === "string" && allowedExternalActions.has(kind)
       ? { allowed: true }

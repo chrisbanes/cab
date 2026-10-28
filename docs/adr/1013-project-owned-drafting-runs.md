@@ -7,7 +7,7 @@ status: accepted
 The task composer lets the operator hand a rough idea to the project lead and get
 back an editable title and outcome. Every agent turn with coordination belongs to a
 task, and Draft (unready) tasks never run turns. Delivery scope lives in
-[#1168](https://github.com/chrisbanes/ensemble/issues/1168).
+[#1168](https://github.com/chrisbanes/cab/issues/1168).
 
 ## Decision
 
@@ -30,7 +30,7 @@ task, and Draft (unready) tasks never run turns. Delivery scope lives in
   24 hours so the composer can reattach after leaving or reloading.
 - The lifecycle, workspace, capacity and Stop logic do not depend on the composer.
   The instruction and the proposal schema are the only composer-specific inputs, so
-  [#1182](https://github.com/chrisbanes/ensemble/issues/1182) can improve imported
+  [#1182](https://github.com/chrisbanes/cab/issues/1182) can improve imported
   issues with the same runs.
 
 ## Considered options

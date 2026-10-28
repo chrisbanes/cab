@@ -21,7 +21,7 @@ const result = {
   cleanup: {
     fixtureCreated: false,
     fixtureRemoved: false,
-    scope: "temporary Ensemble data and workspace directories only",
+    scope: "temporary cab data and workspace directories only",
   },
   failure: null,
 };
@@ -108,7 +108,7 @@ async function run() {
     timeout: 10_000,
   }).trim();
 
-  root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s03b-live-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s03b-live-")));
   result.cleanup.fixtureCreated = true;
   const dataDir = join(root, "data");
   const workspace = join(root, "direct-workspace");

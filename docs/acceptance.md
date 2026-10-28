@@ -6,7 +6,7 @@ state, the boundary cases and who owns the evidence. The scope is reviewed and
 confirmed; a change to scope or guarantees returns for review.
 
 Scenario IDs A01–A30 retain the product obligations of the BB plan (kept in git
-history), with execution, UI and workspace ownership moved to Ensemble by
+history), with execution, UI and workspace ownership moved to cab by
 [ADR-1004](adr/1004-standalone-service.md). Scenarios are requirements, not passing
 results, and no BB test qualifies the standalone service.
 [ADR-1005](adr/1005-service-assignment-routing.md) adds routing and accountability
@@ -22,7 +22,7 @@ Each area records one of three states:
 ## Gates
 
 1. **Runtime feasibility:** prove the minimum Codex integration and bounded
-   coordination contract in [S01 #688](https://github.com/chrisbanes/ensemble/issues/688).
+   coordination contract in [S01 #688](https://github.com/chrisbanes/cab/issues/688).
    It does not require a complete service or OS sandbox.
 2. **Local-task milestone:** service, UI and real-runtime journeys cover A01–A18,
    A25, A27, local A28/A30 and R07–R10. GitHub-dependent portions are qualified
@@ -62,20 +62,20 @@ capability.
 | A13 | Approval denied or reviewed material changes | Action cannot execute using denied/stale approval; reason visible | Service + access integration |
 | A14 | Pause project A while B has work | Current turns in A may finish; no new turns or follow-ups in A; B continues; results retained; resume revalidates | Service + UI |
 | A15 | Stop a task with active lead and worker turns; supervisor loses contact or reports a writer still active | All active task execution, including its lead turn, receives best-effort cancellation requests; bounded observation never releases holds; effects may continue; Stop/writer/capacity holds survive restart until independently resolved; explicit resume alone cannot release ownership; files/history retained and uncertainty visible | Runtime fault injection |
-| A16 | Two writers target one task workspace | One admission succeeds; others wait. Bound successful terminal status, ended Ensemble callbacks and no other hold/known unfinished execution permit one successor. Incomplete tool observation and unobserved-writer overlap are accepted. Crash, Stop, failure, missing/conflicting terminal identity/status and known survivors retain holds; independent tasks may proceed | Service + Git |
+| A16 | Two writers target one task workspace | One admission succeeds; others wait. Bound successful terminal status, ended cab callbacks and no other hold/known unfinished execution permit one successor. Incomplete tool observation and unobserved-writer overlap are accepted. Crash, Stop, failure, missing/conflicting terminal identity/status and known survivors retain holds; independent tasks may proceed | Service + Git |
 | A17 | Complete/archive work in each cleanup mode | Retain until archive by default; automatic cleanup waits for confirmed delivery and preservation checks; conversations cannot silently delete workspaces; missing or replaced workspaces are held at startup recovery, before execution and explicit workspace inspection (uncertain Git stays held); polled list, project and Inbox reads redact from the stored last-known binding without refreshing it or launching Git | Service + Git |
 | A18 | Runtime cannot resume a conversation | Resolve old ownership independently or use qualified normal-success handoff before replacement; reconstruct context in a new generation; late result cannot override; historical resume is not live reattachment | Service + runtime |
 | A19 | Repository and Project sources return same issue | One task with two memberships; deleting one membership preserves other and history | Adapter + SQLite |
 | A20 | Pagination, missed observation, duplicate event or partial outage | Full selection converges; no false withdrawal from partial data; no duplicate task execution; per-selection observed/open/matching counts and the zero-match warning come from stored observations, and a partial read never implies a complete total | Adapter |
 | A21 | Source includes PR, draft, or issue from disallowed repository | PR/draft excluded; discovered issue grants no repository execution access | Adapter + runtime |
-| A22 | Same issue appears in two Ensemble projects | Operator chooses placement; existing project placement and execution retained; newly conflicted work cannot start; no transfer of tasks with established assignments; no permission union | UI + SQLite |
+| A22 | Same issue appears in two cab projects | Operator chooses placement; existing project placement and execution retained; newly conflicted work cannot start; no transfer of tasks with established assignments; no permission union | UI + SQLite |
 | A23 | Lose all memberships/readiness, close issue, or edit scope during execution | Hold new delegation and notify lead and active assignees to stop safely; operator resolves resumption except confirmed own-delivery closure; harmless clarification proceeds, material outcome/scope change holds affected work for input; in both closed-issue modes, closure after import holds the task, a first-observed closed issue is skipped or imported as Done by mode, Done mode completes held work only after settlement, and reopening or a mode switch never deletes tasks or history | Service + adapter |
 | A24 | External edit or PR write times out after success | Confirm remote identity/state before retry; UI never reports unconfirmed success | Adapter fault injection |
-| A25 | Configure permissions; attempt denied Ensemble action | Ensemble action is rejected; runtime/deployment controls are passed correctly and their shell/API limits are disclosed | Service + UI |
+| A25 | Configure permissions; attempt denied cab action | cab action is rejected; runtime/deployment controls are passed correctly and their shell/API limits are disclosed | Service + UI |
 | A26 | Hand back PR, receive feedback, restart, then merge or explicitly accept/close | Task-scoped lead resumes on CI/review feedback; task remains waiting until settled; only through-merge projects merge autonomously; history persists | UI + Service + adapter |
-| A27 | Capacity exhausted or repeatedly failing worker | Ordinary dispatch honors Ensemble capacity; capacity one does not deadlock parent/child work; confirmed transient failures retry at most twice; uncertainty holds; prolonged inactivity flags attention without automatic termination/restart | Service + runtime |
-| A28 | Ready local task depends on another local or imported task in its project | Blocked task stays Ready and visible but starts no task execution or new turn through Ensemble; local blocker Done or confirmed imported issue closure releases it automatically; cancellation does not; only operator can edit edges, with retries/version conflicts handled; self/cyclic and cross-project authored edges are rejected | UI + SQLite + runtime |
-| A29 | Ready imported issue has native GitHub blocker outside selection or project | Full native dependency read holds Ensemble dispatch while blocker is open; no task import or repository access is inferred; closure or edge removal releases it, and reopening re-applies the gate | Adapter + Service + UI |
+| A27 | Capacity exhausted or repeatedly failing worker | Ordinary dispatch honors cab capacity; capacity one does not deadlock parent/child work; confirmed transient failures retry at most twice; uncertainty holds; prolonged inactivity flags attention without automatic termination/restart | Service + runtime |
+| A28 | Ready local task depends on another local or imported task in its project | Blocked task stays Ready and visible but starts no task execution or new turn through cab; local blocker Done or confirmed imported issue closure releases it automatically; cancellation does not; only operator can edit edges, with retries/version conflicts handled; self/cyclic and cross-project authored edges are rejected | UI + SQLite + runtime |
+| A29 | Ready imported issue has native GitHub blocker outside selection or project | Full native dependency read holds cab dispatch while blocker is open; no task import or repository access is inferred; closure or edge removal releases it, and reopening re-applies the gate | Adapter + Service + UI |
 | A30 | Initial or later native dependency read or an imported blocker of a local task is incomplete, or a blocker appears during active work | Unknown state holds dispatch even before the first successful read and after a previously clear read; current turn may finish, but queued/new turns and delegation wait; ownership/results persist across restart; complete confirmed refresh resumes only when other controls permit | Adapter fault injection + runtime |
 
 ### Standalone-specific scenarios
@@ -88,7 +88,7 @@ routing and accountability.
 | R01 | Codex App Server uses the existing operator login on macOS, including restart. Expired/unavailable login visibly holds affected work; no silent switch of agent execution to API credentials or billing. TypeSafe routing credentials are a separate opt-in integration. |
 | R02 | Defaults are four active turns globally and two per project; concurrent admission respects both. Waiting assignments yield slots. Lowering a limit holds new admissions until usage fits without silently killing active work. |
 | R03 | Sleep assertion exists only during active execution and releases when idle or supervision ends. Forced sleep/wake reconciles execution before more dispatch, without duplicates. |
-| R04 | Web UI is privately reachable over Tailscale and independently requires an Ensemble login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. |
+| R04 | Web UI is privately reachable over Tailscale and independently requires a cab login. Unauthenticated requests cannot read private data or mutate controls; authenticated browser actions have session and origin/CSRF protection. |
 | R05 | Conversation history and durable operator messages survive restart. Duplicate submission does not duplicate delivery; the next eligible turn receives the message without bypassing holds. No live steering is exposed. |
 | R06 | Fresh standalone startup never reads or mutates the prototype database. Backup/restore preserves standalone records. Cutover records old active-work disposition before enabling competing work. |
 | R07 | Routing-enabled eligible task supplies its initial brief without a lead turn. Explicit permitted assignee bypasses TypeSafe; disabled projects allocate through the lead without API calls. Profile capabilities and project routing guidance are used; ineligible profiles cannot be selected and full transcripts/credentials are excluded. |
@@ -105,8 +105,8 @@ integration/browser coverage for fault cases and a bounded actual-runtime journe
 for structured request/answer transport. Existing plain-text question evidence
 cannot qualify structured runtime interactions.
 
-UI01 requires the full Ensemble form model, qualified by deterministic
-service/SQLite/browser tests or Ensemble question tools. UI02 requires the native
+UI01 requires the full cab form model, qualified by deterministic
+service/SQLite/browser tests or cab question tools. UI02 requires the native
 shapes qualified by the [native input evidence](evidence/ui01-runtime-input.md):
 its observed single-choice/custom-text round trip and deterministic grouped-shape
 coverage. Native standalone free text, multiple selection and recommendation
@@ -138,7 +138,7 @@ keyboard access, readable text and distinguishable task titles.
 ### Post-MVP task workspace inspection
 
 WI01–WI13 are requirements for post-MVP workspace inspection, tracked in
-[#776](https://github.com/chrisbanes/ensemble/issues/776). They add nothing to the
+[#776](https://github.com/chrisbanes/cab/issues/776). They add nothing to the
 release or cutover gates. Preserve the task workspace behaviour and the pause on
 X01–X08. Recorded evidence is under
 [Task workspace inspection evidence](#task-workspace-inspection-evidence).
@@ -162,7 +162,7 @@ X01–X08. Recorded evidence is under
 ### Operator CLI acceptance
 
 CLI01–CLI06 qualify the operator CLI release under
-[epic #893](https://github.com/chrisbanes/ensemble/issues/893) and
+[epic #893](https://github.com/chrisbanes/cab/issues/893) and
 [ADR-1010](adr/1010-operator-cli.md). They do not add requirements to the
 standalone MVP operational-release or cutover gates above. The
 [operator CLI design](design/operator-cli.md) defines the accepted contract;
@@ -213,7 +213,7 @@ The [CLI8 inventory](evidence/issue-901-cli8-inventory-2026-10-12.json) records
 each operation's state: those the host live journey ran are passed, except
 `assignment apply-current`, which the live journey ran only after a follow-up under
 Stop; adoption followed by a follow-up on a completed lead is covered by a
-deterministic test ([#935](https://github.com/chrisbanes/ensemble/issues/935)); the rest are
+deterministic test ([#935](https://github.com/chrisbanes/cab/issues/935)); the rest are
 bounded to deterministic fixtures, including the `project prepare` write for
 `diagnosticCapture`.
 
@@ -238,7 +238,7 @@ authority checks cover the entire command inventory. Host-local administration
 and deferred operations remain outside this CLI release.
 
 Delivery slices own their focused evidence; CLI8
-([#901](https://github.com/chrisbanes/ensemble/issues/901)) owns assembled
+([#901](https://github.com/chrisbanes/cab/issues/901)) owns assembled
 qualification. Records belong in `docs/evidence/` and must identify the candidate,
 service/client/runtime, observed effects and limits. Documentation acceptance
 alone passes none of these scenarios.
@@ -255,7 +255,7 @@ denial.
 
 | ID | Given / when | Required observable result | Layer |
 | --- | --- | --- | --- |
-| C5-1 | Claude lead and Claude worker on a disposable repository | The lead delegates; the worker asks a question through `ensemble_ask_question`, receives the operator's answer and reports a result; the lead requests completion and the task finalizes | Service + Claude runtime |
+| C5-1 | Claude lead and Claude worker on a disposable repository | The lead delegates; the worker asks a question through `cab_ask_question`, receives the operator's answer and reports a result; the lead requests completion and the task finalizes | Service + Claude runtime |
 | C5-2 | Codex lead delegates to a Claude worker | The Claude worker's result reaches the Codex lead, which requests completion; each assignment keeps its runtime | Service + Codex + Claude runtime |
 | C5-3 | Stop a running Claude turn; separately, kill the service mid-turn and restart | Stop is observed or the hold stays visible with the writer hold. After the crash, the uncertainty hold is visible, writer and capacity holds remain and no turn starts until explicit recovery resumes the same session once; nothing retries or releases ownership early | Service + Claude runtime |
 | C5-4 | Sandboxed Bash in a Claude turn reads its environment | The subprocess token scrub is qualified, or any residual exposure is recorded as a disclosed limit | Claude runtime |
@@ -266,14 +266,14 @@ These integrations are deferred until after the standalone MVP
 ([ADR-1006](adr/1006-chatgpt-and-native-codex.md)). X01–X08 retain future
 acceptance without reopening completed standalone work or gating MVP release or
 cutover. Neither integration has passed. X01–X05 delivery is paused under
-[epic #734](https://github.com/chrisbanes/ensemble/issues/734) until the work is
+[epic #734](https://github.com/chrisbanes/cab/issues/734) until the work is
 explicitly reopened and current APIs, scope and dependencies are revalidated.
 
 | ID | Required observable result |
 | --- | --- |
-| X01 | In a disposable local repository/worktree, supported integration creates a main native task with linked, inspectable worker conversations, opens its task/change view and uses the retained Ensemble worktree. Record Ensemble project, native host/thread and workspace identities; saved host project placement/linkage is optional. Unsupported or failed native visibility or handover returns evidence and scope for review; App Server thread creation alone is not a pass. |
-| X02 | Human inspection starts no turn. Explicit handover holds all further Ensemble dispatch for the task before human continuation; explicit return reconciles settled execution and workspace changes and rechecks permissions, revisions and other holds. Restart, stale/replayed actions, idle status and known active execution neither duplicate launch nor implicitly return ownership. Existing recovery holds remain; no physical containment claim is added. |
-| X03 | With the plugin disabled, Ensemble remains fully usable. With it enabled, both web UI and ChatGPT exercise daily task creation/tracking, durable messages, answers and exact-material approvals through the same service rules. Replay/stale inputs, pause, Stop, dependencies and capacity preserve their existing semantics. Setup and recovery may use the web UI. |
+| X01 | In a disposable local repository/worktree, supported integration creates a main native task with linked, inspectable worker conversations, opens its task/change view and uses the retained cab worktree. Record cab project, native host/thread and workspace identities; saved host project placement/linkage is optional. Unsupported or failed native visibility or handover returns evidence and scope for review; App Server thread creation alone is not a pass. |
+| X02 | Human inspection starts no turn. Explicit handover holds all further cab dispatch for the task before human continuation; explicit return reconciles settled execution and workspace changes and rechecks permissions, revisions and other holds. Restart, stale/replayed actions, idle status and known active execution neither duplicate launch nor implicitly return ownership. Existing recovery holds remain; no physical containment claim is added. |
+| X03 | With the plugin disabled, cab remains fully usable. With it enabled, both web UI and ChatGPT exercise daily task creation/tracking, durable messages, answers and exact-material approvals through the same service rules. Replay/stale inputs, pause, Stop, dependencies and capacity preserve their existing semantics. Setup and recovery may use the web UI. |
 | X04 | Only explicitly enabled projects are available to the connected operator. Tools, components, context, errors and events exclude credentials, private instructions and raw runtime logs. Unauthorised/cross-project requests, project opt-out and access revocation fail closed, including retained UI state and later delivery. |
 | X05 | Guided installation links an authenticated HTTPS MCP endpoint; authorised tools work, invalid/expired/wrong-audience credentials fail and revocation takes effect. Only the plugin and required authentication/discovery surfaces are public; the operator UI and runtime remain private. No automatic endpoint provisioning or hosted relay is required. |
 | X06 | Explicit filtered subscriptions deliver completion, question and approval events. Callback verification/signatures, stable identity across bounded retries, duplicate/out-of-order events, restart, expiry, unsubscribe, opt-out and revocation behave correctly. Inbox/read state survives missing deliveries; webhook receipt is not acknowledgement. Events explain or request input and cannot authorise writes. |
@@ -317,7 +317,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   early-result behaviour, restart, crash, Stop, failure, missing or conflicting
   terminal reports, unfinished callbacks, known survivors, conversation replacement
   and stale results are covered. Normal handoff trusts a bound successful terminal
-  report after Ensemble callbacks end; no physical containment is claimed. Evidence:
+  report after cab callbacks end; no physical containment is claimed. Evidence:
   [workspace and writer](evidence/s03a-workspace-writer-2026-09-29.md).
 - **Scheduler, supervision and capacity** (R02, R03, R08) — **Bounded.** A direct
   turn, a normal follow-up in the same Codex conversation and a task Stop pass against
@@ -456,7 +456,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   no project delete or archive exists, so creation is recovered by editing in
   project configuration.
 - **Structured questions and Inbox** (A12, UI01, UI02) — **Bounded.** The full
-  Ensemble form (grouped text, single and multiple choice, constraints, custom text),
+  cab form (grouped text, single and multiple choice, constraints, custom text),
   durable validation and replay, shared task and Inbox entry points and desktop/phone
   viewport journeys pass in deterministic service, SQLite and browser tests. Native
   evidence is the bounded protocol and one actual service journey for a synchronous
@@ -478,7 +478,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   one finite live journey passed with verified cleanup. The display of answered native
   requests after their endpoint closes was verified deterministically, not live.
   Physical-device acceptance is not claimed. Human visual/usability acceptance is
-  tracked on [#736](https://github.com/chrisbanes/ensemble/issues/736), which is closed
+  tracked on [#736](https://github.com/chrisbanes/cab/issues/736), which is closed
   as completed; the evidence records no separate acceptance statement. Evidence:
   [integrated operator](evidence/ui07-integrated-operator.md),
   [inventory](evidence/release-candidate-inventory.json).
@@ -507,7 +507,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
 - **ChatGPT and native Codex** (X01–X08) — **Unproved**, deferred. X01 and X02 stay
   unproved: the inspected App Server and SDK surfaces expose standalone thread
   creation but not saved-project placement, linked native workers, project/task
-  navigation or an Ensemble handover and return operation. The finding does not show
+  navigation or a cab handover and return operation. The finding does not show
   that such an API can never exist. Evidence:
   [native feasibility](evidence/x01-native-feasibility.md).
 
@@ -531,7 +531,7 @@ scenarios.
 - **Stop and writer replacement:** stop before start, during launch and during a
   writing tool/process. Persist Stop, request cancellation and observe for a bounded
   interval. Unresolved Stop/writer/capacity holds survive late effects and restart.
-  Normal successful bound terminal turns may hand off after all Ensemble callbacks
+  Normal successful bound terminal turns may hand off after all cab callbacks
   end and no other hold or known unfinished execution remains; serialize exactly one
   successor. A missing diagnostic tool item alone does not hold normal completion;
   missing/conflicting terminal identity/status does. Test both and the other negative
@@ -769,12 +769,12 @@ Define exact receipt formats and transactions in the dependent contract.
 | --- | --- |
 | A07 | Matching command retry replays the receipt despite an old expected version; changed payload conflicts; in-flight duplicate returns the original pending operation |
 | A09 | Wake-up acknowledgement precedes a delayed send response; no state regression. Crash after a recorded action but before inbox acknowledgement; redelivery returns the recorded event disposition and caused-operation identities, rather than creating fresh commands |
-| A14 | Pause after Ensemble records a pending turn but before it starts; restart; queued first turns and follow-ups remain held until resume |
+| A14 | Pause after cab records a pending turn but before it starts; restart; queued first turns and follow-ups remain held until resume |
 | A15 | Stop races with delegation, result reporting and a delayed spawn response; hold survives restart, late conversations are reconciled/stopped, and resume clears only the operator stop |
-| A16 | A writer queued behind Ensemble capacity does not retain a reservation; lead or parent yields writing to child and later resumes; an early result does not release a still-active writer. Unknown execution or a known surviving background writer keeps workspace held; untracked-child overlap after qualified normal success remains accepted |
+| A16 | A writer queued behind cab capacity does not retain a reservation; lead or parent yields writing to child and later resumes; an early result does not release a still-active writer. Unknown execution or a known surviving background writer keeps workspace held; untracked-child overlap after qualified normal success remains accepted |
 | A18 | Replacement conversation receives pending events; stale destination messages/results cannot mutate current work; assignment instruction revision remains unchanged without explicit apply |
 | A26 | PR handback preserves the task-scoped lead continuation for feedback; task completion cannot silently leave active children or unresolved effects; child follow-up reopens the same assignment with a new work revision, preserving prior results and rejecting stale revision reports |
-| A27 | Retry counter survives restart; Codex and Ensemble retries cannot multiply the two-retry allowance; unknown effects and permanent failures do not retry automatically |
+| A27 | Retry counter survives restart; Codex and cab retries cannot multiply the two-retry allowance; unknown effects and permanent failures do not retry automatically |
 | A28 | A scoped agent task edit cannot add/remove an edge. Matching operator command retry creates one edge and receipt; changed payload or stale dependent-task version conflicts. Adding a local edge while its dependent has an active or queued turn advances the control revision, lets an admitted turn stop safely, and holds queued/new turns and delegation across restart; removal re-evaluates other gates. |
 | A30 | A newly discovered Ready issue's first dependency-list read fails or returns a partial page: no task execution starts. A complete refresh with no blockers releases it; one with an open blocker keeps it held. Repeat after a previously confirmed clear read and for an unreadable imported blocker of a local task. |
 
@@ -795,7 +795,7 @@ run adds a record rather than rewriting an earlier one. The
 [local qualification report](evidence/s05-local-qualification.md) and the
 [release-candidate inventory](evidence/release-candidate-inventory.json) hold the
 per-scenario dispositions for A01–A30 and R01–R10. GitHub issues under
-[epic #649](https://github.com/chrisbanes/ensemble/issues/649) own delivery scope,
+[epic #649](https://github.com/chrisbanes/cab/issues/649) own delivery scope,
 sequencing and status; this plan owns the required evidence.
 
 Record every proof as passed, failed or unproved with its runtime/source identity,
@@ -814,13 +814,13 @@ journey. Test pause, Stop, restart, replay, failure and session-expiry combinati
 deterministically unless a changed integration boundary or a demonstrated failure
 requires a bounded live check. A later gate alone is not a reason to repeat a live
 journey. Final integrated visual/usability acceptance is a human decision tracked on
-[#736](https://github.com/chrisbanes/ensemble/issues/736).
+[#736](https://github.com/chrisbanes/cab/issues/736).
 
 The operational release gate retains the release candidate's required evidence,
 physical R03 sleep/wake proof before operational use on the Mac
-([#732](https://github.com/chrisbanes/ensemble/issues/732)) and a verified,
+([#732](https://github.com/chrisbanes/cab/issues/732)) and a verified,
 separately authorised cutover
-([#761](https://github.com/chrisbanes/ensemble/issues/761)). R03 stays unproved until
+([#761](https://github.com/chrisbanes/cab/issues/761)). R03 stays unproved until
 then; deferring it from local qualification does not waive that gate or the cutover
 evidence. Technical readiness does not establish deployed operation or a completed
 cutover, and a cutover is not a prerequisite for building or testing the release

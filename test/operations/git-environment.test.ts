@@ -94,7 +94,7 @@ test("only the push and fetch modules relax the offline Git environment", () => 
   // The verifier's overrides only harden object reads; it never enables a transport.
   const verifier =
     sources.get(join("src", "standalone", "push-verification.ts")) ?? "";
-  assert.doesNotMatch(verifier, /ALLOW_PROTOCOL|ENSEMBLE_PUSH|CONFIG_GLOBAL/);
+  assert.doesNotMatch(verifier, /ALLOW_PROTOCOL|CAB_PUSH|CONFIG_GLOBAL/);
 });
 
 test("the domain core neither spawns processes nor reaches the filesystem or standalone", () => {

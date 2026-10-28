@@ -65,7 +65,7 @@ test("hold labels and the Next text use the UI's words", () => {
     operator: true,
   });
   assert.deepEqual(nextText(["question-delivery"], "Running"), {
-    text: "Ensemble · delivering answer",
+    text: "cab · delivering answer",
     operator: false,
   });
   assert.deepEqual(nextText([], "Done"), {
@@ -114,7 +114,7 @@ test("auth status prints the connection URL and leaves capabilities to JSON", as
 test("--version prints the package version", async (t) => {
   const r = await harness(t).run(["--version"]);
   assert.equal(r.code, 0);
-  assert.equal(r.out, `ensemble ${version}\n`);
+  assert.equal(r.out, `cab ${version}\n`);
 });
 
 test("login, status and task get through a token file against the live service", async (t) => {
@@ -146,7 +146,7 @@ test("login, status and task get through a token file against the live service",
   r = await h.run(["task", "get", s.taskId, "--output", "json"]);
   assert.equal(r.code, 0);
   const envelope = r.json();
-  assert.equal(envelope.schema, "ensemble.cli/v1");
+  assert.equal(envelope.schema, "cab.cli/v1");
   assert.equal(envelope.connection, "home");
   assert.deepEqual(envelope.service, {
     installationId: s.f.service.operatorCredentials().installationId(),
@@ -276,7 +276,7 @@ test("auth login defaults to the local connection and says where the token comes
   const h = harness(t);
   const configFile = join(h.configDir, "connections.json");
   const sentence = (origin: string) =>
-    `Create a token in Settings → CLI credentials in the web UI, then run: ensemble auth login --url ${origin}`;
+    `Create a token in Settings → CLI credentials in the web UI, then run: cab auth login --url ${origin}`;
   // Tokens are issued per service.
   const first = { origin: s.origin, token: (await s.issue("read", "a")).token };
   const second = {
@@ -354,7 +354,7 @@ test("auth login defaults to the local connection and says where the token comes
     assert.equal(fixLines(r.err).length, 1);
     assert.match(fixLines(r.err)[0] ?? "", /--connection NAME/);
   }
-  assert.doesNotMatch(prompted, /Ensemble CLI token|Create a token/);
+  assert.doesNotMatch(prompted, /cab CLI token|Create a token/);
   assert.equal(readFileSync(configFile, "utf8"), before);
   assert.deepEqual([...h.keychain.items], keychainBefore);
   assert.equal(h.fetches.length, fetchesBefore);
@@ -423,10 +423,10 @@ test("auth login defaults to the local connection and says where the token comes
     assert.match(r.err, /Connection home already points at /);
     assert.match(r.err, /\(usage\)/);
     assert.deepEqual(fixLines(r.err), [
-      `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' to replace the token, or pass --connection OTHER to add a second connection (then run 'ensemble connection use NAME' to pick the default).`,
+      `Fix: Run 'cab auth login --url ${first.origin} --connection home' to replace the token, or pass --connection OTHER to add a second connection (then run 'cab connection use NAME' to pick the default).`,
     ]);
   }
-  assert.doesNotMatch(promptedG, /Ensemble CLI token|Create a token/);
+  assert.doesNotMatch(promptedG, /cab CLI token|Create a token/);
   assert.equal(readFileSync(configG, "utf8"), homeOnly);
   assert.equal(g.fetches.length, fetchesG);
   assert.equal(g.keychain.items.size, 0);
@@ -438,7 +438,7 @@ test("auth login defaults to the local connection and says where the token comes
   assert.equal(r.code, 2);
   assert.match(r.err, /Connections home, work already point at /);
   assert.deepEqual(fixLines(r.err), [
-    `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' or 'ensemble auth login --url ${first.origin} --connection work' to replace the token, or pass --connection OTHER to add a second connection (then run 'ensemble connection use NAME' to pick the default).`,
+    `Fix: Run 'cab auth login --url ${first.origin} --connection home' or 'cab auth login --url ${first.origin} --connection work' to replace the token, or pass --connection OTHER to add a second connection (then run 'cab connection use NAME' to pick the default).`,
   ]);
   assert.deepEqual(names(), ["home", "work"]);
   // 8. Several connections and no default: a defaulted login to a new origin would leave
@@ -483,10 +483,10 @@ test("auth login defaults to the local connection and says where the token comes
         label,
       );
       assert.deepEqual(fixLines(r.err), [
-        `Fix: Choose a default with 'ensemble connection use NAME' (home, work) and run this again, or pass --connection NAME to add ${second.origin}, then choose a default with 'ensemble connection use NAME'.`,
+        `Fix: Choose a default with 'cab connection use NAME' (home, work) and run this again, or pass --connection NAME to add ${second.origin}, then choose a default with 'cab connection use NAME'.`,
       ]);
     }
-    assert.doesNotMatch(prompted8, /Ensemble CLI token|Create a token/);
+    assert.doesNotMatch(prompted8, /cab CLI token|Create a token/);
     assert.equal(readFileSync(configG, "utf8"), unchanged, label);
     assert.equal(g.fetches.length, fetches8, label);
     assert.equal(g.keychain.items.size, 0, label);
@@ -563,12 +563,12 @@ test("auth login defaults to the local connection and says where the token comes
   assert.match(
     fixLines(r.err)[0] ?? "",
     new RegExp(
-      `^Fix: away already has ${second.origin}\\. Run 'ensemble auth login --url ${second.origin} --connection away'`,
+      `^Fix: away already has ${second.origin}\\. Run 'cab auth login --url ${second.origin} --connection away'`,
     ),
   );
   assert.deepEqual(names(), ["away", "home", "local", "work"]);
 
-  // 6. ENSEMBLE_CONNECTION names the connection; an empty value is a bad name, as it is
+  // 6. CAB_CONNECTION names the connection; an empty value is a bad name, as it is
   // for every other command; a bad name is a usage error that changes nothing.
   const e = harness(t);
   r = await e.run(
@@ -584,8 +584,8 @@ test("auth login defaults to the local connection and says where the token comes
     ],
     {
       env: {
-        ENSEMBLE_CLI_CONFIG_DIR: e.configDir,
-        ENSEMBLE_CONNECTION: "env-name",
+        CAB_CLI_CONFIG_DIR: e.configDir,
+        CAB_CONNECTION: "env-name",
       },
     },
   );
@@ -601,14 +601,14 @@ test("auth login defaults to the local connection and says where the token comes
       "--output",
       "json",
     ],
-    { env: { ENSEMBLE_CLI_CONFIG_DIR: e.configDir, ENSEMBLE_CONNECTION: "" } },
+    { env: { CAB_CLI_CONFIG_DIR: e.configDir, CAB_CONNECTION: "" } },
   );
   assert.equal(r.code, 2);
   assert.equal(r.json().error.code, "usage");
   // Not the same-origin refusal: the empty name itself is refused, and named as such.
   assert.match(
     r.json().error.message,
-    /^ENSEMBLE_CONNECTION must be a connection name/,
+    /^CAB_CONNECTION must be a connection name/,
   );
   assert.deepEqual(readdirSyncSafe(e.configDir), ["connections.json"]);
   assert.deepEqual(
@@ -671,10 +671,7 @@ test("auth login defaults to the local connection and says where the token comes
     }) as unknown as NodeJS.WriteStream,
   });
   assert.equal(r.code, 0, r.err);
-  assert.ok(
-    r.err.startsWith(`${sentence(s.origin)}\nEnsemble CLI token: `),
-    r.err,
-  );
+  assert.ok(r.err.startsWith(`${sentence(s.origin)}\ncab CLI token: `), r.err);
   assert.equal(memory.items.get("local"), first.token);
   assert.ok(!r.out.includes(first.token) && !r.err.includes(first.token));
 });
@@ -682,13 +679,10 @@ test("auth login defaults to the local connection and says where the token comes
 test("Keychain store failures save nothing and never fall back to plaintext", async (t) => {
   const s = await startCliService(t);
   const token = (await s.issue("read")).token;
-  const failing = new KeychainCredentialStore(
-    "ensemble-cli-test",
-    async () => ({
-      code: 51,
-      stdout: "",
-    }),
-  );
+  const failing = new KeychainCredentialStore("cab-cli-test", async () => ({
+    code: 51,
+    stdout: "",
+  }));
   const h = harness(t, { keychain: () => failing });
   const tty = Object.assign(new PassThrough(), {
     isTTY: true,
@@ -839,8 +833,8 @@ test("managed assignments, URL rules, redirects and versions fail before or with
   ]) {
     const r = await h.run(args, {
       env: {
-        ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
-        ENSEMBLE_MANAGED_ASSIGNMENT: "1",
+        CAB_CLI_CONFIG_DIR: h.configDir,
+        CAB_MANAGED_ASSIGNMENT: "1",
       },
     });
     assert.equal(r.code, 3);
@@ -1122,7 +1116,7 @@ test("human errors end with exactly one Fix line and JSON errors are unchanged",
     [
       "unexpected failure",
       ["connection", "list"],
-      { env: { ENSEMBLE_CLI_CONFIG_DIR: notADirectory } },
+      { env: { CAB_CLI_CONFIG_DIR: notADirectory } },
       5,
       "unavailable",
     ],
@@ -1177,13 +1171,10 @@ test("a refused or unresolved connection names the origin and no request id", as
     // A read: the request never left, so the human line has no request id.
     const r = await login(code);
     assert.equal(r.code, 5, code);
-    assert.match(
-      r.err,
-      /^ensemble: The service is unavailable\. \(unavailable\)\n/,
-    );
+    assert.match(r.err, /^cab: The service is unavailable\. \(unavailable\)\n/);
     assert.ok(!r.err.includes("request"), code);
     assert.deepEqual(fixLines(r.err), [
-      "Fix: Check that the service at http://127.0.0.1:9 is running, or check the URL with 'ensemble connection list'.",
+      "Fix: Check that the service at http://127.0.0.1:9 is running, or check the URL with 'cab connection list'.",
     ]);
   }
   // The machine-readable id stays.
@@ -1222,7 +1213,7 @@ test("a refused or unresolved connection names the origin and no request id", as
   assert.equal(human.code, 5);
   assert.ok(!human.err.includes("request"), human.err);
   assert.deepEqual(fixLines(human.err), [
-    `Fix: Check that the service at ${origin} is running, or check the URL with 'ensemble connection list'.`,
+    `Fix: Check that the service at ${origin} is running, or check the URL with 'cab connection list'.`,
   ]);
   const stop = await o.cli("rw", ["task", "stop", o.s.taskId], { fetch: post });
   assert.equal(stop.code, 5);
@@ -1379,10 +1370,7 @@ test("defaults name a runnable command for auth and cursor failures", async (t) 
   let r = await h.run(["task", "get", s.taskId]);
   assert.equal(r.code, 2);
   assert.match(r.err, /\(connection-not-found\)/);
-  assert.match(
-    fix(r.err),
-    /ensemble auth login --connection NAME --url ORIGIN/,
-  );
+  assert.match(fix(r.err), /cab auth login --connection NAME --url ORIGIN/);
 
   // A revoked credential.
   const revoked = await s.issue("read", "revoked");
@@ -1402,7 +1390,7 @@ test("defaults name a runnable command for auth and cursor failures", async (t) 
   r = await h.run(["task", "get", s.taskId, "--connection", "gone"]);
   assert.equal(r.code, 3);
   assert.match(r.err, /\(credential-invalid[,)]/);
-  assert.match(fix(r.err), /ensemble auth login/);
+  assert.match(fix(r.err), /cab auth login/);
 
   // A connection that was logged out names the exact login to repeat.
   r = await h.run(["auth", "logout", "--connection", "gone"]);
@@ -1412,13 +1400,13 @@ test("defaults name a runnable command for auth and cursor failures", async (t) 
   assert.match(r.err, /\(credential-not-found\)/);
   assert.equal(
     fix(r.err),
-    `Fix: Run 'ensemble auth login --connection gone --url ${s.origin}' to store a credential.`,
+    `Fix: Run 'cab auth login --connection gone --url ${s.origin}' to store a credential.`,
   );
 
   // An unknown connection name.
   r = await h.run(["task", "get", s.taskId, "--connection", "nowhere"]);
   assert.equal(r.code, 2);
-  assert.match(fix(r.err), /ensemble connection list/);
+  assert.match(fix(r.err), /cab connection list/);
 
   // A cursor the service refuses restarts without --cursor.
   const cursor = Buffer.from(
@@ -1476,7 +1464,7 @@ const knownCommand = (words: string[]) => {
     ...browseCommands.keys(),
     ...writeCommands.keys(),
   ];
-  // `ensemble help` alone, or naming an area.
+  // `cab help` alone, or naming an area.
   if (first === "help")
     return !second || keys.some((key) => key.split(" ")[0] === second);
   return keys.some(
@@ -1493,14 +1481,14 @@ test("every command a remedy names exists in the CLI", () => {
       assert.ok(knownCommand(words), `${kind}: ${command}`);
     }
   }
-  // Every `ensemble <command>` written in a CLI source file, remedy or not.
+  // Every `cab <command>` written in a CLI source file, remedy or not.
   const dir = join(process.cwd(), "src", "cli");
   const unknown: string[] = [];
   let seen = 0;
   assert.equal(knownCommand(["task", "bogus"]), false, "the check can fail");
   for (const name of readdirSync(dir).filter((f) => f.endsWith(".ts")))
     for (const m of readFileSync(join(dir, name), "utf8").matchAll(
-      /\bensemble ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/g,
+      /\bcab ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/g,
     )) {
       seen++;
       if (!knownCommand([m[1] ?? "", m[2] ?? ""]))
@@ -1520,10 +1508,7 @@ test("service and snapshot usage errors end with one Fix line", async (t) => {
     assert.equal(r.code, 2, args.join(" "));
     assert.equal(r.out, "");
     assert.equal(fixLines(r.err).length, 1);
-    assert.equal(
-      r.err.trimEnd().split("\n").at(-1),
-      "Fix: Run 'ensemble --help'.",
-    );
+    assert.equal(r.err.trimEnd().split("\n").at(-1), "Fix: Run 'cab --help'.");
   }
 });
 
@@ -1550,7 +1535,7 @@ test("every usage-error path ends with one Fix line and help and version stay cl
     assert.equal(fixLines(r.err).length, 1, name);
     assert.equal(
       r.err.trimEnd().split("\n").at(-1),
-      "Fix: Run 'ensemble --help'.",
+      "Fix: Run 'cab --help'.",
       name,
     );
     // JSON: the error envelope (or, for a bare invocation, today's usage text) is unchanged

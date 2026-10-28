@@ -198,7 +198,7 @@ export class StatusMappingWriter {
     const item = issue
       ? this.sources.membershipItem(projectId, mapping.selectionId, nodeId)
       : null;
-    // While the task is Ready, a newer read of the item is what Ensemble last observed.
+    // While the task is Ready, a newer read of the item is what cab last observed.
     if (ready && item && (item.readAt ?? 0) > (state.observedAt ?? 0)) {
       this.mappings.observed(
         taskId,
@@ -212,7 +212,7 @@ export class StatusMappingWriter {
       state = this.mappings.taskState(taskId);
     }
     // Done on closure: a done task whose issue is observed closed is not Ready but may still be
-    // written, against the Status Ensemble last observed or wrote, never one a human set since.
+    // written, against the Status cab last observed or wrote, never one a human set since.
     const closing =
       !ready &&
       event === "done" &&
@@ -286,7 +286,7 @@ export class StatusMappingWriter {
   }
 
   /**
-   * The Status Ensemble last observed on the item: its last confirmed write, unless this item
+   * The Status cab last observed on the item: its last confirmed write, unless this item
    * was read after it (a partial read leaves an unread item's fields alone), else the stored
    * membership value (`null` is no value).
    */

@@ -56,7 +56,7 @@ test("recovery get shows identity, holds, paths and required inputs on both cred
   ]);
   assert.match(
     a.out,
-    new RegExp(`Recovery: ensemble recovery get ${w.g.assignmentId}`),
+    new RegExp(`Recovery: cab recovery get ${w.g.assignmentId}`),
   );
   const unknown = await w.cli("ro", ["recovery", "get", randomUUID()]);
   assert.equal(unknown.code, 2);

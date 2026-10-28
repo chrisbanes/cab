@@ -1366,7 +1366,7 @@ export async function captureRetainedResultEvidence(
       repositoryId: value.repositoryId ?? null,
       path: value.path,
       originRoot: repoRoot,
-      mime: "application/vnd.ensemble.workspace-diff+json",
+      mime: "application/vnd.cab.workspace-diff+json",
       sha256: createHash("sha256").update(value.bytes).digest("hex"),
       size: value.bytes.byteLength,
       capturedAt,

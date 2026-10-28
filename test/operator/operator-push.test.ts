@@ -48,7 +48,7 @@ const subscription = (device: FakeDevice) => ({
 });
 
 const open = async () => {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-push-store-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-push-store-"));
   const file = join(directory, "push.sqlite");
   const db = new DatabaseSync(file);
   return {
@@ -1476,7 +1476,7 @@ test("subscribe, list, test and revoke round trip through the session routes", a
   assert.deepEqual(fake.payloads(device), [
     {
       v: 1,
-      title: "Test notification from Ensemble",
+      title: "Test notification from cab",
       url: "/app/settings#notifications",
       tag: "test:notification",
     },

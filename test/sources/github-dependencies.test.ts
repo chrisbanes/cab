@@ -37,7 +37,7 @@ const blocker: IssueSnapshot = {
 };
 
 test("initial and later incomplete native blocker reads hold imported admission", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-dependencies-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-dependencies-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const domain = new DomainStore(db);
   const sources = new GitHubSourceStore(db);
@@ -393,7 +393,7 @@ test("initial and later incomplete native blocker reads hold imported admission"
 });
 
 test("synchronization reads native blockers only for issues whose task admission needs them", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-github-dependencies-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-github-dependencies-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const domain = new DomainStore(db);
   const sources = new GitHubSourceStore(db);

@@ -263,7 +263,7 @@ export async function createOperatorFixture<
     await lifecycle.start(
       "directory.create",
       async () => {
-        directory = await mkdtemp(join(tmpdir(), "ensemble-ui02-"));
+        directory = await mkdtemp(join(tmpdir(), "cab-ui02-"));
       },
       fixtureDeadline,
       startupSteps,

@@ -7,10 +7,10 @@ import { GitHubHttpSourceReader } from "../../../dist/src/standalone/github-sour
 import { StandaloneService } from "../../../dist/src/standalone/service.js";
 import { LocalOperatorUi } from "../../../dist/src/standalone/operator.js";
 
-const manifestPath = process.env.ENSEMBLE_S06_FIXTURE_MANIFEST;
+const manifestPath = process.env.CAB_S06_FIXTURE_MANIFEST;
 if (!manifestPath)
   throw new Error(
-    "ENSEMBLE_S06_FIXTURE_MANIFEST is required; no provider request was made",
+    "CAB_S06_FIXTURE_MANIFEST is required; no provider request was made",
   );
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 assert.equal(manifest.version, 1);
@@ -111,7 +111,7 @@ for (const expected of manifest.issues) {
   assert.equal(status.status, expected.state);
 }
 
-const temp = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s06-live-")));
+const temp = realpathSync(mkdtempSync(join(tmpdir(), "cab-s06-live-")));
 const runtime = () => ({
   async start() {},
   async stop() {},

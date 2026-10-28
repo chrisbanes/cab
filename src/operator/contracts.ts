@@ -917,7 +917,7 @@ function taskSchemaAdmission() {
 const sourceUrl = z.url().startsWith("https://");
 /**
  * Provider-closure provenance: closed on GitHub while held, completed by that closure, or
- * held because GitHub's closure could not be attributed to Ensemble's own delivery.
+ * held because GitHub's closure could not be attributed to cab's own delivery.
  */
 const sourceClosure = z.enum(["held", "completed", "unattributed"]).nullable();
 /**
@@ -3134,7 +3134,7 @@ export const questionReadSchema = z
         requestingAssignmentId: uuid,
         conversationRevision: revision,
         revision,
-        source: z.enum(["plain", "ensemble", "native"]),
+        source: z.enum(["plain", "cab", "native"]),
         status: z.enum([
           "pending",
           "recorded",
@@ -4248,7 +4248,7 @@ export const executionInputsSchema = envelope(
     .object({
       workId: workIdSchema,
       capture: captureStateSchema,
-      /** Ensemble-supplied inputs as submitted; never the runtime's effective prompt. */
+      /** cab-supplied inputs as submitted; never the runtime's effective prompt. */
       provenance: z
         .object({
           source: z.enum(["captured-submission", "not-captured"]),

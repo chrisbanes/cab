@@ -43,7 +43,7 @@ function privateDirectory(t: TestContext, prefix: string) {
 }
 
 async function journey(t: TestContext) {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-wi782-test-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-wi782-test-"));
   chmodSync(directory, 0o700);
   let runtime!: OperatorFixtureRuntime;
   const harness = await createInspectionJourneyHarness({
@@ -84,7 +84,7 @@ async function playTurn(
     const reported = await runtime.callTool({
       ...intent(h.fixture.service, h.plan[role]!.workId),
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: {
         summary: `${role} result`,
         review: { changes: { files: report } },
@@ -111,7 +111,7 @@ function retainedBytes(
 }
 
 test("entry refuses without exactly --live --three-turns before any setup", (t) => {
-  const root = privateDirectory(t, "ensemble-wi782-refusal-");
+  const root = privateDirectory(t, "cab-wi782-refusal-");
   for (const args of [[], ["--three-turns"], ["--one-attempt"]]) {
     const result = spawnSync(
       process.execPath,
@@ -140,7 +140,7 @@ test("entry refuses without exactly --live --three-turns before any setup", (t) 
 });
 
 test("executable preflight refuses a missing, malformed or mismatched hash", (t) => {
-  const directory = privateDirectory(t, "ensemble-wi782-exe-");
+  const directory = privateDirectory(t, "cab-wi782-exe-");
   const executable = join(directory, "codex");
   writeFileSync(executable, "approved bytes");
   const hash = sha256("approved bytes");
@@ -164,11 +164,11 @@ test("executable preflight refuses a missing, malformed or mismatched hash", (t)
 });
 
 test("guard persists its checkpoint, refuses restart and fails closed on deadlines and order", async (t) => {
-  const directory = privateDirectory(t, "ensemble-wi782-guard-");
+  const directory = privateDirectory(t, "cab-wi782-guard-");
   const path = join(directory, "journey.json");
   const guard = new InspectionJourneyGuard(path);
   assert.throws(() => new InspectionJourneyGuard(path), /already-exists/);
-  const open = privateDirectory(t, "ensemble-wi782-open-");
+  const open = privateDirectory(t, "cab-wi782-open-");
   chmodSync(open, 0o755);
   assert.throws(
     () => new InspectionJourneyGuard(join(open, "j.json")),

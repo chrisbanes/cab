@@ -173,7 +173,7 @@ async function ownerProcess(
 }
 
 test("claiming an empty data directory makes it private; a claimed one keeps its mode", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-claim-mode-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-claim-mode-"));
   const data = join(root, "data");
   try {
     mkdirSync(data);
@@ -189,7 +189,7 @@ test("claiming an empty data directory makes it private; a claimed one keeps its
 });
 
 test("canonical directory has one process owner; crash and failed startup release ownership", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-owner-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-owner-"));
   const data = join(root, "data");
   const alias = join(root, "alias");
   const workspace = join(root, "work");
@@ -265,7 +265,7 @@ test("canonical directory has one process owner; crash and failed startup releas
 });
 
 test("offline data-directory ownership conflicts with the running service and releases on stop", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-shared-owner-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-shared-owner-"));
   const data = join(root, "data");
   const service = new StandaloneService(data, () => new FakeRuntime());
   let offline: StandaloneDataDirectory | undefined;
@@ -292,11 +292,11 @@ test("offline data-directory ownership conflicts with the running service and re
 });
 
 test("interruption before ownership-file creation leaves a restartable marked directory", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-marker-restart-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-marker-restart-"));
   const data = join(root, "data");
   mkdirSync(data);
-  writeFileSync(join(data, ".ensemble-standalone"), "ensemble-standalone-v1\n");
-  assert.equal(existsSync(join(data, ".ensemble-owner.sqlite")), false);
+  writeFileSync(join(data, ".cab-standalone"), "cab-standalone-v1\n");
+  assert.equal(existsSync(join(data, ".cab-owner.sqlite")), false);
   const first = new StandaloneService(data, () => new FakeRuntime());
   const second = new StandaloneService(data, () => new FakeRuntime());
   try {
@@ -324,7 +324,7 @@ test("interruption before ownership-file creation leaves a restartable marked di
 });
 
 test("interrupted first-start owner and partial marker recover under the lock", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-first-start-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-first-start-"));
   const crashed = join(root, "crashed");
   const partial = join(root, "partial");
   const unrelated = join(root, "unrelated");
@@ -339,7 +339,7 @@ test("interrupted first-start owner and partial marker recover under the lock", 
         `
       const { DatabaseSync } = require('node:sqlite');
       const { join } = require('node:path');
-      const owner = new DatabaseSync(join(process.argv[1], '.ensemble-owner.sqlite'));
+      const owner = new DatabaseSync(join(process.argv[1], '.cab-owner.sqlite'));
       owner.exec('BEGIN IMMEDIATE');
       process.kill(process.pid, 'SIGKILL');
     `,
@@ -348,20 +348,20 @@ test("interrupted first-start owner and partial marker recover under the lock", 
       { encoding: "utf8", timeout: 5000 },
     );
     assert.equal(result.signal, "SIGKILL", result.stderr);
-    assert.equal(existsSync(join(crashed, ".ensemble-standalone")), false);
+    assert.equal(existsSync(join(crashed, ".cab-standalone")), false);
     const recovered = new StandaloneService(crashed, () => new FakeRuntime());
     await recovered.start();
     await recovered.stop();
     assert.equal(
-      readFileSync(join(crashed, ".ensemble-standalone"), "utf8"),
-      "ensemble-standalone-v1\n",
+      readFileSync(join(crashed, ".cab-standalone"), "utf8"),
+      "cab-standalone-v1\n",
     );
 
     const failed = new StandaloneService(
       partial,
       () => new FakeRuntime(),
       (path, flag) => {
-        writeFileSync(path, "ensemble-", { flag });
+        writeFileSync(path, "cab-", { flag });
         throw new Error("injected marker write failure");
       },
     );
@@ -373,8 +373,8 @@ test("interrupted first-start owner and partial marker recover under the lock", 
     await afterFailure.start();
     await afterFailure.stop();
     assert.equal(
-      readFileSync(join(partial, ".ensemble-standalone"), "utf8"),
-      "ensemble-standalone-v1\n",
+      readFileSync(join(partial, ".cab-standalone"), "utf8"),
+      "cab-standalone-v1\n",
     );
 
     await assert.rejects(
@@ -385,14 +385,14 @@ test("interrupted first-start owner and partial marker recover under the lock", 
       readFileSync(join(unrelated, "prototype.db"), "utf8"),
       "preserve",
     );
-    assert.equal(existsSync(join(unrelated, ".ensemble-owner.sqlite")), false);
+    assert.equal(existsSync(join(unrelated, ".cab-owner.sqlite")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("injected turn/start EPIPE settles submission and holds it across reopen", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-turn-pipe-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-turn-pipe-"));
   const executable = join(root, "fake-codex.mjs");
   const data = join(root, "data");
   const workspace = join(root, "work");
@@ -466,7 +466,7 @@ for await (const line of createInterface({input: process.stdin})) {
 });
 
 test("approval denial pipe failure preserves a durable hold without granting access", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-approval-pipe-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-approval-pipe-"));
   const executable = join(root, "fake-codex.mjs");
   const data = join(root, "data");
   const workspace = join(root, "work");
@@ -574,7 +574,7 @@ test("all installed approval callback forms deny without policy expansion", () =
 });
 
 test("fresh schema, restart, completed binding and no duplicate dispatch", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "new-data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -625,7 +625,7 @@ test("fresh schema, restart, completed binding and no duplicate dispatch", async
 });
 
 test("lost submission blocks a second work ID before and after reopen", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -672,7 +672,7 @@ test("lost submission blocks a second work ID before and after reopen", async ()
 });
 
 test("deterministic predecessor refusal leaves no writer reservation", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -700,7 +700,7 @@ test("deterministic predecessor refusal leaves no writer reservation", async () 
 });
 
 test("unbound approval callback during delayed thread start prevents turn submission", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -754,7 +754,7 @@ test("callback during turn submission preserves server turn identity and hold ac
       turnId: "callback-turn",
     },
   ]) {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
     const data = join(root, "data");
     const workspace = join(root, "work");
     mkdirSync(workspace);
@@ -814,7 +814,7 @@ test("callback during turn submission preserves server turn identity and hold ac
 });
 
 test("approval callback on a bound turn retains hold after terminal completion", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -835,7 +835,7 @@ test("approval callback on a bound turn retains hold after terminal completion",
 });
 
 test("trusted callback identity holds only its bound turn; unknown identity holds all active turns", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "data");
   const runtime = new FakeRuntime();
   const service = new StandaloneService(data, () => runtime);
@@ -880,7 +880,7 @@ test("trusted callback identity holds only its bound turn; unknown identity hold
 });
 
 test("failed stop closes SQLite and allows restart on the same service object", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "data");
   const runtime = new FakeRuntime();
   const service = new StandaloneService(data, () => runtime);
@@ -908,7 +908,7 @@ test("failed stop closes SQLite and allows restart on the same service object", 
 });
 
 test("shutdown preserves ordered failures, settles active work, and retains durable holds", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-stop-order-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-stop-order-"));
   const data = join(root, "data");
   const heldWorkspace = join(root, "held-work");
   const activeWorkspace = join(root, "active-work");
@@ -1070,7 +1070,7 @@ test("shutdown preserves ordered failures, settles active work, and retains dura
 });
 
 test("shutdown preserves an undefined delivery rejection and still releases the owner", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-stop-undefined-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-stop-undefined-"));
   const data = join(root, "data");
   const runtime = new FakeRuntime();
   const service = new StandaloneService(data, () => runtime);
@@ -1100,7 +1100,7 @@ test("shutdown preserves an undefined delivery rejection and still releases the 
 });
 
 test("service shutdown retains an open database owner and can retry close", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-stop-db-close-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-stop-db-close-"));
   const data = join(root, "data");
   const service = new StandaloneService(data, () => new FakeRuntime());
   try {
@@ -1169,7 +1169,7 @@ test("service shutdown retains an open database owner and can retry close", asyn
 });
 
 test("a startup failure after admission begins unpublishes the service and releases ownership", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-885-first-wake-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-885-first-wake-"));
   const data = join(root, "data");
   const failure = new Error("injected first-wake failure");
   const service = new StandaloneService(data, () => new FakeRuntime());
@@ -1197,7 +1197,7 @@ test("a startup failure after admission begins unpublishes the service and relea
 });
 
 test("failed startup keeps an open database owner until a later stop closes it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-880-start-db-close-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-880-start-db-close-"));
   const data = join(root, "data");
   const closeFailure = new Error(
     "injected failed-start database close failure",
@@ -1273,7 +1273,7 @@ test("failed startup keeps an open database owner until a later stop closes it",
 });
 
 test("startup login failure holds ready work; unmarked prototype directory is refused", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -1319,10 +1319,7 @@ test("startup login failure holds ready work; unmarked prototype directory is re
     );
     const linked = join(root, "linked");
     mkdirSync(linked);
-    writeFileSync(
-      join(linked, ".ensemble-standalone"),
-      "ensemble-standalone-v1\n",
-    );
+    writeFileSync(join(linked, ".cab-standalone"), "cab-standalone-v1\n");
     symlinkSync(
       join(prototype, "prototype.sqlite"),
       join(linked, "standalone.sqlite"),
@@ -1338,7 +1335,7 @@ test("startup login failure holds ready work; unmarked prototype directory is re
 });
 
 test("SQLite binding failure leaves a durable held submission, while corrupt initialization never starts runtime", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const data = join(root, "data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -1367,10 +1364,7 @@ test("SQLite binding failure leaves a durable held submission, while corrupt ini
     await service.stop();
     const corrupt = join(root, "corrupt");
     mkdirSync(corrupt);
-    writeFileSync(
-      join(corrupt, ".ensemble-standalone"),
-      "ensemble-standalone-v1\n",
-    );
+    writeFileSync(join(corrupt, ".cab-standalone"), "cab-standalone-v1\n");
     writeFileSync(join(corrupt, "standalone.sqlite"), "not sqlite");
     runtime = new FakeRuntime();
     service = new StandaloneService(corrupt, () => runtime);
@@ -1383,7 +1377,7 @@ test("SQLite binding failure leaves a durable held submission, while corrupt ini
 });
 
 test("version 2 core schema migrates transactionally to standalone schema", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s02-"));
   const filename = join(root, "core.sqlite");
   let db = new DatabaseSync(filename);
   try {

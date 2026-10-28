@@ -153,8 +153,8 @@ export function StatusMappingPanel(
           unavailable
             ? "Unavailable · needs a GitHub Project source"
             : saved
-              ? "Writes the Project's Status from Ensemble's work events"
-              : "Not set · Ensemble does not change the Project's Status"
+              ? "Writes the Project's Status from cab's work events"
+              : "Not set · cab does not change the Project's Status"
         }
       >
         {unavailable && (

@@ -45,7 +45,7 @@ jobs:
       - run: npm run typecheck && npm run lint && npm run format:check && npm run build
       - uses: actions/upload-artifact@v7.0.2
         with:
-          name: ensemble-build
+          name: cab-build
           overwrite: true
           path: dist
           retention-days: 1
@@ -78,16 +78,16 @@ jobs:
       - run: npm ci
       - uses: actions/download-artifact@v8
         with:
-          name: ensemble-build
+          name: cab-build
           path: dist
       - name: Prepare writable test directories
         env:
-          TMPDIR: ${{ runner.temp }}/ensemble-fixture-tmp
-          ENSEMBLE_TEST_EVIDENCE_DIR: ${{ runner.temp }}/ensemble-test-evidence
+          TMPDIR: ${{ runner.temp }}/cab-fixture-tmp
+          CAB_TEST_EVIDENCE_DIR: ${{ runner.temp }}/cab-test-evidence
         run: |
-          mkdir -p "$TMPDIR" "$ENSEMBLE_TEST_EVIDENCE_DIR"
-          test -w "$TMPDIR" && test -w "$ENSEMBLE_TEST_EVIDENCE_DIR"
-          printf 'TMPDIR=%s\nENSEMBLE_TEST_EVIDENCE_DIR=%s\n' "$TMPDIR" "$ENSEMBLE_TEST_EVIDENCE_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TMPDIR" "$CAB_TEST_EVIDENCE_DIR"
+          test -w "$TMPDIR" && test -w "$CAB_TEST_EVIDENCE_DIR"
+          printf 'TMPDIR=%s\nCAB_TEST_EVIDENCE_DIR=%s\n' "$TMPDIR" "$CAB_TEST_EVIDENCE_DIR" >> "$GITHUB_ENV"
       - name: Install selected browsers
         run: |
           if [ "$TEST_PROFILE" = all ]; then
@@ -105,7 +105,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.2
         with:
           name: evidence-node24-${{ matrix.lane }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ensemble-test-evidence
+          path: ${{ runner.temp }}/cab-test-evidence
           retention-days: 3
           if-no-files-found: error
   service-node26:
@@ -130,25 +130,25 @@ jobs:
       - run: npm ci
       - uses: actions/download-artifact@v8
         with:
-          name: ensemble-build
+          name: cab-build
           path: dist
       - name: Prepare writable test directories
         env:
-          TMPDIR: ${{ runner.temp }}/ensemble-fixture-tmp
-          ENSEMBLE_TEST_EVIDENCE_DIR: ${{ runner.temp }}/ensemble-test-evidence
-          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ensemble-no-browsers
+          TMPDIR: ${{ runner.temp }}/cab-fixture-tmp
+          CAB_TEST_EVIDENCE_DIR: ${{ runner.temp }}/cab-test-evidence
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/cab-no-browsers
         run: |
-          mkdir -p "$TMPDIR" "$ENSEMBLE_TEST_EVIDENCE_DIR"
-          test -w "$TMPDIR" && test -w "$ENSEMBLE_TEST_EVIDENCE_DIR"
+          mkdir -p "$TMPDIR" "$CAB_TEST_EVIDENCE_DIR"
+          test -w "$TMPDIR" && test -w "$CAB_TEST_EVIDENCE_DIR"
           printf 'PLAYWRIGHT_BROWSERS_PATH=%s\n' "$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
-          printf 'TMPDIR=%s\nENSEMBLE_TEST_EVIDENCE_DIR=%s\n' "$TMPDIR" "$ENSEMBLE_TEST_EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf 'TMPDIR=%s\nCAB_TEST_EVIDENCE_DIR=%s\n' "$TMPDIR" "$CAB_TEST_EVIDENCE_DIR" >> "$GITHUB_ENV"
       - run: npm run test:built -- --profile=service --shard=${{ matrix.shard }}/2
       - name: Upload synthetic test evidence
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
           name: evidence-node26-service-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ensemble-test-evidence
+          path: ${{ runner.temp }}/cab-test-evidence
           retention-days: 3
           if-no-files-found: error
   compatibility-node26:
@@ -169,12 +169,12 @@ jobs:
       - run: npm ci
       - name: Prepare writable test directories
         env:
-          TMPDIR: ${{ runner.temp }}/ensemble-fixture-tmp
-          ENSEMBLE_TEST_EVIDENCE_DIR: ${{ runner.temp }}/ensemble-test-evidence
+          TMPDIR: ${{ runner.temp }}/cab-fixture-tmp
+          CAB_TEST_EVIDENCE_DIR: ${{ runner.temp }}/cab-test-evidence
         run: |
-          mkdir -p "$TMPDIR" "$ENSEMBLE_TEST_EVIDENCE_DIR"
-          test -w "$TMPDIR" && test -w "$ENSEMBLE_TEST_EVIDENCE_DIR"
-          printf 'TMPDIR=%s\nENSEMBLE_TEST_EVIDENCE_DIR=%s\n' "$TMPDIR" "$ENSEMBLE_TEST_EVIDENCE_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TMPDIR" "$CAB_TEST_EVIDENCE_DIR"
+          test -w "$TMPDIR" && test -w "$CAB_TEST_EVIDENCE_DIR"
+          printf 'TMPDIR=%s\nCAB_TEST_EVIDENCE_DIR=%s\n' "$TMPDIR" "$CAB_TEST_EVIDENCE_DIR" >> "$GITHUB_ENV"
       - run: npx playwright install --with-deps chromium webkit
       # Also qualify the build tools under Node 26 on the complete compatibility run.
       - run: npm run build
@@ -185,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.2
         with:
           name: evidence-node26-full-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ensemble-test-evidence
+          path: ${{ runner.temp }}/cab-test-evidence
           retention-days: 3
           if-no-files-found: error
   check:

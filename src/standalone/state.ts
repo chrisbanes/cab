@@ -360,7 +360,7 @@ export interface FailedGenerationResolution {
   failedWorkId: string;
   retryWorkId: string;
   retryIndex: number;
-  ensembleRetriesUsed: number;
+  cabRetriesUsed: number;
   harnessRetriesUsed: number;
   nextEligibleAt: number;
 }
@@ -571,7 +571,7 @@ export class ExecutionState {
     );
     CREATE TABLE IF NOT EXISTS execution_retry_chains (
       chainId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
-      ensembleRetriesUsed INTEGER NOT NULL CHECK(ensembleRetriesUsed >= 0),
+      cabRetriesUsed INTEGER NOT NULL CHECK(cabRetriesUsed >= 0),
       codexRetriesUsed INTEGER NOT NULL CHECK(codexRetriesUsed >= 0),
       nextEligibleAt INTEGER
     );
@@ -605,7 +605,7 @@ export class ExecutionState {
       reasonCode TEXT NOT NULL CHECK(reasonCode IN ('serverOverloaded','rateLimitExceeded')),
       failureSource TEXT NOT NULL CHECK(failureSource = 'codexErrorInfo'),
       codexRetries INTEGER NOT NULL CHECK(codexRetries >= 0),
-      ensembleRetriesUsed INTEGER NOT NULL CHECK(ensembleRetriesUsed >= 0),
+      cabRetriesUsed INTEGER NOT NULL CHECK(cabRetriesUsed >= 0),
       codexRetriesUsed INTEGER NOT NULL CHECK(codexRetriesUsed >= 0),
       nextEligibleAt INTEGER NOT NULL,
       createdAt INTEGER NOT NULL
@@ -4907,7 +4907,7 @@ export class ExecutionState {
         if (!retryGeneration) {
           this.db
             .prepare(`INSERT INTO execution_retry_chains
-            (chainId, ensembleRetriesUsed, codexRetriesUsed, nextEligibleAt)
+            (chainId, cabRetriesUsed, codexRetriesUsed, nextEligibleAt)
             VALUES (?, 0, 0, NULL)`)
             .run(workId);
           this.db
@@ -5270,7 +5270,7 @@ export class ExecutionState {
             failedWorkId: string;
             retryWorkId: string;
             retryIndex: number;
-            ensembleRetriesUsed: number;
+            cabRetriesUsed: number;
             codexRetriesUsed: number;
             workRevision: number | null;
             requestSequence: number;
@@ -5299,7 +5299,7 @@ export class ExecutionState {
           failedWorkId: committed.failedWorkId,
           retryWorkId: committed.retryWorkId,
           retryIndex: committed.retryIndex,
-          ensembleRetriesUsed: committed.ensembleRetriesUsed,
+          cabRetriesUsed: committed.cabRetriesUsed,
           harnessRetriesUsed: committed.codexRetriesUsed,
           nextEligibleAt: committed.nextEligibleAt,
         };
@@ -5456,16 +5456,16 @@ export class ExecutionState {
         | undefined;
       const chain = generation
         ? (this.db
-            .prepare(`SELECT ensembleRetriesUsed, codexRetriesUsed
+            .prepare(`SELECT cabRetriesUsed, codexRetriesUsed
             FROM execution_retry_chains WHERE chainId = ?`)
             .get(generation.chainId) as
-            | { ensembleRetriesUsed: number; codexRetriesUsed: number }
+            | { cabRetriesUsed: number; codexRetriesUsed: number }
             | undefined)
         : undefined;
       if (
         !generation ||
         !chain ||
-        generation.retryIndex !== chain.ensembleRetriesUsed
+        generation.retryIndex !== chain.cabRetriesUsed
       )
         throw new Error(
           "Retry accounting state is unavailable or inconsistent",
@@ -5507,8 +5507,8 @@ export class ExecutionState {
 
       const failureSource = retryFailureSource[value.harness];
       const harnessRetriesUsed = chain.codexRetriesUsed + value.harnessRetries;
-      const ensembleRetriesUsed = chain.ensembleRetriesUsed + 1;
-      if (harnessRetriesUsed + ensembleRetriesUsed > 2) {
+      const cabRetriesUsed = chain.cabRetriesUsed + 1;
+      if (harnessRetriesUsed + cabRetriesUsed > 2) {
         this.db
           .prepare(`UPDATE execution_retry_chains SET codexRetriesUsed = ?,
           nextEligibleAt = NULL WHERE chainId = ?`)
@@ -5533,7 +5533,7 @@ export class ExecutionState {
         return undefined;
       }
 
-      const retryIndex = ensembleRetriesUsed;
+      const retryIndex = cabRetriesUsed;
       const retryWorkId = `retry:${generation.chainId}:${retryIndex}`;
       const retryRequestKey = retryWorkId;
       this.db
@@ -5599,10 +5599,10 @@ export class ExecutionState {
         .prepare(`DELETE FROM task_writer_admissions WHERE workId = ?`)
         .run(value.workId);
       this.db
-        .prepare(`UPDATE execution_retry_chains SET ensembleRetriesUsed = ?,
+        .prepare(`UPDATE execution_retry_chains SET cabRetriesUsed = ?,
         codexRetriesUsed = ?, nextEligibleAt = ? WHERE chainId = ?`)
         .run(
-          ensembleRetriesUsed,
+          cabRetriesUsed,
           harnessRetriesUsed,
           value.nextEligibleAt,
           generation.chainId,
@@ -5632,7 +5632,7 @@ export class ExecutionState {
         .prepare(`INSERT INTO execution_retry_resolutions
         (failedWorkId, retryWorkId, chainId, retryIndex, workRevision,
           requestSequence, threadId, turnId, reasonCode, failureSource,
-          codexRetries, ensembleRetriesUsed, codexRetriesUsed,
+          codexRetries, cabRetriesUsed, codexRetriesUsed,
           nextEligibleAt, createdAt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
@@ -5647,7 +5647,7 @@ export class ExecutionState {
           value.reasonCode,
           failureSource,
           value.harnessRetries,
-          ensembleRetriesUsed,
+          cabRetriesUsed,
           harnessRetriesUsed,
           value.nextEligibleAt,
           Date.now(),
@@ -5666,7 +5666,7 @@ export class ExecutionState {
         failedWorkId: value.workId,
         retryWorkId,
         retryIndex,
-        ensembleRetriesUsed,
+        cabRetriesUsed,
         harnessRetriesUsed,
         nextEligibleAt: value.nextEligibleAt,
       };

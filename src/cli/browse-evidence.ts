@@ -183,7 +183,7 @@ const resultGet: BrowseCommand = {
         ]),
         ...(result.destinationDisposition === "unresolved"
           ? [
-              `If 'ensemble task get ${result.taskId}' lists it as undelivered, send it with 'ensemble result deliver ${result.taskId} ${result.resultId}'.`,
+              `If 'cab task get ${result.taskId}' lists it as undelivered, send it with 'cab result deliver ${result.taskId} ${result.resultId}'.`,
             ]
           : []),
         "",
@@ -251,7 +251,7 @@ const resultEvidence: BrowseCommand = {
           "unavailable",
           `Evidence item is ${d.state} (${d.reason}); nothing was written.`,
           {
-            fix: `Run 'ensemble result evidence ${taskId} ${resultId} ${itemId}' without --out to see why it is ${d.state}.`,
+            fix: `Run 'cab result evidence ${taskId} ${resultId} ${itemId}' without --out to see why it is ${d.state}.`,
           },
         );
       return browseOutput(ctx, {
@@ -304,9 +304,9 @@ const artifactGet: BrowseCommand = {
     const file = await client.getBytes(
       `${API}/tasks/${encodeURIComponent(taskId)}/artifacts/${artifactId}`,
     );
-    const digest = file.headers.get("x-ensemble-sha256");
+    const digest = file.headers.get("x-cab-sha256");
     verify(file.body, digest);
-    const source = file.headers.get("x-ensemble-evidence-source");
+    const source = file.headers.get("x-cab-evidence-source");
     const path = await writeOut(out, file.body);
     return browseOutput(ctx, {
       data: {

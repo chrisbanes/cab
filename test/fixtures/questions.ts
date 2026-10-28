@@ -93,7 +93,7 @@ export async function seedOwnQuestion(
     threadId: work.threadId!,
     turnId: work.turnId!,
     callId: randomUUID(),
-    tool: "ensemble_ask_question",
+    tool: "cab_ask_question",
     arguments: { form },
   });
   assert.equal(call.success, true, call.text);
@@ -117,7 +117,7 @@ export async function seedOwnApproval(
     threadId: work.threadId!,
     turnId: work.turnId!,
     callId: randomUUID(),
-    tool: "ensemble_request_approval",
+    tool: "cab_request_approval",
     arguments: { ...request, material: { scope: "fixture" } },
   });
   assert.equal(call.success, true, call.text);

@@ -92,7 +92,7 @@ test("every payload gets a fresh salt and ephemeral key", () => {
 });
 
 test("VAPID authorization carries a verifiable ES256 JWT for the endpoint origin", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-vapid-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-vapid-"));
   try {
     await chmod(directory, 0o700);
     const keys = await loadOrCreateVapidKeys(join(directory, "vapid.json"));
@@ -255,7 +255,7 @@ test("endpoint validation checks keys and labels", () => {
 const unsafe = async (
   prepare: (file: string, directory: string) => Promise<void>,
 ) => {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-vapid-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-vapid-"));
   try {
     await chmod(directory, 0o700);
     const file = join(directory, "vapid.json");
@@ -270,7 +270,7 @@ const unsafe = async (
 };
 
 test("the VAPID key file is created owner-only and reused, including by concurrent callers", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-vapid-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-vapid-"));
   try {
     await chmod(directory, 0o700);
     const file = join(directory, "operator-push-vapid.json");
@@ -292,7 +292,7 @@ test("the VAPID key file is created owner-only and reused, including by concurre
 });
 
 test("a private key with leading zero bytes is created, stored in full and loaded again", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-vapid-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-vapid-"));
   try {
     await chmod(directory, 0o700);
     const file = join(directory, "vapid.json");

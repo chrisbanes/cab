@@ -155,7 +155,7 @@ test("operator route registry exposes the runtime only through its named slot", 
 });
 
 test("all operator and extension routes inherit login, origin, and CSRF guards", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-operator-http-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-operator-http-"));
   chmodSync(directory, 0o700);
   const authFile = join(directory, "operator-auth.json");
   const db = new DatabaseSync(":memory:");
@@ -716,7 +716,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
 
 test("HTML login settles concurrent and stale attempts through the shared auth boundary", async () => {
   const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-operator-auth-concurrency-"),
+    join(tmpdir(), "cab-operator-auth-concurrency-"),
   );
   chmodSync(directory, 0o700);
   const authFile = join(directory, "operator-auth.json");
@@ -886,9 +886,7 @@ test("HTML login settles concurrent and stale attempts through the shared auth b
 });
 
 test("real runtime routes inherit HTTP guards and persist capacity", async () => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-real-operator-routes-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-real-operator-routes-"));
   chmodSync(directory, 0o700);
   const authFile = join(directory, "operator-auth.json");
   const service = new StandaloneService(directory, fakeRuntime, undefined, {
@@ -1155,7 +1153,7 @@ test("legacy awaited slots and extension publications reject expired or logged-o
       const current = await auth.authenticate(anon.id, password);
       assert.ok(current);
       return {
-        cookie: `ensemble_operator_session=${current.id}`,
+        cookie: `cab_operator_session=${current.id}`,
         csrfToken: current.csrfToken,
       };
     };

@@ -62,9 +62,7 @@ export async function runService(options = {}) {
     fixture ||
       Object.keys(options).every((k) => k === "source" || k === "grant"),
   );
-  const root = mkdtempSync(
-    join(realpathSync(tmpdir()), "ensemble-ui01-service-"),
-  );
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "cab-ui01-service-"));
   chmodSync(root, 0o700);
   const data = join(root, "data"),
     evidencePath = `${root}.json`;
@@ -144,7 +142,7 @@ export async function runService(options = {}) {
                       : null,
                   spawnEnvironment: () => ({
                     ...context.spawnEnvironment(),
-                    ENSEMBLE_UI01_NATIVE_PROOF_FIXTURE: fixture.mode ?? "proof",
+                    CAB_UI01_NATIVE_PROOF_FIXTURE: fixture.mode ?? "proof",
                   }),
                 }
               : {}),
@@ -226,7 +224,7 @@ export async function runService(options = {}) {
             assert.ok(work);
             const reporting = listener({
               ...tool,
-              tool: "ensemble_report_result",
+              tool: "cab_report_result",
               arguments: {
                 summary: "UI01 exact native answer consumption observed",
               },

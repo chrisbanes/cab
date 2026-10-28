@@ -597,7 +597,7 @@ test("authenticated HTTP reads discard entries when the task binding changes dur
 });
 
 test("polled reads keep the stored workspace binding and explicit inspection detects a missing worktree", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-passive-workspace-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-passive-workspace-"));
   const controlled = controlledGit();
   const f = await createOperatorFixture(
     null,

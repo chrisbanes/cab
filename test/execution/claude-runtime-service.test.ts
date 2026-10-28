@@ -74,7 +74,7 @@ function withEnvironment(
 
 function harnessFixture(t: { after: (fn: () => Promise<void>) => void }) {
   const dataDir = join(
-    mkdtempSync(join(tmpdir(), "ensemble-claude-service-")),
+    mkdtempSync(join(tmpdir(), "cab-claude-service-")),
     "data",
   );
   const contexts = new Map<ExecutionHarness, RuntimeSpawnContext>();
@@ -158,7 +158,7 @@ test("the Claude token reaches only the Claude turn environment, never Codex or 
   assert.equal(turn.token, TOKEN);
   assert.equal(JSON.stringify(turn.env).includes(TOKEN), false);
   assert.equal(JSON.stringify(turn.env).includes(DELIVERY_VALUE), false);
-  assert.equal(turn.env.ENSEMBLE_MANAGED_ASSIGNMENT, "1");
+  assert.equal(turn.env.CAB_MANAGED_ASSIGNMENT, "1");
   assert.equal(f.claude().configDirectory, join(f.dataDir, "claude", "config"));
 });
 
@@ -207,9 +207,7 @@ const FILE_TOKEN = "claude-file-token-canary-3381";
 
 /** An owner-only token file in a private real directory; returns its path. */
 function tokenFile(t: { after: (fn: () => void) => void }, value = FILE_TOKEN) {
-  const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-claude-token-")),
-  );
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-claude-token-")));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const path = join(root, "claude-token");
@@ -236,7 +234,7 @@ test("a file-sourced Claude token reaches only the Claude turn, never Codex, hel
   assert.ok("env" in turn);
   assert.equal(turn.token, FILE_TOKEN);
   assert.equal(JSON.stringify(turn.env).includes(FILE_TOKEN), false);
-  assert.equal(turn.env.ENSEMBLE_MANAGED_ASSIGNMENT, "1");
+  assert.equal(turn.env.CAB_MANAGED_ASSIGNMENT, "1");
 });
 
 test("a rotated token file keeps the previous value in the failure exclusions", async (t) => {
@@ -375,7 +373,7 @@ async function waitUntil(predicate: () => boolean, describe: () => unknown) {
 }
 
 test("a Claude preflight reason keeps work queued without admission, then the next wake starts it with the profile settings", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-claude-seams-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-claude-seams-"));
   const runtimes = {
     codex: new SeamRuntime("codex", false),
     claude: new SeamRuntime("claude", true),
@@ -735,7 +733,7 @@ async function claudeServiceRun(
   credentialRef = `env:${T6_NAME}`,
 ) {
   withEnvironment(t, { [T6_NAME]: token });
-  const root = mkdtempSync(join(tmpdir(), "ensemble-claude-t6-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-claude-t6-"));
   const h = claudeHarness(join(root, "data"), scripts, controls);
   t.after(async () => {
     await h.service.stop().catch(() => {});
@@ -759,15 +757,8 @@ test("a Claude assignment turn completes, its coordination call carries the hook
     async function* (session) {
       yield init(sessionOf(session));
       const args = { summary: "Claude finished" };
-      await session.hook(
-        "mcp__ensemble__ensemble_report_result",
-        args,
-        "toolu_t6a",
-      );
-      const outcome = (await session.callTool(
-        "ensemble_report_result",
-        args,
-      )) as {
+      await session.hook("mcp__cab__cab_report_result", args, "toolu_t6a");
+      const outcome = (await session.callTool("cab_report_result", args)) as {
         isError: boolean;
       };
       assert.equal(outcome.isError, false);
@@ -1258,7 +1249,7 @@ test("operator token status for a file reference names neither its path nor its 
 });
 
 test("a service whose host has no claude starts with Claude not enabled, and its work waits without a query", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-claude-missing-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-claude-missing-"));
   const missing = claudeHarness(join(root, "missing"), [], {
     selfTest: true,
     verified: true,
@@ -1306,7 +1297,7 @@ test("a started Claude runtime's supported settings and effective policy parse i
   ]);
   const before = run.service.harnessStatuses()[1];
   assert.equal(before?.harness, "claude");
-  assert.match(before?.policy?.lines.join(" ") ?? "", /Ensemble's hook/);
+  assert.match(before?.policy?.lines.join(" ") ?? "", /cab's hook/);
   assert.ok((before?.policy?.limits.length ?? 0) > 0);
   assert.equal(JSON.stringify(before?.policy).includes("/tmp/ens-"), false);
   const { projectId, worker } = run.setup();

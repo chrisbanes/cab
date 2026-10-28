@@ -52,7 +52,7 @@ const reference = {
 async function fixture(t: TestContext) {
   const gh = createFakeGh();
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-source-credential-")),
+    mkdtempSync(join(tmpdir(), "cab-source-credential-")),
   );
   const contexts: RuntimeSpawnContext[] = [];
   const spawns: NodeJS.ProcessEnv[] = [];
@@ -661,7 +661,7 @@ test("credential failure invalidation is atomic, idempotent, scoped and keeps ob
   const { DomainStore } = await import("../../src/core/domain.js");
   const { GitHubSourceStore } = await import("../../src/core/github-source.js");
   const { Store } = await import("../../src/core/store.js");
-  const root = mkdtempSync(join(tmpdir(), "ensemble-credential-invalidation-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-credential-invalidation-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   t.after(() => {
     db.close();

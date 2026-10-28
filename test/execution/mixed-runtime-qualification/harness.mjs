@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-export const ROOT_PREFIX = "ensemble-c5-";
+export const ROOT_PREFIX = "cab-c5-";
 /** Per-attempt startTurn caps (#827 plan Guardrails). */
 export const FACETS = {
   scrub: { claude: 1, codex: 0 },
@@ -79,8 +79,7 @@ export function claudeCliEvidence(runs, resolved, { home, version }) {
 
 export const physicalTmpdir = () => realpathSync(tmpdir());
 /** Outside any disposable root, so caps survive per-facet invocations. */
-export const ledgerPath = () =>
-  join(physicalTmpdir(), "ensemble-c5.ledger.json");
+export const ledgerPath = () => join(physicalTmpdir(), "cab-c5.ledger.json");
 
 export const emptyLedger = (now = Date.now()) => ({
   sessionStartedAt: now,
@@ -300,7 +299,7 @@ export function scanForLeaks(text, { token, roots = [], home } = {}) {
   return findings;
 }
 
-/** Removes only a real, non-symlinked `ensemble-c5-*` directory directly under the temp root. */
+/** Removes only a real, non-symlinked `cab-c5-*` directory directly under the temp root. */
 export function removeRoot(path) {
   const full = resolve(path);
   const parent = physicalTmpdir();

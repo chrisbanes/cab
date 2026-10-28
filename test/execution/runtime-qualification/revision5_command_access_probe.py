@@ -81,7 +81,7 @@ def command(rid, name, argv):
 failure = None
 try:
     emit(server_pid=server.pid, server_pgid=os.getpgid(server.pid), cwd=cwd, outside=outside)
-    send(1, "initialize", {"clientInfo": {"name": "ensemble_s01_access_command", "title": "Ensemble S01 Access Command", "version": "0.1.0"}})
+    send(1, "initialize", {"clientInfo": {"name": "cab_s01_access_command", "title": "cab S01 Access Command", "version": "0.1.0"}})
     receive(1)
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

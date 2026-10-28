@@ -23,14 +23,14 @@ export function selectedBrowserEngines(value = "all"): BrowserEngine[] {
       return [];
     default:
       throw Error(
-        `Invalid ENSEMBLE_TEST_BROWSER_ENGINE value ${JSON.stringify(value)}; expected all, chromium, or none`,
+        `Invalid CAB_TEST_BROWSER_ENGINE value ${JSON.stringify(value)}; expected all, chromium, or none`,
       );
   }
 }
 
 export function browserEngineEnabled(
   engine: BrowserEngine,
-  value = process.env.ENSEMBLE_TEST_BROWSER_ENGINE ?? "all",
+  value = process.env.CAB_TEST_BROWSER_ENGINE ?? "all",
 ): boolean {
   return selectedBrowserEngines(value).includes(engine);
 }
@@ -38,13 +38,13 @@ export function browserEngineEnabled(
 export function browserEngineTestOptions(
   engine: BrowserEngine,
   options: BrowserTestOptions = {},
-  value = process.env.ENSEMBLE_TEST_BROWSER_ENGINE ?? "all",
+  value = process.env.CAB_TEST_BROWSER_ENGINE ?? "all",
 ): TestOptions {
   if (browserEngineEnabled(engine, value)) {
     const { browserEngine: _browserEngine, ...nodeOptions } = options;
     return nodeOptions;
   }
-  const reason = `browser engine ${engine} excluded by ENSEMBLE_TEST_BROWSER_ENGINE`;
+  const reason = `browser engine ${engine} excluded by CAB_TEST_BROWSER_ENGINE`;
   const skip =
     options.skip === true
       ? true

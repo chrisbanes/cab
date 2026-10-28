@@ -43,7 +43,7 @@ test("doctor reports the service's readiness checks, equal to the API read and w
   const s = await startCliService(t, {
     service: { runtimeHarnesses: ["codex", "claude"] },
   });
-  const root = mkdtempSync(join(tmpdir(), "ensemble-doctor-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-doctor-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const tokenPath = join(root, "claude-token");
   writeFileSync(tokenPath, `${CANARY}\n`);
@@ -60,7 +60,7 @@ test("doctor reports the service's readiness checks, equal to the API read and w
   const json = await h.run(["doctor", "--output", "json"]);
   assert.equal(json.code, 0, json.err);
   const envelope = json.json();
-  assert.equal(envelope.schema, "ensemble.cli/v1");
+  assert.equal(envelope.schema, "cab.cli/v1");
   const api = readinessSchema.parse(
     await (await s.bearer(read.token, "/api/operator/readiness")).json(),
   );
@@ -154,7 +154,7 @@ function daemonHome(
   mode: "daemon" | "agent" | null,
   account?: string,
 ) {
-  const home = mkdtempSync(join(tmpdir(), "ensemble-doctor-home-"));
+  const home = mkdtempSync(join(tmpdir(), "cab-doctor-home-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const accountHome = account ?? home;
   if (mode) {
@@ -162,20 +162,20 @@ function daemonHome(
       home,
       "Library",
       "Application Support",
-      "Ensemble",
+      "cab",
       "launchd",
     );
     mkdirSync(launchd, { recursive: true });
     writeFileSync(
-      join(launchd, "local.ensemble.service.json"),
+      join(launchd, "local.cab.service.json"),
       JSON.stringify({
-        schema: "ensemble.service/v1",
+        schema: "cab.service/v1",
         mode,
-        label: "local.ensemble.service",
+        label: "local.cab.service",
         version: "0.1.0",
         plistSha256: "0".repeat(64),
         configuration: {
-          label: "local.ensemble.service",
+          label: "local.cab.service",
           nodePath: "/n",
           cliPath: "/c",
           dataDirectory: "/d",
@@ -206,7 +206,7 @@ test("doctor daemon host warns about a keychain gh login on stderr only", async 
   const h = await loggedIn(t, s.origin, read.token);
   const gh = fakeStatusGh(t);
   const home = daemonHome(t, "daemon");
-  const env = { ENSEMBLE_CLI_CONFIG_DIR: h.configDir, HOME: home };
+  const env = { CAB_CLI_CONFIG_DIR: h.configDir, HOME: home };
   const result = await h.run(["doctor", "--output", "json"], {
     env,
     uid: 501,
@@ -232,7 +232,7 @@ test("doctor daemon host stays silent without a daemon record or with a file log
     h.run(["doctor", "--output", "json"], {
       uid: 501,
       ghExecutable: gh.exe,
-      env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir, HOME: home },
+      env: { CAB_CLI_CONFIG_DIR: h.configDir, HOME: home },
     });
 
   const noRecord = daemonHome(t, null);
@@ -272,12 +272,12 @@ test("doctor daemon host reads the login the daemon will see, not the shell's", 
   const read = await s.issue("read", "doctor");
   const h = await loggedIn(t, s.origin, read.token);
   const gh = fakeStatusGh(t);
-  const shell = mkdtempSync(join(tmpdir(), "ensemble-doctor-shell-"));
+  const shell = mkdtempSync(join(tmpdir(), "cab-doctor-shell-"));
   t.after(() => rmSync(shell, { recursive: true, force: true }));
 
   // The shell has a file login through GH_CONFIG_DIR and XDG_CONFIG_HOME; the daemon's HOME
   // has only the keychain, which launchd's environment cannot redirect: warned.
-  const account = mkdtempSync(join(tmpdir(), "ensemble-doctor-account-"));
+  const account = mkdtempSync(join(tmpdir(), "cab-doctor-account-"));
   t.after(() => rmSync(account, { recursive: true, force: true }));
   fileLogin(shell, join(shell, "custom-gh"));
   fileLogin(shell, join(shell, "xdg", "gh"));
@@ -285,7 +285,7 @@ test("doctor daemon host reads the login the daemon will see, not the shell's", 
     uid: 501,
     ghExecutable: gh.exe,
     env: {
-      ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
+      CAB_CLI_CONFIG_DIR: h.configDir,
       HOME: daemonHome(t, "daemon", account),
       GH_CONFIG_DIR: join(shell, "custom-gh"),
       XDG_CONFIG_HOME: join(shell, "xdg"),
@@ -297,14 +297,14 @@ test("doctor daemon host reads the login the daemon will see, not the shell's", 
   assert.ok(warned.err.includes(account));
 
   // The reverse: the daemon's HOME has the file login, the shell's overrides point at nothing.
-  const filed = mkdtempSync(join(tmpdir(), "ensemble-doctor-account-"));
+  const filed = mkdtempSync(join(tmpdir(), "cab-doctor-account-"));
   t.after(() => rmSync(filed, { recursive: true, force: true }));
   fileLogin(filed);
   const quiet = await h.run(["doctor", "--output", "json"], {
     uid: 501,
     ghExecutable: gh.exe,
     env: {
-      ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
+      CAB_CLI_CONFIG_DIR: h.configDir,
       HOME: daemonHome(t, "daemon", filed),
       GH_CONFIG_DIR: join(shell, "empty"),
       XDG_CONFIG_HOME: join(shell, "empty-xdg"),

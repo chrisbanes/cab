@@ -110,7 +110,7 @@ test("execution and logs reads match the API and label their provenance", async 
   const human = await h.run(["execution", "inputs", seed.captured]);
   assert.match(
     human.out,
-    /Captured submission of Ensemble-supplied inputs; not the runtime's effective prompt/,
+    /Captured submission of cab-supplied inputs; not the runtime's effective prompt/,
   );
   assert.match(human.out, new RegExp(seed.profileOne));
   const absentJson = await ok(["execution", "inputs", seed.absent]);
@@ -227,8 +227,8 @@ test("execution and logs reads match the API and label their provenance", async 
   const unmanaged = h.fetches.length;
   r = await h.run(["logs", "--execution", seed.captured], {
     env: {
-      ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
-      ENSEMBLE_MANAGED_ASSIGNMENT: "1",
+      CAB_CLI_CONFIG_DIR: h.configDir,
+      CAB_MANAGED_ASSIGNMENT: "1",
     },
   });
   assert.equal(r.code, 3);
@@ -281,7 +281,7 @@ test("execution notes print once and only with --verbose", async (t) => {
     "1",
     "--verbose",
   ]);
-  assert.match(paged.out, /^More: ensemble logs .* --verbose .*--cursor \S+$/m);
+  assert.match(paged.out, /^More: cab logs .* --verbose .*--cursor \S+$/m);
   // Past `--` it is an argument, not a flag.
   const after = await h.run([
     "execution",

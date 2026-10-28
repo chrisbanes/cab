@@ -31,7 +31,7 @@ const key = () =>
   `50000000-0000-4000-8000-${String(++serial).padStart(12, "0")}`;
 
 function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-domain-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-domain-"));
   const filename = join(directory, "db.sqlite");
   let db = new DatabaseSync(filename);
   db.exec("PRAGMA foreign_keys = ON");

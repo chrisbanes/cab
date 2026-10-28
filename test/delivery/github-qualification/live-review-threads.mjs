@@ -26,7 +26,7 @@ const root = `/repos/${REPO}`;
 const runId = randomBytes(4).toString("hex");
 const branch = `qual/review-threads-${runId}`;
 const file = `qual-review-threads-${runId}.md`;
-const marker = (id) => `<!-- ensemble-operation:${id} -->`;
+const marker = (id) => `<!-- cab-operation:${id} -->`;
 
 const credential = await ghToken();
 if (!("token" in credential))

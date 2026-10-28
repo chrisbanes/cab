@@ -65,7 +65,7 @@ test("an empty profile list prints the create command next", async (t) => {
   assert.equal(lines[0], "No profiles.");
   assert.equal(
     lines[1],
-    "Next: ensemble profile prepare-create --out profile.json --name NAME --instructions TEXT",
+    "Next: cab profile prepare-create --out profile.json --name NAME --instructions TEXT",
   );
   assert.equal(lines.length, 2);
   assert.equal(human.err, "");
@@ -97,7 +97,7 @@ test("project, profile and task identities stay distinct across projects", async
     projects: workspace.projects,
     runtime: workspace.runtime,
   });
-  assert.equal(projects.schema, "ensemble.cli/v1");
+  assert.equal(projects.schema, "cab.cli/v1");
   assert.equal(typeof projects.coverage.observedAt, "number");
   assert.equal(projects.coverage.complete, true);
   assert.equal(projects.pagination, undefined);
@@ -261,7 +261,7 @@ test("task list pages by opaque token without implicit paging", async (t) => {
   const more = /^More: (.*)$/m.exec(first.out)?.[1] ?? "";
   assert.match(
     more,
-    /^ensemble task list --project [0-9a-f-]{36} --limit 10 --cursor [A-Za-z0-9_-]+$/,
+    /^cab task list --project [0-9a-f-]{36} --limit 10 --cursor [A-Za-z0-9_-]+$/,
   );
   const next = await h.run(more.split(" ").slice(1));
   assert.equal(next.code, 0, next.err);
@@ -566,7 +566,7 @@ test("task messages page and task get reports coverage", async (t) => {
   assert.match(human.out, /^Gap: more-pages$/m);
   assert.match(
     human.out,
-    new RegExp(`^More: ensemble task messages ${id} --limit 2 --cursor `, "m"),
+    new RegExp(`^More: cab task messages ${id} --limit 2 --cursor `, "m"),
   );
   assert.equal((await h.run(["task", "messages", "nope"])).code, 2);
   const missing = await h.run([
@@ -677,10 +677,10 @@ test("task get names the lead assignment, execution and who acts next", async (t
   const projectId = (await ok(["task", "get", q.taskId])).data.task.projectId;
   assert.deepEqual(cells(line(asked, "Next") ?? ""), [
     "Next:",
-    `you · answer question (ensemble inbox list --project ${projectId})`,
+    `you · answer question (cab inbox list --project ${projectId})`,
   ]);
   // A task nobody needs to act on does not name the Inbox.
-  assert.ok(!(line(bare, "Next") ?? "").includes("ensemble inbox"));
+  assert.ok(!(line(bare, "Next") ?? "").includes("cab inbox"));
 });
 
 const COLUMN_WORDS =
@@ -911,7 +911,7 @@ test("browse reads are read-only, capability gated and refuse managed assignment
   const before = databaseDigest(s.f);
   for (const args of commands) {
     const out = await ok(args);
-    assert.equal(out.schema, "ensemble.cli/v1");
+    assert.equal(out.schema, "cab.cli/v1");
     assert.equal(typeof out.coverage.observedAt, "number");
     assert.equal(typeof out.coverage.complete, "boolean");
     assert.ok(Array.isArray(out.coverage.gaps));
@@ -926,8 +926,8 @@ test("browse reads are read-only, capability gated and refuse managed assignment
   for (const args of commands) {
     const r = await h.run(args, {
       env: {
-        ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
-        ENSEMBLE_MANAGED_ASSIGNMENT: "1",
+        CAB_CLI_CONFIG_DIR: h.configDir,
+        CAB_MANAGED_ASSIGNMENT: "1",
       },
     });
     assert.equal(r.code, 3, args.join(" "));

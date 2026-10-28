@@ -26,7 +26,7 @@ type Publication = Extract<CommandReceipt, { kind: "publication" }>;
 const scope = (taskId: string) => `task:${taskId}`;
 
 const IRREVERSIBLE =
-  "Publishing creates a public GitHub issue that Ensemble cannot delete or take back; closing the issue on GitHub is the only recovery.";
+  "Publishing creates a public GitHub issue that the service cannot delete or take back; closing the issue on GitHub is the only recovery.";
 
 function expectedTaskVersion(ctx: WriteContext) {
   const v = positiveIntFlag(
@@ -100,10 +100,10 @@ function publicationLines(p: Publication) {
 function sendingNote(taskId: string, p: Publication) {
   const create = p.steps.find((s) => s.kind === "issue.create")?.state;
   if (create === "confirmed-success")
-    return `Issue #${p.issueNumber} was created. A later step is waiting for GitHub or a retry. Nothing is sent again; run 'ensemble delivery refresh ${taskId}' to continue, and the task converts when the steps are recorded. Link and Abandon do not apply.`;
+    return `Issue #${p.issueNumber} was created. A later step is waiting for GitHub or a retry. Nothing is sent again; run 'cab delivery refresh ${taskId}' to continue, and the task converts when the steps are recorded. Link and Abandon do not apply.`;
   if (create !== "uncertain")
-    return `The create is still in progress or waiting for a retry. Nothing is sent again; run 'ensemble delivery refresh ${taskId}' to continue.`;
-  return `The create's outcome is not known. Nothing is sent again. Run 'ensemble delivery refresh ${taskId}' to read GitHub again; if the issue exists, run 'ensemble delivery publish-link ${taskId} --publication-id ${p.publicationId} --issue N'. 'ensemble delivery publish-abandon ${taskId} --publication-id ${p.publicationId}' gives up and may leave a duplicate issue.`;
+    return `The create is still in progress or waiting for a retry. Nothing is sent again; run 'cab delivery refresh ${taskId}' to continue.`;
+  return `The create's outcome is not known. Nothing is sent again. Run 'cab delivery refresh ${taskId}' to read GitHub again; if the issue exists, run 'cab delivery publish-link ${taskId} --publication-id ${p.publicationId} --issue N'. 'cab delivery publish-abandon ${taskId} --publication-id ${p.publicationId}' gives up and may leave a duplicate issue.`;
 }
 
 const stateNote = (taskId: string, p: Publication) =>
@@ -161,7 +161,7 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
         "delivery publish-review TASK_ID --target ID --expected-task-version N [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-task-version: the task's version ('ensemble task get TASK_ID'); required. --target is an ID from its Publication section.",
+        "--expected-task-version: the task's version ('cab task get TASK_ID'); required. --target is an ID from its Publication section.",
       flags: ["target", "expected-task-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -182,7 +182,7 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
               "policy-denied",
               `This task cannot be published: ${policy?.reason ?? "not reported"} Nothing was sent.`,
               {
-                fix: `Run 'ensemble task get ${taskId}' to see the task.`,
+                fix: `Run 'cab task get ${taskId}' to see the task.`,
               },
             );
           const target = policy.targets.find((t) => t.id === targetId);
@@ -236,7 +236,7 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
             "",
             IRREVERSIBLE,
             r.decision === "pending"
-              ? `Approve or deny with: ensemble delivery publish-confirm ${taskId} --review-id ${r.reviewId} --expected-revision ${r.revision} --material-hash ${r.materialHash} --decision approved|denied`
+              ? `Approve or deny with: cab delivery publish-confirm ${taskId} --review-id ${r.reviewId} --expected-revision ${r.revision} --material-hash ${r.materialHash} --decision approved|denied`
               : `This review is already ${r.decision}.`,
           ].join("\n"),
         };
@@ -250,7 +250,7 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
         "delivery publish-confirm TASK_ID --review-id UUID --expected-revision N --material-hash HASH --decision approved|denied [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-revision and --material-hash: printed by 'ensemble delivery publish-review'; required.",
+        "--expected-revision and --material-hash: printed by 'cab delivery publish-review'; required.",
       flags: [
         "review-id",
         "expected-revision",
@@ -297,7 +297,7 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
               "Not confirmed: the review's revision or material hash does not match, it is already decided, or the task, grants or target changed since the review. The decision is unchanged.",
               {
                 ...error.extra,
-                fix: `Run 'ensemble task get ${taskId}' and review again with 'ensemble delivery publish-review'.`,
+                fix: `Run 'cab task get ${taskId}' and review again with 'cab delivery publish-review'.`,
               },
             );
           throw error;
@@ -310,7 +310,7 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
             `Review ${reviewId} is ${r.decision} (request ${key}). Nothing was created on GitHub.`,
             reviewLines(r),
             r.decision === "approved"
-              ? `Create the issue with: ensemble delivery publish-send ${taskId} --review-id ${reviewId} --expected-task-version ${r.taskVersion}`
+              ? `Create the issue with: cab delivery publish-send ${taskId} --review-id ${reviewId} --expected-task-version ${r.taskVersion}`
               : "A denied review is final; a changed request needs a new review.",
           ].join("\n"),
         };
@@ -386,7 +386,7 @@ export const deliveryPublishCommands = new Map<string, WriteCommand>([
               "Not linked: that issue does not carry this publication's marker, or the publication's create does not have an unknown outcome. Nothing changed.",
               {
                 ...error.extra,
-                fix: `Run 'ensemble task get ${taskId}' to see the publication.`,
+                fix: `Run 'cab task get ${taskId}' to see the publication.`,
               },
             );
           throw error;

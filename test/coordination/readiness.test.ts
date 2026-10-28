@@ -40,7 +40,7 @@ const uid = process.getuid?.();
 type Fixture = { root: string; bin: string; data: string; auth: string };
 
 function fixture(t: { after: (fn: () => void) => void }): Fixture {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-ready-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-ready-")));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const bin = join(root, "bin");
@@ -490,7 +490,7 @@ test("github discovery is not configured, readable or failing", async (t) => {
 
 test("service discovery probes gh only for a gh reference", async (t) => {
   const f = fixture(t);
-  const variable = "ENSEMBLE_READINESS_DISCOVERY_TEST";
+  const variable = "CAB_READINESS_DISCOVERY_TEST";
   let ref: string | null = null;
   let probes = 0;
   const service = {

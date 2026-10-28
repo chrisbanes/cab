@@ -147,7 +147,7 @@ test("A Claude token already in the service environment needs a restart, and the
 
 test("Settings sets a file: Claude token reference and shows it unavailable when unsafe", async (t, journey) => {
   const directory = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-claude-token-browser-")),
+    mkdtempSync(join(tmpdir(), "cab-claude-token-browser-")),
   );
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   chmodSync(directory, 0o700);
@@ -196,7 +196,7 @@ test("Settings sets a file: Claude token reference and shows it unavailable when
 
 test("the Settings overview Claude row is not prefilled and refuses ~", async (t, journey) => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-claude-token-home-")),
+    mkdtempSync(join(tmpdir(), "cab-claude-token-home-")),
   );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "Home Folder ünï");

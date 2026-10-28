@@ -441,7 +441,7 @@ test("current exclusions cover every retained diff and rename path without metad
         repositoryId: null,
         path: "renamed-new.txt",
         originRoot: workspace.path,
-        mime: "application/vnd.ensemble.workspace-diff+json",
+        mime: "application/vnd.cab.workspace-diff+json",
         sha256: digest(payload),
         size: payload.byteLength,
         capturedAt: Date.now(),

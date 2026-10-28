@@ -300,7 +300,7 @@ test("ordinary GitHub observation identity survives changed redaction exclusions
         threadId: w.threadId,
         turnId: w.turnId,
         callId: randomUUID(),
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: {
           summary: "Stable retained result",
           review: {

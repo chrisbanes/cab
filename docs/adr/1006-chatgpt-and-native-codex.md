@@ -6,7 +6,7 @@ status: accepted
 
 Both integrations are deferred until after the standalone MVP. Planning,
 feasibility probes and implementation are paused under
-[epic #734](https://github.com/chrisbanes/ensemble/issues/734) until Chris
+[epic #734](https://github.com/chrisbanes/cab/issues/734) until Chris
 explicitly reopens the work and current APIs, requirements and dependencies are
 revalidated. Saved ChatGPT/Codex project placement is optional.
 
@@ -18,13 +18,13 @@ capability, not MVP obligations or implemented behaviour.
 
 ## Retained integration requirements
 
-Ensemble remains usable independently by individual self-hosters, initially on
+cab remains usable independently by individual self-hosters, initially on
 macOS. Its web UI and an optional ChatGPT plugin both support daily task operations:
 creation, tracking, durable messages, questions and approvals. Setup and recovery
-may remain in the web UI. Ensemble retains projects, policy, scheduling, durable
+may remain in the web UI. cab retains projects, policy, scheduling, durable
 coordination and execution supervision; the plugin is another operator interface.
 
-ChatGPT access is enabled explicitly per Ensemble project. Expose task content,
+ChatGPT access is enabled explicitly per cab project. Expose task content,
 results and interaction material, excluding credentials, private instructions and
 raw runtime logs. Subscribed completion, question and approval events are required
 for the future integration. Events explain outcomes or request input; they do not
@@ -34,16 +34,16 @@ continue to govern actions.
 Self-hosters enabling ChatGPT supply a reachable, authenticated HTTPS MCP endpoint.
 Expose only the plugin API and keep the operator UI and runtime private. Provide
 plugin packaging, guided deployment/authentication setup and connection checks;
-automatic public endpoint provisioning and an Ensemble-hosted relay are outside
+automatic public endpoint provisioning and a cab-hosted relay are outside
 this decision. This amends ADR-1004's private-transport scope only for the optional
 plugin endpoint, without changing runtime access or authentication.
 
 New tasks should appear as one main native Codex task with linked, inspectable
 worker conversations. Saved host project placement/linkage is optional; tasks
-belong to Ensemble projects. Repository tasks default to retained Ensemble
+belong to cab projects. Repository tasks default to retained cab
 task worktrees. Human inspection does not transfer ownership. Continuing work in
-Codex requires explicit handover; Ensemble holds further task dispatch. Explicit
-return requires settled-execution and changed-workspace checks before Ensemble
+Codex requires explicit handover; cab holds further task dispatch. Explicit
+return requires settled-execution and changed-workspace checks before cab
 reacquires control. Neither idleness nor operator acknowledgement releases existing
 crash, Stop, failure or uncertainty holds. No physical process containment is added.
 

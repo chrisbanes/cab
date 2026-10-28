@@ -1,6 +1,6 @@
 # Haze standalone cutover proposal
 
-This is an executable proposal, not approval to execute it. [#761](https://github.com/chrisbanes/ensemble/issues/761) owns deployment and cutover. Nothing in this proposal authorizes touching the prototype database, enabling a competing scheduler, or resuming old work. Physical sleep/wake evidence [#732](https://github.com/chrisbanes/ensemble/issues/732) remains required before operational use.
+This is an executable proposal, not approval to execute it. [#761](https://github.com/chrisbanes/cab/issues/761) owns deployment and cutover. Nothing in this proposal authorizes touching the prototype database, enabling a competing scheduler, or resuming old work. Physical sleep/wake evidence [#732](https://github.com/chrisbanes/cab/issues/732) remains required before operational use.
 
 ## Named target and approval packet
 
@@ -47,7 +47,7 @@ This checks presence only; canonical path, host, ownership, policy and identity 
 
 1. Re-read the packet bindings and native GitHub/host/controller state. Verify #732, final candidate evidence and execution approval. Keep the new project paused and tasks unready. If old work cannot be enumerated, stop here without starting or changing either controller.
 2. Execute only the approved old-work dispositions through their actual lifecycle controls. Verify exact terminal generations and reconcile uncertain effects independently; an acknowledgement, missing UI row, PID alone or connection failure is insufficient. Preserve unresolved Stop, ownership, capacity and effect holds. Record each identity and receipt. Confirm no old scheduler or writer can act on Haze before enabling any new work.
-3. Stop the exact old controller using the bound control seam, verify its exact process/service is absent, and preserve its database, configuration and workspaces using the approved method. Do not apply Ensemble's standalone backup CLI to a prototype database. Record backup integrity/readback and rollback controls before proceeding.
+3. Stop the exact old controller using the bound control seam, verify its exact process/service is absent, and preserve its database, configuration and workspaces using the approved method. Do not apply cab's standalone backup CLI to a prototype database. Record backup integrity/readback and rollback controls before proceeding.
 4. Build the reviewed standalone checkout with the pinned runtime and `npm ci && npm run check`. Initialize separate operator auth with the hidden prompt described in [operations](standalone-macos.md). Keep the password out of argv, plist and evidence. Render the exact reviewed plist using the absolute values from the packet:
 
    ```sh

@@ -75,7 +75,7 @@ generation with a durable result or waiting action settles only that generation'
 effect, except while an exact completion request remains pending; that request's
 finalizer owns its effect so restart reconciliation can require it pending.
 Settling a lead generation's effect does not complete the lead assignment.
-Worker assignments become completed only when their exact `ensemble_report_result`
+Worker assignments become completed only when their exact `cab_report_result`
 is recorded; a result-free worker turn follows the bounded reporting-repair and
 hold path instead.
 

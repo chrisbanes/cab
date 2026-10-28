@@ -233,7 +233,7 @@ export async function runProtocol(options = {}) {
     fixture || Object.keys(options).every((key) => key === "source"),
     "unsupported-live-config",
   );
-  const root = mkdtempSync(join(tmpdir(), "ensemble-ui01-protocol-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-ui01-protocol-"));
   chmodSync(root, 0o700);
   const evidencePath = `${root}.json`;
   const evidence = {
@@ -271,7 +271,7 @@ export async function runProtocol(options = {}) {
       providerThreads:
         "Provider thread records may remain; this probe does not delete them.",
       boundary:
-        "Existing operator login and Codex runtime controls; no independent Ensemble sandbox guarantee.",
+        "Existing operator login and Codex runtime controls; no independent cab sandbox guarantee.",
       callbackWait:
         "The same App Server process/turn retains the callback; no suspension or slot-release protocol is qualified.",
     },
@@ -646,7 +646,7 @@ export async function runProtocol(options = {}) {
     assert.ok(evidence.process, "process-identity-unproved");
     stage = "initialize-and-policy";
     await request("initialize", {
-      clientInfo: { name: "ensemble", version: "0.1.0" },
+      clientInfo: { name: "cab", version: "0.1.0" },
       capabilities: { experimentalApi: true },
     });
     await bounded(send({ method: "initialized" }));
@@ -951,7 +951,7 @@ export async function runProtocol(options = {}) {
 }
 
 function sourceEvidence() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-ui01-schema-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-ui01-schema-"));
   chmodSync(directory, 0o700);
   try {
     const command = (executable, args) =>
@@ -994,7 +994,7 @@ function sourceEvidence() {
       revision: command("git", ["rev-parse", "HEAD"]),
       node: process.version,
       npm: command(process.execPath, [
-        "/tmp/ensemble-npm122.pkgNDI/package/bin/npm-cli.js",
+        "/tmp/cab-npm122.pkgNDI/package/bin/npm-cli.js",
         "--version",
       ]),
       executable,
@@ -1018,9 +1018,7 @@ function sourceEvidence() {
   }
 }
 
-export function consumeServiceGrant(
-  path = process.env.ENSEMBLE_UI01_SERVICE_GRANT,
-) {
+export function consumeServiceGrant(path = process.env.CAB_UI01_SERVICE_GRANT) {
   if (!path)
     throw new Error(
       "Service proof requires exactly --live --phase protocol or --live --phase service with a finite root-owned grant",

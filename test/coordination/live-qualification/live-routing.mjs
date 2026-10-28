@@ -576,7 +576,7 @@ function sha256File(path) {
 function isExactCreatedRoutingRoot(candidate) {
   if (!candidate || evidence.fixture.created !== true) return false;
   const name = basename(candidate);
-  const prefix = "ensemble-s05-routing-";
+  const prefix = "cab-s05-routing-";
   if (
     dirname(candidate) !== tmpdir() ||
     !name.startsWith(prefix) ||
@@ -672,7 +672,7 @@ async function run() {
   };
 
   progress("private-disposable-fixture");
-  root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s05-routing-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s05-routing-")));
   evidence.fixture.created = true;
   chmodSync(root, 0o700);
   const ledgerRelativeToFixture = relative(root, realpathSync(ledgerPath));
@@ -722,17 +722,17 @@ async function run() {
   progress("authenticated-profile-and-enabled-routing-setup");
   const leadProfileId = await createProfile(
     "S05 live routing lead",
-    "Use only Ensemble coordination tools. As the task lead, complete a lead-review or disabled-routing task by calling ensemble_request_completion once with the exact result IDs in its durable inbox, or an empty list when there are none. If a candidate result arrives, review that result ID and request completion once. Do not delegate, ask questions, or request follow-up.",
+    "Use only cab coordination tools. As the task lead, complete a lead-review or disabled-routing task by calling cab_request_completion once with the exact result IDs in its durable inbox, or an empty list when there are none. If a candidate result arrives, review that result ID and request completion once. Do not delegate, ask questions, or request follow-up.",
     "Route review and accountability",
   );
   const candidateProfileId = await createProfile(
     "S05 live routing candidate",
-    "Use only Ensemble coordination tools. For this bounded one-step task, report the requested exact marker as your result once with ensemble_report_result, then stop. Do not ask questions or request follow-up.",
+    "Use only cab coordination tools. For this bounded one-step task, report the requested exact marker as your result once with cab_report_result, then stop. Do not ask questions or request follow-up.",
     "Best eligible profile for clear exact-marker tasks; can return requested markers as a durable result without repository changes",
   );
   const alternateCandidateProfileId = await createProfile(
     "S05 live routing alternate candidate",
-    "Use only Ensemble coordination tools. For this bounded one-step task, report the requested exact marker as your result once with ensemble_report_result, then stop. Do not ask questions or request follow-up.",
+    "Use only cab coordination tools. For this bounded one-step task, report the requested exact marker as your result once with cab_report_result, then stop. Do not ask questions or request follow-up.",
     "Eligible for simple one-step exact-marker work and can return requested markers as a durable result without repository changes",
   );
   const projectId = await createProject(
@@ -862,7 +862,7 @@ async function run() {
   const disabledTaskId = await createTask(
     disabledProjectId,
     "S05 disabled routing task",
-    `Complete this disabled-routing probe through ensemble_request_completion with an empty reviewedResultIds list. Include marker S05_DISABLED_CODEX_OK in a brief response before calling the tool.`,
+    `Complete this disabled-routing probe through cab_request_completion with an empty reviewedResultIds list. Include marker S05_DISABLED_CODEX_OK in a brief response before calling the tool.`,
   );
   currentRouteTaskId = disabledTaskId;
   progress("disabled-routing-provision-task");
@@ -929,7 +929,7 @@ async function run() {
     assignmentId: explicitAssignmentId,
     profileId: candidateProfileId,
     brief:
-      "Complete the exact-marker task S05_EXPLICIT_CODEX_OK by reporting that exact marker through ensemble_report_result, then stop.",
+      "Complete the exact-marker task S05_EXPLICIT_CODEX_OK by reporting that exact marker through cab_report_result, then stop.",
     resultDestination: "S05 explicit verification",
     requesterAssignmentId: null,
   });

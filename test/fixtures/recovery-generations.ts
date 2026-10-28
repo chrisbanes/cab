@@ -63,7 +63,7 @@ export class NoTurnRuntime implements Runtime {
         threadId,
         turnId,
         callId: `completion-${turnId}`,
-        tool: "ensemble_request_completion",
+        tool: "cab_request_completion",
         arguments: { reviewedResultIds: [] },
       }),
     );
@@ -122,7 +122,7 @@ export class PreTurnRuntime implements Runtime {
         threadId,
         turnId,
         callId: "initial-question",
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: "Initial waiting turn" },
       });
       assert.equal(r.success, true);
@@ -133,7 +133,7 @@ export class PreTurnRuntime implements Runtime {
         threadId,
         turnId,
         callId: `fresh-completion-${turnId}`,
-        tool: "ensemble_request_completion",
+        tool: "cab_request_completion",
         arguments: { reviewedResultIds: [] },
       }),
     );
@@ -523,7 +523,7 @@ export async function cliGeneration(
   const evidenceFile = (body: Record<string, unknown>) =>
     o.file(
       `${randomUUID()}.json`,
-      JSON.stringify({ schema: "ensemble.cli.recovery-evidence/v1", ...body }),
+      JSON.stringify({ schema: "cab.cli.recovery-evidence/v1", ...body }),
     );
   const receiptEvidence = {
     receipt: {

@@ -40,7 +40,7 @@ import {
 } from "../../src/standalone/workspaces.js";
 
 function fixture(options: WorkspaceManagerOptions = {}) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-workspaces-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-workspaces-"));
   const databasePath = join(root, "standalone.sqlite");
   const workspaceRoot = join(root, "task-workspaces");
   let db = new DatabaseSync(databasePath);
@@ -875,7 +875,7 @@ test("output overflow and sticky cancellation settle safely and retain uncertain
 });
 
 test("a legacy binding table migrates git uncertainty to false", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-workspace-migration-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-workspace-migration-"));
   const db = new DatabaseSync(join(root, "legacy.sqlite"));
   try {
     db.exec(`CREATE TABLE task_workspace_bindings (
@@ -956,7 +956,7 @@ test("a missing workspace becomes a visible execution hold and is not silently r
 });
 
 test("restored managed bindings reject source-root identity before path access", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-workspace-restore-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-workspace-restore-"));
   const sourceInstall = join(root, "source-install");
   const destinationInstall = join(root, "destination-install");
   const sourceWorkspaceRoot = join(sourceInstall, "workspaces");
@@ -1089,7 +1089,7 @@ test("repeated readiness checks reuse an unchanged worktree identity only briefl
     );
     assert.equal(identityReads(), afterFirst + 3, "reuse expires");
 
-    writeFileSync(gitEntry, "gitdir: /nonexistent-ensemble-worktree\n");
+    writeFileSync(gitEntry, "gitdir: /nonexistent-cab-worktree\n");
     assert.equal(
       (await f.manager.get("recheck-task", inspection))?.state,
       "held",

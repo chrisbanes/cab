@@ -7,7 +7,7 @@
   "projectNodeId": "PVT_kwHOAAN4ns4BlV3Y",
   "searchQuery": "repo:chrisbanes/ensemble-s06-fixture label:s06-ready",
   "projectFilter": "label:s06-selected",
-  "credentialRef": "env:ENSEMBLE_S06_GITHUB_TOKEN",
+  "credentialRef": "env:CAB_S06_GITHUB_TOKEN",
   "readiness": {
     "mode": "all",
     "conditions": [

@@ -105,7 +105,7 @@ class IntegrationRuntime implements Runtime {
       threadId: _threadId,
       turnId,
       callId: `fixture-question-${_threadId}-${turnId}`,
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: {
         question: "Integration fixture is waiting for the next step",
       },
@@ -275,7 +275,7 @@ function receiptFor(record: RecoveryRecord): RecoveryReceipt {
 }
 
 test("integrates yielding, pause, Stop, restart reconciliation and exact recovery without replay", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s03b-integration-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s03b-integration-"));
   const dataDir = join(root, "data");
   const profileId = randomUUID();
   const verifier: TerminationVerifier = {

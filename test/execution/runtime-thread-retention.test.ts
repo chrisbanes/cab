@@ -15,9 +15,7 @@ import {
 test("service bounds settled thread snapshots after held bindings and failed turn startup", {
   timeout: 120_000,
 }, async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-thread-retention-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-thread-retention-"));
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
   const f = fixture(root);
@@ -187,7 +185,7 @@ test("successful resumes do not retain unused native qualifications", {
   timeout: 120_000,
 }, async () => {
   const root = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-resume-qualification-retention-"),
+    join(tmpdir(), "cab-runtime-resume-qualification-retention-"),
   );
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
@@ -263,7 +261,7 @@ test("service trims settled snapshots as concurrent failed turn-start owners rel
   timeout: 120_000,
 }, async () => {
   const root = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-thread-release-retention-"),
+    join(tmpdir(), "cab-runtime-thread-release-retention-"),
   );
   const workspaceRoot = join(root, "workspaces");
   mkdirSync(workspaceRoot);

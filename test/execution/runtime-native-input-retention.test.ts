@@ -24,9 +24,7 @@ import {
 test("production service settles 2,000 native waiters and callbacks with SQLite authority", {
   timeout: 180_000,
 }, async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-retention-native-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-retention-native-"));
   const f = fixture(root);
   let serviceToStop = f.service;
   let waitingTurn:
@@ -398,9 +396,7 @@ test("changed or missing legacy native qualification facts stay unqualified", {
     "missing-legacy-settings",
     "changed-tools",
   ] as const) {
-    const root = mkdtempSync(
-      join(tmpdir(), `ensemble-runtime-retention-${mode}-`),
-    );
+    const root = mkdtempSync(join(tmpdir(), `cab-runtime-retention-${mode}-`));
     const f = fixture(root);
     try {
       await f.service.start();

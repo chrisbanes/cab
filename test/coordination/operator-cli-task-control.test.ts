@@ -274,7 +274,7 @@ test("stop and resume with a stale expected version name the current version", a
       ),
     );
     const fix = human.err.match(/^Fix: (.*)$/m)?.[1] ?? "";
-    assert.match(fix, new RegExp(`ensemble task get ${s.taskId}`));
+    assert.match(fix, new RegExp(`cab task get ${s.taskId}`));
     assert.match(fix, new RegExp(`--expected-version ${current}\\b`));
     const json = await o.h.run([...args, "--output", "json"]);
     assert.equal(json.code, 4);
@@ -435,7 +435,7 @@ test("task resume whose post-read fails names task get", async (t) => {
   );
   assert.equal(resumed.code, 0, resumed.err);
   assert.match(resumed.out, /Requeued:/);
-  assert.equal(lastLine(resumed.out), `Next: ensemble task get ${s.taskId}`);
+  assert.equal(lastLine(resumed.out), `Next: cab task get ${s.taskId}`);
   assert.equal(stopped(o, s.taskId), false, "the Stop was cleared");
 });
 
@@ -457,10 +457,7 @@ test("task resume with no Stop in effect prints no contradicting Next", async (t
     /No operator Stop was in effect; nothing changed\./,
   );
   assert.doesNotMatch(resumed.out, /Resume cleared|No work started/);
-  assert.equal(
-    lastLine(resumed.out),
-    `Next: ensemble task get ${project.taskId}`,
-  );
+  assert.equal(lastLine(resumed.out), `Next: cab task get ${project.taskId}`);
   assert.doesNotMatch(resumed.out, /^Next: .*resume/m);
 });
 
@@ -556,7 +553,7 @@ test("task start-again queues a refused request again and explains what it canno
     r.err + r.out,
     /Start again unavailable: an execution is unresolved/,
   );
-  assert.match(r.err + r.out, /ensemble recovery/);
+  assert.match(r.err + r.out, /cab recovery/);
   assert.equal(requests(), 2);
 });
 

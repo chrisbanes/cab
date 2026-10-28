@@ -31,12 +31,8 @@ try {
         .getByRole("heading", { name: "Sign in", exact: true })
         .waitFor();
       await journey.capture(page, "synthetic-failure");
-      process.stdout.write(
-        "ensemble-test-evidence stdout synthetic-ci-probe\n",
-      );
-      process.stderr.write(
-        "ensemble-test-evidence stderr synthetic-ci-probe\n",
-      );
+      process.stdout.write("cab-test-evidence stdout synthetic-ci-probe\n");
+      process.stderr.write("cab-test-evidence stderr synthetic-ci-probe\n");
       process.stdout.write(
         "SYNTHETIC_PRIVATE_MARKER bearer=private-fixture-value\n",
       );

@@ -49,7 +49,7 @@ const projectReads = 10;
 
 const owner = "chrisbanes";
 /** The name of the in-process variable the service reads the delivery credential from. */
-const credentialName = "ENSEMBLE_1167_LIVE_CREDENTIAL";
+const credentialName = "CAB_1167_LIVE_CREDENTIAL";
 
 /**
  * One bounded run on a scratch user-owned Project linked to the fixture repository, driving the real
@@ -115,7 +115,7 @@ export async function runTaskPublicationJourney(
     }
     return response;
   };
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-1167-live-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-1167-live-")));
   let service: StandaloneService | undefined;
   let project: { nodeId: string; number: number } | undefined;
   let labelCreated = false;
@@ -265,7 +265,7 @@ export async function runTaskPublicationJourney(
       kind: "repository" as const,
       repositoryId,
       owner,
-      name: "ensemble-s07a-fixture",
+      name: "cab-s07a-fixture",
     };
     const projectSelection = {
       id: "project",
@@ -429,8 +429,9 @@ export async function runTaskPublicationJourney(
             number,
             title: issue.title,
             labels: issue.labels.map((l) => l.name),
-            bodyEndsWithMarker:
-              /<!-- ensemble-operation:[0-9a-f-]{36} -->$/.test(issue.body),
+            bodyEndsWithMarker: /<!-- cab-operation:[0-9a-f-]{36} -->$/.test(
+              issue.body,
+            ),
           };
         });
         throw new Error(
@@ -512,7 +513,7 @@ export async function runTaskPublicationJourney(
         number: issue.number,
         state: issue.state,
         labels: issue.labels.map((l) => l.name),
-        marked: /<!-- ensemble-operation:[0-9a-f-]{36} -->/.test(issue.body),
+        marked: /<!-- cab-operation:[0-9a-f-]{36} -->/.test(issue.body),
       };
     });
     const items = json([

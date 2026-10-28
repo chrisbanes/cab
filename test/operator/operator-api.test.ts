@@ -893,7 +893,7 @@ test("active execution retains its admitted generation while next-turn instructi
   assert.deepEqual(await api.execute(command), receipt);
   assert.doesNotMatch(
     JSON.stringify(after),
-    /PRIVATE INSTRUCTIONS|SECRET|ensemble-ui02-/,
+    /PRIVATE INSTRUCTIONS|SECRET|cab-ui02-/,
   );
   assert.match(after.data.task.title ?? "", /<script>/);
 });
@@ -913,14 +913,14 @@ test("scoped interactions preserve exact material, revision conflicts, and origi
       callId,
     });
   assert.equal(
-    (await call("ensemble_ask_question", { question: "Choose target" }, "q1"))
+    (await call("cab_ask_question", { question: "Choose target" }, "q1"))
       .success,
     true,
   );
   assert.equal(
     (
       await call(
-        "ensemble_request_approval",
+        "cab_request_approval",
         { action: "Publish", target: "next", material: { version: "next" } },
         "a1",
       )
@@ -982,7 +982,7 @@ test("scoped interactions preserve exact material, revision conflicts, and origi
   assert.equal(
     (
       await call(
-        "ensemble_request_approval",
+        "cab_request_approval",
         { action: "Publish", material: { text: "PRIVATE INSTRUCTIONS" } },
         "a2",
       )
@@ -1329,7 +1329,7 @@ test("history preserves omission identities and excludes captured instructions a
   );
   assert.doesNotMatch(
     JSON.stringify(history),
-    /PRIVATE INSTRUCTIONS|SECRET|ensemble-ui02-/,
+    /PRIVATE INSTRUCTIONS|SECRET|cab-ui02-/,
   );
 });
 test("retained ownership without a confirmed active intent and held request stays uncertain", async (t) => {
@@ -1573,7 +1573,7 @@ test("omitted-material denial replay remains exact after privacy-context change 
         threadId: work.threadId,
         turnId: work.turnId,
         callId: "unsafe-denial",
-        tool: "ensemble_request_approval",
+        tool: "cab_request_approval",
         arguments: {
           action: "Publish",
           material: { value: "PRIVATE INSTRUCTIONS" },
@@ -1638,7 +1638,7 @@ test("admitted and historical instruction snapshots stay private after configure
         threadId: work.threadId,
         turnId: work.turnId,
         callId: "old-snapshot-approval",
-        tool: "ensemble_request_approval",
+        tool: "cab_request_approval",
         arguments: {
           action: "Publish",
           material: { project: old.project, profile: old.profile },
@@ -1831,7 +1831,7 @@ test("project task summaries share task workspace and repository exclusions", as
 });
 
 test("polled task list, project and Inbox reads redact stored workspace paths without launching Git", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-polled-redaction-")),
+  const root = mkdtempSync(join(tmpdir(), "cab-polled-redaction-")),
     source = join(root, "source");
   mkdirSync(source);
   for (const args of [
@@ -2051,7 +2051,7 @@ test("core-valid material beyond public collection and depth limits remains priv
           threadId: work.threadId,
           turnId: work.turnId,
           callId: `beyond-public-${i}`,
-          tool: "ensemble_request_approval",
+          tool: "cab_request_approval",
           arguments: { action: "Publish", target: "artifact", material },
         })
       ).success,
@@ -2171,14 +2171,14 @@ test("catalog attention tracks current rejected completion and lead review, excl
       callId,
     });
   assert.equal(
-    (await call("ensemble_ask_question", { question: "Choose" }, "attention-q"))
+    (await call("cab_ask_question", { question: "Choose" }, "attention-q"))
       .success,
     true,
   );
   assert.equal(
     (
       await call(
-        "ensemble_request_completion",
+        "cab_request_completion",
         { reviewedResultIds: [] },
         "attention-c",
       )
@@ -2227,7 +2227,7 @@ test("catalog attention tracks current rejected completion and lead review, excl
     });
   });
   assert.ok((await codes(other.taskId)).includes("lead-review"));
-  // Ensemble owns a routing fallback, so it raises no Inbox intervention.
+  // cab owns a routing fallback, so it raises no Inbox intervention.
   assert.deepEqual(
     taskItems((await api.readInbox()).data.items).filter(
       (i) => i.taskId === other.taskId,
@@ -2249,8 +2249,8 @@ test("catalog attention tracks current rejected completion and lead review, excl
     1,
   );
 });
-test("an answered native question awaiting delivery is Ensemble's, not an operator question", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-question-delivery-"));
+test("an answered native question awaiting delivery is cab's, not an operator question", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cab-question-delivery-"));
   const f = nativeFixture(root);
   t.after(async () => {
     await f.service.stop();
@@ -2305,7 +2305,7 @@ test("an answered native question awaiting delivery is Ensemble's, not an operat
   assert.deepEqual(await listedAttention(api, task.taskId), [
     "question-delivery",
   ]);
-  // The recorded answer stays listed as Ensemble's delivery, with no intervention.
+  // The recorded answer stays listed as cab's delivery, with no intervention.
   assert.deepEqual(
     taskItems((await api.readInbox()).data.items)
       .filter((i) => i.taskId === task.taskId)
@@ -2401,7 +2401,7 @@ test("a routing fallback on a task with no project lead clears without operator 
   assert.ok(
     d.admission(seeded.taskId).reasons.includes("project-lead-unconfigured"),
   );
-  // Routing recorded a fallback that Ensemble has not committed to a lead yet.
+  // Routing recorded a fallback that cab has not committed to a lead yet.
   f.seedPersistedState((db) => {
     const routing = new RoutingAttemptStore(db),
       operation = routing.ensureOperation({
@@ -2989,7 +2989,7 @@ test("an exact profile replay returns its receipt after supported settings becom
 
 test("task reads redact a file-sourced Claude token value and path", async (t) => {
   const value = "claude-file-redaction-canary-6610",
-    root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-claude-file-")));
+    root = realpathSync(mkdtempSync(join(tmpdir(), "cab-claude-file-")));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const path = join(root, "claude-token");

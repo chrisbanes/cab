@@ -274,7 +274,7 @@ test("a rejected partial service startup reports its completed cleanup", async (
 });
 
 test("a timed-out directory allocation retains ownership for eventual cleanup", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-lifecycle-startup-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-lifecycle-startup-"));
   const oldTmpdir = process.env.TMPDIR;
   process.env.TMPDIR = root;
   let finish: (() => void) | undefined;

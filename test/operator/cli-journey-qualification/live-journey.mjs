@@ -1,4 +1,4 @@
-// CLI8 assembled operator journey through the packed `ensemble` executable, installed
+// CLI8 assembled operator journey through the packed `cab` executable, installed
 // outside the checkout and driven as a scripted external client.
 //   --fixture [--keychain]          scripted runtime on loopback (CI); --keychain logs the
 //                                   read/write connection in through the macOS Keychain.
@@ -185,7 +185,7 @@ class ScriptedRuntime extends OperatorFixtureRuntime {
       threadId,
       turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: {
         summary: phrase ? `PASS ${phrase}` : "FAIL missing-required-phrase",
       },
@@ -196,7 +196,7 @@ class ScriptedRuntime extends OperatorFixtureRuntime {
     this.complete(Number(turnId.split("-").at(-1)));
   }
 }
-const shellCommand = "printenv ENSEMBLE_MANAGED_ASSIGNMENT || echo unset";
+const shellCommand = "printenv CAB_MANAGED_ASSIGNMENT || echo unset";
 
 /** A disposable root, its service on loopback, and a signed-in browser session. */
 async function startService(root, dataDir, password) {
@@ -362,14 +362,14 @@ try {
       await run("security", [
         "delete-generic-password",
         "-s",
-        "ensemble-cli",
+        "cab-cli",
         "-a",
         keychainAccount,
       ]).catch(() => {});
       evidence.cleanup.keychainItemAbsent = await run("security", [
         "find-generic-password",
         "-s",
-        "ensemble-cli",
+        "cab-cli",
         "-a",
         keychainAccount,
       ]).then(
@@ -446,7 +446,7 @@ function cliRunner(bin, home) {
     PATH: `${resolve(process.execPath, "..")}:/usr/bin:/bin`,
     // `security` finds the login Keychain through HOME; the CLI's own state stays disposable.
     HOME: keychainLogin ? process.env.HOME : home,
-    ENSEMBLE_CLI_CONFIG_DIR: join(home, "config"),
+    CAB_CLI_CONFIG_DIR: join(home, "config"),
   };
   const cli = async (step, args, expect = 0) => {
     let code = 0;
@@ -500,7 +500,7 @@ function cliRunner(bin, home) {
       );
       child.stdout.on("data", (c) => {
         text += c;
-        if (!sent && text.includes("Ensemble CLI token:")) {
+        if (!sent && text.includes("cab CLI token:")) {
           sent = true;
           child.stdin.end(`${token}\n`);
         }
@@ -536,19 +536,24 @@ async function journey() {
       throw new Error("--retain DIR must be empty or absent");
     mkdirSync(root, { recursive: true, mode: 0o700 });
     retain = true;
-  } else root = mkdtempSync(join(tmpdir(), "ensemble-cli8-"));
+  } else root = mkdtempSync(join(tmpdir(), "cab-cli8-"));
   chmodSync(root, 0o700);
   mkdirSync(join(root, "install"));
   const project = await installPacked(join(root, "install"));
-  const bin = join(project, "node_modules", ".bin", "ensemble");
+  const bin = join(project, "node_modules", ".bin", "cab");
   evidence.install = {
     prefix: sanitize(project),
     outsideCheckout: !resolve(project).startsWith(`${checkout}/`),
     testsShipped: existsSync(
-      join(project, "node_modules", "ensemble", "dist", "test"),
+      join(project, "node_modules", "@chrisbanes", "cab", "dist", "test"),
     ),
   };
   assert.ok(evidence.install.outsideCheckout, "installed outside the checkout");
+  assert.equal(
+    evidence.install.testsShipped,
+    false,
+    "installed package excludes test files",
+  );
   const home = join(root, "client");
   mkdirSync(home, { mode: 0o700 });
   const { cli, ptyLogin } = cliRunner(bin, home);
@@ -596,9 +601,9 @@ async function journey() {
       "Disposable qualification probe. Each turn:",
       `1. Run exactly one shell command: ${shellCommand}`,
       "2. Look in your captured profile instructions for a line that starts with CLI8_REQUIRED_PHRASE followed by a colon and one word.",
-      "3. Call ensemble_report_result once. If that line is absent, the summary is exactly: FAIL missing-required-phrase",
+      "3. Call cab_report_result once. If that line is absent, the summary is exactly: FAIL missing-required-phrase",
       "   If it is present, the summary is exactly PASS followed by a space and that word.",
-      "4. End the turn. Do not call any other Ensemble tool and do not request completion.",
+      "4. End the turn. Do not call any other cab tool and do not request completion.",
     ].join("\n"),
     ready: false,
   });
@@ -1248,7 +1253,7 @@ async function remotePhase() {
     transport: `${origin} -> ${s.origin}`,
     turnsAdmitted: 0,
   };
-  // Run on the peer with ENSEMBLE_CLI_CONFIG_DIR set to a temporary directory.
+  // Run on the peer with CAB_CLI_CONFIG_DIR set to a temporary directory.
   const ro = "--connection remote-ro --output json";
   evidence.remoteChecklist = [
     [

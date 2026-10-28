@@ -410,22 +410,22 @@ test("a wait detail is bounded like a label", () => {
 
 test("the CLI Fix is the command or Settings path", () => {
   assert.deepEqual(cliFix({ kind: "resume-project", projectId }), [
-    `ensemble project prepare ${projectId} --out project.json --paused false`,
-    "ensemble project apply --file project.json",
+    `cab project prepare ${projectId} --out project.json --paused false`,
+    "cab project apply --file project.json",
   ]);
   assert.match(
     cliFix({ kind: "choose-lead", projectId })[0] ?? "",
     /--lead-profile PROFILE_ID$/,
   );
-  assert.deepEqual(cliFix({ kind: "readiness" }), ["ensemble doctor"]);
+  assert.deepEqual(cliFix({ kind: "readiness" }), ["cab doctor"]);
   assert.deepEqual(cliFix({ kind: "add-claude" }), ["Settings → Add Claude"]);
   assert.deepEqual(cliFix({ kind: "open-profile", profileId }), [
     `Settings → Profiles → ${profileId}`,
   ]);
   assert.deepEqual(cliFix({ kind: "open-repositories", projectId }), [
-    `ensemble project sources ${projectId}`,
-    `ensemble project prepare-source ${projectId} --out source.json --edit-file EDIT_FILE`,
-    "ensemble project apply --file source.json",
+    `cab project sources ${projectId}`,
+    `cab project prepare-source ${projectId} --out source.json --edit-file EDIT_FILE`,
+    "cab project apply --file source.json",
   ]);
 });
 
@@ -448,16 +448,16 @@ test("revoked repository access discloses no repository and a recovery link send
     [
       "Waiting: Assignment recovery unresolved",
       "  Worker",
-      `  Recovery: ensemble recovery get ${assignmentId}`,
+      `  Recovery: cab recovery get ${assignmentId}`,
     ],
   );
   assert.deepEqual(
     waitLines(one({ repositoryAccessRevoked: true }), projectId),
     [
       "Waiting: Repository access revoked",
-      `  Fix: ensemble project sources ${projectId}`,
-      `  Fix: ensemble project prepare-source ${projectId} --out source.json --edit-file EDIT_FILE`,
-      "  Fix: ensemble project apply --file source.json",
+      `  Fix: cab project sources ${projectId}`,
+      `  Fix: cab project prepare-source ${projectId} --out source.json --edit-file EDIT_FILE`,
+      "  Fix: cab project apply --file source.json",
     ],
   );
 });
@@ -472,7 +472,7 @@ test("the CLI names the approval command for an approval wait", () => {
     ),
     [
       "Waiting: Approval needs a decision",
-      `  Review: ensemble approval get ${projectId} request-1`,
+      `  Review: cab approval get ${projectId} request-1`,
     ],
   );
 });

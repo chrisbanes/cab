@@ -144,7 +144,7 @@ test("local forms submit versioned commands and render secret-safe views", async
 });
 
 test("rendered form retries replay one receipt and retain create IDs", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-form-retry-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-form-retry-"));
   chmodSync(directory, 0o700);
   const authFile = join(directory, "operator-auth.json");
   const service = new StandaloneService(directory, fakeRuntime);
@@ -400,7 +400,7 @@ test("draft project stays held until an active lead is selected in its form", as
 });
 
 test("standalone startup migrates and exposes the same local operator boundary", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-operator-service-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-operator-service-"));
   const service = new StandaloneService(directory, fakeRuntime);
   try {
     await service.start();
@@ -429,7 +429,7 @@ test("standalone startup migrates and exposes the same local operator boundary",
 async function openAuth(
   options: Partial<Parameters<typeof OperatorAuth.open>[0]> = {},
 ) {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-auth-limits-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-auth-limits-"));
   chmodSync(directory, 0o700);
   const authFile = join(directory, "operator-auth.json");
   await OperatorAuth.initialize(authFile, "session limit operator password");

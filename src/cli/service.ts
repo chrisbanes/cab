@@ -73,10 +73,10 @@ const SNAPSHOT_COMMANDS = `  snapshot create SOURCE_DATA_DIR SNAPSHOT
 `;
 const SERVICE_NOTES = `
 SERVICE_OPTIONS:
-  --state-dir DIR          default ~/Library/Application Support/Ensemble
-  --log-dir DIR            default ~/Library/Logs/Ensemble
+  --state-dir DIR          default ~/Library/Application Support/cab
+  --log-dir DIR            default ~/Library/Logs/cab
   --launch-agents-dir DIR  default ~/Library/LaunchAgents
-  --label LABEL            default local.ensemble.service
+  --label LABEL            default local.cab.service
   --port PORT              loopback port for install, default 8787
   --diagnostic-retention-days N|default  diagnostic retention (1-365, service default 30)
   --diagnostic-storage-mib N|default     diagnostic storage cap (16-1048576, service default 1024)
@@ -134,11 +134,11 @@ export function localHelpArea(argv: string[]): LocalArea | undefined {
 
 export const serviceHelp = (area: LocalArea) =>
   area === "service"
-    ? `Usage: ensemble service <command> [options]\n\n${SERVICE_COMMANDS}${SERVICE_NOTES}`
-    : `Usage: ensemble snapshot <command>\n\n${SNAPSHOT_COMMANDS}`;
+    ? `Usage: cab service <command> [options]\n\n${SERVICE_COMMANDS}${SERVICE_NOTES}`
+    : `Usage: cab snapshot <command>\n\n${SNAPSHOT_COMMANDS}`;
 
-const STATE_DIR = "Library/Application Support/Ensemble";
-const RECORD_SCHEMA = "ensemble.service/v1";
+const STATE_DIR = "Library/Application Support/cab";
+const RECORD_SCHEMA = "cab.service/v1";
 const NOT_LOADED = 113;
 const STOP_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 120_000;
@@ -154,7 +154,7 @@ export type ProcessIdentity = object;
 
 /** Everything that reaches launchd, the OS or the network; tests use a fake. */
 export type ServiceHost = {
-  /** The account's uid: owner of the directories Ensemble checks, and the gui domain. */
+  /** The account's uid: owner of the directories the service checks, and the gui domain. */
   uid: number;
   /** Whether the process runs as root, which every command refuses. */
   isRoot(): boolean;
@@ -300,7 +300,7 @@ const recordSchema = z
     plistSha256: z.string().regex(/^[0-9a-f]{64}$/),
     configuration: configurationSchema,
     /**
-     * Daemon only: what Ensemble has seen of the service process under launchd. Absent
+     * Daemon only: what the service has seen of its process under launchd. Absent
      * means launchd was never seen running it. Uninstall clears the record only once
      * every process recorded here is confirmed gone (see daemon-ownership.ts).
      */
@@ -319,7 +319,7 @@ const recordSchema = z
 type InstallRecord = z.infer<typeof recordSchema>;
 
 const manifestSchema = z.object({
-  schema: z.literal("ensemble.release/v1"),
+  schema: z.literal("cab.release/v1"),
   platform: z.literal("darwin-arm64"),
   version: z.string().regex(/^[0-9A-Za-z][0-9A-Za-z.+-]*$/),
 });
@@ -902,8 +902,8 @@ class Service {
     const { port, cliPath } = record.configuration;
     const checks = `Check that \`launchctl print ${this.systemTarget}\` ${kind === "stopped" ? "exits 113" : "shows a pid"}, that \`lsof -nP -iTCP:${port} -sTCP:LISTEN\` ${kind === "stopped" ? "prints nothing" : "lists only that pid"} and that \`ps -axo pid,lstart,command\` shows ${kind === "stopped" ? `no ${shellWord(cliPath)} process` : `that pid running ${shellWord(cliPath)}`}`;
     return kind === "stopped"
-      ? `The ${label} service could not be confirmed stopped (${reason}); the install record is kept. ${checks}; then run \`ensemble service uninstall\` again, or, once you have confirmed none is running, remove ${shellWord(this.recordPath)} and ${shellWord(this.stagedDaemon)} yourself`
-      : `The ${label} service could not be confirmed running (${reason}); the install record is kept. ${checks}; then run the install command again, or \`ensemble service uninstall\` to remove the daemon`;
+      ? `The ${label} service could not be confirmed stopped (${reason}); the install record is kept. ${checks}; then run \`cab service uninstall\` again, or, once you have confirmed none is running, remove ${shellWord(this.recordPath)} and ${shellWord(this.stagedDaemon)} yourself`
+      : `The ${label} service could not be confirmed running (${reason}); the install record is kept. ${checks}; then run the install command again, or \`cab service uninstall\` to remove the daemon`;
   }
 
   /** Whether the staged plist is the one the record describes. */
@@ -999,7 +999,7 @@ class Service {
     } catch {
       this.checkInterrupt();
       throw refuse(
-        "The CLI connection cannot read readiness; run `ensemble auth login` with a read credential first",
+        "The CLI connection cannot read readiness; run `cab auth login` with a read credential first",
       );
     }
   }
@@ -1264,7 +1264,7 @@ export async function issueInstallCredential(
 
 /**
  * Refuses before any lock, directory or launchctl call when the command runs as root:
- * Ensemble never runs as root, and a root-owned state tree would break the real owner.
+ * The service never runs as root, and a root-owned state tree would break the real owner.
  */
 async function refusedAsRoot(
   host: ServiceHost,
@@ -1342,12 +1342,12 @@ async function installServiceLocked(
     }
     if (await service.otherModeConflict(daemon ? "daemon" : "agent"))
       throw refuse(
-        `${options.label} is already present in ${daemon ? "agent" : "daemon"} mode; run \`ensemble service uninstall\` first (a daemon prints sudo steps to finish), then install in ${daemon ? "daemon" : "agent"} mode. Nothing was changed`,
+        `${options.label} is already present in ${daemon ? "agent" : "daemon"} mode; run \`cab service uninstall\` first (a daemon prints sudo steps to finish), then install in ${daemon ? "daemon" : "agent"} mode. Nothing was changed`,
       );
     if (daemon && service.recordMode() === "daemon") {
       if (tarball)
         throw refuse(
-          `${options.label} is already installed as a daemon; verify it with the install command and no TARBALL, or run \`ensemble service uninstall\` before installing another release`,
+          `${options.label} is already installed as a daemon; verify it with the install command and no TARBALL, or run \`cab service uninstall\` before installing another release`,
         );
       stage = "verify";
       return await verifyDaemon(service, first, version as string, (next) => {
@@ -1369,7 +1369,7 @@ async function installServiceLocked(
     const authMissing = !existsSync(service.authFile);
     if (authMissing && !cli?.interactive)
       throw refuse(
-        `${service.authFile} is missing; run install in an interactive terminal or run \`ensemble service init-auth\``,
+        `${service.authFile} is missing; run install in an interactive terminal or run \`cab service init-auth\``,
       );
     if (!(await portIsFree(options.port)))
       throw refuse(`Port ${options.port} on 127.0.0.1 is in use`);
@@ -1382,9 +1382,7 @@ async function installServiceLocked(
       try {
         password =
           (await cli.readPassword(
-            authMissing
-              ? "New Ensemble operator password: "
-              : "Ensemble operator password: ",
+            authMissing ? "New operator password: " : "Operator password: ",
             io.signal,
           )) || undefined;
       } catch {
@@ -1578,7 +1576,7 @@ async function verifyDaemon(
   const record = service.readRecord() as InstallRecord;
   if (version !== record.version)
     throw refuse(
-      `${record.label} is installed at ${record.version}; run \`ensemble service uninstall\` before installing ${version}`,
+      `${record.label} is installed at ${record.version}; run \`cab service uninstall\` before installing ${version}`,
     );
   if (service.options.port !== record.configuration.port)
     throw refuse(
@@ -1642,7 +1640,7 @@ async function verifyDaemon(
   // Present and matching, not loaded: only loading remains, so the staged copy is not needed.
   if (installed === null && !service.stagedDaemonMatches(record))
     throw refuse(
-      `The staged plist ${service.stagedDaemon} does not match the install record; run \`ensemble service uninstall\`, then install again`,
+      `The staged plist ${service.stagedDaemon} does not match the install record; run \`cab service uninstall\`, then install again`,
     );
   await finishDaemonInstall(
     service,
@@ -1740,9 +1738,9 @@ async function finishInstall(
       );
     if (connection === null) {
       line(
-        `Log in the CLI with a read credential from Settings → CLI credentials: ensemble auth login --connection ${first.connection} --url ${service.origin}`,
+        `Log in the CLI with a read credential from Settings → CLI credentials: cab auth login --connection ${first.connection} --url ${service.origin}`,
       );
-      line("Then run: ensemble doctor");
+      line("Then run: cab doctor");
     }
     line(`Open ${app}`);
     if (first.open && !interrupted())
@@ -1783,11 +1781,11 @@ async function upgradeServiceLocked(
     record = service.readRecord();
     if (!record)
       throw refuse(
-        `${options.label} is not installed; run \`ensemble service install\``,
+        `${options.label} is not installed; run \`cab service install\``,
       );
     if (record.mode === "daemon")
       throw refuse(
-        "service upgrade does not support a LaunchDaemon install; switch back first: run `ensemble service uninstall` (and the sudo steps it prints), `ensemble service install`, upgrade, then uninstall and `ensemble service install --mode daemon` again (see the macOS operations guide)",
+        "service upgrade does not support a LaunchDaemon install; switch back first: run `cab service uninstall` (and the sudo steps it prints), `cab service install`, upgrade, then uninstall and `cab service install --mode daemon` again (see the macOS operations guide)",
       );
     const from = record.version;
     const version = service.releaseVersion(target);
@@ -1800,7 +1798,7 @@ async function upgradeServiceLocked(
     }
     if (origin === undefined)
       throw refuse(
-        "No usable CLI connection; run `ensemble auth login` with a read credential first",
+        "No usable CLI connection; run `cab auth login` with a read credential first",
       );
     if (origin !== record.configuration.origin)
       throw refuse(
@@ -1952,7 +1950,7 @@ async function uninstallServiceLocked(
 }
 
 /**
- * A daemon is stopped and removed with sudo, which Ensemble never runs: print the steps for
+ * A daemon is stopped and removed with sudo, which the service never runs: print the steps for
  * what is still loaded or installed, and drop the record only once both are gone.
  */
 async function uninstallDaemon(
@@ -1994,7 +1992,7 @@ async function uninstallDaemon(
     rmSync(service.recordPath, { force: true });
   } else {
     service.io.stderr.write(
-      `Run these commands now, then run \`ensemble service uninstall\` again to finish (after a reboot or restart of the job, run \`ensemble service uninstall\` again first):\n${steps.join("\n")}\n`,
+      `Run these commands now, then run \`cab service uninstall\` again to finish (after a reboot or restart of the job, run \`cab service uninstall\` again first):\n${steps.join("\n")}\n`,
     );
   }
   service.write("stdout", {
@@ -2097,7 +2095,7 @@ export async function ghTokenStorage(
 }
 
 /**
- * The keychain warning `ensemble doctor` shows on a daemon host: only when a daemon install
+ * The keychain warning `cab doctor` shows on a daemon host: only when a daemon install
  * record exists under the default state directory and the gh login is in the keychain.
  */
 export async function daemonGhWarning(
@@ -2207,7 +2205,7 @@ export function defaultServiceHost(): ServiceHost {
 /** A usage error names only the commands of the area it was typed in. */
 function usage(deps: CliDeps, area: LocalArea): number {
   deps.stderr.write(
-    `ensemble: Unexpected arguments. (usage)\nUsage:\n${area === "service" ? SERVICE_COMMANDS : SNAPSHOT_COMMANDS}${fixLine(DEFAULT_FIX.usage ?? "")}\n`,
+    `cab: Unexpected arguments. (usage)\nUsage:\n${area === "service" ? SERVICE_COMMANDS : SNAPSHOT_COMMANDS}${fixLine(DEFAULT_FIX.usage ?? "")}\n`,
   );
   return 2;
 }
@@ -2267,7 +2265,7 @@ export function daemonVerifyCommand(
     connection: first.connection,
     mode: "daemon",
   };
-  const cli = join(options.stateDir, "versions", version, "bin", "ensemble");
+  const cli = join(options.stateDir, "versions", version, "bin", "cab");
   return [
     shellWord(cli),
     "service",
@@ -2317,12 +2315,12 @@ export function lifecycleOptions(
   const directory = (value: string | undefined, fallback: string) =>
     value !== undefined ? resolve(value) : home && join(home, fallback);
   const stateDir = directory(values["state-dir"], STATE_DIR);
-  const logDir = directory(values["log-dir"], "Library/Logs/Ensemble");
+  const logDir = directory(values["log-dir"], "Library/Logs/cab");
   const agentsDir = directory(
     values["launch-agents-dir"],
     "Library/LaunchAgents",
   );
-  const label = values.label ?? "local.ensemble.service";
+  const label = values.label ?? "local.cab.service";
   const mode = values.mode ?? "agent";
   const port = values.port ?? "8787";
   const retentionDays = diagnosticValue(
@@ -2372,7 +2370,7 @@ export function lifecycleOptions(
   };
 }
 
-/** `ensemble service …`: argv starts after `service`. */
+/** `cab service …`: argv starts after `service`. */
 export async function serviceCommand(
   argv: string[],
   deps: CliDeps,
@@ -2439,7 +2437,7 @@ export async function serviceCommand(
     command === "run" ||
     command === "list"
   ) {
-    // Ensemble never runs the service as root, whatever started it.
+    // The service never runs as root, whatever started it.
     if (host().isRoot()) {
       const { ROOT_REFUSAL } = await import("../standalone/launchd.js");
       deps.stderr.write(`${ROOT_REFUSAL}\n`);
@@ -2450,7 +2448,7 @@ export async function serviceCommand(
       await standalone.main(argv);
       return Number(process.exitCode ?? 0);
     } catch {
-      deps.stderr.write(`ensemble: service ${command} failed\n`);
+      deps.stderr.write(`cab: service ${command} failed\n`);
       return 1;
     }
   }
@@ -2507,7 +2505,7 @@ async function initAuth(
   });
 }
 
-/** `ensemble snapshot create|verify|restore`, the offline operations. */
+/** `cab snapshot create|verify|restore`, the offline operations. */
 export async function snapshotCommand(
   argv: string[],
   deps: CliDeps,

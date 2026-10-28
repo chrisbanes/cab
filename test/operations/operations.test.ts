@@ -187,7 +187,7 @@ class OperationsJourneyRuntime implements Runtime {
         threadId,
         turnId,
         callId: "operations-fixture-question",
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: "Which recovery behavior should be verified?" },
       });
       assert.equal(result.success, true, result.text);
@@ -240,7 +240,7 @@ async function stopAfterSchedulerDrain(
 }
 
 test("SQLite snapshot verifies and restores typed logical content with WAL activity", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-snapshot-roundtrip-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-snapshot-roundtrip-"));
   const data = join(root, "data");
   const snapshot = join(root, "snapshots", "snapshot-one");
   const restored = join(root, "restored-data");
@@ -297,8 +297,8 @@ test("SQLite snapshot verifies and restores typed logical content with WAL activ
       "manifest.json",
       "standalone.sqlite",
     ]);
-    assert.equal(manifest.format, "ensemble-sqlite-snapshot-v1");
-    assert.equal(manifest.sourceMarker, "ensemble-standalone-v1\n");
+    assert.equal(manifest.format, "cab-sqlite-snapshot-v1");
+    assert.equal(manifest.sourceMarker, "cab-standalone-v1\n");
     assert.equal(manifest.nodeVersion, process.version);
     assert.equal(manifest.schemaVersion, 6);
     assert.match(manifest.schemaFingerprint, /^[a-f0-9]{64}$/);
@@ -337,8 +337,8 @@ test("SQLite snapshot verifies and restores typed logical content with WAL activ
       true,
     );
     assert.equal(
-      readFileSync(join(restored, ".ensemble-standalone"), "utf8"),
-      "ensemble-standalone-v1\n",
+      readFileSync(join(restored, ".cab-standalone"), "utf8"),
+      "cab-standalone-v1\n",
     );
 
     restoredDatabase = new DatabaseSync(join(restored, "standalone.sqlite"), {
@@ -366,7 +366,7 @@ test("SQLite snapshot verifies and restores typed logical content with WAL activ
 });
 
 test("interrupted backup and restore operations leave uncommitted paths and preserve the source", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-snapshot-interruptions-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-snapshot-interruptions-"));
   const data = join(root, "data");
   const backupProgress = join(root, "backup-progress");
   const backupCommit = join(root, "backup-commit");
@@ -416,13 +416,10 @@ test("interrupted backup and restore operations leave uncommitted paths and pres
         new RegExp(`injected ${stage} failure`),
       );
       assert.equal(
-        existsSync(join(destination, ".ensemble-restore-incomplete")),
+        existsSync(join(destination, ".cab-restore-incomplete")),
         true,
       );
-      assert.equal(
-        existsSync(join(destination, ".ensemble-standalone")),
-        false,
-      );
+      assert.equal(existsSync(join(destination, ".cab-standalone")), false);
       await assert.rejects(verifySnapshot(destination), /incomplete/);
       const service = new StandaloneService(destination, () => {
         unavailableRuntimeStarted = true;
@@ -442,7 +439,7 @@ test("interrupted backup and restore operations leave uncommitted paths and pres
 });
 
 test("snapshot verification rejects malformed, mismatched, unsupported, and linked entries", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-snapshot-invalid-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-snapshot-invalid-"));
   const data = join(root, "data");
   const snapshot = join(root, "valid-snapshot");
   createLargeMarkedSource(data);
@@ -459,7 +456,7 @@ test("snapshot verification rejects malformed, mismatched, unsupported, and link
     const formatManifest = JSON.parse(
       readFileSync(join(futureFormat, "manifest.json"), "utf8"),
     ) as Record<string, unknown>;
-    formatManifest.format = "ensemble-sqlite-snapshot-v2";
+    formatManifest.format = "cab-sqlite-snapshot-v2";
     writeFileSync(
       join(futureFormat, "manifest.json"),
       `${JSON.stringify(formatManifest)}\n`,
@@ -540,7 +537,7 @@ test("snapshot verification rejects malformed, mismatched, unsupported, and link
 
 test("service, snapshot, and restore paths reject symlinked ancestors", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-operation-ancestor-link-")),
+    mkdtempSync(join(tmpdir(), "cab-operation-ancestor-link-")),
   );
   const realAncestor = join(root, "real-ancestor");
   const realSource = join(realAncestor, "real-child");
@@ -613,7 +610,7 @@ test("service, snapshot, and restore paths reject symlinked ancestors", async ()
 
 test("restored offline backups preserve the full source tree and share service ownership", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-restored-backup-owner-")),
+    mkdtempSync(join(tmpdir(), "cab-restored-backup-owner-")),
   );
   const source = join(root, "source");
   const originalSnapshot = join(root, "original-snapshot");
@@ -631,7 +628,7 @@ test("restored offline backups preserve the full source tree and share service o
     createLargeMarkedSource(source);
     await createSnapshot(source, originalSnapshot);
     await restoreSnapshot(originalSnapshot, restored);
-    const ownerPath = join(restored, ".ensemble-owner.sqlite");
+    const ownerPath = join(restored, ".cab-owner.sqlite");
     assert.equal(existsSync(ownerPath), true);
     assert.equal(statSync(ownerPath).size, 0);
     const restoredBefore = treeDigest(restored);
@@ -652,7 +649,7 @@ test("restored offline backups preserve the full source tree and share service o
 
     mkdirSync(ownerlessLegacy, { mode: 0o700 });
     for (const name of readdirSync(restored)) {
-      if (name !== ".ensemble-owner.sqlite")
+      if (name !== ".cab-owner.sqlite")
         copyFileSync(join(restored, name), join(ownerlessLegacy, name));
     }
     const ownerlessBefore = treeDigest(ownerlessLegacy);
@@ -691,10 +688,7 @@ test("restored offline backups preserve the full source tree and share service o
       /already owned/,
     );
     await starting;
-    const serviceOwnerPath = join(
-      serviceFirstRestored,
-      ".ensemble-owner.sqlite",
-    );
+    const serviceOwnerPath = join(serviceFirstRestored, ".cab-owner.sqlite");
     const serviceOwnerBytes = readFileSync(serviceOwnerPath);
     await stopAfterSchedulerDrain(service);
     service = undefined;
@@ -709,7 +703,7 @@ test("restored offline backups preserve the full source tree and share service o
 });
 
 test("exclusive source ownership and exact destination reservations preserve existing paths", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-snapshot-exclusivity-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-snapshot-exclusivity-"));
   const sourceOne = join(root, "source-one");
   const sourceTwo = join(root, "source-two");
   const snapshot = join(root, "snapshot");
@@ -780,7 +774,7 @@ test("exclusive source ownership and exact destination reservations preserve exi
 });
 
 test("operations npm commands are strict, secret-safe, and do not start the service", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-cli-secret-marker-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-cli-secret-marker-"));
   const source = join(root, "source");
   const snapshot = join(root, "snapshot");
   const restored = join(root, "restored");
@@ -798,9 +792,9 @@ test("operations npm commands are strict, secret-safe, and do not start the serv
     const restore = runOperations("restore", snapshot, restored);
     assert.equal(restore.status, 0, restore.stderr);
     assert.equal(cliJson(restore.stdout).operation, "restore");
-    assert.equal(existsSync(join(restored, ".ensemble-standalone")), true);
-    assert.equal(existsSync(join(restored, ".ensemble-owner.sqlite")), true);
-    assert.equal(statSync(join(restored, ".ensemble-owner.sqlite")).size, 0);
+    assert.equal(existsSync(join(restored, ".cab-standalone")), true);
+    assert.equal(existsSync(join(restored, ".cab-owner.sqlite")), true);
+    assert.equal(statSync(join(restored, ".cab-owner.sqlite")).size, 0);
 
     const preserved = join(root, "existing-destination");
     mkdirSync(preserved);
@@ -848,7 +842,7 @@ test("operations npm commands are strict, secret-safe, and do not start the serv
 });
 
 test("restored public state reconciles exact execution evidence before one eligible admission", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-restore-journey-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-restore-journey-"));
   const sourceData = join(root, "source-install", "data");
   const destinationData = join(root, "restored-install", "data");
   const externalWorkspace = join(root, "external-disposable-workspace");

@@ -11,11 +11,11 @@ import {
 import { tmpdir } from "../fixtures/temp.js";
 
 test("recovery documents round-trip with their digest and refuse anything else", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-recovery-document-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-recovery-document-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const assignmentId = randomUUID();
   const { path, document } = await writeRecoveryDocument(join(dir, "r.json"), {
-    schema: "ensemble.cli.recovery/v1",
+    schema: "cab.cli.recovery/v1",
     path: "conversation-replace",
     preparedAt: 1,
     service: { installationId: randomUUID(), origin: "https://e.test" },
@@ -44,10 +44,7 @@ test("recovery documents round-trip with their digest and refuse anything else",
   );
   for (const [name, body] of [
     ["not-json", "{"],
-    [
-      "change",
-      JSON.stringify({ ...document, schema: "ensemble.cli.change/v1" }),
-    ],
+    ["change", JSON.stringify({ ...document, schema: "cab.cli.change/v1" })],
     ["digest", JSON.stringify({ ...document, preparedAt: 2 })],
   ]) {
     const file = join(dir, `${name}.json`);
@@ -60,7 +57,7 @@ test("recovery documents round-trip with their digest and refuse anything else",
 });
 
 test("a missing or open recovery document names the prepare command or the chmod", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-recovery-document-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-recovery-document-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const refusal = (path: string) =>
     readRecoveryDocument(path).then(
@@ -73,7 +70,7 @@ test("a missing or open recovery document names the prepare command or the chmod
     missing.message,
     /Recovery document rejected: it does not exist\./,
   );
-  assert.match(missing.extra.fix ?? "", /ensemble recovery prepare/);
+  assert.match(missing.extra.fix ?? "", /cab recovery prepare/);
   const open = join(dir, "open.json");
   writeFileSync(open, "{}", { mode: 0o600 });
   chmodSync(open, 0o640);

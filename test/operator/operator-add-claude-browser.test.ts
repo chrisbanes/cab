@@ -28,19 +28,19 @@ const CANARY = "add-claude-canary-token-8821";
 const ENV_NAME = "ADD_CLAUDE_UNSET_VARIABLE_8821";
 /** The commands the panel copies; the operations guide must carry the same lines. */
 const claudeTokenSetup = [
-  'mkdir -m 700 -p "$HOME/.ensemble/claude"',
-  'install -m 600 /dev/null "$HOME/.ensemble/claude/claude-token"',
+  'mkdir -m 700 -p "$HOME/.cab/claude"',
+  'install -m 600 /dev/null "$HOME/.cab/claude/claude-token"',
 ].join("\n");
 /** Typed after copying the token: reads the clipboard, so it is never copied. */
 const claudeTokenWrite = [
-  'pbpaste > "$HOME/.ensemble/claude/claude-token"',
-  "stat -f '%Su %Lp' \"$HOME/.ensemble/claude/claude-token\"",
+  'pbpaste > "$HOME/.cab/claude/claude-token"',
+  "stat -f '%Su %Lp' \"$HOME/.cab/claude/claude-token\"",
 ].join("\n");
 const CHECK = "/api/operator/readiness/claude-token";
 
 function tokenFile(t: { after: (fn: () => void) => void }, mode = 0o600) {
   const directory = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-add-claude-")),
+    mkdtempSync(join(tmpdir(), "cab-add-claude-")),
   );
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   chmodSync(directory, 0o700);
@@ -53,7 +53,7 @@ function tokenFile(t: { after: (fn: () => void) => void }, mode = 0o600) {
 /** A temp home folder whose name has a space and non-ASCII text; no test reads the runner's real home. */
 function tempHome(t: { after: (fn: () => void) => void }) {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-add-claude-home-")),
+    mkdtempSync(join(tmpdir(), "cab-add-claude-home-")),
   );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "Home Folder ünï");
@@ -243,7 +243,7 @@ test("Token readable shows Checking while pending and never a stale result after
 });
 
 const HOME_READ = "**/api/operator/setup/home";
-const SUGGESTED = "/.ensemble/claude/claude-token";
+const SUGGESTED = "/.cab/claude/claude-token";
 const FIELD = "Claude token reference";
 const SAVE = "Save reference";
 const SET = { name: "Set", exact: true } as const;
@@ -342,7 +342,7 @@ test("Add Claude never prefills over a configured reference", async (t, journey)
   await row.getByText(NOT_CONFIGURED).waitFor();
   assert.match(
     await (await setPrefilled(row)).inputValue(),
-    /^file:.*\/\.ensemble\/claude\/claude-token$/,
+    /^file:.*\/\.cab\/claude\/claude-token$/,
   );
 });
 
@@ -397,7 +397,7 @@ test("Add Claude leaves an open empty field empty when the home read lands late"
     await row.getByRole("button", { name: "Cancel" }).click();
     assert.match(
       await (await setPrefilled(row)).inputValue(),
-      /^file:\/.*\.ensemble\/claude\/claude-token$/,
+      /^file:\/.*\.cab\/claude\/claude-token$/,
     );
   } finally {
     release();

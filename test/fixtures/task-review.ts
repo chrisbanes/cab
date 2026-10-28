@@ -106,7 +106,7 @@ export function seedTaskResult(
       threadId: workId,
       turnId: workId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary, ...(metadata ? { review: metadata } : {}) },
     }).result.resultId;
     db.prepare(

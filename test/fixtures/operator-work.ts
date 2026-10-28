@@ -152,7 +152,7 @@ export async function seedCatalog(
         threadId: work.threadId,
         turnId: work.turnId,
         callId: "question",
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: "Which target should be used?" },
       })
     ).success,
@@ -264,6 +264,4 @@ export async function seedCatalog(
 }
 /** Seeded tasks are Drafts, which the Ready default hides; the operator has chosen Any readiness for task views opened without filters. */
 export const rememberAnyReadiness = (page: Page) =>
-  page.evaluate(() =>
-    localStorage.setItem("ensemble.task-filters.v1", "ready=any"),
-  );
+  page.evaluate(() => localStorage.setItem("cab.task-filters.v1", "ready=any"));

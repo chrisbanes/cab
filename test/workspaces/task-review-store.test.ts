@@ -158,7 +158,7 @@ test("review metadata is atomic with real result and receipt; replay compares al
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: {
         summary: "Recorded result",
         review: {
@@ -241,7 +241,7 @@ test("recorded criterion scope, artifacts, decisions and repair ownership are su
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "Recorded", review },
     };
     assert.throws(() => f.stores.c.recordResult(call), /Unsafe artifact/);
@@ -306,7 +306,7 @@ test("legacy result has absent optional metadata and first visit has no viewing 
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "Legacy result" },
     });
     assert.equal(f.stores.review.read(f.taskId).results.length, 0);
@@ -445,7 +445,7 @@ test("claimed result sources require one exact retained work context; absent cla
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "No claimed source", review: {} },
     });
     assert.equal(
@@ -470,7 +470,7 @@ test("upgrade atomically populates only missing retained sources and result inde
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: {
         summary: "Retained prior result",
         review: {
@@ -587,7 +587,7 @@ test("upgrade population rolls back missing source and review/index writes then 
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "PRIVATE INSTRUCTIONS hidden result" },
     }).result;
     f.db.exec(
@@ -631,7 +631,7 @@ test("upgrade population discovers exclusions once per pass and still withholds 
         threadId: w.threadId,
         turnId: w.turnId,
         callId: randomUUID(),
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: {
           summary,
           review: { decisions: [{ text: "Keep it", attribution: "Lead" }] },
@@ -728,7 +728,7 @@ test("maximum bounded review callback discovers exclusions once and rejects a pr
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "Maximum recorded review", review: metadata },
     };
     const rejected = structuredClone(call);
@@ -773,7 +773,7 @@ test("artifact identity migration preserves bytes, rolls back conflicting owners
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "Owner one", review: { artifacts: [artifact] } },
     }).result;
     const v = f.work();
@@ -781,7 +781,7 @@ test("artifact identity migration preserves bytes, rolls back conflicting owners
       threadId: v.threadId,
       turnId: v.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "Owner two", review: {} },
     }).result;
     for (let index = 0; index < 128; index++) {
@@ -790,7 +790,7 @@ test("artifact identity migration preserves bytes, rolls back conflicting owners
         threadId: owned.threadId,
         turnId: owned.turnId,
         callId: randomUUID(),
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: {
           summary: `Corpus ${index}`,
           review: { artifacts: [{ ...artifact, artifactId: randomUUID() }] },
@@ -853,7 +853,7 @@ test("artifact identity migration preserves bytes, rolls back conflicting owners
           threadId: bad.threadId,
           turnId: bad.turnId,
           callId: randomUUID(),
-          tool: "ensemble_report_result",
+          tool: "cab_report_result",
           arguments: {
             summary: "Duplicate owner",
             review: { artifacts: [artifact] },
@@ -1050,7 +1050,7 @@ function validationReport(
     threadId: w.threadId,
     turnId: w.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: {
       summary: "Recorded result",
       review: {

@@ -1,13 +1,13 @@
 /** Dependency-free so the LaunchAgent renderer and the service share one definition. */
 export const diagnosticRetentionDays = {
-  name: "ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS",
+  name: "CAB_DIAGNOSTIC_RETENTION_DAYS",
   min: 1,
   max: 365,
   fallback: 30,
 } as const;
 
 export const diagnosticStorageMib = {
-  name: "ENSEMBLE_DIAGNOSTIC_STORAGE_MIB",
+  name: "CAB_DIAGNOSTIC_STORAGE_MIB",
   min: 16,
   max: 1048576,
   fallback: 1024,

@@ -131,7 +131,7 @@ class CaptureRuntime implements Runtime {
         threadId: _threadId,
         turnId,
         callId: `capture-question-${turnId}`,
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: {
           question: "The deterministic fixture is waiting for its next step",
         },
@@ -182,7 +182,7 @@ function createGitRepository(root: string, name: string): string {
 }
 
 async function fixture(repositoryCount = 0) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-turn-capture-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-turn-capture-"));
   const runtime = new CaptureRuntime();
   let service = new StandaloneService(
     join(root, "data"),

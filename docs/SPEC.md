@@ -1,4 +1,4 @@
-# Ensemble behavioural specification
+# cab behavioural specification
 
 This is the reviewed product behaviour contract for the standalone service. The
 product scope, the minimum S01 integration contract, and assignment routing with
@@ -20,19 +20,19 @@ qualified: access from an independent device, physical sleep/wake behaviour, fin
 operations and cutover still need evidence. Requirements below are product
 obligations, not passing acceptance claims; where a behaviour is unimplemented or
 unproved, it says so in place. See the [README](../README.md) for the current
-summary, [epic #649](https://github.com/chrisbanes/ensemble/issues/649) for delivery
+summary, [epic #649](https://github.com/chrisbanes/cab/issues/649) for delivery
 scope and status, and the [acceptance plan](acceptance.md) for required evidence.
 
 ## Purpose and scope
 
-Ensemble is one standalone service coordinating multiple projects for a trusted
+cab is one standalone service coordinating multiple projects for a trusted
 single operator. It owns tasks, scheduling, assignments, execution supervision,
 workspaces, durable conversations and an operator interface. Keep TypeScript,
 Node.js and SQLite. The first deployment runs on Chris's Mac and serves a web
 operator interface, using Codex with the existing operator login. Codex App
 Server qualification remains a runtime gate. No BB installation is required by
 the target product. Private remote access uses Tailscale plus a separate
-Ensemble operator login. The standalone installation starts with a fresh database;
+cab operator login. The standalone installation starts with a fresh database;
 historical BB record import is outside the first release.
 
 Agent instructions determine how to plan, implement, review and revise work.
@@ -55,7 +55,7 @@ The accepted [operator CLI design](design/operator-cli.md) and
 [ADR-1010](adr/1010-operator-cli.md) specify an additional operator interface for
 external agents and terminal users. Its authentication foundation and read-only
 browsing are implemented: Settings issues, lists, rotates and revokes CLI credentials,
-and the packaged `ensemble` executable supports `auth login|status|logout`,
+and the packaged `cab` executable supports `auth login|status|logout`,
 `connection list|use|remove`, project and profile list/get/instructions/revisions,
 task list/search/get/messages, assignment get/history/instructions, result
 list/get/evidence and artifact get. Supported profile, project, routing and
@@ -82,7 +82,7 @@ existing adoption, pre-turn and no-turn recovery and conversation-replacement
 commands from an owner-only, digest-bound document built from observed identity and
 an explicit operator evidence file; none resumes or dispatches work. Further CLI
 delivery sequencing belongs in GitHub under
-[epic #893](https://github.com/chrisbanes/ensemble/issues/893).
+[epic #893](https://github.com/chrisbanes/cab/issues/893).
 
 The CLI uses the running service locally or over the existing private network,
 with revocable read-only or read/write credentials. It covers everyday task
@@ -92,7 +92,7 @@ process management and offline backup/restore remain host-local.
 
 Dedicated authenticated instruction views reconstruct current, historical and
 assignment-bound instructions from retained revision records. New task-bound
-executions capture their Ensemble-supplied inputs before submission, observed
+executions capture their cab-supplied inputs before submission, observed
 settings and available runtime, tool and service events under bounded retention,
 unless a project reduces capture to the baseline. General conversation history retains its current
 instruction redaction; historical gaps remain explicit. The diagnostic payload
@@ -108,7 +108,7 @@ content-access rules.
 Optional ChatGPT daily operations/events and native Codex task visibility/handover
 (X01–X08) are deferred until after the standalone MVP. Planning, feasibility probes
 and implementation are paused under
-[epic #734](https://github.com/chrisbanes/ensemble/issues/734) until explicit
+[epic #734](https://github.com/chrisbanes/cab/issues/734) until explicit
 reopening and revalidation. They do not gate MVP release or cutover; Codex App
 Server execution and the independently usable web UI remain in scope. The
 following paragraphs retain future integration requirements for individual
@@ -123,10 +123,10 @@ authority. Self-hosters supply a narrow authenticated HTTPS MCP endpoint using g
 setup; the operator UI and runtime remain private.
 
 New tasks should appear as a main native Codex task with linked worker conversations.
-Saved host project placement/linkage is optional; tasks belong to Ensemble projects.
-Repository tasks use retained Ensemble worktrees. Inspection
+Saved host project placement/linkage is optional; tasks belong to cab projects.
+Repository tasks use retained cab worktrees. Inspection
 is allowed without handover; native continuation requires explicit human control,
-holding further Ensemble task dispatch. Explicit return checks settled execution,
+holding further cab task dispatch. Explicit return checks settled execution,
 workspace changes and existing admission/ownership holds. Idleness or acknowledgement
 cannot release those holds. Native API, visibility and handover feasibility must be
 proved before future dependent implementation; failed proof returns evidence and integration
@@ -139,7 +139,7 @@ These are deferred requirements, not implemented capabilities. See
 
 ## First local-task journey
 
-The operator opens Ensemble, creates a project, links optional repositories,
+The operator opens cab, creates a project, links optional repositories,
 configures profiles and permissions, and creates a task with an expected outcome.
 New projects start paused; new tasks start unready. Create and start may mark a
 task Ready, but cannot bypass project pause. Enablement admits eligible work.
@@ -267,7 +267,7 @@ Skip reopens its provider-completed tasks under a closure hold. Under Treat clos
 as Done, a task the operator reopens while its issue stays closed is completed again
 once settled; switching the source to Skip keeps it open; no mode or switch
 deletes tasks or history. Once an issue this task's delivery closed is reopened, that
-own closure is superseded: a later closure, by anyone but a new confirmed Ensemble
+own closure is superseded: a later closure, by anyone but a new confirmed cab
 closure, is provider closure in both modes. Supersession keeps the delivery history
 and any closure hold. When GitHub shows the issue closed but not provably by the
 task's own delivery, the task keeps the explained `closure-attribution-unproved`
@@ -296,7 +296,7 @@ A planned restart (SIGINT or SIGTERM) stops admitting work, then interrupts each
 running task turn through the Stop interrupt lifecycle, lets an in-flight
 submission bind or fail, and waits one bounded, configurable interval (five seconds
 by default) for terminal status. A turn whose interrupt was acknowledged and whose
-exact bound turn reported a terminal failure is released when every Ensemble
+exact bound turn reported a terminal failure is released when every cab
 callback has ended and nothing else holds it: no known survivor and no pending
 effect other than its own uncommitted assignment result, which is settled as
 superseded. Its writer ownership and capacity go atomically and the same request is
@@ -305,7 +305,7 @@ every current admission check, without using the transient-retry allowance. A tu
 that completes within the interval completes normally. Everything else, including
 drafting and direct turns, keeps today's restart hold.
 
-Ensemble owns capacity admission with both a global active-turn cap and a cap for
+cab owns capacity admission with both a global active-turn cap and a cap for
 each project. Waiting for workers, people or external feedback
 releases an execution slot; capacity one must not deadlock delegation. Default
 to four active turns globally and two per project, editable in configuration.
@@ -334,7 +334,7 @@ prompt, sends both again as replacements. Instructions travel as user input on b
 developer instructions or Claude's system prompt: Codex native-input qualification
 pins the thread's developer instructions, so changing them disqualifies the thread,
 and a conversation keeps its harness across a profile switch. Limit: a runtime's own
-history compaction may summarise earlier instructions; Ensemble resends them only when
+history compaction may summarise earlier instructions; cab resends them only when
 a revision changes or a conversation gets a new thread.
 
 Record results and handoffs through coordination commands, not transcript inference.
@@ -438,7 +438,7 @@ with no new model tool authority or forms in the curated operator UI.
 
 Already-admitted execution and tools may survive coordinator or App Server failure
 and continue effects. A crash releases neither writer ownership nor capacity. No
-queued turn, follow-up, delegation or replacement may gain admission while Ensemble
+queued turn, follow-up, delegation or replacement may gain admission while cab
 is unavailable. Retain unresolved holds rather than relaunching work. Historical
 conversation resume does not prove reattachment to a live execution. A
 [bounded real Codex journey](evidence/s04b-live-runtime-2026-09-29.md) observed
@@ -459,8 +459,8 @@ Uncertain effects hold dependent work; independent
 work may proceed only when independence is established. No arbitrary external API
 is promised exactly-once effects.
 
-`ensemble snapshot create|verify|restore` provides generic standalone SQLite snapshot,
-verification and restore. `ensemble service install|upgrade|uninstall` manages a
+`cab snapshot create|verify|restore` provides generic standalone SQLite snapshot,
+verification and restore. `cab service install|upgrade|uninstall` manages a
 per-user LaunchAgent bound to an unpacked release: upgrade stops the job, takes and
 verifies a snapshot, then starts the new release and checks readiness; a failed
 upgrade leaves the job stopped with no automatic rollback. `service install --mode daemon`
@@ -479,7 +479,7 @@ settle external effects, or qualify a final operational cutover. See the
 
 ## Workspaces and execution access
 
-Ensemble owns task workspace creation, identity, retention and cleanup. Use one
+cab owns task workspace creation, identity, retention and cleanup. Use one
 worktree per participating repository per task, shared by assignments with one
 admitted writer generation at a time under the cooperative rule below. Independent
 tasks can proceed concurrently; parallel reviews
@@ -491,7 +491,7 @@ not-Ready task gets no checkout. An imported task whose source repository the
 project does not link waits, without a workspace, until it is linked.
 
 Normal successful completion trusts Codex's successful terminal status for the
-bound thread/turn. After every Ensemble-owned callback has ended, with no known
+bound thread/turn. After every cab-owned callback has ended, with no known
 unfinished execution or other hold, persist completion and serialize ownership
 release with admission of one successor. Detailed tool history supports diagnosis;
 an absent item alone does not veto an otherwise qualified normal completion.
@@ -500,7 +500,7 @@ detached-child writes overlapping a successor. It does not prove physical writer
 exclusion or the policy of an unobserved action. See the
 [runtime trust boundary](design/standalone.md#runtime-trust-boundary).
 Crash, Stop, failure/interruption, missing or conflicting terminal identity/status,
-unfinished Ensemble callbacks and known survivors retain holds until independently
+unfinished cab callbacks and known survivors retain holds until independently
 resolved; the one exception is a task turn that a planned restart interrupted and
 recorded as ended (see above).
 A timer, expired lease, quiet interval, empty terminal list, acknowledged Stop or
@@ -515,7 +515,7 @@ identity checks, file and comparison reads, setup probes and repository
 verification) clears inherited `GIT_*` variables, never prompts on a terminal,
 lazily fetches objects or allows transport protocols, and uses bounded time and
 output. A repository that needs the network to supply objects therefore fails
-closed. This governs Ensemble's own Git; agent processes run their own Git with
+closed. This governs cab's own Git; agent processes run their own Git with
 their runtime environment. The one exception is [task commit
 publication](#github-and-completion): a single bounded HTTPS push to the verified
 github.com repository, in a scratch repository that reads the worktree's objects, with
@@ -534,14 +534,14 @@ turn's `networkAccess`, so a change reaches only later admissions and a running 
 keeps its policy. Claude Code turns, drafting runs and any turn without a task
 binding always run with it denied. Every place the effective policy is shown states
 the setting and that network-enabled commands can reach whatever credentials and
-logins the host exposes. Ensemble enforces only what it sends the runtime; it is not
+logins the host exposes. cab enforces only what it sends the runtime; it is not
 an allow-list, a proxy or a host filter, and MCP and app tools, web tools and model
 transport are separate surfaces.
 Reads retain Codex full read access subject to host permissions; outside-read
 denial is not implied. Runtime temporary write roots and protected paths must be
 disclosed with the effective policy. See the [default execution policy](design/standalone.md#default-execution-policy)
 for supported controls, qualification and ambient-access limits.
-Ensemble enforces project policy on its own tools and integrations. Runtime and
+cab enforces project policy on its own tools and integrations. Runtime and
 OS/deployment controls govern shell, filesystem, network and ambient credentials;
 disclose their actual limits and do not claim an independent sandbox. External
 content is data, never authority. Runtime choice must establish caller identity
@@ -550,7 +550,7 @@ without trusting agent-supplied project or assignment IDs.
 A [drafting run](#drafting-runs) works in a disposable worktree of the project's
 linked repositories. The host-read disclosure above applies to it unchanged. A
 [draft turn](#draft-turns) uses the task workspace read-only with command network
-access off; the same disclosure applies, and Ensemble's own refusals cover its tools.
+access off; the same disclosure applies, and cab's own refusals cover its tools.
 
 ## Operator interface and human requests
 
@@ -630,7 +630,7 @@ remembers the filters per device and restores them on a task view opened without
 any; Readiness defaults to Ready, so Draft tasks are shown by choosing Not Ready or
 Any readiness.
 
-Group board cards by Ensemble work state, showing the task title, project, lead,
+Group board cards by cab work state, showing the task title, project, lead,
 source identity when imported, and the reason for waiting or intervention. Keep
 readiness and dependency holds distinct: a Ready task can still be blocked. Keep
 uncertain and stopping work visible rather than implying completion. Cards open
@@ -641,17 +641,17 @@ Attention appears alongside work state rather than replacing it. Keep actionable
 readiness, successful completion, cancellation and provider closure without
 delivery visibly distinguishable. Provider closure alone does not establish task
 completion, except under a source's Treat closure as Done mode, which records the task
-as completed by provider closure, distinct from Ensemble or manual completion. Prioritise the task's meaning, current situation and next actor;
+as completed by provider closure, distinct from cab or manual completion. Prioritise the task's meaning, current situation and next actor;
 supporting identifiers and timestamps must remain readable and accessible without
 competing with that information. These refinements do not change the existing
 board state mapping.
 
-Board columns describe Ensemble work, not GitHub issue state or Project fields.
+Board columns describe cab work, not GitHub issue state or Project fields.
 The board does not grant arbitrary status changes or require drag-and-drop for the
 MVP. Any offered transition must use an existing permitted command and preserve
 readiness, dependency, approval and source-ownership rules; moving a card cannot
 bypass a hold or silently write to GitHub. A project's [status mapping](#github-and-completion)
-reflects Ensemble's work onto a Project's Status without changing these columns.
+reflects cab's work onto a Project's Status without changing these columns.
 
 ### Task creation and project setup
 
@@ -766,7 +766,7 @@ while distinct rotations grow this retained set until restart. Existing Codex sp
 environments need a service restart to apply changed exclusions. Runtime permissions
 may still let agents reach the host gh login or keychain. Delivery and routing remain
 env-only, so a LaunchDaemon (whose plist carries no environment variable) cannot supply
-a delivery credential yet; Ensemble supplies no separate host sandbox. On a daemon host
+a delivery credential yet; cab supplies no separate host sandbox. On a daemon host
 the `gh:github.com` source credential works through a file-based `gh` login;
 there is no `file:` GitHub reference. See the
 [macOS operations procedure](operations/standalone-macos.md#launchdaemon-mode).
@@ -791,7 +791,7 @@ Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` referenc
 without showing it.
 
 The operator enables or disables each execution runtime for the installation in
-Settings → Runtime or with `ensemble runtime enable|disable`
+Settings → Runtime or with `cab runtime enable|disable`
 ([ADR-1012](adr/1012-operator-controlled-runtime-enablement.md)). A missing setting
 means enabled. No runtime is required: the service starts and serves the operator UI
 with none enabled, and an enabled runtime that fails to start, Codex included, is
@@ -802,7 +802,7 @@ restart replaces only the runtime process: held turns stay held for the recovery
 queued work is admitted only after the new runtime passes the usual startup checks, and
 nothing is relaunched or resumed implicitly. A disabled runtime is never restarted, and
 disabling it or stopping the service cancels pending retries. After the third failed
-attempt Ensemble stops retrying and raises one runtime item in the attention inbox. The
+attempt cab stops retrying and raises one runtime item in the attention inbox. The
 item is derived from in-memory state, appears under All projects only and clears as soon
 as the runtime recovers; turning the runtime off and on, or restarting the service,
 starts a fresh schedule. The item is also delivered to subscribed browsers as one
@@ -837,7 +837,7 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 - File-editing tools are confined by the hook, not by the OS sandbox.
 - Claude loads no user, project or plugin configuration; repository instructions
   are supplied as text.
-- Agents ask questions only through `ensemble_ask_question`.
+- Agents ask questions only through `cab_ask_question`.
 
 Each runtime's effective policy lists its disclosed limits. For Claude, the
 subprocess token scrub is qualified for sandboxed Bash only; hooks run in process and
@@ -999,8 +999,8 @@ recovery for drafting.
 Make the distinction between local tasks and imported issues visible. Imported task
 detail shows the provider, repository and issue identifier, a source link, the last
 successful sync, refresh and any sync failure or stale state. Present external
-issue status and Project fields separately from Ensemble execution state; an open
-GitHub issue can have work waiting for approval in Ensemble.
+issue status and Project fields separately from cab execution state; an open
+GitHub issue can have work waiting for approval in cab.
 
 For the MVP, imported titles and descriptions are read-only in the operator UI,
 with Edit on GitHub linking to the source. The local task composer does not edit
@@ -1016,7 +1016,7 @@ It needs the repository's `issue.edit` grant, a project lead and a delivery cred
 and is unavailable while an earlier GitHub action on the task has an unknown outcome. The
 task read gives the first reason that applies, in that order: no source issue, task not
 open, no edit grant, no project lead, an unresolved action, no delivery credential.
-Ensemble keeps no copy of the edited text and no local override: the edit goes to
+cab keeps no copy of the edited text and no local override: the edit goes to
 GitHub, and the next sync observes the new title and body like a hand edit, including
 any source review that raises. Nothing is sent without the operator reviewing it.
 
@@ -1115,7 +1115,7 @@ history.
 - **Entry points.** On a Draft task the task page's reply becomes **Start draft turn**,
   with the reason in its place when a draft turn is not available. A project without a
   lead, or a lead that has started, keeps the ordinary reply and its own sentence.
-  `ensemble task draft-turn TASK_ID --expected-version N --message-file FILE
+  `cab task draft-turn TASK_ID --expected-version N --message-file FILE
   [--request-id UUID]` does the same. Both send `task.draft-turn {key, taskId,
   expectedVersion, message}`; the message is trimmed and 1 to 16000 characters. The
   receipt records the lead assignment and the work ID and is replayed for the same key
@@ -1146,7 +1146,7 @@ history.
 - **Access.** Codex runs the turn with a per-turn read-only sandbox policy and Claude with
   the workspace removed from its writable roots and file-edit hook. Command network
   access is off whatever the project setting says. Reads keep the runtime's host access.
-  Ensemble sends the policy and does not claim an independent sandbox. The Codex proof is
+  cab sends the policy and does not claim an independent sandbox. The Codex proof is
   [recorded](evidence/2026-10-19-codex-read-only-turn.md).
 - **Ready.** The lead stays pending through draft turns. When the task becomes Ready,
   routing runs as for any task, without a preliminary lead turn, or, with routing off, the
@@ -1198,8 +1198,8 @@ submitting and held work stays with the `recovery` commands.
   the operator UI and CLI say so before sending.
 - **Entry points.** The task page's decisions, the Inbox intervention and Home's Needs
   you card offer **Start again** for the `not-started` attention code; the task header
-  offers **Reset task…** behind a confirmation. `ensemble task start-again TASK_ID
-  --expected-version N [--work WORK] [--request-id UUID]` and `ensemble task reset
+  offers **Reset task…** behind a confirmation. `cab task start-again TASK_ID
+  --expected-version N [--work WORK] [--request-id UUID]` and `cab task reset
   TASK_ID --expected-version N [--request-id UUID]` send the same commands and print
   the same reason text.
 
@@ -1266,7 +1266,7 @@ evidence together:
   PR identity, checks and findings close to the result. Attribute repair ownership
   only when recorded. Identify provider state, the checked head/revision and
   stale or changed-head evidence; retain a useful no-PR state. Provider refresh
-  is a read. A merged PR does not complete the Ensemble task, and these views
+  is a read. A merged PR does not complete the cab task, and these views
   retain exact-material approvals and independent dependency/recovery holds.
 - **Search recorded work.** Provide discoverable Search in shared desktop and
   phone navigation for retained tasks, decisions and results within permitted
@@ -1439,7 +1439,7 @@ fake-runtime evidence does not establish broader native runtime behaviour.
 #### Retained result evidence
 
 The service captures bounded evidence during the accepted
-`ensemble_report_result` callback, before recording its result and callback
+`cab_report_result` callback, before recording its result and callback
 receipt. Eligible sources are linked artifact files, supplied change-file
 references read through the existing safe workspace reader, and a compatible
 exact turn-comparison export. A direct result-recording path that does not pass
@@ -1704,8 +1704,8 @@ completion, release ownership or bypass an execution hold.
 
 Support agent requests for user input as first-class durable questions, including
 structured question interactions such as AskUserQuestion or the selected runtime's
-equivalent. Adapt supported runtime requests into the same Ensemble question model
-as `ensemble_ask_question`; tool names alone do not establish runtime support.
+equivalent. Adapt supported runtime requests into the same cab question model
+as `cab_ask_question`; tool names alone do not establish runtime support.
 Preserve the originating task, assignment, conversation and request identity, and
 surface the question in the attention inbox and task detail.
 
@@ -1716,9 +1716,9 @@ custom text when the request permits it. A recommended or preselected option is
 not a submitted answer. Validate each answer against its question and keep
 unfinished input on submission failure.
 
-The full Ensemble question model is distinct from the selected runtime's supported
+The full cab question model is distinct from the selected runtime's supported
 native inputs. The full form model is qualified through deterministic
-service/browser tests or Ensemble question tools. Native runtime input is supported
+service/browser tests or cab question tools. Native runtime input is supported
 only for the bounded shapes qualified in the
 [native input evidence](evidence/ui01-runtime-input.md): the observed
 single-choice/custom-text round trip and deterministic grouped-shape coverage.
@@ -1747,7 +1747,7 @@ ownership or age is labelled explicitly. Answers are durable decisions; correcti
 requires a new agent request. Transport failures reconcile the original frozen
 command and key before editing can resume.
 
-The version-1 Ensemble form retains up to 32 questions, 100 options per question,
+The version-1 cab form retains up to 32 questions, 100 options per question,
 512-character IDs/labels, 16,000-character text fields, and independent 256 KiB
 UTF-8 form/answer limits. Only the operator command JSON route allows the answer
 limit plus its mechanically derived strict command envelope; other commands retain
@@ -1766,7 +1766,7 @@ without retained material are deny-only. Answers do not grant unrelated permissi
 Denial persists. Replayed requests or responses cannot duplicate effects. Controls
 acknowledge persisted outcomes.
 
-Ensemble displays conversation history and accepts durable messages to the task-scoped lead conversation
+cab displays conversation history and accepts durable messages to the task-scoped lead conversation
 for the next eligible turn. They cannot bypass pause, stop or other admission
 controls. Live steering is deferred; stop is a separate control. Exact transcript
 and message transport is part of Codex App Server qualification.
@@ -1804,7 +1804,7 @@ from an independent device is not qualified.
 
 ## GitHub and completion
 
-Ensemble owns integration access independently of BB; reuse an explicitly configured
+cab owns integration access independently of BB; reuse an explicitly configured
 credential facility, keep secrets out of instructions and expose identity/access
 failures. Initial discovery uses native issue search and Project-filter syntax,
 validated with a preview. Poll and allow manual refresh; show last-success time.
@@ -1881,12 +1881,12 @@ longer shows that text. GitHub has no conditional issue update, so a change betw
 read and the PATCH is an accepted race. After that refusal the source is read again, so a
 Redraft starts from what GitHub shows. Read-back requires both fields, an unknown outcome
 stays uncertain and blocks further GitHub actions on the task until resolved, and nothing is
-resent. The edit is irreversible from Ensemble: the replaced text is kept only in the
+resent. The edit is irreversible from cab: the replaced text is kept only in the
 review record and no restore action exists. Sending needs an open task, a current task
 version and source revision, no unresolved action and an allowed credential activation, but
 not task admission.
 
-A project's **status mapping** reflects Ensemble's work onto one GitHub Project's Status.
+A project's **status mapping** reflects cab's work onto one GitHub Project's Status.
 It is operator-owned and versioned, with one mapping per project, bound to one `project`
 selection of the project's source and that Project's single-select field named `Status`
 (`status-mapping.configure`; a source without a `project` selection reads the mapping as
@@ -1909,7 +1909,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   mapping never makes work Ready. The one exception is Done on closure: a done task whose issue
   is observed closed (provider closure, `issue.close`, a closing-keyword merge) is no longer
   Ready, but its mapped Done option is still written, because a closed issue cannot be Ready.
-  It follows the conditional-write rule below against the last Status Ensemble wrote, or read while
+  It follows the conditional-write rule below against the last Status cab wrote, or read while
   the task was Ready, so a Status a human set since is never overwritten and the skip is recorded;
   the authority check refuses it unless the Status sent as expected is exactly that one.
   It is refused if that option is one the readiness rule accepts, a done task that is not Ready
@@ -1920,7 +1920,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   that value replaced. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
   an in-flight Status drops the item from the selection on the next sync and the ordinary
-  leave-selection hold applies: Ensemble validates the readiness rule, not filter text.
+  leave-selection hold applies: cab validates the readiness rule, not filter text.
 - **Transitions.** The service derives each Ready imported task's current event from durable
   facts in the order Done, held, handed back, turn started. A write is due when the event
   changes to a mapped one, once per transition; leaving an event and re-entering it is a new
@@ -1935,10 +1935,10 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   partial read) is not a block and keeps a held task held. A write needs the issue's current
   item in the mapped Project selection.
 - **Conditional write.** Immediately before writing, the provider reads the item's Status. If
-  it is not what Ensemble last observed (its last confirmed write, unless a later read of that item
+  it is not what cab last observed (its last confirmed write, unless a later read of that item
   replaced it, else the stored membership value; a read counts from when it began) it records `provider-project-field-changed`,
   writes nothing, does not retry, and the task shows "Skipped: Status changed on GitHub since
-  Ensemble last saw it". GitHub has no conditional update, so a move between that read and the
+  cab last saw it". GitHub has no conditional update, so a move between that read and the
   mutation is an accepted race: readback then shows another option and the action stays
   uncertain.
 - **No hold.** Status-mapping records are excluded from the task's action blockers. An unproved
@@ -1954,45 +1954,45 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or
 `approval` (approval binds the exact commit) and following the same delivery lifecycle
-([ADR-1016](adr/1016-ensemble-owned-commit-publication.md)). Ensemble assigns each task
+([ADR-1016](adr/1016-cab-owned-commit-publication.md)). cab assigns each task
 one **task branch** per repository, `<project prefix><task id hex>-<title slug>`, on
-first use; the operator sets the prefix per project (default `ensemble/`), agents cannot
+first use; the operator sets the prefix per project (default `cab/`), agents cannot
 choose a name, later renames never happen, and `pr.create` accepts only that branch as its
-head. The agent names an exact commit. Before any network call Ensemble proves offline
+head. The agent names an exact commit. Before any network call cab proves offline
 that it is the task worktree's `HEAD` or an ancestor of it and descends from the base the
 workspace was provisioned at. Each ancestry is proved from the commit objects themselves,
 every one read raw and rehashed, so a forged commit-graph, replace ref, graft or lying object
 cannot manufacture it; a history too long to walk is unproved, not assumed, and the proof assumes SHA-1 object ids as GitHub repositories use (another format fails closed). Uncommitted entries
-are reported and never pushed. A push needs the remote branch to be where Ensemble last left
+are reported and never pushed. A push needs the remote branch to be where cab last left
 it: absent before the first push, or equal to the last pushed commit. Every update is leased
 against that observed head (creation expects the branch to be absent), so a branch another writer
 created or moved after the read rejects the push and is an outside change. `branch.push` also
 refuses a commit that does not descend from the last pushed commit; `branch.force-push` needs a
 recorded last push, which is its lease.
 
-Ensemble owns a commit on the task branch only if it pushed it or an attempt of that push may have
+cab owns a commit on the task branch only if it pushed it or an attempt of that push may have
 landed: one that ended unproved, was reported pushed by Git, was concluded not applied from a read,
 or was never settled. A push that never started or was rejected owns nothing, and neither does one Git skipped because the remote already held the commit (another writer's push). An ambiguous attempt keeps its possible ownership even when a later read shows a different head, which is then recorded as an outside change. A remote that equals
 the requested commit is therefore accepted only on a retry whose earlier attempt may have landed,
 and a retry of an operation superseded by a newer push is refused. Git reporting a push done keeps
 the outcome unproved until a read shows it (a first push whose branch is deleted before the read cannot be
 told from read lag, so it stays unproved until an operator acts); a later third head then records the push and the outside
-head separately. Any head Ensemble does not own, seen at a push or on the task's PR, is an outside
+head separately. Any head cab does not own, seen at a push or on the task's PR, is an outside
 change: the push is refused, the lead is woken and handback settlement is invalidated at once;
-without a PR it is noticed at the next push, as Ensemble does not poll branches. While any of the
+without a PR it is noticed at the next push, as cab does not poll branches. While any of the
 task's branches, in any repository and with or without a PR, holds an outside head, or the bound
-PR's head is not Ensemble's last push, completion, accepted settlement and `issue.close` are held
+PR's head is not cab's last push, completion, accepted settlement and `issue.close` are held
 (closing the outcome of a closed PR stays possible). A PR merged on GitHub counts as acceptance,
 even at an outside head, and a closed PR's own branch never holds, because GitHub may delete it
 and no operator action clears that. PR actions that name the task branch (`pr.create`, `pr.edit`,
-`pr.ready`, `pr.merge`) need `expectedHeadSha` to equal Ensemble's last push. A branch found absent is held the same way and stays held, even while the PR still shows its head commit, until a ref read
+`pr.ready`, `pr.merge`) need `expectedHeadSha` to equal cab's last push. A branch found absent is held the same way and stays held, even while the PR still shows its head commit, until a ref read
 shows it back at that commit. The record clears when
-the branch is read back at that commit or Ensemble pushes again; a PR inspection that still shows the last push while
-the PR head lags behind a later Ensemble push also clears it until the PR catches up. A rewritten history means the next review
+the branch is read back at that commit or cab pushes again; a PR inspection that still shows the last push while
+the PR head lags behind a later cab push also clears it until the PR catches up. A rewritten history means the next review
 covers the whole new head. Success needs a read of the remote ref equal to the pushed commit; a
 timeout, cancellation or unobserved exit is uncertain, is settled by reading the ref and is never
-replayed blindly. Ensemble does not delete branches or push tags or other remotes; merged branches
-follow the repository's head-branch deletion setting. Ensemble cannot prevent a push made with
+replayed blindly. cab does not delete branches or push tags or other remotes; merged branches
+follow the repository's head-branch deletion setting. cab cannot prevent a push made with
 ambient host credentials once a project's command network access is enabled; it detects the
 result as an outside change. Plain pushes to a task branch whose head was changed outside stay
 refused until the branch is recovered or the remote returns to the last pushed commit.
@@ -2000,7 +2000,7 @@ refused until the branch is recovered or the remote returns to the last pushed c
 Recovery is requested by the lead after the outside-change wake and is always approved by the
 operator, whatever the grants: it is never covered by an `allow` grant, and the service,
 operator-delivery and publication callers cannot use it. Both paths name the task branch, the
-outside head (git's all-zero id for a deleted branch) and the commit Ensemble last pushed (null
+outside head (git's all-zero id for a deleted branch) and the commit cab last pushed (null
 before any push); the approval binds all of it, and the approval view shows these values with a
 GitHub compare link from the last push to the outside head (the outside commit alone when nothing was
 pushed; no link for a deleted branch). The values must still be the task branch's recorded outside
@@ -2016,11 +2016,11 @@ refuses it, and an approval is never reused after a refusal.
   push lifecycle (intent before effect, readback, no blind replay) and records the commit as the
   last push.
 - **Adopt** is `branch.adopt`, grantable per repository with `approval` only and not offered for a
-  deleted branch. Ensemble reads the remote ref, fetches exactly that one commit from the
+  deleted branch. cab reads the remote ref, fetches exactly that one commit from the
   verified github.com repository over HTTPS in an isolated child (the credential reaches only
   that child's environment; ADR-1016), proves from rehashed objects that the commit descends from
   the task's provisioned base, imports the objects into the worktree's object store under an
-  Ensemble-owned ref (`refs/ensemble/adopted/<task branch>`), reads the remote ref again and
+  cab-owned ref (`refs/cab/adopted/<task branch>`), reads the remote ref again and
   records the commit as the last push. It does not require descent from the previous last push,
   so a maintainer's rebase can be adopted, and it never moves the worktree's `HEAD`, index, local
   commits or files: the agent integrates the outside commits offline, and the next `branch.push`
@@ -2028,7 +2028,7 @@ refuses it, and an approval is never reused after a refusal.
   overwrite stays available. Adoption's only remote act is a read, so an adoption interrupted by
   a restart runs again from its recorded intent and records once. A failed, refused or cancelled
   adoption leaves the outside change held with no unresolved action, and the lead can request it
-  again with a new approval. The fetch is also bounded in size: Ensemble watches the bytes the
+  again with a new approval. The fetch is also bounded in size: cab watches the bytes the
   child writes to its scratch object store and stops it past 512 MiB (checked every 200 ms, so
   approximately). That adoption is refused as `branch-adopt-too-large`, imports nothing, removes
   the scratch repository, and keeps the outside change held with overwrite available.

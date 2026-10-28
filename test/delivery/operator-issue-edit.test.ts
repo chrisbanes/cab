@@ -78,7 +78,7 @@ test("a reviewed, approved operator edit is one issue.edit that the next sync ob
   assert.equal((await post(f, r)).operationId, saved.operationId);
   assert.equal(f.effects.length, 1);
   await f.service.refreshGitHub();
-  // Ensemble keeps no copy of its own: the synced issue shows the edit like a hand edit.
+  // cab keeps no copy of its own: the synced issue shows the edit like a hand edit.
   const synced = f.service.githubSources().issue("I1");
   assert.equal(synced?.observedTitle, edit.title);
   assert.equal(synced?.observedBody, edit.body);
@@ -145,13 +145,13 @@ test("a runtime caller cannot use an operator review, and its own issue.edit kee
     fields: edit,
     expected: observed,
   };
-  const withReview = await f.call("ensemble_external_action", {
+  const withReview = await f.call("cab_external_action", {
     operationId: r.operationId,
     action,
     operatorReviewId: r.reviewId,
   });
   assert.equal(withReview.success, false);
-  const plain = await f.call("ensemble_external_action", {
+  const plain = await f.call("cab_external_action", {
     operationId: randomUUID(),
     action: { ...action, expected: undefined },
   });

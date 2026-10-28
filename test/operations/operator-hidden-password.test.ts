@@ -85,7 +85,7 @@ test("hidden password reader restores and pauses after input error or close", as
 });
 
 test("operator auth CLI exits safely when hidden input is not a terminal", () => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-operator-auth-cli-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-operator-auth-cli-"));
   try {
     const authFile = join(directory, "operator-auth.json");
     const sentinel = "never-print-this-password";

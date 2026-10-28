@@ -15,7 +15,7 @@ export function updatedLabel(first: number, last: number) {
  * a proper noun ("GitHub dependencies unconfirmed" keeps its capitals, "Project paused" does not).
  */
 export const midSentence = (label: string) =>
-  /^(GitHub|Claude|Ensemble)\b/.test(label)
+  /^(GitHub|Claude|cab)\b/.test(label)
     ? label
     : label.charAt(0).toLowerCase() + label.slice(1);
 

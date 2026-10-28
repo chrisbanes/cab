@@ -122,7 +122,7 @@ const transientEvidence = (
 });
 
 async function fixture(runtime: RetryFixtureRuntime) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-retry-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-retry-"));
   const dataDir = join(root, "data");
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
@@ -143,7 +143,7 @@ async function fixture(runtime: RetryFixtureRuntime) {
 }
 
 async function managedFixture(runtime: RetryFixtureRuntime) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-managed-retry-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-managed-retry-"));
   const dataDir = join(root, "data");
   const service = new StandaloneService(dataDir, () => runtime);
   await service.start();
@@ -443,7 +443,7 @@ test("reported Codex retry usage consumes the same persisted allowance", async (
     assert.equal(
       await waitUntil(() => runtime.turns === 2),
       true,
-      "one provider retry plus one Ensemble retry should exhaust the shared allowance",
+      "one provider retry plus one cab retry should exhaust the shared allowance",
     );
     await first;
     await new Promise<void>((resolve) => setTimeout(resolve, 25));
@@ -515,7 +515,7 @@ test("retry count and queued generation survive restart without duplicating work
       assert.equal(
         secondRuntime.turns,
         1,
-        "persisted Codex and Ensemble retry usage must prevent a third later turn",
+        "persisted Codex and cab retry usage must prevent a third later turn",
       );
       assert.equal(
         restarted.turnRequests().length,
@@ -676,7 +676,7 @@ test("transport timeout cannot be upgraded into a retry by a transient-looking c
   }
 });
 
-test("a pending Ensemble callback or known survivor keeps the failed generation held", async () => {
+test("a pending cab callback or known survivor keeps the failed generation held", async () => {
   for (const hold of ["callback", "survivor"] as const) {
     const runtime = new RetryFixtureRuntime();
     runtime.failure = transientEvidence();

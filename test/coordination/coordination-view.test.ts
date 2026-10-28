@@ -106,7 +106,7 @@ function command(service: StandaloneService, body: Record<string, unknown>) {
 async function fixture(
   routingClient: StandaloneServiceOptions["routingClient"] = null,
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-coordination-view-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-coordination-view-"));
   const runtime = new ViewRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -310,7 +310,7 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
     const questionResult = await call(
       f.threadId,
       f.turnId,
-      "ensemble_ask_question",
+      "cab_ask_question",
       { question: "Which compatibility target should remain?" },
       "call-question",
     );
@@ -320,10 +320,10 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
         await call(
           f.threadId,
           f.turnId,
-          "ensemble_request_approval",
+          "cab_request_approval",
           {
             action: "Publish package",
-            target: "ensemble@next",
+            target: "cab@next",
             material: { version: "next" },
           },
           "call-approval",
@@ -353,7 +353,7 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
         await call(
           workerWork.threadId,
           workerWork.turnId,
-          "ensemble_report_result",
+          "cab_report_result",
           { summary: "Reviewed parser output" },
           "call-result",
         )

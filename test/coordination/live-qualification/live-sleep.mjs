@@ -981,9 +981,7 @@ async function runLiveJourney(approval) {
     };
 
     progress("disposable-fixture-setup");
-    root = realpathSync(
-      mkdtempSync(join(temporaryRoot, "ensemble-s05-sleep-")),
-    );
+    root = realpathSync(mkdtempSync(join(temporaryRoot, "cab-s05-sleep-")));
     chmodSync(root, 0o700);
     evidence.fixture.created = true;
     dataDir = join(root, "data");
@@ -1039,7 +1037,7 @@ async function runLiveJourney(approval) {
       onToolCall(listener) {
         super.onToolCall(async (call) => {
           const result = await listener(call);
-          if (call.tool !== "ensemble_ask_question") return result;
+          if (call.tool !== "cab_ask_question") return result;
           const intent = activeService
             ?.list()
             .find(
@@ -1140,7 +1138,7 @@ async function runLiveJourney(approval) {
       profileId,
       name: "S05 physical sleep lead",
       instructions:
-        "Use only registered Ensemble coordination tools for this disposable task.",
+        "Use only registered cab coordination tools for this disposable task.",
       capabilities: "local task coordination",
     });
     command({
@@ -1174,8 +1172,8 @@ async function runLiveJourney(approval) {
       taskId: activeTaskId,
       title: "S05 active sleep-wake recovery task",
       outcome: [
-        "This is a disposable local runtime test. Use only registered Ensemble coordination tools. Do not use shell, filesystem, browser, network or other tools.",
-        "Call ensemble_ask_question exactly once with question text S05_PHYSICAL_SLEEP_V1: Please confirm the physical sleep and wake checkpoint. Do not answer it. After the call, end the turn without any more tools.",
+        "This is a disposable local runtime test. Use only registered cab coordination tools. Do not use shell, filesystem, browser, network or other tools.",
+        "Call cab_ask_question exactly once with question text S05_PHYSICAL_SLEEP_V1: Please confirm the physical sleep and wake checkpoint. Do not answer it. After the call, end the turn without any more tools.",
       ].join("\n"),
       ready: false,
     });
@@ -1555,7 +1553,7 @@ async function runLiveJourney(approval) {
         exactRoot =
           realpathSync(root) === root &&
           dirname(root) === temporaryRoot &&
-          basename(root).startsWith("ensemble-s05-sleep-");
+          basename(root).startsWith("cab-s05-sleep-");
       } catch {}
       if (exactRoot) {
         try {

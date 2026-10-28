@@ -247,7 +247,7 @@ async function fixture(
   runtime: HistoryRuntime,
   options: { exclusions?: () => readonly string[] } = {},
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-history-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-history-"));
   const dataDir = join(root, "data");
   const service = new StandaloneService(dataDir, () => runtime, undefined, {
     power: { enabled: false },
@@ -1017,9 +1017,7 @@ test("the Claude token reference and value are redacted when history is captured
 
 test("a file-sourced Claude token value and path are redacted when history is captured", async () => {
   const runtime = new HistoryRuntime();
-  const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-history-token-")),
-  );
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-history-token-")));
   chmodSync(root, 0o700);
   const path = join(root, "claude-token");
   writeFileSync(path, "CLAUDEFILECANARY884\n", { mode: 0o600 });

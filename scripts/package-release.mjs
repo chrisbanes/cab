@@ -90,7 +90,7 @@ export async function downloadVerifiedNode({
   }
 }
 
-/** ensemble-tree-sha256/v1 over a release root, excluding the root manifest.json. */
+/** cab-tree-sha256/v1 over a release root, excluding the root manifest.json. */
 export async function treeDigest(root) {
   const lines = [];
   const walk = async (relative) => {
@@ -179,7 +179,7 @@ async function build(commit, out) {
   const nodeVersion = await git("show", `${sha}:.nvmrc`).catch(() =>
     git("show", `${sha}:.node-version`),
   );
-  const root = join(homedir(), ".config/ensemble-dev");
+  const root = join(homedir(), ".config/cab-dev");
   const output = resolve(out ?? join(root, "builds", sha));
   const partial = `${output}.partial`;
   for (const path of [output, partial])
@@ -240,7 +240,7 @@ async function build(commit, out) {
     ]);
     await assertProductionTree(source);
 
-    const name = `${pkg.name}-${pkg.version}-${PLATFORM}`;
+    const name = `${basename(pkg.name)}-${pkg.version}-${PLATFORM}`;
     const release = join(partial, name);
     for (const path of [
       "dist/src",
@@ -257,17 +257,17 @@ async function build(commit, out) {
     for (const path of ["bin/node", "LICENSE"])
       await cp(join(node.nodeDirectory, path), join(release, "node", path));
     await mkdir(join(release, "bin"));
-    await writeFile(join(release, "bin/ensemble"), launcher, { mode: 0o755 });
+    await writeFile(join(release, "bin/cab"), launcher, { mode: 0o755 });
     const manifest = `${JSON.stringify(
       {
-        schema: "ensemble.release/v1",
+        schema: "cab.release/v1",
         name: pkg.name,
         version: pkg.version,
         platform: PLATFORM,
         commit: sha,
         node: { version: nodeVersion, sha256: node.sha256 },
         tree: {
-          algorithm: "ensemble-tree-sha256/v1",
+          algorithm: "cab-tree-sha256/v1",
           digest: await treeDigest(release),
         },
       },
@@ -300,8 +300,8 @@ ${
   out
     ? ""
     : `Start:
-  ENSEMBLE_OPERATOR_AUTH_FILE="${root}/auth/operator-auth.json" \\
-  ENSEMBLE_OPERATOR_ORIGIN=http://127.0.0.1:8787 \\
+  CAB_OPERATOR_AUTH_FILE="${root}/auth/operator-auth.json" \\
+  CAB_OPERATOR_ORIGIN=http://127.0.0.1:8787 \\
   "${releaseRoot}/node/bin/node" "${releaseRoot}/dist/src/standalone/cli.js" operator "${root}/data" 8787
 `
 }`);
@@ -420,7 +420,7 @@ async function verify(tarballPath) {
   const tarball = resolve(tarballPath);
   await checkSums(dirname(tarball), basename(tarball));
   // The space exercises the quoted paths that the install location needs.
-  const temp = await mkdtemp(join(realpathSync(tmpdir()), "ensemble verify-"));
+  const temp = await mkdtemp(join(realpathSync(tmpdir()), "cab verify-"));
   let child;
   try {
     const unpacked = join(temp, "release");
@@ -441,10 +441,11 @@ async function verify(tarballPath) {
       await readFile(join(release, "package.json"), "utf8"),
     );
     if (
-      manifest.schema !== "ensemble.release/v1" ||
+      manifest.schema !== "cab.release/v1" ||
+      manifest.name !== pkg.name ||
       manifest.platform !== PLATFORM ||
       manifest.version !== pkg.version ||
-      name !== `${pkg.name}-${pkg.version}-${PLATFORM}`
+      name !== `${basename(pkg.name)}-${pkg.version}-${PLATFORM}`
     )
       throw new Error("manifest.json does not describe this release");
     const digest = await treeDigest(release);
@@ -485,11 +486,11 @@ async function verify(tarballPath) {
     if (nodeOnPath)
       throw new Error("node must not be on the verification PATH");
     const versionLine = (
-      await run(join(release, "bin/ensemble"), ["--version"], { env })
+      await run(join(release, "bin/cab"), ["--version"], { env })
     ).stdout;
-    if (versionLine !== `ensemble ${manifest.version}\n`)
+    if (versionLine !== `cab ${manifest.version}\n`)
       throw new Error(
-        `bin/ensemble --version printed ${JSON.stringify(versionLine)}`,
+        `bin/cab --version printed ${JSON.stringify(versionLine)}`,
       );
 
     const password = randomBytes(24).toString("hex");
@@ -516,8 +517,8 @@ await OperatorAuth.initialize(process.env.AUTH_FILE, process.env.PASSWORD);`,
       {
         env: {
           ...env,
-          ENSEMBLE_OPERATOR_AUTH_FILE: authFile,
-          ENSEMBLE_OPERATOR_ORIGIN: origin,
+          CAB_OPERATOR_AUTH_FILE: authFile,
+          CAB_OPERATOR_ORIGIN: origin,
         },
         stdio: ["ignore", "inherit", "inherit"],
       },

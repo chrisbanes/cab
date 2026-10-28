@@ -217,7 +217,7 @@ async function routedFixture(
     backgroundDiagnosticSink?: StandaloneServiceOptions["backgroundDiagnosticSink"];
   } = {},
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-routing-race-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-routing-race-"));
   const runtime = new CoordinationRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -366,7 +366,7 @@ async function routedFixture(
 }
 
 test("enabled routing allocates the initial brief without a lead turn", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-routing-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-routing-"));
   const runtime = new CoordinationRuntime();
   const workerProfileId = randomUUID();
   const client = new FakeRoutingClient((request) =>
@@ -691,7 +691,7 @@ test("a first turn waiting for capacity is re-captured at a newer assignment ver
 });
 
 test("a delayed routing response cannot dispatch after the task brief changes", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-stale-route-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-stale-route-"));
   const runtime = new CoordinationRuntime();
   const firstResponse = deferred<RoutingChoiceResponse>();
   const client = new FakeRoutingClient((request, index) =>
@@ -807,7 +807,7 @@ test("a delayed routing response cannot dispatch after the task brief changes", 
 });
 
 test("a Stop committed after routing still blocks scheduler admission", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-stop-after-route-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-stop-after-route-"));
   const runtime = new StopAtAdmissionRuntime();
   const workerProfileId = randomUUID();
   const client = new FakeRoutingClient((request) =>
@@ -1399,17 +1399,17 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
   assert.deepEqual(
     coordinationTools.map((tool) => tool.name),
     [
-      "ensemble_external_action",
-      "ensemble_register_pr",
-      "ensemble_delegate",
-      "ensemble_report_result",
-      "ensemble_ask_question",
-      "ensemble_request_approval",
-      "ensemble_request_follow_up",
-      "ensemble_request_completion",
+      "cab_external_action",
+      "cab_register_pr",
+      "cab_delegate",
+      "cab_report_result",
+      "cab_ask_question",
+      "cab_request_approval",
+      "cab_request_follow_up",
+      "cab_request_completion",
     ],
   );
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-integration-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-integration-"));
   const runtime = new CoordinationRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -1501,7 +1501,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
       threadId: leadThread,
       turnId: "turn-1",
       callId: "delegate-1",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: { profileId: workerProfileId, brief: "Build the feature" },
     });
     assert.equal(delegation.success, true);
@@ -1531,7 +1531,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
       threadId: childThread,
       turnId: "turn-2",
       callId: "question-1",
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Should the output use format B?" },
     } as const;
     const question = await runtime.callTool(questionCall);
@@ -1542,7 +1542,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
       threadId: childThread,
       turnId: "turn-2",
       callId: "approval-1",
-      tool: "ensemble_request_approval",
+      tool: "cab_request_approval",
       arguments: {
         action: "publish",
         target: "release-notes",
@@ -1722,7 +1722,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
       threadId: childThread,
       turnId: "turn-3",
       callId: "result-1",
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "Implemented the feature" },
     } as const;
     const reported = await runtime.callTool(reportCall);
@@ -1807,9 +1807,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
 });
 
 test("a Stop committed before delegation rejects without a child or receipt", async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-s04b-stop-before-delegate-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-stop-before-delegate-"));
   const runtime = new CoordinationRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -1901,7 +1899,7 @@ test("a Stop committed before delegation rejects without a child or receipt", as
       threadId: "thread-1",
       turnId: "turn-1",
       callId: "delegate-after-stop",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: {
         profileId: workerProfileId,
         brief: "Must remain unassigned.",
@@ -1935,9 +1933,7 @@ test("a Stop committed before delegation rejects without a child or receipt", as
 });
 
 test("a Stop after delegation commit leaves the child pending without dispatch", async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-s04b-stop-after-delegate-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-stop-after-delegate-"));
   const runtime = new StopAtAdmissionRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -2038,7 +2034,7 @@ test("a Stop after delegation commit leaves the child pending without dispatch",
       threadId: "thread-1",
       turnId: "turn-1",
       callId: "delegate-before-stop",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: { profileId: workerProfileId, brief: "Created before Stop." },
     });
     assert.equal(response.success, true);
@@ -2058,7 +2054,7 @@ test("a Stop after delegation commit leaves the child pending without dispatch",
 });
 
 test("restart leaves legacy inbox events for a completed recipient undelivered", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-completed-inbox-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-completed-inbox-"));
   let runtime = new CoordinationRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -2124,7 +2120,7 @@ test("restart leaves legacy inbox events for a completed recipient undelivered",
       threadId: "thread-1",
       turnId: "turn-1",
       callId: "lead-result-before-completion",
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "Completed the task." },
     });
     assert.equal(result.success, true);
@@ -2172,7 +2168,7 @@ test("restart leaves legacy inbox events for a completed recipient undelivered",
 });
 
 test("completion rejection is final for one lead generation; a fresh turn can complete", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-completion-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-completion-"));
   const runtime = new CoordinationRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -2263,10 +2259,10 @@ test("completion rejection is final for one lead generation; a fresh turn can co
       threadId: leadThread,
       turnId: "turn-1",
       callId: "completion-delegate",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: {
         profileId: workerProfileId,
-        brief: "Use ensemble_report_result with summary 'completion-result'.",
+        brief: "Use cab_report_result with summary 'completion-result'.",
       },
     });
     assert.equal(delegation.success, true);
@@ -2304,7 +2300,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
       threadId: "thread-2",
       turnId: "turn-2",
       callId: "completion-worker-result",
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: { summary: "completion-result" },
     });
     assert.equal(workerResult.success, true);
@@ -2326,7 +2322,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
       threadId: leadThread,
       turnId: "turn-3",
       callId: "completion-question",
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Should the verification be retained?" },
     });
     assert.equal(questionResponse.success, true);
@@ -2336,7 +2332,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
       threadId: leadThread,
       turnId: "turn-3",
       callId: "completion-blocked-request",
-      tool: "ensemble_request_completion",
+      tool: "cab_request_completion",
       arguments: { reviewedResultIds: [resultId] },
     });
     assert.equal(firstCompletion.success, true);
@@ -2433,7 +2429,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
       threadId: leadThread,
       turnId: "turn-4",
       callId: "completion-fresh-request",
-      tool: "ensemble_request_completion",
+      tool: "cab_request_completion",
       arguments: { reviewedResultIds: [resultId] },
     });
     assert.equal(freshCompletion.success, true);
@@ -2497,7 +2493,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
 });
 
 test("restart acknowledges the exact lead inbox batch before finalizing a completion commit gap", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-completion-gap-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-completion-gap-"));
   const runtime = new CoordinationRuntime();
   const service = new StandaloneService(
     join(root, "data"),
@@ -2591,7 +2587,7 @@ test("restart acknowledges the exact lead inbox batch before finalizing a comple
       threadId: "thread-1",
       turnId: "turn-1",
       callId: "completion-gap-request",
-      tool: "ensemble_request_completion",
+      tool: "cab_request_completion",
       arguments: { reviewedResultIds: [] },
     });
     assert.equal(completion.success, true);
@@ -2785,7 +2781,7 @@ test("restart acknowledges the exact lead inbox batch before finalizing a comple
 });
 
 test("a result-free turn gets one durable reporting repair then holds", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-repair-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s04b-repair-"));
   const runtime = new CoordinationRuntime();
   const service = new StandaloneService(
     join(root, "data"),

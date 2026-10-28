@@ -66,7 +66,7 @@ test("prepare writes an exact, owner-only, version-bound document and sends noth
   assert.equal(posts(w), before, "prepare sends no command");
   assert.equal(statSync(file).mode & 0o777, 0o600);
   const document = JSON.parse(readFileSync(file, "utf8"));
-  assert.equal(document.schema, "ensemble.cli.recovery/v1");
+  assert.equal(document.schema, "cab.cli.recovery/v1");
   assert.equal(document.path, "no-turn-adopt");
   assert.deepEqual(document.target, {
     scope: `assignment:${w.g.assignmentId}`,
@@ -315,7 +315,7 @@ test("submit sends a document once, replays it exactly and reports what did not 
   const lost = r.json().error;
   assert.equal(lost.outcome, "unknown");
   assert.equal(lost.request.type, "recovery.no-turn.recover");
-  assert.match(lost.message, /ensemble operation get .* --scope assignment:/);
+  assert.match(lost.message, /cab operation get .* --scope assignment:/);
   const get = await w.cli("ro", [
     "operation",
     "get",
@@ -379,7 +379,7 @@ test("submit sends a document once, replays it exactly and reports what did not 
     "rw",
   ]);
   assert.match(replaced.out, /do not replace it again/);
-  assert.match(replaced.out, /new 'ensemble task message'/);
+  assert.match(replaced.out, /new 'cab task message'/);
   assert.doesNotMatch(replaced.out, /needs conversation replacement/);
 });
 

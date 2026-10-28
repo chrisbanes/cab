@@ -258,7 +258,7 @@ test("caffeinate holds exactly one idle-sleep assertion only while execution is 
     },
   );
   const events = new FakePowerEvents();
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const power = new ExecutionPower(state, events, assertion, async () => {});
   try {
@@ -306,7 +306,7 @@ test("caffeinate holds exactly one idle-sleep assertion only while execution is 
 test("admission observation needs a completed poll started after the last execution ended", async () => {
   let clock = 1_000_000;
   const clockMock = mock.method(Date, "now", () => clock);
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-observed-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-observed-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const events = new FakePowerEvents();
   events.cursor = powerCursor("baseline");
@@ -434,7 +434,7 @@ test("assertion child failure is visible without releasing execution state", asy
       return child;
     },
   );
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-failure-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-failure-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const power = new ExecutionPower(
     state,
@@ -466,7 +466,7 @@ test("assertion child failure is visible without releasing execution state", asy
 });
 
 test("power stop attempts event-source cleanup after assertion failure and preserves holds", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-stop-assertion-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-stop-assertion-"));
   const path = join(root, "power.sqlite");
   const { db, state } = powerStore(path);
   const active = begin(state, "active-at-power-stop", "/workspace/a");
@@ -517,7 +517,7 @@ test("power stop attempts event-source cleanup after assertion failure and prese
 });
 
 test("power stop reports assertion and event-source failures in shutdown order", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-stop-both-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-stop-both-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const queued = state.create("queued-at-power-stop", "prompt", "/workspace/a");
   state.holdPowerAdmission("Injected power-admission hold");
@@ -572,7 +572,7 @@ test("a new execution racing final assertion release reacquires before its first
     children.push(child);
     return child;
   });
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-race-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-race-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const power = new ExecutionPower(
     state,
@@ -607,7 +607,7 @@ test("a new execution racing final assertion release reacquires before its first
 });
 
 test("sleep/wake installs the durable admission gate before reconciling active generations", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-wake-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-wake-"));
   const path = join(root, "power.sqlite");
   const { db, state } = powerStore(path);
   const active = state.create(
@@ -707,7 +707,7 @@ test("sleep/wake installs the durable admission gate before reconciling active g
 });
 
 test("an incomplete or ambiguous power-event cursor persists a global hold across reopen", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-cursor-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-cursor-"));
   const path = join(root, "power.sqlite");
   const opened = powerStore(path);
   const events = new FakePowerEvents();
@@ -742,7 +742,7 @@ test("an incomplete or ambiguous power-event cursor persists a global hold acros
 });
 
 test("a repeated or out-of-order power cursor holds admission instead of guessing", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-ambiguous-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-ambiguous-"));
   const path = join(root, "power.sqlite");
   const { db, state } = powerStore(path);
   const events = new FakePowerEvents();
@@ -784,7 +784,7 @@ test("a repeated or out-of-order power cursor holds admission instead of guessin
 });
 
 test("wake cursor survives restart and an already reconciled wake is not replayed", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-restart-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-restart-"));
   const path = join(root, "power.sqlite");
   const opened = powerStore(path);
   const events = new FakePowerEvents();
@@ -849,9 +849,7 @@ test("wake cursor survives restart and an already reconciled wake is not replaye
 });
 
 test("wake admission stays held until every admitted generation is reconciled", async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-power-pending-reconciliation-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-power-pending-reconciliation-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const active = state.create(
     "active-needs-reconciliation",
@@ -898,7 +896,7 @@ test("wake admission stays held until every admitted generation is reconciled", 
 });
 
 test("a complete cursor can establish an idle baseline but not bypass active recovery", async () => {
-  const idleRoot = mkdtempSync(join(tmpdir(), "ensemble-power-idle-baseline-"));
+  const idleRoot = mkdtempSync(join(tmpdir(), "cab-power-idle-baseline-"));
   const idle = powerStore(join(idleRoot, "power.sqlite"));
   const idleEvents = new FakePowerEvents();
   idleEvents.cursor = powerCursor("baseline-1");
@@ -918,9 +916,7 @@ test("a complete cursor can establish an idle baseline but not bypass active rec
     rmSync(idleRoot, { recursive: true, force: true });
   }
 
-  const activeRoot = mkdtempSync(
-    join(tmpdir(), "ensemble-power-active-baseline-"),
-  );
+  const activeRoot = mkdtempSync(join(tmpdir(), "cab-power-active-baseline-"));
   const active = powerStore(join(activeRoot, "power.sqlite"));
   const intent = active.state.create(
     "active-without-history",
@@ -1383,7 +1379,7 @@ test("power supervision establishes its baseline from macOS 27 output but holds 
     [macos27Log, false],
     [misplaced, true],
   ] as const) {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-power-macos27-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-power-macos27-"));
     const store = powerStore(join(root, "power.sqlite"));
     const readLog: PowerLogReader = async function* () {
       yield* lines;
@@ -1439,7 +1435,7 @@ process.stdout.write(out+"2026-09-29 10:00:00 +0100 Sleep\\tx\\n");`;
 });
 
 test("an over-long line, a timeout, a failing exit or a reader error stop the child, and only a timeout is distinguishable", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-power-reader-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-power-reader-"));
   try {
     const pidFile = join(dir, "pid");
     const hang = `require("fs").writeFileSync(${JSON.stringify(pidFile)},String(process.pid));process.stdout.write("2026-09-29 10:00:00 +0100 Sleep\\n");setInterval(()=>{},1000)`;
@@ -1562,7 +1558,7 @@ test("a read slower than the idle bound completes while it keeps producing outpu
 });
 
 test("a stalled read hits the idle bound and an endless read hits the total bound, each as a typed timeout that stops the child", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-power-bounds-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-power-bounds-"));
   try {
     const pidFile = join(dir, "pid");
     const record = `require("fs").writeFileSync(${JSON.stringify(pidFile)},String(process.pid));`;
@@ -1616,7 +1612,7 @@ test("a timed-out read holds admission with its own reason, distinct from an una
   ];
   for (const [label, fail, suffix] of outcomes) {
     for (const stage of ["history", "advancement"] as const) {
-      const root = mkdtempSync(join(tmpdir(), "ensemble-power-reason-"));
+      const root = mkdtempSync(join(tmpdir(), "cab-power-reason-"));
       const { db, state } = powerStore(join(root, "power.sqlite"));
       const events = new FakePowerEvents();
       events.cursor = powerCursor("baseline");
@@ -1842,7 +1838,7 @@ async function signallingPower(
     reconciles: { count: number; during?: (() => void) | undefined };
   }) => Promise<void>,
 ) {
-  const root = mkdtempSync(join(tmpdir(), `ensemble-power-${label}-`));
+  const root = mkdtempSync(join(tmpdir(), `cab-power-${label}-`));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const events = new SignallingPowerEvents();
   events.cursor = powerCursor("baseline");
@@ -2016,7 +2012,7 @@ test("a listener that cannot start holds admission without failing supervision s
 });
 
 test("a listener failure in the same output chunk as ready keeps admission held until a restart succeeds", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-ready-then-fail-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-ready-then-fail-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const children: ListenerChild[] = [];
   const listener = new SleepWakeListener((() => {
@@ -2112,7 +2108,7 @@ async function withRetentionHarness(
     log: { rows: string[]; now: number };
   }) => Promise<void>,
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-retention-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-retention-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const log = {
     rows: [utcRow(retentionStart - 3_600_000, "Assertions\tearlier")],
@@ -2218,7 +2214,7 @@ test("a held poll resumes with the cursor it read instead of advancing to the re
 });
 
 test("advancing the power cursor is fenced by holds, stale revisions and a changed cursor, and allows admitted work", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-advance-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-advance-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   try {
     const a = powerCursor("pmset-time:1000");
@@ -2249,7 +2245,7 @@ test("advancing the power cursor is fenced by holds, stale revisions and a chang
 });
 
 test("a batch with an invalid read-start cursor holds admission, and the source floors the read start to a whole second", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-readstart-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-readstart-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const events = new FakePowerEvents();
   events.cursor = powerCursor("baseline-1");

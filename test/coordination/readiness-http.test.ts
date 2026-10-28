@@ -78,7 +78,7 @@ test("the readiness read reports a Claude token the service cannot use without i
   const s = await startCliService(t, {
     service: { runtimeHarnesses: ["codex", "claude"] },
   });
-  const root = mkdtempSync(join(tmpdir(), "ensemble-ready-http-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-ready-http-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const tokenPath = join(root, "claude-token");
   writeFileSync(tokenPath, "ready-http-canary-token-9031\n");
@@ -100,7 +100,7 @@ test("the readiness read reports a Claude token the service cannot use without i
 });
 
 test("verifyCodexLogin asks the App Server for account and config only", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-ready-codex-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-ready-codex-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const executable = join(root, "fake-codex.mjs");
   const log = join(root, "methods.log");
@@ -166,7 +166,7 @@ for await (const line of createInterface({input: process.stdin})) {
 });
 
 test("a rejected profile's name never reaches readiness output", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-ready-name-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-ready-name-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const tokenPath = join(root, "claude-token");
   const TOKEN_VALUE = "ready-name-canary-token-5530";

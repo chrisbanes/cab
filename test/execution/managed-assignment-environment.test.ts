@@ -8,9 +8,9 @@ import {
 
 test("service runtime children get the managed-assignment marker and no CLI selection", async (t) => {
   const keys = [
-    "ENSEMBLE_CLI_CONFIG_DIR",
-    "ENSEMBLE_CONNECTION",
-    "ENSEMBLE_MANAGED_ASSIGNMENT",
+    "CAB_CLI_CONFIG_DIR",
+    "CAB_CONNECTION",
+    "CAB_MANAGED_ASSIGNMENT",
     "MANAGED_ENV_SENTINEL",
   ] as const;
   const previous = keys.map((key) => process.env[key]);
@@ -21,9 +21,9 @@ test("service runtime children get the managed-assignment marker and no CLI sele
       else process.env[key] = value;
     }),
   );
-  process.env.ENSEMBLE_CLI_CONFIG_DIR = "/tmp/ensemble-cli-config";
-  process.env.ENSEMBLE_CONNECTION = "home";
-  delete process.env.ENSEMBLE_MANAGED_ASSIGNMENT;
+  process.env.CAB_CLI_CONFIG_DIR = "/tmp/cab-cli-config";
+  process.env.CAB_CONNECTION = "home";
+  delete process.env.CAB_MANAGED_ASSIGNMENT;
   process.env.MANAGED_ENV_SENTINEL = "kept";
   const contexts: RuntimeSpawnContext[] = [];
   const f = await createOperatorFixture(
@@ -39,8 +39,8 @@ test("service runtime children get the managed-assignment marker and no CLI sele
   t.after(() => f.close());
   const environment = contexts[0]?.spawnEnvironment();
   assert.ok(environment);
-  assert.equal(environment.ENSEMBLE_MANAGED_ASSIGNMENT, "1");
-  assert.equal(environment.ENSEMBLE_CLI_CONFIG_DIR, undefined);
-  assert.equal(environment.ENSEMBLE_CONNECTION, undefined);
+  assert.equal(environment.CAB_MANAGED_ASSIGNMENT, "1");
+  assert.equal(environment.CAB_CLI_CONFIG_DIR, undefined);
+  assert.equal(environment.CAB_CONNECTION, undefined);
   assert.equal(environment.MANAGED_ENV_SENTINEL, "kept");
 });

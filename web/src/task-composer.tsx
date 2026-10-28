@@ -199,7 +199,7 @@ export function TaskComposer({
       >
         <h2 className="section-heading">Unfinished input on this device</h2>
         <p className="body">
-          This input was kept in this tab. It is not a saved Ensemble task.
+          This input was kept in this tab. It is not a saved cab task.
         </p>
         <p className="body">{input.title || "Untitled input"}</p>
         <div className="task-actions">
@@ -392,6 +392,7 @@ export function TaskComposer({
                   <Input
                     id="composer-title"
                     aria-label="Task title"
+                    placeholder="Where to?"
                     className="control"
                     value={input.title}
                     onChange={(e) => edit({ title: e.target.value })}
@@ -718,8 +719,7 @@ export function TaskComposer({
             <div className="composer-actions">
               {state.savedOnDevice && (
                 <p className="metadata muted">
-                  Unfinished input saved on this device · not yet an Ensemble
-                  draft
+                  Unfinished input saved on this device · not yet a cab draft
                 </p>
               )}
               <div className="composer-actions-end">

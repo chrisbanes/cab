@@ -37,7 +37,7 @@ export function git(cwd: string, ...args: string[]): string {
 
 /** A source repository and a detached task worktree provisioned at its `base` commit. */
 export function taskWorktree(t: TestContext) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-publication-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-publication-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = join(root, "source");
   mkdirSync(source);
@@ -204,7 +204,7 @@ export function publicationWorld(
   let refReadsFail = false;
   const push: PushFunction = async (request): Promise<PushOutcome> => {
     pushes.push(request);
-    // Another writer moves the branch after Ensemble's preflight and before its push.
+    // Another writer moves the branch after cab's preflight and before its push.
     if (racer) {
       remote.head = racer;
       racer = null;
@@ -218,12 +218,12 @@ export function publicationWorld(
       return "rejected-lease";
     }
     if (pushBehaviour === "applied-then-deleted") {
-      // Git succeeds, then another writer deletes the branch before Ensemble reads it back.
+      // Git succeeds, then another writer deletes the branch before cab reads it back.
       remote.head = null;
       return "pushed";
     }
     if (pushBehaviour === "applied-then-moved") {
-      // Git succeeds, then another writer moves the branch before Ensemble reads it back.
+      // Git succeeds, then another writer moves the branch before cab reads it back.
       remote.head = movedHead;
       return "pushed";
     }

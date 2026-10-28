@@ -50,7 +50,7 @@ const nextTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 test("a selection response from the previous configuration cannot commit after same-ID reactivation", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-selection-race-")),
+    mkdtempSync(join(tmpdir(), "cab-github-selection-race-")),
   );
   const projectId = randomUUID();
   let release!: () => void;
@@ -154,7 +154,7 @@ test("a selection response from the previous configuration cannot commit after s
 
 test("a native blocker response from the previous configuration cannot clear the reconfigured task", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-blocker-race-")),
+    mkdtempSync(join(tmpdir(), "cab-github-blocker-race-")),
   );
   const projectId = randomUUID();
   let release!: () => void;
@@ -263,7 +263,7 @@ test("a native blocker response from the previous configuration cannot clear the
 
 test("a retained status response cannot release a local dependent after credential removal", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-status-race-")),
+    mkdtempSync(join(tmpdir(), "cab-github-status-race-")),
   );
   const projectId = randomUUID();
   const localId = randomUUID();

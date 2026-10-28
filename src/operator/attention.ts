@@ -20,7 +20,7 @@ export type AttentionCode = (typeof attentionCodes)[number];
 export const attentionCodeSchema = z.enum(attentionCodes);
 
 /**
- * Who acts next for each code, shared by the List, the Inbox and the task detail. Ensemble owns
+ * Who acts next for each code, shared by the List, the Inbox and the task detail. cab owns
  * `question-delivery` (a recorded answer it is still delivering to the agent) and `lead-review`
  * (a routing fallback it commits to the project lead, or marks stale, on its next coordination
  * pass); the operator owns the rest, and only those raise Inbox interventions. A recorded answer
@@ -97,13 +97,13 @@ export function nextAttention(
   return {
     code,
     operator: next.operator,
-    text: `Next: ${next.operator ? "you" : "Ensemble"} · ${next.action}`,
+    text: `Next: ${next.operator ? "you" : "cab"} · ${next.action}`,
   };
 }
 
 /**
  * The operator-owned code an Inbox intervention stands for. Questions and approvals have their
- * own items, and Ensemble-owned codes raise none.
+ * own items, and cab-owned codes raise none.
  */
 export const interventionCode = (codes: readonly AttentionCode[]) =>
   attentionCodes.find(

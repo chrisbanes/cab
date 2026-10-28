@@ -324,7 +324,7 @@ export class Readiness {
       return outcome(
         id,
         "fail",
-        "Codex's approval policy or sandbox mode is not the one Ensemble requires",
+        "Codex's approval policy or sandbox mode is not the one cab requires",
         fixes.codexPolicy,
       );
     const reason = {

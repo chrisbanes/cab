@@ -54,7 +54,7 @@ async function withPr(w: World) {
   return { first, branch };
 }
 
-test("an equal head after a rejected fresh push is an outside change, not Ensemble's push", async (t) => {
+test("an equal head after a rejected fresh push is an outside change, not cab's push", async (t) => {
   const w = publicationWorld(t);
   const sha = w.commit();
   w.setPush("remote-rejected");
@@ -92,10 +92,10 @@ test("a push that never started does not own its commit on the PR, and the branc
       .completionBlockers(w.taskId, 1)
       .includes("task-branch-outside-change"),
   );
-  await assert.rejects(settle(w, second), /outside Ensemble/);
+  await assert.rejects(settle(w, second), /outside cab/);
 });
 
-test("PR actions on the task branch need the commit Ensemble last pushed", async (t) => {
+test("PR actions on the task branch need the commit cab last pushed", async (t) => {
   const w = publicationWorld(t, { grants: ["branch.push", "pr.create"] });
   const outside = w.commit();
   w.remote.head = outside;
@@ -117,10 +117,10 @@ test("PR actions on the task branch need the commit Ensemble last pushed", async
       draft: true,
     },
   });
-  // The branch exists but Ensemble never published it: no PR may be opened from that head.
+  // The branch exists but cab never published it: no PR may be opened from that head.
   assert.throws(
     () => w.store.authorize(create(outside), w.caller, false),
-    /last Ensemble push/,
+    /last cab push/,
   );
 
   const own = publicationWorld(t, {
@@ -149,7 +149,7 @@ test("PR actions on the task branch need the commit Ensemble last pushed", async
   assert.throws(() =>
     own.store.authorize(ownCreate("1".repeat(40)), own.caller, false),
   );
-  // An outside advance blocks the same PR actions until the branch is back where Ensemble left it.
+  // An outside advance blocks the same PR actions until the branch is back where cab left it.
   own.db
     .prepare(
       "UPDATE delivery_task_branches SET outsideHeadSha=? WHERE taskId=?",
@@ -157,7 +157,7 @@ test("PR actions on the task branch need the commit Ensemble last pushed", async
     .run("2".repeat(40), own.taskId);
   assert.throws(
     () => own.store.authorize(ownCreate(sha), own.caller, false),
-    /last Ensemble push/,
+    /last cab push/,
   );
   const prAction = (kind: "pr.merge" | "pr.ready" | "pr.edit") => ({
     operationId: randomUUID(),
@@ -180,7 +180,7 @@ test("PR actions on the task branch need the commit Ensemble last pushed", async
   for (const kind of ["pr.merge", "pr.ready", "pr.edit"] as const)
     assert.throws(
       () => own.store.authorize(prAction(kind) as never, own.caller, true),
-      /last Ensemble push/,
+      /last cab push/,
       kind,
     );
 });
@@ -237,7 +237,7 @@ test("a push Git reported done stays unproved while the read lags, and settles w
   assert.equal(w.pushes.length, 1);
 });
 
-test("a push Git reported done followed by a third head is Ensemble's push and an outside move", async (t) => {
+test("a push Git reported done followed by a third head is cab's push and an outside move", async (t) => {
   const w = publicationWorld(t);
   const sha = w.commit();
   const third = "3".repeat(40);
@@ -286,7 +286,7 @@ test("a retry of a superseded push never rewinds a newer push", async (t) => {
   assert.equal(branchOf(w)?.lastPushedSha, newer);
 });
 
-test("a recorded outside head clears once the branch is back at Ensemble's push or Ensemble pushes again", async (t) => {
+test("a recorded outside head clears once the branch is back at cab's push or cab pushes again", async (t) => {
   const w = publicationWorld(t);
   const { first, branch } = await withPr(w);
   w.showPr("5".repeat(40), branch);
@@ -343,7 +343,7 @@ test("a PR registered on a branch that already holds an outside head wakes the l
   );
 });
 
-test("a stale lease is not labelled outside when the readback fails or shows the head Ensemble saw", async (t) => {
+test("a stale lease is not labelled outside when the readback fails or shows the head cab saw", async (t) => {
   const unchanged = publicationWorld(t);
   const first = unchanged.commit();
   await unchanged.submit("branch.push", first);
@@ -434,7 +434,7 @@ test("ancestry fails closed on a loose object that lies about its content", asyn
 test("status in the verifier never runs a configured clean filter", async (t) => {
   const w = publicationWorld(t);
   const sha = w.commit();
-  const marker = join(mkdtempSync(join(tmpdir(), "ensemble-filter-")), "ran");
+  const marker = join(mkdtempSync(join(tmpdir(), "cab-filter-")), "ran");
   t.after(() => rmSync(join(marker, ".."), { recursive: true, force: true }));
   git(w.workspace, "config", "filter.evil.clean", `touch ${marker}; cat`);
   mkdirSync(w.workspace, { recursive: true });
@@ -479,7 +479,7 @@ test("an update Git rejected never owns an equal head, even when its readback fa
   assert.deepEqual(unchanged.wakes, []);
 });
 
-test("a branch deleted after Ensemble's push is an outside change, not a clean success", async (t) => {
+test("a branch deleted after cab's push is an outside change, not a clean success", async (t) => {
   const w = publicationWorld(t);
   const { first } = await withPr(w);
   await settle(w, first);
@@ -494,7 +494,7 @@ test("a branch deleted after Ensemble's push is an outside change, not a clean s
     w.wakes.map((x) => x.identity),
     [`outside-push:${repositoryId}:absent`],
   );
-  // The absent branch is not where Ensemble left it, so the next push is refused.
+  // The absent branch is not where cab left it, so the next push is refused.
   w.setPush("apply");
   const next = await w.submit("branch.push", w.commit());
   assert.equal(next.observation?.reason, "branch-outside-change");
@@ -516,7 +516,7 @@ test("a Git-rejected update does not own its commit on the PR while its readback
   assert.equal(branchOf(w)?.outsideHeadSha, second);
 });
 
-test("a remote already at the commit makes Git send nothing, and that is not Ensemble's push", async (t) => {
+test("a remote already at the commit makes Git send nothing, and that is not cab's push", async (t) => {
   const w = publicationWorld(t);
   const sha = w.commit();
   w.raceBeforeNextPush(sha);
@@ -593,8 +593,8 @@ test("a deleted branch keeps holding completion until a ref read proves it is ba
       .completionBlockers(w.taskId, 1)
       .includes("task-branch-outside-change"),
   );
-  await assert.rejects(settle(w, second), /outside Ensemble/);
-  // The branch comes back where Ensemble left it; the next push reads that and clears the hold.
+  await assert.rejects(settle(w, second), /outside cab/);
+  // The branch comes back where cab left it; the next push reads that and clears the hold.
   w.remote.head = second;
   w.setPush("apply");
   const third = w.commit();
@@ -691,7 +691,7 @@ test("an outside head on a second repository's branch holds completion and accep
   assignSecondRepository(w);
   setOutsideHead(w, "R2", "5".repeat(40));
   assert.equal(holdsCompletion(w), true);
-  await assert.rejects(settle(w, first), /outside Ensemble/);
+  await assert.rejects(settle(w, first), /outside cab/);
   setOutsideHead(w, "R2", null);
   await settle(w, first);
 });

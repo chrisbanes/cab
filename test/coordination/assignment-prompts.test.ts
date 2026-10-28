@@ -154,7 +154,7 @@ async function waitUntil(
 }
 
 test("task turns include their captured instructions and lead accountability context", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-prompt-context-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-prompt-context-"));
   const projectId = randomUUID();
   const leadProfileId = randomUUID();
   const workerTaskId = randomUUID();
@@ -253,7 +253,7 @@ test("task turns include their captured instructions and lead accountability con
         threadId,
         turnId,
         callId: `s05-prompt-question-${turnId}`,
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: `S05_PROMPT_QUESTION_${turnId}` },
       });
     };
@@ -422,7 +422,7 @@ test("task turns include their captured instructions and lead accountability con
 });
 
 test("a resumed thread receives each instruction revision once", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-instructions-once-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-instructions-once-"));
   const projectId = randomUUID();
   const profileId = randomUUID();
   const taskId = randomUUID();
@@ -496,7 +496,7 @@ test("a resumed thread receives each instruction revision once", async () => {
         threadId,
         turnId,
         callId: `once-question-${turnId}`,
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: `ONCE_QUESTION_${turnId}` },
       });
     };
@@ -616,7 +616,7 @@ test("a resumed thread receives each instruction revision once", async () => {
 });
 
 test("routed candidate result materializes and wakes the task lead at capacity one", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-routed-lead-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-routed-lead-"));
   const projectId = randomUUID();
   const leadProfileId = randomUUID();
   const candidateProfileId = randomUUID();
@@ -647,7 +647,7 @@ test("routed candidate result materializes and wakes the task lead at capacity o
             threadId,
             turnId,
             callId: "s05-candidate-result",
-            tool: "ensemble_report_result",
+            tool: "cab_report_result",
             arguments: { summary: "S05_ROUTED_CANDIDATE_RESULT" },
           }),
         );
@@ -661,7 +661,7 @@ test("routed candidate result materializes and wakes the task lead at capacity o
             threadId,
             turnId,
             callId: "s05-lead-completion",
-            tool: "ensemble_request_completion",
+            tool: "cab_request_completion",
             arguments: { reviewedResultIds },
           }),
         );
@@ -808,9 +808,7 @@ test("routed candidate result materializes and wakes the task lead at capacity o
 });
 
 test("instruction apply rebinds only a never-admitted stale inbox batch", async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-s05-rebind-refused-inbox-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-rebind-refused-inbox-"));
   const projectId = randomUUID();
   const leadProfileId = randomUUID();
   const refusedBeforeApplyTaskId = randomUUID();
@@ -949,7 +947,7 @@ test("instruction apply rebinds only a never-admitted stale inbox batch", async 
         threadId,
         turnId,
         callId: `s05-refusal-question-${request.taskId}`,
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: `S05_${request.taskId}_INITIAL_QUESTION` },
       });
       assert.equal(result.success, true);
@@ -958,7 +956,7 @@ test("instruction apply rebinds only a never-admitted stale inbox batch", async 
         threadId,
         turnId,
         callId: `s05-refusal-completion-${request.taskId}`,
-        tool: "ensemble_request_completion",
+        tool: "cab_request_completion",
         arguments: { reviewedResultIds: [] },
       });
       assert.equal(result.success, true);
@@ -1287,7 +1285,7 @@ test("instruction apply rebinds only a never-admitted stale inbox batch", async 
 });
 
 test("stale inbox withdrawal preserves independent stop and admission holds", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-rebind-holds-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-rebind-holds-"));
   const projectId = randomUUID();
   const leadProfileId = randomUUID();
   const runtime = new JourneyRuntime();
@@ -1350,7 +1348,7 @@ test("stale inbox withdrawal preserves independent stop and admission holds", as
       threadId,
       turnId,
       callId: `s05-hold-question-${request.taskId}`,
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: `S05_${request.taskId}_QUESTION` },
     });
     assert.equal(result.success, true);

@@ -44,7 +44,7 @@ export const publicationAbandonedReason = "publication-abandoned-unproved";
 
 /** The marker an `issue.create` appends to its body, by which a read-back or a link recognises it. */
 export const publicationMarker = (operationId: string) =>
-  `<!-- ensemble-operation:${operationId} -->`;
+  `<!-- cab-operation:${operationId} -->`;
 
 export const publicationProjectFieldSchema = z
   .object({

@@ -292,8 +292,8 @@ export function managedAssignmentEnvironment(
 ): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env))
-    if (key !== "ENSEMBLE_CONNECTION" && !key.startsWith("ENSEMBLE_CLI_"))
+    if (key !== "CAB_CONNECTION" && !key.startsWith("CAB_CLI_"))
       result[key] = value;
-  result.ENSEMBLE_MANAGED_ASSIGNMENT = "1";
+  result.CAB_MANAGED_ASSIGNMENT = "1";
   return result;
 }

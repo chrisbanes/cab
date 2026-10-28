@@ -660,13 +660,13 @@ test("browser frozen storage failure sends zero commands and restores only last 
     if (r.url().endsWith("/api/operator/commands")) posts++;
   });
   const saved = await page.evaluate(() =>
-    sessionStorage.getItem("ensemble.ui03.composer.v1"),
+    sessionStorage.getItem("cab.ui03.composer.v1"),
   );
   assert.ok(saved);
   await page.evaluate(() => {
     const original = Storage.prototype.setItem;
     Storage.prototype.setItem = function (key, value) {
-      if (key === "ensemble.ui03.composer.v1")
+      if (key === "cab.ui03.composer.v1")
         throw new DOMException("Fixture quota", "QuotaExceededError");
       original.call(this, key, value);
     };
@@ -685,9 +685,7 @@ test("browser frozen storage failure sends zero commands and restores only last 
     "Newer unsaved input",
   );
   assert.equal(
-    await page.evaluate(() =>
-      sessionStorage.getItem("ensemble.ui03.composer.v1"),
-    ),
+    await page.evaluate(() => sessionStorage.getItem("cab.ui03.composer.v1")),
     saved,
   );
   await screenshot(page, "390-storage-unavailable-current-input");
@@ -871,9 +869,7 @@ test("committed lost-response creation survives reload expiry and exact reconcil
   assert.equal(d.tasks(projectId).length, 2);
   assert.equal(d.assignments(material.taskId).length, 1);
   assert.equal(
-    await page.evaluate(() =>
-      sessionStorage.getItem("ensemble.ui03.composer.v1"),
-    ),
+    await page.evaluate(() => sessionStorage.getItem("cab.ui03.composer.v1")),
     null,
   );
   await screenshot(page, "1366-recorded-receipt-read-failed");
@@ -1174,7 +1170,7 @@ for (const viewport of [
     await signIn(page, web.origin, web.password);
     // A fresh installation's Home is the getting-started checklist.
     const checklist = page.getByRole("region", {
-      name: "Get Ensemble running",
+      name: "Get cab running",
     });
     const row = (name: string) =>
       checklist.getByRole("listitem", { name, exact: true });
@@ -1923,7 +1919,7 @@ test("replacement composer owns recovery before a detached committed receipt or 
     assert.equal(await page.locator("[data-slot=action-outcome]").count(), 0);
     assert.equal(await page.getByRole("status").count(), 0);
     const recovery = await page.evaluate(() =>
-      sessionStorage.getItem("ensemble.ui03.composer.v1"),
+      sessionStorage.getItem("cab.ui03.composer.v1"),
     );
     assert.ok(recovery);
     const command = JSON.parse(sent[0] ?? "null");
@@ -1967,9 +1963,7 @@ test("replacement composer owns recovery before a detached committed receipt or 
       true,
     );
     assert.equal(
-      await page.evaluate(() =>
-        sessionStorage.getItem("ensemble.ui03.composer.v1"),
-      ),
+      await page.evaluate(() => sessionStorage.getItem("cab.ui03.composer.v1")),
       recovery,
     );
     assert.equal(await page.getByLabel("Password", { exact: true }).count(), 0);
@@ -1989,9 +1983,7 @@ test("replacement composer owns recovery before a detached committed receipt or 
     await page.getByText("Draft saved.", { exact: true }).waitFor();
     assert.deepEqual(sent, [sent[0], sent[0]]);
     assert.equal(
-      await page.evaluate(() =>
-        sessionStorage.getItem("ensemble.ui03.composer.v1"),
-      ),
+      await page.evaluate(() => sessionStorage.getItem("cab.ui03.composer.v1")),
       null,
     );
     assert.equal(d.tasks(projectId).length, 1);

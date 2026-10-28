@@ -93,16 +93,14 @@ test("closure provenance places held tasks in Paused and names provider completi
     assert.equal(taskColumn(unattributed), "Paused");
     assert.equal(
       taskReasons(unattributed)[0],
-      "Held · closure not attributed to Ensemble",
+      "Held · closure not attributed to cab",
     );
     assert.equal(taskReasons(unattributed).includes("Draft: not Ready"), false);
   }
   const completed = summary({ state: "done", closure: "completed" });
   assert.equal(taskColumn(completed), "Done");
   assert.ok(
-    taskReasons(completed).includes(
-      "Closed on GitHub, not delivered by Ensemble",
-    ),
+    taskReasons(completed).includes("Closed on GitHub, not delivered by cab"),
   );
   for (const plain of [
     summary({ state: "done", closure: null }),
@@ -178,7 +176,7 @@ test("the next actor is derived from recorded attention and state only", () => {
   );
   assert.equal(
     next({ codes: ["lead-review"] }),
-    "Next: Ensemble · recording routing fallback",
+    "Next: cab · recording routing fallback",
   );
   assert.equal(operatorNext(summary({ codes: ["lead-review"] })), false);
   assert.equal(next({ state: "done" }), "Next: none · no decision");

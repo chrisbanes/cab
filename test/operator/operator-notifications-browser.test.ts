@@ -183,7 +183,7 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   assert.deepEqual(fake.payloads(device), [
     {
       v: 1,
-      title: "Test notification from Ensemble",
+      title: "Test notification from cab",
       url: "/app/settings#notifications",
       tag: "test:notification",
     },
@@ -357,7 +357,7 @@ test("notifications: a click routes an open tab in place, keeping unsaved input"
       const { port1, port2 } = new MessageChannel();
       return new Promise<boolean>((resolve) => {
         port1.onmessage = () => resolve(true);
-        tab?.postMessage({ type: "ensemble.notification-open", url: target }, [
+        tab?.postMessage({ type: "cab.notification-open", url: target }, [
           port2,
         ]);
         setTimeout(() => resolve(false), 1000);

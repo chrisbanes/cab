@@ -106,7 +106,7 @@ export const issueEditReasonSentences: Record<IssueEditReasonCode, string> = {
   "no-source-issue": "This task isn’t imported from a GitHub issue.",
   "task-not-open": "Improve with lead needs an open task.",
   "no-edit-grant":
-    "This repository doesn’t allow Ensemble to edit issues. Allow issue edits in project configuration.",
+    "This repository doesn’t allow cab to edit issues. Allow issue edits in project configuration.",
   "no-project-lead":
     "Improve with lead needs a project lead. Choose a lead in project configuration.",
   "action-unresolved":
@@ -138,9 +138,9 @@ export const publicationTargetReasonSentences: Record<
   string
 > = {
   "selection-unpredictable":
-    "Ensemble can't tell whether a new issue would match this selection, so it can't publish here.",
+    "cab can't tell whether a new issue would match this selection, so it can't publish here.",
   "no-create-grant":
-    "This repository doesn't allow Ensemble to create issues. Allow issue creation in project configuration.",
+    "This repository doesn't allow cab to create issues. Allow issue creation in project configuration.",
   "no-item-grant":
     "This project doesn't allow adding issues to this GitHub Project. Allow it in project configuration.",
   "no-field-grant":

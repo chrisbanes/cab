@@ -217,7 +217,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
     ]);
     assert.equal(r.code, 0, `${key}: ${r.err}${r.out}`);
     const envelope = r.json();
-    assert.equal(envelope.schema, "ensemble.cli/v1", key);
+    assert.equal(envelope.schema, "cab.cli/v1", key);
     assert.equal(typeof envelope.coverage.observedAt, "number", key);
     assert.equal(
       envelope.coverage.complete,

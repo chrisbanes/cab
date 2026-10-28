@@ -503,7 +503,7 @@ function makeFailureClassification(
     reasonCode: code ?? "unknown",
     source: code ? "harness" : "missing",
     // App Server's terminal TurnError exposes no per-turn retry count. Null is
-    // deliberately non-retryable under the shared Ensemble/Codex budget.
+    // deliberately non-retryable under the shared cab/Codex budget.
     harnessRetries: null,
   };
 }
@@ -529,7 +529,7 @@ export function deniedServerRequest(id: string | number, method: string) {
     id,
     error: {
       code: -32601,
-      message: "Ensemble denies unexpected server request",
+      message: "cab denies unexpected server request",
     },
   };
 }
@@ -1836,7 +1836,7 @@ export class CodexRuntime implements Runtime {
       )(child.pid);
       if (this.child !== child) throw new Error("Runtime stopped");
       await this.request("initialize", {
-        clientInfo: { name: "ensemble", version: "0.1.0" },
+        clientInfo: { name: "cab", version: "0.1.0" },
         capabilities: { experimentalApi: true },
       });
       if (this.child !== child) throw new Error("Runtime stopped");

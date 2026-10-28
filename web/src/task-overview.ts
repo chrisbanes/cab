@@ -126,7 +126,7 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
         : data.source?.closure === "held"
           ? `Held · closed on GitHub${active ? ` · ${execution.state}` : ""}`
           : data.source?.closure === "unattributed"
-            ? `Held · closure not attributed to Ensemble${active ? ` · ${execution.state}` : ""}`
+            ? `Held · closure not attributed to cab${active ? ` · ${execution.state}` : ""}`
             : paused
               ? `${task.ready ? "Ready" : "Draft"} · project paused`
               : !task.ready

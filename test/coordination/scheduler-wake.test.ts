@@ -45,7 +45,7 @@ class FakeRuntime implements Runtime {
         threadId,
         turnId,
         callId: `question-${threadId}-${turnId}`,
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: "Waiting for the next step" },
       });
     await this.release;
@@ -155,7 +155,7 @@ async function withFixture(
   body: (fixture: Fixture) => Promise<void>,
   options: { lead?: boolean } = {},
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-wake-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-wake-"));
   const runtime = new FakeRuntime();
   const service = new StandaloneService(join(root, "data"), () => runtime);
   const guard = forbidFullHistoryReads();
@@ -413,7 +413,7 @@ test("a failed initial request holds the assignment's oldest request, not a newe
 });
 
 test("routing fallback events are created once, survive restart and wait for a lead", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-wake-fallback-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-wake-fallback-"));
   const dataDir = join(root, "data");
   const guard = forbidFullHistoryReads();
   const ensured: string[] = [];
@@ -914,7 +914,7 @@ test("a failed wake after a committed delegation still reports success", async (
       threadId: "thread-1",
       turnId: "turn-1",
       callId: "delegate-after-commit",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: { profileId: fixture.profileId, brief: "Child work" },
     });
     assert.equal(result.success, true, result.text);

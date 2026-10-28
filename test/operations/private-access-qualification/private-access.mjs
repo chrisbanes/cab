@@ -5,9 +5,9 @@ import { readHiddenPassword } from "../../../dist/src/standalone/operator-hidden
 import { postWithoutFollowingRedirects } from "../../../dist/test/operations/private-access-qualification/private-access-requests.js";
 
 function readConfiguration() {
-  const origin = process.env.ENSEMBLE_TEST_HTTPS_ORIGIN ?? "";
-  const projectId = process.env.ENSEMBLE_TEST_PROJECT_ID ?? "";
-  const privateMarker = process.env.ENSEMBLE_TEST_PRIVATE_MARKER ?? "";
+  const origin = process.env.CAB_TEST_HTTPS_ORIGIN ?? "";
+  const projectId = process.env.CAB_TEST_PROJECT_ID ?? "";
+  const privateMarker = process.env.CAB_TEST_PRIVATE_MARKER ?? "";
   let url;
   try {
     url = new URL(origin);
@@ -61,7 +61,7 @@ if (args.length !== 1 || args[0] !== "--live") {
       password = await readHiddenPassword(
         process.stdin,
         process.stdout,
-        "Ensemble fixture password: ",
+        "cab fixture password: ",
       );
       assert.ok(password.length > 0);
       browser = await chromium.launch({ headless: true });
@@ -83,7 +83,7 @@ if (args.length !== 1 || args[0] !== "--live") {
         "/login",
       );
       const anonymousCookie = (await context.cookies()).find(
-        (cookie) => cookie.name === "ensemble_operator_session",
+        (cookie) => cookie.name === "cab_operator_session",
       );
       assert.ok(anonymousCookie);
 
@@ -158,7 +158,7 @@ if (args.length !== 1 || args[0] !== "--live") {
       await page.waitForURL(`${config.origin}/`);
       assert.equal(new URL(page.url()).origin, config.origin);
       const authenticatedCookie = (await context.cookies()).find(
-        (cookie) => cookie.name === "ensemble_operator_session",
+        (cookie) => cookie.name === "cab_operator_session",
       );
       assert.ok(authenticatedCookie);
       assert.notEqual(authenticatedCookie.value, anonymousCookie.value);

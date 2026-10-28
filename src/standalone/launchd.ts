@@ -36,9 +36,9 @@ export type LaunchAgentConfiguration = {
 };
 
 export const ROOT_REFUSAL =
-  "Ensemble does not run as root; run it as the account that owns the service";
+  "cab does not run as root; run it as the account that owns the service";
 
-/** Ensemble never runs as root, in any mode; a fixed message so no path or cause leaks. */
+/** cab never runs as root, in any mode; a fixed message so no path or cause leaks. */
 export function assertNotRoot(uid: number | undefined): void {
   if (uid === 0) throw new Error(ROOT_REFUSAL);
 }
@@ -219,8 +219,8 @@ export function launchdEnvironment(
   return {
     PATH: LAUNCHD_PATH,
     ...(configuration.home === undefined ? {} : { HOME: configuration.home }),
-    ENSEMBLE_OPERATOR_AUTH_FILE: configuration.authFile,
-    ENSEMBLE_OPERATOR_ORIGIN: configuration.origin,
+    CAB_OPERATOR_AUTH_FILE: configuration.authFile,
+    CAB_OPERATOR_ORIGIN: configuration.origin,
     ...(configuration.diagnosticRetentionDays === undefined
       ? {}
       : {

@@ -8,8 +8,8 @@ import { DeliveryStore } from "../../src/core/delivery.js";
 import { type Database, Store, transaction } from "../../src/core/store.js";
 
 function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-bindings-"));
-  const filename = join(directory, "ensemble.db");
+  const directory = mkdtempSync(join(tmpdir(), "cab-bindings-"));
+  const filename = join(directory, "cab.db");
   let db = new DatabaseSync(filename);
   return {
     get db() {

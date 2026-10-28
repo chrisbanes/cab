@@ -122,7 +122,7 @@ function scanCoreGraph(coreRoot: string): string[] {
 }
 
 function fixture(files: Record<string, string>, check: (core: string) => void) {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-core-boundary-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-core-boundary-"));
   const core = join(directory, "src", "core");
   try {
     for (const [name, contents] of Object.entries(files)) {

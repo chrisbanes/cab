@@ -187,7 +187,7 @@ test("routing changes through reviewed documents", async (t) => {
   assert.match(
     human.err,
     new RegExp(
-      `^Fix: Review project:${seed.projectA} with 'ensemble project get ${seed.projectA}', then run 'ensemble project prepare-routing' again\\.$`,
+      `^Fix: Review project:${seed.projectA} with 'cab project get ${seed.projectA}', then run 'cab project prepare-routing' again\\.$`,
       "m",
     ),
   );

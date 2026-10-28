@@ -147,7 +147,7 @@ class FakeRuntime implements Runtime {
       threadId,
       turnId,
       callId: `fixture-question-${threadId}-${turnId}`,
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Power fixture is waiting for the next step" },
     });
     if (this.turns === 1) {
@@ -183,7 +183,7 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
 }
 
 test("standalone service quarantines wake during T4 reconciliation and resumes queued work after the gate clears", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-service-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-service-"));
   const data = join(root, "data");
   const firstWorkspace = join(root, "first");
   const secondWorkspace = join(root, "second");
@@ -252,7 +252,7 @@ test("standalone service quarantines wake during T4 reconciliation and resumes q
 });
 
 test("power-source shutdown failure does not retain the service database owner", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-cleanup-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-cleanup-"));
   const data = join(root, "data");
   const events = new FailingStopPowerEvents();
   const service = new StandaloneService(
@@ -288,7 +288,7 @@ test("power-source shutdown failure does not retain the service database owner",
 });
 
 test("power polling defaults to a 60 second interval", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-default-interval-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-default-interval-"));
   const delays: unknown[] = [];
   const realSetInterval = globalThis.setInterval;
   const spy = mock.method(globalThis, "setInterval", ((
@@ -323,7 +323,7 @@ async function postTurnPowerFixture(
     queued: () => { state: string; reason: string | null };
   }) => Promise<void>,
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-post-turn-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-post-turn-"));
   const firstWorkspace = join(root, "first");
   const secondWorkspace = join(root, "second");
   mkdirSync(firstWorkspace);
@@ -537,7 +537,7 @@ class ListenerChild extends EventEmitter {
 }
 
 test("service stop stops the sleep/wake listener child", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-listener-stop-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-listener-stop-"));
   const children: ListenerChild[] = [];
   const listener = new SleepWakeListener((() => {
     const child = new ListenerChild();
@@ -579,7 +579,7 @@ test("service stop stops the sleep/wake listener child", async () => {
 });
 
 test("a runtime removed between admission and submission holds the turn with a reason", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-power-runtime-gone-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-power-runtime-gone-"));
   const workspace = join(root, "first");
   mkdirSync(workspace);
   const runtime = new FakeRuntime();

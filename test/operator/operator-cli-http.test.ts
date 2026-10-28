@@ -113,7 +113,7 @@ test("a read refused with redaction-limit keeps its code instead of collapsing t
 });
 
 test("bearer credentials read through the service under server-side route authority", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "ensemble-cli-home-"));
+  const home = mkdtempSync(join(tmpdir(), "cab-cli-home-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const s = await startCliService(t, { setup: { home } });
   const read = await s.issue("read", "laptop-ro");

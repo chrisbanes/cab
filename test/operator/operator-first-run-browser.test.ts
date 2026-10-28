@@ -62,7 +62,7 @@ async function firstRun(
   const button = (name: string) =>
     page.getByRole("button", { name, exact: true });
 
-  const card = page.getByRole("region", { name: "Get Ensemble running" });
+  const card = page.getByRole("region", { name: "Get cab running" });
   const row = card.locator("li[aria-label]").filter({ hasText: "Project" });
   const create = card.getByRole("link", {
     name: "Create project",

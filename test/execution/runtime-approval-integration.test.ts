@@ -233,7 +233,7 @@ function assertExited(child: ChildProcessWithoutNullStreams | undefined) {
 const powerOff = { power: { enabled: false } } as const;
 
 test("production service rejects installed approval and unknown request forms without widening policy", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-approval-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-approval-"));
   const data = join(root, "data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -344,7 +344,7 @@ test("production service rejects installed approval and unknown request forms wi
 });
 
 test("production callback binds an exact approval during a delayed turn response", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-delayed-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-delayed-"));
   const data = join(root, "data");
   const workspace = join(root, "work");
   mkdirSync(workspace);
@@ -389,7 +389,7 @@ test("production callback binds an exact approval during a delayed turn response
 
 test("malformed identity holds the active production execution and denial-pipe failure survives reopen", async () => {
   for (const mode of ["delayed-unknown", "pipe-failure"] as const) {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-s05-denial-failure-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-s05-denial-failure-"));
     const data = join(root, "data");
     const workspace = join(root, "work");
     mkdirSync(workspace);

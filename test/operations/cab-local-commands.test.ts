@@ -21,7 +21,7 @@ function run(script: string, args: string[], env: NodeJS.ProcessEnv = {}) {
 }
 
 function fixture(t: { after(fn: () => void): void }) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-local-commands-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-local-commands-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }
@@ -54,12 +54,12 @@ test("a --help after -- is the value of a service or snapshot command, not a hel
   assert.equal(snapshot.out, "");
   assert.match(
     snapshot.err,
-    /^ensemble: Unexpected arguments\. \(usage\)\nUsage:\n/,
+    /^cab: Unexpected arguments\. \(usage\)\nUsage:\n/,
   );
   assert.equal(existsSync(join(root, "Library")), false);
 });
 
-test("ensemble snapshot create, verify and restore match the operations entry point", (t) => {
+test("cab snapshot create, verify and restore match the operations entry point", (t) => {
   const root = fixture(t);
   const data = join(root, "data");
   markedDataDirectory(data);
@@ -90,7 +90,7 @@ test("ensemble snapshot create, verify and restore match the operations entry po
   assert.deepEqual(JSON.parse(restored.out).manifest, backup.manifest);
 });
 
-test("ensemble snapshot create fails without a raw cause while the owner lock is held", (t) => {
+test("cab snapshot create fails without a raw cause while the owner lock is held", (t) => {
   const root = fixture(t);
   const data = join(root, "data");
   markedDataDirectory(data);
@@ -106,7 +106,7 @@ test("ensemble snapshot create fails without a raw cause while the owner lock is
   assert.equal(run(MAIN, ["snapshot", "render-launch-agent"]).code, 2);
 });
 
-test("ensemble service init-auth needs a terminal and creates nothing without one", (t) => {
+test("cab service init-auth needs a terminal and creates nothing without one", (t) => {
   const root = fixture(t);
   const authFile = join(root, "auth", "operator-auth.json");
   const result = run(MAIN, ["service", "init-auth", authFile]);
@@ -120,7 +120,7 @@ test("ensemble service init-auth needs a terminal and creates nothing without on
   assert.equal(existsSync(join(home, "Library")), false);
 });
 
-test("ensemble service without a subcommand or data directory starts nothing", (t) => {
+test("cab service without a subcommand or data directory starts nothing", (t) => {
   const root = fixture(t);
   const bare = run(MAIN, ["service"]);
   assert.equal(bare.code, 2);
@@ -128,11 +128,11 @@ test("ensemble service without a subcommand or data directory starts nothing", (
 
   const list = run(MAIN, ["service", "list"], { HOME: root });
   assert.equal(list.code, 1);
-  assert.equal(list.err, "ensemble: service list failed\n");
+  assert.equal(list.err, "cab: service list failed\n");
   assert.equal(list.out, "");
 });
 
-test("ensemble --help --all lists the local service and snapshot commands", () => {
+test("cab --help --all lists the local service and snapshot commands", () => {
   const help = run(MAIN, ["--help", "--all"]);
   assert.equal(help.code, 0);
   for (const command of [
@@ -146,7 +146,7 @@ test("ensemble --help --all lists the local service and snapshot commands", () =
   assert.ok(!help.out.includes("rollback"));
   assert.ok(!help.out.includes("render-launch-agent"));
 
-  // `ensemble service --help` shows the same service lines on stdout.
+  // `cab service --help` shows the same service lines on stdout.
   const service = run(MAIN, ["service", "--help"]);
   assert.equal(service.code, 0);
   assert.equal(service.err, "");
@@ -160,5 +160,5 @@ test("ensemble --help --all lists the local service and snapshot commands", () =
   const forwarded = run(MAIN, ["service", "list", "--help"]);
   assert.equal(forwarded.code, 1);
   assert.equal(forwarded.out, "");
-  assert.equal(forwarded.err, "ensemble: service list failed\n");
+  assert.equal(forwarded.err, "cab: service list failed\n");
 });

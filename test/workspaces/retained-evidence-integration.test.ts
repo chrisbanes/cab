@@ -182,7 +182,7 @@ test("retained evidence and submitted comparison context survive replacement, cl
     threadId: work.threadId,
     turnId: work.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: {
       summary: "Retain callback evidence",
       review: {

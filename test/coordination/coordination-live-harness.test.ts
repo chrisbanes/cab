@@ -122,9 +122,7 @@ test("live routing harness accepts the authorized maximum before ledger access",
 });
 
 test("live routing harness refuses a fresh twenty-call ledger before credential setup", () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-s05-fresh-high-budget-cli-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-fresh-high-budget-cli-"));
   const ledgerPath = join(root, "controller-owned.sqlite");
   try {
     let report:
@@ -219,7 +217,7 @@ function invokeWithoutCredential(ledgerPath: string) {
 }
 
 test("separate live harness invocations preserve one controller-owned ledger", () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-ledger-invocations-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-ledger-invocations-"));
   const ledgerPath = join(root, "controller-owned.sqlite");
   let budget: SqliteLiveCallBudget | undefined;
   try {
@@ -242,7 +240,7 @@ test("separate live harness invocations preserve one controller-owned ledger", (
 });
 
 test("fixture file action honors a denied production approval decision", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-denied-action-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-denied-action-"));
   const workspacePath = join(root, "workspace");
   const databasePath = join(root, "service.sqlite");
   mkdirSync(workspacePath, { mode: 0o700 });
@@ -336,7 +334,7 @@ test("fixture file action honors a denied production approval decision", async (
 });
 
 test("mid-stage cleanup closes registered owners and retains an unverified root", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-repository-free-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-repository-free-"));
   const previousExitCode = process.exitCode;
   const calls: string[] = [];
   const evidence = {
@@ -451,7 +449,7 @@ test("mid-stage cleanup closes registered owners and retains an unverified root"
 });
 
 test("journey cleanup removes an exact created canonical fixture root", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-s05-repository-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-s05-repository-"));
   const evidence = {
     fixture: {
       created: true,
@@ -502,17 +500,17 @@ test("journey cleanup removes an exact created canonical fixture root", async ()
 
 test("journey cleanup retains foreign, wrong-parent, and symlink roots", async () => {
   const foreignRoot = mkdtempSync(join(tmpdir(), "s05-foreign-root-"));
-  const parent = mkdtempSync(join(tmpdir(), "ensemble-s05-parent-"));
+  const parent = mkdtempSync(join(tmpdir(), "cab-s05-parent-"));
   const wrongParentRoot = join(
     parent,
-    `ensemble-s05-repository-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+    `cab-s05-repository-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
   );
   mkdirSync(wrongParentRoot);
-  const symlinkTarget = mkdtempSync(join(tmpdir(), "ensemble-s05-repository-"));
-  const unclaimedRoot = mkdtempSync(join(tmpdir(), "ensemble-s05-repository-"));
+  const symlinkTarget = mkdtempSync(join(tmpdir(), "cab-s05-repository-"));
+  const unclaimedRoot = mkdtempSync(join(tmpdir(), "cab-s05-repository-"));
   const symlinkRoot = join(
     tmpdir(),
-    `ensemble-s05-repository-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+    `cab-s05-repository-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
   );
   symlinkSync(symlinkTarget, symlinkRoot, "dir");
   const cases = [
@@ -599,7 +597,7 @@ test("timed-out startup retains ownership through late resolution or rejection",
       "reject",
       "disposer-failure",
     ] as const) {
-      const root = mkdtempSync(join(tmpdir(), "ensemble-s05-repository-free-"));
+      const root = mkdtempSync(join(tmpdir(), "cab-s05-repository-free-"));
       let settleStartup!: (error?: Error) => void;
       const calls: string[] = [];
       const owner = {
@@ -733,7 +731,7 @@ test("operator startup timeout disposes late handles despite listener-stop failu
       ).href
     );
     for (const failHttpStop of [false, true]) {
-      const root = mkdtempSync(join(tmpdir(), "ensemble-s05-repository-"));
+      const root = mkdtempSync(join(tmpdir(), "cab-s05-repository-"));
       const calls: string[] = [];
       let resolveAuth!: (auth: { close(): void }) => void;
       const owner = {

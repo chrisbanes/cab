@@ -136,7 +136,7 @@ class OwnedRuntime extends OperatorFixtureRuntime {
 }
 const verifier = new MacProcessTerminationVerifier();
 try {
-  root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s08b-owned-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s08b-owned-")));
   chmodSync(root, 0o700);
   const data = join(root, "data"),
     auth = join(root, "auth"),
@@ -144,11 +144,11 @@ try {
   for (const p of [data, auth, logs]) mkdirSync(p, { mode: 0o700 });
   const authFile = join(auth, "synthetic.json");
   writeFileSync(authFile, "{}", { mode: 0o600 });
-  const plist = join(root, "com.example.ensemble.s08b.plist");
+  const plist = join(root, "com.example.cab.s08b.plist");
   writeFileSync(
     plist,
     renderLaunchAgent({
-      label: "com.example.ensemble.s08b",
+      label: "com.example.cab.s08b",
       nodePath: realpathSync(process.execPath),
       cliPath: resolve("dist/src/standalone/cli.js"),
       dataDirectory: data,

@@ -234,10 +234,7 @@ test("row and test copy cover every reason, failure and outcome", () => {
 
 test("a worker message opens only a same-origin /app/ address from this origin", () => {
   const origin = "http://127.0.0.1:8787";
-  const message = (
-    url: unknown,
-    type: unknown = "ensemble.notification-open",
-  ) => ({
+  const message = (url: unknown, type: unknown = "cab.notification-open") => ({
     origin,
     data: { type, url },
   });

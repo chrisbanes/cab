@@ -47,7 +47,7 @@ test("the journey runs through the installed binary with exactly two admitted tu
     2,
   );
   assert.ok(o.execution1.runtimeItems.includes("commandExecution/completed"));
-  assert.deepEqual(o.execution1.toolItems, ["ensemble_report_result"]);
+  assert.deepEqual(o.execution1.toolItems, ["cab_report_result"]);
   assert.match(o.prepared.diff.lines.at(-1), /^\+ CLI8_REQUIRED_PHRASE: /);
   assert.equal(o.prepared.diff.lines.length, 2);
   assert.equal(o.prepared.mode, "600");

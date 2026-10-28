@@ -112,7 +112,7 @@ export function decodeSegment(segment: string): string | undefined {
   }
 }
 
-/** Pre-start, typed route seam for trusted Ensemble UI extensions. */
+/** Pre-start, typed route seam for trusted cab UI extensions. */
 export class OperatorRouteRegistry {
   private readonly slots = new Map<OperatorRouteSlot, RegisteredRoute[]>();
   private started = false;

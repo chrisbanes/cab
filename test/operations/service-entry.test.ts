@@ -20,7 +20,7 @@ async function run(
   signal?: NodeJS.Signals,
   signalOn: "start-line" | "starting" = "start-line",
 ) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-entry-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-entry-")));
   const data = join(root, "data");
   mkdirSync(data, { mode: 0o700 });
   try {
@@ -137,7 +137,7 @@ test("a signal during startup waits for startup, then exits cleanly with one sta
 });
 
 test("a second signal during a stalled startup ends the process", async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-entry-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-entry-")));
   const data = join(root, "data");
   mkdirSync(data, { mode: 0o700 });
   try {

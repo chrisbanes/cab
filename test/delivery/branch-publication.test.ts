@@ -61,7 +61,7 @@ test("a task gets one durable branch per repository with the operator's prefix",
   const first = world.store.taskBranch(world.taskId, repositoryId);
   assert.equal(
     first?.branch,
-    `ensemble/${world.taskId.replaceAll("-", "").slice(0, 8)}-fix-the-login-bug`,
+    `cab/${world.taskId.replaceAll("-", "").slice(0, 8)}-fix-the-login-bug`,
   );
 
   // Later title and prefix changes never rename it, and a second push reuses it.
@@ -106,7 +106,7 @@ test("a colliding branch name lengthens the task id part", (t) => {
   const hex = world.taskId.replaceAll("-", "");
   world.db
     .prepare("INSERT INTO delivery_task_branches VALUES (?,?,?,NULL,NULL,1)")
-    .run(other, repositoryId, `ensemble/${hex.slice(0, 8)}-fix-the-login-bug`);
+    .run(other, repositoryId, `cab/${hex.slice(0, 8)}-fix-the-login-bug`);
   world.store.prepareAction(
     world.request({
       kind: "branch.push",
@@ -118,7 +118,7 @@ test("a colliding branch name lengthens the task id part", (t) => {
   );
   assert.equal(
     world.store.taskBranch(world.taskId, repositoryId)?.branch,
-    `ensemble/${hex.slice(0, 12)}-fix-the-login-bug`,
+    `cab/${hex.slice(0, 12)}-fix-the-login-bug`,
   );
 });
 
@@ -220,7 +220,7 @@ test("a force-push before any push has no lease and is refused", async (t) => {
   assert.equal(world.pushes.length, 0);
 });
 
-test("a branch moved outside Ensemble refuses the push as an outside change and wakes the lead", async (t) => {
+test("a branch moved outside cab refuses the push as an outside change and wakes the lead", async (t) => {
   const world = publicationWorld(t);
   assert.equal(
     (await world.submit("branch.push", world.commit())).state,
@@ -336,7 +336,7 @@ test("an ambiguous push that did not land is a no-effect failure that only the r
   assert.equal(world.remote.head, sha);
 });
 
-test("a PR head Ensemble did not push wakes the lead once and clears handback settlement", async (t) => {
+test("a PR head cab did not push wakes the lead once and clears handback settlement", async (t) => {
   const world = publicationWorld(t);
   const first = world.commit();
   await world.submit("branch.push", first);
@@ -367,7 +367,7 @@ test("a PR head Ensemble did not push wakes the lead once and clears handback se
   assert.ok(world.store.delivery(world.taskId)?.settlement);
   world.wakes.length = 0;
 
-  // Ensemble's own push advances the PR head without being flagged, even while the PR lags.
+  // cab's own push advances the PR head without being flagged, even while the PR lags.
   const second = world.commit();
   await world.submit("branch.push", second);
   world.showPr(first, branch);
@@ -475,7 +475,7 @@ test("a graft cannot fake a commit's ancestry", async (t) => {
   assert.deepEqual(world.requests, []);
 });
 
-test("a branch another writer creates after preflight is not recorded as Ensemble's push", async (t) => {
+test("a branch another writer creates after preflight is not recorded as cab's push", async (t) => {
   const world = publicationWorld(t);
   const sha = world.commit();
   // The outsider's commit is an ancestor of the one being pushed: a plain fast-forward would succeed.
@@ -495,7 +495,7 @@ test("a branch another writer creates after preflight is not recorded as Ensembl
   assert.equal(world.wakes.length, 1);
 });
 
-test("a branch another writer advances after preflight is not recorded as Ensemble's push", async (t) => {
+test("a branch another writer advances after preflight is not recorded as cab's push", async (t) => {
   const world = publicationWorld(t);
   const first = world.commit();
   await world.submit("branch.push", first);
@@ -512,7 +512,7 @@ test("a branch another writer advances after preflight is not recorded as Ensemb
   assert.equal(world.wakes.length, 1);
 });
 
-test("a remote that already equals the commit but was not pushed by Ensemble is an outside change", async (t) => {
+test("a remote that already equals the commit but was not pushed by cab is an outside change", async (t) => {
   for (const pushedBefore of [false, true]) {
     const world = publicationWorld(t);
     const first = world.commit();

@@ -51,7 +51,7 @@ test("Folder picker lists home folders, selects checkouts and keeps paths privat
   ]);
   await dialog
     .getByText(
-      "Listed by the Ensemble service on this Mac: folder names and Git status only. Choosing a folder grants nothing until you create the project.",
+      "Listed by the cab service on this Mac: folder names and Git status only. Choosing a folder grants nothing until you create the project.",
     )
     .waitFor();
   await captureBrowserEvidence(page, "1366-picker");

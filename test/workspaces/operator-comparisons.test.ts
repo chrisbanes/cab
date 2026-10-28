@@ -25,7 +25,7 @@ class ReportingComparisonRuntime extends OperatorFixtureRuntime {
       threadId,
       turnId,
       callId: `comparison-report-${turnId}`,
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: {
         question: "The comparison fixture has finished its observation",
       },
@@ -1769,21 +1769,21 @@ test("workspace comparison awaits recheck logout, expiry, binding and changing e
   const wrapper = join(wrapperRoot, "git");
   writeFileSync(
     wrapper,
-    `#!/bin/sh\nif [ "$ENSEMBLE_TEST_GATE_ARMED" = "1" ] && [ ! -e "$ENSEMBLE_TEST_GATE_USED" ]; then : > "$ENSEMBLE_TEST_GATE_USED"; : > "$ENSEMBLE_TEST_GATE_ENTERED"; while [ ! -e "$ENSEMBLE_TEST_GATE_RELEASE" ]; do /bin/sleep 0.01; done; rm -f "$ENSEMBLE_TEST_GATE_ENTERED" "$ENSEMBLE_TEST_GATE_RELEASE"; fi\nexec "$ENSEMBLE_TEST_GIT_REAL" "$@"\n`,
+    `#!/bin/sh\nif [ "$CAB_TEST_GATE_ARMED" = "1" ] && [ ! -e "$CAB_TEST_GATE_USED" ]; then : > "$CAB_TEST_GATE_USED"; : > "$CAB_TEST_GATE_ENTERED"; while [ ! -e "$CAB_TEST_GATE_RELEASE" ]; do /bin/sleep 0.01; done; rm -f "$CAB_TEST_GATE_ENTERED" "$CAB_TEST_GATE_RELEASE"; fi\nexec "$CAB_TEST_GIT_REAL" "$@"\n`,
   );
   chmodSync(wrapper, 0o700);
   const previousPath = process.env.PATH ?? "";
   process.env.PATH = `${wrapperRoot}:${previousPath}`;
-  process.env.ENSEMBLE_TEST_GATE_ENTERED = marker;
-  process.env.ENSEMBLE_TEST_GATE_RELEASE = gate;
-  process.env.ENSEMBLE_TEST_GATE_USED = used;
-  process.env.ENSEMBLE_TEST_GATE_ARMED = "0";
-  process.env.ENSEMBLE_TEST_GIT_REAL = realGit;
+  process.env.CAB_TEST_GATE_ENTERED = marker;
+  process.env.CAB_TEST_GATE_RELEASE = gate;
+  process.env.CAB_TEST_GATE_USED = used;
+  process.env.CAB_TEST_GATE_ARMED = "0";
+  process.env.CAB_TEST_GIT_REAL = realGit;
   let gateLookups = 0;
   let changeNextBinding = false;
   f.service.taskWorkspace = async (...args) => {
     const value = await originalTaskWorkspace(...args);
-    if (++gateLookups === 4) process.env.ENSEMBLE_TEST_GATE_ARMED = "1";
+    if (++gateLookups === 4) process.env.CAB_TEST_GATE_ARMED = "1";
     if (!changeNextBinding || !value) return value;
     changeNextBinding = false;
     return { ...value, workspaceId: randomUUID() };
@@ -1832,7 +1832,7 @@ test("workspace comparison awaits recheck logout, expiry, binding and changing e
 
     rmSync(used, { force: true });
     gateLookups = 0;
-    process.env.ENSEMBLE_TEST_GATE_ARMED = "0";
+    process.env.CAB_TEST_GATE_ARMED = "0";
     let bindingReadState = "pending";
     const bindingRead = fetch(endpoint, {
       headers: { cookie: credentials.cookie },
@@ -1880,10 +1880,10 @@ test("workspace comparison awaits recheck logout, expiry, binding and changing e
     writeFileSync(gate, "release");
     f.service.taskWorkspace = originalTaskWorkspace;
     process.env.PATH = previousPath;
-    delete process.env.ENSEMBLE_TEST_GATE_ENTERED;
-    delete process.env.ENSEMBLE_TEST_GATE_RELEASE;
-    delete process.env.ENSEMBLE_TEST_GATE_USED;
-    delete process.env.ENSEMBLE_TEST_GATE_ARMED;
-    delete process.env.ENSEMBLE_TEST_GIT_REAL;
+    delete process.env.CAB_TEST_GATE_ENTERED;
+    delete process.env.CAB_TEST_GATE_RELEASE;
+    delete process.env.CAB_TEST_GATE_USED;
+    delete process.env.CAB_TEST_GATE_ARMED;
+    delete process.env.CAB_TEST_GIT_REAL;
   }
 });

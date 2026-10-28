@@ -905,7 +905,7 @@ test("Home checklist Settings actions land on their sections", async (_t, journe
       turnStarted: false,
     },
   );
-  const card = page.getByRole("region", { name: "Get Ensemble running" });
+  const card = page.getByRole("region", { name: "Get cab running" });
   const action = (row: string, name: string) =>
     card
       .getByRole("listitem", { name: row, exact: true })

@@ -83,7 +83,7 @@ const reportCallSchema = z
     threadId: z.string().min(1).max(512),
     turnId: z.string().min(1).max(512),
     callId: z.string().min(1).max(512),
-    tool: z.literal("ensemble_report_result"),
+    tool: z.literal("cab_report_result"),
     arguments: z
       .object({
         summary: summarySchema,
@@ -124,21 +124,21 @@ const toolIdentity = {
 const delegateCallSchema = z
   .object({
     ...toolIdentity,
-    tool: z.literal("ensemble_delegate"),
+    tool: z.literal("cab_delegate"),
     arguments: z.object({ profileId: uuid, brief: summarySchema }).strict(),
   })
   .strict();
 const questionCallSchema = z
   .object({
     ...toolIdentity,
-    tool: z.literal("ensemble_ask_question"),
+    tool: z.literal("cab_ask_question"),
     arguments: questionToolArgumentsSchema,
   })
   .strict();
 const approvalCallSchema = z
   .object({
     ...toolIdentity,
-    tool: z.literal("ensemble_request_approval"),
+    tool: z.literal("cab_request_approval"),
     arguments: z
       .object({
         action: z.string().trim().min(1).max(512),
@@ -151,7 +151,7 @@ const approvalCallSchema = z
 const followUpCallSchema = z
   .object({
     ...toolIdentity,
-    tool: z.literal("ensemble_request_follow_up"),
+    tool: z.literal("cab_request_follow_up"),
     arguments: z
       .object({
         resultId: uuid,
@@ -163,7 +163,7 @@ const followUpCallSchema = z
 const completionCallSchema = z
   .object({
     ...toolIdentity,
-    tool: z.literal("ensemble_request_completion"),
+    tool: z.literal("cab_request_completion"),
     arguments: z
       .object({ reviewedResultIds: z.array(uuid).max(1000) })
       .strict(),
@@ -955,7 +955,7 @@ export class CoordinationStore {
   /** Matching lost-response retries replay before any current-generation query. */
   receipt(input: CoordinationCall): CoordinationReceipt | undefined {
     const call =
-      input.tool === "ensemble_report_result"
+      input.tool === "cab_report_result"
         ? reportCallSchema.parse(input)
         : generalCallSchema.parse(input);
     const row = this.one(
@@ -3176,7 +3176,7 @@ export class CoordinationStore {
         this.one(
           `SELECT 1 AS found FROM coordination_receipts
         WHERE workId = ? AND tool IN
-          ('ensemble_delegate','ensemble_request_follow_up') LIMIT 1`,
+          ('cab_delegate','cab_request_follow_up') LIMIT 1`,
           work,
         ) ||
         this.one(

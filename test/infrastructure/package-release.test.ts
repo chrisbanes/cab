@@ -44,7 +44,7 @@ const hex = (bytes: Buffer | string) =>
   createHash("sha256").update(bytes).digest("hex");
 
 function temp(t: { after(fn: () => void): void }) {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-release-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-release-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -162,16 +162,16 @@ test("checkTag accepts only v plus the package version", () => {
 });
 
 test("the launcher runs the bundled Node from a path with spaces", (t) => {
-  const root = join(temp(t), "Application Support", "ensemble 0.1.0");
+  const root = join(temp(t), "Application Support", "cab 0.1.0");
   mkdirSync(join(root, "bin"), { recursive: true });
   mkdirSync(join(root, "node/bin"), { recursive: true });
-  writeFileSync(join(root, "bin/ensemble"), release.launcher, { mode: 0o755 });
+  writeFileSync(join(root, "bin/cab"), release.launcher, { mode: 0o755 });
   writeFileSync(
     join(root, "node/bin/node"),
     `#!/bin/sh\nprintf '%s\\n' "$@"\n`,
     { mode: 0o755 },
   );
-  const out = execFileSync(join(root, "bin/ensemble"), ["--version"], {
+  const out = execFileSync(join(root, "bin/cab"), ["--version"], {
     encoding: "utf8",
   });
   assert.equal(out, `${root}/dist/src/cli/main.js\n--version\n`);

@@ -58,24 +58,24 @@ test("a draft turn is available only on an open, unready task with a waiting lea
 
 test("a draft turn allows questions, approvals and only issue comments and labels", () => {
   const allowed: Array<[string, unknown]> = [
-    ["ensemble_ask_question", {}],
-    ["ensemble_request_approval", {}],
-    ["ensemble_external_action", { action: { kind: "issue.comment" } }],
-    ["ensemble_external_action", { action: { kind: "issue.labels" } }],
+    ["cab_ask_question", {}],
+    ["cab_request_approval", {}],
+    ["cab_external_action", { action: { kind: "issue.comment" } }],
+    ["cab_external_action", { action: { kind: "issue.labels" } }],
   ];
   for (const [tool, args] of allowed)
     assert.deepEqual(draftTurnToolDecision(tool, args), { allowed: true });
   const refused: Array<[string, unknown]> = [
-    ["ensemble_delegate", {}],
-    ["ensemble_register_pr", {}],
-    ["ensemble_report_result", {}],
-    ["ensemble_request_follow_up", {}],
-    ["ensemble_request_completion", {}],
-    ["ensemble_external_action", { action: { kind: "pr.create" } }],
-    ["ensemble_external_action", { action: { kind: "pr.merge" } }],
-    ["ensemble_external_action", { action: { kind: "issue.close" } }],
-    ["ensemble_external_action", {}],
-    ["ensemble_external_action", null],
+    ["cab_delegate", {}],
+    ["cab_register_pr", {}],
+    ["cab_report_result", {}],
+    ["cab_request_follow_up", {}],
+    ["cab_request_completion", {}],
+    ["cab_external_action", { action: { kind: "pr.create" } }],
+    ["cab_external_action", { action: { kind: "pr.merge" } }],
+    ["cab_external_action", { action: { kind: "issue.close" } }],
+    ["cab_external_action", {}],
+    ["cab_external_action", null],
     ["unknown_tool", {}],
   ];
   for (const [tool, args] of refused) {

@@ -62,7 +62,7 @@ def until(predicate, seconds=45):
 
 
 try:
-    send("initialize", 1, {"clientInfo": {"name": "ensemble_s01_probe", "title": "Ensemble S01 Probe", "version": "0.1.0"}})
+    send("initialize", 1, {"clientInfo": {"name": "cab_s01_probe", "title": "cab S01 Probe", "version": "0.1.0"}})
     print("initialize", until(lambda m: m.get("id") == 1, 45), flush=True)
     send("initialized")
     send("account/read", 2, {})

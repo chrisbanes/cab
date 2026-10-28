@@ -58,7 +58,7 @@ for (const hold of ["none", "pause", "stop"] as const)
         threadId: work.threadId,
         turnId: work.turnId,
         callId: "full-service-question",
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { form },
       });
       assert.equal(response.success, true, response.text);
@@ -154,7 +154,7 @@ test("ordinary same-assignment continuation delivers before answer to original r
       threadId: continuation.threadId,
       turnId: continuation.turnId,
       callId: "ordinary-next-action",
-      tool: "ensemble_request_approval",
+      tool: "cab_request_approval",
       arguments: { action: "review", material: { revision: 1 } },
     });
     assert.equal(waiting.success, true, waiting.text);

@@ -101,7 +101,7 @@ test("approval flow: review, confirm and send post exactly one bound comment", a
   assert.match(text.out, /Nothing was posted/);
   assert.match(
     text.out,
-    /ensemble delivery confirm-comment .* --decision approved\|denied/,
+    /cab delivery confirm-comment .* --decision approved\|denied/,
   );
 
   // A send before approval is refused by the CLI without burning the operation.
@@ -155,7 +155,7 @@ test("approval flow: review, confirm and send post exactly one bound comment", a
   assert.equal(w.scripted.commentWrites, 1);
   assert.ok(
     w.scripted.comments[0]?.body.endsWith(
-      `<!-- ensemble-operation:${r.reviewId} -->`,
+      `<!-- cab-operation:${r.reviewId} -->`,
     ),
   );
   const action = (await w.actions()).find(

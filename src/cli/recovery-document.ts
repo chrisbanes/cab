@@ -14,8 +14,8 @@ import { writeOut } from "./browse-evidence.js";
 import { readSealedDocument, sealDocument } from "./change-document.js";
 import { CliError } from "./connections.js";
 
-export const RECOVERY_SCHEMA = "ensemble.cli.recovery/v1";
-export const EVIDENCE_SCHEMA = "ensemble.cli.recovery-evidence/v1";
+export const RECOVERY_SCHEMA = "cab.cli.recovery/v1";
+export const EVIDENCE_SCHEMA = "cab.cli.recovery-evidence/v1";
 const MAX_EVIDENCE_BYTES = 64 * 1024;
 
 const recoveryDocumentSchema = z
@@ -68,7 +68,7 @@ const invalid = (why: string, fix?: string) =>
     { ...(fix ? { fix } : {}) },
   );
 const PREPARE_FIX =
-  "Prepare it first with 'ensemble recovery prepare' (see 'ensemble help recovery'), then submit the file it writes.";
+  "Prepare it first with 'cab recovery prepare' (see 'cab help recovery'), then submit the file it writes.";
 
 /** Reads an owner-only recovery document and verifies its schema and digest. */
 export const readRecoveryDocument = (

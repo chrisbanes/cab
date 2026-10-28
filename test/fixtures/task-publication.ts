@@ -42,7 +42,7 @@ type FakeIssue = {
 };
 
 export const marker = (operationId: string) =>
-  `<!-- ensemble-operation:${operationId} -->`;
+  `<!-- cab-operation:${operationId} -->`;
 
 /** A GitHub that holds issues, Projects and counts every write the provider sends. */
 export class FakeGitHub {
@@ -64,7 +64,7 @@ export class FakeGitHub {
   fieldMode: "ok" | "rejected" | "uncertain" = "ok";
   nodeSequence = 0;
 
-  /** An issue created outside Ensemble, as a human would. */
+  /** An issue created outside cab, as a human would. */
   add(title: string, body: string, labels: string[] = []): FakeIssue {
     const number = this.next++;
     const issue: FakeIssue = {
@@ -533,9 +533,7 @@ export async function seedPublication(
 export async function publicationFixture(
   options: PublicationFixtureOptions = {},
 ) {
-  const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "ensemble-publication-")),
-    ),
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-publication-"))),
     gh = new FakeGitHub();
   const build = () =>
     new StandaloneService(join(root, "data"), () => noRuntime, undefined, {

@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Serve a React operator interface from Ensemble
+# Serve a React operator interface from cab
 
 Use React with Vite for the reviewed operator UI, instead of extending the existing
 server-rendered forms with bespoke browser state handling. The UI must preserve drafts, history disclosure, reading position
@@ -10,7 +10,7 @@ and selections while service state changes. Locally owned shadcn/ui source
 components supply the shared foundation; Radix primitives remain selective for
 composed controls such as the mobile navigation sheet.
 
-Ensemble serves the production browser build and same-origin authenticated APIs
+cab serves the production browser build and same-origin authenticated APIs
 from its existing service. Preserve session, origin and CSRF protection, runtime
 validation, command idempotency, revision checks and server-owned action policy.
 Browser state never establishes execution, persistence or external-write success.
@@ -30,4 +30,4 @@ hydrating those pages or changing their forms. See the
 The chosen libraries do not establish accessibility or runtime qualification.
 Validate the integrated UI against the specification and acceptance criteria.
 Delivery scope and sequencing live in GitHub issue
-[#736](https://github.com/chrisbanes/ensemble/issues/736).
+[#736](https://github.com/chrisbanes/cab/issues/736).

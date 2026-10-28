@@ -755,11 +755,11 @@ test("The strip and decision card follow the server's attention codes, not a cli
       .getAttribute("href"),
     `/runtime/task/${a.taskId}`,
   );
-  // Ensemble records a routing fallback itself: plain text, never an operator button.
+  // cab records a routing fallback itself: plain text, never an operator button.
   codes = ["lead-review"];
   await page.reload();
   await strip
-    .getByText("Next: Ensemble · recording routing fallback", { exact: true })
+    .getByText("Next: cab · recording routing fallback", { exact: true })
     .waitFor();
   assert.equal(
     await strip
@@ -1583,7 +1583,7 @@ test("A recovery approval shows its exact material and a GitHub compare link, an
   const material = {
     kind: "branch.adopt",
     target: { repositoryId: "R1" },
-    branch: "ensemble/aaaa1111-ship-it",
+    branch: "cab/aaaa1111-ship-it",
     outsideHeadSha: "b".repeat(40),
     lastPushedSha: "a".repeat(40),
   };
@@ -2107,7 +2107,7 @@ test("An open approval leads Overview and stays reachable from every tab through
   assert.deepEqual(commands, []);
 });
 
-test("An imported task separates read-only GitHub source from Ensemble execution", async (_t, j) => {
+test("An imported task separates read-only GitHub source from cab execution", async (_t, j) => {
   const fixture = await openFixture(j);
   const ids = await seedCatalog(fixture.f);
   fixture.f.service.githubSources().reconcileBlockers("I-UI03", {
@@ -2176,14 +2176,11 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   }, syncedAt);
   assert.match(source, new RegExp(`Issue open · synced ${clock}(?!\\d|:)`));
   assert.doesNotMatch(source, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
-  assert.match(
-    source,
-    /GitHub owns the issue\. Ensemble coordinates the work\./,
-  );
+  assert.match(source, /GitHub owns the issue\. cab coordinates the work\./);
   assert.match(source, /Dependencies · managed in GitHub/);
   assert.match(source, /outside\/repo#7\s*Open blocker/);
   assert.match(source, /GitHub commenting (permitted|unavailable)/);
-  // One Dependencies block, the GitHub-managed one: Ensemble's own group is for local tasks.
+  // One Dependencies block, the GitHub-managed one: cab's own group is for local tasks.
   assert.deepEqual(
     await inspector
       .locator(".inspector-label")
@@ -2201,7 +2198,7 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   );
   assert.equal(
     await inspector.locator(".inspector-divider").textContent(),
-    "Ensemble execution",
+    "cab execution",
   );
   assert.match(
     await strip.locator("[data-task-readiness]").innerText(),
@@ -2447,7 +2444,7 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
   assert.equal(await github.count(), 0);
   assert.equal(await delivery.count(), 0);
   assert.equal(await inspector.getByText(/GitHub commenting/).count(), 0);
-  // A local task owns Ensemble's one Dependencies block, never a GitHub-managed one.
+  // A local task owns cab's one Dependencies block, never a GitHub-managed one.
   assert.deepEqual(
     await inspector
       .locator(".inspector-label")
@@ -2510,7 +2507,7 @@ test("The reply box has one sentence above it", async (_t, j) => {
   assert.deepEqual(await sentencesAboveReply(page), [`P:${resumes}`]);
   assert.doesNotMatch(
     await page.locator("body").innerText(),
-    /Local Ensemble inbox|Sending does not bypass/,
+    /Local cab inbox|Sending does not bypass/,
   );
 
   // The immutable reference sits below the box; one sentence still sits above.
@@ -3349,7 +3346,7 @@ test("The delivery block links the PR, says its state and blockers in words, and
   // The assigned task branch reads with its last push and, when set, an outside push.
   const branch = {
     repositoryName: "acme/app",
-    branch: "ensemble/aaaa1111-ship-it",
+    branch: "cab/aaaa1111-ship-it",
     lastPushedSha: head,
     outsideHeadSha: null as string | null,
   };
@@ -3359,7 +3356,7 @@ test("The delivery block links the PR, says its state and blockers in words, and
   await branchLine.waitFor();
   assert.equal(
     await flat(branchLine),
-    "acme/app · branch ensemble/aaaa1111-ship-it · pushed 11111111",
+    "acme/app · branch cab/aaaa1111-ship-it · pushed 11111111",
   );
   reads.set(a.taskId, {
     ...read({}),
@@ -3369,7 +3366,7 @@ test("The delivery block links the PR, says its state and blockers in words, and
   await branchLine.getByText("Outside push cccccccc").waitFor();
   await changes
     .getByText(
-      "Ensemble assigns and pushes these. A head it did not push is flagged, and Ensemble will not push that branch again until it returns to Ensemble's last push, or the lead adopts that head or overwrites it with your approval.",
+      "cab assigns and pushes these. A head it did not push is flagged, and cab will not push that branch again until it returns to cab's last push, or the lead adopts that head or overwrites it with your approval.",
       { exact: true },
     )
     .waitFor();

@@ -1,4 +1,4 @@
-// Bounded live qualification of task commit publication: a real task worktree, Ensemble's coordinator
+// Bounded live qualification of task commit publication: a real task worktree, cab's coordinator
 // and HTTPS push for a first commit, `pr.create` on the assigned branch, then a repair push, then
 // recovery from two harness-made outside commits: one overwritten, one adopted and pushed on top of.
 // Run manually after `npm run build`:

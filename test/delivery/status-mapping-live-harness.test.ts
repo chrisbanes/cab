@@ -71,7 +71,7 @@ test("the grant must match the manifest, be unexpired and stay inside the attemp
   );
   for (const change of [
     {
-      repository: { ...manifest().repository, fullName: "chrisbanes/ensemble" },
+      repository: { ...manifest().repository, fullName: "chrisbanes/cab" },
     },
     { credential: "env:S07A_GITHUB_TOKEN" },
     { actions: ["project.field", "pr.merge"] },
@@ -105,9 +105,9 @@ test("only the Project this run created may be used: never Project 6, never one 
     /Project 6/,
   );
   for (const linkedRepositories of [
-    ["chrisbanes/ensemble"],
-    ["Chrisbanes/Ensemble"],
-    [fullName, "chrisbanes/ensemble"],
+    ["chrisbanes/cab"],
+    ["Chrisbanes/cab"],
+    [fullName, "chrisbanes/cab"],
     ["chrisbanes/other"],
   ])
     assert.throws(
@@ -210,7 +210,7 @@ test("the guard allows only the product's documents on the recorded resources an
       "--owner",
       "chrisbanes",
       "--repo",
-      "chrisbanes/ensemble",
+      "chrisbanes/cab",
     ],
     [
       "project",
@@ -241,7 +241,7 @@ test("the guard allows only the product's documents on the recorded resources an
       "issue",
       "create",
       "--repo",
-      "chrisbanes/ensemble",
+      "chrisbanes/cab",
       "--title",
       issueTitle("aaaaaaaa"),
       "--body",
@@ -278,14 +278,14 @@ test("the guard allows only the product's documents on the recorded resources an
   g.assertRequest(api("/user"));
   g.assertRequest(api(`/repos/${fullName}/issues/7`));
   g.assertRequest(
-    ...post("query EnsembleProjectPage($id:ID!)", {
+    ...post("query CabProjectPage($id:ID!)", {
       id: "PVT_9",
       query: "is:issue",
       after: null,
     }),
   );
   g.assertRequest(
-    ...post("mutation EnsembleDeliveryProject($project:ID!)", {
+    ...post("mutation CabDeliveryProject($project:ID!)", {
       project: "PVT_9",
       item: "ITEM_1",
       field: "F_1",
@@ -294,22 +294,22 @@ test("the guard allows only the product's documents on the recorded resources an
   );
   for (const [url, init] of [
     ["https://attacker.example/graphql", { method: "POST" }],
-    [api("/repos/chrisbanes/ensemble/issues/1"), {}],
+    [api("/repos/chrisbanes/cab/issues/1"), {}],
     [api(`/repos/${fullName}/issues/7`), { method: "PATCH", body: "{}" }],
     [api("/orgs/someone/projectsV2"), {}],
     post("mutation { deleteProjectV2(input:{}) { clientMutationId } }"),
-    post("query EnsembleProjectPage($id:ID!)", {
+    post("query CabProjectPage($id:ID!)", {
       id: "PVT_6",
       query: "is:issue",
       after: null,
     }),
-    post("mutation EnsembleDeliveryProject($project:ID!)", {
+    post("mutation CabDeliveryProject($project:ID!)", {
       project: "PVT_9",
       item: "ITEM_2",
       field: "F_1",
       option: "O_2",
     }),
-    post("mutation EnsembleDeliveryProject($project:ID!)", {
+    post("mutation CabDeliveryProject($project:ID!)", {
       project: "PVT_9",
       item: "ITEM_1",
       field: "F_1",
@@ -457,11 +457,11 @@ function fakeGitHub(
       query: string;
       variables: Record<string, string>;
     };
-    if (query.startsWith("query EnsembleDeliveryRepository"))
+    if (query.startsWith("query CabDeliveryRepository"))
       return Response.json({
         data: { node: { id: repositoryNode, nameWithOwner: fullName } },
       });
-    if (query.startsWith("mutation EnsembleDeliveryProject")) {
+    if (query.startsWith("mutation CabDeliveryProject")) {
       state.status = variables.option ?? "";
       return Response.json({ data: {} });
     }
@@ -470,7 +470,7 @@ function fakeGitHub(
       optionId: state.status,
       field: { id: "F_status" },
     };
-    if (query.startsWith("query EnsembleDeliveryField"))
+    if (query.startsWith("query CabDeliveryField"))
       return Response.json({
         data: {
           node: {
@@ -486,7 +486,7 @@ function fakeGitHub(
           },
         },
       });
-    if (query.startsWith("query EnsembleProjectPage")) {
+    if (query.startsWith("query CabProjectPage")) {
       const listed = state.projectReads++ >= (fail.emptyReads ?? 0);
       return Response.json({
         data: {

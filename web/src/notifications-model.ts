@@ -205,7 +205,7 @@ export function testOutcomeText(
 }
 
 /** What the push worker posts to an open tab when a notification is clicked. */
-export const NOTIFICATION_OPEN_MESSAGE = "ensemble.notification-open";
+export const NOTIFICATION_OPEN_MESSAGE = "cab.notification-open";
 
 /**
  * The in-app address a worker message asks this tab to open, or null. Only this origin's own

@@ -19,7 +19,7 @@ import { isoTime, keyValues, oneLine, table } from "./render.js";
 
 const API = "/api/operator";
 const SUPPLIED =
-  "Captured submission of Ensemble-supplied inputs; not the runtime's effective prompt.";
+  "Captured submission of cab-supplied inputs; not the runtime's effective prompt.";
 const ABSENT = "No captured submission for this execution.";
 export const CAPTURE_NOTES = [
   "Tool observation is incomplete.",

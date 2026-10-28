@@ -1,7 +1,7 @@
 /**
  * The one wording for a project's command network access (SPEC execution policy). The server
  * disclosure, the CLI and the web import it, so every surface that shows the effective policy
- * reads the same. Ensemble enforces only what it sends the runtime; the runtime enforces access.
+ * reads the same. cab enforces only what it sends the runtime; the runtime enforces access.
  */
 export const commandNetworkDisclosure =
   "Network-enabled commands can reach whatever credentials and logins the host exposes.";

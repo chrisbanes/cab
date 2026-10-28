@@ -23,7 +23,7 @@ import { isoTime, jsonLine, oneLine, table, terminalSafe } from "./render.js";
 
 const KINDS = ["input", "setting", "runtime", "tool", "service"] as const;
 const SEVERITIES = ["info", "warn", "error"] as const;
-const SCHEMA = "ensemble.cli/v1";
+const SCHEMA = "cab.cli/v1";
 /** Consecutive unavailable polls before following stops. */
 const MAX_FAILURES = 3;
 

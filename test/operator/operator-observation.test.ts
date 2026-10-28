@@ -124,13 +124,13 @@ test("the delivery projection lists the assigned branch without private names or
   f.seedPersistedState((db) =>
     db
       .prepare("INSERT INTO delivery_task_branches VALUES (?,?,?,?,?,1)")
-      .run(task.taskId, "R1", "ensemble/12345678-fix-it", sha, null),
+      .run(task.taskId, "R1", "cab/12345678-fix-it", sha, null),
   );
   const read = (await api.readTask(task.taskId)).data.delivery!;
   assert.deepEqual(read.branches, [
     {
       repositoryName: "R1",
-      branch: "ensemble/12345678-fix-it",
+      branch: "cab/12345678-fix-it",
       lastPushedSha: sha,
       outsideHeadSha: null,
     },

@@ -119,7 +119,7 @@ const profileList: BrowseCommand = {
           : [
               "No profiles.",
               nextLine(
-                "ensemble profile prepare-create --out profile.json --name NAME --instructions TEXT",
+                "cab profile prepare-create --out profile.json --name NAME --instructions TEXT",
               ),
             ].join("\n"),
         ...runtimeNote(runtime),

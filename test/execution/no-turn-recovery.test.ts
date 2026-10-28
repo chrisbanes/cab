@@ -68,7 +68,7 @@ class NoTurnRuntime implements Runtime {
         threadId,
         turnId,
         callId: `completion-${turnId}`,
-        tool: "ensemble_request_completion",
+        tool: "cab_request_completion",
         arguments: { reviewedResultIds: [] },
       }),
     );
@@ -95,7 +95,7 @@ function required<T>(value: T | undefined | null): T {
   return value;
 }
 async function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-no-turn-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-no-turn-"));
   const runtime = new NoTurnRuntime();
   let verified = true;
   const makeService = () =>
@@ -858,7 +858,7 @@ test("R4 current external completion actions and terminal completion reject inva
         threadId,
         turnId,
         callId: "proof-check",
-        tool: "ensemble_request_completion",
+        tool: "cab_request_completion",
         arguments: { reviewedResultIds: [] },
       };
       const caller = coordination.deliveryCaller(call);

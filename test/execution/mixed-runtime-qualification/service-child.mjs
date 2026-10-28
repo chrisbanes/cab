@@ -5,7 +5,7 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { BudgetExhausted, reserveTurnInFile } from "./harness.mjs";
 
-export const TOKEN_VARIABLE = "ENSEMBLE_C5_CLAUDE_TOKEN";
+export const TOKEN_VARIABLE = "CAB_C5_CLAUDE_TOKEN";
 
 /**
  * Wraps the Claude Agent SDK so each query records the `command` it asks to spawn and the
@@ -157,10 +157,10 @@ export const SLEEP = "/bin/sleep 120";
 /** The probe brief: one verbatim Bash command, then a result so no repair turn follows. */
 export const shellOnly = (command) =>
   [
-    "Disposable Ensemble qualification probe.",
+    "Disposable cab qualification probe.",
     `Run exactly one Bash command, verbatim: ${command}`,
     // A lead turn that ends without a result gets a reporting-repair turn.
-    `Then call ensemble_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
+    `Then call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
   ].join("\n");
 
 /** Lead outcome text per facet; the worker brief is carried inside the lead's instructions. */
@@ -169,17 +169,17 @@ export function facetOutcome(facet, { workerProfileId, nonce }) {
   // Claude Code blocks a bare `sleep N` (N >= 25) in the foreground.
   if (facet === "stop") return shellOnly(SLEEP);
   if (facet === "crash")
-    return `Disposable Ensemble qualification probe. Call ensemble_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`;
+    return `Disposable cab qualification probe. Call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`;
   const brief =
     facet === "claude-only"
-      ? `Call ensemble_ask_question with question "C5 check: reply ready". After the answer arrives, call ensemble_report_result with summary C5_RESULT_${nonce}. Use no other tools.`
-      : `Call ensemble_report_result with summary C5_RESULT_${nonce}. Use no other tools.`;
+      ? `Call cab_ask_question with question "C5 check: reply ready". After the answer arrives, call cab_report_result with summary C5_RESULT_${nonce}. Use no other tools.`
+      : `Call cab_report_result with summary C5_RESULT_${nonce}. Use no other tools.`;
   return [
-    "Disposable Ensemble coordination probe. Use only the Ensemble tools named here; no shell, file, browser or network tools.",
+    "Disposable cab coordination probe. Use only the cab tools named here; no shell, file, browser or network tools.",
     `Worker profile ID: ${workerProfileId}.`,
-    `As lead, call ensemble_delegate exactly once with profileId set to the Worker profile ID literal above and this brief, verbatim: ${brief}`,
+    `As lead, call cab_delegate exactly once with profileId set to the Worker profile ID literal above and this brief, verbatim: ${brief}`,
     "Immediately after that call returns, end the turn.",
-    "When the worker's result is delivered, call ensemble_request_completion with reviewedResultIds containing exactly that result ID, then end the turn.",
+    "When the worker's result is delivered, call cab_request_completion with reviewedResultIds containing exactly that result ID, then end the turn.",
   ].join("\n");
 }
 

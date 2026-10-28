@@ -86,7 +86,7 @@ let runtime;
 let submittedPrompt;
 try {
   stage("fixture");
-  root = mkdtempSync(join(tmpdir(), "ensemble-cli7-live-"));
+  root = mkdtempSync(join(tmpdir(), "cab-cli7-live-"));
   chmodSync(root, 0o700);
   const dataDir = join(root, "data");
   const bundle = join(root, "bundle");
@@ -181,7 +181,7 @@ try {
     outcome: [
       "Disposable diagnostics probe.",
       "Run exactly one shell command: printenv CLI7_SENTINEL_TOKEN || echo cli7-unset",
-      "Then reply with one short sentence and end the turn. Do not call any Ensemble tool.",
+      "Then reply with one short sentence and end the turn. Do not call any cab tool.",
     ].join("\n"),
     ready: false,
   });
@@ -231,7 +231,7 @@ try {
         env: {
           PATH: process.env.PATH,
           HOME: cliDir,
-          ENSEMBLE_CLI_CONFIG_DIR: cliDir,
+          CAB_CLI_CONFIG_DIR: cliDir,
         },
         timeout: 120_000,
       });

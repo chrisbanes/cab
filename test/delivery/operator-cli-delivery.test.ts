@@ -17,7 +17,7 @@ test("delivery get shows the PR, actions and comment policy without provider acc
       .run(
         w.f.taskId,
         "R1",
-        "ensemble/12345678-fix-it",
+        "cab/12345678-fix-it",
         "a".repeat(40),
         "b".repeat(40),
       ),
@@ -46,7 +46,7 @@ test("delivery get shows the PR, actions and comment policy without provider acc
   assert.match(human.out, /Comments: +available \(allow\)/);
   assert.match(
     human.out,
-    /Branch: +org\/repo ensemble\/12345678-fix-it pushed a{12}, outside push b{12}/,
+    /Branch: +org\/repo cab\/12345678-fix-it pushed a{12}, outside push b{12}/,
   );
   assert.equal(json.data.delivery.branches.length, 1);
   assert.match(human.out, /build +success/);
@@ -681,7 +681,7 @@ test("delivery settle refuses accepting a draft, closed or outside-changed PR, a
       .run(
         outside.f.taskId,
         "R1",
-        "ensemble/12345678-fix-it",
+        "cab/12345678-fix-it",
         "a".repeat(40),
         "b".repeat(40),
       ),
@@ -692,7 +692,7 @@ test("delivery settle refuses accepting a draft, closed or outside-changed PR, a
     settleArgs(outside, "--decision", "accepted"),
   );
   assert.equal(refusedOutside.code, 4, refusedOutside.out);
-  assert.match(refusedOutside.json().error.message, /outside Ensemble/);
+  assert.match(refusedOutside.json().error.message, /outside cab/);
   assert.equal(settlementRows(outside), 0);
 
   // An unreadable provider asks for a refresh first.

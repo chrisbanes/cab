@@ -49,7 +49,7 @@ class GatedRuntime implements Runtime {
       threadId,
       turnId,
       callId: `fixture-question-${threadId}-${turnId}`,
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Scheduler fixture is waiting for the next step" },
     });
     this.entered?.();
@@ -253,7 +253,7 @@ function countRows(
 }
 
 test("eligible pending assignments dispatch once and retain request identity after restart", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-scheduler-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-scheduler-"));
   const dataDir = join(root, "data");
   const runtime = new GatedRuntime();
   let service = new StandaloneService(dataDir, () => runtime);
@@ -387,7 +387,7 @@ test("eligible pending assignments dispatch once and retain request identity aft
 });
 
 test("service stop cancels ready-workspace Git before scheduler settlement and preserves uncertainty", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-scheduler-git-drain-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-scheduler-git-drain-"));
   const controlled = controlledGit();
   const source = repository(root, "source");
   const failures: Array<{
@@ -514,7 +514,7 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
 });
 
 test("lead bindings are task-scoped and enabled routing waits for an assignment", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-lead-binding-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-lead-binding-"));
   const dataDir = join(root, "data");
   const runtime = new GatedRuntime();
   const service = new StandaloneService(dataDir, () => runtime);
@@ -666,7 +666,7 @@ test("lead bindings are task-scoped and enabled routing waits for an assignment"
 });
 
 test("direct and managed turns share one atomic provisional reservation ledger", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-admission-ledger-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-admission-ledger-"));
   const dataDir = join(root, "data");
   const firstDirect = join(root, "direct-one");
   const secondDirect = join(root, "direct-two");
@@ -790,7 +790,7 @@ test("direct and managed turns share one atomic provisional reservation ledger",
 });
 
 test("failed writer admission rolls back the entire reservation transition", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-admission-rollback-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-admission-rollback-"));
   const service = new StandaloneService(
     join(root, "data"),
     () => new GatedRuntime(),
@@ -922,7 +922,7 @@ test("failed writer admission rolls back the entire reservation transition", asy
 });
 
 test("default capacity limits count direct and managed turns together", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-capacity-defaults-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-capacity-defaults-"));
   const dataDir = join(root, "data");
   const directOne = join(root, "direct-one");
   const directTwo = join(root, "direct-two");
@@ -1042,7 +1042,7 @@ test("default capacity limits count direct and managed turns together", async ()
 });
 
 test("lowered capacity preserves active turns and waits for both limits to fit", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-capacity-lowering-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-capacity-lowering-"));
   const dataDir = join(root, "data");
   const runtime = new GatedRuntime();
   let service = new StandaloneService(dataDir, () => runtime);
@@ -1130,7 +1130,7 @@ test("lowered capacity preserves active turns and waits for both limits to fit",
 });
 
 test("capacity-waiting direct work owns neither ledger and wakes once on the same workspace", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-capacity-waiting-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-capacity-waiting-"));
   const dataDir = join(root, "data");
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
@@ -1207,7 +1207,7 @@ test("capacity-waiting direct work owns neither ledger and wakes once on the sam
 });
 
 test("capacity one yields a completed requester to its child and resumes it once", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-capacity-yielding-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-capacity-yielding-"));
   const runtime = new GatedRuntime();
   const service = new StandaloneService(join(root, "data"), () => runtime);
   const parentGate = deferred();
@@ -1399,7 +1399,7 @@ class CrashableRuntime extends GatedRuntime {
 }
 
 test("runtime failure holds the running turn, blocks admission and keeps queued work queued", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-failure-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-failure-"));
   const runningWorkspace = join(root, "running");
   const queuedWorkspace = join(root, "queued");
   mkdirSync(runningWorkspace);
