@@ -118,10 +118,11 @@ absence is not evidence that no tool ran. Do not collect provider-private reason
 The capture is a fourth dedicated instruction projection:
 `GET /api/operator/executions/WORK_ID/inputs[?compare=current]` returns each
 captured supplied segment (request, role, review references, project and profile
-instructions with their revisions) and the submitted byte count and SHA-256, with
-provenance `{source: "captured-submission" | "not-captured", effectivePrompt:
-"not-captured"}`. Only it leaves the execution's own profile and project
-instruction text readable; when no instruction segment was captured it adds a
+instructions with their revisions) and the submitted byte count and SHA-256. An
+instruction segment the resumed thread already held is listed with its revision and
+`sent: false`, with no text and no gap. Provenance is `{source: "captured-submission" |
+"not-captured", effectivePrompt: "not-captured"}`. Only this projection leaves the
+execution's own profile and project instruction text readable; when no instruction segment was captured it adds a
 labelled `reconstructed` block from retained revisions. `GET
 /api/operator/executions?task|assignment|project=ID`, `GET
 /api/operator/executions/WORK_ID` and `GET

@@ -430,6 +430,12 @@ test("draft turns and the first ordinary turn after them carry the current task"
   await task.api.execute(startCommand(f, task.taskId, "Continue."));
   await until(() => f.runtime.hasPending(2), "second draft turn");
   assert.match(f.runtime.prompts[1] ?? "", current);
+  assert.match(
+    f.runtime.prompts[0] ?? "",
+    /^Profile instructions:\nPRIVATE REVIEW INSTRUCTIONS$/m,
+  );
+  assert.match(f.runtime.prompts[0] ?? "", /^Project instructions:/m);
+  assert.doesNotMatch(f.runtime.prompts[1] ?? "", /instructions:/);
   f.runtime.complete(2);
   await until(
     () => !f.service.list().some((work) => work.state === "running"),
@@ -446,6 +452,52 @@ test("draft turns and the first ordinary turn after them carry the current task"
   });
   await until(() => f.runtime.hasPending(3), "initial turn");
   assert.match(f.runtime.prompts[2] ?? "", current);
+  assert.doesNotMatch(f.runtime.prompts[2] ?? "", /instructions:/);
+});
+
+test("the first ordinary turn after a draft turn carries instructions changed in between once", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await draftTask(f, "Changed after the draft turn");
+  const domain = f.service.domain();
+  await runDraftTurn(f, task);
+  f.runtime.complete(1);
+  await until(
+    () => !f.service.list().some((work) => work.state === "running"),
+    "turn end",
+  );
+  domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    expectedVersion: Number(domain.project(task.projectId).version),
+    instructions: "PROJECT_INSTRUCTIONS_AFTER_DRAFT",
+  });
+  domain.execute({
+    type: "assignment.apply",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    assignmentId: task.assignmentId,
+    expectedVersion: Number(domain.assignment(task.assignmentId).version),
+  });
+  domain.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId: task.taskId,
+    expectedVersion: version(f, task.taskId),
+    ready: true,
+  });
+  await until(() => f.runtime.hasPending(2), "initial turn");
+  const initial = f.runtime.prompts[1] ?? "";
+  assert.match(
+    initial,
+    /Updated project instructions\. These replace all project instructions given earlier in this conversation:\nPROJECT_INSTRUCTIONS_AFTER_DRAFT/,
+  );
+  assert.doesNotMatch(initial, /profile instructions|PRIVATE REVIEW/i);
 });
 
 test("a task that never had a draft turn keeps exactly its brief", async (t) => {

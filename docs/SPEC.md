@@ -322,6 +322,20 @@ turn is admitted. Once any turn has started for it, it retains those revisions u
 an explicit apply for its next turn. Permission
 revocations apply to subsequent actions regardless of snapshots.
 
+A turn's input carries the project and profile instructions only when its thread has
+not received that revision: the first turn on a thread, including a new thread after
+conversation replacement or recovery, or a resumed turn whose bound revision differs
+from the one the predecessor turn ran with. A changed revision is sent once, stated
+as replacing the earlier instructions, with no revision numbers in the text. The
+execution binding and execution diagnostics keep each turn's revisions and mark an
+instruction segment not sent. A turn that resumes an interrupted predecessor, which may not have delivered its
+prompt, sends both again as replacements. Instructions travel as user input on both harnesses, not as Codex
+developer instructions or Claude's system prompt: Codex native-input qualification
+pins the thread's developer instructions, so changing them disqualifies the thread,
+and a conversation keeps its harness across a profile switch. Limit: a runtime's own
+history compaction may summarise earlier instructions; Ensemble resends them only when
+a revision changes or a conversation gets a new thread.
+
 Record results and handoffs through coordination commands, not transcript inference.
 A successful process exit is not a task outcome. One reporting prompt may repair a
 completed turn with neither result nor waiting reason; then hold for attention.

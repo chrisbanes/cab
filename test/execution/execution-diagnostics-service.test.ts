@@ -195,15 +195,15 @@ async function fixture(
 }
 
 const BASELINE_PROMPT =
-  'Run one diagnostic turn.\n\nAssignment role: project assignee. The project lead remains accountable for coordinating this task and reviewing its results before completion. Report your result and durable next action through Ensemble.\n\nCaptured review references (JSON): {"sourceId":"S","sourceRevision":1,"criteriaOmittedCount":0,"criteria":[]}\n\nCaptured project instructions (revision 2):\nPROJECT_INSTRUCTION_TEXT token=abc123\n\nCaptured profile instructions (revision 1):\nPROFILE_INSTRUCTION_TEXT keeps FIXTURE_SECRET_CANARY private';
+  'Run one diagnostic turn.\n\nAssignment role: project assignee. The project lead remains accountable for coordinating this task and reviewing its results before completion. Report your result and durable next action through Ensemble.\n\nCaptured review references (JSON): {"sourceId":"S","sourceRevision":1,"criteriaOmittedCount":0,"criteria":[]}\n\nProject instructions:\nPROJECT_INSTRUCTION_TEXT token=abc123\n\nProfile instructions:\nPROFILE_INSTRUCTION_TEXT keeps FIXTURE_SECRET_CANARY private';
 
-test("the submitted assignment prompt is unchanged", async () => {
+test("the submitted assignment prompt matches the first-turn layout", async () => {
   const runtime = new DiagnosticsRuntime();
   const f = await fixture(runtime);
   try {
     f.activate();
     await waitUntil(() => runtime.prompts.length === 1, "turn start");
-    // Pinned before executionPrompt was split into parts; only the source id varies.
+    // Only the source id varies.
     assert.equal(
       runtime.prompts[0]?.replace(
         /"sourceId":"[0-9a-f-]{36}"/,
@@ -302,6 +302,49 @@ test("inputs are recorded before submission and equal the submitted bytes", asyn
       await api.readExecutionInputs(f.workId, new URLSearchParams()),
     );
     assert.match(view, /PROJECT_INSTRUCTION_TEXT token=\[redacted\]/);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a resumed turn records unchanged instructions as not sent and submits only what it carries", async () => {
+  const runtime = new DiagnosticsRuntime();
+  const f = await fixture(runtime);
+  try {
+    f.activate();
+    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await finishTurn(f, runtime, "turn-1");
+    // The turn reported no result, so its repair turn resumes the same thread.
+    await waitUntil(() => runtime.prompts.length === 2, "second turn start");
+    const prompt = runtime.prompts[1] ?? "";
+    const next = f.service
+      .list()
+      .find((item) => item.workId !== f.workId)?.workId;
+    assert.ok(next?.includes(":repair:"));
+    if (!next) return;
+    assert.doesNotMatch(
+      prompt,
+      /PROJECT_INSTRUCTION_TEXT|PROFILE_INSTRUCTION_TEXT/,
+    );
+    const inputs = new Map(
+      f
+        .store()
+        .inputs(next)
+        .map((i) => [i.name, i.payload as Record<string, unknown>]),
+    );
+    assert.deepEqual(inputs.get("project-instructions"), {
+      sent: false,
+      revision: 2,
+    });
+    assert.deepEqual(inputs.get("profile-instructions"), {
+      sent: false,
+      revision: 1,
+    });
+    assert.deepEqual(inputs.get("submitted"), {
+      bytes: Buffer.byteLength(prompt),
+      sha256: createHash("sha256").update(prompt).digest("hex"),
+    });
+    runtime.complete("turn-2");
   } finally {
     await f.close();
   }

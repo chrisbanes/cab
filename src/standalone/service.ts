@@ -378,7 +378,34 @@ interface PromptPart {
     | "draft-turn";
   text: string;
   revision?: number;
+  /** False: the resumed thread already holds this exact revision, so it is recorded but not submitted. */
+  sent?: false;
 }
+
+/**
+ * One instruction kind's prompt part. `seenRevision` is what the resumed thread last received:
+ * undefined for a new thread, which gets the full text, and null when the thread holds
+ * instructions of unknown revision, which always get re-sent as a replacement.
+ */
+const instructionPart = (
+  kind: "project" | "profile",
+  revision: number,
+  instructions: string,
+  seenRevision?: number | null,
+): PromptPart => {
+  const name = `${kind}-instructions` as const;
+  if (seenRevision === revision)
+    return { name, revision, text: "", sent: false };
+  const body = instructions || "(none)";
+  return {
+    name,
+    revision,
+    text:
+      seenRevision === undefined
+        ? `${kind === "project" ? "Project" : "Profile"} instructions:\n${body}`
+        : `Updated ${kind} instructions. These replace all ${kind} instructions given earlier in this conversation:\n${body}`,
+  };
+};
 
 const serviceItem = (
   name: string,
@@ -401,7 +428,10 @@ const unionExclusions = (
 
 /** The exact submitted prompt; captured segments cannot drift from it. */
 const joinPromptParts = (parts: readonly PromptPart[]) =>
-  parts.map((part) => part.text).join("\n\n");
+  parts
+    .filter((part) => part.sent !== false)
+    .map((part) => part.text)
+    .join("\n\n");
 
 const draftingStoppedReason = "You stopped the draft";
 const draftingTimeLimitReason = "The 10 minute time limit was reached";
@@ -6724,8 +6754,14 @@ export class StandaloneService {
     return `${context}${brief}\n\nDurable assignment inbox through event ${delivery.highWaterSequence}:\n${events.join("\n")}`;
   }
 
-  /** The submitted prompt's Ensemble-supplied segments, in submission order. */
-  private executionPromptParts(request: TurnRequest): PromptPart[] {
+  /**
+   * The submitted prompt's Ensemble-supplied segments, in submission order. `seen` is the
+   * revisions the resumed thread has already received (null: unknown); undefined for a new thread.
+   */
+  private executionPromptParts(
+    request: TurnRequest,
+    seen?: { project: number | null; profile: number | null },
+  ): PromptPart[] {
     if (request.kind === "drafting") {
       const run = this.started().drafting.require(
         this.draftingRunIdOf(request),
@@ -6739,16 +6775,12 @@ export class StandaloneService {
         run.instructionsRevision,
       );
       return [
-        {
-          name: "profile-instructions",
-          revision: run.profileRevision,
-          text: `Captured profile instructions (revision ${run.profileRevision}):\n${profileInstructions || "(none)"}`,
-        },
-        {
-          name: "project-instructions",
-          revision: run.instructionsRevision,
-          text: `Captured project instructions (revision ${run.instructionsRevision}):\n${projectInstructions || "(none)"}`,
-        },
+        instructionPart("profile", run.profileRevision, profileInstructions),
+        instructionPart(
+          "project",
+          run.instructionsRevision,
+          projectInstructions,
+        ),
         {
           name: "drafting-instruction",
           text:
@@ -6846,16 +6878,18 @@ export class StandaloneService {
         name: "review-references",
         text: `Captured review references (JSON): ${reviewReferences}`,
       },
-      {
-        name: "project-instructions",
-        revision: binding.instructionsRevision,
-        text: `Captured project instructions (revision ${binding.instructionsRevision}):\n${projectInstructions || "(none)"}`,
-      },
-      {
-        name: "profile-instructions",
-        revision: binding.profileRevision,
-        text: `Captured profile instructions (revision ${binding.profileRevision}):\n${profileInstructions || "(none)"}`,
-      },
+      instructionPart(
+        "project",
+        binding.instructionsRevision,
+        projectInstructions,
+        seen?.project,
+      ),
+      instructionPart(
+        "profile",
+        binding.profileRevision,
+        profileInstructions,
+        seen?.profile,
+      ),
     ];
   }
 
@@ -7542,7 +7576,21 @@ export class StandaloneService {
       submissionStage = "turn";
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
       const settings = this.turnSettings(request);
-      const promptParts = this.executionPromptParts(request);
+      // Only a completed predecessor is known to hold its prompt; an interrupted one
+      // (shutdown requeue) leaves the thread's instructions unknown, so they are re-sent.
+      const resumed =
+        previous?.state === "completed"
+          ? state.taskBinding(previous.workId)
+          : undefined;
+      const promptParts = this.executionPromptParts(
+        request,
+        previous?.threadId
+          ? {
+              project: resumed?.instructionsRevision ?? null,
+              profile: resumed?.profileRevision ?? null,
+            }
+          : undefined,
+      );
       const prompt = joinPromptParts(promptParts);
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
@@ -8144,7 +8192,7 @@ export class StandaloneService {
           "input",
           part.name,
           {
-            text: part.text,
+            ...(part.sent === false ? { sent: false } : { text: part.text }),
             ...(part.revision === undefined ? {} : { revision: part.revision }),
           },
           part.name.endsWith("-instructions") ? disclosing : general,

@@ -4231,6 +4231,8 @@ const inputSegmentSchema = z
       "profile-instructions",
     ]),
     revision: revision.nullable(),
+    /** False: the thread already held this revision, so the turn did not carry it. */
+    sent: z.boolean(),
     state: z.enum(["available", "omitted"]),
     reason: diagnosticGapCodeSchema.nullable(),
     /** Up to 64 KiB captured; redaction markers can lengthen it. */

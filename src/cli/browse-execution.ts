@@ -258,7 +258,11 @@ const executionInputs: BrowseCommand = {
         ...d.segments.flatMap((s) => [
           "",
           `--- ${s.name}${s.revision === null ? "" : ` (revision ${s.revision})`} ---`,
-          s.state === "omitted" ? `[omitted: ${s.reason}]` : (s.text ?? ""),
+          !s.sent
+            ? "[not sent: the thread already has this revision]"
+            : s.state === "omitted"
+              ? `[omitted: ${s.reason}]`
+              : (s.text ?? ""),
         ]),
         ...(reconstructed
           ? [

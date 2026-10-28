@@ -12,9 +12,12 @@ import { startCliService } from "../fixtures/operator-cli.js";
 // biome-ignore lint/suspicious/noExplicitAny: response bodies are asserted structurally
 type Json = Record<string, any>;
 
-async function setup(t: { after(fn: () => unknown): void }) {
+async function setup(
+  t: { after(fn: () => unknown): void },
+  options: { unchanged?: boolean } = {},
+) {
   const s = await startCliService(t);
-  const seed = await seedExecutionDiagnostics(s.f);
+  const seed = await seedExecutionDiagnostics(s.f, options);
   t.after(seed.cleanup);
   const read = await s.issue("read", "executions-ro");
   const get = async (path: string, status = 200) => {
@@ -24,6 +27,43 @@ async function setup(t: { after(fn: () => unknown): void }) {
   };
   return { s, seed, read, get };
 }
+
+test("inputs mark instruction segments the thread already held as not sent", async (t) => {
+  const { seed, get } = await setup(t, { unchanged: true });
+  const inputs = await get(
+    `/api/operator/executions/${enc(seed.unchanged)}/inputs?compare=current`,
+  );
+  const held = inputs.segments.filter((x: Json) =>
+    x.name.endsWith("-instructions"),
+  );
+  assert.equal(held.length, 2);
+  for (const segment of held)
+    assert.deepEqual(
+      [
+        segment.sent,
+        segment.text,
+        segment.state,
+        segment.reason,
+        segment.revision,
+        segment.redacted,
+      ],
+      [false, null, "available", null, 1, false],
+    );
+  assert.equal(inputs.reconstructed, null);
+  assert.ok(
+    inputs.comparison.instructions.every(
+      (c: Json) => typeof c.sameContent === "boolean",
+    ),
+  );
+  const sent = await get(
+    `/api/operator/executions/${enc(seed.captured)}/inputs`,
+  );
+  assert.ok(sent.segments.every((x: Json) => x.sent === true));
+  const events = await get(
+    `/api/operator/executions/${enc(seed.unchanged)}/events?kind=input`,
+  );
+  assert.ok(!JSON.stringify(events).includes("[redacted]"));
+});
 
 const enc = encodeURIComponent;
 

@@ -1417,6 +1417,13 @@ test("historical pre-turn proof requires explicit exact operator adoption and im
       required(f.runtime.prompts[1]),
       /OLD_BATCH_SHOULD_NOT_REPLAY/,
     );
+    // A new thread after conversation replacement gets full instructions.
+    assert.match(required(f.runtime.prompts[1]), /^Project instructions:/m);
+    assert.match(required(f.runtime.prompts[1]), /^Profile instructions:/m);
+    assert.doesNotMatch(
+      required(f.runtime.prompts[1]),
+      /Updated (project|profile) instructions/,
+    );
     await service.stop();
     service = f.makeService();
     await service.start();

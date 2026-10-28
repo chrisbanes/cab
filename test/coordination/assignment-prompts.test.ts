@@ -25,6 +25,7 @@ class JourneyRuntime implements Runtime {
   maxActiveTurns = 0;
   activeTurns = 0;
   prompts: string[] = [];
+  threadByPrompt = new Map<string, string>();
   profilesAtTurnStart: string[][] = [];
   resultCalls: RuntimeToolResult[] = [];
   completionCalls: RuntimeToolResult[] = [];
@@ -52,12 +53,13 @@ class JourneyRuntime implements Runtime {
   async resumeThread(): Promise<void> {}
 
   async startTurn(
-    _threadId: string,
+    threadId: string,
     _workspace: string,
     prompt: string,
   ): Promise<string> {
     this.turns++;
     this.prompts.push(prompt);
+    this.threadByPrompt.set(prompt, threadId);
     const service = this.service;
     const taskId = this.taskId;
     this.profilesAtTurnStart.push(
@@ -399,9 +401,214 @@ test("task turns include their captured instructions and lead accountability con
         prompt.includes("S05_OPERATOR_ANSWER_REVISION_TWO"),
     );
     assert.ok(workerFollowUpPrompt);
-    assert.match(workerFollowUpPrompt, /S05_PROJECT_INSTRUCTIONS_REVISION_TWO/);
-    assert.match(workerFollowUpPrompt, /S05_LEAD_PROFILE_REVISION_TWO/);
+    assert.match(
+      workerFollowUpPrompt,
+      /Updated project instructions\. These replace all project instructions given earlier in this conversation:\nS05_PROJECT_INSTRUCTIONS_REVISION_TWO/,
+    );
+    assert.match(
+      workerFollowUpPrompt,
+      /Updated profile instructions\. These replace all profile instructions given earlier in this conversation:\nS05_LEAD_PROFILE_REVISION_TWO/,
+    );
     assert.doesNotMatch(workerFollowUpPrompt, /REVISION_ONE/);
+    for (const prompt of runtime.prompts)
+      assert.doesNotMatch(
+        prompt,
+        /Captured (project|profile) instructions|instructions \(revision/,
+      );
+  } finally {
+    await service?.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a resumed thread receives each instruction revision once", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-instructions-once-"));
+  const projectId = randomUUID();
+  const profileId = randomUUID();
+  const taskId = randomUUID();
+  const assignmentId = randomUUID();
+  const brief = "ONCE_WORKER_ASSIGNMENT_BRIEF";
+  let service: StandaloneService | undefined;
+  const runtime = new JourneyRuntime();
+  const currentService = () => {
+    if (!service) throw new Error("Service is not started");
+    return service;
+  };
+
+  try {
+    service = new StandaloneService(
+      join(root, "data"),
+      () => runtime,
+      undefined,
+      { power: { enabled: false }, routingClient: null },
+    );
+    runtime.observe(service, taskId);
+    await service.start();
+    command(service, {
+      type: "profile.create",
+      profileId,
+      name: "Once profile",
+      instructions: "ONCE_PROFILE_ONE",
+      capabilities: "task coordination",
+    });
+    command(service, {
+      type: "project.create",
+      projectId,
+      name: "Once project",
+      leadProfileId: profileId,
+    });
+    command(service, {
+      type: "project.configure",
+      projectId,
+      expectedVersion: 1,
+      paused: false,
+      instructions: "ONCE_PROJECT_ONE",
+    });
+    command(service, {
+      type: "routing.configure",
+      projectId,
+      expectedVersion: 1,
+      enabled: false,
+      guidance: "",
+      candidateProfileIds: [],
+    });
+    command(service, {
+      type: "task.create",
+      projectId,
+      taskId,
+      title: "Once task",
+      outcome: "ONCE_OUTCOME",
+      ready: false,
+    });
+    await service.provisionTask(taskId);
+    command(service, {
+      type: "assignment.create",
+      projectId,
+      taskId,
+      assignmentId,
+      profileId,
+      brief,
+      resultDestination: "lead",
+      requesterAssignmentId: null,
+    });
+    runtime.handleTurn = async (threadId, turnId) => {
+      await runtime.callTool({
+        threadId,
+        turnId,
+        callId: `once-question-${turnId}`,
+        tool: "ensemble_ask_question",
+        arguments: { question: `ONCE_QUESTION_${turnId}` },
+      });
+    };
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 2 });
+    command(service, {
+      type: "task.configure",
+      projectId,
+      taskId,
+      expectedVersion: 1,
+      ready: true,
+    });
+    await service.provisionTask(taskId);
+
+    const workerPrompts = () =>
+      runtime.prompts.filter((prompt) => prompt.includes(brief));
+    const answered = new Set<string>();
+    const openQuestion = () =>
+      currentService()
+        .coordinationView()
+        .readTask(taskId)
+        .questions.find(
+          (item) =>
+            item.requestingAssignmentId === assignmentId &&
+            !answered.has(item.interactionId),
+        );
+    const answer = async (text: string) => {
+      await waitUntil(() => openQuestion() !== undefined, "worker question");
+      const question = openQuestion();
+      assert.ok(question);
+      answered.add(question.interactionId);
+      await currentService().coordinationView().answerQuestion({
+        key: randomUUID(),
+        taskId,
+        interactionId: question.interactionId,
+        expectedRevision: question.revision,
+        answer: text,
+      });
+    };
+    const nextTurn = async (turn: number, text: string) => {
+      await answer(text);
+      await waitUntil(() => workerPrompts().length >= turn, `turn ${turn}`);
+      return workerPrompts()[turn - 1] ?? "";
+    };
+    const pausedProject = (paused: boolean) =>
+      command(currentService(), {
+        type: "project.configure",
+        projectId,
+        expectedVersion: Number(
+          currentService().domain().project(projectId).version,
+        ),
+        paused,
+      });
+
+    await waitUntil(() => workerPrompts().length >= 1, "first worker turn");
+    const [first] = workerPrompts();
+    assert.ok(first);
+    assert.match(first, /^Project instructions:\nONCE_PROJECT_ONE$/m);
+    assert.match(first, /^Profile instructions:\nONCE_PROFILE_ONE$/m);
+
+    const unchanged = await nextTurn(2, "ONCE_ANSWER_TWO");
+    assert.equal(
+      runtime.threadByPrompt.get(unchanged),
+      runtime.threadByPrompt.get(first),
+    );
+    assert.doesNotMatch(unchanged, /ONCE_(PROJECT|PROFILE)_|instructions:/);
+
+    await waitUntil(() => openQuestion() !== undefined, "second question");
+    pausedProject(true);
+    command(service, {
+      type: "profile.configure",
+      profileId,
+      expectedVersion: 1,
+      instructions: "ONCE_PROFILE_TWO",
+    });
+    command(service, {
+      type: "project.configure",
+      projectId,
+      expectedVersion: Number(service.domain().project(projectId).version),
+      instructions: "ONCE_PROJECT_TWO",
+    });
+    await answer("ONCE_ANSWER_THREE");
+    command(service, {
+      type: "assignment.apply",
+      projectId,
+      assignmentId,
+      expectedVersion: 1,
+    });
+    pausedProject(false);
+    await waitUntil(() => workerPrompts().length >= 3, "turn 3");
+    const [, , applied] = workerPrompts();
+    assert.ok(applied);
+    assert.equal(
+      runtime.threadByPrompt.get(applied),
+      runtime.threadByPrompt.get(first),
+    );
+    assert.match(
+      applied,
+      /Updated project instructions\. These replace all project instructions given earlier in this conversation:\nONCE_PROJECT_TWO/,
+    );
+    assert.match(
+      applied,
+      /Updated profile instructions\. These replace all profile instructions given earlier in this conversation:\nONCE_PROFILE_TWO/,
+    );
+    assert.doesNotMatch(applied, /ONCE_(PROJECT|PROFILE)_ONE/);
+
+    const settled = await nextTurn(4, "ONCE_ANSWER_FOUR");
+    assert.doesNotMatch(settled, /ONCE_(PROJECT|PROFILE)_|instructions:/);
+    for (const prompt of workerPrompts())
+      assert.doesNotMatch(
+        prompt,
+        /Captured (project|profile) instructions|instructions \(revision/,
+      );
   } finally {
     await service?.stop();
     rmSync(root, { recursive: true, force: true });
