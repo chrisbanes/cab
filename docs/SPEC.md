@@ -2010,8 +2010,8 @@ After either recovery succeeds the outside change clears, completion and handbac
 are re-evaluated against the new head (the PR is read again), and plain pushes resume. A PR that
 still shows the head a recovery replaced or adopted is lagging, not another outside change. The
 bounded live run of plain publication is in the
-[branch publication evidence](evidence/2026-10-19-branch-publication.md); recovery has deterministic
-coverage only until its own bounded live run is recorded ([acceptance](acceptance.md)).
+[branch publication evidence](evidence/2026-10-19-branch-publication.md); the bounded live run of both
+recoveries is in the [branch recovery evidence](evidence/2026-10-28-branch-recovery.md).
 
 The lead explicitly submits merge or issue closure with its current reviewed result
 set. Shared completion checks run with the current action intent transition, excluding

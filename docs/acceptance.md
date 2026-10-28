@@ -383,11 +383,14 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   verified cleanup; it was coordinator-level with no model turns, and a real foreign
   push, force-push and approval mode were not exercised live. Evidence:
   [branch publication](evidence/2026-10-19-branch-publication.md). Recovery from an outside
-  change (#1206) is **Bounded** by deterministic tests only so far: the approval-gated overwrite
+  change (#1206) is **Bounded.** Deterministic tests cover the approval-gated overwrite
   and adoption, their binding and refusals, a remote that moves after approval, restart
   mid-recovery, the isolated fetch child and the approval view (`branch-recovery`, `git-fetch`,
-  `delivery-integration`, `operator-task-detail-browser`, `publication-live-harness`); its bounded
-  live run is pending.
+  `delivery-integration`, `operator-task-detail-browser`, `publication-live-harness`). One bounded
+  live run on the fixture repository overwrote one real foreign head and adopted another, then
+  pushed on top of the adopted head, with verified cleanup; it was coordinator-level with no model
+  turns and a harness stand-in for the operator's approval. Evidence:
+  [branch recovery](evidence/2026-10-28-branch-recovery.md).
 - **Status mapping** (#1194, ADR-1017) — **Bounded.** Deterministic tests cover the
   mapping save rules (grants, in-flight readiness, unavailable source, versions), the service
   caller's authority and its readiness exemption, each event's write once per transition, the
