@@ -36,8 +36,8 @@ function git(cwd: string, ...args: string[]): string {
  * A source with a base commit, a task worktree on a local commit, and a bare `remote` that outside
  * writers push to. `outside` commits to a clone of the remote and publishes the result there.
  */
-function repository(t: TestContext) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-git-fetch-"));
+function repository(t: TestContext, prefix = "ensemble-git-fetch-") {
+  const root = mkdtempSync(join(tmpdir(), prefix));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = join(root, "source");
   mkdirSync(source);
@@ -173,6 +173,23 @@ const adoptedRef = (repo: ReturnType<typeof repository>) => {
   );
   return read.status === 0 ? read.stdout.trim() : null;
 };
+
+test("a checkout path containing a colon still adopts through quoted alternates", async (t) => {
+  const repo = repository(t, "ensemble-git-fetch-a:b-");
+  const outside = repo.commitOutside();
+  const fake = shim(t, repo.remote);
+  assert.equal(
+    await adoptOutsideHead(request(repo, fake.executable, outside)),
+    "adopted",
+  );
+  assert.equal(adoptedRef(repo), outside);
+  assert.equal(
+    fake.recorded().env.GIT_ALTERNATE_OBJECT_DIRECTORIES,
+    JSON.stringify(
+      join(git(repo.workspace, "rev-parse", "--git-common-dir"), "objects"),
+    ),
+  );
+});
 
 test("a rebased outside head is adopted into the worktree's objects without touching HEAD, the index or files", async (t) => {
   const repo = repository(t);

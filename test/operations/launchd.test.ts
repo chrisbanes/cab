@@ -344,7 +344,11 @@ test("operations CLI renders diagnostic retention options and refuses bad ones",
   const { configuration } = fixture;
   const npmCli = process.env.npm_execpath;
   assert.ok(npmCli, "launchd CLI test must run from npm");
-  const render = (plistPath: string, extra: string[]) =>
+  const render = (
+    plistPath: string,
+    extra: string[],
+    port: string = String(configuration.port),
+  ) =>
     spawnSync(
       process.execPath,
       [
@@ -359,7 +363,7 @@ test("operations CLI renders diagnostic retention options and refuses bad ones",
         configuration.dataDirectory,
         configuration.authFile,
         configuration.origin,
-        String(configuration.port),
+        port,
         configuration.stdoutPath,
         configuration.stderrPath,
         plistPath,
@@ -400,6 +404,18 @@ test("operations CLI renders diagnostic retention options and refuses bad ones",
       const target = join(fixture.root, "bad", "x.plist");
       const result = render(target, bad);
       assert.equal(result.status, 2);
+      assert.match(result.stderr, /Usage/);
+      assert.equal(
+        `${result.stdout}${result.stderr}`.includes(fixture.root),
+        false,
+      );
+      assert.equal(existsSync(target), false);
+    }
+
+    for (const port of ["0x50", "0", "70000"]) {
+      const target = join(fixture.root, "bad-port", "x.plist");
+      const result = render(target, [], port);
+      assert.equal(result.status, 2, port);
       assert.match(result.stderr, /Usage/);
       assert.equal(
         `${result.stdout}${result.stderr}`.includes(fixture.root),

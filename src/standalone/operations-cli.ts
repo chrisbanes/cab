@@ -117,6 +117,13 @@ async function operate(argv: string[], io: Io): Promise<number> {
       io.stderr.write(USAGE);
       return 2;
     }
+    let port: number;
+    try {
+      port = parsePort(positionals[6] as string);
+    } catch {
+      io.stderr.write(USAGE);
+      return 2;
+    }
     const configuration: LaunchAgentConfiguration = {
       label: positionals[0] as string,
       nodePath: positionals[1] as string,
@@ -124,7 +131,7 @@ async function operate(argv: string[], io: Io): Promise<number> {
       dataDirectory: positionals[3] as string,
       authFile: positionals[4] as string,
       origin: positionals[5] as string,
-      port: parsePort(positionals[6] as string),
+      port,
       stdoutPath: positionals[7] as string,
       stderrPath: positionals[8] as string,
       ...diagnostic,

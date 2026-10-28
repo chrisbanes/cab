@@ -55,3 +55,9 @@ export function stopWithoutDrain(service: StandaloneService): Promise<void> {
   if (acquired) delete acquired.supervisor;
   return service.stop();
 }
+
+/** The running runtimes by harness, so a test can remove one under an admitted turn. */
+export function runtimesOf(service: StandaloneService) {
+  // biome-ignore lint/complexity/useLiteralKeys: private member access for tests
+  return service["runtimes"];
+}

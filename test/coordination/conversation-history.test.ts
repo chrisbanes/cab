@@ -1193,3 +1193,15 @@ test("exact values and credential patterns cannot hide each other", () => {
   ] as const)
     assert.equal(sanitizeConversationText(text, [excluded]), expected, text);
 });
+
+test("a raw @ in a URL password is redacted through the last @ before the path", () => {
+  const redacted = sanitizeConversationText(
+    "postgres://u:p@ss@db/x and https://user:pw@example.test/path?q=a@b#f@g",
+    [],
+  );
+  assert.equal(
+    redacted,
+    "postgres://[redacted]@db/x and https://[redacted]@example.test/path?q=a@b#f@g",
+  );
+  assert.equal(redacted.includes("ss@"), false);
+});

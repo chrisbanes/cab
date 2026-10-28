@@ -26,7 +26,11 @@ import type {
   PowerSignalListener,
 } from "../../src/standalone/power.js";
 import type { PowerEventCursor } from "../../src/standalone/state.js";
-import { acquiredOf, startedOf } from "../fixtures/service-internals.js";
+import {
+  acquiredOf,
+  runtimesOf,
+  startedOf,
+} from "../fixtures/service-internals.js";
 
 class FakeChild extends EventEmitter {
   killed = 0;
@@ -570,6 +574,40 @@ test("service stop stops the sleep/wake listener child", async () => {
     assert.equal(children.length, 1, "no listener is respawned on stop");
   } finally {
     await service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a runtime removed between admission and submission holds the turn with a reason", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-power-runtime-gone-"));
+  const workspace = join(root, "first");
+  mkdirSync(workspace);
+  const runtime = new FakeRuntime();
+  const service: StandaloneService = new StandaloneService(
+    join(root, "data"),
+    () => runtime,
+    undefined,
+    {
+      power: {
+        eventSource: new FakePowerEvents(),
+        pollIntervalMs: 60_000,
+        // Runs inside executionStarted, after admission and before executeAdmitted looks up the runtime.
+        assertion: new CaffeinateAssertion((() => {
+          runtimesOf(service).clear();
+          return new FakeChild();
+        }) as never),
+      },
+    },
+  );
+  try {
+    await service.start();
+    await service.submit("first", "first prompt", workspace);
+    const record = startedOf(service).schedulerStore.byWorkId("first");
+    assert.equal(record.state, "held");
+    assert.match(record.reason ?? "", /Runtime unavailable/);
+    assert.equal(runtime.turns, 0);
+  } finally {
+    await service.stop();
     rmSync(root, { recursive: true, force: true });
   }
 });

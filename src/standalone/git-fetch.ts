@@ -110,7 +110,8 @@ export async function adoptOutsideHead(
     await writeFile(join(dir, "refs", "ensemble", "base"), `${baseCommit}\n`);
     const scratchEnvironment = {
       GIT_DIR: dir,
-      GIT_ALTERNATE_OBJECT_DIRECTORIES: objects,
+      // Quoted as in git-push.ts: Git splits an unquoted value on `:`.
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objects),
       GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_NO_REPLACE_OBJECTS: "1",

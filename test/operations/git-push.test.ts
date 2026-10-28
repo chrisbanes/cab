@@ -30,8 +30,8 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 /** A source repository with one commit and a detached task worktree on it. */
-function repository(t: TestContext) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-git-push-"));
+function repository(t: TestContext, prefix = "ensemble-git-push-") {
+  const root = mkdtempSync(join(tmpdir(), prefix));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = join(root, "source");
   mkdirSync(source);
@@ -172,6 +172,20 @@ test("the token reaches only the push child's environment, never argv, configura
     "the commit resolves through the worktree's objects",
   );
   assert.notEqual(seen.cwd, repo.workspace);
+});
+
+test("a checkout path containing a colon still resolves the commit through quoted alternates", async (t) => {
+  const repo = repository(t, "ensemble-git-push-a:b-");
+  const fake = shim(t);
+  assert.equal(await pushTaskCommit(request(repo, fake.executable)), "pushed");
+  const seen = fake.recorded();
+  assert.equal(seen.resolves, repo.sha);
+  assert.equal(
+    seen.env.GIT_ALTERNATE_OBJECT_DIRECTORIES,
+    JSON.stringify(
+      join(git(repo.workspace, "rev-parse", "--git-common-dir"), "objects"),
+    ),
+  );
 });
 
 test("repository-local, user and system configuration cannot redirect the push or its credential", async (t) => {

@@ -43,7 +43,7 @@ const sensitiveAssignment =
   /((?:"?(?:password|passwd|token|api[_-]?key|secret)[\w-]*"?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|([^\s,;]+))/gi;
 const authorizationHeader = /\b(authorization\s*:\s*)[^\r\n]+/gi;
 const bearerToken = /\b(bearer\s+)[^\s,;]+/gi;
-const urlCredentials = /\b([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi;
+const urlCredentials = /\b([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi;
 /** Patterns redact what follows their first group; `kept` trailing characters stay. */
 const patterns: readonly (readonly [RegExp, number])[] = [
   [authorizationHeader, 0],

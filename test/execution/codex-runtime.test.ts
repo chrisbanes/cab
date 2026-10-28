@@ -15,6 +15,7 @@ import { mock, test } from "node:test";
 import {
   CodexRuntime,
   executionPolicy,
+  maxAppServerLineBytes,
   type RuntimeConversationEvent,
   type RuntimeDiagnosticEvent,
 } from "../../src/standalone/codex.js";
@@ -1551,6 +1552,46 @@ for await (const line of createInterface({input: process.stdin})) {
     const waiting = runtime.waitForTurn("thread-1", "turn-1");
     child.stdout.emit("close");
     await assert.rejects(bounded(waiting, 1000), /stdout closed/);
+  } finally {
+    await runtime.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an App Server stdout line over the byte cap fails the runtime", {
+  timeout: 7000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-line-cap-"));
+  const executable = join(root, "fake-codex.mjs");
+  writeFileSync(
+    executable,
+    String.raw`#!/usr/bin/env node
+import { createInterface } from "node:readline";
+for await (const line of createInterface({input: process.stdin})) {
+  const message = JSON.parse(line);
+  if (message.id === undefined) continue;
+  let result = {};
+  if (message.method === "account/read") result = {account: {type: "chatgpt"}};
+  if (message.method === "config/read") result = {config: {approval_policy: "never", sandbox_mode: "workspace-write"}};
+  process.stdout.write(JSON.stringify({id: message.id, result}) + "\n");
+}
+`,
+  );
+  chmodSync(executable, 0o700);
+  const runtime = newTestRuntime(executable);
+  try {
+    await bounded(runtime.start(), 3000);
+    const child = (
+      runtime as unknown as { child?: ChildProcessWithoutNullStreams }
+    ).child;
+    assert.ok(child);
+    bindTestTurn(runtime, "thread-1", "turn-1");
+    const waiting = runtime.waitForTurn("thread-1", "turn-1");
+    // Neither chunk alone exceeds the cap, so this proves the bound is cumulative.
+    const half = Buffer.alloc(maxAppServerLineBytes / 2 + 1, 0x20);
+    child.stdout.emit("data", half);
+    child.stdout.emit("data", half);
+    await assert.rejects(bounded(waiting, 1000), /stdout line exceeds/);
   } finally {
     await runtime.stop();
     rmSync(root, { recursive: true, force: true });

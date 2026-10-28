@@ -118,7 +118,9 @@ export async function pushTaskCommit(
       cwd: scratch,
       environmentOverrides: {
         GIT_DIR: scratch,
-        GIT_ALTERNATE_OBJECT_DIRECTORIES: objects,
+        // Git splits this on `:` unless C-quoted. shortcut: a path with ASCII control characters
+        // other than \b\f\n\r\t still fails (JSON's \u00XX is not Git's C-quoting).
+        GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objects),
         GIT_CONFIG_GLOBAL: "/dev/null",
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_ALLOW_PROTOCOL: "https",
