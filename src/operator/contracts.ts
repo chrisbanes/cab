@@ -87,6 +87,28 @@ export const draftTurnReasonSchema = z.enum([
   "draft-turn-active",
 ]);
 export type DraftTurnReason = z.infer<typeof draftTurnReasonSchema>;
+
+/** Why Start again is not offered for a task; each names the recovery that applies instead. */
+export const startAgainReasonSchema = z.enum([
+  "nothing-refused",
+  "task-not-open",
+  "source-held",
+  "assignment-held",
+  "submission-interrupted",
+  "execution-unresolved",
+]);
+export type StartAgainReason = z.infer<typeof startAgainReasonSchema>;
+
+/** Why Reset task is not offered for a task. */
+export const resetReasonSchema = z.enum([
+  "task-not-open",
+  "task-not-ready",
+  "lead-unconfigured",
+  "nothing-to-reset",
+  "execution-unresolved",
+  "task-held",
+]);
+export type ResetReason = z.infer<typeof resetReasonSchema>;
 const time = z.number().int().nonnegative().safe();
 /** The most Unicode characters (code points, as zod counts them) any operator text field takes. */
 export const textMaxLength = 16000;
@@ -815,11 +837,13 @@ export const executionSchema = z
       "paused",
       "stopping",
       "uncertain",
+      "not-started",
       "completed",
       "cancelled",
     ]),
     reasonCodes: z.array(
       z.enum([
+        "refused-before-start",
         "project-paused",
         "task-held",
         "recovery-held",
@@ -1579,6 +1603,24 @@ export const taskSchema = envelope(
         .object({
           available: z.boolean(),
           reason: draftTurnReasonSchema.optional(),
+        })
+        .strict()
+        .optional(),
+      /** Whether Start again is offered for a request refused before it ran, and why not. */
+      startAgain: z
+        .object({
+          available: z.boolean(),
+          reason: startAgainReasonSchema.optional(),
+          assignmentId: uuid.optional(),
+          workId: z.string().min(1).max(512).optional(),
+        })
+        .strict()
+        .optional(),
+      /** Whether Reset task is offered, and why not. */
+      reset: z
+        .object({
+          available: z.boolean(),
+          reason: resetReasonSchema.optional(),
         })
         .strict()
         .optional(),
@@ -2445,6 +2487,25 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       taskId: uuid,
       expectedVersion: revision,
       message: z.string().trim().min(1).max(16000),
+    })
+    .strict(),
+  // Queues a refused-before-start request again at the current revisions.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.start-again"),
+      taskId: uuid,
+      expectedVersion: revision,
+      workId: z.string().min(1).max(512),
+    })
+    .strict(),
+  // Replaces every assignment's conversation and queues a fresh first turn for the lead.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.reset"),
+      taskId: uuid,
+      expectedVersion: revision,
     })
     .strict(),
   // Optional fence: Stop and Resume act on a hold, so an unrelated edit must not block them.
@@ -3411,6 +3472,30 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       taskId: uuid,
       leadAssignmentId: uuid,
       workId: z.string().min(1).max(512),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("start-again"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      assignmentId: uuid,
+      refusedWorkId: z.string().min(1).max(512),
+      workId: z.string().min(1).max(512),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("task-reset"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      leadAssignmentId: uuid,
+      workId: z.string().min(1).max(512),
+      conversations: z.array(
+        z.object({ assignmentId: uuid, revision }).strict(),
+      ),
     })
     .strict(),
   z

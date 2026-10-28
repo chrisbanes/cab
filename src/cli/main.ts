@@ -153,7 +153,10 @@ const OPTIONS_HELP = `Options:
 `;
 
 const TASK_NOTE = `Task operations: task create, task message, task follow-up, task draft-turn, question answer
-and approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
+and approval decide cannot be undone. task start-again queues a refused request
+again and keeps the refusal in the history; task reset replaces every
+assignment's conversation, starts the lead fresh in the same workspace and
+cannot be undone. Reverse pairs: task stop/resume (Stop is
 best-effort cancellation of an open task; Resume clears only the operator
 Stop),
 add-dependency/remove-dependency and task configure --ready true/false.`;

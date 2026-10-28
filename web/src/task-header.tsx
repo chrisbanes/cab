@@ -6,7 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { TaskRead } from "../../src/operator/contracts.js";
+import type { Session, TaskRead } from "../../src/operator/contracts.js";
+import type { OperatorClient } from "./api.js";
 import { ActionLink, Button } from "./components.js";
 import { outcomeLine } from "./presentation.js";
 import { MarkdownPreview } from "./task-files.js";
@@ -20,6 +21,7 @@ import {
 } from "./task-overview.js";
 import { type TaskTab, taskTabs } from "./task-tabs.js";
 import { useMediaQuery } from "./use-media-query.js";
+import { ResetTask, taskChangedEvent } from "./task-restart.js";
 import { stateIcons } from "./task-views.js";
 import {
   Dialog,
@@ -39,6 +41,11 @@ export interface TaskHeaderReport {
   identity: string;
   back: { href: string; label: string; ariaLabel: string; history: boolean };
   stop: { affected: string; held: boolean; open: boolean };
+  /** Reset task: whether it is offered, the task version it is sent with and why not. */
+  reset: {
+    offer: NonNullable<TaskRead["data"]["reset"]>;
+    version: number;
+  } | null;
 }
 
 export function taskHeaderReport(
@@ -69,6 +76,9 @@ export function taskHeaderReport(
           history: false,
         },
     stop: { affected, held, open: data.task.state === "open" },
+    reset: data.reset
+      ? { offer: data.reset, version: data.task.version }
+      : null,
   };
 }
 
@@ -80,20 +90,25 @@ export function taskHeaderReport(
  */
 export function TaskHeaderActions({
   report,
-  csrfToken,
+  client,
+  session,
 }: {
   report: TaskHeaderReport;
-  csrfToken: string;
+  client: OperatorClient;
+  session: Session;
 }) {
+  const csrfToken = session.csrfToken;
   const [open, setOpen] = useState(false),
     [sent, setSent] = useState(false),
+    [resetOpen, setResetOpen] = useState(false),
+    [resetSent, setResetSent] = useState<string | null>(null),
     [menuOpen, setMenuOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 759px)");
   const keep = useRef<HTMLButtonElement>(null),
     overflow = useRef<HTMLDetailsElement>(null);
   // A tap outside closes the phone overflow; the Stop dialog's own layer is not outside.
   useEffect(() => {
-    if (!phone || open) return;
+    if (!phone || open || resetOpen) return;
     const away = (event: PointerEvent) => {
       const details = overflow.current;
       if (details?.open && !details.contains(event.target as Node)) {
@@ -104,7 +119,7 @@ export function TaskHeaderActions({
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
-  }, [phone, open]);
+  }, [phone, open, resetOpen]);
   // A page restored from the back-forward cache (after Execution or the Stop post) starts
   // closed again: the dialog and the phone overflow are visit-long overlays, not state to keep.
   useEffect(() => {
@@ -122,7 +137,7 @@ export function TaskHeaderActions({
     <details
       ref={overflow}
       className="task-header-overflow"
-      open={!phone || menuOpen || open}
+      open={!phone || menuOpen || open || resetOpen}
       onToggle={(event) => {
         if (phone) setMenuOpen(event.currentTarget.open);
       }}
@@ -150,6 +165,23 @@ export function TaskHeaderActions({
         <ActionLink variant="secondary" href={`/runtime/task/${report.taskId}`}>
           Execution
         </ActionLink>
+        {report.reset && (report.stop.open || resetSent === report.taskId) && (
+          <ResetTask
+            client={client}
+            session={session}
+            taskId={report.taskId}
+            title={report.title}
+            version={report.reset.version}
+            offer={report.reset.offer}
+            onSend={() => setResetSent(report.taskId)}
+            onOpenChange={(next) => {
+              // The trigger lives in the overflow, which stays open behind the dialog.
+              if (phone) setMenuOpen(true);
+              setResetOpen(next);
+            }}
+            onChanged={() => window.dispatchEvent(new Event(taskChangedEvent))}
+          />
+        )}
         {report.stop.held ? (
           <Button variant="destructive" disabled>
             Stop requested

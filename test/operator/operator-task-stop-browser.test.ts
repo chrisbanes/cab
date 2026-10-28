@@ -60,6 +60,7 @@ test("the task header offers Stop… only on an open task and keeps a Stop reque
 
   assert.deepEqual(await actions(open.taskId, "Open task"), [
     ["A", "Execution", undefined],
+    ["BUTTON", "Reset task…", true],
     ["BUTTON", "Stop…", false],
   ]);
   assert.deepEqual(await actions(done.taskId, "Done task"), [

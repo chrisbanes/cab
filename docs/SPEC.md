@@ -346,6 +346,8 @@ still apply. Runtime identity, writer admission, capacity reservation, recovery
 identity, pending effects or a Stop target disqualify the historical refusal exemption.
 Any initial inbox batch stays bound unless the existing narrow stale-delivery withdrawal
 proves it safe to withdraw; continuation never orphans or replays that batch.
+The operator can also clear such a refusal directly with
+[Start again](#start-again-and-reset-task).
 
 After exact-generation operator recovery, the old intent remains `reconciled` and
 its turn request remains held; the validated recovery receipt alone does not dispatch
@@ -664,9 +666,10 @@ is queued for it. Revoked repository access (an imported task's ready workspace 
 repository the project no longer links) opens the project's GitHub settings, names no
 repository and grants nothing by itself. An assignment whose operator-reconciled
 recovery has no recorded continuation has no Fix and links to its recovery; opening
-it releases nothing. A request refused only because the captured task or assignment
-revisions changed is shown as held execution (`recovery-held`), not as a wait:
-clearing it is a recovery or fresh operator message decision. A Fix never clears
+it releases nothing. A request refused before it ran because the captured task or assignment
+revisions changed is shown as **Not started** (`not-started`, reason
+`refused-before-start`), not as a wait or as uncertain execution: Start again, a
+recovery or a fresh operator message clears it. A Fix never clears
 holds or grants access by implication. These controls must preserve existing
 readiness and admission rules.
 
@@ -1129,6 +1132,52 @@ history.
   becomes Ready finishes read-only first. Draft prompts and the first ordinary turn after
   draft turns carry the task's current title and outcome.
   Automatic draft turns, triage procedures and readiness proposals are not part of this.
+
+### Start again and Reset task
+
+Two keyed, task-versioned operator commands restart work without a force unlock: there
+is no way to release an execution that may still be writing, and interrupted, unknown,
+submitting and held work stays with the `recovery` commands.
+
+- **Start again** (`task.start-again {key, taskId, expectedVersion, workId}`) queues an
+  assignment's newest request again when a witness-only proof shows it was refused at
+  admission before it ran: the request and intent are held with their matching revision
+  refusal and an exact binding; no thread or turn, writer admission, capacity
+  reservation, recovery identity, pending effect or stop target is recorded. It does not
+  read the refusal's reasons; every current admission check applies again to the new
+  request. The refused request and its refusal stay in the history, linked to the new
+  request by a restart record, so the restarted work is historically resolved. The new
+  request is captured at the current task, profile and instructions revisions, takes the
+  assignment's inbox batch and any waiting events in order, and runs in the task's
+  workspace. A conversation that has not seen the brief gets the task's current title and
+  outcome with it. Nothing is sent to the lead. Replay returns the same receipt; another
+  request under the key, a stale task version or a `workId` that is no longer the
+  refused request is a conflict. When several assignments qualify the newest by sequence
+  is the target.
+- **Not offered** for a closed task (`task-not-open`), a source hold (`source-held`, review
+  the source first), a held assignment (`assignment-held`), a request cut off during
+  submission (`submission-interrupted`), any assignment's newest request that is held for another reason or a writer,
+  ambiguity or archival hold (`execution-unresolved`) or when nothing was refused (`nothing-refused`).
+  Each refusal is a 409 `conflict` with the reason, which the task read reports as
+  `startAgain`, with the recovery that applies. A Stop hold, pause or capacity does not
+  block it; the new request queues and is held like any turn.
+- **Reset task** (`task.reset {key, taskId, expectedVersion}`) starts a new conversation
+  for every assignment of the task: the existing conversation replacement, then a fresh
+  first turn for the current lead only, who re-delegates. Other assignments are not
+  revived. A completed lead is reopened for it. The old conversations, results, history
+  and the workspace stay readable and are kept, not reprovisioned. The lead's refused
+  request, if any, gets a restart record. Reset is available only on an open, Ready
+  task whose lead has started, with no queued, running or unresolved execution, writer,
+  capacity or effect state, and no task, Stop, source or assignment hold; otherwise it is
+  refused with `task-not-open`, `task-not-ready`, `lead-unconfigured`, `nothing-to-reset`,
+  `execution-unresolved` or `task-held`. It cannot be undone: there is no restore, and
+  the operator UI and CLI say so before sending.
+- **Entry points.** The task page's decisions, the Inbox intervention and Home's Needs
+  you card offer **Start again** for the `not-started` attention code; the task header
+  offers **Reset task…** behind a confirmation. `ensemble task start-again TASK_ID
+  --expected-version N [--work WORK] [--request-id UUID]` and `ensemble task reset
+  TASK_ID --expected-version N [--request-id UUID]` send the same commands and print
+  the same reason text.
 
 ### Task brief, evidence and delegation
 

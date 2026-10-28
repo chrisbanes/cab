@@ -16,7 +16,9 @@ import type { OperatorClient } from "./api.js";
 export { columns, nextActor, taskColumn };
 export type { TaskColumn };
 /** Everything except the terminal columns: unfinished work, Draft included. */
-export const activeColumns: readonly TaskColumn[] = columns.slice(0, 7);
+export const activeColumns: readonly TaskColumn[] = columns.filter(
+  (c) => c !== "Done" && c !== "Cancelled",
+);
 export const isActiveColumn = (column: TaskColumn) =>
   activeColumns.includes(column);
 /** `state` is empty (Active tasks), `all`, or one column; a terminal choice adds its column. */

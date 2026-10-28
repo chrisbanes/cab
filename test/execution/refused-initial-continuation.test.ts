@@ -1,204 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { test } from "node:test";
-import { tmpdir } from "../fixtures/temp.js";
-import type {
-  Runtime,
-  RuntimeToolCall,
-  RuntimeToolResult,
-  UnexpectedRequest,
-} from "../../src/standalone/codex.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { StandaloneService } from "../../src/standalone/service.js";
+import type { StandaloneService } from "../../src/standalone/service.js";
+import {
+  command,
+  db,
+  refusedInitial,
+  unpause,
+  waitUntil,
+} from "../fixtures/refused-turn.js";
 import { startedOf } from "../fixtures/service-internals.js";
-
-type ToolListener = (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
-
-class JourneyRuntime implements Runtime {
-  turns = 0;
-  starts = 0;
-  prompts: string[] = [];
-  handleTurn: ((threadId: string, turnId: string) => Promise<void>) | undefined;
-  private listener: ToolListener | undefined;
-
-  async start(): Promise<void> {}
-
-  async stop(): Promise<void> {}
-
-  async startThread(): Promise<string> {
-    this.starts++;
-    return `thread-${this.starts}`;
-  }
-
-  async resumeThread(): Promise<void> {}
-
-  async startTurn(
-    _threadId: string,
-    _workspace: string,
-    prompt: string,
-  ): Promise<string> {
-    this.turns++;
-    this.prompts.push(prompt);
-    return `turn-${this.turns}`;
-  }
-
-  async interruptTurn(): Promise<void> {}
-
-  async waitForTurn(threadId: string, turnId: string) {
-    await this.handleTurn?.(threadId, turnId);
-    return "completed" as const;
-  }
-
-  onUnexpectedRequest(_listener: (request: UnexpectedRequest) => void): void {}
-
-  onToolCall(listener: ToolListener): void {
-    this.listener = listener;
-  }
-
-  async callTool(call: RuntimeToolCall): Promise<RuntimeToolResult> {
-    assert.ok(this.listener, "service registers the runtime tool callback");
-    return this.listener(call);
-  }
-}
-
-function command(service: StandaloneService, body: Record<string, unknown>) {
-  return service
-    .domain()
-    .execute({ key: randomUUID(), actor: "operator", ...body } as never);
-}
-
-async function waitUntil(
-  predicate: () => boolean,
-  description: string,
-  diagnostics: () => unknown = () => undefined,
-): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline)
-      throw new Error(
-        `${description} timed out; ${JSON.stringify(diagnostics())}`,
-      );
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-function db(service: StandaloneService) {
-  return (service as unknown as { db: import("node:sqlite").DatabaseSync }).db;
-}
-
-async function refusedInitial(initialBatch = false) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-refused-initial-"));
-  const projectId = randomUUID(),
-    taskId = randomUUID(),
-    profileId = randomUUID();
-  const runtime = new JourneyRuntime();
-  const makeService = () =>
-    new StandaloneService(join(root, "data"), () => runtime, undefined, {
-      power: { enabled: false },
-      routingClient: null,
-      supervisor: { observationMs: 5 },
-    });
-  const service = makeService();
-  await service.start();
-  command(service, {
-    type: "profile.create",
-    profileId,
-    name: "Lead",
-    instructions: "PRESERVED_PROFILE",
-    capabilities: "coordination",
-  });
-  command(service, {
-    type: "project.create",
-    projectId,
-    name: "Project",
-    leadProfileId: profileId,
-  });
-  command(service, {
-    type: "project.configure",
-    projectId,
-    expectedVersion: 1,
-    instructions: "PRESERVED_PROJECT",
-    paused: true,
-  });
-  command(service, {
-    type: "routing.configure",
-    projectId,
-    expectedVersion: 1,
-    enabled: false,
-    guidance: "",
-    candidateProfileIds: [],
-  });
-  command(service, {
-    type: "task.create",
-    projectId,
-    taskId,
-    title: "Old title",
-    outcome: "OLD_OUTCOME",
-    ready: true,
-  });
-  await service.provisionTask(taskId);
-  const assignment = service.domain().assignments(taskId)[0];
-  assert.ok(assignment);
-  const workId = `assignment:${assignment.id}:initial`;
-  command(service, {
-    type: "task.configure",
-    projectId,
-    taskId,
-    expectedVersion: Number(service.domain().task(taskId).version),
-    title: "CURRENT_TITLE",
-    outcome: "CURRENT_OUTCOME",
-  });
-  await service.configureCapacity({ key: randomUUID(), globalLimit: 1 });
-  const old = service.turnRequests().find((r) => r.workId === workId);
-  assert.ok(old);
-  assert.equal(old.state, "held");
-  assert.match(old.reason ?? "", /task-revision-changed/);
-  assert.equal(runtime.turns, 0);
-  if (initialBatch) {
-    const coordination = startedOf(service).coordination;
-    coordination.postOperatorMessage({
-      actor: "operator",
-      key: randomUUID(),
-      taskId,
-      recipientAssignmentId: String(assignment.id),
-      expectedAssignmentVersion: Number(assignment.version),
-      message: "HELD_INITIAL_BATCH",
-    });
-    assert.ok(
-      coordination.bindDeliveryBatch(
-        String(assignment.id),
-        workId,
-        Number(assignment.version),
-      ),
-    );
-  }
-  return {
-    root,
-    projectId,
-    taskId,
-    profileId,
-    assignmentId: String(assignment.id),
-    workId,
-    old,
-    runtime,
-    service,
-    makeService,
-  };
-}
-
-function unpause(
-  f: Awaited<ReturnType<typeof refusedInitial>>,
-  service = f.service,
-) {
-  command(service, {
-    type: "project.configure",
-    projectId: f.projectId,
-    expectedVersion: Number(service.domain().project(f.projectId).version),
-    paused: false,
-  });
-}
 
 function message(
   f: Awaited<ReturnType<typeof refusedInitial>>,
@@ -318,13 +131,13 @@ function proof(service: StandaloneService, workId: string) {
   return startedOf(service).state.isNeverAdmittedRefusedAssignmentWork(workId);
 }
 
-test("a request refused only because captured revisions changed reads as held execution, not as a wait", async () => {
+test("a request refused before it ran reads as not started, not as a wait or uncertain", async () => {
   const f = await refusedInitial();
   try {
     const read = (await new OperatorApi(f.service).readTask(f.taskId)).data;
-    assert.equal(read.execution.state, "uncertain");
-    assert.deepEqual(read.execution.reasonCodes, ["recovery-held"]);
-    // Clearing it is a recovery or fresh-message decision, so no wait implies a Fix.
+    assert.equal(read.execution.state, "not-started");
+    assert.deepEqual(read.execution.reasonCodes, ["refused-before-start"]);
+    // Start again, a recovery or a fresh message clears it, so no wait implies a Fix.
     assert.deepEqual(
       read.waits.map((w) => w.code),
       ["project-paused"],

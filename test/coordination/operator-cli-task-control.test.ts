@@ -8,6 +8,7 @@ import {
   startCliOperator,
 } from "../fixtures/operator-cli.js";
 import { startOwnWork } from "../fixtures/questions.js";
+import { refusedTask } from "../fixtures/refused-task.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 
 type Operator = Awaited<ReturnType<typeof startCliOperator>>;
@@ -461,4 +462,146 @@ test("task resume with no Stop in effect prints no contradicting Next", async (t
     `Next: ensemble task get ${project.taskId}`,
   );
   assert.doesNotMatch(resumed.out, /^Next: .*resume/m);
+});
+
+test("task start-again queues a refused request again and explains what it cannot", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, h } = o;
+  const task = await refusedTask(o.s.f);
+  const version = () => Number(o.d.task(task.taskId).version);
+  const requests = () => o.s.f.service.turnRequests().length;
+
+  // A stale version is a conflict and records nothing.
+  let r = await cli("rw", [
+    "task",
+    "start-again",
+    task.taskId,
+    "--expected-version",
+    String(version() + 1),
+  ]);
+  assert.equal(r.code, 4, r.out);
+  assert.equal(requests(), 1);
+
+  const requestId = randomUUID();
+  r = await cli("rw", [
+    "task",
+    "start-again",
+    task.taskId,
+    "--expected-version",
+    String(version()),
+    "--request-id",
+    requestId,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const data = r.json().data;
+  assert.equal(data.receipt.kind, "start-again");
+  assert.equal(data.receipt.refusedWorkId, task.workId);
+  assert.equal(data.workId, data.receipt.workId);
+  assert.equal(requests(), 2);
+  r = await h.run([
+    "task",
+    "start-again",
+    task.taskId,
+    "--expected-version",
+    String(version()),
+    "--connection",
+    "rw",
+  ]);
+  // The refused request is history now, so there is nothing to start again.
+  assert.equal(r.code, 4, r.err + r.out);
+  assert.match(
+    r.err + r.out,
+    /Start again unavailable: no request was refused/,
+  );
+  assert.match(
+    r.err + r.out,
+    /repeat it with --work WORK and the same --request-id/,
+  );
+  assert.equal(requests(), 2);
+  // With the refused work and the same request id, a lost reply replays the receipt.
+  r = await cli("rw", [
+    "task",
+    "start-again",
+    task.taskId,
+    "--expected-version",
+    String(version()),
+    "--work",
+    task.workId,
+    "--request-id",
+    requestId,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.receipt.workId, data.workId);
+  assert.equal(requests(), 2);
+
+  // A hold that may be live is named with its recovery.
+  o.s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, 'Independent hold')",
+      )
+      .run(task.taskId),
+  );
+  r = await h.run([
+    "task",
+    "start-again",
+    task.taskId,
+    "--expected-version",
+    String(version()),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 4, r.err + r.out);
+  assert.match(
+    r.err + r.out,
+    /Start again unavailable: an execution is unresolved/,
+  );
+  assert.match(r.err + r.out, /ensemble recovery/);
+  assert.equal(requests(), 2);
+});
+
+test("task reset says it cannot be undone and replaces the conversation", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, h } = o;
+  const task = await refusedTask(o.s.f);
+  const version = () => Number(o.d.task(task.taskId).version);
+  let r = await h.run([
+    "task",
+    "reset",
+    task.taskId,
+    "--expected-version",
+    String(version()),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.match(r.out, /cannot be undone/);
+  assert.match(r.out, /Conversations replaced:\s+1/);
+  r = await cli("rw", [
+    "task",
+    "reset",
+    task.taskId,
+    "--expected-version",
+    String(version() + 1),
+  ]);
+  assert.equal(r.code, 4, r.out);
+  o.s.f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE turn_requests SET state = 'queued' WHERE workId = ?")
+      .run(task.workId),
+  );
+  r = await h.run([
+    "task",
+    "reset",
+    task.taskId,
+    "--expected-version",
+    String(version()),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 4, r.err + r.out);
+  assert.match(
+    r.err + r.out,
+    /Reset unavailable: an execution is queued, running or unresolved/,
+  );
 });

@@ -12,6 +12,7 @@ import { ActionLink, Button } from "./components.js";
 import { clockLabel } from "./presentation.js";
 import { holdNotices, requestActionLabel } from "./inbox-presentation.js";
 import { QuestionResponse } from "./question-response.js";
+import { StartAgainAction } from "./task-restart.js";
 import { useOperatorResource } from "./resource.js";
 import { Alert } from "./ui/alert.js";
 
@@ -178,11 +179,40 @@ export function ApprovalDetail({
 export function InterventionDetail({
   item,
   leftQueue = false,
+  start,
+  startKept = false,
 }: {
   item: TaskInboxItem;
   /** The request is no longer current, so it no longer asserts that ownership is held. */
   leftQueue?: boolean;
+  /** What a refused-before-start request needs to offer Start again in place. */
+  start?:
+    | {
+        client: OperatorClient;
+        session: Session;
+        task: TaskRead["data"];
+        onChanged: () => void;
+        onStart: () => void;
+      }
+    | undefined;
+  /** A start was sent from this pane: it stays, whatever the request's code becomes. */
+  startKept?: boolean;
 }) {
+  if ((item.attentionCode === "not-started" || startKept) && start)
+    return (
+      <div className="inbox-approval">
+        <div className="inbox-approval-body">
+          <p>
+            Nothing ran for this request: it was refused at admission before it
+            started.
+          </p>
+        </div>
+        <StartAgainAction {...start} />
+        <div className="inbox-decision">
+          <ActionLink href={item.destination}>Open task</ActionLink>
+        </div>
+      </div>
+    );
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">

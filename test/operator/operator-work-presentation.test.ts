@@ -126,12 +126,13 @@ test("columns follow the design order and Active tasks hides only terminal work"
       "Paused",
       "Stopping",
       "Uncertain",
+      "Not started",
       "Draft",
       "Done",
       "Cancelled",
     ],
   );
-  assert.deepEqual([...activeColumns], columns.slice(0, 7));
+  assert.deepEqual([...activeColumns], columns.slice(0, 8));
   assert.deepEqual([...visibleColumns("")], [...activeColumns]);
   assert.deepEqual([...visibleColumns("all")], [...columns]);
   assert.deepEqual([...visibleColumns("Done")], [...activeColumns, "Done"]);

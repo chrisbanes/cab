@@ -44,6 +44,16 @@ test("taskColumnOf follows the Board's precedence from the task read", () => {
     ],
     [{ execution: { state: "stopping", holds } }, "Stopping"],
     [{ execution: { state: "uncertain", holds } }, "Uncertain"],
+    [{ execution: { state: "not-started", holds } }, "Not started"],
+    [
+      {
+        execution: {
+          state: "not-started",
+          holds: { ...holds, uncertainty: true },
+        },
+      },
+      "Uncertain",
+    ],
     [
       { execution: { state: "idle", holds: { ...holds, uncertainty: true } } },
       "Uncertain",
@@ -74,6 +84,7 @@ test("taskNextActor reads the List's next actor from the same attention codes", 
   const cases: [string[], string, string][] = [
     [[], "idle", "No operator decision"],
     [["execution-uncertain"], "idle", "Next: you · inspect execution"],
+    [["not-started"], "not-started", "Next: you · start again"],
     [[], "uncertain", "Next: you · inspect execution"],
     [["question", "approval"], "idle", "Next: you · review material & decide"],
     [["question"], "idle", "Next: you · answer question"],

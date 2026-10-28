@@ -88,6 +88,13 @@ owns delivery scope and status.
   issue; delegation, writes, pull request actions, results and completion are refused,
   and the task stays not Ready. Codex runs it with a read-only sandbox policy and
   command network access off; Ensemble claims no independent sandbox.
+- **Start again and Reset task.** A request refused at admission before it ran shows as
+  Not started, not Uncertain. Start again, from the task page, the Inbox, Home or
+  `ensemble task start-again`, queues it again at the current revisions in the same
+  workspace and keeps the refusal in the history. Reset task, from the task header or
+  `ensemble task reset`, replaces every assignment's conversation and starts the lead
+  fresh in the same workspace; it cannot be undone. Neither forces an execution that may
+  still be running: those stay with the `recovery` commands.
 - **Improve with lead.** On an open imported task, the project lead reads the linked
   repositories in the same throwaway copy and proposes a better title and body for
   the source issue. The operator edits the proposal, reviews the full current and

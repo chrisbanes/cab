@@ -50,6 +50,10 @@ The operator CLI is outside the budget: it has no screens.
 
 Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
 
+Work refused before it ran is not a wait: it is shown as Not started with **Start again**
+beside it, from task detail, the Inbox and Home, and **Reset task** in the task header. See
+[Triage an uncertain execution](triage-uncertainty.md#not-started-refused-before-it-ran).
+
 ## Recovery
 
 - A Fix never clears holds or grants access by implication.

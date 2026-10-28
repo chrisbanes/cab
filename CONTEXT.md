@@ -96,6 +96,17 @@ investigating and talking with the operator. It grants no readiness and carries
 out no implementation.
 _Avoid_: Triage turn
 
+**Start again**:
+The operator action that queues an assignment's request again when it was refused at
+admission before it ran, at the current revisions. The refused request stays as history.
+_Avoid_: Retry, which resends work that may have run
+
+**Reset task**:
+The operator action that replaces every assignment's conversation and starts the project
+lead fresh in the same workspace. The old conversations and the workspace stay readable;
+it is not undone.
+_Avoid_: Restart, which a runtime does to a process
+
 **Project lead**:
 The agent accountable for task outcomes across a project, including coordination,
 planning and allocation exceptions. Delegating work does not transfer that accountability.

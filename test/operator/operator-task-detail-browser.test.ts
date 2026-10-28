@@ -169,13 +169,14 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     ((await strip.locator("[data-task-readiness]").textContent()) ?? "")
       .length > 0,
   );
-  // Exactly two header actions, and the direct-load Back names the project.
+  // Exactly three header actions (Execution, Reset task, Stop), and the direct-load Back names the project.
   assert.deepEqual(
     await header
       .locator(".task-header-actions > *")
       .evaluateAll((els) => els.map((e) => [e.tagName, e.textContent])),
     [
       ["A", "Execution"],
+      ["BUTTON", "Reset task…"],
       ["BUTTON", "Stop…"],
     ],
   );
@@ -4359,6 +4360,9 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   const header = page.locator(".page-header");
   const toggle = header.locator(".task-header-overflow-toggle");
   const overflow = header.locator("details.task-header-overflow");
+  const stopButton = header
+    .locator(".task-header-actions button")
+    .filter({ hasText: "Stop…" });
   const activeIs = (text: string) =>
     page.waitForFunction(
       (text) => document.activeElement?.textContent === text,
@@ -4460,13 +4464,13 @@ test("Phone task header is Back, title, identity subtitle and one Task actions c
   assert.ok(await dialog.isVisible());
   // The open modal hides the page from role queries, so these are located by class.
   assert.ok(await header.locator(".task-header-actions a").isVisible());
-  assert.ok(await header.locator(".task-header-actions button").isVisible());
+  assert.ok(await stopButton.isVisible());
   assert.equal(await toggle.isVisible(), false);
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
   // A dialog opened on desktop keeps the actions it came from when the window narrows:
   // closing it returns to Stop… rather than to the page.
-  await header.locator(".task-header-actions button").click();
+  await stopButton.click();
   await dialog.waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await settle(page);
@@ -4675,7 +4679,10 @@ for (const engine of ["chromium", "webkit"] as const)
       );
       // The same with the Stop confirmation open behind it.
       await toggle.click();
-      await page.locator(".task-header-actions button").click();
+      await page
+        .locator(".task-header-actions button")
+        .filter({ hasText: "Stop…" })
+        .click();
       const dialog = page.getByRole("alertdialog");
       await dialog.waitFor();
       await restore();

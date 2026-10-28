@@ -169,6 +169,7 @@ export function Inbox({
       if (observation) poll.current();
     }
   }, [observation]);
+  const [startSentFor, setStartSentFor] = useState<string | null>(null);
   const [, render] = useState(0),
     queue = useRef<HTMLDivElement>(null),
     single = useMediaQuery("(max-width: 760px)"),
@@ -209,15 +210,23 @@ export function Inbox({
         (!state.kind || item.kind === state.kind),
     ),
   ).flatMap((group) => group.items);
+  // A sent start is kept only for the selection it was sent from; another selection drops the
+  // pane (and its command), so the flag must not describe a later one.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clears exactly when the selection changes.
+  useEffect(() => setStartSentFor(null), [selectedId]);
   // One read of the selected request's task serves its holds, approval facts and the inspector.
   const task = useInboxTask(
     client,
     session,
-    // An intervention below the inspector width shows nothing from the task read.
+    // An intervention below the inspector width shows nothing from the task read, except the
+    // Start again it offers in place.
     selectedId &&
       taskId &&
       !runtimeId &&
-      (inspector || selected?.kind !== "intervention")
+      (inspector ||
+        selected?.kind !== "intervention" ||
+        selected.attentionCode === "not-started" ||
+        startSentFor === taskId)
       ? taskId
       : null,
     resource.state.fetchedAt,
@@ -654,7 +663,22 @@ export function Inbox({
               ) : selected?.kind === "runtime" ? (
                 <RuntimeDetail item={selected} />
               ) : selected ? (
-                <InterventionDetail item={selected} leftQueue={leftQueue} />
+                <InterventionDetail
+                  item={selected}
+                  leftQueue={leftQueue}
+                  startKept={startSentFor === taskId}
+                  start={
+                    task.state.data
+                      ? {
+                          client,
+                          session,
+                          task: task.state.data.data,
+                          onChanged: resource.refresh,
+                          onStart: () => setStartSentFor(taskId),
+                        }
+                      : undefined
+                  }
+                />
               ) : (
                 <p>Selected request is unavailable.</p>
               )}

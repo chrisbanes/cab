@@ -2805,6 +2805,15 @@ export class DomainStore {
     return this.assignment(assignmentId);
   }
 
+  /** Must run inside the caller's transaction. Reopens a completed assignment at a new version. */
+  reopenCompletedAssignment(assignmentId: string): void {
+    this.db
+      .prepare(
+        "UPDATE domain_assignments SET version = version + 1, state = 'pending' WHERE id = ? AND state = 'completed'",
+      )
+      .run(id.parse(assignmentId));
+  }
+
   ensureLeadAssignmentWithinTransaction(taskId: string): Row | undefined {
     const assignmentId = this.ensureLeadBindingWithinTransaction(taskId);
     if (!assignmentId) return undefined;

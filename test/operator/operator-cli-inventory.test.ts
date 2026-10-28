@@ -64,6 +64,8 @@ const documentedWrites = [
   "task message",
   "task follow-up",
   "task draft-turn",
+  "task start-again",
+  "task reset",
   "delivery publish-review",
   "delivery publish-confirm",
   "delivery publish-send",
@@ -100,6 +102,10 @@ test("every documented browse command runs read-only with a coverage envelope", 
   assert.match(
     help.out,
     /task create, task message, task follow-up, task draft-turn, question answer\nand approval decide cannot be undone/,
+  );
+  assert.match(
+    help.out,
+    /task reset replaces every\nassignment's conversation, starts the lead fresh in the same workspace and\ncannot be undone/,
   );
   assert.match(help.out, /Reverse pairs: task stop\/resume/);
   assert.match(

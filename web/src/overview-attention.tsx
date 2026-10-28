@@ -24,6 +24,7 @@ import {
   projectRows,
 } from "./overview-model.js";
 import { QuestionHolds } from "./question-response.js";
+import { StartAgainAction } from "./task-restart.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {
   inboxSummaryOf,
@@ -107,9 +108,15 @@ export function NeedsYou({
     ordered = data ? orderAttention(data.items, tasks) : [],
     further = furtherRequests(ordered, shown),
     cards = ordered.slice(0, shown);
-  for (const kept of answered)
-    if (!data?.items.some((i) => i.id === kept.item.id))
+  for (const kept of answered) {
+    // A sent start keeps its card even while the request is still listed, moved or changed:
+    // the card holds the check of a lost reply.
+    const sent = kept.item.kind === "intervention";
+    const live = sent ? cards.findIndex((i) => i.id === kept.item.id) : -1;
+    if (live >= 0) cards.splice(live, 1);
+    if (sent || !data?.items.some((i) => i.id === kept.item.id))
       cards.splice(Math.min(kept.index, cards.length), 0, kept.item);
+  }
   const byId = new Map(tasks?.map((t) => [t.id, t]));
   return (
     <section className="overview-needs" aria-label="Needs you">
@@ -292,6 +299,17 @@ function RequestCard({
           head={head}
           respond={respond}
         />
+      ) : item.kind === "intervention" &&
+        item.attentionCode === "not-started" &&
+        operator ? (
+        <StartAgainCard
+          item={item}
+          operator={operator}
+          observedAt={observedAt}
+          onRecorded={onRecorded}
+          head={head}
+          respond={respond}
+        />
       ) : (
         <>
           {head(null)}
@@ -398,6 +416,45 @@ function QuestionCard({
         observedAt={observedAt}
         onRecorded={onRecorded}
       />
+    </>
+  );
+}
+
+/** A request refused before it ran: Start again in place once its task has been read. */
+function StartAgainCard({
+  item,
+  operator: { client, session },
+  observedAt,
+  onRecorded,
+  head,
+  respond,
+}: CardParts & { onRecorded: () => void }) {
+  const resource = useInboxTask(
+      client,
+      session,
+      item.taskId,
+      observedAt,
+      "request",
+    ),
+    task = resource.state.data?.data;
+  return (
+    <>
+      {head(null)}
+      {task ? (
+        <StartAgainAction
+          client={client}
+          session={session}
+          task={task}
+          // Kept in place from the send on, as for an answered question, so a lost reply stays checkable.
+          onStart={onRecorded}
+          onChanged={() => {
+            void resource.refresh();
+            onRecorded();
+          }}
+        />
+      ) : (
+        respond
+      )}
     </>
   );
 }
