@@ -3529,6 +3529,11 @@ test("An unconfirmed delivery refresh stays checkable after delivery stops apply
     .click();
   const check = changes.getByRole("button", { name: "Check whether it saved" });
   await check.waitFor();
+  // The refresh control is off now, so the check takes the focus it held.
+  assert.equal(
+    await check.evaluate((el) => el === document.activeElement),
+    true,
+  );
 
   // Delivery stops applying while the outcome is unknown: the check stays, the control goes.
   setLinkedRepository(fixture.f, a.projectId, false);

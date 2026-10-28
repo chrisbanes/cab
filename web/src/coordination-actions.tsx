@@ -48,9 +48,9 @@ export function SendFeedback({
   /** Keeps this wording on the entry, so the task page can show the check once this is gone. */
   entry?: CommandSend;
 }) {
-  // A message that was already there when this mounted is not news: it never takes focus.
-  const arrived = useRef(outcome);
-  focus = focus && outcome !== arrived.current;
+  // A send's message already there when its component mounted is not news: it never takes focus.
+  const inherited = useRef(entry?.outcome);
+  focus = focus && (!entry || outcome !== inherited.current);
   useEffect(() => {
     if (entry)
       entry.copy = {
@@ -335,7 +335,7 @@ export function AssignmentMessage({
   onChanged: () => void;
 }) {
   const [, draftEdited] = useReducer((n: number) => n + 1, 0);
-  const { entry, send, sending, outcome, uncertain } = useCommandSend(
+  const { entry, send, sending, outcome, uncertain, clear } = useCommandSend(
     client,
     session,
     `${taskId}:message:${assignment.assignmentId}`,
@@ -403,6 +403,7 @@ export function AssignmentMessage({
         outcome={outcome}
         recorded={`Sent to ${name}.`}
         conflict={`Not sent: ${name} changed since it was read. Your message is still here.`}
+        review={{ label: "Review current state", onClick: clear }}
         check={() => void send()}
       />
     </form>
@@ -428,6 +429,21 @@ export function RetainedSends({
   const sends = useCommandSends(),
     [, render] = useReducer((n: number) => n + 1, 0);
   useEffect(() => sends.subscribe(render), [sends]);
+  // What changed elsewhere (recorded, or refused) is reread once, whoever sent it.
+  const reread = useRef(new Set<string>());
+  const settled = sends
+    .retained(taskId)
+    .filter(
+      ([, e]) =>
+        e.outcome?.kind === "recorded" || e.outcome?.kind === "conflict",
+    )
+    .map(([key, e]) => `${key}:${e.outcome?.kind}:${e.outcome?.command.key}`);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per newly settled send.
+  useEffect(() => {
+    const fresh = settled.filter((id) => !reread.current.has(id));
+    for (const id of fresh) reread.current.add(id);
+    if (fresh.length) onChanged();
+  }, [settled.join()]);
   // A recorded confirmation belongs to this visit.
   useEffect(
     () => () => {
@@ -436,25 +452,20 @@ export function RetainedSends({
     },
     [sends, taskId],
   );
-  return sends.retained(taskId).map(([key, entry]) => (
-    <SendFeedback
-      key={key}
-      outcome={entry.outcome}
-      {...entry.copy!}
-      review={
-        entry.copy?.review
-          ? { label: entry.copy.review, onClick: () => entry.clear() }
-          : undefined
-      }
-      focus={false}
-      check={() =>
-        void entry
-          .send(client, session.csrfToken, entry.matches!)
-          .then((done) => {
-            if (done?.kind === "recorded" || done?.kind === "conflict")
-              onChanged();
-          })
-      }
-    />
-  ));
+  return sends
+    .retained(taskId)
+    .map(([key, entry]) => (
+      <SendFeedback
+        key={key}
+        outcome={entry.outcome}
+        {...entry.copy!}
+        review={
+          entry.copy?.review
+            ? { label: entry.copy.review, onClick: () => entry.clear() }
+            : undefined
+        }
+        focus={false}
+        check={() => void entry.send(client, session.csrfToken, entry.matches!)}
+      />
+    ));
 }

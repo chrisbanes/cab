@@ -1855,6 +1855,13 @@ export function TaskWorkspace({
               : {}
           }
         />
+        {/* Above the tabs: a send whose control is gone is checked from any of them. */}
+        <RetainedSends
+          client={client}
+          session={session}
+          taskId={taskId}
+          onChanged={refreshAll}
+        />
         {updates && (
           <Button
             onClick={() => {
@@ -2003,12 +2010,6 @@ export function TaskWorkspace({
                     onChanged={refreshAll}
                   />
                 )}
-                <RetainedSends
-                  client={client}
-                  session={session}
-                  taskId={taskId}
-                  onChanged={refreshAll}
-                />
                 {nextActor.code === "execution-uncertain" &&
                   !data.execution.holds.uncertainty && (
                     <ActionLink

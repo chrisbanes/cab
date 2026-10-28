@@ -123,6 +123,11 @@ test("an unconfirmed answer is still checkable after leaving the task and coming
     .getByRole("button", { name: "Submit answer", exact: true })
     .click();
   await check().waitFor();
+  // The check replaces the button used to send, so it takes the focus.
+  assert.equal(
+    await check().evaluate((el) => el === document.activeElement),
+    true,
+  );
   // Leaving through an in-app link and coming back remounts the question.
   await page
     .getByRole("link", { name: /^Inbox/ })
