@@ -2855,6 +2855,57 @@ test("The viewing reference appears only once a result exists", async (_t, j) =>
   );
 });
 
+test("A viewing reference the service refuses while the task page is away says so on return", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Fieldnotes",
+    "Local task",
+    "Write the guide.",
+  );
+  a.result("Guide drafted");
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const review = page.locator("#review");
+  const view = review.getByRole("button", { name: "Set viewing reference" });
+  await view.waitFor();
+  // The reply is held until the task page has been left, then refuses the request.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    await held;
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "conflict" } }),
+    });
+  });
+  const sent = page.waitForRequest((r) =>
+    (r.postData() ?? "").includes("review.view"),
+  );
+  await view.click();
+  await sent;
+  await page
+    .getByRole("link", { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/inbox/);
+  release();
+  await page.waitForTimeout(300);
+  await page.goBack();
+  await review
+    .getByText("This task changed since you opened it. Your draft is kept.")
+    .waitFor();
+  await review.getByRole("button", { name: "Review current state" }).click();
+  await review
+    .getByText("This task changed since you opened it. Your draft is kept.")
+    .waitFor({ state: "detached" });
+  await view.waitFor();
+  assert.equal(await view.isEnabled(), true);
+});
+
 test("The outcome shows its first line and a closed disclosure with rendered Markdown", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seed(fixture.f);

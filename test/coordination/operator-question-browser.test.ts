@@ -158,6 +158,81 @@ test("an unconfirmed answer is still checkable after leaving the task and coming
   );
 });
 
+test("an answer the service recorded but whose reply was lost is checkable when the task is reopened without its request", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
+    web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const commands: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/operator/commands"
+    )
+      commands.push(request.postData() ?? "");
+  });
+  await page.goto(
+    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
+  );
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const form = page.getByRole("region", { name: "Exact question response" });
+  const check = () =>
+    page.getByRole("button", { name: "Check whether it saved", exact: true });
+  await form.getByRole("radio", { name: /^Team owners/ }).check();
+  // The service records the answer but the reply is lost.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort("failed");
+  });
+  await form
+    .getByRole("button", { name: "Submit answer", exact: true })
+    .click();
+  await check().waitFor();
+  // Leave, then reopen the task by its plain address (no request selected), in the same session.
+  await page
+    .getByRole("link", { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/inbox/);
+  await page.evaluate((path) => {
+    history.pushState(null, "", path);
+    dispatchEvent(new PopStateEvent("popstate"));
+  }, `/app/tasks/${a.taskId}`);
+  await page.locator("main.page h1").waitFor();
+  assert.equal(await form.count(), 0, "the question card is not shown");
+  await check().waitFor();
+  await page.unroute("**/api/operator/commands");
+  await check().click();
+  await page
+    .getByText("Answer sent. It reaches the requester on its next turn.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1], commands[0], "the check resends the original");
+  assert.equal(
+    f.service
+      .coordinationView()
+      .readTask(a.taskId)
+      .messages.filter((m) => m.eventType === "question-answer").length,
+    1,
+  );
+});
+
 test("production mixed form preserves literal schema, keyboard input, field errors and original unknown command across task navigation", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),

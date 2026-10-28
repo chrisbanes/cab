@@ -9,7 +9,7 @@ import type {
   CommandReceipt,
 } from "../../src/operator/contracts.js";
 import type { CommandState } from "./api.js";
-import { CommandSend } from "./command-send.js";
+import { CommandSend, CommandSends } from "./command-send.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 
 /** Validation issues by question id (`""` for the form), empty when the answers are valid. */
@@ -79,9 +79,20 @@ export class QuestionResponseState {
   errors: Record<string, string> = Object.create(null);
   scrollTop = 0;
   focusId: string | null = null;
-  constructor(data: QuestionRead["data"], changed?: () => void) {
+  constructor(data: QuestionRead["data"], send = new CommandSend()) {
     if (!data.form) throw Error("Unavailable form");
-    this.send = new CommandSend(changed);
+    this.send = send;
+    // The task page checks this answer if its card is not shown.
+    send.persistent = true;
+    send.matches = (c, r) => this.matches(c, r);
+    send.copy = {
+      recorded: answerCopy.sent,
+      conflict: answerCopy.conflict,
+      unknown: answerCopy.unknown,
+      failed: answerCopy.failed,
+      details: { resource: data.interactionId, version: data.revision },
+      review: "Review current request",
+    };
     this.form = structuredClone(data.form);
     this.revision = data.revision;
     this.interactionId = data.interactionId;
@@ -165,11 +176,16 @@ export class QuestionResponseState {
 export class QuestionResponseStates {
   private states = new Map<string, QuestionResponseState>();
   private listeners = new Set<() => void>();
+  /** Each answer's send lives in the session registry, so the task page can check it too. */
+  constructor(private readonly sends = new CommandSends()) {}
   forQuestion(data: QuestionRead["data"]) {
     const key = `${data.taskId}:${data.interactionId}`;
     let state = this.states.get(key);
     if (!state) {
-      state = new QuestionResponseState(data, () => this.changed());
+      state = new QuestionResponseState(
+        data,
+        this.sends.entry(`${data.taskId}:question:${data.interactionId}`),
+      );
       this.states.set(key, state);
     }
     return state;
@@ -182,8 +198,10 @@ export class QuestionResponseStates {
   }
   subscribe(listener: () => void) {
     this.listeners.add(listener);
+    const stop = this.sends.subscribe(listener);
     return () => {
       this.listeners.delete(listener);
+      stop();
     };
   }
   changed() {

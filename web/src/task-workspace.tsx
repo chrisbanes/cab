@@ -392,6 +392,14 @@ export function TaskWorkspace({
   const auxSend = useSendEntry(`${taskId}:workspace-aux`);
   const unconfirmed = auxSend.uncertain ? auxSend.lifecycle.frozen : null;
 
+  // A refusal belongs to the visit that saw it; one that arrives while away waits for the next.
+  useEffect(
+    () => () => {
+      if (auxSend.outcome && auxSend.outcome.kind !== "unknown")
+        auxSend.outcome = null;
+    },
+    [auxSend],
+  );
   const focusUnconfirmed = useRef(false);
   // The control whose replayed check just settled, focused once the commit enables it.
   const focusReplay = useRef<string | null>(null);
@@ -1565,18 +1573,28 @@ export function TaskWorkspace({
     : deliveryOutcome
       ? null
       : (aux ?? state.notice);
-  // The check sits beside the control whose response was lost, which stays off meanwhile.
+  // The check sits beside the control whose response was lost, which stays off meanwhile. A
+  // refusal that arrived while the page was away is shown there too, until it is reviewed.
+  const refusedAway =
+    auxSend.outcome?.kind === "conflict" || auxSend.outcome?.kind === "failed"
+      ? auxSend.outcome
+      : null;
   const unconfirmedCheck = (type: "review.view" | "delivery.refresh") =>
     !pending &&
-    unconfirmed?.type === type && (
+    (unconfirmed?.type === type || refusedAway?.command.type === type) && (
       <SendFeedback
         outcome={auxSend.outcome}
         recorded=""
         conflict={changedMessage}
         unknown={unknownMessage(type)}
+        failed={(code) => rejectedMessage(type, code)}
         details={{ resource: taskId }}
+        review={{
+          label: "Review current state",
+          onClick: () => auxSend.clear(),
+        }}
         focus={focusUnconfirmed.current}
-        check={() => void command(unconfirmed)}
+        check={() => void command(unconfirmed!)}
       />
     );
   const comment = commentAvailability(data.commentPolicy);

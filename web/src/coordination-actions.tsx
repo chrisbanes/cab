@@ -429,10 +429,12 @@ export function RetainedSends({
   const sends = useCommandSends(),
     [, render] = useReducer((n: number) => n + 1, 0);
   useEffect(() => sends.subscribe(render), [sends]);
+  // Answers keep their outcome elsewhere: this list shows one only if it checked it.
+  const checkedHere = useRef(new Set<string>());
   // What changed elsewhere (recorded, or refused) is reread once, whoever sent it.
   const reread = useRef(new Set<string>());
   const settled = sends
-    .retained(taskId)
+    .retained(taskId, checkedHere.current)
     .filter(
       ([, e]) =>
         e.outcome?.kind === "recorded" || e.outcome?.kind === "conflict",
@@ -447,25 +449,26 @@ export function RetainedSends({
   // A recorded confirmation belongs to this visit.
   useEffect(
     () => () => {
-      for (const [, e] of sends.retained(taskId))
-        if (!e.uncertain) e.outcome = null;
+      for (const [, e] of sends.retained(taskId, checkedHere.current))
+        if (!e.uncertain && !e.persistent) e.outcome = null;
     },
     [sends, taskId],
   );
-  return sends
-    .retained(taskId)
-    .map(([key, entry]) => (
-      <SendFeedback
-        key={key}
-        outcome={entry.outcome}
-        {...entry.copy!}
-        review={
-          entry.copy?.review
-            ? { label: entry.copy.review, onClick: () => entry.clear() }
-            : undefined
-        }
-        focus={false}
-        check={() => void entry.send(client, session.csrfToken, entry.matches!)}
-      />
-    ));
+  return sends.retained(taskId, checkedHere.current).map(([key, entry]) => (
+    <SendFeedback
+      key={key}
+      outcome={entry.outcome}
+      {...entry.copy!}
+      review={
+        entry.copy?.review
+          ? { label: entry.copy.review, onClick: () => entry.clear() }
+          : undefined
+      }
+      focus={false}
+      check={() => {
+        checkedHere.current.add(key);
+        void entry.send(client, session.csrfToken, entry.matches!);
+      }}
+    />
+  ));
 }

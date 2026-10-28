@@ -45,6 +45,8 @@ export class CommandSend {
   /** What a component using this entry last showed: lets the task page check it once that component is gone. */
   copy?: SendCopy | undefined;
   matches?: Matches | undefined;
+  /** The outcome is also state elsewhere (an answer card): the task page shows only an unconfirmed send or one it checked itself. */
+  persistent = false;
   /** Run when a send settles while a component using this entry is mounted. */
   readonly onSettled = new Set<(kind: SendOutcome["kind"]) => void>();
   constructor(private readonly changed: () => void = () => {}) {}
@@ -131,14 +133,14 @@ export class CommandSends {
    * A task's sends that still wait for a check, or settled without a mounted component to say
    * how (recorded, refused or failed), and that no mounted component shows.
    */
-  retained(taskId: string) {
+  retained(taskId: string, checkedHere: ReadonlySet<string> = new Set()) {
     return [...this.entries].filter(
       ([key, e]) =>
         key.startsWith(`${taskId}:`) &&
         e.copy &&
         e.matches &&
         e.onSettled.size === 0 &&
-        (e.uncertain || e.outcome),
+        (e.uncertain || (e.outcome && (!e.persistent || checkedHere.has(key)))),
     );
   }
   purge() {

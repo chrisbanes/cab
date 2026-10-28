@@ -103,6 +103,17 @@ export function QuestionResponse({
   // The check that follows a send replaces the button the operator used, so it takes focus.
   const sent = useRef(false);
   if (state?.sending) sent.current = true;
+  // While this card is mounted it shows the answer's outcome; the task page shows it otherwise.
+  useLayoutEffect(() => {
+    if (!state) return;
+    const mounted = () => {};
+    state.send.onSettled.add(mounted);
+    states.changed();
+    return () => {
+      state.send.onSettled.delete(mounted);
+      states.changed();
+    };
+  }, [state, states]);
   useLayoutEffect(() => {
     // The bounded Inbox detail owns question scrolling there; elsewhere the body does.
     const owner =

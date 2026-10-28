@@ -529,8 +529,10 @@ export function App() {
   const unconfirmedSignOut = useRef(false);
   const searchState = useRef(new Map<string, SearchState>());
   const taskStates = useRef(new TaskWorkspaceStates());
-  const questionStates = useRef(new QuestionResponseStates());
   const commandSends = useRef(new CommandSends());
+  const questionStates = useRef(
+    new QuestionResponseStates(commandSends.current),
+  );
   const inboxState = useRef(new InboxState());
   // biome-ignore lint/correctness/useExhaustiveDependencies: navigation purge uses current browser entry and stable scope ref.
   const expired = useCallback(() => {
