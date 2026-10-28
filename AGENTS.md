@@ -53,11 +53,9 @@ authorise dispatch while paused.
 ## Working conventions
 
 - Use `rg --files` for discovery and `rg` for text searches.
-- UX designs live on the Ensemble operator UI Design canvas on claude.ai, linked
-  from `design/DESIGN.md`. Read and edit its artboards through the Artifact tool or
-  the canvas editor; reuse the shared `Sidebar` and `TopBar` components and an
-  existing artboard's tokens. `design/DESIGN.md` is the portable snapshot with
-  artboard references; update it in the same change as any design change.
+- Explore new screens in any tool; artboards are throwaway and aren't maintained
+  once a screen ships. `design/DESIGN.md` holds the visual foundations; update it
+  with any foundation change.
 - Keep implementation and validation proportional to the current task.
 - Keep architectural decisions with the lead and use delegation only when useful.
 - Keep development methods in agent instructions; do not recreate configured step

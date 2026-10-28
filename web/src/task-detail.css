@@ -1,4 +1,4 @@
-/* Task detail (frames 46a, 57, 47) and the Stop confirmation (132). */
+/* Task detail and the Stop confirmation. */
 
 /* Header: Back above the title; Execution and Stop… beside the Back from 760px. */
 .page-header[data-desktop-back] {
@@ -67,7 +67,7 @@
   display: none;
 }
 
-/* Phone (frame 47): Back, a one-line title over the mono identity, one Task actions control. */
+/* Phone: Back, a one-line title over the mono identity, one Task actions control. */
 @media (max-width: 759px) {
   .page-header[data-desktop-back] {
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -628,7 +628,7 @@ a.task-source-chip:hover {
   }
 }
 
-/* Collapsed Overview cards (frames 46a, 03): a native disclosure whose summary is the card's
+/* Collapsed Overview cards: a native disclosure whose summary is the card's
    label and a one-line count. The heading stays a heading inside the summary. */
 .task-workspace details.overview-disclosure {
   margin: 0;

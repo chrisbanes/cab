@@ -1,15 +1,12 @@
 # Project setup
 
-**Status:** implemented (`/app/settings/projects/new`, design frames 115–117d and
-145–147, 146c–146d). Product rules are in
+**Status:** implemented (`/app/settings/projects/new`). Product rules are in
 [SPEC](../SPEC.md#task-creation-and-project-setup).
 
 ## Goal
 
 One uninterrupted pass from "new project" to a project ready for its first task.
 The operator never leaves setup to create a prerequisite.
-
-Frames: see [First run and onboarding](../../design/DESIGN.md#first-run-and-onboarding).
 
 ## Entry points
 

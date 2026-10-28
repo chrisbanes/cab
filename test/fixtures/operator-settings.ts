@@ -50,7 +50,7 @@ export async function createCheckout(directory: string, name: string) {
 }
 
 /**
- * The settings world of frames 114–128: seven profiles (Reviewer revoked), Atlas with a
+ * The settings world: seven profiles (Reviewer revoked), Atlas with a
  * GitHub source and one linked checkout, Relay paused with routing and a held task, and
  * Fieldnotes with nothing configured. Private values carry PRIVATE sentinels.
  */

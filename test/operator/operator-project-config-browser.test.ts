@@ -3241,7 +3241,10 @@ test("a Ready label is suggested from the source's repository labels and read on
 test("a label-only source without a Project makes no Project discovery reads", async (_t, journey) => {
   const state: { calls: string[] } = { calls: [] };
   const { f, ids, page } = await startDiscovery(journey, state);
-  const d = f.service.domain();
+  const d = f.service.domain(),
+    url = page.url();
+  // Leave the page so none of its reads land after the count is reset.
+  await page.goto("about:blank");
   await new OperatorApi(f.service, [f.directory]).execute({
     type: "github.configure",
     key: randomUUID(),
@@ -3255,7 +3258,7 @@ test("a label-only source without a Project makes no Project discovery reads", a
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   state.calls = [];
-  await page.reload();
+  await page.goto(url);
   await page.locator("input#source-conditions-0-name[list]").waitFor();
   assert.equal(labelCalls(state), 1);
   assert.equal(state.calls.includes("projects"), false);

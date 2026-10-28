@@ -56,8 +56,6 @@ Identifiers (result, assignment, revision) appear as short metadata, never in a
 sentence.
 The operator CLI is outside the budget: it has no screens.
 
-Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
-
 ## Recovery
 
 - A result superseded by a newer revision is labelled as earlier, with the newer

@@ -46,9 +46,6 @@ and 390 × 844, and that Sync & placement then offers no preview and reads every
 Active. Adding or editing the source is the edit being saved, not an interaction.
 The ready check's path is asserted within the [first-run budget](first-run.md) and in
 `operator-setup-browser`.
-Frames: `119d-github-source-import-ready` to `119e-github-source-imported`, and
-`146c-setup-ready-check-import` to `146d-setup-ready-check-imported`; see
-[Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
 
 ## Recovery
 

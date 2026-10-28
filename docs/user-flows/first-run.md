@@ -56,8 +56,6 @@ outside the count, and the other setup entry points are not budgeted here.
 
 Each getting-started row has one action and no two rows open the same screen.
 
-Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
-
 ## Recovery
 
 - The readiness check names each problem with one fix; a problem the service can

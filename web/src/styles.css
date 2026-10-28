@@ -1767,7 +1767,7 @@ nav {
     gap: 4px 8px;
     padding: 4px 0;
   }
-  /* Closed, Details is its summary alone, a link-like line as in frame 89; open, it keeps its box. */
+  /* Closed, Details is its summary alone, a link-like line; open, it keeps its box. */
   .changes-observation .action-outcome-details:not([open]) {
     display: block;
     border: 0;

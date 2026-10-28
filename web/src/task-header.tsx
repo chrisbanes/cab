@@ -85,7 +85,7 @@ export function taskHeaderReport(
 }
 
 /**
- * Execution and Stop… (frame 46a). From 760px they sit in the header; on a phone (frame 47)
+ * Execution and Stop…: from 760px they sit in the header; on a phone
  * the one "Task actions" disclosure holds them. It is one element at every width, forced open
  * from 760px, so a resize never remounts the Stop dialog. Stop confirms first, then posts the
  * retained Stop form.

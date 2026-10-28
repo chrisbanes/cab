@@ -41,8 +41,6 @@ it in one submission.
 Unfinished input survives navigation on this device and is offered for recovery.
 The operator CLI is outside the budget: it has no screens.
 
-Frames: see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).
-
 ## Recovery
 
 - Save draft keeps the task without starting it; drafts are not Ready.

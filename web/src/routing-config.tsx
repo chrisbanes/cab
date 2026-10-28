@@ -32,7 +32,7 @@ import {
 const profileLabel = (r: ProjectConfigurationData["profiles"][number]) =>
   [r.name ?? "Name unavailable", r.summary].filter(Boolean).join(" · ");
 
-/** TypeSafe availability in words (frame 172); disabled is the only state with routing off. */
+/** TypeSafe availability in words; disabled is the only state with routing off. */
 const availabilityLabel = {
   available: "TypeSafe available",
   "missing-client-credentials": "TypeSafe unavailable",

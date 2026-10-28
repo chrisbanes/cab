@@ -179,7 +179,7 @@ function ReferenceRow({
 
 export type GhLogin = z.infer<typeof ghLoginStateSchema>;
 
-/** The detected GitHub CLI login, as frames 114 and 114b word it. */
+/** The detected GitHub CLI login. */
 export function ghLoginCopy(gh: GhLogin) {
   switch (gh.state) {
     case "signed-in":
@@ -203,7 +203,7 @@ export const discoveryUseNote =
 export const discoveryElsewhereNote =
   "A discovery credential save elsewhere isn't confirmed yet. Check it there first.";
 
-/** Frames 114 and 114b: the installation's read-only GitHub discovery credential. */
+/** The installation's read-only GitHub discovery credential. */
 export function DiscoveryCredentialRow(
   p: SettingsProps & {
     /** A save or clear was recorded; the page re-reads what else shows this credential. */

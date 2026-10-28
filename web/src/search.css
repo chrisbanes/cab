@@ -1,4 +1,4 @@
-/* Search (`73-search`, `74-phone-search`): query, one coverage line, then one bordered results panel whose header holds the count, the filters and Refresh. */
+/* Search: query, one coverage line, then one bordered results panel whose header holds the count, the filters and Refresh. */
 .search-workspace {
   display: flex;
   flex-direction: column;

@@ -98,7 +98,7 @@ const namedLengths = new Set([
   "guidance",
 ]);
 /**
- * The fix a schema issue asks for under its field (frames 156 and 167–169). Fields
+ * The fix a schema issue asks for under its field. Fields
  * without drawn copy keep the generic line.
  */
 function fieldFix(issue: z.core.$ZodIssue, input: unknown) {

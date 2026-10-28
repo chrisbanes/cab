@@ -17,7 +17,7 @@ Browser state never establishes execution, persistence or external-write success
 This decision adds a frontend build and an API presentation boundary; it does not
 replace the coordination core or require a separate production frontend service.
 
-The foundation maps the [design handoff's tokens](../../design/DESIGN.md#tokens)
+The foundation maps the [design foundations' tokens](../../design/DESIGN.md#tokens)
 onto shadcn's token layer, with self-hosted Geist and Geist Mono, owned
 Button/Input/Textarea/NativeSelect/Badge/Alert/Card/Sheet source, and Tailwind v4
 build integration. The build still uses the Dark / Neutral / Default token set

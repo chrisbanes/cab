@@ -28,7 +28,7 @@ const failure = (error: unknown) =>
         ? "This folder doesn't exist. Type a path instead."
         : "Folders couldn't be listed. Type a path instead.";
 
-/** Frame 131: the service lists subfolders of the operator's home folder; nothing is granted. */
+/** The service lists subfolders of the operator's home folder; nothing is granted. */
 export function FolderPicker({
   client,
   csrfToken,

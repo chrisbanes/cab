@@ -51,4 +51,3 @@ list or reloading, and always sees which filters are hiding work.
 | --- | --- | --- |
 | Sidebar Tasks after leaving the list | 1 (Tasks) | the remembered filters in the URL and the toolbar, and the active count |
 
-Frame: `24b-task-filter-states`; see [Daily flow frames](../../design/DESIGN.md#daily-flow-frames).

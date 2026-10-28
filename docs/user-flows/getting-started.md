@@ -7,8 +7,6 @@
 After the first sign-in, the operator always knows the next step to a running task,
 and each step opens the screen that completes it.
 
-Frames: see [First run and onboarding](../../design/DESIGN.md#first-run-and-onboarding).
-
 ## Entry points
 
 - Home (`/app`) until a task starts a turn; the card is then the only content
@@ -34,8 +32,7 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
   **Use GitHub CLI login (@account)** is offered in [project setup](project-setup.md)
   step 3 (the first-run path) and, separately, on the Settings GitHub discovery
   credential row and the Settings → Readiness GitHub discovery row
-  ([readiness check](readiness-check.md)); see "GitHub discovery credential" in
-  `design/DESIGN.md` for why.
+  ([readiness check](readiness-check.md)).
 - Settings actions open their own section, so no two rows open the same place:
   `/app/settings#readiness`, `#github-discovery`, `#readiness-claude-executable`
   and `/app/settings/runtime#add-claude`.

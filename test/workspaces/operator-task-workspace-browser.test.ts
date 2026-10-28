@@ -686,7 +686,7 @@ test("production workspace retains literal history, pending request, focused rep
     await page.unroute("**/api/operator/commands");
   }
   await openTaskTab(page, "Overview");
-  // A running lead receives feedback on its next eligible turn (frame 03a).
+  // A running lead receives feedback on its next eligible turn.
   assert.equal(
     await page
       .getByText(leadReceivesNotice("Task lead"), { exact: true })
