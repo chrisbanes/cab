@@ -94,7 +94,8 @@ existing ownership and work; do not dispatch newly conflicted unowned issues.
 Transfers of already-owned tasks between projects are deferred beyond the first release.
 Removing readiness, leaving all selections, or external closure holds new
 delegation and asks the owner to reach a safe stopping point. Operator resolution
-is required to resume, except closure confirmed as this task's own delivery.
+is required to resume, except closure confirmed as this task's own delivery and a withdrawn or
+readiness-lost hold that a later complete read of the listed, Ready issue releases.
 Harmless clarifications can be incorporated; changes to the admitted outcome or
 material scope expansion hold affected work for operator clarification.
 

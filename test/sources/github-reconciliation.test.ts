@@ -1109,7 +1109,7 @@ test("without a readiness rule, Ready tasks still wait on incomplete reads, bloc
   }
 });
 
-test("adding a readiness rule filters again; removing it stops filtering but keeps the readiness-lost hold", () => {
+test("adding a readiness rule filters again; removing it stops filtering and a complete read releases the readiness-lost hold", () => {
   const f = readinessFixture(null);
   const configure = (readiness: Parameters<typeof evaluateReadiness>[0]) => {
     f.domain.execute({
@@ -1143,10 +1143,143 @@ test("adding a readiness rule filters again; removing it stops filtering but kee
     configure(null);
     f.read("repo", [f.at("I_1", { labels: ["next"] })]);
     assert.equal(Number(f.domain.task(taskId).ready), 1);
-    assert.equal(f.sources.hold("I_1")?.reason, "readiness-lost");
-    assert.ok(f.domain.admission(taskId).reasons.includes("source-hold"));
+    assert.equal(Number(f.sources.hold("I_1")?.active), 0);
+    assert.ok(!f.domain.admission(taskId).reasons.includes("source-hold"));
   } finally {
     f.db.close();
+  }
+});
+
+const readyLabel = {
+  mode: "all" as const,
+  conditions: [{ kind: "label" as const, name: "ready" }],
+};
+
+test("a complete read that lists a withdrawn issue again releases the hold, and a real removal stays held", () => {
+  const f = readinessFixture(readyLabel);
+  const active = () => Number(f.sources.hold("I_1")?.active);
+  try {
+    f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+    const taskId = f.task("I_1");
+    const held = () =>
+      f.domain.admission(taskId).reasons.includes("source-hold");
+    f.read("repo", []);
+    assert.deepEqual(
+      [active(), f.sources.hold("I_1")?.reason],
+      [1, "withdrawn"],
+    );
+    const version = Number(f.domain.task(taskId).version);
+    f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+    assert.equal(active(), 0);
+    assert.equal(Number(f.domain.task(taskId).ready), 1);
+    assert.ok(!held());
+    assert.ok(Number(f.domain.task(taskId).version) > version);
+    // Removed for good: every complete read keeps the hold.
+    f.read("repo", []);
+    f.read("repo", []);
+    f.read("repo", []);
+    assert.equal(active(), 1);
+    assert.ok(held());
+  } finally {
+    f.db.close();
+  }
+});
+
+test("a readiness-lost hold releases only once the task is Ready again, and a partial read releases nothing", () => {
+  const f = readinessFixture(readyLabel);
+  const hold = () => [
+    f.sources.hold("I_1")?.active,
+    f.sources.hold("I_1")?.reason,
+  ];
+  try {
+    f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+    f.read("repo", [f.at("I_1", { labels: [] })]);
+    assert.deepEqual(hold(), [1, "readiness-lost"]);
+    f.read("repo", [f.at("I_1", { labels: ["ready"] })], false);
+    assert.deepEqual(hold(), [1, "readiness-lost"]);
+    f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+    assert.deepEqual(hold(), [0, "readiness-lost"]);
+    // Withdrawn, then listed without readiness (complete) or Ready (partial): both stay held.
+    f.read("repo", []);
+    f.read("repo", [f.at("I_1", { labels: [] })]);
+    assert.deepEqual(hold(), [1, "withdrawn"]);
+    f.read("repo", [f.at("I_1", { labels: ["ready"] })], false);
+    assert.deepEqual(hold(), [1, "withdrawn"]);
+  } finally {
+    f.db.close();
+  }
+});
+
+for (const [name, lose] of [
+  [
+    "readiness loss",
+    (f: ReturnType<typeof readinessFixture>) =>
+      f.read("repo", [f.at("I_1", { labels: [] })]),
+  ],
+  [
+    "withdrawal",
+    (f: ReturnType<typeof readinessFixture>) => f.read("repo", []),
+  ],
+] as const)
+  test(`a closed hold survives a reopen, ${name} and a Ready re-listing`, () => {
+    const f = readinessFixture(readyLabel);
+    const hold = () => [
+      f.sources.hold("I_1")?.active,
+      f.sources.hold("I_1")?.reason,
+    ];
+    try {
+      f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+      f.read("repo", [f.at("I_1", { labels: ["ready"], state: "closed" })]);
+      assert.deepEqual(hold(), [1, "closed"]);
+      f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+      assert.deepEqual(hold(), [1, "closed"]);
+      lose(f);
+      f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+      assert.deepEqual(hold(), [1, "closed"]);
+    } finally {
+      f.db.close();
+    }
+  });
+
+test("re-listing releases no changed-text hold, and leaves a project pause alone", () => {
+  const f = readinessFixture(readyLabel);
+  const reason = () => f.sources.hold("I_1")?.reason;
+  try {
+    f.read("repo", [f.at("I_1", { labels: ["ready"] })]);
+    const taskId = f.task("I_1");
+    f.read("repo", []);
+    f.read("repo", [f.at("I_1", { labels: ["ready"], body: "Changed" })]);
+    assert.deepEqual(
+      [f.sources.hold("I_1")?.active, reason()],
+      [1, "changed-text"],
+    );
+    assert.ok(
+      f.domain.admission(taskId).reasons.includes("source-review-required"),
+    );
+  } finally {
+    f.db.close();
+  }
+  const g = readinessFixture(readyLabel);
+  try {
+    g.read("repo", [g.at("I_1", { labels: ["ready"] })]);
+    const taskId = g.task("I_1");
+    g.domain.execute({
+      key: randomUUID(),
+      type: "project.configure",
+      actor: "operator",
+      projectId: g.projectId,
+      expectedVersion: Number(g.domain.project(g.projectId).version),
+      paused: true,
+    });
+    g.read("repo", []);
+    g.read("repo", [g.at("I_1", { labels: ["ready"] })]);
+    assert.equal(Number(g.sources.hold("I_1")?.active), 0);
+    const reasons = g.domain.admission(taskId).reasons;
+    assert.ok(
+      reasons.includes("project-paused") && !reasons.includes("source-hold"),
+    );
+  } finally {
+    g.db.close();
   }
 });
 

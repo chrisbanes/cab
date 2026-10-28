@@ -103,15 +103,6 @@ export class TaskPublicationStore {
       WHERE state IN ('reviewed','approved','sending');
     CREATE TABLE IF NOT EXISTS task_publication_receipts (
       key TEXT PRIMARY KEY, material TEXT NOT NULL, recordJson TEXT NOT NULL);`);
-    // Set when two complete reads in a row omitted the converted issue; only that withdrawal is released.
-    if (
-      !(
-        this.db.prepare("PRAGMA table_info(task_publications)").all() as Row[]
-      ).some((c) => c.name === "omittedWithdrawal")
-    )
-      this.db.exec(
-        "ALTER TABLE task_publications ADD COLUMN omittedWithdrawal INTEGER NOT NULL DEFAULT 0",
-      );
   }
 
   private publication(row: Row): Publication {

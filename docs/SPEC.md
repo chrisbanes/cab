@@ -251,7 +251,11 @@ between projects are deferred. Discovery grants no additional repository access.
 
 Losing readiness, leaving all selections or external closure holds new delegation
 and notifies the lead and active assignees to reach a safe stopping point. Operator resolution is needed
-to resume, except confirmed closure from this task's own delivery. External closure
+to resume, except confirmed closure from this task's own delivery and the two source-caused holds
+that clear themselves: a readiness-lost or withdrawn hold (omitted, or leaving all selections) is released by a later complete read
+that lists the issue again while the task is Ready, since the source has recovered. A partial read
+releases nothing, and every other source hold, including changed text and closure, still needs
+operator resolution. External closure
 after import holds the task in both closed-issue modes, whatever its readiness. Under
 Treat closure as Done, the service then completes it once current membership evidence
 is complete and its execution has settled, with no writer, ambiguity or unfinished
@@ -1028,9 +1032,8 @@ from local to imported; its title and description are source-owned from then on.
   read of a selection that omits its issue: it keeps its membership, its Ready flag and no hold. A
   second consecutive complete read that omits it (a failed or unknown item add leaves the predicted
   Project membership exactly this way) removes the membership and the ordinary withdrawn hold applies.
-  A read that lists the issue again resets the count, and releases a withdrawn hold on a converted task
-  that is Ready. An imported issue that was not just published keeps today's behaviour: the first
-  complete read that omits it withdraws it, and the hold stays until the operator resolves it.
+  A read that lists the issue again resets the count, and a complete one releases the withdrawn hold
+  when the task is Ready, as on any imported task.
 - **Unknown create.** The read-back confirms nothing from an empty list. The task stays held and
   nothing is sent again, across restart; a sync skips a new issue carrying an unresolved
   publication's marker. The operator can **Link** a named issue, which must carry the marker and the

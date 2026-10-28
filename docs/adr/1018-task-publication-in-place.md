@@ -34,9 +34,8 @@ delivery scope lives in [#1167](https://github.com/chrisbanes/ensemble/issues/11
   never resent. While a create is unresolved, a sync skips any new issue carrying its marker.
 - **GitHub's lists trail a create.** A converted task is forgiven one complete read that omits its
   issue (it keeps its membership, Ready flag and no hold); a second consecutive omission withdraws it,
-  and a listing releases a withdrawn hold on a converted Ready task. This is limited to just-published
-  tasks: for any other imported issue the first omission withdraws it and the hold stays until the
-  operator resolves it, as before.
+  and a complete read that lists it again releases the withdrawn hold once the task is Ready, as on any
+  imported task. Only the one-read forgiveness is limited to just-published tasks.
 - **Recovery is closing the issue on GitHub.** Nothing in Ensemble reverses a publish, and
   Abandon only forgets an unproved create, which may leave a duplicate. Both are stated in the
   confirm step.
