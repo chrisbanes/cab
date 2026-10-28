@@ -19,6 +19,8 @@ type Lock = {
 
 /** Installs the packed CLI offline from the npm cache with a lockfile derived from the repository's. */
 export async function installPacked(dir: string) {
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  assert.equal(manifest.name, "@chrisbanes/cab");
   const packed = await run(
     "npm",
     ["pack", "--ignore-scripts", "--json", "--pack-destination", dir],
@@ -26,8 +28,8 @@ export async function installPacked(dir: string) {
   );
   // npm 11 prints an array of pack results; npm 12 keys them by package name.
   const results = JSON.parse(packed.stdout) as
-    | { filename: string }[]
-    | Record<string, { filename: string }>;
+    | { filename: string; name: string }[]
+    | Record<string, { filename: string; name: string }>;
   const [result, ...extra] = Array.isArray(results)
     ? results
     : Object.values(results);
@@ -35,20 +37,28 @@ export async function installPacked(dir: string) {
     result?.filename && extra.length === 0,
     packed.stdout.slice(0, 200),
   );
+  if (Array.isArray(results)) {
+    assert.equal(result?.name, manifest.name, packed.stdout.slice(0, 200));
+  } else {
+    assert.deepEqual(
+      Object.keys(results),
+      [manifest.name],
+      packed.stdout.slice(0, 200),
+    );
+  }
   const { filename } = result;
   const tarball = join(dir, filename);
   const project = join(dir, "project");
   rmSync(project, { recursive: true, force: true });
-  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const lock = JSON.parse(
     readFileSync(join(root, "package-lock.json"), "utf8"),
   ) as Lock;
   const packages: Lock["packages"] = {
     "": {
       name: "cab-cli-smoke",
-      dependencies: { cab: `file:${tarball}` },
+      dependencies: { "@chrisbanes/cab": `file:${tarball}` },
     },
-    "node_modules/cab": {
+    "node_modules/@chrisbanes/cab": {
       version: manifest.version,
       resolved: `file:${tarball}`,
       integrity: `sha512-${createHash("sha512").update(readFileSync(tarball)).digest("base64")}`,
@@ -66,7 +76,7 @@ export async function installPacked(dir: string) {
     JSON.stringify({
       name: "cab-cli-smoke",
       private: true,
-      dependencies: { cab: `file:${tarball}` },
+      dependencies: { "@chrisbanes/cab": `file:${tarball}` },
     }),
   );
   writeFileSync(

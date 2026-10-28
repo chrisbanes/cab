@@ -549,6 +549,11 @@ async function journey() {
     ),
   };
   assert.ok(evidence.install.outsideCheckout, "installed outside the checkout");
+  assert.equal(
+    evidence.install.testsShipped,
+    false,
+    "installed package excludes test files",
+  );
   const home = join(root, "client");
   mkdirSync(home, { mode: 0o700 });
   const { cli, ptyLogin } = cliRunner(bin, home);

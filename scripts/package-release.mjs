@@ -240,7 +240,7 @@ async function build(commit, out) {
     ]);
     await assertProductionTree(source);
 
-    const name = `${pkg.name}-${pkg.version}-${PLATFORM}`;
+    const name = `${basename(pkg.name)}-${pkg.version}-${PLATFORM}`;
     const release = join(partial, name);
     for (const path of [
       "dist/src",
@@ -442,9 +442,10 @@ async function verify(tarballPath) {
     );
     if (
       manifest.schema !== "cab.release/v1" ||
+      manifest.name !== pkg.name ||
       manifest.platform !== PLATFORM ||
       manifest.version !== pkg.version ||
-      name !== `${pkg.name}-${pkg.version}-${PLATFORM}`
+      name !== `${basename(pkg.name)}-${pkg.version}-${PLATFORM}`
     )
       throw new Error("manifest.json does not describe this release");
     const digest = await treeDigest(release);

@@ -60,6 +60,14 @@ const requests = (service: StandaloneService, taskId: string) =>
     taskId,
   );
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 const history = (service: StandaloneService, workId: string) => ({
   request: service.turnRequests().find((r) => r.workId === workId),
   intent: service.list().find((i) => i.workId === workId),
@@ -570,6 +578,11 @@ test("Reset replaces the conversation of a refused lead and runs a fresh first t
 
 test("Reset after completed turns replaces every conversation and restarts only the lead", async () => {
   const f = await refusedInitial();
+  const freshTurnEntered = deferred<void>();
+  const releaseFreshTurn = deferred<void>();
+  let freshTurnStarted = false;
+  let freshTurnFinished = false;
+  let freshWorkId: string | undefined;
   try {
     const api = new OperatorApi(f.service);
     unpause(f);
@@ -606,14 +619,16 @@ test("Reset after completed turns replaces every conversation and restarts only 
       f.service.domain().assignment(workerId).state === "completed" &&
       !f.service
         .turnRequests()
-        .some((r) => r.state === "queued" || r.state === "active");
-    await waitUntil(settled, "worker and follow-ups settle", () =>
-      f.service.turnRequests(),
-    );
-    // Whatever the worker's result woke up has settled too.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await waitUntil(settled, "everything settles", () =>
-      f.service.turnRequests(),
+        .some((r) => r.state === "queued" || r.state === "active") &&
+      count(
+        f.service,
+        "SELECT COUNT(*) AS n FROM coordination_delivery_batches WHERE taskId=? AND state='queued'",
+        f.taskId,
+      ) === 0;
+    await waitUntil(
+      settled,
+      "worker requests and inbox deliveries settle",
+      () => f.service.turnRequests(),
     );
     const read = (await api.readTask(f.taskId)).data;
     assert.deepEqual(read.reset, { available: true });
@@ -626,11 +641,33 @@ test("Reset after completed turns replaces every conversation and restarts only 
     const oldLead = f.service
       .turnRequests()
       .filter((r) => r.assignmentId === f.assignmentId);
-    f.runtime.handleTurn = undefined;
+    f.runtime.handleTurn = async (threadId, turnId) => {
+      freshTurnStarted = true;
+      freshTurnEntered.resolve();
+      try {
+        await releaseFreshTurn.promise;
+        const result = await f.runtime.callTool({
+          threadId,
+          turnId,
+          callId: `result-${turnId}`,
+          tool: "cab_report_result",
+          arguments: { summary: `Done in ${turnId}` },
+        });
+        assert.equal(result.success, true, result.text);
+      } finally {
+        freshTurnFinished = true;
+      }
+    };
 
     const receipt = await api.execute(reset(f));
     assert.ok(receipt.kind === "task-reset");
-    await waitUntil(() => f.runtime.turns === turns + 1, "fresh lead turn");
+    freshWorkId = receipt.workId;
+    await waitUntil(
+      () => freshTurnStarted,
+      "fresh lead handler enters",
+      () => f.service.turnRequests(),
+    );
+    await freshTurnEntered.promise;
     const revisions = (id: string) =>
       count(
         f.service,
@@ -669,9 +706,43 @@ test("Reset after completed turns replaces every conversation and restarts only 
         f.service.turnRequests().find((r) => r.workId === old.workId),
         old,
       );
+    releaseFreshTurn.resolve();
+    await waitUntil(
+      () =>
+        f.service.domain().assignment(f.assignmentId).state === "completed" &&
+        !f.service
+          .turnRequests()
+          .some((r) => r.state === "queued" || r.state === "active"),
+      "fresh lead result settles without a reporting repair",
+      () => f.service.turnRequests(),
+    );
     const after = (await api.readTask(f.taskId)).data;
     assert.ok(after.results.length > 0);
+    assert.equal(requests(f.service, f.taskId), total + 1);
+    assert.equal(f.runtime.turns, turns + 1);
   } finally {
+    releaseFreshTurn.resolve();
+    if (freshTurnStarted) {
+      await waitUntil(
+        () => freshTurnFinished,
+        "fresh lead handler completes during teardown",
+        () => f.service.turnRequests(),
+      );
+      if (freshWorkId) {
+        await waitUntil(
+          () =>
+            !f.service
+              .turnRequests()
+              .some(
+                (r) =>
+                  r.workId === freshWorkId &&
+                  (r.state === "queued" || r.state === "active"),
+              ),
+          "fresh lead turn teardown settles",
+          () => f.service.turnRequests(),
+        );
+      }
+    }
     await f.service.stop();
     rmSync(f.root, { recursive: true, force: true });
   }
