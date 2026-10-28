@@ -36,7 +36,7 @@ export type ControlledGitEvent = {
 
 export function controlledGit(root?: string) {
   const fixtureRoot =
-    root ?? mkdtempSync(join(tmpdir(), "ensemble-controlled-git-"));
+    root ?? mkdtempSync(join(tmpdir(), "cab-controlled-git-"));
   const fixtureToken = randomUUID();
   const executable = join(fixtureRoot, `controlled-git-${fixtureToken}.cjs`);
   const descendantExecutable = join(

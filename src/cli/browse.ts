@@ -231,7 +231,7 @@ export function nextCommand(ctx: BrowseContext, token: string): string {
     ["cursor", token],
   ];
   return [
-    "ensemble",
+    "cab",
     ...ctx.positionals.map(shellWord),
     ...flags.flatMap(([name, value]) =>
       value === undefined || value === false

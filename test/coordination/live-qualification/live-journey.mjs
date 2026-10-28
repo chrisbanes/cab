@@ -142,7 +142,7 @@ if (mode !== "capture") {
     };
 
     stage = "disposable-root";
-    root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s05-capture-")));
+    root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s05-capture-")));
     chmodSync(root, 0o700);
 
     stage = "existing-login-runtime";

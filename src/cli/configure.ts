@@ -64,32 +64,32 @@ export const CHANGE_COMMANDS: Record<
   { prepare: string; read: (targetId: string) => string }
 > = {
   "profile.create": {
-    prepare: "ensemble profile prepare-create",
-    read: (id) => `ensemble profile get ${id}`,
+    prepare: "cab profile prepare-create",
+    read: (id) => `cab profile get ${id}`,
   },
   "profile.configure": {
-    prepare: "ensemble profile prepare",
-    read: (id) => `ensemble profile get ${id}`,
+    prepare: "cab profile prepare",
+    read: (id) => `cab profile get ${id}`,
   },
   "project.create": {
-    prepare: "ensemble project prepare-create",
-    read: (id) => `ensemble project get ${id}`,
+    prepare: "cab project prepare-create",
+    read: (id) => `cab project get ${id}`,
   },
   "project.configure": {
-    prepare: "ensemble project prepare",
-    read: (id) => `ensemble project get ${id}`,
+    prepare: "cab project prepare",
+    read: (id) => `cab project get ${id}`,
   },
   "routing.configure": {
-    prepare: "ensemble project prepare-routing",
-    read: (id) => `ensemble project get ${id}`,
+    prepare: "cab project prepare-routing",
+    read: (id) => `cab project get ${id}`,
   },
   "capacity.configure": {
-    prepare: "ensemble capacity prepare",
-    read: () => "ensemble capacity get",
+    prepare: "cab capacity prepare",
+    read: () => "cab capacity get",
   },
   "github.configure": {
-    prepare: "ensemble project prepare-source",
-    read: (id) => `ensemble project sources ${id}`,
+    prepare: "cab project prepare-source",
+    read: (id) => `cab project sources ${id}`,
   },
 };
 export const isCreation = (kind: ChangeKind) => kind.endsWith(".create");
@@ -263,7 +263,7 @@ export function checkOut(ctx: WriteContext) {
   if (out === "" || out === "-")
     throw new CliError(
       "usage",
-      "A change document must be a file; omit --out to use ./ensemble-<kind>-<id8>.json.",
+      "A change document must be a file; omit --out to use ./cab-<kind>-<id8>.json.",
     );
 }
 
@@ -436,7 +436,7 @@ export async function writePrepared(
 }
 
 const applyWith = (kind: ChangeKind, path: string) =>
-  `Apply with: ensemble ${AREA[kind]} apply --file ${shellWord(path)}`;
+  `Apply with: cab ${AREA[kind]} apply --file ${shellWord(path)}`;
 
 function effectNote(document: ChangeDocument): string[] {
   const c = document.command;
@@ -448,14 +448,14 @@ function effectNote(document: ChangeDocument): string[] {
   if (c.type === "github.configure")
     return [
       "Source configuration saved; nothing was imported, dispatched or started.",
-      "Every selection is now inactive until previewed again at the new version with 'ensemble project preview-source'; observations are incomplete until the next sync refresh.",
+      "Every selection is now inactive until previewed again at the new version with 'cab project preview-source'; observations are incomplete until the next sync refresh.",
     ];
   return [
     "Configuration saved; nothing was dispatched, started, stopped or cancelled.",
     ...(c.type === "profile.configure" ||
     (c.type === "project.configure" && c.instructions !== undefined)
       ? [
-          "Existing assignments keep their bound revisions and may now be stale; adopt with 'ensemble assignment apply-current'. An active turn is never rewritten.",
+          "Existing assignments keep their bound revisions and may now be stale; adopt with 'cab assignment apply-current'. An active turn is never rewritten.",
         ]
       : []),
     ...(admits
@@ -483,14 +483,14 @@ async function checkedDocument(file: string, area: string) {
   ];
   const document = await readChangeDocument(
     file,
-    `Prepare it first with ${prepares.join(", ")} (see 'ensemble --help --all'), then apply the file it writes.`,
+    `Prepare it first with ${prepares.join(", ")} (see 'cab --help --all'), then apply the file it writes.`,
   );
   if (AREA[document.kind] !== area)
     throw new CliError(
       "change-document-invalid",
-      `This is a ${document.kind} change; apply it with 'ensemble ${AREA[document.kind]} apply'.`,
+      `This is a ${document.kind} change; apply it with 'cab ${AREA[document.kind]} apply'.`,
       {
-        fix: `Run 'ensemble ${AREA[document.kind]} apply --file ${shellWord(file)}'.`,
+        fix: `Run 'cab ${AREA[document.kind]} apply --file ${shellWord(file)}'.`,
       },
     );
   let exact: Record<string, unknown>;

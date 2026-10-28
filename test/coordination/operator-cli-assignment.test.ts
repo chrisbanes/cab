@@ -176,7 +176,7 @@ test("instruction revisions, bound-versus-current comparison and history browse 
     ),
   );
   r = await h.run(["assignment", "history", seed.assignmentA]);
-  const more = /More: (ensemble .*)$/m.exec(r.out)?.[1];
+  const more = /More: (cab .*)$/m.exec(r.out)?.[1];
   assert.ok(more, r.out);
   const token = first.pagination.nextCursor as string;
   assert.ok(more.includes(token));
@@ -254,8 +254,8 @@ test("instruction views report unavailable redaction and refuse managed or expir
 
   const managed = await h.run(["assignment", "get", seed.assignmentA], {
     env: {
-      ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
-      ENSEMBLE_MANAGED_ASSIGNMENT: "1",
+      CAB_CLI_CONFIG_DIR: h.configDir,
+      CAB_MANAGED_ASSIGNMENT: "1",
     },
   });
   assert.equal(managed.code, 3);

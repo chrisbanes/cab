@@ -70,21 +70,21 @@ export const publishCopy = {
   intro:
     "Create a GitHub issue from this task. The task becomes that issue: its title and description are then owned by GitHub, and the next sync matches it instead of importing a second task.",
   irreversible: (repository: string) =>
-    `This creates a public issue in ${repository}. Ensemble can’t delete it or take it back; closing the issue on GitHub is the only recovery.`,
+    `This creates a public issue in ${repository}. cab can’t delete it or take it back; closing the issue on GitHub is the only recovery.`,
   guard:
-    "Ensemble records the request before sending it. If GitHub doesn’t confirm the result, the task is held and nothing is sent again.",
+    "cab records the request before sending it. If GitHub doesn’t confirm the result, the task is held and nothing is sent again.",
   hidden:
     "Part of this task’s text can’t be shown in full here, so it can’t be published.",
   moved:
     "That didn’t apply: the task, the project’s grants or the issue changed, or the issue doesn’t carry this request’s marker. Check the state shown and try again.",
   unknown:
-    "Ensemble couldn’t tell whether that was recorded. Check below before trying again.",
+    "cab couldn’t tell whether that was recorded. Check below before trying again.",
   waiting:
     "Publishing is in progress. Nothing is sent again; this updates when GitHub answers.",
   uncertain:
-    "GitHub didn’t confirm that the issue was created, and Ensemble can’t tell whether it exists. The task is held and nothing is sent again.",
+    "GitHub didn’t confirm that the issue was created, and cab can’t tell whether it exists. The task is held and nothing is sent again.",
   linkHelp:
-    "If you can find the issue on GitHub, link it by number. Ensemble checks that it carries this request’s marker before turning the task into it.",
+    "If you can find the issue on GitHub, link it by number. cab checks that it carries this request’s marker before turning the task into it.",
   abandonWarning:
     "Abandoning returns the task to a local task, but GitHub may still have created the issue. If it did, the next sync imports it as a second, unrelated task. This can’t be undone.",
   published: "Published. The task is now the GitHub issue below.",

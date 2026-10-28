@@ -144,7 +144,7 @@ test("weighted shards separate heavy files and include newly added files", () =>
 });
 
 test("test discovery includes nested suites once and ignores stale compiled tests", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-test-discovery-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-test-discovery-"));
   try {
     for (const file of [
       "test/coordination/task.test.ts",
@@ -177,7 +177,7 @@ test("test discovery includes nested suites once and ignores stale compiled test
 });
 
 test("the owned runner preserves an actual npm run check failure status", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-runner-status-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-runner-status-"));
   try {
     await writeFile(
       join(directory, "package.json"),
@@ -277,14 +277,14 @@ test("bounded followup forces only the retained child group after ignored SIGTER
 test("runner evidence retains only bounded known synthetic stdout and stderr", async () => {
   const result = await runner.runTestProcess([
     "-e",
-    'console.log("ensemble-test-evidence stdout synthetic-ci-probe"); console.error("ensemble-test-evidence stderr synthetic-ci-probe"); console.error("AssertionError [ERR_ASSERTION]: Injected CI browser assertion remains primary"); console.log("SYNTHETIC_PRIVATE_MARKER token=private"); console.error("x".repeat(10000)); for(let i=0;i<100;i++) console.log("ensemble-test-evidence stdout synthetic-ci-probe"); process.exitCode=1;',
+    'console.log("cab-test-evidence stdout synthetic-ci-probe"); console.error("cab-test-evidence stderr synthetic-ci-probe"); console.error("AssertionError [ERR_ASSERTION]: Injected CI browser assertion remains primary"); console.log("SYNTHETIC_PRIVATE_MARKER token=private"); console.error("x".repeat(10000)); for(let i=0;i<100;i++) console.log("cab-test-evidence stdout synthetic-ci-probe"); process.exitCode=1;',
   ]);
   assert.equal(result.code, 1);
   assert.equal(result.stdout.lines.length, 40);
   assert.equal(result.stdout.omitted, 62);
   assert.equal(result.stderr.truncated, 1);
   assert.deepEqual(result.stderr.lines, [
-    "ensemble-test-evidence stderr synthetic-ci-probe",
+    "cab-test-evidence stderr synthetic-ci-probe",
     "AssertionError [ERR_ASSERTION]: Injected CI browser assertion remains primary",
   ]);
   assert.equal(
@@ -341,7 +341,7 @@ test("wrapper timeout and uncertainty statuses remain separate from observed chi
 });
 
 test("wrapper interruption uses bounded exact-child cleanup before returning", async () => {
-  const code = `import {spawn} from "node:child_process"; import {once} from "node:events"; const {runTestProcess}=await import(${JSON.stringify(pathToFileURL(resolve("scripts/run-tests.mjs")).href)}); const ownsGroup=process.platform!=="win32"; const child=spawn(process.execPath,["-e",'process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000);setTimeout(()=>process.exit(99),5000);process.send("ready")'],{detached:ownsGroup,stdio:["ignore","pipe","pipe","ipc"]}); const [ready]=await once(child,"message",{signal:AbortSignal.timeout(5000)}); if(ready!=="ready") throw Error("Expected child readiness"); child.disconnect(); const pending=runTestProcess([],{ownedChild:{child,pid:child.pid,ownsGroup},forwardSignals:true,deadlineMs:5000,graceMs:1000,forceWaitMs:1000}); setTimeout(()=>process.kill(process.pid,"SIGTERM"),150); const r=await pending; if(r.interrupted==="SIGTERM"&&r.exitObserved&&r.code===0&&!r.timedOut) console.log("ensemble-test-evidence stdout synthetic-ci-probe"); else process.exitCode=17;`;
+  const code = `import {spawn} from "node:child_process"; import {once} from "node:events"; const {runTestProcess}=await import(${JSON.stringify(pathToFileURL(resolve("scripts/run-tests.mjs")).href)}); const ownsGroup=process.platform!=="win32"; const child=spawn(process.execPath,["-e",'process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000);setTimeout(()=>process.exit(99),5000);process.send("ready")'],{detached:ownsGroup,stdio:["ignore","pipe","pipe","ipc"]}); const [ready]=await once(child,"message",{signal:AbortSignal.timeout(5000)}); if(ready!=="ready") throw Error("Expected child readiness"); child.disconnect(); const pending=runTestProcess([],{ownedChild:{child,pid:child.pid,ownsGroup},forwardSignals:true,deadlineMs:5000,graceMs:1000,forceWaitMs:1000}); setTimeout(()=>process.kill(process.pid,"SIGTERM"),150); const r=await pending; if(r.interrupted==="SIGTERM"&&r.exitObserved&&r.code===0&&!r.timedOut) console.log("cab-test-evidence stdout synthetic-ci-probe"); else process.exitCode=17;`;
   const result = await runner.runTestProcess(
     ["--input-type=module", "-e", code],
     { deadlineMs: 10000 },
@@ -349,7 +349,7 @@ test("wrapper interruption uses bounded exact-child cleanup before returning", a
   assert.equal(result.code, 0);
   assert.equal(result.signal, null);
   assert.deepEqual(result.stdout.lines, [
-    "ensemble-test-evidence stdout synthetic-ci-probe",
+    "cab-test-evidence stdout synthetic-ci-probe",
   ]);
 });
 

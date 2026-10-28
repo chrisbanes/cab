@@ -45,7 +45,7 @@ const metadata = {
 
 async function fixture(t: TestContext, missing = false) {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-944-qualification-")),
+    mkdtempSync(join(tmpdir(), "cab-944-qualification-")),
   );
   const gh = createFakeGh();
   let turns = 0,
@@ -81,7 +81,7 @@ async function fixture(t: TestContext, missing = false) {
       const query = JSON.parse(String(init?.body));
       if (
         url.pathname !== "/graphql" ||
-        !String(query.query).startsWith("query EnsembleProjectPage(")
+        !String(query.query).startsWith("query CabProjectPage(")
       ) {
         writes++;
         throw new Error("provider mutation forbidden");
@@ -252,18 +252,18 @@ test("qualification separates preview activation/import and retains replay/Clear
   assert.ok(f.domain.admission(localId).reasons.includes("local-dependency"));
   assert.ok(f.sources.issue("I_944"));
   assert.deepEqual(await f.api.execute(result.preview), result.activated);
-  const previous = process.env.ENSEMBLE_944_RECOVERY;
-  process.env.ENSEMBLE_944_RECOVERY = "offline-recovery-canary";
+  const previous = process.env.CAB_944_RECOVERY;
+  process.env.CAB_944_RECOVERY = "offline-recovery-canary";
   t.after(() => {
-    if (previous === undefined) delete process.env.ENSEMBLE_944_RECOVERY;
-    else process.env.ENSEMBLE_944_RECOVERY = previous;
+    if (previous === undefined) delete process.env.CAB_944_RECOVERY;
+    else process.env.CAB_944_RECOVERY = previous;
   });
   await f.api.execute({
     type: "github.configure",
     key: randomUUID(),
     projectId: result.projectId,
     expectedVersion: 3,
-    credentialRef: "env:ENSEMBLE_944_RECOVERY",
+    credentialRef: "env:CAB_944_RECOVERY",
     selections: [{ id: result.selectionId, keep: true }],
     readiness: {
       mode: "all",
@@ -299,7 +299,7 @@ test("qualification separates preview activation/import and retains replay/Clear
   );
   assert.equal(
     f.domain.githubConfiguration(result.projectId).credentialRef,
-    "env:ENSEMBLE_944_RECOVERY",
+    "env:CAB_944_RECOVERY",
   );
   const safe = JSON.stringify({
     source: await f.api.readProjectConfiguration(result.projectId),
@@ -309,7 +309,7 @@ test("qualification separates preview activation/import and retains replay/Clear
   for (const privateValue of [
     fakeGhToken,
     "Private issue contents",
-    "ENSEMBLE_944_RECOVERY",
+    "CAB_944_RECOVERY",
     "offline-recovery-canary",
   ])
     assert.ok(!safe.includes(privateValue));
@@ -317,7 +317,7 @@ test("qualification separates preview activation/import and retains replay/Clear
   await f.service.start();
   assert.equal(
     f.service.domain().githubConfiguration(result.projectId).credentialRef,
-    "env:ENSEMBLE_944_RECOVERY",
+    "env:CAB_944_RECOVERY",
   );
   assert.ok(f.service.githubSources().issue("I_944"));
 });
@@ -384,9 +384,7 @@ for (const failure of [
   });
 
 test("prepare-only cannot launch; exact consumed record/callback binds one bootstrap and immutable artifacts", async (t) => {
-  const parent = realpathSync(
-      mkdtempSync(join(tmpdir(), "ensemble-944-prepared-")),
-    ),
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "cab-944-prepared-"))),
     root = join(parent, "one-attempt");
   t.after(() => rmSync(parent, { recursive: true, force: true }));
   let linted = "",
@@ -395,7 +393,7 @@ test("prepare-only cannot launch; exact consumed record/callback binds one boots
   const prepared = await harness.prepareOnly(
     {
       root,
-      label: "com.example.ensemble944.offline",
+      label: "com.example.cab944.offline",
       nodePath: realpathSync(process.execPath),
       cliPath: realpathSync(join(process.cwd(), "dist/src/standalone/cli.js")),
       port: 18744,
@@ -407,7 +405,7 @@ test("prepare-only cannot launch; exact consumed record/callback binds one boots
       },
     },
   );
-  assert.ok(linted.endsWith("com.example.ensemble944.offline.plist"));
+  assert.ok(linted.endsWith("com.example.cab944.offline.plist"));
   const manifest = JSON.parse(readFileSync(prepared.manifest, "utf8"));
   const password = readFileSync(manifest.passwordFile, "utf8");
   assert.ok(!readFileSync(prepared.manifest, "utf8").includes(password));
@@ -616,9 +614,7 @@ test("qualification missing source reference refuses preview without fallback or
 });
 
 test("owned terminal logs are checked before deletion and credential matches retain only safe failure metadata", async (t) => {
-  const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-944-owned-logs-")),
-  );
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-944-owned-logs-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const stdout = join(root, "stdout.log"),
     stderr = join(root, "stderr.log");

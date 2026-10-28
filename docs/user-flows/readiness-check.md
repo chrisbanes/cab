@@ -1,6 +1,6 @@
 # Readiness check
 
-**Status:** implemented. `ensemble service install` runs it after it signs the CLI in; the
+**Status:** implemented. `cab service install` runs it after it signs the CLI in; the
 procedure is in [standalone macOS operations](../operations/standalone-macos.md).
 The Getting started Runtime row and first-task Fix actions that read these checks
 are planned.
@@ -12,8 +12,8 @@ what the service can and cannot use, with one fix line per problem.
 
 ## Entry points
 
-- `ensemble doctor` in the operator CLI (any read credential; the service must advertise `diagnostics.read`).
-- `ensemble service install`, which prints this table with its `Fix` lines on
+- `cab doctor` in the operator CLI (any read credential; the service must advertise `diagnostics.read`).
+- `cab service install`, which prints this table with its `Fix` lines on
   stderr after it signs the CLI in, before it opens the app. A failed check does not fail the install.
 - Settings → Readiness (`/app/settings#readiness`), the first section until a task
   starts a turn and the last afterwards.
@@ -29,12 +29,12 @@ service sees rather than the operator's interactive shell.
 | ------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | An execution runtime is enabled | At least one enabled runtime's executable resolves on the service `PATH` | Enable a runtime in Settings → Runtime. If one is enabled but its executable is missing, install Codex or Claude Code into the fixed `PATH`, then turn it off and on in Settings → Runtime. |
 | Codex executable    | Resolves on the service `PATH`                                                                     | Install Codex into the fixed `PATH`                                                                                                                                                                                                                                  |
-| Codex login         | App Server initializes authenticated, without a model turn                                         | Run `codex login` as the service user. If Codex's approval policy or sandbox mode is not the one Ensemble requires, set it to `never` and `workspace-write` and restart the service.                                                                                  |
+| Codex login         | App Server initializes authenticated, without a model turn                                         | Run `codex login` as the service user. If Codex's approval policy or sandbox mode is not the one cab requires, set it to `never` and `workspace-write` and restart the service.                                                                                  |
 | Git                 | Resolves on the service `PATH`                                                                     | Install git                                                                                                                                                                                                                                                          |
 | GitHub discovery    | Configured and readable, or not configured                                                         | Run `gh auth login`, or Settings → discovery credential                                                                                                                                                                                                              |
 | Claude executable   | Not configured, or `claude` resolves on the service `PATH` and reports a version                   | Install Claude Code into the fixed `PATH`, then restart the service. If `claude --version` fails, run it as the service user or reinstall Claude Code.                                                                                                               |
 | Claude token        | Not configured, or the reference is readable and safe                                              | Not configured: add a token in [Add Claude](claude-runtime.md). A `file:` problem: make it a private regular file you own (mode 600), or clear the reference. An `env:` variable: set it and restart the service, or clear the reference. Restart required: restart. |
-| Runtime harness     | Each runtime a profile uses is running, and each profile's model and reasoning effort are accepted | While Ensemble is restarting the runtime the fix names the attempt and time ("Restarting · attempt 1 of 3 · next at 14:30"); once retries are exhausted, or if none are scheduled, turn the runtime off and on in Settings → Runtime, or restart the service, or edit the profile's model or reasoning effort. A runtime that is not enabled needs its executable installed into the fixed `PATH` instead, as for Claude executable.                                                                          |
+| Runtime harness     | Each runtime a profile uses is running, and each profile's model and reasoning effort are accepted | While cab is restarting the runtime the fix names the attempt and time ("Restarting · attempt 1 of 3 · next at 14:30"); once retries are exhausted, or if none are scheduled, turn the runtime off and on in Settings → Runtime, or restart the service, or edit the profile's model or reasoning effort. A runtime that is not enabled needs its executable installed into the fixed `PATH` instead, as for Claude executable.                                                                          |
 | Data and auth paths | Private, canonical, owned by the service user                                                      | Named path rule, without the path value in shared output                                                                                                                                                                                                             |
 
 - A check that is not configured is reported as such, not as a failure. A missing
@@ -42,7 +42,7 @@ service sees rather than the operator's interactive shell.
   configured; an active Claude profile then fails Runtime harness instead
   ([ADR-1012](../adr/1012-operator-controlled-runtime-enablement.md)).
 - Claude executable shows the version that `claude --version` prints, as in
-  `Claude executable (2.1.296)`. Ensemble reports it and never compares it. Only the
+  `Claude executable (2.1.296)`. cab reports it and never compares it. Only the
   Claude Code version the pinned SDK declares was qualified; any other version is a
   [disclosed limit](../adr/1011-packaging-and-distribution.md).
 - Every row that is not a pass shows its fix line, in the CLI and in Settings. A
@@ -63,7 +63,7 @@ service sees rather than the operator's interactive shell.
   check again, or restart the service if the read keeps failing. A Codex profile
   without a model or reasoning effort runs on the Codex default and is not held to
   the catalogue.
-- `ensemble doctor` exits 0 whenever the read succeeds, whatever the checks report;
+- `cab doctor` exits 0 whenever the read succeeds, whatever the checks report;
   its JSON `data` is the service's `data` unchanged.
 - Re-running is the only action of the check, and it changes nothing. In Settings
   only, when GitHub discovery is not configured and the service detects a signed-in
@@ -76,4 +76,4 @@ service sees rather than the operator's interactive shell.
   nothing; Settings also holds **Set**/**Change** and **Clear**. Each is a separate, explicit step beside the one in
   [project setup](project-setup.md) step 3: the existing discovery credential
   command, sent once per activation. Signed out, not installed, unreadable or a configured but
-  unreadable credential keep the fix line, and `ensemble doctor` always prints it.
+  unreadable credential keep the fix line, and `cab doctor` always prints it.

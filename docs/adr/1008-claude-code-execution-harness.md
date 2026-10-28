@@ -6,9 +6,9 @@ status: accepted
 
 This amends [ADR-1004](1004-standalone-service.md), which deferred Claude for agent
 execution. The Claude harness is implemented and qualified with limits by bounded
-live journeys ([#827](https://github.com/chrisbanes/ensemble/issues/827)).
+live journeys ([#827](https://github.com/chrisbanes/cab/issues/827)).
 Delivery scope and status live under
-[epic #777](https://github.com/chrisbanes/ensemble/issues/777).
+[epic #777](https://github.com/chrisbanes/cab/issues/777).
 
 ## Selection
 
@@ -17,23 +17,23 @@ each runtime, and new profiles default to the first enabled one
 ([ADR-1012](1012-operator-controlled-runtime-enablement.md)).
 An assignment conversation stays bound to the harness that started it; changing a
 profile's harness affects new conversations only and never migrates a live session.
-One task may therefore mix Codex and Claude assignments. Ensemble keeps admission,
+One task may therefore mix Codex and Claude assignments. cab keeps admission,
 ownership, coordination, policy and task completion for every harness.
 
 Claude profiles expose model and reasoning effort, validated against the values the
 installed integration supports. Permission mode, tools, sandbox and configuration
-sources are Ensemble policy, not profile settings.
+sources are cab policy, not profile settings.
 
 ## Integration
 
 Use the TypeScript Claude Agent SDK behind the existing `Runtime` interface. Each
 turn is one `query()` that resumes the assignment's Claude session, so each turn has
-its own `claude` subprocess and process identity. Ensemble mints the turn identity;
+its own `claude` subprocess and process identity. cab mints the turn identity;
 the SDK session ID is the conversation identity. Interrupt uses the query's abort
 path. Generalise the interface only where the Claude integration demonstrates a
 different need.
 
-Ensemble coordination tools are served through an in-process SDK MCP server.
+cab coordination tools are served through an in-process SDK MCP server.
 
 ## Authentication
 
@@ -46,7 +46,7 @@ forms are accepted:
 - `file:/absolute/path` names an owner-only file holding the token. This is the
   form for the installed LaunchAgent service, whose plist and environment then
   hold no Claude secret. The path is absolute with no empty, `.` or `..` segment.
-- `env:NAME` names a variable in the service environment, like Ensemble's other
+- `env:NAME` names a variable in the service environment, like cab's other
   provider credentials; it suits foreground and development runs.
 
 `file:` is added alongside `env:NAME` rather than replacing it: it alone solves the
@@ -68,7 +68,7 @@ lists are not inspected; the operator keeps the file in a private directory.
 Replacing the file atomically rotates the token from the next turn without a
 restart; a running turn keeps the value it started with.
 
-The Claude runtime ([#825](https://github.com/chrisbanes/ensemble/issues/825))
+The Claude runtime ([#825](https://github.com/chrisbanes/cab/issues/825))
 sets the resolved token only as the Claude subprocess's token variable; it never
 logs it. Every other spawn environment, including Codex and helper children such
 as `git`, omits the token variable and any variable holding the same nonempty value.
@@ -83,7 +83,7 @@ Bash, hooks and stdio MCP children do not inherit the token; its effect is
 qualified before the harness is advertised, and any residual exposure is a
 disclosed limit. An invalid token fails the turn visibly. Operator setup,
 clearing and configured/available status belong to the harness UI
-([#826](https://github.com/chrisbanes/ensemble/issues/826)).
+([#826](https://github.com/chrisbanes/cab/issues/826)).
 
 Anthropic's terms bar third-party products from offering subscription login to
 others, and say advertised Pro/Max limits assume ordinary, individual use of
@@ -96,7 +96,7 @@ advertising the harness and when self-hosting by others is considered.
 
 Match the Codex default policy and disclose where enforcement differs:
 
-- `permissionMode: "dontAsk"`, an explicit built-in tool allowlist, Ensemble's MCP
+- `permissionMode: "dontAsk"`, an explicit built-in tool allowlist, cab's MCP
   tools, and every other tool disallowed. No interactive approvals.
 - A `PreToolUse` hook sees every tool call, records it, and denies calls outside
   policy, because allow rules bypass `canUseTool`.
@@ -104,7 +104,7 @@ Match the Codex default policy and disclose where enforcement differs:
   task workspace and explicit writable roots only (except the sandbox temporary
   directory below), an empty network allowlist and no unsandboxed retry. Commands
   never run unsandboxed.
-- Before each turn, Ensemble runs a sandbox self-test in the turn's spawn context.
+- Before each turn, cab runs a sandbox self-test in the turn's spawn context.
   If the sandbox cannot run, the turn does not start: the work waits visibly as an
   unavailable runtime, never falls back to another harness, and leaves no
   uncertainty hold because no agent command ran. Claude Code reports a sandbox
@@ -120,12 +120,12 @@ Match the Codex default policy and disclose where enforcement differs:
 - Reads keep full access subject to host permissions, as with Codex.
 
 Agents load no user, project or plugin Claude configuration: no setting sources,
-strict MCP configuration and a dedicated Claude configuration directory. Ensemble
+strict MCP configuration and a dedicated Claude configuration directory. cab
 supplies repository instructions (`CLAUDE.md`, `AGENTS.md`) as instruction text, so
 repository content cannot add permission rules, hooks or MCP servers.
 
 Native `AskUserQuestion` is disabled. Agents ask the operator through
-`ensemble_ask_question`, which is durable across restarts.
+`cab_ask_question`, which is durable across restarts.
 
 ## Recovery
 
@@ -144,6 +144,6 @@ Untested surfaces remain disclosed limits.
 
 ## Outside this decision
 
-OpenCode, Pi, remote workers ([#778](https://github.com/chrisbanes/ensemble/issues/778)),
+OpenCode, Pi, remote workers ([#778](https://github.com/chrisbanes/cab/issues/778)),
 conversation transfer between harnesses, API-key billing and native Claude
 `AskUserQuestion` bridging.

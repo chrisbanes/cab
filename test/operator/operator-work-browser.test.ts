@@ -269,7 +269,7 @@ test("toolbar puts the filters, switch and count on one row with Active tasks as
   assert.equal(commands(), 0);
 });
 
-const filtersKey = "ensemble.task-filters.v1";
+const filtersKey = "cab.task-filters.v1";
 const stored = (page: Page) =>
   page.evaluate((key) => localStorage.getItem(key), filtersKey);
 const tasksLink = (page: Page) =>
@@ -927,7 +927,7 @@ test("a Resume conflict reviewed while the project is still paused resumes with 
   assert.equal(d.project(ids.pausedProject).paused, 0);
 });
 
-test("a routing fallback row names Ensemble as the next actor without the operator tone", async (_t, journey) => {
+test("a routing fallback row names cab as the next actor without the operator tone", async (_t, journey) => {
   const { ids, page } = await start(journey, "/app/tasks?state=all");
   await page.route("**/api/operator/task-list*", async (route) => {
     const response = await route.fetch(),
@@ -940,10 +940,10 @@ test("a routing fallback row names Ensemble as the next actor without the operat
   await page.reload();
   const next = page
     .locator(`.task-list [data-task-id="${ids.running.id}"]`)
-    .getByText("Next: Ensemble · recording routing fallback", { exact: true });
+    .getByText("Next: cab · recording routing fallback", { exact: true });
   await next.waitFor();
   assert.equal(await next.getAttribute("data-operator"), null);
-  // Ensemble acting is not the amber "you act" tone.
+  // cab acting is not the amber "you act" tone.
   assert.notEqual(
     await next.evaluate((e) => getComputedStyle(e).color),
     await resolved(page, "color", "var(--attn)"),
@@ -2321,7 +2321,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
   );
   assert.equal(
     squash(await page.locator(".board-footer").innerText()),
-    "Columns describe Ensemble work, not GitHub issue state. Cards open the task; nothing here changes state, and there is no drag and drop.",
+    "Columns describe cab work, not GitHub issue state. Cards open the task; nothing here changes state, and there is no drag and drop.",
   );
   assert.ok(await noPageOverflow(page));
   await shot(page, "390-board-waiting-tabs");

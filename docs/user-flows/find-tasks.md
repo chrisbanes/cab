@@ -20,7 +20,7 @@ list or reloading, and always sees which filters are hiding work.
 1. The list is the URL: Project, State, Source, Readiness, text and List or Board are
    query parameters, so a link or a reload shows the same list.
 2. The browser remembers the last filters shown, in `localStorage` under
-   `ensemble.task-filters.v1`. It is a per-device, per-browser-profile preference,
+   `cab.task-filters.v1`. It is a per-device, per-browser-profile preference,
    not a credential, so signing out keeps it, and the service stores nothing. A URL
    that has filters always wins and becomes the remembered set. A task page URL with
    no filters is rewritten in place (no extra Back step) to the remembered ones.

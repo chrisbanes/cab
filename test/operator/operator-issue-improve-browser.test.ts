@@ -310,7 +310,7 @@ for (const [name, viewport] of viewports) {
       });
       assert.deepEqual(effect.expected, original);
     }
-    // Ensemble keeps no copy: the next sync shows the edit like a hand edit.
+    // cab keeps no copy: the next sync shows the edit like a hand edit.
     await f.service.refreshGitHub();
     assert.equal(
       f.service.githubSources().issue("I_1")?.observedTitle,

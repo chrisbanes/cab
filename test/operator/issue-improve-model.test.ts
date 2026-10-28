@@ -162,9 +162,9 @@ test("stored state survives a reload, tolerates damage and clears when empty", (
   assert.deepEqual(readStored(storage, taskId), value);
   writeStored(storage, taskId, { note: "" });
   assert.equal(map.size, 0);
-  map.set(`ensemble.issue-improve.v1.${taskId}`, "{not json");
+  map.set(`cab.issue-improve.v1.${taskId}`, "{not json");
   assert.deepEqual(readStored(storage, taskId), { note: "" });
-  map.set(`ensemble.issue-improve.v1.${taskId}`, '{"note":1}');
+  map.set(`cab.issue-improve.v1.${taskId}`, '{"note":1}');
   assert.deepEqual(readStored(storage, taskId), { note: "" });
 });
 

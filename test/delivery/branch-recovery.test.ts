@@ -72,7 +72,7 @@ test("an overwrite whose material is not the recorded outside change is denied",
     { ...material, outsideHeadSha: "6".repeat(40) },
     { ...material, lastPushedSha: "7".repeat(40) },
     { ...material, lastPushedSha: null },
-    { ...material, branch: "ensemble/other" },
+    { ...material, branch: "cab/other" },
   ])
     assert.equal((await w.overwrite(commit, wrong)).state, "denied");
   // Partial material is not an overwrite request at all.
@@ -115,7 +115,7 @@ test("a remote that moves between preflight and push is recorded, not overwritte
   assert.equal(w.pushes.at(-1)?.lease, outside);
 });
 
-test("a remote back at Ensemble's last push clears the record without pushing", async (t) => {
+test("a remote back at cab's last push clears the record without pushing", async (t) => {
   const w = publicationWorld(t, { approved: true });
   const first = await withOutsideHead(w);
   const material = w.outsideMaterial();
@@ -363,7 +363,7 @@ test("adoption is never grantable as allow, always needs approval, and is not of
   assert.equal(branchOf(deleted)?.outsideHeadSha, absentBranchHead);
 });
 
-test("an adoption whose remote returned to Ensemble's push clears the stale record without fetching", async (t) => {
+test("an adoption whose remote returned to cab's push clears the stale record without fetching", async (t) => {
   const w = adoptWorld(t);
   const first = await withOutsideHead(w);
   const material = w.outsideMaterial();
@@ -439,7 +439,7 @@ test("a PR still showing the head a recovery replaced or adopted is lagging, not
   assert.deepEqual(overwriting.wakes, []);
 });
 
-test("a branch that returns to Ensemble's own push during a recovery clears the record without waking the lead", async (t) => {
+test("a branch that returns to cab's own push during a recovery clears the record without waking the lead", async (t) => {
   const adopting = adoptWorld(t);
   const first = await withOutsideHead(adopting);
   adopting.setAdopt(async () => {

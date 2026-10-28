@@ -29,7 +29,7 @@ const evidence = {
     fixtureCreated: false,
     fixtureRemoved: false,
     appServerProcessesVerifiedExited: [],
-    scope: "temporary Ensemble data and its managed task workspace only",
+    scope: "temporary cab data and its managed task workspace only",
   },
   limitations: {
     typeSafe: "disabled; routing is disabled and routingClient is null",
@@ -130,7 +130,7 @@ class ObservedCodexRuntime extends CodexRuntime {
         callId: call.callId,
         tool: call.tool,
         profileId:
-          call.tool === "ensemble_delegate" &&
+          call.tool === "cab_delegate" &&
           typeof call.arguments.profileId === "string"
             ? call.arguments.profileId
             : null,
@@ -222,15 +222,14 @@ async function setup() {
     type: "profile.create",
     profileId: leadProfileId,
     name: "S04b live lead",
-    instructions: "Use only the task-scoped Ensemble coordination tools.",
+    instructions: "Use only the task-scoped cab coordination tools.",
     capabilities: "task coordination",
   });
   command({
     type: "profile.create",
     profileId: workerProfileId,
     name: "S04b live worker",
-    instructions:
-      "Use only Ensemble coordination tools to report assigned work.",
+    instructions: "Use only cab coordination tools to report assigned work.",
     capabilities: "verification",
   });
   command({
@@ -259,11 +258,11 @@ async function setup() {
     taskId,
     title: "S04b coordination runtime verification",
     outcome: [
-      "This is a disposable coordination integration probe. Use only the registered Ensemble tools. Do not use shell, filesystem, browser, network, or any other tools.",
+      "This is a disposable coordination integration probe. Use only the registered cab tools. Do not use shell, filesystem, browser, network, or any other tools.",
       `Lead profile ID: ${leadProfileId}. Worker profile ID: ${workerProfileId}.`,
-      "As lead, call ensemble_delegate exactly once with profileId set to the exact Worker profile ID literal above, not the Lead ID. Give the worker a brief requiring summary S04B_RESULT_V1 through ensemble_report_result.",
+      "As lead, call cab_delegate exactly once with profileId set to the exact Worker profile ID literal above, not the Lead ID. Give the worker a brief requiring summary S04B_RESULT_V1 through cab_report_result.",
       "Immediately after that one call returns, end the turn. Do not wait, poll, or invoke any more tools in that turn; process the durable result only on a later resumed turn.",
-      "When the first result is delivered, request one follow-up for that exact result ID. The follow-up instructions must ask the worker to report summary S04B_RESULT_V2 through ensemble_report_result.",
+      "When the first result is delivered, request one follow-up for that exact result ID. The follow-up instructions must ask the worker to report summary S04B_RESULT_V2 through cab_report_result.",
       "When the revised result is delivered, request task completion with exactly the current result ID in reviewedResultIds.",
       "The service is configured for capacity one. Do not claim completion without using the completion tool.",
     ].join("\n"),
@@ -305,7 +304,7 @@ async function run() {
   };
 
   progress("fixture-setup");
-  root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s04b-live-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s04b-live-")));
   evidence.cleanup.fixtureCreated = true;
   const dataDir = join(root, "data");
   runtime = new ObservedCodexRuntime();
@@ -376,7 +375,7 @@ async function run() {
   recordScheduler("lead-started");
 
   progress("lead-delegation");
-  const firstDelegate = await waitForTool(runtime, "ensemble_delegate");
+  const firstDelegate = await waitForTool(runtime, "cab_delegate");
   assert.equal(firstDelegate.threadId, initialLeadThreadId);
   assert.equal(firstDelegate.turnId, initialLeadTurnId);
   assert.equal(firstDelegate.assignmentId, leadAssignmentId);
@@ -429,7 +428,7 @@ async function run() {
 
   runtime.afterCallback = async (_call, observation) => {
     if (
-      observation.tool !== "ensemble_report_result" ||
+      observation.tool !== "cab_report_result" ||
       observation.assignmentId !== childAssignmentId ||
       firstResultPauseApplied
     )
@@ -446,11 +445,7 @@ async function run() {
   };
 
   progress("initial-worker-result-held");
-  const firstResultCall = await waitForTool(
-    runtime,
-    "ensemble_report_result",
-    1,
-  );
+  const firstResultCall = await waitForTool(runtime, "cab_report_result", 1);
   assert.equal(firstResultCall.threadId, workerTurn.threadId);
   assert.equal(firstResultCall.turnId, workerTurn.turnId);
   assert.equal(firstResultPauseApplied, true);
@@ -522,10 +517,7 @@ async function run() {
   });
 
   progress("resumed-lead-follow-up-callback");
-  const resumedFollowUp = await waitForTool(
-    runtime,
-    "ensemble_request_follow_up",
-  );
+  const resumedFollowUp = await waitForTool(runtime, "cab_request_follow_up");
   assert.equal(resumedFollowUp.threadId, initialLeadThreadId);
   assert.notEqual(resumedFollowUp.turnId, initialLeadTurnId);
   assert.ok(resumedFollowUp.callId);
@@ -533,7 +525,7 @@ async function run() {
     runtime.resumptions.some(
       (item) =>
         item.threadId === initialLeadThreadId &&
-        item.tools.includes("ensemble_request_follow_up"),
+        item.tools.includes("cab_request_follow_up"),
     ),
     "the restarted App Server must register dynamic tools on the resumed lead thread",
   );
@@ -576,11 +568,7 @@ async function run() {
   assert.equal(service.domain().assignment(childAssignmentId).version, 2);
 
   progress("worker-revision-result");
-  const revisedResultCall = await waitForTool(
-    runtime,
-    "ensemble_report_result",
-    0,
-  );
+  const revisedResultCall = await waitForTool(runtime, "cab_report_result", 0);
   assert.equal(revisedResultCall.threadId, workerTurn.threadId);
   assert.equal(revisedResultCall.turnId, revisedWorkerTurn.turnId);
   await waitForWorkState(
@@ -613,7 +601,7 @@ async function run() {
   recordScheduler("worker-revision-result-completed");
 
   progress("resumed-lead-completion-callback");
-  const completion = await waitForTool(runtime, "ensemble_request_completion");
+  const completion = await waitForTool(runtime, "cab_request_completion");
   assert.equal(completion.threadId, initialLeadThreadId);
   assert.ok(completion.callId);
   assert.ok(

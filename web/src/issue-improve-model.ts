@@ -258,8 +258,7 @@ export type Stored = z.infer<typeof storedSchema>;
 
 export const emptyStored: Stored = { note: "" };
 
-export const storageKey = (taskId: string) =>
-  `ensemble.issue-improve.v1.${taskId}`;
+export const storageKey = (taskId: string) => `cab.issue-improve.v1.${taskId}`;
 
 export function readStored(
   storage: Pick<Storage, "getItem">,
@@ -295,12 +294,12 @@ export const issueImproveCopy = {
   capacity:
     "Counts toward capacity and stops by itself after 10:00 of running. It also works while the task has work running.",
   irreversible:
-    "Sending replaces the title and body on GitHub, and Ensemble cannot undo it. The current text stays in this review, but there is no restore action.",
+    "Sending replaces the title and body on GitHub, and cab cannot undo it. The current text stays in this review, but there is no restore action.",
   guard:
     "Sends one edit under this repository’s issue edit grant. It is refused, with nothing sent, if the issue changed on GitHub after the draft started.",
   stale:
     "The issue changed on GitHub after this draft started. Nothing was sent. Redraft to start again from the current text; your edits stay on screen until the new draft arrives.",
-  held: "Held: we couldn’t confirm whether GitHub applied the edit. Check the issue on GitHub. Ensemble won’t send it again, and the edit stays held across reloads and restarts.",
+  held: "Held: we couldn’t confirm whether GitHub applied the edit. Check the issue on GitHub. cab won’t send it again, and the edit stays held across reloads and restarts.",
   heldPending:
     "Sending. The edit is in progress and can’t be sent again from here.",
   sent: "Sent. GitHub shows the new title and body. The title and outcome here update after the next sync.",

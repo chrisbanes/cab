@@ -24,7 +24,7 @@ function nextCommand(): string {
 }
 
 export function coordinationFixture() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-coordination-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-coordination-"));
   const filename = join(directory, "coordination.sqlite");
   let db = new DatabaseSync(filename);
   let domain!: DomainStore;

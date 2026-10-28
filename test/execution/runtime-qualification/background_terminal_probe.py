@@ -94,7 +94,7 @@ def require(response):
 
 try:
     emit(predeclared_observation_seconds=3, fixture_natural_completion_seconds=30, server=process(server.pid), oracle=process(oracle.pid))
-    send("initialize", 1, {"clientInfo": {"name": "ensemble_s01_bgterminal", "title": "Ensemble S01 Background Terminal", "version": "0.1.0"}, "capabilities": {"experimentalApi": True}})
+    send("initialize", 1, {"clientInfo": {"name": "cab_s01_bgterminal", "title": "cab S01 Background Terminal", "version": "0.1.0"}, "capabilities": {"experimentalApi": True}})
     require(receive(lambda e: e.get("id") == 1))
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

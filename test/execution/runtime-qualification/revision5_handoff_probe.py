@@ -136,7 +136,7 @@ def require(event):
 
 try:
     emit(predeclared_observation_seconds=2, child_natural_timeout_seconds=30, app_server=proc(server.pid), oracle=proc(oracle.pid))
-    send(1, "initialize", {"clientInfo": {"name": "ensemble_s01_r5", "title": "Ensemble S01 R5", "version": "0.1.0"}, "capabilities": {"experimentalApi": True}})
+    send(1, "initialize", {"clientInfo": {"name": "cab_s01_r5", "title": "cab S01 R5", "version": "0.1.0"}, "capabilities": {"experimentalApi": True}})
     require(receive(lambda e: e.get("id") == 1))
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

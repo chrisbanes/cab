@@ -64,7 +64,7 @@ test("fresh operator message continues a refused canonical initial with exact cu
         threadId,
         turnId,
         callId: "initial-continuation-completion",
-        tool: "ensemble_request_completion",
+        tool: "cab_request_completion",
         arguments: { reviewedResultIds: [] },
       });
       assert.equal(result.success, true);
@@ -381,7 +381,7 @@ test("refused initial exemption feeds external completion actions and preserves 
         threadId,
         turnId,
         callId: "completion-action-proof",
-        tool: "ensemble_request_completion",
+        tool: "cab_request_completion",
         arguments: { reviewedResultIds: [] },
       };
       const caller = coordination.deliveryCaller(call);

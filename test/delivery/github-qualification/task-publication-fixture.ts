@@ -6,7 +6,7 @@ const fixtureRepository = "chrisbanes/ensemble-s07a-fixture";
 const owner = "chrisbanes";
 /** The maintainer's own Project 6 and every Project linked to this repository are never touched. */
 const forbiddenProjectNumber = 6;
-const forbiddenRepository = "chrisbanes/ensemble";
+const forbiddenRepository = "chrisbanes/cab";
 const publicationActions = [
   z.literal("issue.create"),
   z.literal("project.item.add"),
@@ -64,7 +64,7 @@ export type TaskPublicationManifest = z.output<
 export const statusOptionNames = ["Todo", "Ready"] as const;
 /** The filters a scratch Project source may use: none, or issues only. */
 export const projectFilters = ["", "is:issue"] as const;
-export const projectTitle = (runId: string) => `ensemble-1167-${runId}`;
+export const projectTitle = (runId: string) => `cab-1167-${runId}`;
 export const issueTitle = (runId: string) =>
   `Task publication qualification ${runId}`;
 /** The readiness label the run's rule names. */
@@ -88,14 +88,14 @@ export const harnessDocuments = {
 
 /** The operation prefixes of the product's own documents a run may send. */
 const productOperations = [
-  "query EnsembleDeliveryRepository",
-  "query EnsembleDeliveryField",
-  "query EnsembleDeliveryIssueItems",
-  "mutation EnsembleDeliveryItemAdd",
-  "mutation EnsembleDeliveryProject",
-  "query EnsembleProjectPage",
-  "query EnsembleProjectFieldValues",
-  "query EnsembleProjectFields",
+  "query CabDeliveryRepository",
+  "query CabDeliveryField",
+  "query CabDeliveryIssueItems",
+  "mutation CabDeliveryItemAdd",
+  "mutation CabDeliveryProject",
+  "query CabProjectPage",
+  "query CabProjectFieldValues",
+  "query CabProjectFields",
 ] as const;
 
 /**
@@ -238,12 +238,12 @@ export class TaskPublicationGuard {
           !this.ids.has(value)
         )
           throw new Error(`guard: unexpected id ${key}`);
-      if (query.startsWith("mutation EnsembleDeliveryItemAdd")) {
+      if (query.startsWith("mutation CabDeliveryItemAdd")) {
         if (!this.project || variables.project !== this.project.nodeId)
           throw new Error("guard: unexpected Project item add");
         this.writes.push("POST /graphql addProjectV2ItemById");
       }
-      if (query.startsWith("mutation EnsembleDeliveryProject")) {
+      if (query.startsWith("mutation CabDeliveryProject")) {
         if (
           !this.project ||
           variables.project !== this.project.nodeId ||

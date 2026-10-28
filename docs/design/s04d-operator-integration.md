@@ -24,7 +24,7 @@ observed execution. It discloses the actual default policy (workspace writes,
 broad host-permitted reads, command network disabled, approval policy never)
 and states that strict isolation, exhaustive ambient access containment and
 universal descendant containment have not been proved. Existing Codex login
-and host/deployment controls remain the execution trust boundary; Ensemble does
+and host/deployment controls remain the execution trust boundary; cab does
 not claim an independent sandbox.
 Runtime assignment status follows the latest persisted request
 sequence for the current assignment revision, so an older completed turn cannot

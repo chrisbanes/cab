@@ -92,7 +92,7 @@ export function db(service: StandaloneService) {
 }
 
 export async function refusedInitial(initialBatch = false) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-refused-initial-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-refused-initial-"));
   const projectId = randomUUID(),
     taskId = randomUUID(),
     profileId = randomUUID();

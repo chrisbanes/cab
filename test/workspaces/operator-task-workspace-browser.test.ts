@@ -1014,7 +1014,7 @@ test("mounted Inbox discovers new requests and holds through timer and header re
           threadId: wa.threadId!,
           turnId: wa.turnId!,
           callId: randomUUID(),
-          tool: "ensemble_ask_question",
+          tool: "cab_ask_question",
           arguments: { question: prompt },
         })
       ).success,
@@ -1057,7 +1057,7 @@ test("mounted Inbox discovers new requests and holds through timer and header re
         threadId: wb.threadId!,
         turnId: wb.turnId!,
         callId: randomUUID(),
-        tool: "ensemble_request_approval",
+        tool: "cab_request_approval",
         arguments: {
           action: "Inspect retained material",
           material: { scope: "fixture" },

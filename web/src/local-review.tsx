@@ -74,8 +74,7 @@ const anchorStatusLabel = {
 const timeLabel = (value: number) => new Date(value).toLocaleString();
 type DraftRead = ReturnType<typeof localReviewDraftReadSchema.parse>["data"];
 
-const sendStorageKey = (taskId: string) =>
-  `ensemble:local-review-send:${taskId}`;
+const sendStorageKey = (taskId: string) => `cab:local-review-send:${taskId}`;
 
 /** Frozen send identity survives reload; it carries no comment text. */
 function storeSend(taskId: string, send: LocalReviewSend | null) {

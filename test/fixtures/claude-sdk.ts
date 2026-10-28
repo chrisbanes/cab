@@ -119,7 +119,7 @@ export function fakeSdk(
           log.push("prompt");
           const tools =
             (
-              options.mcpServers?.ensemble as unknown as
+              options.mcpServers?.cab as unknown as
                 | undefined
                 | {
                     instance: { tools: FakeTool[] };
@@ -176,7 +176,7 @@ export function fakeSdk(
     },
     createSdkMcpServer: ((options: { tools: FakeTool[] }) => ({
       type: "sdk",
-      name: "ensemble",
+      name: "cab",
       instance: { tools: options.tools },
     })) as never,
     // Like the MCP layer, arguments are parsed by the advertised object shape.

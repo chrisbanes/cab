@@ -53,7 +53,7 @@ export async function completedLead(f: Fixture, name: string) {
     threadId: first.threadId,
     turnId: first.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary: "Lead finished the first pass" },
   });
   assert.equal(reported.success, true, reported.text);

@@ -129,7 +129,7 @@ const inboxList: BrowseCommand = {
                   [
                     i.kind,
                     i.harness,
-                    "(ensemble runtime list)",
+                    "(cab runtime list)",
                     "-",
                     "-",
                     oneLine(i.reason, 60),
@@ -137,7 +137,7 @@ const inboxList: BrowseCommand = {
                 : [
                     i.kind,
                     i.taskId,
-                    i.interactionId ?? `(ensemble task get ${i.taskId})`,
+                    i.interactionId ?? `(cab task get ${i.taskId})`,
                     i.revision === null ? "-" : String(i.revision),
                     oneLine(i.requesterName, 30),
                     oneLine(i.reason, 60),
@@ -149,7 +149,7 @@ const inboxList: BrowseCommand = {
               i.kind === "intervention" &&
               i.attentionCode === "unresolved-result",
           )
-            ? "\nAn undelivered result's 'ensemble task get TASK_ID' names its 'ensemble result deliver' command."
+            ? "\nAn undelivered result's 'cab task get TASK_ID' names its 'cab result deliver' command."
             : "")
         : "Nothing needs attention.",
     });
@@ -196,7 +196,7 @@ const questionGet: BrowseCommand = {
           ? [
               `Answer every question explicitly; recommended or preselected options are never an answer.`,
               `Answers file shape: ${template}`,
-              `Then: ensemble question answer ${taskId} ${interactionId} --expected-revision ${q.revision} --answers-file FILE`,
+              `Then: cab question answer ${taskId} ${interactionId} --expected-revision ${q.revision} --answers-file FILE`,
             ]
           : []),
       ].join("\n"),
@@ -256,7 +256,7 @@ const approvalGet: BrowseCommand = {
         "A decision does not clear Stop, pause or other holds, and cannot be changed once recorded.",
         ...(approval.status === "open"
           ? [
-              `Decide: ensemble approval decide ${taskId} ${interactionId} --decision approved|denied --expected-revision ${approval.revision}${approval.materialHash ? ` --material-hash ${approval.materialHash}` : ""}`,
+              `Decide: cab approval decide ${taskId} ${interactionId} --decision approved|denied --expected-revision ${approval.revision}${approval.materialHash ? ` --material-hash ${approval.materialHash}` : ""}`,
             ]
           : []),
       ].join("\n"),
@@ -306,7 +306,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
         "question answer TASK_ID INTERACTION_ID --expected-revision N --answers-file FILE [--request-id UUID]",
       positionals: 2,
       expects:
-        "--expected-revision: the question's revision ('ensemble question get TASK_ID INTERACTION_ID'); required.",
+        "--expected-revision: the question's revision ('cab question get TASK_ID INTERACTION_ID'); required.",
       flags: ["expected-revision", "answers-file", "request-id"],
       async run(ctx) {
         const { taskId, interactionId } = ids(ctx.positionals);
@@ -323,7 +323,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
             "policy-denied",
             "The question form is withheld; it cannot be answered here.",
             {
-              fix: `Run 'ensemble question get ${taskId} ${interactionId}' to see what is withheld.`,
+              fix: `Run 'cab question get ${taskId} ${interactionId}' to see what is withheld.`,
             },
           );
         const answers = await readAnswers(ctx.values["answers-file"], q.form);
@@ -364,7 +364,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
             "conflict",
             `The question is ${q.status}; it cannot be answered.`,
             {
-              fix: `Run 'ensemble question get ${taskId} ${interactionId}' to see its state.`,
+              fix: `Run 'cab question get ${taskId} ${interactionId}' to see its state.`,
             },
           );
         if (!reused && q.revision !== revision)
@@ -372,7 +372,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
             "conflict",
             `The question is at revision ${q.revision}, not ${revision}.`,
             {
-              fix: `Retry with --expected-revision ${q.revision}; 'ensemble question get ${taskId} ${interactionId}' shows it.`,
+              fix: `Retry with --expected-revision ${q.revision}; 'cab question get ${taskId} ${interactionId}' shows it.`,
             },
           );
         const { receipt, request } = await sendCommand(ctx, session, {
@@ -415,7 +415,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
         "approval decide TASK_ID INTERACTION_ID --decision approved|denied --expected-revision N [--material-hash HASH] [--request-id UUID]",
       positionals: 2,
       expects:
-        "--expected-revision: the approval's revision ('ensemble approval get TASK_ID INTERACTION_ID'); required.",
+        "--expected-revision: the approval's revision ('cab approval get TASK_ID INTERACTION_ID'); required.",
       flags: ["decision", "expected-revision", "material-hash", "request-id"],
       async run(ctx) {
         const { taskId, interactionId } = ids(ctx.positionals);
@@ -455,7 +455,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
             "policy-denied",
             "The approval action is withheld; it cannot be decided here.",
             {
-              fix: `Run 'ensemble approval get ${taskId} ${interactionId}' to see what is withheld.`,
+              fix: `Run 'cab approval get ${taskId} ${interactionId}' to see what is withheld.`,
             },
           );
         // Send exactly what the service disclosed; a withheld material is filled
@@ -485,7 +485,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
               "conflict",
               `The approval is already ${approval.status}.`,
               {
-                fix: `Run 'ensemble approval get ${taskId} ${interactionId}' to see the decision.`,
+                fix: `Run 'cab approval get ${taskId} ${interactionId}' to see the decision.`,
               },
             );
           if (approval.revision !== revision)
@@ -493,7 +493,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
               "conflict",
               `The approval is at revision ${approval.revision}, not ${revision}.`,
               {
-                fix: `Retry with --expected-revision ${approval.revision}; 'ensemble approval get ${taskId} ${interactionId}' shows it.`,
+                fix: `Retry with --expected-revision ${approval.revision}; 'cab approval get ${taskId} ${interactionId}' shows it.`,
               },
             );
           if ((approval.materialHash ?? undefined) !== hash)
@@ -501,7 +501,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
               "conflict",
               "--material-hash does not match the approval's material.",
               {
-                fix: `Copy the material hash from 'ensemble approval get ${taskId} ${interactionId}'.`,
+                fix: `Copy the material hash from 'cab approval get ${taskId} ${interactionId}'.`,
               },
             );
           if (decision === "approved" && !approval.approvable)
@@ -509,7 +509,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
               "policy-denied",
               "This approval cannot be approved: its material or target is withheld or was never recorded. It can only be denied.",
               {
-                fix: `Decide it with --decision denied; 'ensemble approval get ${taskId} ${interactionId}' shows the material.`,
+                fix: `Decide it with --decision denied; 'cab approval get ${taskId} ${interactionId}' shows the material.`,
               },
             );
         }
@@ -547,7 +547,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
         "result deliver TASK_ID RESULT_ID [--expected-revision N] [--request-id UUID]",
       positionals: 2,
       expects:
-        "--expected-revision: the undelivered result's revision ('ensemble task get TASK_ID --output json' lists data.unresolvedResults); omitted, the revision this command reads first.",
+        "--expected-revision: the undelivered result's revision ('cab task get TASK_ID --output json' lists data.unresolvedResults); omitted, the revision this command reads first.",
       flags: ["expected-revision", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -567,7 +567,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
         const row = read.results.find((r) => r.resultId === resultId);
         if (!row && !item)
           throw new CliError("not-found", `No such result on task ${taskId}.`, {
-            fix: `Run 'ensemble result list ${taskId}' to see its results.`,
+            fix: `Run 'cab result list ${taskId}' to see its results.`,
           });
         const nameOf = (id: string) =>
           read.assignments.find((a) => a.assignmentId === id)?.name ?? id;
@@ -578,7 +578,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
               ? `The result was already delivered to ${nameOf(id)}.`
               : "The result is not waiting for a destination.",
             {
-              fix: `Run 'ensemble result get ${taskId} ${resultId}' to see where it went. If an earlier attempt's reply was lost, rerun it with its --request-id and --expected-revision.`,
+              fix: `Run 'cab result get ${taskId} ${resultId}' to see where it went. If an earlier attempt's reply was lost, rerun it with its --request-id and --expected-revision.`,
             },
           );
         if (
@@ -589,7 +589,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
             "policy-denied",
             "No lead or requester on this task can receive it; the result stays undelivered. Nothing was sent.",
             {
-              fix: `Run 'ensemble task get ${taskId}' to see the task's assignments.`,
+              fix: `Run 'cab task get ${taskId}' to see the task's assignments.`,
             },
           );
         // A delivered result has left unresolvedResults, so a replay rebuilds its material from the record.
@@ -653,7 +653,7 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
               }`,
               {
                 ...error.extra,
-                fix: `Run 'ensemble task get ${taskId}' to see the result's current state, then rerun (omit --expected-revision to use the current revision, and use a new --request-id if you reused one).`,
+                fix: `Run 'cab task get ${taskId}' to see the result's current state, then rerun (omit --expected-revision to use the current revision, and use a new --request-id if you reused one).`,
               },
             );
           }

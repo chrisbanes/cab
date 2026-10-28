@@ -1070,7 +1070,7 @@ async function startHome(
     suffix?: string;
   } = {},
 ) {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-setup-home-"));
+  const root = await mkdtemp(join(tmpdir(), "cab-setup-home-"));
   const home = join(root, "Home Folder ünï");
   await mkdir(home);
   const f = await createOperatorFixture();
@@ -1148,7 +1148,7 @@ test("the setup home read returns null for an unusable home", async (t) => {
   assert.equal(homeOf("/tmp/Home Folder ünï/"), "/tmp/Home Folder ünï");
   assert.equal(homeOf("/tmp/a/./b"), resolve("/tmp/a/b"));
   // Exactly the longest suggested reference the command accepts.
-  const suffix = "/.ensemble/claude/claude-token";
+  const suffix = "/.cab/claude/claude-token";
   const longest = `/${"y".repeat(1024 - "file:/".length - suffix.length)}`;
   assert.equal(`file:${longest}${suffix}`.length, 1024);
   assert.equal(homeOf(longest), longest);
@@ -1215,7 +1215,7 @@ test("the setup home read records and logs nothing and the home stays out of eve
   const read = await s.issue("read", "home-leak-ro");
   const write = await s.issue("read-write", "home-leak-rw");
   // A reference under the home is configured, as Add Claude would save it.
-  const reference = `file:${s.home}/.ensemble/claude/claude-token`;
+  const reference = `file:${s.home}/.cab/claude/claude-token`;
   assert.equal(
     (
       await s.sessionPost("/api/operator/commands", {
@@ -1280,7 +1280,7 @@ test("the setup home read refuses without a current session even when routed pas
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
-    home: "/tmp/ensemble-home",
+    home: "/tmp/cab-home",
   });
   const status = (call: () => unknown) => {
     try {

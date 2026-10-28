@@ -30,9 +30,9 @@ const TAG_LENGTH = 16;
 const HEADER_LENGTH = 16 + 4 + 1 + 65;
 export const PUSH_PLAINTEXT_LIMIT = 4096 - HEADER_LENGTH - 1 - TAG_LENGTH;
 const MAX_ENDPOINT_LENGTH = 2048;
-const KEY_FILE_FORMAT = "ensemble-operator-push-vapid";
+const KEY_FILE_FORMAT = "cab-operator-push-vapid";
 const MAX_KEY_FILE_BYTES = 4_096;
-const VAPID_SUBJECT = "mailto:operator@ensemble.invalid";
+const VAPID_SUBJECT = "mailto:operator@cab.invalid";
 const VAPID_LIFETIME_MS = 12 * 60 * 60 * 1000;
 
 /** Exact hosts of the browser vendors' push services, and the domains whose subdomains qualify. */

@@ -145,7 +145,7 @@ const cards: Record<
     title: "Not supported here",
     tone: "idle",
     body: () =>
-      "This browser can't receive notifications on this address. It needs service workers, Push and Notifications, and a secure address: https:// or http://127.0.0.1. Open Ensemble at its 127.0.0.1 address or over HTTPS.",
+      "This browser can't receive notifications on this address. It needs service workers, Push and Notifications, and a secure address: https:// or http://127.0.0.1. Open cab at its 127.0.0.1 address or over HTTPS.",
   },
   "service-unavailable": {
     title: "Unavailable on the service",

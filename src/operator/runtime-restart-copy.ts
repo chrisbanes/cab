@@ -75,7 +75,7 @@ export function readinessFix(
  * schedule rather than its current attempt, so it holds whichever stored wait text was read.
  */
 export const unavailableNote = (harness: Harness) =>
-  `The ${executionHarnessLabels[harness]} runtime is unavailable. Ensemble restarts it automatically after ${restartScheduleText}; if those retries run out, ${toggleRemedy}.`;
+  `The ${executionHarnessLabels[harness]} runtime is unavailable. cab restarts it automatically after ${restartScheduleText}; if those retries run out, ${toggleRemedy}.`;
 
 /** The Inbox item for a runtime whose retries ran out (SPEC attention inbox). */
 export const runtimeInboxHeadline = (harness: Harness) =>

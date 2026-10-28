@@ -76,7 +76,7 @@ def result(event):
 
 
 def initialize(n):
-    send(n, "initialize", {"clientInfo": {"name": "ensemble_s01_minimum_turn",
+    send(n, "initialize", {"clientInfo": {"name": "cab_s01_minimum_turn",
         "title": "S01 Minimum Turn", "version": "0.1.0"}})
     result(receive(lambda e: e.get("id") == n))
     server.stdin.write('{"method":"initialized","params":{}}\n')

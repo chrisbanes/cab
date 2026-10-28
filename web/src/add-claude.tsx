@@ -15,12 +15,12 @@ import "./add-claude.css";
  * types it after copying the token. The token never passes through this page.
  */
 const claudeTokenSetup = [
-  'mkdir -m 700 -p "$HOME/.ensemble/claude"',
-  'install -m 600 /dev/null "$HOME/.ensemble/claude/claude-token"',
+  'mkdir -m 700 -p "$HOME/.cab/claude"',
+  'install -m 600 /dev/null "$HOME/.cab/claude/claude-token"',
 ].join("\n");
 const claudeTokenWrite = [
-  'pbpaste > "$HOME/.ensemble/claude/claude-token"',
-  "stat -f '%Su %Lp' \"$HOME/.ensemble/claude/claude-token\"",
+  'pbpaste > "$HOME/.cab/claude/claude-token"',
+  "stat -f '%Su %Lp' \"$HOME/.cab/claude/claude-token\"",
 ].join("\n");
 
 const status = {

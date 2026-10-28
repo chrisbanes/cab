@@ -231,7 +231,7 @@ async function withService<T>(
   ) => Promise<T>,
   clock = new ManualRestartClock(),
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-restart-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-restart-"));
   const dataDir = join(root, "data");
   const context = openService(dataDir, clock, options);
   try {
@@ -738,7 +738,7 @@ test("stopping the service during an attempt stops the new runtime and arms noth
 });
 
 test("a boot-time start failure uses the same schedule and a service restart starts it fresh", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-restart-boot-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-restart-boot-"));
   const dataDir = join(root, "data");
   const clock = new ManualRestartClock();
   const slept: number[] = [];
@@ -792,9 +792,7 @@ test("a boot-time start failure uses the same schedule and a service restart sta
 });
 
 test("a start that fails while the service starts leaves no sleeping retry", async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-restart-teardown-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-restart-teardown-"));
   const clock = new ManualRestartClock();
   const { service } = openService(join(root, "data"), clock, {
     behaviours: { codex: behaviour({ failStart: true }) },

@@ -51,7 +51,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       expects:
-        "--expected-version: the project's version ('ensemble project get PROJECT_ID'); omitted, the version this command reads.",
+        "--expected-version: the project's version ('cab project get PROJECT_ID'); omitted, the version this command reads.",
       flags: [
         "out",
         "expected-version",

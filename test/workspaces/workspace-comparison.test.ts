@@ -48,7 +48,7 @@ function digest(value: string | Buffer): string {
 }
 
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-comparison-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-comparison-"));
   const db = new DatabaseSync(join(root, "standalone.sqlite"));
   new Store(db).ensureHost("workspace-comparison-test");
   const manager = new WorkspaceManager(
@@ -193,12 +193,12 @@ test("working-tree comparisons disable configured clean and process filters", as
   const clean = executable(
     f.root,
     "filter-clean-hook",
-    `#!/bin/sh\nprintf C >> "$ENSEMBLE_FILTER_MARKER"\ncat\n`,
+    `#!/bin/sh\nprintf C >> "$CAB_FILTER_MARKER"\ncat\n`,
   );
   const processHook = executable(
     f.root,
     "filter-process-hook",
-    `#!/bin/sh\nprintf P >> "$ENSEMBLE_FILTER_MARKER"\nexit 0\n`,
+    `#!/bin/sh\nprintf P >> "$CAB_FILTER_MARKER"\nexit 0\n`,
   );
   git(repo, "config", "filter.cleanprobe.clean", clean);
   git(repo, "config", "filter.cleanprobe.required", "true");
@@ -207,8 +207,8 @@ test("working-tree comparisons disable configured clean and process filters", as
   writeFileSync(join(repo, "clean.txt"), "clean after\n");
   writeFileSync(join(repo, "process.txt"), "process after\n");
 
-  const previousMarker = process.env.ENSEMBLE_FILTER_MARKER;
-  process.env.ENSEMBLE_FILTER_MARKER = marker;
+  const previousMarker = process.env.CAB_FILTER_MARKER;
+  process.env.CAB_FILTER_MARKER = marker;
   let comparison: WorkspaceComparisonSnapshot;
   try {
     const diff = [
@@ -267,8 +267,8 @@ test("working-tree comparisons disable configured clean and process filters", as
       f.current,
     );
   } finally {
-    if (previousMarker === undefined) delete process.env.ENSEMBLE_FILTER_MARKER;
-    else process.env.ENSEMBLE_FILTER_MARKER = previousMarker;
+    if (previousMarker === undefined) delete process.env.CAB_FILTER_MARKER;
+    else process.env.CAB_FILTER_MARKER = previousMarker;
   }
 
   assert.equal(comparison.state, "available");

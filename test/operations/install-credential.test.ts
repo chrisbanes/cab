@@ -125,7 +125,7 @@ test("installCli stores the login like auth login: token file at 0600, or the ke
   const keychain = new MemoryKeychain();
   const deps = (): CliDeps =>
     ({
-      env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+      env: { CAB_CLI_CONFIG_DIR: h.configDir },
       stdin: new PassThrough(),
       stdout: new PassThrough(),
       stderr: new PassThrough(),
@@ -196,7 +196,7 @@ test("installCli doctor writes the readiness table to stderr only", async (t) =>
   });
   const keychain = new MemoryKeychain();
   const deps = {
-    env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+    env: { CAB_CLI_CONFIG_DIR: h.configDir },
     stdin: new PassThrough(),
     stdout,
     stderr,
@@ -237,7 +237,7 @@ test("a stalled or interrupted credential store is bounded, revokes the credenti
     };
     const keychain = new MemoryKeychain();
     const deps = {
-      env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+      env: { CAB_CLI_CONFIG_DIR: h.configDir },
       stdin: new PassThrough(),
       stdout: new PassThrough(),
       stderr: new PassThrough(),
@@ -371,7 +371,7 @@ test("a Keychain write that blocks is cancelled by the interrupt and nothing is 
     },
   };
   const deps = {
-    env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+    env: { CAB_CLI_CONFIG_DIR: h.configDir },
     stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
@@ -499,7 +499,7 @@ test("a Keychain cleanup that blocks is bounded: the new login stays, the restor
       }),
   };
   const deps = {
-    env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+    env: { CAB_CLI_CONFIG_DIR: h.configDir },
     stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
@@ -635,7 +635,7 @@ test("installCli doctor stops reading when its signal aborts", async (t) => {
     );
   };
   const deps = {
-    env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+    env: { CAB_CLI_CONFIG_DIR: h.configDir },
     stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),

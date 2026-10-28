@@ -793,8 +793,8 @@ test("lost replies reuse the unresolved key once; read-only and managed callers 
   const sent = posts(o);
   r = await o.h.run([...create, "--connection", "rw"], {
     env: {
-      ENSEMBLE_CLI_CONFIG_DIR: o.h.configDir,
-      ENSEMBLE_MANAGED_ASSIGNMENT: "1",
+      CAB_CLI_CONFIG_DIR: o.h.configDir,
+      CAB_MANAGED_ASSIGNMENT: "1",
     },
   });
   assert.equal(r.code, 3, r.out + r.err);
@@ -847,11 +847,11 @@ test("task get prints waits in the flow's order with the Fix command or the bloc
   assert.ok(at > 0, human.out);
   assert.deepEqual(lines.slice(at, at + 8), [
     "Waiting: Project paused",
-    `  Fix: ensemble project prepare ${projectId} --out project.json --paused false`,
-    "  Fix: ensemble project apply --file project.json",
+    `  Fix: cab project prepare ${projectId} --out project.json --paused false`,
+    "  Fix: cab project apply --file project.json",
     "Waiting: Project has no lead",
-    `  Fix: ensemble project prepare ${projectId} --out project.json --lead-profile PROFILE_ID`,
-    "  Fix: ensemble project apply --file project.json",
+    `  Fix: cab project prepare ${projectId} --out project.json --lead-profile PROFILE_ID`,
+    "  Fix: cab project apply --file project.json",
     "Waiting: Blocked by a task dependency",
     `  Blocked by task ${blocker} (Blocking task)`,
   ]);
@@ -1013,7 +1013,7 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
       page.includes(
         closure === "held"
           ? "Held · closed on GitHub"
-          : "Done · closed on GitHub, not delivered by Ensemble",
+          : "Done · closed on GitHub, not delivered by cab",
       ),
       page,
     );
@@ -1143,10 +1143,7 @@ test("an unproved own-delivery closure attribution is explained on every task vi
   ]) {
     const human = await o.h.run([...args, "--connection", "ro"]);
     assert.equal(human.code, 0, human.err);
-    assert.ok(
-      human.out.includes("closure not attributed to Ensemble"),
-      human.out,
-    );
+    assert.ok(human.out.includes("closure not attributed to cab"), human.out);
   }
   const ui = new LocalOperatorUi(d, undefined, sources);
   const page = ui.task(taskId);
@@ -1156,9 +1153,7 @@ test("an unproved own-delivery closure attribution is explained on every task vi
     "Source hold: closure-attribution-unproved",
   ])
     assert.ok(page.includes(marker), marker);
-  assert.ok(
-    ui.project(s.projectId).includes("closure not attributed to Ensemble"),
-  );
+  assert.ok(ui.project(s.projectId).includes("closure not attributed to cab"));
 });
 
 test("task get names an imported Draft task's unmet readiness condition", async (t) => {
@@ -1608,7 +1603,7 @@ test("a stale expected version names the current version and the read command", 
       `Task ${s.taskId} is at version ${current}, not ${current - 1}\\.`,
     ),
   );
-  assert.match(fixOf(human.err), new RegExp(`ensemble task get ${s.taskId}`));
+  assert.match(fixOf(human.err), new RegExp(`cab task get ${s.taskId}`));
   assert.match(
     fixOf(human.err),
     new RegExp(`--expected-version ${current}\\b`),
@@ -1658,7 +1653,7 @@ test("a conflict whose re-read fails still names the read command", async (t) =>
   const human = await o.h.run(args, { fetch: failReadAfterPost() });
   assert.equal(human.code, 4);
   assert.doesNotMatch(human.err, /is at version/);
-  assert.match(fixOf(human.err), new RegExp(`ensemble task get ${s.taskId}`));
+  assert.match(fixOf(human.err), new RegExp(`cab task get ${s.taskId}`));
 
   const json = await o.h.run([...args, "--output", "json"], {
     fetch: failReadAfterPost(),
@@ -1706,7 +1701,7 @@ test("a reused request id with other material is not reported as a stale version
   ]);
   assert.equal(r.code, 4);
   assert.doesNotMatch(r.err, /not \d+\./);
-  assert.match(fixOf(r.err), new RegExp(`ensemble task get ${s.taskId}`));
+  assert.match(fixOf(r.err), new RegExp(`cab task get ${s.taskId}`));
   assert.match(fixOf(r.err), /new one/);
   assert.equal(
     (await cli("rw", ["task", "get", s.taskId])).json().data.task.title,
@@ -1739,7 +1734,7 @@ test("task message with a stale assignment version names the assignment version"
       `Assignment ${lead} \\(completed\\) is at version ${version}, not ${version + 1}\\.`,
     ),
   );
-  assert.match(fixOf(r.err), new RegExp(`ensemble assignment get ${lead}`));
+  assert.match(fixOf(r.err), new RegExp(`cab assignment get ${lead}`));
   assert.match(fixOf(r.err), new RegExp(`--expected-version ${version}\\b`));
   assert.equal(d.assignment(lead).state, "completed");
 });
@@ -1776,7 +1771,7 @@ test("task message to an assignment outside the task is denied with the reason",
   );
   assert.match(
     fixOf(local.err),
-    new RegExp(`ensemble task get ${here.taskId} --output json`),
+    new RegExp(`cab task get ${here.taskId} --output json`),
   );
   assert.equal(posts(o), sent);
   const json = await cli("rw", send(here.taskId, elsewhere.assignmentId));
@@ -1832,7 +1827,7 @@ test("follow-up on a task without a lead names the fix", async (t) => {
   assert.match(r.err, /This task has no project lead\. \(conflict\)/);
   assert.equal(
     fixOf(r.err),
-    `Choose a project lead with 'ensemble project prepare ${s.projectId} --out project.json --lead-profile PROFILE_ID', then 'ensemble project apply --file project.json' ('ensemble profile list' shows profile IDs).`,
+    `Choose a project lead with 'cab project prepare ${s.projectId} --out project.json --lead-profile PROFILE_ID', then 'cab project apply --file project.json' ('cab profile list' shows profile IDs).`,
   );
   assert.equal(posts(o), sent);
 });
@@ -1905,7 +1900,7 @@ test("a ready task with no waits ends with Next: task get", async (t) => {
   assert.deepEqual(waitBlock(created.out), []);
   assert.equal(
     created.out.trimEnd().split("\n").at(-1),
-    `Next: ensemble task get ${taskId}`,
+    `Next: cab task get ${taskId}`,
   );
   await o.s.f.service.stopTask(taskId);
   await o.s.f.service.stopTask(project.taskId);
@@ -1925,7 +1920,7 @@ test("a task created not ready names the configure command", async (t) => {
   assert.doesNotMatch(created.out, /\(not ready\)|\bopen\b/);
   assert.equal(
     created.out.trimEnd().split("\n").at(-1),
-    `Next: ensemble task configure ${taskId} --expected-version ${version} --ready true`,
+    `Next: cab task configure ${taskId} --expected-version ${version} --ready true`,
   );
   // The command it names works as printed.
   const next = await o.h.run([
@@ -1954,7 +1949,7 @@ test("a create whose post-read fails still names the next command", async (t) =>
   assert.match(created.out, /\(request [0-9a-f-]{36}\)\./);
   assert.equal(
     created.out.trimEnd().split("\n").at(-1),
-    `Next: ensemble task get ${taskId}`,
+    `Next: cab task get ${taskId}`,
   );
   const key = created.out.match(/\(request ([0-9a-f-]{36})\)/)?.[1];
   assert.equal(

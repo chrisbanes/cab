@@ -144,7 +144,7 @@ export async function chooseKey(
 }
 
 export function reconcileHint(identity: RequestIdentity): string {
-  return `ensemble operation get ${identity.key} --scope ${identity.scope} --type ${identity.type}`;
+  return `cab operation get ${identity.key} --scope ${identity.scope} --type ${identity.type}`;
 }
 
 function matches(
@@ -279,7 +279,7 @@ export async function withConflictRemedy<T>(
     subject: string;
     /** The `--expected-version` that was sent, if any. */
     sent: number | undefined;
-    /** The command that reads the resource, such as `ensemble task get ID`. */
+    /** The command that reads the resource, such as `cab task get ID`. */
     read: string;
     /** The current version, if it can be read now. */
     current: () => Promise<{ version: number; state?: string } | undefined>;

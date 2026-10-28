@@ -174,7 +174,7 @@ const assignmentGet: BrowseCommand = {
           : []),
         ...(a.brief ? ["", oneLine(a.brief, 400)] : []),
         ...(a.state === "held" || Object.values(a.execution.holds).some(Boolean)
-          ? ["", `Recovery: ensemble recovery get ${a.assignmentId}`]
+          ? ["", `Recovery: cab recovery get ${a.assignmentId}`]
           : []),
       ].join("\n"),
     });

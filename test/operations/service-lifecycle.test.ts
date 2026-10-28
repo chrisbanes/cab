@@ -54,7 +54,7 @@ import { tmpdir } from "../fixtures/temp.js";
 
 /** The owner of what these tests create, whoever runs them: the fake host's uid is never the process's. */
 const UID = (() => {
-  const probe = mkdtempSync(join(tmpdir(), "ensemble-uid-"));
+  const probe = mkdtempSync(join(tmpdir(), "cab-uid-"));
   try {
     return statSync(probe).uid;
   } finally {
@@ -302,7 +302,7 @@ function release(stateDir: string, version: string, manifestVersion = version) {
   writeFileSync(
     join(root, "manifest.json"),
     JSON.stringify({
-      schema: "ensemble.release/v1",
+      schema: "cab.release/v1",
       platform: "darwin-arm64",
       version: manifestVersion,
     }),
@@ -358,11 +358,11 @@ async function setup(
   data = false,
   { unpacked = true, auth = true, bare = false } = {},
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-service-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-service-"));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
-  const stateDir = join(home, "Library", "Application Support", "Ensemble");
+  const stateDir = join(home, "Library", "Application Support", "cab");
   // `bare` leaves only what a user has before a first install: their home, the release
   // they unpacked and the auth file they made, and nothing the install itself creates.
   mkdirSync(home, { recursive: true });
@@ -379,11 +379,11 @@ async function setup(
   if (data) markedDataDirectory(join(stateDir, "data"));
   const options: ServiceOptions = {
     stateDir,
-    logDir: join(home, "Library", "Logs", "Ensemble"),
+    logDir: join(home, "Library", "Logs", "cab"),
     agentsDir: join(home, "Library", "LaunchAgents"),
     daemonsDir: join(root, "daemons"),
     daemonPlistOwner: UID,
-    label: "local.ensemble.test",
+    label: "local.cab.test",
     port: await freePort(),
   };
   const snapshots = join(stateDir, "snapshots");
@@ -484,25 +484,18 @@ test("install renders, lints, records and bootstraps the versioned LaunchAgent",
   assert.equal(f.launchd.linted.length, 1);
   assert.match(
     f.launchd.linted[0] ?? "",
-    /\/LaunchAgents\/\.local\.ensemble\.test\.staging-[^/]+\/local\.ensemble\.test\.plist$/,
+    /\/LaunchAgents\/\.local\.cab\.test\.staging-[^/]+\/local\.cab\.test\.plist$/,
   );
   assert.deepEqual(readdirSync(join(f.stateDir, "launchd")), [
-    "local.ensemble.test.json",
+    "local.cab.test.json",
   ]);
-  assert.deepEqual(readdirSync(f.options.agentsDir), [
-    "local.ensemble.test.plist",
-  ]);
-  assert.equal(
-    existsSync(join(f.stateDir, ".local.ensemble.test.lock")),
-    false,
-  );
+  assert.deepEqual(readdirSync(f.options.agentsDir), ["local.cab.test.plist"]);
+  assert.equal(existsSync(join(f.stateDir, ".local.cab.test.lock")), false);
   for (const name of ["data", "snapshots", "launchd"])
     assert.equal(statSync(join(f.stateDir, name)).mode & 0o777, 0o700, name);
   assert.deepEqual(readFileSync(join(f.stateDir, "config.yaml")), legacy);
   for (const log of output.logs)
-    assert.ok(
-      log.startsWith(join(f.options.logDir, "local.ensemble.test.0.1.0.")),
-    );
+    assert.ok(log.startsWith(join(f.options.logDir, "local.cab.test.0.1.0.")));
 });
 
 test("lifecycle options default under HOME", async (t) => {
@@ -518,8 +511,8 @@ test("lifecycle options default under HOME", async (t) => {
     0,
   );
   assert.deepEqual(fake.calls, [
-    ["print", `gui/${UID}/local.ensemble.service`],
-    ["print", "system/local.ensemble.service"],
+    ["print", `gui/${UID}/local.cab.service`],
+    ["print", "system/local.cab.service"],
   ]);
   assert.equal(JSON.parse(out.stdout).installed, false);
   // The checkout is not a release under the default state directory.
@@ -529,7 +522,7 @@ test("lifecycle options default under HOME", async (t) => {
   );
   assert.ok(
     out.stderr.includes(
-      join(f.home, "Library", "Application Support", "Ensemble", "versions"),
+      join(f.home, "Library", "Application Support", "cab", "versions"),
     ),
   );
   assert.equal(
@@ -766,8 +759,8 @@ function environment(plist: string): Record<string, string> {
   );
 }
 
-const RETENTION = "ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS";
-const STORAGE = "ENSEMBLE_DIAGNOSTIC_STORAGE_MIB";
+const RETENTION = "CAB_DIAGNOSTIC_RETENTION_DAYS";
+const STORAGE = "CAB_DIAGNOSTIC_STORAGE_MIB";
 
 /** Installs 0.1.0 over marked data and adds release 0.2.0. */
 async function installed(
@@ -865,7 +858,7 @@ test("upgrade stops, snapshots, re-renders, starts and checks readiness in order
   ]);
   assert.match(
     basename(report.snapshot),
-    /^local\.ensemble\.test\.0\.1\.0-to-0\.2\.0\.\d{8}T\d{6}Z$/,
+    /^local\.cab\.test\.0\.1\.0-to-0\.2\.0\.\d{8}T\d{6}Z$/,
   );
   assert.equal(verifySnapshot(report.snapshot), 0);
   assert.equal(f.record().version, "0.2.0");
@@ -1015,7 +1008,7 @@ test("upgrade preflight refuses an unowned activation or an invalid record", asy
   assert.match(result.report.error, /not created by this installation/);
   assert.deepEqual(f.launchd.mutations(), []);
 
-  writeFileSync(f.recordPath, '{"schema":"ensemble.service/v1"');
+  writeFileSync(f.recordPath, '{"schema":"cab.service/v1"');
   result = await f.upgrade();
   assert.equal(result.report.stage, "preflight");
   assert.match(result.report.error, /install record .* is invalid/);
@@ -1208,20 +1201,17 @@ test("overlapping installs: the loser fails fast on the lock and leaves the winn
   assert.equal(report.stage, "preflight");
   assert.match(
     report.error,
-    /Another service command holds .*\.local\.ensemble\.test\.lock/,
+    /Another service command holds .*\.local\.cab\.test\.lock/,
   );
   assert.deepEqual(f.launchd.mutations(), [
     ["bootstrap", `gui/${UID}`, f.activation],
   ]);
   assert.equal(f.launchd.jobs.size, 1);
   assert.equal(f.record().plistSha256, sha256(f.activation));
-  assert.equal(
-    existsSync(join(f.stateDir, ".local.ensemble.test.lock")),
-    false,
-  );
+  assert.equal(existsSync(join(f.stateDir, ".local.cab.test.lock")), false);
 
   // A stale lock is never taken over; removing it, as the error says, recovers.
-  const lock = join(f.stateDir, ".local.ensemble.test.lock");
+  const lock = join(f.stateDir, ".local.cab.test.lock");
   writeFileSync(lock, '{"pid":999999}\n', { mode: 0o600 });
   const blocked = await f.uninstall();
   assert.equal(blocked.code, 1);
@@ -1473,7 +1463,7 @@ function tarballOf(
     writeFileSync(
       join(build, "versions", version, "manifest.json"),
       JSON.stringify({
-        schema: "ensemble.release/v1",
+        schema: "cab.release/v1",
         platform: "darwin-arm64",
         version,
         note,
@@ -1481,7 +1471,7 @@ function tarballOf(
     );
   const file = join(
     root,
-    `ensemble-${version}${note ?? ""}${omit ? "-incomplete" : ""}.tar.gz`,
+    `cab-${version}${note ?? ""}${omit ? "-incomplete" : ""}.tar.gz`,
   );
   execFileSync("tar", ["-czf", file, "-C", join(build, "versions"), version]);
   rmSync(build, { recursive: true, force: true });
@@ -1522,7 +1512,7 @@ test("install TARBALL unpacks, asks for the password, signs in, runs doctor and 
     programArguments(f.activation)[0],
     join(f.stateDir, "versions", "0.1.0", "node", "bin", "node"),
   );
-  assert.deepEqual(result.cli.prompts, ["Ensemble operator password: "]);
+  assert.deepEqual(result.cli.prompts, ["Operator password: "]);
   assert.deepEqual(
     f.launchd.requests.map(({ method, path }) => `${method} ${path}`),
     [
@@ -1559,7 +1549,7 @@ test("install creates the auth file from the password when it is missing", async
   cli.password = "new-password";
   const result = await f.run({}, cli);
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(cli.prompts, ["New Ensemble operator password: "]);
+  assert.deepEqual(cli.prompts, ["New operator password: "]);
   assert.equal(statSync(f.authFile).mode & 0o777, 0o600);
   const auth = await OperatorAuth.open({
     authFile: f.authFile,
@@ -1693,7 +1683,7 @@ test("an existing version directory is reused when its manifest matches and refu
 
 test("a wrong password, cancelled prompt or failed store leaves the service installed with the manual login line", async (t) => {
   const login = (f: { origin: string }) =>
-    `ensemble auth login --connection local --url ${f.origin}`;
+    `cab auth login --connection local --url ${f.origin}`;
   const settled = async (
     f: Awaited<ReturnType<typeof tarballSetup>>,
     result: Awaited<ReturnType<typeof f.run>>,
@@ -1706,7 +1696,7 @@ test("a wrong password, cancelled prompt or failed store leaves the service inst
     ]);
     assert.equal(JSON.parse(result.stdout).connection, null);
     assert.ok(result.stderr.includes(login(f)));
-    assert.ok(result.stderr.includes("Then run: ensemble doctor"));
+    assert.ok(result.stderr.includes("Then run: cab doctor"));
     assert.deepEqual(
       result.cli.calls.filter((c) => c.startsWith("doctor")),
       [],
@@ -1912,7 +1902,7 @@ test("an interrupt during the tarball extraction stops before the auth file, the
 });
 
 test("the default tar extraction is killed when its signal aborts", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-extract-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-extract-"));
   // tar blocks opening a FIFO that has no writer, standing in for a long extraction.
   const fifo = join(root, "release.tar.gz");
   execFileSync("mkfifo", [fifo]);
@@ -1980,7 +1970,7 @@ test("an interrupt before or during the password prompt stops the install before
     assert.equal(report.error, "interrupted", when);
     assert.deepEqual(
       cli.prompts,
-      when === "before" ? [] : ["New Ensemble operator password: "],
+      when === "before" ? [] : ["New operator password: "],
     );
     assert.equal(existsSync(f.authFile), false, when);
     assert.deepEqual(f.launchd.mutations(), [], when);
@@ -2072,7 +2062,7 @@ test("a token file that already exists is refused before anything changes or any
 const quoted = (path: string) =>
   /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path}'`;
 const ROOT_MESSAGE =
-  "Ensemble does not run as root; run it as the account that owns the service";
+  "cab does not run as root; run it as the account that owns the service";
 const KEYCHAIN_WARNING = "gh auth login --insecure-storage";
 
 type Fixture = Awaited<ReturnType<typeof setup>>;
@@ -2112,7 +2102,7 @@ test("daemon mode install renders, lints and records without touching launchd", 
   for (const step of output.steps) assert.ok(result.stderr.includes(step));
   assert.ok(
     result.stderr.includes(
-      `Then run the same install command again, with the same options and no TARBALL, to verify: ${quoted(join(f.stateDir, "versions", "0.1.0", "bin", "ensemble"))} service install --state-dir ${quoted(f.stateDir)} --log-dir ${quoted(f.options.logDir)} --launch-agents-dir ${quoted(f.options.agentsDir)} --label ${f.options.label} --port ${f.options.port} --connection local --mode daemon`,
+      `Then run the same install command again, with the same options and no TARBALL, to verify: ${quoted(join(f.stateDir, "versions", "0.1.0", "bin", "cab"))} service install --state-dir ${quoted(f.stateDir)} --log-dir ${quoted(f.options.logDir)} --launch-agents-dir ${quoted(f.options.agentsDir)} --label ${f.options.label} --port ${f.options.port} --connection local --mode daemon`,
     ),
     result.stderr,
   );
@@ -2127,8 +2117,8 @@ test("daemon mode install renders, lints and records without touching launchd", 
   assert.match(plist, /<key>UserName<\/key>\s*<string>operator<\/string>/);
   assert.equal(environment(f.staged).HOME, f.home);
   assert.deepEqual(readdirSync(join(f.stateDir, "launchd")).sort(), [
-    "local.ensemble.test.json",
-    "local.ensemble.test.plist",
+    "local.cab.test.json",
+    "local.cab.test.plist",
   ]);
 
   // Only reads reach launchd; nothing is written to either plist directory.
@@ -2141,12 +2131,9 @@ test("daemon mode install renders, lints and records without touching launchd", 
   assert.equal(f.launchd.linted.length, 1);
   assert.match(
     f.launchd.linted[0] ?? "",
-    /\/launchd\/\.local\.ensemble\.test\.staging-[^/]+\/local\.ensemble\.test\.plist$/,
+    /\/launchd\/\.local\.cab\.test\.staging-[^/]+\/local\.cab\.test\.plist$/,
   );
-  assert.equal(
-    existsSync(join(f.stateDir, ".local.ensemble.test.lock")),
-    false,
-  );
+  assert.equal(existsSync(join(f.stateDir, ".local.cab.test.lock")), false);
 });
 
 test("daemon mode plist passes plutil -lint", {
@@ -2238,7 +2225,7 @@ test("daemon mode re-run verifies the installed plist and job against the record
   assert.deepEqual(f.launchd.fetched, [
     `http://127.0.0.1:${f.options.port}/app`,
   ]);
-  assert.match(verified.stderr, /ensemble auth login --connection local/);
+  assert.match(verified.stderr, /cab auth login --connection local/);
   assert.match(verified.stderr, /Open http:\/\/127\.0\.0\.1:\d+\/app/);
   assert.deepEqual(f.launchd.mutations(), []);
   assert.deepEqual(f.launchd.requests, []);
@@ -2456,7 +2443,7 @@ test("daemon mode install refuses while the LaunchAgent exists, and agent instal
       assert.match(
         report.error,
         new RegExp(
-          `already present in ${direction === "daemon" ? "agent" : "daemon"} mode; run .ensemble service uninstall`,
+          `already present in ${direction === "daemon" ? "agent" : "daemon"} mode; run .cab service uninstall`,
         ),
         label,
       );
@@ -2480,7 +2467,7 @@ test("daemon mode uninstall prints the sudo steps until the job and plist are go
   assert.equal(output.mode, "daemon");
   assert.equal(output.complete, false);
   assert.deepEqual(output.steps, [bootout, remove]);
-  assert.match(result.stderr, /ensemble service uninstall` again/);
+  assert.match(result.stderr, /cab service uninstall` again/);
   assert.equal(existsSync(f.recordPath), true);
   assert.equal(existsSync(f.staged), true);
   assert.deepEqual(f.launchd.mutations(), []);
@@ -2777,7 +2764,7 @@ test("daemon mode CLI parses --mode only for install", async (t) => {
 test("daemon mode records are refused by a v1 reader without mode, and a record without mode is an agent", async (t) => {
   const olderReader = z
     .object({
-      schema: z.literal("ensemble.service/v1"),
+      schema: z.literal("cab.service/v1"),
       label: z.string(),
       version: z.string(),
       plistSha256: z.string(),
@@ -2861,10 +2848,7 @@ test("daemon mode uninstall keeps the record while the booted-out process is sti
   const error = JSON.parse(held.stderr).error;
   assert.match(error, HOLD);
   assert.match(error, /recorded process may still be running/);
-  assert.match(
-    error,
-    /launchctl print system\/local\.ensemble\.test` exits 113/,
-  );
+  assert.match(error, /launchctl print system\/local\.cab\.test` exits 113/);
   assert.match(error, /lsof -nP -iTCP:\d+ -sTCP:LISTEN/);
   assert.deepEqual(readFileSync(f.recordPath), bytes);
   assert.deepEqual(stateTrees(f), before);
@@ -2936,7 +2920,7 @@ test("daemon mode uninstall holds while the port is still in use", async (t) => 
 });
 
 test("daemon mode uninstall holds a process that was never recorded or could not be identified", async (t) => {
-  // The operator booted it out by hand before Ensemble ever saw it loaded: a log file shows it ran.
+  // The operator booted it out by hand before cab ever saw it loaded: a log file shows it ran.
   let f = await setup(t);
   assert.equal((await f.installDaemon()).code, 0);
   writeFileSync(f.record().configuration.stdoutPath, "started\n");
@@ -3346,22 +3330,19 @@ test("daemon mode verify command carries every install option that matters and d
     connection: "work-box",
     open: false,
     tokenFile: undefined,
-    tarball: join(f.home, "ensemble.tar.gz"),
+    tarball: join(f.home, "cab.tar.gz"),
     mode: "daemon",
   };
   const command = daemonVerifyCommand(options, first, "0.1.0");
   const [cli, service, install, ...args] = shellSplit(command);
-  assert.equal(
-    cli,
-    join(options.stateDir, "versions", "0.1.0", "bin", "ensemble"),
-  );
+  assert.equal(cli, join(options.stateDir, "versions", "0.1.0", "bin", "cab"));
   assert.deepEqual([service, install], ["service", "install"]);
   const flags = args.filter((word) => word.startsWith("--"));
   for (const [name, kind] of Object.entries(VERIFY_OPTIONS)) {
     if (kind === "carried") assert.ok(flags.includes(`--${name}`), name);
     else assert.equal(flags.includes(`--${name}`), false, name);
   }
-  assert.equal(command.includes("ensemble.tar.gz"), false, "no TARBALL");
+  assert.equal(command.includes("cab.tar.gz"), false, "no TARBALL");
   // Round trip: the printed command parses back to the effective options it was built from.
   const parsed = lifecycleOptions(args, { HOME: f.home }, options.daemonsDir);
   assert.ok(parsed);
@@ -3412,10 +3393,7 @@ test("daemon mode verify command carries every install option that matters and d
   assert.ok(real.stderr.includes("--connection work-box --mode daemon"));
   runSudoSteps(f);
   const verified = await f.installDaemon({ connection: "work-box" });
-  assert.match(
-    verified.stderr,
-    /ensemble auth login --connection work-box --url/,
-  );
+  assert.match(verified.stderr, /cab auth login --connection work-box --url/);
 });
 
 /** Every path under `root` with its mode and content hash, as a map. */
@@ -3488,14 +3466,14 @@ test("daemon mode commands write exactly the documented set of files and directo
   assert.deepEqual(
     readdirSync(f.options.logDir),
     [],
-    "launchd creates the log files, not Ensemble",
+    "launchd creates the log files, not cab",
   );
 
   // A re-run that finds nothing loaded writes nothing at all.
   assert.equal((await f.installDaemon()).code, 0);
   assert.deepEqual(step(), nothing);
 
-  // The operator's sudo steps are not Ensemble's writes; verify then records the process.
+  // The operator's sudo steps are not cab's writes; verify then records the process.
   runSudoSteps(f);
   step();
   assert.equal((await f.installDaemon()).code, 0);
@@ -3529,7 +3507,7 @@ test("daemon mode first install from a tarball into an empty home creates exactl
   cli.password = "new-password";
   const result = await f.run({ mode: "daemon", open: false }, cli);
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(cli.prompts, ["New Ensemble operator password: "]);
+  assert.deepEqual(cli.prompts, ["New operator password: "]);
   const { created, removed, changed } = changes(before, treeMap(root));
   assert.deepEqual([removed, changed], [[], []]);
   const versions = rel(join(f.stateDir, "versions", "0.1.0"));
@@ -3590,7 +3568,7 @@ async function withShellEnvironment(
 
 test("daemon mode gh probe runs in the daemon's own environment, never the installing shell's", async (t) => {
   const gh = fakeStatusGh(t);
-  const shell = mkdtempSync(join(tmpdir(), "ensemble-shell-gh-"));
+  const shell = mkdtempSync(join(tmpdir(), "cab-shell-gh-"));
   t.after(() => rmSync(shell, { recursive: true, force: true }));
   mkdirSync(join(shell, "custom"), { recursive: true });
   writeFileSync(join(shell, "custom", "hosts.yml"), "github.com:\n");
@@ -3652,8 +3630,8 @@ test("daemon mode gh probe runs in the daemon's own environment, never the insta
       launchdEnvironment(f.record().configuration),
     );
     assert.deepEqual(Object.keys(seen).sort(), [
-      "ENSEMBLE_OPERATOR_AUTH_FILE",
-      "ENSEMBLE_OPERATOR_ORIGIN",
+      "CAB_OPERATOR_AUTH_FILE",
+      "CAB_OPERATOR_ORIGIN",
       "HOME",
       "PATH",
     ]);

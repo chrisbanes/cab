@@ -1,5 +1,5 @@
 {
-  "name": "ensemble",
+  "name": "@chrisbanes/cab",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
   },
   "packageManager": "npm@12.2.1",
   "bin": {
-    "ensemble": "dist/src/cli/main.js"
+    "cab": "dist/src/cli/main.js"
   },
   "files": [
     "dist/src",

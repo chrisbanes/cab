@@ -125,7 +125,7 @@ for (const [name, viewport] of [
       .getByText("Limits and untested surfaces · 12")
       .click();
     await runtimes
-      .getByText("confined to the same roots by Ensemble's hook", {
+      .getByText("confined to the same roots by cab's hook", {
         exact: false,
       })
       .waitFor();
@@ -144,7 +144,7 @@ for (const [name, viewport] of [
     await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
     await aside.getByText("Execution policy · Claude").waitFor();
     await aside
-      .getByText("Ensemble's hook, not by the operating system", {
+      .getByText("cab's hook, not by the operating system", {
         exact: false,
       })
       .waitFor();

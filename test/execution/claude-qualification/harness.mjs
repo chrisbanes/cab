@@ -20,7 +20,7 @@ import {
   MacProcessTerminationVerifier,
 } from "../../../dist/src/standalone/termination.js";
 
-export const ROOT_PREFIX = "ensemble-claude-c0-";
+export const ROOT_PREFIX = "cab-claude-c0-";
 export const QUERY_CAP = 60;
 export const QUERY_DEADLINE_MS = 120_000;
 export const REPO = resolve(

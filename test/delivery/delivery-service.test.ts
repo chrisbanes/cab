@@ -12,7 +12,7 @@ import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
 import type { GitHubDeliveryProvider } from "../../src/standalone/github-delivery.js";
 
 test("persisted intent is visible before write and uncertain create is never replayed after restart", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-delivery-")),
+  const directory = mkdtempSync(join(tmpdir(), "cab-delivery-")),
     file = join(directory, "db.sqlite");
   let db = new DatabaseSync(file);
   const projectId = randomUUID(),
@@ -153,7 +153,7 @@ test("bound service delivery refuses spoofing and a revoked policy during asynch
     };
     assert.equal(
       (
-        await f.call("ensemble_external_action", {
+        await f.call("cab_external_action", {
           ...args,
           taskId: randomUUID(),
         })
@@ -167,7 +167,7 @@ test("bound service delivery refuses spoofing and a revoked policy during asynch
         release = resolve;
       }),
     );
-    const pending = f.call("ensemble_external_action", args);
+    const pending = f.call("cab_external_action", args);
     let response: unknown;
     void pending.then((value) => {
       response = value;
@@ -218,14 +218,14 @@ test("actual operator approval authorizes only exact material on the next eligib
     };
     assert.equal(
       (
-        await f.call("ensemble_external_action", {
+        await f.call("cab_external_action", {
           operationId: randomUUID(),
           action,
         })
       ).success,
       false,
     );
-    const approval = await f.call("ensemble_request_approval", {
+    const approval = await f.call("cab_request_approval", {
       action: action.kind,
       target: canonicalMaterial(action.target),
       material: action,
@@ -258,7 +258,7 @@ test("actual operator approval authorizes only exact material on the next eligib
     assert.equal(
       (
         await f.call(
-          "ensemble_external_action",
+          "cab_external_action",
           {
             operationId: randomUUID(),
             action: {
@@ -276,7 +276,7 @@ test("actual operator approval authorizes only exact material on the next eligib
     assert.equal(
       (
         await f.call(
-          "ensemble_external_action",
+          "cab_external_action",
           { operationId: randomUUID(), action, approval: approved },
           1,
         )
@@ -287,7 +287,7 @@ test("actual operator approval authorizes only exact material on the next eligib
     assert.equal(
       (
         await f.call(
-          "ensemble_external_action",
+          "cab_external_action",
           { operationId: randomUUID(), action, approval: approved },
           1,
         )
@@ -312,10 +312,7 @@ test("a bound denied operation remains denied after policy expansion and rejects
         remove: [],
       },
     };
-    assert.equal(
-      (await f.call("ensemble_external_action", request)).success,
-      false,
-    );
+    assert.equal((await f.call("cab_external_action", request)).success, false);
     assert.equal(
       f.service
         .delivery()
@@ -334,14 +331,11 @@ test("a bound denied operation remains denied after policy expansion and rejects
       grants: [{ action: "issue.labels", repositoryId: "R1", mode: "allow" }],
       requiredChecks: [],
     });
-    assert.equal(
-      (await f.call("ensemble_external_action", request)).success,
-      false,
-    );
+    assert.equal((await f.call("cab_external_action", request)).success, false);
     assert.equal(f.effects.length, 0);
     assert.equal(
       (
-        await f.call("ensemble_external_action", {
+        await f.call("cab_external_action", {
           ...request,
           action: { ...request.action, add: ["other"] },
         })
@@ -355,7 +349,7 @@ test("a bound denied operation remains denied after policy expansion and rejects
 });
 
 function coordinatorFixture() {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-delivery-races-")),
+  const root = mkdtempSync(join(tmpdir(), "cab-delivery-races-")),
     file = join(root, "state.sqlite");
   let db = new DatabaseSync(file);
   new Store(db).ensureHost("test");
@@ -628,7 +622,7 @@ test("newly configured delivery credentials inherited by the current runtime hol
       grants: [{ action: "issue.comment", repositoryId: "R1", mode: "allow" }],
       requiredChecks: [],
     });
-    const response = await f.call("ensemble_external_action", {
+    const response = await f.call("cab_external_action", {
       operationId: randomUUID(),
       action: {
         kind: "issue.comment",
@@ -657,7 +651,7 @@ test("restart retains one unavailable PR binding while independent feedback and 
   const f = await deliveryFixture();
   try {
     const register = (p: ReturnType<typeof f.getPr>) =>
-      f.call("ensemble_register_pr", {
+      f.call("cab_register_pr", {
         repositoryId: p.repositoryId,
         prNumber: p.number,
         expectedPrNodeId: p.nodeId,
@@ -755,7 +749,7 @@ test("restart retains one unavailable PR binding while independent feedback and 
 });
 test("failed startup releases delivery state before a clean retry", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-delivery-startup-")),
+    mkdtempSync(join(tmpdir(), "cab-delivery-startup-")),
   );
   const runtime = {
     async start() {},

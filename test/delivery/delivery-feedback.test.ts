@@ -19,7 +19,7 @@ import {
 import type { GitHubDeliveryProvider } from "../../src/standalone/github-delivery.js";
 
 test("unchanged feedback is deduplicated and cached settlement never qualifies a changed provider head", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-feedback-restart-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-feedback-restart-"));
   let db = new DatabaseSync(join(root, "state.sqlite"));
   new Store(db).ensureHost("test");
   const domain = new DomainStore(db);

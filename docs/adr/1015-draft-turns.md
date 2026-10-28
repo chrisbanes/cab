@@ -8,7 +8,7 @@ An operator often needs to talk to a task's project lead before the task is Read
 to clarify an imported issue, have the lead investigate the repositories, or let it
 comment on or label the issue. Draft (unready) tasks otherwise run no turns. The
 glossary defines **Draft turn**; delivery scope lives in
-[#1193](https://github.com/chrisbanes/ensemble/issues/1193).
+[#1193](https://github.com/chrisbanes/cab/issues/1193).
 
 ## Decision
 
@@ -28,7 +28,7 @@ glossary defines **Draft turn**; delivery scope lives in
   gives its messages back: they become pending again and the turn no longer counts as
   the task's draft turn.
 - During a draft turn the lead may ask questions, request approvals, and use
-  `ensemble_external_action` for `issue.comment` and `issue.labels` where grants allow.
+  `cab_external_action` for `issue.comment` and `issue.labels` where grants allow.
   The service refuses every other coordination tool before dispatch. The existing
   rule that refuses readiness labels and fields stays the only readiness protection:
   a draft turn never makes a task Ready, edits task fields, or creates assignments,
@@ -43,7 +43,7 @@ glossary defines **Draft turn**; delivery scope lives in
     file-edit roots, leaving only the per-task temporary base.
   - The turn uses the same task workspace an ordinary lead turn would. No new
     workspace kind is added and repository access is not widened.
-  - Codex keeps broad host reads under a read-only policy. Ensemble claims no
+  - Codex keeps broad host reads under a read-only policy. cab claims no
     independent sandbox; the runtime's sandbox and the Claude hook are the controls.
 - When the task becomes Ready, the lead is treated as not started. With routing
   disabled the lead's initial turn runs as ordinary execution and resumes the draft

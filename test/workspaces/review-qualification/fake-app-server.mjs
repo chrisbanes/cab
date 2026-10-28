@@ -51,7 +51,7 @@ for await (const line of createInterface({ input: process.stdin })) {
             threadId: "ui04-thread",
             turnId: "ui04-turn",
             callId: "ui04-call",
-            tool: "ensemble_report_result",
+            tool: "cab_report_result",
             arguments: {
               ...JSON.parse(marker.slice("UI04_CALLBACK_JSON=".length)),
               ...(process.env.UI04_FIXTURE_MALFORMED === "1"

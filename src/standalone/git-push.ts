@@ -8,13 +8,13 @@ import { runGit } from "./git-process.js";
  * Answers Git's credential request only for the exact repository over HTTPS on github.com, with
  * the token from the child's environment; any other host, protocol or path gets no answer.
  */
-export const pushCredentialHelper = `!f() { test "$1" = get || exit 0; while IFS== read -r k v; do case "$k" in protocol) p=$v;; host) h=$v;; path) q=$v;; esac; done; test "$p" = https && test "$h" = github.com && test "$q" = "$ENSEMBLE_PUSH_PATH" || exit 0; echo username=x-access-token; echo "password=$ENSEMBLE_PUSH_TOKEN"; }; f`;
+export const pushCredentialHelper = `!f() { test "$1" = get || exit 0; while IFS== read -r k v; do case "$k" in protocol) p=$v;; host) h=$v;; path) q=$v;; esac; done; test "$p" = https && test "$h" = github.com && test "$q" = "$CAB_PUSH_PATH" || exit 0; echo username=x-access-token; echo "password=$CAB_PUSH_TOKEN"; }; f`;
 
 export type PushOutcome =
   /** Nothing reached the network (setup failed or the child never started). */
   | "not-attempted"
   | "pushed"
-  /** Git found the remote already at the commit and sent nothing: someone else's push, not Ensemble's. */
+  /** Git found the remote already at the commit and sent nothing: someone else's push, not cab's. */
   | "up-to-date"
   | "rejected-non-fast-forward"
   | "rejected-lease"
@@ -85,7 +85,7 @@ export async function pushTaskCommit(
   const objects = join(located.stdout.toString("utf8").trim(), "objects");
   let scratch: string | undefined;
   try {
-    scratch = await mkdtemp(join(tmpdir(), "ensemble-push-"));
+    scratch = await mkdtemp(join(tmpdir(), "cab-push-"));
     await mkdir(join(scratch, "objects"));
     await mkdir(join(scratch, "refs"));
     await writeFile(join(scratch, "HEAD"), "ref: refs/heads/main\n");
@@ -125,8 +125,8 @@ export async function pushTaskCommit(
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_ALLOW_PROTOCOL: "https",
         HOME: scratch,
-        ENSEMBLE_PUSH_PATH: `${nameWithOwner}.git`,
-        ENSEMBLE_PUSH_TOKEN: token,
+        CAB_PUSH_PATH: `${nameWithOwner}.git`,
+        CAB_PUSH_TOKEN: token,
       },
     });
     if (result.status === "ok")

@@ -288,7 +288,7 @@ test("apply-current with a stale version names the current version", async (t) =
     ),
   );
   const fix = human.err.match(/^Fix: (.*)$/m)?.[1] ?? "";
-  assert.match(fix, new RegExp(`ensemble assignment get ${seed.assignmentA}`));
+  assert.match(fix, new RegExp(`cab assignment get ${seed.assignmentA}`));
   assert.match(fix, new RegExp(`--expected-version ${current}\\b`));
   const json = await h.run([...args, "--output", "json"]);
   const error = (JSON.parse(json.out) as Json).error;

@@ -396,17 +396,17 @@ test("limits from the environment", () => {
   assert.equal(d.ageMs, 30 * day);
   assert.equal(d.installationBytes, 1024 ** 3);
   const o = diagnosticLimitsFromEnv({
-    ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS: "7",
-    ENSEMBLE_DIAGNOSTIC_STORAGE_MIB: "16",
+    CAB_DIAGNOSTIC_RETENTION_DAYS: "7",
+    CAB_DIAGNOSTIC_STORAGE_MIB: "16",
   });
   assert.equal(o.ageMs, 7 * day);
   assert.equal(o.installationBytes, 16 * 1024 * 1024);
   for (const env of [
-    { ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS: "0" },
-    { ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS: "NaN" },
-    { ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS: "366" },
-    { ENSEMBLE_DIAGNOSTIC_STORAGE_MIB: "15" },
-    { ENSEMBLE_DIAGNOSTIC_STORAGE_MIB: "1048577" },
+    { CAB_DIAGNOSTIC_RETENTION_DAYS: "0" },
+    { CAB_DIAGNOSTIC_RETENTION_DAYS: "NaN" },
+    { CAB_DIAGNOSTIC_RETENTION_DAYS: "366" },
+    { CAB_DIAGNOSTIC_STORAGE_MIB: "15" },
+    { CAB_DIAGNOSTIC_STORAGE_MIB: "1048577" },
   ])
     assert.throws(() => diagnosticLimitsFromEnv(env));
 });

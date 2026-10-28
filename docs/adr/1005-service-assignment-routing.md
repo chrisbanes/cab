@@ -5,7 +5,7 @@ status: accepted
 # Route assignments in the service while the project lead retains accountability
 
 The project lead remains accountable for all task outcomes, using separate per-task
-conversations with the same lead profile. Defer a separate task-owner role. Ensemble service code invokes TypeSafe directly
+conversations with the same lead profile. Defer a separate task-owner role. cab service code invokes TypeSafe directly
 to recommend assignment assignees from eligible profiles using their capabilities
 and project routing guidance. This avoids a PA agent turn and allows routine
 initial allocation without waking the lead, at the cost of a separate optional

@@ -22,7 +22,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 test("a drafting workspace is discarded even with written files, apart from task workspaces", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-drafting-workspace-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-drafting-workspace-"));
   const db = new DatabaseSync(join(root, "standalone.sqlite"));
   new Store(db).ensureHost("drafting-workspace-test");
   try {

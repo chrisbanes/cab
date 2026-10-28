@@ -245,7 +245,7 @@ for (const revoke of [false, true])
       : "a current repository grant permits a new turn in an imported workspace",
     async () => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "ensemble-github-revocation-")),
+        mkdtempSync(join(tmpdir(), "cab-github-revocation-")),
       );
       const path = join(root, "repo");
       mkdirSync(path);

@@ -3,7 +3,7 @@ status: accepted
 partially_superseded_by: [ADR-1005, ADR-1006, ADR-1008]
 ---
 
-# Build Ensemble as a standalone service without BB
+# Build cab as a standalone service without BB
 
 Superseded in part: [ADR-1005](1005-service-assignment-routing.md) replaces the
 separate task-owner role and lead-only initial allocation;
@@ -11,7 +11,7 @@ separate task-owner role and lead-only initial allocation;
 execution harness; deferred [ADR-1006](1006-chatgpt-and-native-codex.md) would
 extend private transport for an optional ChatGPT plugin endpoint only.
 
-Ensemble removes BB and builds its own service. Ensemble owns scheduling,
+cab removes BB and builds its own service. cab owns scheduling,
 execution admission, process supervision, task workspaces, conversation records
 and the operator interface, alongside its existing durable coordination core. BB
 is not a target backend or a production dependency.
@@ -19,7 +19,7 @@ is not a target backend or a production dependency.
 The BB investigation demonstrated accepted queued work executing after guarding
 plugins failed startup, and left writer termination guarantees unresolved. A local
 pre-submission recovery repair cannot govern work BB already accepted. Owning
-these boundaries costs more implementation work, but allows Ensemble to enforce
+these boundaries costs more implementation work, but allows cab to enforce
 and test its intended operating contract without depending on BB plugin lifecycle.
 The BB prototype and its capability evidence are preserved on
 `cb/pipeline-implementation` and in Git history.
@@ -34,15 +34,15 @@ process graph.
 Standalone does not mean implementing models or every agent harness from scratch.
 Reuse an existing agent harness for model interaction and tools through a narrow
 integration. The first deployment is macOS on Chris's Mac, with a web operator
-interface served by Ensemble and accessible privately over Tailscale with a
-separate Ensemble login. Other platforms are deferred. The first installation uses
+interface served by cab and accessible privately over Tailscale with a
+separate cab login. Other platforms are deferred. The first installation uses
 a fresh database, preserving the BB prototype separately rather than importing its
 records.
 
 Codex is the first harness, using the existing operator login; API-key billing for
 agent execution is deferred. ADR-1005 separately permits opt-in TypeSafe API access
 for assignment routing. Codex App Server is the selected integration surface, with
-installed-version qualification still required. Ensemble must prove admission,
+installed-version qualification still required. cab must prove admission,
 cancellation requests, conservative recovery and cooperative workspace ownership;
 wrapping another queue does not satisfy that requirement. Runtime and deployment
 controls enforce execution access; an in-process service is not a security sandbox.
@@ -50,7 +50,7 @@ controls enforce execution access; an in-process service is not a security sandb
 The reusable core remains in this repository and is not by itself a standalone
 implementation. Do not mutate the installed Haze prototype or assume its unfinished
 work can migrate. Runtime-specific contracts and dependent implementation are gated
-on [S01 #688](https://github.com/chrisbanes/ensemble/issues/688) capability evidence.
+on [S01 #688](https://github.com/chrisbanes/cab/issues/688) capability evidence.
 
 ## Execution guarantees
 
@@ -60,7 +60,7 @@ coordination and OS execution containment; see the
 [existing evidence matrix](../evidence/s01-existing-evidence-2026-09-28.md).
 
 1. **Crash survival:** already-admitted execution may survive coordinator/App Server
-   crashes and continue effects. Unavailable Ensemble cannot admit queued work.
+   crashes and continue effects. Unavailable cab cannot admit queued work.
    Preserve ownership/capacity and uncertain submissions; never blindly resubmit or
    automatically release them.
 2. **Best-effort Stop:** persist Stop, request cancellation for active task
@@ -69,7 +69,7 @@ coordination and OS execution containment; see the
    remain until independently resolved; time, acknowledgements, empty terminal lists
    or operator acknowledgement do not unlock.
 3. **Cooperative normal-success handoff:** Codex's successful terminal status for
-   the bound thread/turn, with ended Ensemble-owned callbacks and no known unfinished
+   the bound thread/turn, with ended cab-owned callbacks and no known unfinished
    execution or other hold, permits serialized handoff to one successor. Detailed
    tool history is diagnostic; missing items alone do not prevent handoff. This
    accepts incomplete observation, possible unobserved effects and an untracked

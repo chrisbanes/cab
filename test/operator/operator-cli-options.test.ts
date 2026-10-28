@@ -104,7 +104,7 @@ test("a command refuses every option it does not declare before it acts", async 
       assert.equal(r.out, "", label);
       assert.ok(
         r.err.startsWith(
-          `ensemble: --${name} is not an option of this command. (usage)\n`,
+          `cab: --${name} is not an option of this command. (usage)\n`,
         ),
         `${label}: ${r.err}`,
       );

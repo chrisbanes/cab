@@ -212,7 +212,7 @@ export class PublicationGuard {
       branch &&
       url.pathname === `${this.root}/git/refs/heads/${branch}`
     ) {
-      // Cleanup: delete exactly the recorded head (Ensemble never deletes branches).
+      // Cleanup: delete exactly the recorded head (cab never deletes branches).
     } else throw new Error(`guard: unexpected write ${method} ${url.pathname}`);
     this.writes.push(`${method} ${url.pathname}`);
   }

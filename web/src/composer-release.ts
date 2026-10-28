@@ -4,7 +4,7 @@ import type { OperatorClient } from "./api.js";
 import type { ComposerInput, RecoveryStorage } from "./composer-state.js";
 
 /** Draft releases still owed to the service, kept apart from the composer's own input. */
-export const releaseStorageKey = "ensemble.ui03.composer.releases.v1";
+export const releaseStorageKey = "cab.ui03.composer.releases.v1";
 /** The start a release may still have to settle: sent again under its key until known. */
 const briefStartSchema = z
   .object({ key: uuid, projectId: uuid, idea: z.string().min(1).max(16000) })

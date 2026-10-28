@@ -42,9 +42,7 @@ const issue: IssueSnapshot = {
 };
 
 test("startup invalidates prior clear source/dependency evidence before the first scheduler wake", async () => {
-  const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-startup-")),
-  );
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-github-startup-")));
   const data = join(root, "data");
   const projectId = randomUUID();
   const profileId = randomUUID();
@@ -190,7 +188,7 @@ test("startup invalidates prior clear source/dependency evidence before the firs
 
 test("a runnable imported assignment starts on complete evidence, then a failed refresh holds later admission without cancelling its turn", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-active-hold-")),
+    mkdtempSync(join(tmpdir(), "cab-github-active-hold-")),
   );
   const projectId = randomUUID();
   const profileId = randomUUID();
@@ -353,7 +351,7 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
       threadId: "thread",
       turnId: "turn-1",
       callId: "delegate-after-source-hold",
-      tool: "ensemble_delegate",
+      tool: "cab_delegate",
       arguments: { profileId: workerId, brief: "Must remain held" },
     });
     assert.equal(rejected.success, false);
@@ -416,7 +414,7 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
         threadId: "thread",
         turnId: "turn-1",
         callId: "report-with-ordinary-inbox",
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: { summary: "Finished admitted work" },
       });
       assert.equal(ordinaryBlocked.success, false);
@@ -428,7 +426,7 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
         threadId: "thread",
         turnId: "turn-1",
         callId: "report-after-source-hold",
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: { summary: "Finished admitted work" },
       });
       assert.equal(report.success, true, report.text);
@@ -464,7 +462,7 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
 
 test("a held canonical lead receives one source-hold notice without changing assignment state", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-held-lead-")),
+    mkdtempSync(join(tmpdir(), "cab-github-held-lead-")),
   );
   const projectId = randomUUID();
   const profileId = randomUUID();
@@ -591,7 +589,7 @@ test("a held canonical lead receives one source-hold notice without changing ass
 
 test("an unassigned routing-enabled source hold does not invent a lead assignment", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-routing-hold-")),
+    mkdtempSync(join(tmpdir(), "cab-github-routing-hold-")),
   );
   const projectId = randomUUID();
   const leadId = randomUUID();
@@ -834,9 +832,7 @@ test("an unassigned routing-enabled source hold does not invent a lead assignmen
 });
 
 test("explicit and timer refresh converge, and stop settles an in-flight read before closing storage", async () => {
-  const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-poll-")),
-  );
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-github-poll-")));
   const projectId = randomUUID();
   const leadId = randomUUID();
   let reads = 0;
@@ -1140,7 +1136,7 @@ test("blocker reads skip closed issues unless their still-open imported task own
 
 test("a rate-limited read pauses manual refreshes until the reset without implying dependency clearance", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-rate-limit-")),
+    mkdtempSync(join(tmpdir(), "cab-github-rate-limit-")),
   );
   const calls: string[] = [];
   let limited = false;
@@ -1352,7 +1348,7 @@ test("a rate limit mid-selection leaves the unread issues' imported blockers unk
 
 test("timer refreshes also wait out a rate limit", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-rate-limit-timer-")),
+    mkdtempSync(join(tmpdir(), "cab-github-rate-limit-timer-")),
   );
   let reads = 0;
   const reader: GitHubSourceReader = {
@@ -1407,7 +1403,7 @@ test("timer refreshes also wait out a rate limit", async () => {
 
 test("GitHub refresh defaults to five minutes", async () => {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-default-interval-")),
+    mkdtempSync(join(tmpdir(), "cab-github-default-interval-")),
   );
   const delays: unknown[] = [];
   const realSetInterval = globalThis.setInterval;
@@ -1502,7 +1498,7 @@ test("synchronizer scopes concrete reader pauses across refreshes and projects b
 
 async function closedIssueService(closedIssues: "skip" | "done") {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-closure-mode-")),
+    mkdtempSync(join(tmpdir(), "cab-github-closure-mode-")),
   );
   const projectId = randomUUID();
   const profileId = randomUUID();
@@ -1745,7 +1741,7 @@ async function importedWorkspaceService(options: {
   holdTurns?: boolean;
 }) {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "ensemble-github-imported-workspace-")),
+    mkdtempSync(join(tmpdir(), "cab-github-imported-workspace-")),
   );
   const makeRepository = (name: string) => {
     const path = join(root, name);

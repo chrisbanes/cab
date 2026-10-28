@@ -31,7 +31,7 @@ const retainedMime = z.union([
     "image/gif",
     "image/webp",
     "application/pdf",
-    "application/vnd.ensemble.workspace-diff+json",
+    "application/vnd.cab.workspace-diff+json",
   ]),
   z
     .string()

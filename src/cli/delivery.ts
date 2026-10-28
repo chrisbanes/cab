@@ -115,7 +115,7 @@ const noHandback = (taskId: string) =>
     "policy-denied",
     "This task has no reviewable pull request handback to settle. Nothing was sent.",
     {
-      fix: `Run 'ensemble delivery get ${taskId}' to see the task's delivery.`,
+      fix: `Run 'cab delivery get ${taskId}' to see the task's delivery.`,
     },
   );
 
@@ -228,7 +228,7 @@ function commentGates(read: TaskRead, expected: number) {
       "policy-denied",
       `Comments are not available for this task: ${policy?.reason ?? "not reported"}. Nothing was sent.`,
       {
-        fix: `Run 'ensemble delivery get ${read.data.task.id}' to see the comment policy.`,
+        fix: `Run 'cab delivery get ${read.data.task.id}' to see the comment policy.`,
       },
     );
   if (read.data.task.version !== expected)
@@ -236,7 +236,7 @@ function commentGates(read: TaskRead, expected: number) {
       "conflict",
       `The task is at version ${read.data.task.version}, not ${expected}. Nothing was sent.`,
       {
-        fix: `Retry with --expected-task-version ${read.data.task.version}; 'ensemble delivery get ${read.data.task.id}' shows the task.`,
+        fix: `Retry with --expected-task-version ${read.data.task.version}; 'cab delivery get ${read.data.task.id}' shows the task.`,
       },
     );
   return policy;
@@ -267,7 +267,7 @@ function reviewLines(r: ReviewReceipt) {
 }
 
 const UNKNOWN_GUIDANCE = (taskId: string, key: string) =>
-  `Do not resend with a new --request-id. Run 'ensemble delivery refresh ${taskId}', then 'ensemble delivery get ${taskId}' (operation ${key}); rerunning this exact command replays the recorded outcome.`;
+  `Do not resend with a new --request-id. Run 'cab delivery refresh ${taskId}', then 'cab delivery get ${taskId}' (operation ${key}); rerunning this exact command replays the recorded outcome.`;
 
 /** Parses and validates the flags shared by the review-confirm commands. */
 export function reviewDecisionArgs(ctx: WriteContext) {
@@ -395,7 +395,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         "delivery settle TASK_ID --decision accepted|closed [--expected-task-version N] [--expected-delivery-revision N] [--expected-policy-version N] [--expected-head-sha SHA] [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-task-version: the task's version; --expected-delivery-revision: the PR binding's revision; --expected-policy-version: the delivery policy's version; --expected-head-sha: the PR head ('ensemble delivery get TASK_ID' shows them); omitted, the value this command reads first. The decision is final: it does not merge, close or comment, and has no undo.",
+        "--expected-task-version: the task's version; --expected-delivery-revision: the PR binding's revision; --expected-policy-version: the delivery policy's version; --expected-head-sha: the PR head ('cab delivery get TASK_ID' shows them); omitted, the value this command reads first. The decision is final: it does not merge, close or comment, and has no undo.",
       flags: [
         "decision",
         "expected-task-version",
@@ -481,7 +481,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         // Advisory only, and never for a key that may already have applied: the service decides.
         if (!reached) {
           if (!d || !b || d.mode !== "reviewable-pr") throw noHandback(taskId);
-          const view = `Run 'ensemble delivery get ${taskId}' to see the handback.`;
+          const view = `Run 'cab delivery get ${taskId}' to see the handback.`;
           const settled = currentSettlement(d);
           if (settled)
             refuse(
@@ -493,22 +493,22 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           if (b.readError)
             refuse(
               `The last GitHub read failed (${b.readError}).`,
-              `Run 'ensemble delivery refresh ${taskId}', then settle again.`,
+              `Run 'cab delivery refresh ${taskId}', then settle again.`,
             );
           if (decision === "accepted") {
             if (b.draft)
               refuse(
                 "The pull request is a draft, so it cannot be accepted.",
-                `Mark it ready for review on GitHub and run 'ensemble delivery refresh ${taskId}', or settle it as closed.`,
+                `Mark it ready for review on GitHub and run 'cab delivery refresh ${taskId}', or settle it as closed.`,
               );
             if (b.state === "CLOSED")
               refuse(
                 "The pull request is closed, so it cannot be accepted.",
-                `Reopen it on GitHub and run 'ensemble delivery refresh ${taskId}', or settle it as closed.`,
+                `Reopen it on GitHub and run 'cab delivery refresh ${taskId}', or settle it as closed.`,
               );
             if (d.blockers.includes("task-branch-outside-change"))
               refuse(
-                "The task branch has a push from outside Ensemble, so the handback cannot be accepted.",
+                "The task branch has a push from outside cab, so the handback cannot be accepted.",
                 `${view} Settle it as closed, or resolve the outside change first.`,
               );
           }
@@ -548,7 +548,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               `Not settled; nothing was recorded. The service refused it: the pull request, branch or policy no longer matches what was sent, the pull request is not reviewable, or this request ID was used with other material. Sent: ${sent}. Current: ${current}.`,
               {
                 ...error.extra,
-                fix: `Run 'ensemble delivery get ${taskId}' to review the current head and policy, then rerun (omit the --expected-* flags to use the current values, and use a new --request-id if you reused one).`,
+                fix: `Run 'cab delivery get ${taskId}' to review the current head and policy, then rerun (omit the --expected-* flags to use the current values, and use a new --request-id if you reused one).`,
               },
             );
           }
@@ -584,7 +584,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         "delivery review-comment TASK_ID --body-file FILE --expected-task-version N [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-task-version: the task's version ('ensemble task get TASK_ID'); required.",
+        "--expected-task-version: the task's version ('cab task get TASK_ID'); required.",
       flags: ["body-file", "expected-task-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -634,7 +634,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             r.body ?? "(body not shown)",
             "",
             r.decision === "pending"
-              ? `Approve or deny with: ensemble delivery confirm-comment ${taskId} --review-id ${r.reviewId} --expected-revision ${r.revision} --material-hash ${r.materialHash} --decision approved|denied`
+              ? `Approve or deny with: cab delivery confirm-comment ${taskId} --review-id ${r.reviewId} --expected-revision ${r.revision} --material-hash ${r.materialHash} --decision approved|denied`
               : `This review is already ${r.decision}; a decision is final.`,
             "A pending review cannot be withdrawn; deny it instead. Changing the body needs a new review.",
           ].join("\n"),
@@ -649,7 +649,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         "delivery confirm-comment TASK_ID --review-id UUID --expected-revision N --material-hash HASH --decision approved|denied [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-revision: the comment review's revision, printed by 'ensemble delivery review-comment' and shown by 'ensemble delivery get TASK_ID'; required.",
+        "--expected-revision: the comment review's revision, printed by 'cab delivery review-comment' and shown by 'cab delivery get TASK_ID'; required.",
       flags: [
         "review-id",
         "expected-revision",
@@ -697,7 +697,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               "Not confirmed: the review's revision or material hash does not match, it is already decided, or the task, source or policy changed since the review. The decision is unchanged.",
               {
                 ...error.extra,
-                fix: `Run 'ensemble delivery get ${taskId}' for the review's current revision and material hash, then decide again.`,
+                fix: `Run 'cab delivery get ${taskId}' for the review's current revision and material hash, then decide again.`,
               },
             );
           if (error instanceof CliError && error.code === "policy-denied")
@@ -706,7 +706,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               "Not approved: the project policy does not grant issue comments for this repository. The decision is unchanged; a denial can still be recorded.",
               {
                 ...error.extra,
-                fix: `Record a denial instead (--decision denied), or ask the project owner to grant issue comments; 'ensemble delivery get ${taskId}' shows the policy.`,
+                fix: `Record a denial instead (--decision denied), or ask the project owner to grant issue comments; 'cab delivery get ${taskId}' shows the policy.`,
               },
             );
           throw error;
@@ -719,7 +719,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             `Review ${reviewId} is ${r.decision} (request ${key}). Nothing was posted.`,
             reviewLines(r),
             r.decision === "approved"
-              ? `Post it with: ensemble delivery send-comment ${taskId} --body-file FILE --expected-task-version ${r.taskVersion} --review-id ${reviewId}`
+              ? `Post it with: cab delivery send-comment ${taskId} --body-file FILE --expected-task-version ${r.taskVersion} --review-id ${reviewId}`
               : "A denied review is final; a changed request needs a new review.",
           ].join("\n"),
         };
@@ -733,7 +733,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         "delivery send-comment TASK_ID --body-file FILE --expected-task-version N [--review-id UUID] [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-task-version: the task's version ('ensemble task get TASK_ID'); required.",
+        "--expected-task-version: the task's version ('cab task get TASK_ID'); required.",
       flags: ["body-file", "expected-task-version", "review-id", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -784,7 +784,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               "policy-denied",
               "This project requires an approved review before posting: run 'delivery review-comment', then 'delivery confirm-comment', then send with --review-id. Nothing was sent.",
               {
-                fix: `Run 'ensemble delivery review-comment ${taskId}' first.`,
+                fix: `Run 'cab delivery review-comment ${taskId}' first.`,
               },
             );
         }
@@ -813,7 +813,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
                   `The body or task version differs from review ${reviewId}, or the task changed. Nothing was sent; a changed comment needs a new review.`,
                   {
                     ...error.extra,
-                    fix: `Run 'ensemble delivery review-comment ${taskId}' for a changed comment; 'ensemble delivery get ${taskId}' shows the task.`,
+                    fix: `Run 'cab delivery review-comment ${taskId}' for a changed comment; 'cab delivery get ${taskId}' shows the task.`,
                   },
                 );
               throw error;
@@ -824,7 +824,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               "unavailable",
               `Review ${reviewId} could not be read back. Nothing was sent.`,
               {
-                fix: `Run 'ensemble delivery get ${taskId}' to check the review, then send again.`,
+                fix: `Run 'cab delivery get ${taskId}' to check the review, then send again.`,
               },
             );
           if ((review.data as ReviewReceipt).decision !== "approved")
@@ -832,7 +832,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               "policy-denied",
               `Review ${reviewId} is ${(review.data as ReviewReceipt).decision}, not approved. Nothing was sent.`,
               {
-                fix: `Run 'ensemble delivery get ${taskId}' to see the review, or create a new one with 'ensemble delivery review-comment ${taskId}'.`,
+                fix: `Run 'cab delivery get ${taskId}' to see the review, or create a new one with 'cab delivery review-comment ${taskId}'.`,
               },
             );
         }
@@ -896,7 +896,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             `Not sent: ${error.code === "conflict" ? "the task, its source or the delivery policy changed, or this request ID was used with other material" : "the project policy denies this comment"}. Nothing was posted.`,
             {
               ...error.extra,
-              fix: `Run 'ensemble delivery get ${taskId}' to see the task and policy, then rerun with a new --request-id.`,
+              fix: `Run 'cab delivery get ${taskId}' to see the task and policy, then rerun with a new --request-id.`,
             },
           );
         });
@@ -910,7 +910,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             `Denied: ${r.reason ?? "delivery authority denied"}. Nothing was posted; operation ${key} stays denied. ${retry}`,
             {
               request,
-              fix: `Run 'ensemble delivery get ${taskId}' to see why the policy denied it.`,
+              fix: `Run 'cab delivery get ${taskId}' to see why the policy denied it.`,
             },
           );
         if (r.state === "confirmed-failure")
@@ -919,7 +919,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             `Failed: ${r.reason ?? "the provider refused it"}. Nothing was posted; operation ${key} stays failed. ${retry}`,
             {
               request,
-              fix: `Run 'ensemble delivery get ${taskId}' to see the failure, fix its cause, then send again with a new --request-id.`,
+              fix: `Run 'cab delivery get ${taskId}' to see the failure, fix its cause, then send again with a new --request-id.`,
             },
           );
         if (r.state !== "confirmed-success")
@@ -935,7 +935,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             reached
               ? `This request was sent before; the service returned its recorded outcome: the comment is posted (operation ${key}). Nothing new was posted.`
               : `Posted the comment on the task's GitHub issue (operation ${key}).`,
-            "The comment is public and Ensemble cannot edit or retract it. Rerunning this exact command replays this receipt; a deliberate second comment needs a new --request-id.",
+            "The comment is public and the CLI cannot edit or retract it. Rerunning this exact command replays this receipt; a deliberate second comment needs a new --request-id.",
           ].join("\n"),
         };
       },

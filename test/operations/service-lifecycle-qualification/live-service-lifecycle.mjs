@@ -95,7 +95,7 @@ function runOnPty(command, args, { env, prompt, password }) {
     let typed = false;
     const timer = setTimeout(() => {
       child.stdin.end();
-      // The whole group: `cat`, `script` and `ensemble` outlive a kill of `sh` alone.
+      // The whole group: `cat`, `script` and `cab` outlive a kill of `sh` alone.
       process.kill(-child.pid, "SIGTERM");
     }, 600_000);
     child.stdout.on("data", (chunk) => {
@@ -164,8 +164,8 @@ function baseline() {
       )
       .sort(),
     launchAgents: listing(join(library, "LaunchAgents"), true),
-    applicationSupportEnsemble: listing(
-      join(library, "Application Support", "Ensemble"),
+    applicationSupportcab: listing(
+      join(library, "Application Support", "cab"),
       true,
     ),
     // Other apps write here continuously, so only top-level names are compared.
@@ -262,11 +262,9 @@ function buildAndUnpack(commit, out, versions) {
 
 async function main() {
   assert.equal(process.platform, "darwin", "requires macOS");
-  root = realpathSync(
-    mkdtempSync(join(realpathSync(tmpdir()), "ensemble-980-")),
-  );
+  root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), "cab-980-")));
   chmodSync(root, 0o700);
-  const label = `local.ensemble.validation-${randomBytes(4).toString("hex")}`;
+  const label = `local.cab.validation-${randomBytes(4).toString("hex")}`;
   const uid = process.getuid();
   target = `gui/${uid}/${label}`;
   const state = join(root, "state");
@@ -283,7 +281,7 @@ async function main() {
   assert.equal(print(), null, "throwaway label must start unloaded");
   step("1-preflight", { labelAbsent: true });
 
-  // Release A is unpacked only to run its `ensemble`; install unpacks the tarball itself.
+  // Release A is unpacked only to run its `cab`; install unpacks the tarball itself.
   mkdirSync(join(root, "bootstrap"), { mode: 0o700 });
   const a = buildAndUnpack(
     "HEAD",
@@ -317,7 +315,7 @@ async function main() {
   const env = {
     PATH: "/usr/bin:/bin",
     HOME: join(root, "home"),
-    ENSEMBLE_CLI_CONFIG_DIR: join(cli, "config"),
+    CAB_CLI_CONFIG_DIR: join(cli, "config"),
   };
   const options = [
     "--label",
@@ -329,12 +327,12 @@ async function main() {
     "--launch-agents-dir",
     agents,
   ];
-  const ensemble = (release, args) =>
-    run(join(release.directory, "bin", "ensemble"), args, { env });
+  const cab = (release, args) =>
+    run(join(release.directory, "bin", "cab"), args, { env });
 
   const tokenFile = join(cli, "token");
   const installed = await runOnPty(
-    join(a.directory, "bin", "ensemble"),
+    join(a.directory, "bin", "cab"),
     [
       "service",
       "install",
@@ -348,7 +346,7 @@ async function main() {
       "--port",
       String(port),
     ],
-    { env, prompt: "New Ensemble operator password: ", password },
+    { env, prompt: "New operator password: ", password },
   );
   assert.ok(installed.typed, "the new-password prompt appeared");
   assert.equal(installed.code, 0, "install failed (output withheld)");
@@ -384,7 +382,7 @@ async function main() {
   pids.add(jobA.pid);
   const app = await fetch(`${origin}/app`);
   assert.equal(app.status, 200);
-  const status = ensemble(a, [
+  const status = cab(a, [
     "auth",
     "status",
     "--connection",
@@ -417,7 +415,7 @@ async function main() {
     tokenFileMode: "0600",
   });
 
-  const upgrade = ensemble(b, [
+  const upgrade = cab(b, [
     "service",
     "upgrade",
     b.directory,
@@ -435,7 +433,7 @@ async function main() {
     processCommand(jobB.pid).includes(join(b.directory, "node", "bin", "node")),
   );
   const report = evidence.upgradeOutput;
-  const verify = ensemble(b, ["snapshot", "verify", report.snapshot]);
+  const verify = cab(b, ["snapshot", "verify", report.snapshot]);
   assert.equal(verify.code, 0, "snapshot verify");
   step("6-upgrade", {
     output: report,
@@ -444,7 +442,7 @@ async function main() {
     snapshotVerify: JSON.parse(verify.out),
   });
 
-  const uninstall = ensemble(b, ["service", "uninstall", ...options]);
+  const uninstall = cab(b, ["service", "uninstall", ...options]);
   assert.equal(uninstall.code, 0, `uninstall failed: ${uninstall.err}`);
   assert.equal(print(), null);
   await until(() => [...pids].every(processGone), 30_000, "process exit");

@@ -117,9 +117,9 @@ const projectIssueSchema = z.object({
   }),
 });
 
-const projectPageQuery = `query EnsembleProjectPage($id:ID!,$query:String!,$after:String){node(id:$id){... on ProjectV2{id items(first:100,after:$after,query:$query){nodes{id content{__typename ... on Issue{id number title body state repository{id nameWithOwner} labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}}}} fieldValues(first:100){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}} fields(first:100){nodes{__typename ... on ProjectV2SingleSelectField{id name options{id name}}} pageInfo{hasNextPage endCursor}}}}}`;
-const projectValuesQuery = `query EnsembleProjectFieldValues($id:ID!,$after:String){node(id:$id){... on ProjectV2Item{id fieldValues(first:100,after:$after){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}}}}`;
-const projectFieldsQuery = `query EnsembleProjectFields($id:ID!,$after:String){node(id:$id){... on ProjectV2{id fields(first:100,after:$after){nodes{__typename ... on ProjectV2SingleSelectField{id name options{id name}}} pageInfo{hasNextPage endCursor}}}}}`;
+const projectPageQuery = `query CabProjectPage($id:ID!,$query:String!,$after:String){node(id:$id){... on ProjectV2{id items(first:100,after:$after,query:$query){nodes{id content{__typename ... on Issue{id number title body state repository{id nameWithOwner} labels(first:100){nodes{name} pageInfo{hasNextPage endCursor}}}} fieldValues(first:100){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}} fields(first:100){nodes{__typename ... on ProjectV2SingleSelectField{id name options{id name}}} pageInfo{hasNextPage endCursor}}}}}`;
+const projectValuesQuery = `query CabProjectFieldValues($id:ID!,$after:String){node(id:$id){... on ProjectV2Item{id fieldValues(first:100,after:$after){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}}}}`;
+const projectFieldsQuery = `query CabProjectFields($id:ID!,$after:String){node(id:$id){... on ProjectV2{id fields(first:100,after:$after){nodes{__typename ... on ProjectV2SingleSelectField{id name options{id name}}} pageInfo{hasNextPage endCursor}}}}}`;
 
 export interface GitHubSourceReader {
   readSelection(selection: GitHubSelection): Promise<SelectionSnapshot>;
@@ -441,7 +441,7 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
         | undefined;
       for (let page = 0; page < MAX_PAGES; page++) {
         const result = projectPageSchema.parse(
-          await this.graphql("EnsembleProjectPage", projectPageQuery, {
+          await this.graphql("CabProjectPage", projectPageQuery, {
             id: selection.projectNodeId,
             query: selection.filter,
             after: itemCursor,
@@ -476,11 +476,10 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
               throw new Error("page-limit");
             seenValues.add(valueCursor);
             const extra = projectValuePageSchema.parse(
-              await this.graphql(
-                "EnsembleProjectFieldValues",
-                projectValuesQuery,
-                { id: item.id, after: valueCursor },
-              ),
+              await this.graphql("CabProjectFieldValues", projectValuesQuery, {
+                id: item.id,
+                after: valueCursor,
+              }),
             );
             if (extra.data.node.id !== item.id)
               throw new Error("invalid-project-item-identity");
@@ -539,7 +538,7 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
           throw new Error("page-limit");
         seenFields.add(fieldCursor);
         const extra = projectFieldPageSchema.parse(
-          await this.graphql("EnsembleProjectFields", projectFieldsQuery, {
+          await this.graphql("CabProjectFields", projectFieldsQuery, {
             id: selection.projectNodeId,
             after: fieldCursor,
           }),

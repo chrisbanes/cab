@@ -38,7 +38,7 @@ export const actionKinds = [
   "branch.force-push",
   "branch.adopt",
 ] as const;
-export const defaultBranchPrefix = "ensemble/";
+export const defaultBranchPrefix = "cab/";
 /** Git's all-zero id, recorded as the outside head when the remote branch is absent. */
 export const absentBranchHead = "0".repeat(40);
 const branchPrefixMax = 64;
@@ -60,7 +60,7 @@ export function validBranchPrefix(prefix: string): boolean {
     refSafe(prefix)
   );
 }
-/** A complete, Ensemble-assigned task branch name. */
+/** A complete, cab-assigned task branch name. */
 export function safeBranchName(name: string): boolean {
   return (
     name.length > 0 &&
@@ -131,7 +131,7 @@ const branchTargetSchema = z.object({ repositoryId: identity }).strict();
 const commitSha = z.string().regex(/^[0-9a-f]{40}$/);
 /**
  * What a recovery from an outside change names: the task branch, the outside head (git's all-zero id
- * for a deleted branch) and the commit Ensemble last pushed. The approval binds all three.
+ * for a deleted branch) and the commit cab last pushed. The approval binds all three.
  */
 const recoveryMaterial = {
   branch: identity,
@@ -502,9 +502,9 @@ export const actionObservationSchema = z
     ambiguous: z.boolean().optional(),
     /** Git rejected this attempt's update, so it provably did not land even though the outcome is unproved. */
     rejected: z.boolean().optional(),
-    /** A head Ensemble did not push, seen alongside this outcome. */
+    /** A head cab did not push, seen alongside this outcome. */
     outsideHeadSha: commitSha.optional(),
-    /** The branch was deleted by another writer after Ensemble's push. */
+    /** The branch was deleted by another writer after cab's push. */
     outsideDeleted: z.boolean().optional(),
     /** Epoch ms before which a retryable failure is not re-attempted. */
     resumeAt: z.number().int().positive().optional(),
@@ -670,7 +670,7 @@ export function materialDigest(value: unknown): string {
   return createHash("sha256").update(canonicalMaterial(value)).digest("hex");
 }
 
-/** On closure, only the Status Ensemble last wrote or saw while the task was Ready may be expected. */
+/** On closure, only the Status cab last wrote or saw while the task was Ready may be expected. */
 function closureExpectedHolds(
   state: { observedAt: number | null; observedOptionNodeId: string | null },
   expected: { optionNodeId: string | null } | undefined,
@@ -929,14 +929,14 @@ export class DeliveryStore {
         branch?.branch !== action.target.headRef
       )
         throw new Error("PR head is not the task's assigned branch");
-      // A PR from the task branch may only be acted on at the commit Ensemble last pushed there.
+      // A PR from the task branch may only be acted on at the commit cab last pushed there.
       if (
         branch?.branch === action.target.headRef &&
         (branch.lastPushedSha === null ||
           branch.outsideHeadSha !== null ||
           action.target.expectedHeadSha !== branch.lastPushedSha)
       )
-        throw new Error("PR head is not the task branch's last Ensemble push");
+        throw new Error("PR head is not the task branch's last cab push");
     }
     if (
       action.kind === "pr.thread.reply" ||
@@ -1215,7 +1215,7 @@ export class DeliveryStore {
         caller.event !== "done" ||
         task.state !== "done" ||
         task.observedState !== "closed" ||
-        // Skip-if-changed: the Status sent as expected must be the one Ensemble last wrote or saw.
+        // Skip-if-changed: the Status sent as expected must be the one cab last wrote or saw.
         !closureExpectedHolds(
           new StatusMappingStore(this.db).taskState(caller.taskId),
           action.expected,
@@ -1789,7 +1789,7 @@ export class DeliveryStore {
       );
     });
   }
-  /** The branch head Ensemble last pushed as of the operation's first attempt, or undefined before any. */
+  /** The branch head cab last pushed as of the operation's first attempt, or undefined before any. */
   firstAttemptLastPushed(operationId: string): string | null | undefined {
     const row = this.db
       .prepare(
@@ -1813,7 +1813,7 @@ export class DeliveryStore {
   }
   /**
    * The `owner/name` of a repository as the provider verified it for the task's latest begun branch
-   * action there, which exists whenever Ensemble pushed or adopted; null before any.
+   * action there, which exists whenever cab pushed or adopted; null before any.
    */
   verifiedRepositoryName(taskId: string, repositoryId: string): string | null {
     for (const a of this.actions(taskId).reverse()) {
@@ -1885,7 +1885,7 @@ export class DeliveryStore {
     throw new Error("Task branch could not be assigned");
   }
   /**
-   * Commits Ensemble pushed, or may have pushed (an attempt that may have landed), for the repository,
+   * Commits cab pushed, or may have pushed (an attempt that may have landed), for the repository,
    * and the outside head a confirmed recovery replaced or adopted: a PR that still shows it is lagging
    * behind the recovery, not an outside change.
    */
@@ -1990,7 +1990,7 @@ export class DeliveryStore {
     binding: PrDeliveryBinding;
     changed: boolean;
     firstSeen: boolean;
-    /** Newly recorded: the PR's head is on the task branch but is no commit Ensemble pushed. */
+    /** Newly recorded: the PR's head is on the task branch but is no commit cab pushed. */
     outsideHead: boolean;
   } {
     const observation = prObservationSchema.parse(input),
@@ -2028,7 +2028,7 @@ export class DeliveryStore {
     return { binding, changed, firstSeen, outsideHead };
   }
   /**
-   * Records a PR head on the task branch that Ensemble did not push; true when newly recorded. A head
+   * Records a PR head on the task branch that cab did not push; true when newly recorded. A head
    * back at the last push clears an earlier record. A lagging head showing an earlier push is not outside.
    */
   outsideHeadWithinTransaction(
@@ -2060,7 +2060,7 @@ export class DeliveryStore {
       .run(observation.headSha, taskId, observation.repositoryId);
     return true;
   }
-  /** The remote branch was read back at the commit Ensemble last pushed: any outside record is obsolete. */
+  /** The remote branch was read back at the commit cab last pushed: any outside record is obsolete. */
   clearOutsideHead(taskId: string, repositoryId: string): void {
     this.db
       .prepare(
@@ -2070,7 +2070,7 @@ export class DeliveryStore {
   }
   /**
    * Any task branch, in any repository and with or without a PR, that records an outside head holds
-   * completion. The bound PR's own branch also holds when its head is not Ensemble's last push, and
+   * completion. The bound PR's own branch also holds when its head is not cab's last push, and
    * a closed PR's own branch never holds, because GitHub may delete it and nothing clears that.
    */
   private branchHold(
@@ -2124,7 +2124,7 @@ export class DeliveryStore {
       this.branchHold(command.taskId, binding)
     )
       throw new HandbackSettlementRefusedError(
-        "Task branch changed outside Ensemble",
+        "Task branch changed outside cab",
       );
     if (
       binding.mode !== "reviewable-pr" ||

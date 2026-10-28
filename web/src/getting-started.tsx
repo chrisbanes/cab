@@ -148,9 +148,9 @@ export function GettingStarted({
   );
   const attention = required.find((r) => r.status === "attention");
   return (
-    <section className="getting-started" aria-label="Get Ensemble running">
+    <section className="getting-started" aria-label="Get cab running">
       <div className="getting-started-heading">
-        <h2 className="section-heading">Get Ensemble running</h2>
+        <h2 className="section-heading">Get cab running</h2>
         <p className="metadata muted">
           {required.filter((r) => r.status === "done").length} of{" "}
           {required.length} required steps done

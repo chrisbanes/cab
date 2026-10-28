@@ -27,7 +27,7 @@ each screen leading to the next and nothing to look up.
 1. One install command unpacks the release, asks for the operator password when no
    auth file exists, installs the LaunchAgent, waits for the service and opens the
    sign-in page. The `tar -xzf` line before the command only makes the tarball's own
-   `ensemble` runnable ([operations](../operations/standalone-macos.md#install)).
+   `cab` runnable ([operations](../operations/standalone-macos.md#install)).
 2. Sign in. Home shows the getting-started card and nothing else until the first
    turn.
 3. Project setup creates the lead profile inline (name and runtime), then the project;

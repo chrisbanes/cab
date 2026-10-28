@@ -106,21 +106,21 @@ Reusing a work ID never resubmits it. A held result requires independent
 reconciliation; there is no force unlock. Automatic retry is limited to an exact
 terminal `serverOverloaded` or `rateLimitExceeded` failure with known retry
 telemetry, settled effects, ended callbacks, and no Stop or known survivor. Codex
-and Ensemble retries share a two-retry limit; uncertain or other failures remain
+and cab retries share a two-retry limit; uncertain or other failures remain
 held.
-On first use, the directory must be empty or carry Ensemble's standalone marker.
+On first use, the directory must be empty or carry cab's standalone marker.
 Claiming an empty directory owned by the service user sets its mode to `0700`; an
 existing marked directory keeps its mode, and readiness reports one that permits
 group or other access.
 Startup can also recover an interrupted first start when the only files are an
-empty `.ensemble-owner.sqlite`, its SQLite journal if present, and an absent or
+empty `.cab-owner.sqlite`, its SQLite journal if present, and an absent or
 partial marker whose contents match the beginning of the expected marker.
 Unrelated unmarked contents, including prototype data, remain refused.
-The service database is `standalone.sqlite`; `.ensemble-owner.sqlite` provides
+The service database is `standalone.sqlite`; `.cab-owner.sqlite` provides
 cross-process ownership of the marked directory.
 Initialize a separate operator password with
 `npm run operator-auth -- init ABSOLUTE_AUTH_FILE`, then set
-`ENSEMBLE_OPERATOR_AUTH_FILE` and `ENSEMBLE_OPERATOR_ORIGIN` before starting the
+`CAB_OPERATOR_AUTH_FILE` and `CAB_OPERATOR_ORIGIN` before starting the
 `operator` command. Use the exact loopback origin (including port) for local
 access or an HTTPS origin for a separately managed private transport. Use a
 canonical origin without a trailing slash. The server still binds only to
@@ -134,7 +134,7 @@ workspace, including repository-free and multiple-repository tasks.
 `submitTask` resolves that binding and captured assignment revisions before
 writer admission. Capacity-waiting turns own neither a writer nor a reservation.
 A bound successful terminal report admits a successor only after registered
-Ensemble callbacks finish and no hold or known survivor remains. `stopTask`
+cab callbacks finish and no hold or known survivor remains. `stopTask`
 synchronously persists the Stop hold and returns a bounded observation; only
 `resumeTask` clears the independent Stop hold. Startup reconciliation observes
 exact execution identities and never replays an ambiguous generation. A validated
@@ -147,45 +147,45 @@ detached child may overlap a later writer after qualified normal success.
 
 ## Operator CLI
 
-The packaged `ensemble` executable (`package.json` `bin`, built to
+The packaged `cab` executable (`package.json` `bin`, built to
 `dist/src/cli/main.js`) talks only to a running `operator` service. Install it from
-a checkout with `npm run build && npm pack`, then `npm install -g ./ensemble-*.tgz`,
+a checkout with `npm run build && npm pack`, then `npm install -g ./cab-*.tgz`,
 or run `node dist/src/cli/main.js` directly.
 
-`ensemble` (bare, which exits 2 with the `Fix:` line on stderr) and `ensemble --help`
+`cab` (bare, which exits 2 with the `Fix:` line on stderr) and `cab --help`
 print a short start-here block: `auth login`, `doctor`, `project list`, `task list`,
 `task get`, `task create` and `inbox list`, the area names and these forms.
-`ensemble help AREA` and `ensemble AREA --help` print that area's commands (exit 0,
-stdout); `ensemble --help --all` lists every command and option, with the `service`
+`cab help AREA` and `cab AREA --help` print that area's commands (exit 0,
+stdout); `cab --help --all` lists every command and option, with the `service`
 and `snapshot` commands in their own block after the operator commands. Help is
 plain text on stdout, also with `--output json`. A usage error prints its message,
 then the usage lines of that command (or of its area, or the area names when the
-command is not recognised), then `Fix: Run 'ensemble --help'.`.
+command is not recognised), then `Fix: Run 'cab --help'.`.
 
 1. Sign in to the web UI and create a credential under **Settings → CLI
    credentials**. Choose read-only or read/write and a lifetime of 7–90 days. The
    token is shown once; rotate to issue a replacement, then revoke the old one.
    Revocation is irreversible.
-2. `ensemble auth login --url ORIGIN` stores connection `local` (the name `service
-   install` uses) unless `--connection NAME` or `ENSEMBLE_CONNECTION` names another.
+2. `cab auth login --url ORIGIN` stores connection `local` (the name `service
+   install` uses) unless `--connection NAME` or `CAB_CONNECTION` names another.
    A name nobody chose refuses (exit 2, nothing prompted, sent or changed) to re-point
    an existing `local` at a different origin, to add `local` for an origin another
    connection already has, or to add `local` beside saved connections when none is the
    default (every bare command would then be ambiguous); the `Fix:` line names the
-   connections. It never changes the default: `ensemble connection use NAME` does. Pass
+   connections. It never changes the default: `cab connection use NAME` does. Pass
    `--connection NAME` to log in to a second service, to replace a named connection, or
    to add a second one for the same service. It says where the token comes from, then
    prompts for it with masked input and stores it in the macOS Keychain (service
-   `ensemble-cli`, account = connection name). For unattended callers, pass `--token-file PATH` instead: a
+   `cab-cli`, account = connection name). For unattended callers, pass `--token-file PATH` instead: a
    regular, non-symlink file owned by you with mode `0600` or stricter, holding one
    token. The file is referenced, never copied. There is no literal-token flag and no
    plaintext fallback; without the Keychain or a token file, login fails with
-   `credential-store-unavailable`. Success ends with `Next: ensemble doctor` (with
+   `credential-store-unavailable`. Success ends with `Next: cab doctor` (with
    `--connection NAME` when that login is not the one a bare command selects).
-3. `ensemble auth status` (the connection, its saved `URL:`, the installation, the
+3. `cab auth status` (the connection, its saved `URL:`, the installation, the
    credential and `API: version N`; the capability list and the service's own origin
-   are in `--output json`), `ensemble task get TASK_ID [--output json]`,
-   `ensemble connection list|use NAME|remove NAME` and `ensemble auth logout`.
+   are in `--output json`), `cab task get TASK_ID [--output json]`,
+   `cab connection list|use NAME|remove NAME` and `cab auth logout`.
    Logout and removal delete only local state; the server credential stays active
    until revoked or expired.
    `task get` prints the task's State as the web UI's column (Ready, Running, Waiting,
@@ -193,7 +193,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    (the lead's name and, once it has one, its assignment id, the `--to` of `task
    message`; no line without a lead), `Execution:` (the execution state, with the holds
    in the UI's words after `held:`) and `Next:` (who acts next, by the List's rule; an
-   operator action also names `ensemble inbox list --project ID`). The three ownership
+   operator action also names `cab inbox list --project ID`). The three ownership
    holds (writer, capacity and uncertainty) read as one `Ownership held`; `Stop
    requested` and `Task hold` are the others. The separate flags stay in JSON and
    in `recovery get`.
@@ -234,9 +234,9 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    - `profile prepare PROFILE_ID`, `profile prepare-create`, `project prepare
      PROJECT_ID`, `project prepare-create`, `project prepare-routing PROJECT_ID` and
      `capacity prepare` read the current state and write a change document with mode
-     `0600`, to `--out FILE` or by default to `./ensemble-<kind>-<id8>.json` (kind
+     `0600`, to `--out FILE` or by default to `./cab-<kind>-<id8>.json` (kind
      such as `project-configure`, id8 the first eight characters of the target's ID;
-     `ensemble-capacity-configure.json` for capacity). A default name that is taken
+     `cab-capacity-configure.json` for capacity). A default name that is taken
      becomes `-2` to `-99`, chosen by creating the file exclusively, so a prepare
      never overwrites a document and two at once never share one; when all 99 are
      taken the prepare is refused (`output-exists`). An explicit `--out` still
@@ -324,7 +324,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      revisions, observed settings with their source (`service-admitted`,
      `runtime-reported` or `unknown`), counts and capture health.
    - `execution inputs WORK_ID [--compare-current]` shows the captured submission
-     of Ensemble-supplied inputs (request, role, review references, project and
+     of cab-supplied inputs (request, role, review references, project and
      profile instructions) with the submitted byte count and SHA-256. It is not
      the runtime's effective prompt. It is the only diagnostic view that leaves the
      execution's own instruction text readable; credentials, patterns and private
@@ -344,7 +344,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      or on Ctrl-C, and prints a `Resume:` command. Each poll is a fresh
      authenticated request, so revocation or expiry stops it with exit 3; three
      consecutive unavailable polls exit 5 with the resume cursor. `--output jsonl`
-     (logs only) writes one `ensemble.cli/v1` record per line: `item`, `gap`, `end`
+     (logs only) writes one `cab.cli/v1` record per line: `item`, `gap`, `end`
      or `error`.
    - `doctor` reads the service's readiness checks (the same read as Settings →
      Readiness) and reports each as Pass, Fail or Not configured with one fix line
@@ -382,8 +382,8 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    project's command network access the same way. It applies to Codex task turns
    admitted afterwards; running turns keep their policy.
 
-   Retention: items older than `ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS` (1–365,
-   default 30) are deleted hourly; beyond `ENSEMBLE_DIAGNOSTIC_STORAGE_MIB`
+   Retention: items older than `CAB_DIAGNOSTIC_RETENTION_DAYS` (1–365,
+   default 30) are deleted hourly; beyond `CAB_DIAGNOSTIC_STORAGE_MIB`
    (16–1048576, default 1024) the oldest items are evicted. Invalid values fail
    service startup. `service install|upgrade` take `--diagnostic-retention-days` and
    `--diagnostic-storage-mib` and write them into the LaunchAgent. Each execution
@@ -434,7 +434,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      `{"QUESTION_ID": {"optionIds": [...], "text": "..."}}`. `question answer TASK_ID
      INTERACTION_ID --expected-revision N --answers-file FILE` (at most 256 KiB)
      needs an explicit entry for every question, validates it locally, and sends
-     the same command as the web UI for plain, Ensemble-form and native questions.
+     the same command as the web UI for plain, cab-form and native questions.
    - `approval get TASK_ID INTERACTION_ID` shows the exact action, target, material,
      material hash, revision and task holds. `approval decide TASK_ID INTERACTION_ID
      --decision approved|denied --expected-revision N [--material-hash HASH]` sends
@@ -536,7 +536,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      --review-id R --expected-revision N --material-hash HASH --decision
      approved|denied` decides it; a decision is final and a pending review cannot
      be withdrawn, only denied. `delivery send-comment TASK_ID --body-file FILE
-     --expected-task-version N [--review-id R]` posts a public comment Ensemble
+     --expected-task-version N [--review-id R]` posts a public comment cab
      cannot edit or retract; with `--review-id` the request ID is the review ID and
      the CLI first checks the review is approved for exactly this body by replaying
      it. An ID that is not an existing review is recorded as a new pending review
@@ -546,7 +546,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      `publication` lists the target IDs and why a target is unavailable) and creates
      nothing. `publish-confirm`, `publish-send --review-id R --expected-task-version N`,
      `publish-link --publication-id R --issue N` and `publish-abandon --publication-id R`
-     follow it. Creating the issue is irreversible from Ensemble.
+     follow it. Creating the issue is irreversible from cab.
 
    Comment and refresh requests are scoped `task:TASK_ID`. An identical rerun
    reuses the journal key and replays the recorded outcome, so a comment is never
@@ -579,10 +579,10 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    - `recovery prepare PATH ASSIGNMENT_ID --out FILE --work WORK_ID
      --evidence-file FILE` (or, for `conversation-replace`, `--expected-version N
      --expected-conversation-revision N` and no evidence file) writes an owner-only
-     `ensemble.cli.recovery/v1` document with the exact command, the observed
+     `cab.cli.recovery/v1` document with the exact command, the observed
      versions and a digest, and sends nothing. The identity comes from the read; the
      evidence file supplies everything the service cannot observe. It is strict
-     JSON of at most 64 KiB with `"schema": "ensemble.cli.recovery-evidence/v1"`
+     JSON of at most 64 KiB with `"schema": "cab.cli.recovery-evidence/v1"`
      and, per path, exactly: `pre-turn-adopt` — `rpcError` (the persisted
      `{code, message}`), `evidence` (`frozenSourceRevision`,
      `frozenHarnessSha256`, `evidenceSha256`, `approvedDecisionSha256`,
@@ -618,12 +618,12 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
 rejected. Certificates are always verified; for a private CA set
 `NODE_EXTRA_CA_CERTS`. Redirects are never followed, so a credential cannot reach
 another origin. Connections live in `connections.json` under
-`$ENSEMBLE_CLI_CONFIG_DIR` (default `~/.config/ensemble`, directory `0700`, file
-`0600`). With several connections, pass `--connection`, set `ENSEMBLE_CONNECTION`, or set a
+`$CAB_CLI_CONFIG_DIR` (default `~/.config/cab`, directory `0700`, file
+`0600`). With several connections, pass `--connection`, set `CAB_CONNECTION`, or set a
 default with `connection use`.
 
-Runtime children started by the service receive `ENSEMBLE_MANAGED_ASSIGNMENT=1` and
-no `ENSEMBLE_CONNECTION` or `ENSEMBLE_CLI_*` variables, and the CLI refuses to
+Runtime children started by the service receive `CAB_MANAGED_ASSIGNMENT=1` and
+no `CAB_CONNECTION` or `CAB_CLI_*` variables, and the CLI refuses to
 authenticate when the marker is set. This guards against accidental privilege
 crossing only; it is not OS isolation from same-user processes. The CLI8 live run
 observed the marker in Codex tool shells (one host, one Codex version).
@@ -644,9 +644,9 @@ Troubleshooting:
 
 `npm run check` covers the CLI with injected fakes and a packed offline install
 against a real service over loopback and verified HTTPS. The Keychain test is
-opt-in on macOS: `npm run build && ENSEMBLE_KEYCHAIN_LIVE=1 node --test
+opt-in on macOS: `npm run build && CAB_KEYCHAIN_LIVE=1 node --test
 dist/test/operations/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
-`ensemble-cli-test-<uuid>` item.
+`cab-cli-test-<uuid>` item.
 
 `node test/operator/cli-journey-qualification/live-journey.mjs --fixture` (run by `npm run check`) drives the
 installed binary through the assembled journey with a scripted runtime.

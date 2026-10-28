@@ -17,7 +17,7 @@ import { runGit } from "./git-process.js";
 import { type Git, provedAncestor } from "./push-verification.js";
 
 export type AdoptOutcome =
-  /** The outside head was fetched, proved to descend from the base, and imported under an Ensemble-owned ref. */
+  /** The outside head was fetched, proved to descend from the base, and imported under a cab-owned ref. */
   | "adopted"
   /** Nothing reached the network (invalid request or setup failed). */
   | "not-attempted"
@@ -31,7 +31,7 @@ export type AdoptOutcome =
   | "unproved";
 
 export interface AdoptRequest {
-  /** The task worktree; only its object store and Ensemble's own ref namespace are touched. */
+  /** The task worktree; only its object store and cab's own ref namespace are touched. */
   workspacePath: string;
   /** The commit the worktree was provisioned at; the outside head must descend from it. */
   baseCommit: string | null;
@@ -86,7 +86,7 @@ async function storedBytes(dir: string): Promise<number> {
 /**
  * Fetches one commit by its sha from the verified github.com repository over HTTPS, proves it descends
  * from the task's base, and imports its objects into the task worktree under
- * `refs/ensemble/adopted/<branch>`, and nothing else.
+ * `refs/cab/adopted/<branch>`, and nothing else.
  *
  * The fetch runs in a scratch repository that reads the worktree's objects through an alternate, as
  * the push does, so no repository-local or user configuration applies and Git never runs in the
@@ -129,14 +129,14 @@ export async function adoptOutsideHead(
   const objects = join(commonDir, "objects");
   let scratch: string | undefined;
   try {
-    scratch = await mkdtemp(join(tmpdir(), "ensemble-adopt-"));
+    scratch = await mkdtemp(join(tmpdir(), "cab-adopt-"));
     const dir = scratch;
     await mkdir(join(dir, "objects"));
-    await mkdir(join(dir, "refs", "ensemble"), { recursive: true });
+    await mkdir(join(dir, "refs", "cab"), { recursive: true });
     await writeFile(join(dir, "HEAD"), "ref: refs/heads/main\n");
     await writeFile(join(dir, "config"), "");
     // The base is a negotiation "have", so only what the worktree lacks is sent.
-    await writeFile(join(dir, "refs", "ensemble", "base"), `${baseCommit}\n`);
+    await writeFile(join(dir, "refs", "cab", "base"), `${baseCommit}\n`);
     const scratchEnvironment = {
       GIT_DIR: dir,
       // Quoted as in git-push.ts: Git splits an unquoted value on `:`.
@@ -205,14 +205,14 @@ export async function adoptOutsideHead(
         "--no-write-fetch-head",
         "--no-recurse-submodules",
         `https://github.com/${nameWithOwner}.git`,
-        `+${commitSha}:refs/ensemble/adopt`,
+        `+${commitSha}:refs/cab/adopt`,
       ],
       cwd: dir,
       environmentOverrides: {
         ...scratchEnvironment,
         GIT_ALLOW_PROTOCOL: "https",
-        ENSEMBLE_PUSH_PATH: `${nameWithOwner}.git`,
-        ENSEMBLE_PUSH_TOKEN: token,
+        CAB_PUSH_PATH: `${nameWithOwner}.git`,
+        CAB_PUSH_TOKEN: token,
       },
     }).finally(() => clearInterval(watcher));
     // A fetch that finished between polls is measured once more; nothing is proved or imported.
@@ -255,7 +255,7 @@ export async function adoptOutsideHead(
     for (const extension of [".pack", ".idx"])
       for (const name of names.filter((n) => n.endsWith(extension))) {
         // A unique aside name: a leftover read-only file or a concurrent import never collides.
-        const aside = join(target, `tmp_ensemble_${randomUUID()}_${name}`);
+        const aside = join(target, `tmp_cab_${randomUUID()}_${name}`);
         try {
           await copyFile(join(packs, name), aside);
           await rename(aside, join(target, name));
@@ -274,7 +274,7 @@ export async function adoptOutsideHead(
         "-c",
         "core.hooksPath=/dev/null",
         "update-ref",
-        `refs/ensemble/adopted/${branch}`,
+        `refs/cab/adopted/${branch}`,
         commitSha,
       ],
       cwd: workspacePath,

@@ -43,7 +43,7 @@ for (const [name, viewport] of [
         turnStarted: false,
       },
     );
-    const root = mkdtempSync(join(tmpdir(), "ensemble-ready-ui-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-ready-ui-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const tokenPath = join(root, "claude-token");
     writeFileSync(tokenPath, `${CANARY}\n`);

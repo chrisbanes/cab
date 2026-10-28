@@ -435,8 +435,8 @@ export function TaskBoard({
         </Button>
       </div>
       <p className="metadata muted board-footer">
-        Columns describe Ensemble work, not GitHub issue state. Cards open the
-        task; nothing here changes state, and there is no drag and drop.
+        Columns describe cab work, not GitHub issue state. Cards open the task;
+        nothing here changes state, and there is no drag and drop.
       </p>
     </div>
   );

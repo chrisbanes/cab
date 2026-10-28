@@ -311,9 +311,8 @@ async function coordination(current, ids, check) {
       true,
     );
   const leadHarness = facet === "mixed" ? "codex" : "claude";
-  const delegate = await tool("ensemble_delegate", leadHarness);
-  if (!delegate.success)
-    throw new ComplianceError("ensemble_delegate was rejected");
+  const delegate = await tool("cab_delegate", leadHarness);
+  if (!delegate.success) throw new ComplianceError("cab_delegate was rejected");
   if (facet === "claude-only") {
     const question = await waitUntil(
       () => {
@@ -333,9 +332,9 @@ async function coordination(current, ids, check) {
       answer: "ready",
     });
   }
-  const report = await tool("ensemble_report_result", "claude");
+  const report = await tool("cab_report_result", "claude");
   if (!report.success)
-    throw new ComplianceError("ensemble_report_result was rejected");
+    throw new ComplianceError("cab_report_result was rejected");
   await waitUntil(
     () => {
       check();
@@ -398,7 +397,7 @@ async function scrub(current, ids, check) {
     tokenValueInEnv: full.includes(token),
     tokenValueInParentPs: ps.includes(token),
     parentPsReadable: !/ps-error|not permitted/i.test(ps),
-    controlPresent: listed.includes("ENSEMBLE_C5_CONTROL"),
+    controlPresent: listed.includes("CAB_C5_CONTROL"),
     hooksAndStdioMcp:
       "not applicable: the hook runs in-process and strict MCP config allows no stdio servers",
   };
@@ -673,7 +672,7 @@ async function crashJourney() {
     recipientAssignmentId: held.binding.assignmentId,
     expectedAssignmentVersion: held.binding.assignmentVersion,
     message:
-      "Recovered after a service crash. Run no command. Call ensemble_report_result exactly once with summary C5 recovered, and end the turn.",
+      "Recovered after a service crash. Run no command. Call cab_report_result exactly once with summary C5 recovered, and end the turn.",
   });
   let resumed;
   try {
@@ -807,7 +806,7 @@ async function attemptBody(attempt) {
     root = mkdtempSync(join(physicalTmpdir(), ROOT_PREFIX));
     chmodSync(root, 0o700);
     // Non-secret positive control: shows the scrub probe reads Bash's environment.
-    process.env.ENSEMBLE_C5_CONTROL = "present";
+    process.env.CAB_C5_CONTROL = "present";
     stage("run");
     work =
       facet === "crash"

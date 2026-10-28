@@ -398,7 +398,7 @@ export class DraftingRunStore {
   }
 }
 
-export const draftProposalToolName = "ensemble_propose_draft";
+export const draftProposalToolName = "cab_propose_draft";
 
 export const draftProposalTool: RuntimeToolDefinition = {
   type: "function",
@@ -416,7 +416,7 @@ export const draftingInstruction = [
   `When you are done, call ${draftProposalToolName} once with a concise title and a desired outcome that states the context, the result wanted and acceptance criteria, then stop.`,
 ].join("\n");
 
-export const issueEditProposalToolName = "ensemble_propose_issue_edit";
+export const issueEditProposalToolName = "cab_propose_issue_edit";
 
 export const issueEditProposalTool: RuntimeToolDefinition = {
   type: "function",

@@ -132,7 +132,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     const confirmedId = randomUUID();
     assert.equal(
       (
-        await f.call("ensemble_external_action", {
+        await f.call("cab_external_action", {
           operationId: confirmedId,
           action: {
             kind: "issue.comment",
@@ -157,7 +157,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     writeFileSync(join(workspace.path, "evidence.png"), image);
     assert.equal(
       (
-        await f.call("ensemble_ask_question", {
+        await f.call("cab_ask_question", {
           question: "Preserve exact question and answer?",
         })
       ).success,
@@ -168,7 +168,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     const material = { scope: "synthetic fixture", identity: "approval1" };
     assert.equal(
       (
-        await f.call("ensemble_request_approval", {
+        await f.call("cab_request_approval", {
           action: "fixture.exact",
           target: "fixture-target",
           material,
@@ -241,7 +241,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     await f.terminal(2);
     await f.waitTurn(3);
     const complete = await f.call(
-      "ensemble_request_completion",
+      "cab_request_completion",
       { reviewedResultIds: [] },
       3,
     );
@@ -311,7 +311,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     await f.waitTurn(4);
     writeFileSync(join(resultWorkspace.path, "evidence.png"), image);
     const result = await f.call(
-      "ensemble_report_result",
+      "cab_report_result",
       {
         summary: "Preserved result metadata",
         review: {
@@ -370,7 +370,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     assert.equal(
       (
         await f.call(
-          "ensemble_external_action",
+          "cab_external_action",
           {
             operationId: uncertainId,
             action: {
@@ -617,7 +617,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     f.scripted.state.comments.push({
       node_id: "EXACT_RECONCILED_COMMENT",
       user: { node_id: "U1" },
-      body: `Unknown synthetic effect\n\n<!-- ensemble-operation:${uncertainId} -->`,
+      body: `Unknown synthetic effect\n\n<!-- cab-operation:${uncertainId} -->`,
     });
     await restored.refreshGitHub();
     assert.equal(
@@ -661,7 +661,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
       callId: randomUUID(),
       threadId: "fixture-thread",
       turnId: "fixture-turn-1",
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Retain one admitted request without replay?" },
     });
     assert.equal(waiting.success, true, waiting.text);

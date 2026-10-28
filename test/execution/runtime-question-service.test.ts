@@ -205,7 +205,7 @@ async function fixture(
     terminationVerifier?: StandaloneServiceOptions["terminationVerifier"];
   } = {},
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-native-service-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-native-service-"));
   const runtime = new NativeRuntime();
   runtime.early = options.early ?? false;
   // With `claude`, the work runs on a Claude-bound runtime beside an idle Codex

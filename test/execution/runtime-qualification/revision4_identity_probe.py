@@ -65,7 +65,7 @@ def result(event):
 
 
 try:
-    send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "ensemble_s01_identity", "title": "Ensemble S01 Identity", "version": "0.1.0"}, "capabilities": {"experimentalApi": True}}})
+    send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "cab_s01_identity", "title": "cab S01 Identity", "version": "0.1.0"}, "capabilities": {"experimentalApi": True}}})
     result(wait(lambda e: e.get("id") == 1))
     send({"method": "initialized", "params": {}})
     send({"id": 2, "method": "account/read", "params": {}})

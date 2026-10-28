@@ -7,7 +7,7 @@ import { writeOut } from "./browse-evidence.js";
 import { CliError } from "./connections.js";
 import { shellWord } from "./remedy.js";
 
-export const CHANGE_SCHEMA = "ensemble.cli.change/v1";
+export const CHANGE_SCHEMA = "cab.cli.change/v1";
 export const MAX_DOCUMENT_BYTES = 512 * 1024;
 
 export const changeKinds = [
@@ -87,10 +87,10 @@ export function sealDocument<T extends object>(
   return { complete, body };
 }
 
-/** `ensemble-<kind>-<id8>`: the default document name, without its suffix or extension. */
+/** `cab-<kind>-<id8>`: the default document name, without its suffix or extension. */
 function defaultStem(kind: ChangeKind, targetId: string) {
   const id8 = z.uuid().safeParse(targetId).success ? targetId.slice(0, 8) : "";
-  return `ensemble-${kind.replace(".", "-")}${id8 && `-${id8}`}`;
+  return `cab-${kind.replace(".", "-")}${id8 && `-${id8}`}`;
 }
 const DEFAULT_ATTEMPTS = 99;
 

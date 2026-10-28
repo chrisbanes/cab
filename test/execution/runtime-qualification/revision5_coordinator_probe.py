@@ -52,7 +52,7 @@ def child(cwd):
                     raise RuntimeError(event["error"])
                 return event["result"]
         raise TimeoutError(method)
-    ask(1, "initialize", {"clientInfo": {"name": "ensemble_s01_r5_crash", "title": "Ensemble S01 R5 Crash", "version": "0.1.0"}})
+    ask(1, "initialize", {"clientInfo": {"name": "cab_s01_r5_crash", "title": "cab S01 R5 Crash", "version": "0.1.0"}})
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()
     thread = ask(2, "thread/start", {"cwd": cwd, "sandbox": "workspace-write", "approvalPolicy": "never", "ephemeral": True})["thread"]["id"]

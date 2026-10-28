@@ -27,7 +27,7 @@ export type GitInvocation = { args: string; env: Record<string, string> };
  * by name find it first on `PATH` inside `withPath`.
  */
 export function gitEnvironmentProbe() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-git-environment-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-git-environment-"));
   const binDirectory = join(directory, "bin");
   const log = join(directory, "invocations");
   mkdirSync(binDirectory);
@@ -84,7 +84,7 @@ exec '${realGit}' "$@"
 export async function withHostileGitEnvironment<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
-  const decoy = mkdtempSync(join(tmpdir(), "ensemble-hostile-git-"));
+  const decoy = mkdtempSync(join(tmpdir(), "cab-hostile-git-"));
   const cleanEnvironment = { ...process.env };
   for (const key of Object.keys(cleanEnvironment))
     if (key.startsWith("GIT_")) delete cleanEnvironment[key];

@@ -440,7 +440,7 @@ test("post-commit notification failure of a guided create stays unknown and repl
 
 test("verification Git never inherits a credential the command selects before it is recorded", async (t) => {
   const { f, api } = await setupWorld(t);
-  const shim = await mkdtemp(join(tmpdir(), "ensemble-git-credential-"));
+  const shim = await mkdtemp(join(tmpdir(), "cab-git-credential-"));
   t.after(() => rm(shim, { recursive: true, force: true }));
   const log = join(shim, "seen");
   const real = execFileSync("/usr/bin/which", ["git"], {

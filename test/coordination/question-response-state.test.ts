@@ -15,7 +15,7 @@ const data: QuestionRead["data"] = {
   requestingAssignmentId: randomUUID(),
   conversationRevision: 1,
   revision: 1,
-  source: "ensemble",
+  source: "cab",
   status: "pending",
   form: mixedForm,
   answers: null,

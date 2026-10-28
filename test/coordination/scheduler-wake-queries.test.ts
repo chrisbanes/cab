@@ -135,7 +135,7 @@ function withDatabase(
   body: (filename: string, queries: SchedulerWakeQueries) => void,
 ) {
   test(name, () => {
-    const directory = mkdtempSync(join(tmpdir(), "ensemble-wake-queries-"));
+    const directory = mkdtempSync(join(tmpdir(), "cab-wake-queries-"));
     const filename = join(directory, "wake.sqlite");
     current = open(filename);
     try {

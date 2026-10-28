@@ -133,7 +133,7 @@ export function taskFiltersUrl(path: string, filters: TaskFilters) {
       params.set(key, value);
   return path + (params.size ? `?${params}` : "");
 }
-const TASK_FILTERS_KEY = "ensemble.task-filters.v1";
+const TASK_FILTERS_KEY = "cab.task-filters.v1";
 /** The remembered filters as a query string without `?`; blocked or unavailable storage reads as none. */
 export function rememberedTaskQuery() {
   try {
@@ -207,9 +207,9 @@ export function taskReasons(task: TaskListSummary) {
   if (task.source?.closure === "held")
     reasons.unshift("Held · closed on GitHub");
   if (task.source?.closure === "completed")
-    reasons.unshift("Closed on GitHub, not delivered by Ensemble");
+    reasons.unshift("Closed on GitHub, not delivered by cab");
   if (task.source?.closure === "unattributed")
-    reasons.unshift("Held · closure not attributed to Ensemble");
+    reasons.unshift("Held · closure not attributed to cab");
   if (task.execution.holds.stop)
     reasons.unshift("Stop requested; effects may continue");
   if (

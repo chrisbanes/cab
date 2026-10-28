@@ -3,7 +3,7 @@ status: accepted
 partially_superseded_by: [ADR-1004, ADR-1005]
 ---
 
-# Keep Ensemble's core independent of its host
+# Keep cab's core independent of its host
 
 Superseded in part: [ADR-1004](1004-standalone-service.md) removes BB and the
 host-adapter model for execution, workspaces, UI, capacity and cleanup;
@@ -11,7 +11,7 @@ host-adapter model for execution, workspaces, UI, capacity and cleanup;
 role and lead-only initial allocation. The portable identities, SQLite ownership
 and other product policies remain in force.
 
-Ensemble owns project and task identities, assignments, policy, durable
+cab owns project and task identities, assignments, policy, durable
 coordination, results, and recovery decisions in a host-independent core. BB
 remains the initial host, loading the core through an adapter; an independent
 service or replacement host is not required now. This retains BB's execution
@@ -28,7 +28,7 @@ resumption. Detailed migration and adapter contracts remain open.
 
 Adapters must meet the guarantees required by each operation. If a host cannot
 meet a requirement, gate the affected feature rather than silently weakening
-Ensemble's semantics or rejecting unrelated supported features. An adapter
+cab's semantics or rejecting unrelated supported features. An adapter
 cannot advertise a capability merely because it exposes a similarly named API;
 its behavior must satisfy the relevant acceptance scenarios.
 
@@ -40,7 +40,7 @@ compatibility. A second production host is not a first-release requirement.
 An installation uses one execution host at a time. Portability supports replacing
 that host; concurrent execution across hosts, including host selection per
 project or assignment, is outside the initial scope. Keep SQLite as the core's
-storage technology, with Ensemble owning its schema and migrations and hosting
+storage technology, with cab owning its schema and migrations and hosting
 supplying database access without a dependency on BB. Multiple database engines
 are not required.
 
@@ -49,6 +49,6 @@ belong to a versioned host binding, validated by that adapter; changing hosts
 requires remapping and validating these settings. Do not pretend that provider,
 model, reasoning, permission, or environment choices have universal equivalents.
 
-This supersedes ADR-1001's choice to use BB project identities as Ensemble's
+This supersedes ADR-1001's choice to use BB project identities as cab's
 identities and its framing of the product as intrinsically a BB plugin. Its
 agent-led coordination model and other product policies remain in force.

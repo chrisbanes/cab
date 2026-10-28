@@ -319,7 +319,7 @@ function readClosed<T>(root: string, sql: string, ...params: string[]): T[] {
 }
 
 const sandbox = (t: { after(fn: () => unknown): void }) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-planned-shutdown-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-planned-shutdown-"));
   const services: StandaloneService[] = [];
   t.after(async () => {
     for (const service of services) await service.stop().catch(() => undefined);

@@ -104,7 +104,7 @@ try:
     emit(server_pid=server.pid, server_pgid=os.getpgid(server.pid),
          workspace=workspace, sibling=sibling, home_like=home_like,
          server_argv=argv)
-    send(1, "initialize", {"clientInfo": {"name": "ensemble_s01_named_profile", "title": "Ensemble S01 Named Profile", "version": "0.1.0"}})
+    send(1, "initialize", {"clientInfo": {"name": "cab_s01_named_profile", "title": "cab S01 Named Profile", "version": "0.1.0"}})
     receive(1)
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

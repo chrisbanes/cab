@@ -3,7 +3,7 @@ import { emitKeypressEvents } from "node:readline";
 export function readHiddenPassword(
   input: NodeJS.ReadStream = process.stdin,
   output: NodeJS.WriteStream = process.stdout,
-  prompt = "Ensemble operator password: ",
+  prompt = "Operator password: ",
   signal?: AbortSignal,
 ): Promise<string> {
   if (signal?.aborted)

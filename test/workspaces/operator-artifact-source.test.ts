@@ -26,8 +26,8 @@ test("artifact bytes name their evidence source and digest on both access paths"
     assert.equal(r.status, 200);
     const body = Buffer.from(await r.arrayBuffer());
     assert.deepEqual(body, png);
-    assert.equal(r.headers.get("x-ensemble-evidence-source"), "retained");
-    assert.equal(r.headers.get("x-ensemble-sha256"), digest(body));
+    assert.equal(r.headers.get("x-cab-evidence-source"), "retained");
+    assert.equal(r.headers.get("x-cab-sha256"), digest(body));
   }
 
   // 2. A pre-retention result served from its matching recorded workspace file.
@@ -62,11 +62,8 @@ test("artifact bytes name their evidence source and digest on both access paths"
     assert.equal(r.status, 200);
     const body = Buffer.from(await r.arrayBuffer());
     assert.deepEqual(body, bytes);
-    assert.equal(
-      r.headers.get("x-ensemble-evidence-source"),
-      "recorded-workspace",
-    );
-    assert.equal(r.headers.get("x-ensemble-sha256"), digest(bytes));
+    assert.equal(r.headers.get("x-cab-evidence-source"), "recorded-workspace");
+    assert.equal(r.headers.get("x-cab-sha256"), digest(bytes));
   }
   const changed = Buffer.from(png);
   changed.writeUInt8(
@@ -76,7 +73,7 @@ test("artifact bytes name their evidence source and digest on both access paths"
   await writeFile(file, changed);
   for (const r of await both(recordedPath)) {
     assert.equal(r.status, 409);
-    assert.equal(r.headers.get("x-ensemble-sha256"), null);
+    assert.equal(r.headers.get("x-cab-sha256"), null);
   }
 
   // 4. Another task's artifact id is not found.
@@ -101,5 +98,5 @@ test("a retained artifact gap is never served from the workspace over the bearer
     `/api/operator/tasks/${native.seeded.taskId}/artifacts/${native.artifactId}`,
   );
   assert.equal(r.status, 503);
-  assert.equal(r.headers.get("x-ensemble-evidence-source"), null);
+  assert.equal(r.headers.get("x-cab-evidence-source"), null);
 });

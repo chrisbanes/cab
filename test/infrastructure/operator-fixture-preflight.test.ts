@@ -73,15 +73,15 @@ browserTest(
     timeout: 60000,
   },
   async () => {
-    const configured = process.env.ENSEMBLE_TEST_EVIDENCE_DIR;
+    const configured = process.env.CAB_TEST_EVIDENCE_DIR;
     const root =
-      configured ?? (await mkdtemp(join(tmpdir(), "ensemble-ci-preflight-")));
+      configured ?? (await mkdtemp(join(tmpdir(), "cab-ci-preflight-")));
     try {
       const result = await runner.runTestProcess(
         ["dist/test/fixtures/operator-ci-evidence-failure.js"],
         {
           deadlineMs: 45000,
-          env: { ...process.env, ENSEMBLE_TEST_EVIDENCE_DIR: root },
+          env: { ...process.env, CAB_TEST_EVIDENCE_DIR: root },
         },
       );
       assert.equal(result.timedOut, false);
@@ -89,12 +89,12 @@ browserTest(
       assert.equal(result.code, 1);
       assert.ok(
         result.stdout.lines.includes(
-          "ensemble-test-evidence stdout synthetic-ci-probe",
+          "cab-test-evidence stdout synthetic-ci-probe",
         ),
       );
       assert.ok(
         result.stderr.lines.includes(
-          "ensemble-test-evidence stderr synthetic-ci-probe",
+          "cab-test-evidence stderr synthetic-ci-probe",
         ),
       );
       assert.ok(

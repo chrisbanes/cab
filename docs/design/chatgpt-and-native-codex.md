@@ -6,14 +6,14 @@ until Chris explicitly reopens the work and current APIs, requirements and
 dependencies are revalidated. This document retains future behaviour and evidence
 gaps. Neither integration is implemented or qualified; X01–X08 do not gate MVP
 release or cutover. GitHub issues under
-[epic #734](https://github.com/chrisbanes/ensemble/issues/734) own delivery scope;
-[native feasibility #724](https://github.com/chrisbanes/ensemble/issues/724) owns
-the bounded proof and [integration qualification #728](https://github.com/chrisbanes/ensemble/issues/728)
+[epic #734](https://github.com/chrisbanes/cab/issues/734) own delivery scope;
+[native feasibility #724](https://github.com/chrisbanes/cab/issues/724) owns
+the bounded proof and [integration qualification #728](https://github.com/chrisbanes/cab/issues/728)
 the assembled integration evidence.
 
 ## Operator experience
 
-Ensemble's web UI remains independently usable. Optional ChatGPT daily operations
+cab's web UI remains independently usable. Optional ChatGPT daily operations
 cover task creation/tracking, durable messages, answers and approval decisions.
 Project/profile administration and recovery may open the web UI. A sidebar app
 provides project/task navigation; a conversation panel provides task detail beside
@@ -40,7 +40,7 @@ results, component metadata, context sharing, errors and events. Project opt-out
 access revocation must prevent later reads, writes and deliveries.
 
 Approval decisions show the exact retained action, target, requester, revision and
-material. A ChatGPT tool confirmation alone does not satisfy Ensemble's approval
+material. A ChatGPT tool confirmation alone does not satisfy cab's approval
 contract. Explicit user instructions authorise writes within granted project policy;
 an event payload or task content does not supply that authority.
 
@@ -67,7 +67,7 @@ or reordered deliveries without duplicate writes. Subscription expiry, opt-out,
 revocation and unsubscribe stop delivery. Missed updates remain discoverable through
 authorised reads; callback receipt is not operator acknowledgement or task completion.
 
-Ensemble's durable attention inbox remains the source of truth. Event processing
+cab's durable attention inbox remains the source of truth. Event processing
 may explain an outcome or request input, but cannot automatically approve, answer,
 create work or send instructions. The configured runtime's command-network policy
 does not authorise model execution to send webhooks; delivery belongs to the
@@ -77,7 +77,7 @@ service integration. GitHub inbound discovery webhooks remain deferred.
 
 Saved Codex project placement/linkage is optional.
 No saved-project create/list/select/assign API is required. A task keeps
-its Ensemble identity and main lead conversation; assignments bind to worker
+its cab identity and main lead conversation; assignments bind to worker
 threads and may continue across replacement conversations. Preserve native host,
 thread and workspace identity, and host project identity when available, without
 deriving policy from those IDs or unioning project permissions. Creating and
@@ -85,12 +85,12 @@ following new tasks is in scope;
 automatic import/adoption of historical native tasks is not.
 
 Present one main native task with linked, inspectable worker conversations. For
-repository tasks, create and retain an Ensemble task worktree; human continuation
+repository tasks, create and retain a cab task worktree; human continuation
 uses that same workspace. Codex project linkage must not silently replace the task
 workspace with the project's main checkout or broaden writable roots.
 
-Record explicit human handover before native continuation and hold further Ensemble
-dispatch for the task. Do not overlap human and Ensemble turns in that workspace.
+Record explicit human handover before native continuation and hold further cab
+dispatch for the task. Do not overlap human and cab turns in that workspace.
 Record explicit return, reconcile execution and workspace changes, and revalidate
 permissions, revisions, dependencies and all existing holds before dispatch. After
 restart, a task remains under human control or uncertain until reconciliation;
@@ -110,7 +110,7 @@ not establish a supported standalone API.
 When reopened, the bounded native proof must create a new task in a disposable
 local repository/worktree, verify actual native visibility/opening and worker
 navigation, observe a harmless worktree change, exercise settled handover in both
-directions, and restart Ensemble
+directions, and restart cab
 without duplicate launch. Record installed versions, integration entrypoints,
 identity, observed effects, failure/unproved rows and exact fixture cleanup. Do not
 modify production tasks, shared configuration/login or the installed Haze prototype.

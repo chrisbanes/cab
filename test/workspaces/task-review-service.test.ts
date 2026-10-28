@@ -113,7 +113,7 @@ test("production service creates source, assignment and work captures, and real 
     threadId: w.threadId,
     turnId: w.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: {
       summary: "Wrong source",
       review: { sourceId: newer.sourceId },
@@ -130,7 +130,7 @@ test("production service creates source, assignment and work captures, and real 
       threadId: w.threadId,
       turnId: w.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: {
         summary: "Rejected reference",
         review: { changes: { reference } },
@@ -170,7 +170,7 @@ test("production service creates source, assignment and work captures, and real 
     threadId: w.threadId,
     turnId: w.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: {
       summary: "Restored focus",
       review: {
@@ -614,7 +614,7 @@ test("never-admitted same work rebind retains provisional captures but prompt an
       threadId: work.threadId,
       turnId: work.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: {
         summary: "Wrong provisional source",
         review: { sourceId: old.sourceId! },
@@ -629,7 +629,7 @@ test("never-admitted same work rebind retains provisional captures but prompt an
       threadId: work.threadId,
       turnId: work.turnId,
       callId: randomUUID(),
-      tool: "ensemble_report_result",
+      tool: "cab_report_result",
       arguments: {
         summary: "Version bound result",
         ...(structured ? { review: { sourceId: current.sourceId! } } : {}),

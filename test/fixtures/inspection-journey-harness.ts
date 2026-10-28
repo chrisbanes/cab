@@ -46,19 +46,19 @@ export const inspectionJourneyBudgets = Object.freeze({
 });
 
 export const inspectionJourneyMarkers = Object.freeze({
-  marker1A: "ensemble-782-marker-1-A\n",
-  marker1B: "ensemble-782-marker-1-B\n",
-  marker2: "ensemble-782-marker-2\n",
-  marker3: "ensemble-782-marker-3\n",
+  marker1A: "cab-782-marker-1-A\n",
+  marker1B: "cab-782-marker-1-B\n",
+  marker2: "cab-782-marker-2\n",
+  marker3: "cab-782-marker-3\n",
 });
 
 const scope =
   "Use only these local workspace writes and the required result-reporting action. Do not delegate, ask a question, request approval, invoke an external action, use network access or modify any other file.";
 
 export const inspectionJourneyInstructions = Object.freeze({
-  T1: `Create marker-1.txt in the workspace root containing exactly ${inspectionJourneyMarkers.marker1A.trimEnd()} followed by one newline. Then call ensemble_report_result with a short summary and review {"changes":{"files":["marker-1.txt"]}}. ${scope}`,
-  T2: `Overwrite marker-1.txt in the workspace root so it contains exactly ${inspectionJourneyMarkers.marker1B.trimEnd()} followed by one newline, and create marker-2.txt containing exactly ${inspectionJourneyMarkers.marker2.trimEnd()} followed by one newline. Then call ensemble_report_result with a short summary and review {"changes":{"files":["marker-1.txt","marker-2.txt"]}}. ${scope}`,
-  T3: `Create marker-3.txt in the workspace root containing exactly ${inspectionJourneyMarkers.marker3.trimEnd()} followed by one newline. Then run the shell command \`sleep 900\` in the workspace and wait for it to finish. Only after it finishes, call ensemble_report_result with a short summary and review {"changes":{"files":["marker-3.txt"]}}. ${scope}`,
+  T1: `Create marker-1.txt in the workspace root containing exactly ${inspectionJourneyMarkers.marker1A.trimEnd()} followed by one newline. Then call cab_report_result with a short summary and review {"changes":{"files":["marker-1.txt"]}}. ${scope}`,
+  T2: `Overwrite marker-1.txt in the workspace root so it contains exactly ${inspectionJourneyMarkers.marker1B.trimEnd()} followed by one newline, and create marker-2.txt containing exactly ${inspectionJourneyMarkers.marker2.trimEnd()} followed by one newline. Then call cab_report_result with a short summary and review {"changes":{"files":["marker-1.txt","marker-2.txt"]}}. ${scope}`,
+  T3: `Create marker-3.txt in the workspace root containing exactly ${inspectionJourneyMarkers.marker3.trimEnd()} followed by one newline. Then run the shell command \`sleep 900\` in the workspace and wait for it to finish. Only after it finishes, call cab_report_result with a short summary and review {"changes":{"files":["marker-3.txt"]}}. ${scope}`,
 });
 
 export function sha256(value: string | Uint8Array) {
@@ -623,10 +623,7 @@ export async function createInspectionJourneyHarness(
 ): Promise<InspectionJourneyHarness> {
   const checkpointPath =
     options.checkpointPath ??
-    join(
-      mkdtempSync(join(tmpdir(), "ensemble-wi782-attempt-")),
-      "journey.json",
-    );
+    join(mkdtempSync(join(tmpdir(), "cab-wi782-attempt-")), "journey.json");
   const checkpointDirectory = dirname(checkpointPath);
   const guard = new InspectionJourneyGuard(checkpointPath, options.journeyId);
   let fixture: InspectionJourneyFixture | undefined;

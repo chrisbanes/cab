@@ -11,7 +11,7 @@ import { tmpdir } from "./temp.js";
  * what the probe ran under.
  */
 export function fakeStatusGh(t: { after(fn: () => void): void }) {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-fake-gh-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-fake-gh-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const log = join(dir, "argv.log");
   writeFileSync(

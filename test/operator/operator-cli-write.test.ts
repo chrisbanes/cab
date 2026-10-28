@@ -56,7 +56,7 @@ const receipt = {
 };
 
 function drive(t: After, origin: string, fetcher: typeof fetch) {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-write-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-write-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const journal = new RequestJournal(join(dir, "config"));
   const session = {
@@ -226,7 +226,7 @@ test("write transport classifies every outcome and journals before sending", asy
       );
       if (code === "command-outcome-unknown") {
         assert.equal(error.extra.retryable, true, name);
-        assert.match(error.message, /ensemble operation get/);
+        assert.match(error.message, /cab operation get/);
       }
       if (code === "invalid-input") assert.match(error.message, /globalLimit/);
     }
@@ -273,7 +273,7 @@ test("timeouts are unknown and redirects never forward the credential", async (t
 });
 
 test("the journal finds earlier keys, keeps concurrent lines and fails closed", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-journal-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-journal-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const a = new RequestJournal(dir),
     b = new RequestJournal(dir);
@@ -529,8 +529,8 @@ test("operation get reads receipts by scope and type only", async (t) => {
 
   r = await h.run(args, {
     env: {
-      ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
-      ENSEMBLE_MANAGED_ASSIGNMENT: "1",
+      CAB_CLI_CONFIG_DIR: h.configDir,
+      CAB_MANAGED_ASSIGNMENT: "1",
     },
   });
   assert.equal(r.code, 3);
@@ -584,7 +584,7 @@ test("operation get requires the operation.read capability before any read", asy
 });
 
 test("unresolved journal reuse never offers a recorded or definitely rejected key", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-journal-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-journal-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const j = new RequestJournal(dir);
   const id = (k: string) => ({

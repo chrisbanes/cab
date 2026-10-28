@@ -27,7 +27,7 @@ import {
 type Task = TaskRead["data"];
 
 /** Sent by a control outside the task page after it changed the task, so the page rereads. */
-export const taskChangedEvent = "ensemble-task-changed";
+export const taskChangedEvent = "cab-task-changed";
 
 /** Where an unavailable action sends the operator, one link per destination. */
 export function RestartDestinationLink({

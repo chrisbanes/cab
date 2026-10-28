@@ -3,7 +3,7 @@ status: accepted
 partially_superseded_by: [ADR-1003, ADR-1004, ADR-1005]
 ---
 
-# Build Ensemble around agent coordination
+# Build cab around agent coordination
 
 Superseded in part: [ADR-1003](1003-host-independent-core.md) and
 [ADR-1004](1004-standalone-service.md) replace the BB hosting, identity and
@@ -11,9 +11,9 @@ integration choices; [ADR-1005](1005-service-assignment-routing.md) replaces the
 separate task-owner role and lead-only initial allocation. Other product policies
 remain in force.
 
-Ensemble is a BB plugin where agents organise work through instructions
+cab is a BB plugin where agents organise work through instructions
 and runtime tools. Agents decide how to plan, implement, review, and revise work;
-Ensemble owns durable coordination and its recovery; BB provides agent execution. This
+cab owns durable coordination and its recovery; BB provides agent execution. This
 allows the process to adapt to each task, at the cost of a predetermined sequence
 of steps.
 
@@ -21,15 +21,15 @@ of steps.
 
 Center the product on projects and tasks, with reusable agent profiles and
 optional GitHub sync. Profiles supply instructions and execution settings;
-project leads and task assignments have conversations for their work. Ensemble
+project leads and task assignments have conversations for their work. cab
 does not require persistent bot identities, personal bot state or a bot management
 surface. This keeps configuration reusable while work history belongs to its
 project or task. Bots Sidebar informs conversation binding and navigation only;
-its broader bot model is not part of Ensemble.
+its broader bot model is not part of cab.
 
 ## Coordination
 
-Ensemble attaches its project configuration to BB projects, each containing tasks,
+cab attaches its project configuration to BB projects, each containing tasks,
 optional linked Git repositories, agent profiles, instructions, and permissions. A project is
 independent of any external tracker or GitHub Project. Project leads select work
 and delegate to concurrent task owners, which coordinate each task's implementation
@@ -50,18 +50,18 @@ A reviewable-PR project retains responsibility after handback: CI failures and
 review feedback wake the task owner, while merge remains an operator action.
 The task waits for review and completes on merge or explicit acceptance/closure.
 For through-merge projects, the owner follows project-specific instructions and
-GitHub's actual merge requirements. Ensemble checks merge authority and records
+GitHub's actual merge requirements. cab checks merge authority and records
 evidence; it does not impose universal reviewer counts or a review process schema.
 
 Each task belongs to one project, whose instructions and permissions govern its
-work. Ensemble stores assignments, handoffs, pending work, and human interactions
+work. cab stores assignments, handoffs, pending work, and human interactions
 durably. Local tasks are built in and support quick one-offs without an external
 integration. Use SQLite for initial task and coordination storage.
 
 A project may configure multiple external task sources through plugins. Store a
 local representation of each external task with its stable external reference;
 the provider remains authoritative for imported title, description, and status,
-while Ensemble owns coordination. External edits, progress updates,
+while cab owns coordination. External edits, progress updates,
 and results are written through the plugin. Deduplicate an item discovered through
 several sources within a project, retaining its source memberships. Overlapping
 projects must not create competing execution owners or combine permissions.
@@ -79,7 +79,7 @@ and results and update configured labels or GitHub Project fields. Editing an
 external issue's title or description requires separate operator approval; source
 membership and workflow permissions do not grant that authority.
 
-Each Ensemble project may define one readiness rule for GitHub tasks, using
+Each cab project may define one readiness rule for GitHub tasks, using
 selected labels, a specified Project field, or an explicit combination. A project
 without a rule does not filter its selected open issues by readiness.
 Membership in another source cannot independently grant readiness. Agents cannot
@@ -117,10 +117,10 @@ Multi-repository tasks require a worktree for each participating repository;
 parallel reviews refer to a fixed revision. Use BB's existing cleanup lifecycle,
 configurable per project: retain conversations until operator archival (default),
 or archive after confirmed delivery and preservation checks. Direct BB archival
-can cause workspace removal; Ensemble does not supply an independent retention
+can cause workspace removal; cab does not supply an independent retention
 engine.
 
-Honor BB's Concurrency limit plugin without adding an Ensemble global default or
+Honor BB's Concurrency limit plugin without adding a cab global default or
 per-project cap. Waiting owners yield so their workers can run. Retry confirmed
 transient execution failures at most twice with backoff, then hold for attention;
 reconcile uncertain effects before retrying. Flag inactivity for attention without
@@ -129,13 +129,13 @@ automatically terminating or restarting an agent based on silence.
 Existing assignments keep their recorded instructions and profile revision.
 New assignments use current configuration; the operator explicitly applies
 changes to existing assignments for their next turn. Permission revocations
-still apply to subsequent Ensemble actions.
+still apply to subsequent cab actions.
 
 ## Implementation and access
 
-Implement Ensemble as its own TypeScript BB plugin on Node.js. BB supplies
+Implement cab as its own TypeScript BB plugin on Node.js. BB supplies
 agent providers, conversations, workspaces, transcripts, and the plugin host.
-Ensemble owns local tasks, external source memberships, assignments, handoffs,
+cab owns local tasks, external source memberships, assignments, handoffs,
 and project coordination settings in its plugin-owned SQLite database. Use BB
 project identities; verify repository-free and multi-repository behaviour before
 claiming those product scenarios work.
@@ -147,8 +147,8 @@ a task owner may do work itself or delegate according to instructions. A thread
 is not itself an assignment, a task, or a worktree.
 
 Use Taskboard as inspiration for project-scoped boards, task details, and task
-context beside conversations. Build Ensemble independently rather than forking
-Taskboard. Keep local tasks and multiple external sources in Ensemble's model.
+context beside conversations. Build cab independently rather than forking
+Taskboard. Keep local tasks and multiple external sources in cab's model.
 Prefer BB's public SDK and extension points over importing its internal packages.
 This saves execution and UI infrastructure, while accepting dependency on BB's
 plugin contracts and lifecycle. Some relevant hooks remain experimental.
@@ -157,16 +157,16 @@ The first implementation is a bounded local-task delegation experiment. Record
 launch intent before calling BB, tag worker threads with assignment identity,
 and reconcile uncertain launches before any retry. An absent search result does
 not prove a timed-out launch cannot complete. BB metadata is mutable and is not
-an authorization boundary. BB's dispatch override is not a security gate. Ensemble relies on BB/provider
+an authorization boundary. BB's dispatch override is not a security gate. cab relies on BB/provider
 execution controls and documents their limits.
 
-The initial product targets a trusted, single-operator BB installation. Ensemble
+The initial product targets a trusted, single-operator BB installation. cab
 authorizes its own coordination and integration actions using project policy;
-agent execution uses BB/provider permissions and environment controls. Ensemble
+agent execution uses BB/provider permissions and environment controls. cab
 does not promise an independent sandbox against shell, ambient credentials, or
 direct BB API access. Display effective settings and their limits, and never
 present an instruction as enforced isolation. Improving execution isolation is a
-BB/deployment concern rather than a prerequisite for a new Ensemble security layer.
+BB/deployment concern rather than a prerequisite for a new cab security layer.
 The initial deployment is one BB host; additional hosts are deferred.
 
 ## Fresh implementation

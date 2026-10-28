@@ -727,7 +727,7 @@ test("conversation capture resumes after tracked and omitted turns terminate", a
   ];
 
   const result = await captureTwoTurns(
-    "ensemble-codex-history-drain-",
+    "cab-codex-history-drain-",
     trackedTurnIds[0] ?? "missing-bound-turn",
     freshTurnId,
     firstEvents,
@@ -817,7 +817,7 @@ test("capture remains bounded and fails closed after overflow identity cap", asy
   ];
 
   const result = await captureTwoTurns(
-    "ensemble-codex-history-overflow-cap-",
+    "cab-codex-history-overflow-cap-",
     trackedTurnIds[0] ?? "missing-bound-turn",
     freshTurnId,
     firstEvents,
@@ -846,7 +846,7 @@ test("capture remains bounded and fails closed after overflow identity cap", asy
 test("App Server projects only complete bounded agent-message history", {
   timeout: 12000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-history-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-history-"));
   const executable = join(root, "fake-codex.mjs");
   const message = "The bounded answer.";
   const tooLong = "x".repeat(64 * 1024 + 1);
@@ -1234,7 +1234,7 @@ test("App Server projects only complete bounded agent-message history", {
 test("conversation projection bounds completed items and ignores post-terminal replay", {
   timeout: 12000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-history-bound-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-history-bound-"));
   const executable = join(root, "fake-codex.mjs");
   const events: unknown[] = [
     ...Array.from({ length: 258 }, (_, index) => ({
@@ -1347,7 +1347,7 @@ test("conversation projection bounds completed items and ignores post-terminal r
 test("large discarded stderr cannot stall App Server initialization or RPC", {
   timeout: 12000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-pipe-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-pipe-"));
   const executable = join(root, "fake-codex.mjs");
   writeFileSync(
     executable,
@@ -1394,7 +1394,7 @@ for await (const line of lines) {
 test("turn interrupt uses the bound App Server identities and validates its response", {
   timeout: 7000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-interrupt-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-interrupt-"));
   const executable = join(root, "fake-codex.mjs");
   writeFileSync(
     executable,
@@ -1440,7 +1440,7 @@ for await (const line of createInterface({input: process.stdin})) {
 test("stdin closure during initialization rejects promptly", {
   timeout: 7000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-init-pipe-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-init-pipe-"));
   const executable = join(root, "fake-codex.sh");
   writeFileSync(
     executable,
@@ -1469,7 +1469,7 @@ test("late events from a stopped child cannot fail a restarted runtime", {
   // plus shutdown/fixture cleanup, must fit inside the enclosing deadline.
   timeout: 20000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-restart-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-restart-"));
   const executable = join(root, "fake-codex.mjs");
   writeFileSync(
     executable,
@@ -1524,7 +1524,7 @@ for await (const line of createInterface({input: process.stdin})) {
 test("stdout closure while the App Server lives fails a pending turn wait", {
   timeout: 7000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-stdout-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-stdout-"));
   const executable = join(root, "fake-codex.mjs");
   writeFileSync(
     executable,
@@ -1561,7 +1561,7 @@ for await (const line of createInterface({input: process.stdin})) {
 test("an App Server stdout line over the byte cap fails the runtime", {
   timeout: 7000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-line-cap-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-line-cap-"));
   const executable = join(root, "fake-codex.mjs");
   writeFileSync(
     executable,
@@ -1601,7 +1601,7 @@ for await (const line of createInterface({input: process.stdin})) {
 test("child exit notifies failure listeners exactly once", {
   timeout: 7000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-exit-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-exit-"));
   const executable = join(root, "fake-codex.mjs");
   writeFileSync(
     executable,
@@ -1684,7 +1684,7 @@ test("dynamic tool registration is passed to thread/start", async () => {
 test("App Server dynamic callbacks use the registered function and server identity", {
   timeout: 7000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-tool-call-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-tool-call-"));
   const executable = join(root, "fake-codex.mjs");
   const reportPath = join(root, "report.json");
   const source = [
@@ -1936,17 +1936,17 @@ test("handler rejection is bounded and response-pipe failure fails the runtime",
 
 import { deliveryRuntimeEnvironment } from "../../src/standalone/delivery.js";
 test("delivery spawn snapshot excludes configured key and exact-value aliases while retaining login environment", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-delivery-spawn-")),
+  const root = mkdtempSync(join(tmpdir(), "cab-delivery-spawn-")),
     executable = join(root, "codex.mjs"),
     report = join(root, "report.json");
   writeFileSync(
     executable,
-    `#!${process.execPath}\nimport{createInterface}from'node:readline';import{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(report)},JSON.stringify({keyAbsent:process.env.ENSEMBLE_S07A_DELIVERY_SENTINEL===undefined,aliasAbsent:process.env.S07A_ALIAS===undefined,pathPresent:Boolean(process.env.PATH),homePresent:Boolean(process.env.HOME)}));for await(const line of createInterface({input:process.stdin})){const m=JSON.parse(line);if(m.id!==undefined){let result={};if(m.method==='account/read')result={account:{type:'chatgpt'}};if(m.method==='config/read')result={config:{approval_policy:'never',sandbox_mode:'workspace-write'}};process.stdout.write(JSON.stringify({id:m.id,result})+'\\n');}}`,
+    `#!${process.execPath}\nimport{createInterface}from'node:readline';import{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(report)},JSON.stringify({keyAbsent:process.env.CAB_S07A_DELIVERY_SENTINEL===undefined,aliasAbsent:process.env.S07A_ALIAS===undefined,pathPresent:Boolean(process.env.PATH),homePresent:Boolean(process.env.HOME)}));for await(const line of createInterface({input:process.stdin})){const m=JSON.parse(line);if(m.id!==undefined){let result={};if(m.method==='account/read')result={account:{type:'chatgpt'}};if(m.method==='config/read')result={config:{approval_policy:'never',sandbox_mode:'workspace-write'}};process.stdout.write(JSON.stringify({id:m.id,result})+'\\n');}}`,
   );
   chmodSync(executable, 0o700);
   const environment = {
     ...process.env,
-    ENSEMBLE_S07A_DELIVERY_SENTINEL: "S07A_NON_SECRET_TEST_MARKER",
+    CAB_S07A_DELIVERY_SENTINEL: "S07A_NON_SECRET_TEST_MARKER",
     S07A_ALIAS: "S07A_NON_SECRET_TEST_MARKER",
   };
   const runtime = newTestRuntime(executable, {
@@ -1955,7 +1955,7 @@ test("delivery spawn snapshot excludes configured key and exact-value aliases wh
         {
           version: 2,
           mode: "reviewable-pr",
-          credentialRef: "env:ENSEMBLE_S07A_DELIVERY_SENTINEL",
+          credentialRef: "env:CAB_S07A_DELIVERY_SENTINEL",
           grants: [],
           requiredChecks: [],
         },
@@ -1970,7 +1970,7 @@ test("delivery spawn snapshot excludes configured key and exact-value aliases wh
       homePresent: true,
     });
     assert.equal(
-      environment.ENSEMBLE_S07A_DELIVERY_SENTINEL,
+      environment.CAB_S07A_DELIVERY_SENTINEL,
       "S07A_NON_SECRET_TEST_MARKER",
     );
   } finally {
@@ -2073,8 +2073,8 @@ async function nativeTransport(mode: string) {
     spawnEnvironment: () => {
       return {
         ...process.env,
-        ENSEMBLE_UI01_NATIVE_TRANSPORT_FIXTURE: mode,
-        ENSEMBLE_UI01_NATIVE_TRANSPORT_INSTANCE: String(processInstance),
+        CAB_UI01_NATIVE_TRANSPORT_FIXTURE: mode,
+        CAB_UI01_NATIVE_TRANSPORT_INSTANCE: String(processInstance),
       };
     },
   });
@@ -2678,7 +2678,7 @@ for (const mode of [
           : createHash("sha256").update(readFileSync(executable)).digest("hex"),
       spawnEnvironment: () => ({
         ...process.env,
-        ENSEMBLE_UI01_NATIVE_TRANSPORT_FIXTURE: mode,
+        CAB_UI01_NATIVE_TRANSPORT_FIXTURE: mode,
       }),
     });
     let requests = 0;
@@ -2720,7 +2720,7 @@ for (const mode of [
         .digest("hex"),
       spawnEnvironment: () => ({
         ...process.env,
-        ENSEMBLE_UI01_NATIVE_TRANSPORT_FIXTURE: mode,
+        CAB_UI01_NATIVE_TRANSPORT_FIXTURE: mode,
       }),
     });
     const calls: import("../../src/standalone/native-input.js").RuntimeUserInputRequest[] =
@@ -2946,7 +2946,7 @@ for (const mode of [
   });
 
 test("archived resume rejection retains its exact correlated request and process before any turn", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-archived-resume-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-archived-resume-"));
   const executable = join(root, "fake-codex.mjs");
   writeFileSync(
     executable,
@@ -3017,7 +3017,7 @@ test("archived RPC text cannot qualify wrong methods, identities or malformed re
     "no-response",
   ] as const)
     await t.test(mode, async () => {
-      const root = mkdtempSync(join(tmpdir(), "ensemble-archived-negative-"));
+      const root = mkdtempSync(join(tmpdir(), "cab-archived-negative-"));
       const executable = join(root, "fake-codex.mjs");
       const error = {
         code: mode === "wrong-code" ? -32000 : -32600,
@@ -3074,7 +3074,7 @@ test("archived RPC text cannot qualify wrong methods, identities or malformed re
 });
 
 test("diagnostic events carry tool metadata and observed settings only", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-diagnostic-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-diagnostic-"));
   const executable = join(root, "fake-codex.mjs");
   const item = (method: string, it: unknown) => ({
     method,

@@ -89,7 +89,7 @@ const command = (domain, body) =>
   domain.execute({ key: randomUUID(), actor: "operator", ...body });
 
 try {
-  root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-drafting-live-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "cab-drafting-live-")));
   const repository = join(root, "greeter");
   mkdirSync(join(repository, "src"), { recursive: true });
   writeFileSync(

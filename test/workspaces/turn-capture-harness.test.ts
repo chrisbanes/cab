@@ -84,9 +84,7 @@ function disposeAttemptDirectory(path: string) {
 }
 
 test("live entry refuses default invocation before fixture or runtime setup", (t) => {
-  const tempRoot = mkdtempSync(
-    join(tmpdir(), "ensemble-wi03-default-refusal-"),
-  );
+  const tempRoot = mkdtempSync(join(tmpdir(), "cab-wi03-default-refusal-"));
   chmodSync(tempRoot, 0o700);
   t.after(() => disposeAttemptDirectory(tempRoot));
 
@@ -218,7 +216,7 @@ test("the offline live-harness path captures one exact turn through authenticate
   const copiedExport = structuredClone(exported);
   assert.equal(
     copiedExport.sides.find((side) => side.rightText !== undefined)?.rightText,
-    "ensemble-turn-capture-marker-v1\n",
+    "cab-turn-capture-marker-v1\n",
   );
   harness.guard.recordCapture(capture);
 
@@ -728,7 +726,7 @@ test("setup failure preserves its stopped fixture and checkpoint before any disp
 
 test("shutdown checkpoint rejects mismatched and out-of-budget process evidence", async (t) => {
   const checkpointDirectory = mkdtempSync(
-    join(tmpdir(), "ensemble-turn-capture-shutdown-"),
+    join(tmpdir(), "cab-turn-capture-shutdown-"),
   );
   const guard = new OneTurnAttemptGuard(
     join(checkpointDirectory, "attempt.json"),
@@ -789,7 +787,7 @@ test("shutdown checkpoint rejects mismatched and out-of-budget process evidence"
 
 test("the private attempt ledger enforces the single-use and reconciliation bounds", (t) => {
   const checkpointDirectory = mkdtempSync(
-    join(tmpdir(), "ensemble-turn-capture-ledger-"),
+    join(tmpdir(), "cab-turn-capture-ledger-"),
   );
   const checkpointPath = join(checkpointDirectory, "attempt.json");
   const guard = new OneTurnAttemptGuard(checkpointPath, "ledger-test");
@@ -834,7 +832,7 @@ test("the private attempt ledger enforces the single-use and reconciliation boun
 
 test("a supplied shared checkpoint parent is rejected without changing its mode", async (t) => {
   const sharedDirectory = mkdtempSync(
-    join(tmpdir(), "ensemble-wi03-shared-parent-"),
+    join(tmpdir(), "cab-wi03-shared-parent-"),
   );
   chmodSync(sharedDirectory, 0o755);
   t.after(() => disposeAttemptDirectory(sharedDirectory));

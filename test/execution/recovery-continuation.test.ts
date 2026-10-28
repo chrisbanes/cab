@@ -89,7 +89,7 @@ class RecoveryContinuationRuntime implements Runtime {
         threadId,
         turnId,
         callId: "initial-question",
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: { question: "Initial waiting turn" },
       });
       assert.equal(r.success, true);
@@ -101,7 +101,7 @@ class RecoveryContinuationRuntime implements Runtime {
       threadId,
       turnId,
       callId: `fresh-completion-${turn}`,
-      tool: "ensemble_request_completion",
+      tool: "cab_request_completion",
       arguments: { reviewedResultIds: [] },
     });
     this.completionResults.push(r);
@@ -134,9 +134,7 @@ async function heldFixture(
     | "wrong-thread"
     | "timeout" = false,
 ) {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-recovery-continuation-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-recovery-continuation-"));
   const runtime = new RecoveryContinuationRuntime();
   runtime.rejectResume = Boolean(preTurn);
   if (preTurn === "historical")
@@ -909,7 +907,7 @@ test("late callback or known survivor after recorded continuation persistently h
           threadId: active.threadId,
           turnId: active.turnId,
           callId: "completion-action-gate",
-          tool: "ensemble_request_completion",
+          tool: "cab_request_completion",
           arguments: { reviewedResultIds: [] },
         });
         assert.deepEqual(

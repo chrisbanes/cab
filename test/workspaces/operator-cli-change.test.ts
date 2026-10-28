@@ -1046,7 +1046,7 @@ test("a missing change document says it is missing and sends nothing", async (t)
   assert.match(r.err, /Change document rejected: it does not exist\./);
   assert.match(
     r.err,
-    /^Fix: Prepare it first with .*'ensemble project prepare'.*then apply/m,
+    /^Fix: Prepare it first with .*'cab project prepare'.*then apply/m,
   );
   assert.deepEqual(h.fetches, []);
   assert.equal(existsSync(join(h.configDir, "requests.jsonl")), false);
@@ -1076,7 +1076,7 @@ test("a missing change document says it is missing and sends nothing", async (t)
 
 test("prepare writes a change document to a default path that never overwrites", async (t) => {
   const { seed, h, cli } = await setup(t);
-  const stem = `ensemble-project-configure-${seed.projectA.slice(0, 8)}`;
+  const stem = `cab-project-configure-${seed.projectA.slice(0, 8)}`;
   const cwdOf = (prefix = "cwd-") => mkdtempSync(join(h.dir, prefix));
   const names = (cwd: string) => readdirSync(cwd).sort();
   let n = 0;
@@ -1123,7 +1123,7 @@ test("prepare writes a change document to a default path that never overwrites",
   const humanFile = join(humanCwd, `${stem}.json`);
   assert.equal(
     human.out.trimEnd().split("\n").at(-1),
-    `Apply with: ensemble project apply --file ${humanFile}`,
+    `Apply with: cab project apply --file ${humanFile}`,
   );
   r = await cli("rw", ["project", "apply", "--file", humanFile]);
   assert.equal(r.code, 0, r.err + r.out);
@@ -1173,7 +1173,7 @@ test("prepare writes a change document to a default path that never overwrites",
     r = await prepare(cwd5, ["--out", out]);
     assert.equal(r.code, 2, out);
     assert.equal(r.json().error.code, "usage", out);
-    assert.match(r.json().error.message, /ensemble-<kind>-<id8>\.json/);
+    assert.match(r.json().error.message, /cab-<kind>-<id8>\.json/);
   }
   assert.deepEqual(names(cwd5), []);
   assert.equal(fetched(), sent);
@@ -1274,10 +1274,7 @@ test("prepare writes a change document to a default path that never overwrites",
     cwd: cwd9,
   });
   assert.equal(r.code, 0, r.err + r.out);
-  assert.equal(
-    r.json().data.file,
-    join(cwd9, "ensemble-capacity-configure.json"),
-  );
+  assert.equal(r.json().data.file, join(cwd9, "cab-capacity-configure.json"));
 
   // 10. A path with a space and a quote is printed as one runnable shell word.
   const odd = cwdOf("it's a dir-");
@@ -1295,7 +1292,7 @@ test("prepare writes a change document to a default path that never overwrites",
   );
   assert.equal(printed.code, 0, printed.err);
   const line = printed.out.trimEnd().split("\n").at(-1) ?? "";
-  const word = line.slice("Apply with: ensemble project apply --file ".length);
+  const word = line.slice("Apply with: cab project apply --file ".length);
   assert.ok(word.startsWith("'") && word.endsWith("'"), word);
   const unquoted = word.slice(1, -1).replaceAll("'\\''", "'");
   assert.equal(unquoted, join(odd, `${stem}.json`));
@@ -1369,7 +1366,7 @@ test("apply --dry-run shows the stored change and sends nothing", async (t) => {
   );
   assert.equal(
     r.out.trimEnd().split("\n").at(-1),
-    `Apply with: ensemble project apply --file ${D}`,
+    `Apply with: cab project apply --file ${D}`,
   );
 
   // 2. JSON: the stored document, and nothing the service said.
@@ -1405,7 +1402,7 @@ test("apply --dry-run shows the stored change and sends nothing", async (t) => {
   r = await cli("rw", ["profile", "apply", "--file", D, "--dry-run"]);
   assert.equal(r.code, 2);
   assert.equal(r.json().error.code, "change-document-invalid");
-  assert.match(r.json().error.message, /ensemble project apply/);
+  assert.match(r.json().error.message, /cab project apply/);
   assert.equal(h.fetches.length, sent);
 
   // 6. A stale version is not noticed by the dry run, but apply still refuses it.
@@ -1748,7 +1745,7 @@ test("every change prepare command defaults its document into the working direct
   const routes: [string[], string][] = [
     [
       ["profile", "prepare", seed.profileId, "--summary", "Default path"],
-      `ensemble-profile-configure-${short(seed.profileId)}.json`,
+      `cab-profile-configure-${short(seed.profileId)}.json`,
     ],
     [
       [
@@ -1761,7 +1758,7 @@ test("every change prepare command defaults its document into the working direct
         "--instructions",
         "Guidance",
       ],
-      `ensemble-profile-create-${short(profileId)}.json`,
+      `cab-profile-create-${short(profileId)}.json`,
     ],
     [
       [
@@ -1772,7 +1769,7 @@ test("every change prepare command defaults its document into the working direct
         "--name",
         "Default path project",
       ],
-      `ensemble-project-create-${short(projectId)}.json`,
+      `cab-project-create-${short(projectId)}.json`,
     ],
     [
       [
@@ -1782,7 +1779,7 @@ test("every change prepare command defaults its document into the working direct
         "--credential-ref",
         "env:DEFAULT_PATH_REF",
       ],
-      `ensemble-routing-configure-${short(seed.projectA)}.json`,
+      `cab-routing-configure-${short(seed.projectA)}.json`,
     ],
   ];
   for (const [args, name] of routes) {

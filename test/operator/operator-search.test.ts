@@ -375,7 +375,7 @@ test("actual report callback retains long decisions while bounded search validat
         threadId: w.threadId,
         turnId: w.turnId,
         callId: randomUUID(),
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: {
           summary: "Supplied decision result",
           review: { sourceId: a.source.sourceId, decisions },

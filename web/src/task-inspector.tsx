@@ -82,7 +82,7 @@ export function TaskInspector({
                     {problem && ` · ${problem}`}
                   </p>
                   <p className="muted">
-                    GitHub owns the issue. Ensemble coordinates the work.
+                    GitHub owns the issue. cab coordinates the work.
                   </p>
                 </>
               );
@@ -116,7 +116,7 @@ export function TaskInspector({
             </p>
             {comment.sentence && <p className="muted">{comment.sentence}</p>}
           </Group>
-          <p className="inspector-divider">Ensemble execution</p>
+          <p className="inspector-divider">cab execution</p>
         </>
       )}
       <Group label={`Holds · ${requests.length + holds.length}`}>

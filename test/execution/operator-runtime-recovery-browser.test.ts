@@ -354,7 +354,7 @@ test("Assignment recovery reads witnesses and missing evidence in plain words", 
   );
   assert.equal(
     await witness("No turn sent"),
-    `No turn sent Witness ${noTurn} · added by an operator An operator confirmed that no turn was sent for this attempt. An idle conversation may still exist that Ensemble hasn't seen. Evidence only. It doesn't recover the assignment or allow new work.`,
+    `No turn sent Witness ${noTurn} · added by an operator An operator confirmed that no turn was sent for this attempt. An idle conversation may still exist that cab hasn't seen. Evidence only. It doesn't recover the assignment or allow new work.`,
   );
   evidence = "none";
   await page.reload();

@@ -56,7 +56,7 @@ function transportFailure(
     : new CliError("unavailable", "The service is unavailable.", {
         requestId,
         retryable: true,
-        fix: `Check that the service at ${origin} is running, or check the URL with 'ensemble connection list'.`,
+        fix: `Check that the service at ${origin} is running, or check the URL with 'cab connection list'.`,
         ...(NOT_SENT.test(code) ? { notSent: true } : {}),
       });
 }
@@ -82,7 +82,7 @@ export class ServiceClient {
         headers: {
           accept,
           authorization: `Bearer ${this.token}`,
-          "x-ensemble-request-id": requestId,
+          "x-cab-request-id": requestId,
         },
       });
     } catch (error) {
@@ -176,7 +176,7 @@ export class ServiceClient {
           accept: "application/json",
           "content-type": "application/json",
           authorization: `Bearer ${this.token}`,
-          "x-ensemble-request-id": requestId,
+          "x-cab-request-id": requestId,
         },
         body,
         signal: AbortSignal.timeout(timeoutMs),

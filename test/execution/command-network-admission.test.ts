@@ -176,7 +176,7 @@ class RecordingRuntime implements Runtime {
 }
 
 test("a turn admitted after enabling runs with network access and one admitted before keeps it off", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-network-admission-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-network-admission-"));
   const runtime = new RecordingRuntime();
   const service = new StandaloneService(
     join(root, "data"),

@@ -3211,10 +3211,10 @@ function Changes({
       ))}
       {d && d.branches.length > 0 && (
         <p>
-          Ensemble assigns and pushes these. A head it did not push is flagged,
-          and Ensemble will not push that branch again until it returns to
-          Ensemble's last push, or the lead adopts that head or overwrites it
-          with your approval.
+          cab assigns and pushes these. A head it did not push is flagged, and
+          cab will not push that branch again until it returns to cab's last
+          push, or the lead adopts that head or overwrites it with your
+          approval.
         </p>
       )}
       {d?.binding && (

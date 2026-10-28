@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup script for the Ensemble Claude Code cloud environment. Paste this file into the
+# Setup script for the cab Claude Code cloud environment. Paste this file into the
 # environment's Setup script field; the cache rebuilds only when that pasted text changes.
 # Keep the versions in step with .nvmrc, package.json packageManager and playwright.
 set -euo pipefail

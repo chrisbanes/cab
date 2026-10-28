@@ -40,7 +40,7 @@ export type ReadinessCheck = z.infer<typeof readinessCheckSchema>;
 
 const time = z.number().int().nonnegative().safe();
 
-/** `ensemble doctor` and Settings → Readiness read this. */
+/** `cab doctor` and Settings → Readiness read this. */
 export const readinessSchema = z
   .object({
     data: z

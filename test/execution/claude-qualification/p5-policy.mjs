@@ -64,7 +64,7 @@ export function policy(loaded, root, token, log, extra = {}) {
     tools: BUILTIN,
     allowedTools: [...BUILTIN, ...MCP_TOOLS],
     disallowedTools: DISALLOWED,
-    mcpServers: { ensemble: fixtureServer(loaded, log.calls).server },
+    mcpServers: { cab: fixtureServer(loaded, log.calls).server },
     hooks: { PreToolUse: [{ hooks: [hook] }] },
     canUseTool: async (name) => {
       log.canUseTool.push({ label: log.label, name });
@@ -119,7 +119,7 @@ export async function run({ root, token }) {
       "p5-main",
       "Do these steps in order, one tool call each: 1) Read alpha.txt. 2) Glob for *.txt. 3) Grep for alpha. " +
         "4) Write the text beta to beta.txt. 5) Run the Bash command: echo hi. " +
-        '6) Call ensemble_echo with {"text": "x", "count": 1}. ' +
+        '6) Call cab_echo with {"text": "x", "count": 1}. ' +
         `7) Write the text nope to ${denied}. Then reply DONE.`,
     );
     const calls = toolCalls(main.messages);
@@ -347,7 +347,7 @@ export async function run({ root, token }) {
       modes.every((mode) => mode === "dontAsk") &&
       observation.resumedInitPermissionMode === "dontAsk" &&
       observation.resumedInitHasWebFetch === false &&
-      observation.resumedServers.every((name) => name === "ensemble") &&
+      observation.resumedServers.every((name) => name === "cab") &&
       observation.resumedWebFetchCalls === 0 &&
       !observation.rogueMarker;
     return facet("F5.5", true, ok ? "passed" : "failed", observation);

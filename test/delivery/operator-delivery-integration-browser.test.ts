@@ -231,7 +231,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     await f.terminal(2);
     await f.waitTurn(3);
     const completion = await f.call(
-      "ensemble_request_completion",
+      "cab_request_completion",
       { reviewedResultIds: [] },
       3,
     );

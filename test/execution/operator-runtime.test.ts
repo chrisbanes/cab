@@ -135,7 +135,7 @@ function command(service: StandaloneService, value: object): unknown {
 }
 
 test("runtime overview reports effective access limits without exposing configuration", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-operator-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-operator-"));
   const service = new StandaloneService(join(directory, "data"), () => runtime);
   t.after(async () => {
     await service.stop();
@@ -210,7 +210,7 @@ test("runtime overview reports effective access limits without exposing configur
 });
 
 test("runtime overview shows the restart notice only after a runtime failure", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-failure-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-failure-"));
   let fail!: (error: Error) => void;
   const clock = new ManualRestartClock();
   const service = new StandaloneService(
@@ -254,7 +254,7 @@ test("runtime overview shows the restart notice only after a runtime failure", a
 });
 
 test("runtime overview says retries are exhausted once the third restart fails", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-exhausted-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-exhausted-"));
   let fail!: (error: Error) => void;
   let starts = 0;
   const clock = new ManualRestartClock();
@@ -308,7 +308,7 @@ test("runtime overview says retries are exhausted once the third restart fails",
 });
 
 test("runtime overview alerts once per unavailable harness and never for a disabled one", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-harnesses-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-harnesses-"));
   const clock = new ManualRestartClock();
   const options = (harnesses: ("codex" | "claude")[]) =>
     new StandaloneService(
@@ -356,9 +356,7 @@ test("runtime overview alerts once per unavailable harness and never for a disab
 });
 
 test("runtime details distinguish selected, queued, and running assignments across projects", async (t) => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-status-matrix-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-status-matrix-"));
   const heldRuntime = new HeldRuntime();
   const service = new StandaloneService(
     join(directory, "data"),
@@ -589,7 +587,7 @@ test("runtime details distinguish selected, queued, and running assignments acro
 });
 
 test("capacity control replays the same keyed change", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-capacity-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-capacity-"));
   let service = new StandaloneService(join(directory, "data"), () => runtime);
   t.after(async () => {
     await service.stop();
@@ -651,7 +649,7 @@ test("capacity control replays the same keyed change", async (t) => {
 });
 
 test("task runtime detail keeps stop and writer holds visible after Resume", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-task-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-task-"));
   const heldRuntime = new HeldRuntime();
   const service = new StandaloneService(
     join(directory, "data"),
@@ -766,9 +764,7 @@ test("task runtime detail keeps stop and writer holds visible after Resume", asy
 });
 
 test("task and assignment recovery views render every scoped record without implying release", async (t) => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-recovery-view-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-recovery-view-"));
   const runtime = new RecoveryEvidenceRuntime();
   const service = new StandaloneService(
     join(directory, "data"),
@@ -996,9 +992,7 @@ test("task and assignment recovery views render every scoped record without impl
 });
 
 test("dependency controls replay add and remove commands across restart", async (t) => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-dependencies-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-dependencies-"));
   let service = new StandaloneService(join(directory, "data"), () => runtime);
   t.after(async () => {
     await service.stop();
@@ -1119,9 +1113,7 @@ test("dependency controls replay add and remove commands across restart", async 
 });
 
 test("instruction apply refreshes the selected assignment revision once", async (t) => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-instructions-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-runtime-instructions-"));
   let service = new StandaloneService(join(directory, "data"), () => runtime);
   t.after(async () => {
     await service.stop();

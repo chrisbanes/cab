@@ -194,12 +194,12 @@ export function scriptedDeliveryProvider() {
     }
     if (route === "POST /graphql") {
       const query = JSON.parse(String(init?.body)).query as string;
-      if (query.includes("EnsembleDeliveryRepository"))
+      if (query.includes("CabDeliveryRepository"))
         return Response.json({
           data: { node: { id: "R1", nameWithOwner: "org/repo" } },
         });
       const thread = state.thread;
-      if (thread && query.includes("EnsembleDeliveryThreadReply")) {
+      if (thread && query.includes("CabDeliveryThreadReply")) {
         state.threadReplies++;
         thread.comments.push({
           id: `C${thread.comments.length + 1}`,
@@ -210,7 +210,7 @@ export function scriptedDeliveryProvider() {
         if (state.lostThreadReply) throw Error("scripted lost reply response");
         return Response.json({ data: {} });
       }
-      if (thread && query.includes("EnsembleDeliveryThreadResolve")) {
+      if (thread && query.includes("CabDeliveryThreadResolve")) {
         state.threadResolves++;
         thread.resolved = true;
         thread.resolvedBy = "U1";
@@ -218,7 +218,7 @@ export function scriptedDeliveryProvider() {
           throw Error("scripted lost resolve response");
         return Response.json({ data: {} });
       }
-      if (thread && query.includes("EnsembleDeliveryThread"))
+      if (thread && query.includes("CabDeliveryThread"))
         return Response.json({
           data: {
             node: {
@@ -239,7 +239,7 @@ export function scriptedDeliveryProvider() {
             },
           },
         });
-      if (query.includes("EnsembleDeliveryClosure"))
+      if (query.includes("CabDeliveryClosure"))
         return Response.json({
           data: {
             node: {
@@ -256,7 +256,7 @@ export function scriptedDeliveryProvider() {
             },
           },
         });
-      if (query.includes("EnsembleDeliveryPr"))
+      if (query.includes("CabDeliveryPr"))
         return Response.json({
           data: {
             node: {
@@ -592,7 +592,7 @@ export async function createReleaseDeliveryFixture(
     call,
     waitTurn,
     async register() {
-      const r = await call("ensemble_register_pr", {
+      const r = await call("cab_register_pr", {
         repositoryId: "R1",
         prNumber: 7,
         expectedPrNodeId: "P7",
@@ -602,7 +602,7 @@ export async function createReleaseDeliveryFixture(
       return r;
     },
     async merge(operationId = randomUUID()) {
-      return call("ensemble_external_action", {
+      return call("cab_external_action", {
         operationId,
         action: {
           kind: "pr.merge",
@@ -640,7 +640,7 @@ export async function createReleaseDeliveryFixture(
       approval?: { interactionId: string; expectedRevision: number },
     ) {
       return call(
-        "ensemble_external_action",
+        "cab_external_action",
         {
           operationId,
           action: {

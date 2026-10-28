@@ -11,7 +11,7 @@ import { ALWAYS_ALLOWED } from "../../src/cli/write.js";
 import { harness } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 
-const FIX = "Fix: Run 'ensemble --help'.";
+const FIX = "Fix: Run 'cab --help'.";
 const START_HERE = [
   "auth login",
   "doctor",
@@ -43,7 +43,7 @@ const fixLines = (text: string) =>
 const areaNames = (line: string | undefined) =>
   line?.slice("Areas: ".length).split(", ").sort();
 
-test("ensemble --help prints the start-here block and the area names", async (t) => {
+test("cab --help prints the start-here block and the area names", async (t) => {
   const h = harness(t);
   const r = await h.run(["--help"]);
   assert.equal(r.code, 0);
@@ -52,7 +52,7 @@ test("ensemble --help prints the start-here block and the area names", async (t)
   for (const key of START_HERE)
     assert.ok(out.includes(`  ${usageOf(key)}`), key);
   assert.deepEqual(areaNames(out.find((l) => l.startsWith("Areas: "))), areas);
-  for (const text of ["ensemble help AREA", "--help --all", "--version"])
+  for (const text of ["cab help AREA", "--help --all", "--version"])
     assert.ok(r.out.includes(text), text);
   for (const text of ["task stop", "service install", "snapshot create"])
     assert.ok(!r.out.includes(text), text);
@@ -62,7 +62,7 @@ test("ensemble --help prints the start-here block and the area names", async (t)
   assert.equal(linux.out, r.out);
 });
 
-test("bare ensemble prints the start block and one Fix line", async (t) => {
+test("bare cab prints the start block and one Fix line", async (t) => {
   const h = harness(t);
   const help = await h.run(["--help"]);
   const human = await h.run([]);
@@ -143,7 +143,7 @@ test("--help --all lists every command with service and snapshot in a separate b
 test("help requests that are not an area fail as usage errors", async (t) => {
   const h = harness(t);
   for (const [args, message] of [
-    [["help"], "Name an area: ensemble help AREA."],
+    [["help"], "Name an area: cab help AREA."],
     [["help", "bogus"], "Unknown area 'bogus'."],
     [["help", "task", "extra"], "Unexpected arguments."],
     [["task", "list", "--all"], "--all only goes with --help."],
@@ -157,7 +157,7 @@ test("help requests that are not an area fail as usage errors", async (t) => {
     const name = args.join(" ");
     assert.equal(r.code, 2, name);
     assert.equal(r.out, "", name);
-    assert.equal(lines(r.err)[0], `ensemble: ${message} (usage)`, name);
+    assert.equal(lines(r.err)[0], `cab: ${message} (usage)`, name);
     assert.equal(lines(r.err).at(-1), FIX, name);
     assert.equal(fixLines(r.err).length, 1, name);
   }
@@ -178,7 +178,7 @@ test("words after a standalone -- are values, not help, version or --all request
     assert.equal(r.out, "", name);
     assert.equal(
       lines(r.err)[0],
-      "ensemble: TASK_ID must be a UUID. (invalid-input)",
+      "cab: TASK_ID must be a UUID. (invalid-input)",
       name,
     );
     assert.equal(fixLines(r.err).length, 1, name);
@@ -187,7 +187,7 @@ test("words after a standalone -- are values, not help, version or --all request
   const all = await h.run(["task", "list", "--", "--all"]);
   assert.equal(all.code, 2);
   assert.equal(all.out, "");
-  assert.equal(lines(all.err)[0], "ensemble: Unexpected arguments. (usage)");
+  assert.equal(lines(all.err)[0], "cab: Unexpected arguments. (usage)");
   assert.equal(fixLines(all.err).length, 1);
 });
 
@@ -233,14 +233,14 @@ test("a usage error prints the message, that command's usage and the Fix line", 
     assert.equal(r.code, 2, name);
     assert.equal(r.out, "", name);
     const err = lines(r.err);
-    assert.equal(err[0], `ensemble: ${message} (usage)`, name);
+    assert.equal(err[0], `cab: ${message} (usage)`, name);
     assert.equal(err.at(-1), FIX, name);
     assert.equal(fixLines(r.err).length, 1, name);
     assert.ok(err.length <= 18, name);
     assert.doesNotMatch(r.err, /positional argument|'--'/, name);
     const block = err.slice(1, -1);
     if (expected === "areas") {
-      assert.equal(block[0], "Usage: ensemble <command> [options]", name);
+      assert.equal(block[0], "Usage: cab <command> [options]", name);
       assert.deepEqual(areaNames(block[1]), areas, name);
       assert.equal(block.length, 2, name);
     } else
@@ -286,7 +286,7 @@ test("service and snapshot usage errors print only their area's commands", async
     assert.equal(r.code, 2, name);
     assert.equal(r.out, "", name);
     const err = lines(r.err);
-    assert.equal(err[0], "ensemble: Unexpected arguments. (usage)", name);
+    assert.equal(err[0], "cab: Unexpected arguments. (usage)", name);
     assert.equal(err[1], "Usage:", name);
     assert.deepEqual(
       err.slice(2, -1),
@@ -307,7 +307,7 @@ const optionNames = new Set([
 ]);
 const flagsIn = (text: string) =>
   [...text.matchAll(/(?<![\w-])--[a-z][a-z-]*/g)].map((m) => m[0].slice(2));
-/** The flags of an `ensemble ...` command that are not options of it. */
+/** The flags of an `cab ...` command that are not options of it. */
 const flagProblems = (command: string) => {
   const words = command.split(/\s+/);
   const write = writeCommands.get(`${words[0]} ${words[1]}`);
@@ -318,7 +318,7 @@ const flagProblems = (command: string) => {
   );
 };
 const knownCommand = (words: string[]): boolean =>
-  // `ensemble help` alone, or naming an area.
+  // `cab help` alone, or naming an area.
   (words[0] === "help" &&
     (words.length === 1 ||
       (words.length === 2 && areas.includes(words[1] ?? "")))) ||
@@ -351,17 +351,17 @@ test("every command and flag that help and remedies name exists", async (t) => {
     for (const flag of flagsIn(text))
       if (!optionNames.has(flag)) unknown.add(`--${flag}`);
     for (const m of text.matchAll(
-      /\bensemble ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/g,
+      /\bcab ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/g,
     )) {
       const words = [m[1] ?? "", m[2] ?? ""].filter(Boolean);
       if (!knownCommand(words)) unknown.add(m[0]);
     }
   }
-  // Every quoted `'ensemble ...'` command written in a CLI source file.
+  // Every quoted `'cab ...'` command written in a CLI source file.
   let seen = 0;
   for (const name of readdirSync(sourceDir).filter((f) => f.endsWith(".ts")))
     for (const m of readFileSync(join(sourceDir, name), "utf8").matchAll(
-      /'ensemble ([^'$]+)'/g,
+      /'cab ([^'$]+)'/g,
     )) {
       seen++;
       for (const flag of flagProblems(m[1] ?? ""))
@@ -407,25 +407,25 @@ test("auth login ends with the doctor command that reaches the new login", async
   assert.equal(r.code, 0, r.err);
   assert.equal(r.err, "");
   assert.match(lines(r.out)[0] ?? "", /^Logged in to home /);
-  assert.equal(last(r.out), "Next: ensemble doctor");
-  await reaches("ensemble doctor");
+  assert.equal(last(r.out), "Next: cab doctor");
+  await reaches("cab doctor");
 
   // A second connection and no default: a bare doctor is ambiguous, so the line names the login.
   r = await login("work");
   assert.equal(r.code, 0, r.err);
-  assert.equal(last(r.out), "Next: ensemble doctor --connection work");
+  assert.equal(last(r.out), "Next: cab doctor --connection work");
   await reaches(last(r.out)?.slice("Next: ".length));
 
-  // ENSEMBLE_CONNECTION decides what a bare doctor selects.
+  // CAB_CONNECTION decides what a bare doctor selects.
   const env = {
-    ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
-    ENSEMBLE_CONNECTION: "home",
+    CAB_CLI_CONFIG_DIR: h.configDir,
+    CAB_CONNECTION: "home",
   };
   r = await login("work", { env });
   assert.equal(r.code, 0, r.err);
-  assert.equal(last(r.out), "Next: ensemble doctor --connection work");
+  assert.equal(last(r.out), "Next: cab doctor --connection work");
   r = await login("home", { env });
-  assert.equal(last(r.out), "Next: ensemble doctor");
+  assert.equal(last(r.out), "Next: cab doctor");
 
   // JSON carries neither the Next line nor anything on stderr.
   r = await login("home", {}, "--output", "json");
@@ -468,9 +468,9 @@ test("every expected-* flag's help names the record it checks", async (t) => {
   const task = (await h.run(["help", "task"])).out;
   assert.equal(
     under(task, "task configure"),
-    "    --expected-version: the task's version ('ensemble task get TASK_ID'); omitted, the version this command reads first.",
+    "    --expected-version: the task's version ('cab task get TASK_ID'); omitted, the version this command reads first.",
   );
-  assert.match(under(task, "task message") ?? "", /ensemble assignment get/);
+  assert.match(under(task, "task message") ?? "", /cab assignment get/);
   assert.match(under(task, "task follow-up") ?? "", /lead's assignment/);
   assert.match(under(task, "task stop") ?? "", /omitted, no version check/);
   // No line is added under a command that has none.
@@ -513,6 +513,6 @@ test("every expected-* flag's help names the record it checks", async (t) => {
   assert.equal(bare.code, 2);
   assert.equal(
     bare.err,
-    `ensemble: Unexpected arguments. (usage)\nUsage:\n  ${usageOf("task message")}\n${FIX}\n`,
+    `cab: Unexpected arguments. (usage)\nUsage:\n  ${usageOf("task message")}\n${FIX}\n`,
   );
 });

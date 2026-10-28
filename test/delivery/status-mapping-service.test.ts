@@ -70,7 +70,7 @@ const optionsWritten = (f: Fixture) =>
 const registerPr = async (f: Fixture) =>
   assert.equal(
     (
-      await f.call("ensemble_register_pr", {
+      await f.call("cab_register_pr", {
         repositoryId: "R1",
         prNumber: 7,
         expectedPrNodeId: "P7",
@@ -165,7 +165,7 @@ async function started() {
   return f;
 }
 
-test("a Status that moved on GitHub since Ensemble last saw it skips the write and shows on the task", async () => {
+test("a Status that moved on GitHub since cab last saw it skips the write and shows on the task", async () => {
   const f = await started();
   try {
     // A human moved the card; the source read has not seen it yet.
@@ -217,7 +217,7 @@ test("a move that lands with the write stays uncertain and never holds the task;
     assert.deepEqual(f.service.delivery().actionBlockers(f.taskId), []);
 
     // The uncertain write does not stop the mapping: the next event is written against the
-    // Status Ensemble last confirmed, so it is skipped rather than overwriting the moved card.
+    // Status cab last confirmed, so it is skipped rather than overwriting the moved card.
     f.moveStatusAfterWrite(undefined);
     await f.service.controlTask({
       type: "task.stop",
@@ -488,7 +488,7 @@ test("a hung status write is given up and never delays an agent action or comple
       assert.ok(Date.now() < deadline, "the status write was never prepared");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    const comment = await f.call("ensemble_external_action", {
+    const comment = await f.call("cab_external_action", {
       operationId: randomUUID(),
       action: {
         kind: "issue.comment",
@@ -837,7 +837,7 @@ test("Done recorded while the issue was open and the task not Ready is written o
   }
 });
 
-test("Done on closure is skipped, and the skip recorded, when a human set the Status since Ensemble last saw it", async () => {
+test("Done on closure is skipped, and the skip recorded, when a human set the Status since cab last saw it", async () => {
   const { f, run } = await mappedManually();
   try {
     await run();
@@ -902,7 +902,7 @@ test("an older unproved status write is not inspected again once a newer one has
     await registerPr(f);
     await f.service.runStatusMapping();
     assert.equal(writes(f)[1]?.state, "uncertain");
-    // The card is back where Ensemble expects it, so the next write is sent.
+    // The card is back where cab expects it, so the next write is sent.
     f.moveStatusAfterWrite(undefined);
     f.setStatus(inProgress);
     await f.service.controlTask({

@@ -79,7 +79,7 @@ function completeTask(f: Refused) {
       threadId,
       turnId,
       callId: `restart-completion-${turnId}`,
-      tool: "ensemble_request_completion",
+      tool: "cab_request_completion",
       arguments: { reviewedResultIds: [] },
     });
     assert.equal(result.success, true);
@@ -176,7 +176,7 @@ test("Start again moves a refused follow-up's inbox batch to the new request", a
         threadId,
         turnId,
         callId: "first-turn-result",
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: { summary: "First pass done" },
       });
       assert.equal(result.success, true, result.text);
@@ -500,7 +500,7 @@ test("a restarted request that is refused again stays eligible across a restart"
         threadId,
         turnId,
         callId: "second-restart-completion",
-        tool: "ensemble_request_completion",
+        tool: "cab_request_completion",
         arguments: { reviewedResultIds: [] },
       });
       assert.equal(result.success, true);
@@ -578,7 +578,7 @@ test("Reset after completed turns replaces every conversation and restarts only 
         threadId,
         turnId,
         callId: `result-${turnId}`,
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: { summary: `Done in ${turnId}` },
       });
       assert.equal(result.success, true, result.text);

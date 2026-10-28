@@ -21,7 +21,7 @@ import { tmpdir } from "../fixtures/temp.js";
 const CANARY = "canary-file-token-3381";
 
 function directory(t: { after: (fn: () => void) => void }) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-token-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-token-")));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;

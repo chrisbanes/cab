@@ -62,7 +62,7 @@ function digest(path) {
 }
 
 function fixtureRecoveryToken(root, mode) {
-  const prefix = `ensemble-s05-${mode}-`;
+  const prefix = `cab-s05-${mode}-`;
   const token = basename(root);
   const suffix = token.slice(prefix.length);
   required(
@@ -385,7 +385,7 @@ class ObservedCodexRuntime extends CodexRuntime {
           );
           return match && isUuid(match[1]) ? match[1] : null;
         };
-        if (call.tool === "ensemble_delegate") {
+        if (call.tool === "cab_delegate") {
           const delegatedAssignmentId = success
             ? toolOutputId("Delegated assignment")
             : null;
@@ -438,7 +438,7 @@ class ObservedCodexRuntime extends CodexRuntime {
               );
           }
         }
-        if (call.tool === "ensemble_report_result") {
+        if (call.tool === "cab_report_result") {
           callback.recordedResultId = success
             ? toolOutputId("Result recorded:")
             : null;
@@ -477,11 +477,11 @@ class ObservedCodexRuntime extends CodexRuntime {
               ...artifactValueWitness(watch.filePath, watch.workspacePath),
             };
         }
-        if (call.tool === "ensemble_request_follow_up")
+        if (call.tool === "cab_request_follow_up")
           callback.requestedResultId = isUuid(call.arguments.resultId)
             ? call.arguments.resultId
             : null;
-        if (call.tool === "ensemble_request_follow_up") {
+        if (call.tool === "cab_request_follow_up") {
           const watch = this.initialReviewWatch;
           callback.targetsInitialImplementationResult = Boolean(
             watch?.initialImplementationResultId &&
@@ -489,7 +489,7 @@ class ObservedCodexRuntime extends CodexRuntime {
                 watch.initialImplementationResultId,
           );
         }
-        if (call.tool === "ensemble_request_completion")
+        if (call.tool === "cab_request_completion")
           callback.reviewedResultIds = Array.isArray(
             call.arguments.reviewedResultIds,
           )
@@ -1100,7 +1100,7 @@ async function createLocalRepository(root) {
     "git",
     [
       "-c",
-      "user.name=Ensemble S05 fixture",
+      "user.name=cab S05 fixture",
       "-c",
       "user.email=fixture@example.invalid",
       "commit",
@@ -1292,11 +1292,11 @@ async function runRepositoryJourney(
   evidence,
 ) {
   const initialLeadInstructions =
-    "You are accountable for task completion. Do not edit repository files. First delegate only implementation to the exact implementer profile in the task brief; after the successful durable delegation, return a short final message and end this turn immediately. Do not poll or wait in the active turn; resume only when the implementer's result is delivered through your inbox. The implementer owns the initial nested review and must report its initial result and review finding to you, preserving the exact nested review result ID in that report summary. Then use ensemble_request_follow_up on that exact initial result to ask the same implementer to change answer.txt from 41 to 42; after the successful durable follow-up, end this turn and resume only through the delivered inbox. After the revision-two result reaches you, delegate a new revision-two review to the exact reviewer profile in the task brief; end that turn after successful delegation and resume when the review result is delivered. Only then request completion with exactly all current results: the nested review result ID relayed in the initial report, the revision-two implementation result ID, and the revision-two review result ID. Include S05_REPOSITORY_TASK in each final message. Use registered Ensemble coordination tools; never bypass review or complete from a worker result alone.";
+    "You are accountable for task completion. Do not edit repository files. First delegate only implementation to the exact implementer profile in the task brief; after the successful durable delegation, return a short final message and end this turn immediately. Do not poll or wait in the active turn; resume only when the implementer's result is delivered through your inbox. The implementer owns the initial nested review and must report its initial result and review finding to you, preserving the exact nested review result ID in that report summary. Then use cab_request_follow_up on that exact initial result to ask the same implementer to change answer.txt from 41 to 42; after the successful durable follow-up, end this turn and resume only through the delivered inbox. After the revision-two result reaches you, delegate a new revision-two review to the exact reviewer profile in the task brief; end that turn after successful delegation and resume when the review result is delivered. Only then request completion with exactly all current results: the nested review result ID relayed in the initial report, the revision-two implementation result ID, and the revision-two review result ID. Include S05_REPOSITORY_TASK in each final message. Use registered cab coordination tools; never bypass review or complete from a worker result alone.";
   const implementerInstructions =
-    "Work only in the task's bound repository workspace. For your initial assignment, change answer.txt to exactly 41 followed by a newline. Before reporting your initial result to the lead, use ensemble_delegate once for the exact reviewer profile ID in the task brief. Ask that reviewer to inspect the current answer.txt value and compare it with the requested final value 42; do not pass the first review to the lead yourself. After the successful durable delegation, return a short final message containing S05_REPOSITORY_TASK and end this turn immediately. Do not poll or wait in the active turn; resume only when the review result is delivered through your inbox. Then report your initial artifact value and review finding to the lead with ensemble_report_result, copying the exact nested review result ID from your inbox into your initial result summary. Return a short final message, and end the turn. When the lead requests a follow-up on that exact initial result, change answer.txt to exactly 42 followed by a newline and report the revision-two result, then end the turn; the lead will request the second review. Do not delegate the second review. Do not use network or access paths outside the workspace.";
+    "Work only in the task's bound repository workspace. For your initial assignment, change answer.txt to exactly 41 followed by a newline. Before reporting your initial result to the lead, use cab_delegate once for the exact reviewer profile ID in the task brief. Ask that reviewer to inspect the current answer.txt value and compare it with the requested final value 42; do not pass the first review to the lead yourself. After the successful durable delegation, return a short final message containing S05_REPOSITORY_TASK and end this turn immediately. Do not poll or wait in the active turn; resume only when the review result is delivered through your inbox. Then report your initial artifact value and review finding to the lead with cab_report_result, copying the exact nested review result ID from your inbox into your initial result summary. Return a short final message, and end the turn. When the lead requests a follow-up on that exact initial result, change answer.txt to exactly 42 followed by a newline and report the revision-two result, then end the turn; the lead will request the second review. Do not delegate the second review. Do not use network or access paths outside the workspace.";
   const reviewerInstructions =
-    "Review the exact artifact revision described in your assignment brief by reading answer.txt from the bound task workspace. For the initial nested review, no implementation result ID exists yet: inspect the live file, report its actual value, and compare it with the requested final value 42. For the later revision-two review, use the exact implementation result ID named in the lead's brief and confirm answer.txt is 42. Do not edit files, delegate, request follow-up, or request task completion. Return your finding to your requester with ensemble_report_result.";
+    "Review the exact artifact revision described in your assignment brief by reading answer.txt from the bound task workspace. For the initial nested review, no implementation result ID exists yet: inspect the live file, report its actual value, and compare it with the requested final value 42. For the later revision-two review, use the exact implementation result ID named in the lead's brief and confirm answer.txt is 42. Do not edit files, delegate, request follow-up, or request task completion. Return your finding to your requester with cab_report_result.";
   const leadId = await createProfile(
     page,
     current.origin,
@@ -1369,9 +1369,9 @@ async function runRepositoryJourney(
     "S05_REPOSITORY_TASK: deliver a reviewed fixture result in this repository. Include this marker in each result and your final response.",
     `The exact implementer profile ID is ${implementerId}; the exact reviewer profile ID is ${reviewerId}.`,
     "Delegate only the first implementation to the implementer. It must change answer.txt from 0 to 41. Before reporting its initial result to you, the implementer must delegate the first review to the reviewer; that review must inspect the live file and return to its exact requester, the implementer.",
-    "After receiving the implementer's initial result and nested review finding, call ensemble_request_follow_up on that exact initial implementation result and ask the same implementer to change answer.txt to 42.",
+    "After receiving the implementer's initial result and nested review finding, call cab_request_follow_up on that exact initial implementation result and ask the same implementer to change answer.txt to 42.",
     "After the implementer reports revision two, delegate a NEW review to the reviewer. Include the exact revision-two implementation result ID in this review brief; the reviewer must inspect answer.txt and confirm it is 42. This second review is requested by you and returns to you.",
-    "Only after the current revision-two implementation and second-review results have been delivered to you, call ensemble_request_completion with those exact two result IDs.",
+    "Only after the current revision-two implementation and second-review results have been delivered to you, call cab_request_completion with those exact two result IDs.",
     "Do not modify files yourself, do not bypass review, do not use network, and do not claim completion from a worker result alone.",
   ].join("\n");
   const repositoryInputs = [
@@ -1457,7 +1457,7 @@ async function runRepositoryJourney(
   );
   const firstImplementationDelegations = callsForTask.filter(
     (call) =>
-      call.tool === "ensemble_delegate" &&
+      call.tool === "cab_delegate" &&
       call.assignmentId === (initialLead ? String(initialLead.id) : null) &&
       call.requestedProfileId === implementerId,
   );
@@ -1472,14 +1472,14 @@ async function runRepositoryJourney(
   );
   const nestedReviewDelegations = callsForTask.filter(
     (call) =>
-      call.tool === "ensemble_delegate" &&
+      call.tool === "cab_delegate" &&
       call.assignmentId ===
         (firstImplementer ? String(firstImplementer.id) : null) &&
       call.requestedProfileId === reviewerId,
   );
   const secondReviewDelegations = callsForTask.filter(
     (call) =>
-      call.tool === "ensemble_delegate" &&
+      call.tool === "cab_delegate" &&
       call.assignmentId === (initialLead ? String(initialLead.id) : null) &&
       call.requestedProfileId === reviewerId,
   );
@@ -1566,10 +1566,10 @@ async function runRepositoryJourney(
     ),
   );
   const followUpCalls = callsForTask.filter(
-    (call) => call.tool === "ensemble_request_follow_up",
+    (call) => call.tool === "cab_request_follow_up",
   );
   const completionCalls = callsForTask.filter(
-    (call) => call.tool === "ensemble_request_completion",
+    (call) => call.tool === "cab_request_completion",
   );
   const followUp = followUpCalls[0];
   const initialImplementationResult = followUp?.requestedResultId
@@ -1623,7 +1623,7 @@ async function runRepositoryJourney(
   const nestedReviewReportCall = nestedReviewResult
     ? callsForTask.find(
         (call) =>
-          call.tool === "ensemble_report_result" &&
+          call.tool === "cab_report_result" &&
           call.assignmentId === nestedReviewResult.assignmentId &&
           call.recordedResultId === nestedReviewResult.resultId,
       )
@@ -1631,7 +1631,7 @@ async function runRepositoryJourney(
   const initialImplementationReportCall = initialImplementationResult
     ? callsForTask.find(
         (call) =>
-          call.tool === "ensemble_report_result" &&
+          call.tool === "cab_report_result" &&
           call.assignmentId === initialImplementationResult.assignmentId &&
           call.recordedResultId === initialImplementationResult.resultId,
       )
@@ -1639,7 +1639,7 @@ async function runRepositoryJourney(
   const revisionTwoImplementationReportCall = revisionTwoImplementationResult
     ? callsForTask.find(
         (call) =>
-          call.tool === "ensemble_report_result" &&
+          call.tool === "cab_report_result" &&
           call.assignmentId === revisionTwoImplementationResult.assignmentId &&
           call.recordedResultId === revisionTwoImplementationResult.resultId,
       )
@@ -1647,7 +1647,7 @@ async function runRepositoryJourney(
   const revisionTwoReviewReportCall = revisionTwoReviewResult
     ? callsForTask.find(
         (call) =>
-          call.tool === "ensemble_report_result" &&
+          call.tool === "cab_report_result" &&
           call.assignmentId === revisionTwoReviewResult.assignmentId &&
           call.recordedResultId === revisionTwoReviewResult.resultId,
       )
@@ -1990,7 +1990,7 @@ async function runRepositoryFreeJourney(
   const leadInstructions =
     'S05 repository-free lead private instructions. For Alpha, delegate exactly once to the configured Alpha worker; after the successful durable delegation, include the task marker in a short final message and end the turn immediately. Do not poll or wait in the active turn; resume only through the delivered worker-result inbox, then request completion using that exact result ID. For Beta, open its one planned question and request approval in the same turn with action "Write fixture-only relative file", target "s05-denied.txt", and material exactly {relativePath: "s05-denied.txt", content: "S05_BETA_TASK_MARKER_DENIED_ACTION_MUST_NOT_EXIST"}; do not write the file. Then include its task marker in a short final message and end the turn without reporting or requesting completion. Resume only when both operator responses are delivered through the inbox, then request completion with an empty reviewedResultIds list. Never poll or wait inside an active turn.';
   const alphaWorkerInstructions =
-    'For the S05 Alpha task only, open exactly one task-marker-bound operator question and request approval with action "Write fixture-only relative file", target "s05-denied.txt", and material exactly {relativePath: "s05-denied.txt", content: "S05_ALPHA_TASK_MARKER_DENIED_ACTION_MUST_NOT_EXIST"}. Do not write the file or perform any action requiring approval. After both interactions are durably opened, include S05_ALPHA_TASK_MARKER in a short final message and end this turn immediately; do not report a result or request completion yet, and do not poll or wait in the active turn. Resume only when both operator responses are delivered through your inbox. Then report one concise result containing the marker, the answer, and the denied approval to your exact requester with ensemble_report_result, and end that turn. Do not ask again or request completion.';
+    'For the S05 Alpha task only, open exactly one task-marker-bound operator question and request approval with action "Write fixture-only relative file", target "s05-denied.txt", and material exactly {relativePath: "s05-denied.txt", content: "S05_ALPHA_TASK_MARKER_DENIED_ACTION_MUST_NOT_EXIST"}. Do not write the file or perform any action requiring approval. After both interactions are durably opened, include S05_ALPHA_TASK_MARKER in a short final message and end this turn immediately; do not report a result or request completion yet, and do not poll or wait in the active turn. Resume only when both operator responses are delivered through your inbox. Then report one concise result containing the marker, the answer, and the denied approval to your exact requester with cab_report_result, and end that turn. Do not ask again or request completion.';
   const alphaWorkerId = await createProfile(
     page,
     current.origin,
@@ -2035,7 +2035,7 @@ async function runRepositoryFreeJourney(
           ].join("\n")
         : [
             "S05_BETA_TASK_MARKER: perform a bounded project-free operator coordination probe.",
-            'As the task lead, call ensemble_ask_question exactly once with a question containing this task marker and asking for the expected harmless fixture response. In the same turn, call ensemble_request_approval exactly once with action "Write fixture-only relative file", target "s05-denied.txt", and material exactly {relativePath: "s05-denied.txt", content: "S05_BETA_TASK_MARKER_DENIED_ACTION_MUST_NOT_EXIST"}. Do not write the file. After both interactions are durably opened, include the marker in a short final message and end the turn without reporting or requesting completion. Do not poll or wait. Resume only when both operator responses arrive through your inbox, then call ensemble_request_completion once with an empty reviewedResultIds list. Do not perform any action requiring approval.',
+            'As the task lead, call cab_ask_question exactly once with a question containing this task marker and asking for the expected harmless fixture response. In the same turn, call cab_request_approval exactly once with action "Write fixture-only relative file", target "s05-denied.txt", and material exactly {relativePath: "s05-denied.txt", content: "S05_BETA_TASK_MARKER_DENIED_ACTION_MUST_NOT_EXIST"}. Do not write the file. After both interactions are durably opened, include the marker in a short final message and end the turn without reporting or requesting completion. Do not poll or wait. Resume only when both operator responses arrive through your inbox, then call cab_request_completion once with an empty reviewedResultIds list. Do not perform any action requiring approval.',
           ].join("\n");
     const taskId = await createTask(
       page,
@@ -2140,14 +2140,14 @@ async function runRepositoryFreeJourney(
       (call) =>
         call.taskId === project.taskId &&
         call.assignmentId === requesterAssignmentId &&
-        (call.tool === "ensemble_ask_question" ||
-          call.tool === "ensemble_request_approval"),
+        (call.tool === "cab_ask_question" ||
+          call.tool === "cab_request_approval"),
     );
     const questionCalls = interactionCalls.filter(
-      (call) => call.tool === "ensemble_ask_question",
+      (call) => call.tool === "cab_ask_question",
     );
     const approvalCalls = interactionCalls.filter(
-      (call) => call.tool === "ensemble_request_approval",
+      (call) => call.tool === "cab_request_approval",
     );
     const requesterAssignment = current.service
       .domain()
@@ -2167,7 +2167,7 @@ async function runRepositoryFreeJourney(
         (call) =>
           call.taskId === project.taskId &&
           call.assignmentId === String(leadAssignment.id) &&
-          call.tool === "ensemble_delegate",
+          call.tool === "cab_delegate",
       );
       required(
         leadDelegations.length === 1 &&
@@ -2818,12 +2818,12 @@ async function runLocalDependencyJourney(
 ) {
   const leadInstructions = [
     "You are the accountable project lead for two finite local dependency fixtures.",
-    "When the task outcome asks you to complete this fixture, call ensemble_request_completion exactly once with reviewedResultIds as an empty array, then end the turn.",
+    "When the task outcome asks you to complete this fixture, call cab_request_completion exactly once with reviewedResultIds as an empty array, then end the turn.",
     "Do not delegate, ask questions, request approval, modify files, or use network.",
     noNetwork,
   ].join(" ");
   const projectInstructions =
-    "Use only the registered Ensemble completion tool for the finite local dependency task outcomes. Do not delegate or perform other actions.";
+    "Use only the registered cab completion tool for the finite local dependency task outcomes. Do not delegate or perform other actions.";
   privateValues.push(leadInstructions, projectInstructions);
 
   const leadProfileId = await createProfile(
@@ -2863,7 +2863,7 @@ async function runLocalDependencyJourney(
     projectId,
     "S05 local dependency blocker",
     "Fixture blocker is not Ready yet.",
-    `Before requesting completion, emit a completed assistant message containing the exact marker ${blockerMarker} as text (not only in a prompt or tool argument). Then call ensemble_request_completion with reviewedResultIds as an empty array and end the turn.`,
+    `Before requesting completion, emit a completed assistant message containing the exact marker ${blockerMarker} as text (not only in a prompt or tool argument). Then call cab_request_completion with reviewedResultIds as an empty array and end the turn.`,
     [],
     false,
   );
@@ -2874,7 +2874,7 @@ async function runLocalDependencyJourney(
     projectId,
     "S05 local dependency dependent",
     "Fixture dependent is not Ready yet.",
-    `Before requesting completion, emit a completed assistant message containing the exact marker ${dependentMarker} as text (not only in a prompt or tool argument). Then call ensemble_request_completion with reviewedResultIds as an empty array and end the turn.`,
+    `Before requesting completion, emit a completed assistant message containing the exact marker ${dependentMarker} as text (not only in a prompt or tool argument). Then call cab_request_completion with reviewedResultIds as an empty array and end the turn.`,
     [],
     false,
   );
@@ -3133,7 +3133,7 @@ async function runLocalDependencyJourney(
     const blockerCompletionCalls = current.runtime.callbacks.filter(
       (callback) =>
         callback.taskId === blockerTaskId &&
-        callback.tool === "ensemble_request_completion",
+        callback.tool === "cab_request_completion",
     );
     const blockerCompletion = blockerView.completionRequests.filter(
       (request) => request.status === "finalized",
@@ -3243,7 +3243,7 @@ async function runLocalDependencyJourney(
     const dependentCompletionCalls = current.runtime.callbacks.filter(
       (callback) =>
         callback.taskId === dependentTaskId &&
-        callback.tool === "ensemble_request_completion",
+        callback.tool === "cab_request_completion",
     );
     const dependentCompletion = dependentView.completionRequests.filter(
       (request) => request.status === "finalized",
@@ -3367,7 +3367,7 @@ function isOwnedJourneyFixture(root, mode, evidence) {
   )
     return false;
   const name = basename(root);
-  const prefix = `ensemble-s05-${mode}-`;
+  const prefix = `cab-s05-${mode}-`;
   if (
     evidence.fixture.recoveryToken !== name ||
     !name.startsWith(prefix) ||
@@ -3633,7 +3633,7 @@ export async function runLiveJourney(mode) {
   try {
     recordSource(evidence, mode);
     progress("disposable-fixture");
-    root = realpathSync(mkdtempSync(join(tmpdir(), `ensemble-s05-${mode}-`)));
+    root = realpathSync(mkdtempSync(join(tmpdir(), `cab-s05-${mode}-`)));
     evidence.fixture.recoveryToken = fixtureRecoveryToken(root, mode);
     chmodSync(root, 0o700);
     evidence.fixture.created = true;

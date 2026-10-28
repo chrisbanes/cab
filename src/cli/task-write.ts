@@ -90,7 +90,7 @@ export function closureSuffix(
     : closure === "completed"
       ? " (closed on GitHub)"
       : closure === "unattributed"
-        ? " (closed on GitHub; closure not attributed to Ensemble; held)"
+        ? " (closed on GitHub; closure not attributed to cab; held)"
         : "";
 }
 
@@ -126,11 +126,11 @@ export function waitLines(waits: readonly Wait[], taskId: string): string[] {
       link.kind === "task"
         ? `  Blocked by task ${link.id} (${link.label})`
         : link.kind === "request"
-          ? `  Review: ensemble approval get ${taskId} ${link.id}`
+          ? `  Review: cab approval get ${taskId} ${link.id}`
           : link.kind === "source"
             ? `  ${link.label}: ${link.url}`
             : link.kind === "recovery"
-              ? `  Recovery: ensemble recovery get ${link.assignmentId}`
+              ? `  Recovery: cab recovery get ${link.assignmentId}`
               : `  ${link.label}`,
     ),
   ]);
@@ -150,10 +150,10 @@ export function followLines(
   if (after && suggestReady && !after.task.ready)
     return [
       nextLine(
-        `ensemble task configure ${taskId} --expected-version ${after.task.version} --ready true`,
+        `cab task configure ${taskId} --expected-version ${after.task.version} --ready true`,
       ),
     ];
-  return [nextLine(`ensemble task get ${taskId}`)];
+  return [nextLine(`cab task get ${taskId}`)];
 }
 
 /** `queued` only when the task is ready and admissible now; holds still decide. */
@@ -165,10 +165,10 @@ const admissionEffect = (task: TaskData | undefined): Effect =>
 /** What to run instead when Start again or Reset is unavailable, by the recovery the reason names. */
 const restartFix = (taskId: string, destination: RestartDestination) =>
   destination === "recovery"
-    ? `Run 'ensemble task get ${taskId}', then clear it with 'ensemble recovery get ASSIGNMENT_ID' and the recovery commands it names.`
+    ? `Run 'cab task get ${taskId}', then clear it with 'cab recovery get ASSIGNMENT_ID' and the recovery commands it names.`
     : destination === "source-review"
-      ? `Review the task's source hold first; 'ensemble task get ${taskId}' names it.`
-      : `Run 'ensemble task get ${taskId}' to see the task's state.`;
+      ? `Review the task's source hold first; 'cab task get ${taskId}' names it.`
+      : `Run 'cab task get ${taskId}' to see the task's state.`;
 
 export function writeOutput(o: {
   request: RequestIdentity;
@@ -205,7 +205,7 @@ export const taskVersion = (
 ) => ({
   subject: `Task ${taskId}`,
   sent,
-  read: `ensemble task get ${taskId}`,
+  read: `cab task get ${taskId}`,
   current: () =>
     readAfter(session, taskId).then((t) => t && { version: t.task.version }),
 });
@@ -291,7 +291,7 @@ const notAnAssignment = (
     `Assignment ${recipient} is not an assignment of task ${taskId}.`,
     {
       ...extra,
-      fix: `Run 'ensemble task get ${taskId} --output json' and use an assignment ID from its assignments list.`,
+      fix: `Run 'cab task get ${taskId} --output json' and use an assignment ID from its assignments list.`,
     },
   );
 
@@ -339,7 +339,7 @@ async function sendMessage(
     {
       subject: `Assignment ${recipient}`,
       sent: expected,
-      read: `ensemble assignment get ${recipient}`,
+      read: `cab assignment get ${recipient}`,
       current: () =>
         readAfter(session, taskId).then((t) => {
           const a = t?.assignments.find((x) => x.assignmentId === recipient);
@@ -485,7 +485,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         "task configure TASK_ID [--expected-version N] [--title T] [--outcome TEXT|- | --outcome-file FILE] [--ready true|false] [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the task's version ('ensemble task get TASK_ID'); omitted, the version this command reads first.",
+        "--expected-version: the task's version ('cab task get TASK_ID'); omitted, the version this command reads first.",
       flags: [
         "expected-version",
         "title",
@@ -540,7 +540,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
       usage: `task ${verb}-dependency TASK_ID --blocker ID --expected-version N [--request-id UUID]`,
       positionals: 1,
       expects:
-        "--expected-version: the task's version ('ensemble task get TASK_ID'); required.",
+        "--expected-version: the task's version ('cab task get TASK_ID'); required.",
       flags: ["blocker", "expected-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -570,7 +570,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         "task message TASK_ID --to ASSIGNMENT_ID --expected-version N --message-file FILE [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the version of the assignment named by --to ('ensemble assignment get ASSIGNMENT_ID'); required.",
+        "--expected-version: the version of the assignment named by --to ('cab assignment get ASSIGNMENT_ID'); required.",
       flags: ["to", "expected-version", "message-file", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -598,9 +598,9 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
             )
               throw new CliError(
                 "usage",
-                `The project lead has completed; use 'ensemble task follow-up ${taskId}' to resume it.`,
+                `The project lead has completed; use 'cab task follow-up ${taskId}' to resume it.`,
                 {
-                  fix: `Run 'ensemble task follow-up ${taskId} --expected-version N --message-file FILE', with N from 'ensemble assignment get ${recipient}'.`,
+                  fix: `Run 'cab task follow-up ${taskId} --expected-version N --message-file FILE', with N from 'cab assignment get ${recipient}'.`,
                 },
               );
           },
@@ -615,7 +615,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         "task draft-turn TASK_ID --expected-version N --message-file FILE [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the task's version ('ensemble task get TASK_ID'); required.",
+        "--expected-version: the task's version ('cab task get TASK_ID'); required.",
       flags: ["expected-version", "message-file", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -639,7 +639,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
             "conflict",
             draftTurnUnavailableText(refusal.reason),
             {
-              fix: `Run 'ensemble task get ${taskId}' to see the task's state and lead.`,
+              fix: `Run 'cab task get ${taskId}' to see the task's state and lead.`,
             },
           );
         const { receipt, request } = await withConflictRemedy(
@@ -683,7 +683,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         "task start-again TASK_ID --expected-version N [--work WORK] [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the task's version ('ensemble task get TASK_ID'); required. --work defaults to the refused request that read names.",
+        "--expected-version: the task's version ('cab task get TASK_ID'); required. --work defaults to the refused request that read names.",
       flags: ["expected-version", "work", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -755,7 +755,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
       usage: "task reset TASK_ID --expected-version N [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the task's version ('ensemble task get TASK_ID'); required.",
+        "--expected-version: the task's version ('cab task get TASK_ID'); required.",
       flags: ["expected-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -820,7 +820,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         "task follow-up TASK_ID --expected-version N --message-file FILE [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the project lead's assignment version ('ensemble assignment get ASSIGNMENT_ID', the lead's ID is on 'ensemble task get TASK_ID'); required.",
+        "--expected-version: the project lead's assignment version ('cab assignment get ASSIGNMENT_ID', the lead's ID is on 'cab task get TASK_ID'); required.",
       flags: ["expected-version", "message-file", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -835,7 +835,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         });
         if (!lead)
           throw new CliError("conflict", "This task has no project lead.", {
-            fix: `Choose a project lead with '${chooseLead[0]}', then '${chooseLead[1]}' ('ensemble profile list' shows profile IDs).`,
+            fix: `Choose a project lead with '${chooseLead[0]}', then '${chooseLead[1]}' ('cab profile list' shows profile IDs).`,
           });
         return sendMessage(
           ctx,
@@ -850,13 +850,13 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
               throw new CliError(
                 "conflict",
                 task.leadFeedback?.mode === "receives"
-                  ? `The lead has not completed; use 'ensemble task message ${taskId} --to ${lead}'.`
+                  ? `The lead has not completed; use 'cab task message ${taskId} --to ${lead}'.`
                   : "The lead cannot be resumed: the task is not open or the lead is unavailable.",
                 {
                   fix:
                     task.leadFeedback?.mode === "receives"
-                      ? `Run 'ensemble task message ${taskId} --to ${lead} --expected-version N --message-file FILE', with N from 'ensemble assignment get ${lead}'.`
-                      : `Run 'ensemble task get ${taskId}' to see the task's state and lead.`,
+                      ? `Run 'cab task message ${taskId} --to ${lead} --expected-version N --message-file FILE', with N from 'cab assignment get ${lead}'.`
+                      : `Run 'cab task get ${taskId}' to see the task's state and lead.`,
                 },
               );
           },

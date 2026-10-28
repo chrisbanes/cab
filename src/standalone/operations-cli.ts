@@ -62,7 +62,7 @@ function parseRenderArgs(args: string[]) {
 
 type Io = { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
 
-/** Runs one operation and returns its exit code; `ensemble snapshot` shares it. */
+/** Runs one operation and returns its exit code; `cab snapshot` shares it. */
 export async function runOperations(
   argv: string[],
   io: Io = process,

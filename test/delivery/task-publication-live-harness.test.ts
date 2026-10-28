@@ -84,7 +84,7 @@ test("the grant must match the manifest, be unexpired, last at most a day and st
   );
   for (const change of [
     {
-      repository: { ...manifest().repository, fullName: "chrisbanes/ensemble" },
+      repository: { ...manifest().repository, fullName: "chrisbanes/cab" },
     },
     { credential: "env:S07A_GITHUB_TOKEN" },
     { actions: ["issue.create", "project.item.add"] },
@@ -122,9 +122,9 @@ test("only the Project this run created may be used: never Project 6, never one 
     /Project 6/,
   );
   for (const linkedRepositories of [
-    ["chrisbanes/ensemble"],
-    ["Chrisbanes/Ensemble"],
-    [fullName, "chrisbanes/ensemble"],
+    ["chrisbanes/cab"],
+    ["Chrisbanes/cab"],
+    [fullName, "chrisbanes/cab"],
     ["chrisbanes/other"],
   ])
     assert.throws(
@@ -201,20 +201,20 @@ test("the guard allows only the product's requests on the recorded resources and
   g.assertRequest(api(`/repos/${fullName}/issues?creator=bot&state=all`));
   g.assertRequest(...create(`${issueTitle(run)} a`, [readyLabel(run)]));
   g.assertRequest(
-    ...post("query EnsembleDeliveryRepository($id:ID!)", {
+    ...post("query CabDeliveryRepository($id:ID!)", {
       id: repositoryNode,
     }),
   );
   g.recordIssue(7, "I_7");
   g.recordItem("ITEM_1");
   g.assertRequest(
-    ...post("mutation EnsembleDeliveryItemAdd", {
+    ...post("mutation CabDeliveryItemAdd", {
       project: "PVT_9",
       content: "I_7",
     }),
   );
   g.assertRequest(
-    ...post("mutation EnsembleDeliveryProject", {
+    ...post("mutation CabDeliveryProject", {
       project: "PVT_9",
       item: "ITEM_1",
       field: "F_1",
@@ -222,8 +222,8 @@ test("the guard allows only the product's requests on the recorded resources and
     }),
   );
   for (const [input, init] of [
-    [api("/repos/chrisbanes/ensemble"), {}],
-    [api("/repos/chrisbanes/ensemble/issues"), { method: "POST", body: "{}" }],
+    [api("/repos/chrisbanes/cab"), {}],
+    [api("/repos/chrisbanes/cab/issues"), { method: "POST", body: "{}" }],
     [
       api(`/repos/${fullName}/issues/7/comments`),
       { method: "POST", body: "{}" },
@@ -234,23 +234,23 @@ test("the guard allows only the product's requests on the recorded resources and
     ["https://example.com/user", {}],
     create("Another title", [readyLabel(run)]),
     create(`${issueTitle(run)} b`, ["bug"]),
-    post("mutation EnsembleDeliveryProject", {
+    post("mutation CabDeliveryProject", {
       project: "PVT_6",
       item: "ITEM_1",
       field: "F_1",
       option: "O_2",
     }),
-    post("mutation EnsembleDeliveryProject", {
+    post("mutation CabDeliveryProject", {
       project: "PVT_9",
       item: "ITEM_1",
       field: "F_1",
       option: "O_other",
     }),
-    post("mutation EnsembleDeliveryItemAdd", {
+    post("mutation CabDeliveryItemAdd", {
       project: "PVT_9",
       content: "I_other",
     }),
-    post("mutation EnsembleDeliveryItemAdd", {
+    post("mutation CabDeliveryItemAdd", {
       project: "PVT_6",
       content: "I_7",
     }),
@@ -313,19 +313,14 @@ test("the guard allows only the product's requests on the recorded resources and
       "--owner",
       "chrisbanes",
       "--repo",
-      "chrisbanes/ensemble",
+      "chrisbanes/cab",
     ],
     ["issue", "close", "9", "--repo", fullName],
-    ["issue", "close", "7", "--repo", "chrisbanes/ensemble"],
+    ["issue", "close", "7", "--repo", "chrisbanes/cab"],
     ["issue", "create", "--repo", fullName, "--title", "x", "--body", "y"],
     ["api", `repos/${fullName}/issues/9`],
     ["api", "-X", "DELETE", `repos/${fullName}/labels/bug`],
-    [
-      "api",
-      "-X",
-      "DELETE",
-      `repos/chrisbanes/ensemble/labels/${readyLabel(run)}`,
-    ],
+    ["api", "-X", "DELETE", `repos/chrisbanes/cab/labels/${readyLabel(run)}`],
     ["repo", "delete", fullName],
     [
       "api",

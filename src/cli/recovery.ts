@@ -170,7 +170,7 @@ const recoveryGet: BrowseCommand = {
         ...(d.omittedCount ? [`(${d.omittedCount} older omitted)`] : []),
         "",
         IRREVERSIBLE,
-        "Prepare with: ensemble recovery prepare PATH ASSIGNMENT_ID --work WORK_ID --evidence-file FILE --out FILE",
+        "Prepare with: cab recovery prepare PATH ASSIGNMENT_ID --work WORK_ID --evidence-file FILE --out FILE",
       ].join("\n"),
     });
   },
@@ -321,9 +321,9 @@ async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
     )
       throw new CliError(
         "conflict",
-        `The assignment is at version ${d.assignmentVersion}, conversation revision ${d.conversationRevision}. Review 'ensemble recovery get ${assignmentId}' and prepare again. Nothing was written.`,
+        `The assignment is at version ${d.assignmentVersion}, conversation revision ${d.conversationRevision}. Review 'cab recovery get ${assignmentId}' and prepare again. Nothing was written.`,
         {
-          fix: `Run 'ensemble recovery get ${assignmentId}', then prepare again with the version and conversation revision it shows.`,
+          fix: `Run 'cab recovery get ${assignmentId}', then prepare again with the version and conversation revision it shows.`,
         },
       );
   } else {
@@ -342,7 +342,7 @@ async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
       "conflict",
       `${path} is not eligible now: blocked by ${blockedBy.join(", ")}. Nothing was written.`,
       {
-        fix: `Run 'ensemble recovery get ${assignmentId}' to see what blocks it, then prepare again once it is clear.`,
+        fix: `Run 'cab recovery get ${assignmentId}' to see what blocks it, then prepare again once it is clear.`,
       },
     );
   const exact = exactCommand(
@@ -393,7 +393,7 @@ async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
       "",
       ...preview,
       "",
-      `Submit with: ensemble recovery submit --file ${file}`,
+      `Submit with: cab recovery submit --file ${file}`,
     ].join("\n"),
   };
 }
@@ -401,15 +401,15 @@ async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
 /** What remains after each path; replacement is done once, then only a new message is needed. */
 const NEXT_STEP: Record<RecoveryPath, string> = {
   "pre-turn-adopt":
-    "Not resumed; nothing was dispatched. Next: recover the generation with 'ensemble recovery prepare pre-turn-recover'.",
+    "Not resumed; nothing was dispatched. Next: recover the generation with 'cab recovery prepare pre-turn-recover'.",
   "no-turn-adopt":
-    "Not resumed; nothing was dispatched. Next: recover the generation with 'ensemble recovery prepare no-turn-recover'.",
+    "Not resumed; nothing was dispatched. Next: recover the generation with 'cab recovery prepare no-turn-recover'.",
   "pre-turn-recover":
-    "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('ensemble recovery prepare conversation-replace') and then a new 'ensemble task message'.",
+    "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('cab recovery prepare conversation-replace') and then a new 'cab task message'.",
   "no-turn-recover":
-    "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('ensemble recovery prepare conversation-replace') and then a new 'ensemble task message'.",
+    "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('cab recovery prepare conversation-replace') and then a new 'cab task message'.",
   "conversation-replace":
-    "Not resumed; nothing was dispatched. The conversation is replaced; do not replace it again. Continue with a new 'ensemble task message'.",
+    "Not resumed; nothing was dispatched. The conversation is replaced; do not replace it again. Continue with a new 'cab task message'.",
 };
 
 const EFFECT: Record<RecoveryPath, Effect> = {
@@ -530,7 +530,7 @@ async function submit(ctx: Parameters<WriteCommand["run"]>[0]) {
         ].join("\n"),
         {
           ...error.extra,
-          fix: `Run 'ensemble recovery get ${assignmentId}', then prepare a new document with 'ensemble recovery prepare'.`,
+          fix: `Run 'cab recovery get ${assignmentId}', then prepare a new document with 'cab recovery prepare'.`,
         },
       );
     throw error;
@@ -559,7 +559,7 @@ export const recoveryWriteCommands = new Map<string, WriteCommand>([
         "recovery prepare PATH ASSIGNMENT_ID --out FILE (--work WORK_ID --evidence-file FILE | --expected-version N --expected-conversation-revision N)",
       positionals: 2,
       expects:
-        "--expected-version and --expected-conversation-revision: the assignment's version and conversation revision ('ensemble recovery get ASSIGNMENT_ID'); required for conversation-replace, refused for the other paths.",
+        "--expected-version and --expected-conversation-revision: the assignment's version and conversation revision ('cab recovery get ASSIGNMENT_ID'); required for conversation-replace, refused for the other paths.",
       flags: [
         "out",
         "work",

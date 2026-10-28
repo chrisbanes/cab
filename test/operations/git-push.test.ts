@@ -30,7 +30,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 /** A source repository with one commit and a detached task worktree on it. */
-function repository(t: TestContext, prefix = "ensemble-git-push-") {
+function repository(t: TestContext, prefix = "cab-git-push-") {
   const root = mkdtempSync(join(tmpdir(), prefix));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = join(root, "source");
@@ -68,7 +68,7 @@ function shim(
   t: TestContext,
   behaviour: { stdout?: string; exit?: number; sleep?: boolean } = {},
 ) {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-git-push-shim-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-git-push-shim-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const executable = join(directory, "git");
   const record = join(directory, "record.json");
@@ -89,7 +89,7 @@ const sha = refspec.split(":")[0];
 writeFileSync(${JSON.stringify(record)}, JSON.stringify({
   args,
   cwd: process.cwd(),
-  env: Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(GIT_|ENSEMBLE_|HOME$)/.test(k))),
+  env: Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(GIT_|CAB_|HOME$)/.test(k))),
   config: real([...args.slice(0, args.indexOf("push")), "config", "--list", "--show-origin"]).stdout,
   scratchConfig: readFileSync(process.env.GIT_DIR + "/config", "utf8"),
   resolves: real(["rev-parse", "--verify", sha + "^{commit}"]).stdout.trim(),
@@ -118,7 +118,7 @@ const request = (repo: ReturnType<typeof repository>, executable: string) => ({
   workspacePath: repo.workspace,
   nameWithOwner: "octo/fixture",
   commitSha: repo.sha,
-  branch: "ensemble/abcd1234-task",
+  branch: "cab/abcd1234-task",
   token,
   executable,
   lease: null as string | null,
@@ -142,7 +142,7 @@ test("the token reaches only the push child's environment, never argv, configura
   const fake = shim(t);
   assert.equal(await pushTaskCommit(request(repo, fake.executable)), "pushed");
   const seen = fake.recorded();
-  assert.equal(seen.env.ENSEMBLE_PUSH_TOKEN, token);
+  assert.equal(seen.env.CAB_PUSH_TOKEN, token);
   assert.equal(
     seen.args.some((a) => a.includes(token)),
     false,
@@ -157,13 +157,13 @@ test("the token reaches only the push child's environment, never argv, configura
   );
   assert.ok(seen.args.includes("--no-verify"));
   assert.deepEqual(seen.args.slice(-3), [
-    "--force-with-lease=refs/heads/ensemble/abcd1234-task:",
+    "--force-with-lease=refs/heads/cab/abcd1234-task:",
     "https://github.com/octo/fixture.git",
-    `${repo.sha}:refs/heads/ensemble/abcd1234-task`,
+    `${repo.sha}:refs/heads/cab/abcd1234-task`,
   ]);
   // Even a first push is leased: the branch must not exist yet.
   assert.ok(
-    seen.args.includes("--force-with-lease=refs/heads/ensemble/abcd1234-task:"),
+    seen.args.includes("--force-with-lease=refs/heads/cab/abcd1234-task:"),
   );
   assert.equal(seen.env.GIT_ALLOW_PROTOCOL, "https");
   assert.equal(
@@ -175,7 +175,7 @@ test("the token reaches only the push child's environment, never argv, configura
 });
 
 test("a checkout path containing a colon still resolves the commit through quoted alternates", async (t) => {
-  const repo = repository(t, "ensemble-git-push-a:b-");
+  const repo = repository(t, "cab-git-push-a:b-");
   const fake = shim(t);
   assert.equal(await pushTaskCommit(request(repo, fake.executable)), "pushed");
   const seen = fake.recorded();
@@ -245,8 +245,8 @@ test("the credential helper answers only for https github.com and the exact repo
       encoding: "utf8",
       env: {
         PATH: process.env.PATH,
-        ENSEMBLE_PUSH_TOKEN: token,
-        ENSEMBLE_PUSH_PATH: "octo/fixture.git",
+        CAB_PUSH_TOKEN: token,
+        CAB_PUSH_PATH: "octo/fixture.git",
       },
     }).stdout;
   const good = "protocol=https\nhost=github.com\npath=octo/fixture.git\n";
@@ -266,8 +266,8 @@ test("the credential helper answers only for https github.com and the exact repo
       encoding: "utf8",
       env: {
         PATH: process.env.PATH,
-        ENSEMBLE_PUSH_TOKEN: token,
-        ENSEMBLE_PUSH_PATH: "octo/fixture.git",
+        CAB_PUSH_TOKEN: token,
+        CAB_PUSH_PATH: "octo/fixture.git",
       },
     }).stdout,
     "",
@@ -301,7 +301,7 @@ test("a lease push names the lease commit and the refusal reports map to outcome
       fake
         .recorded()
         .args.includes(
-          `--force-with-lease=refs/heads/ensemble/abcd1234-task:${lease}`,
+          `--force-with-lease=refs/heads/cab/abcd1234-task:${lease}`,
         ),
     );
   }
@@ -345,7 +345,7 @@ test("a cancelled push is uncertain and an invalid request never starts Git", as
 });
 
 test("every push carries an exact lease, and Git enforces it against a head that moved", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-git-lease-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-git-lease-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const remote = join(root, "remote");
   git(root, "init", "-q", "--bare", remote);

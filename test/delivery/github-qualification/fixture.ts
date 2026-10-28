@@ -208,17 +208,17 @@ export class FixtureGuard {
         variables = z
           .record(z.string(), z.unknown())
           .parse(body.variables ?? {}),
-        operation = /^(query|mutation)\s+(EnsembleDelivery\w+)\b/.exec(query);
+        operation = /^(query|mutation)\s+(CabDelivery\w+)\b/.exec(query);
       if (
         !operation ||
         !Object.values(deliveryDocuments).some((document) => document === query)
       )
         throw new Error("Unexpected fixture GraphQL operation");
       const permittedQueries = new Set([
-        "EnsembleDeliveryRepository",
-        "EnsembleDeliveryPr",
-        "EnsembleDeliveryField",
-        "EnsembleDeliveryClosure",
+        "CabDeliveryRepository",
+        "CabDeliveryPr",
+        "CabDeliveryField",
+        "CabDeliveryClosure",
       ]);
       const allowedIds = new Set([
         m.repository.nodeId,
@@ -240,7 +240,7 @@ export class FixtureGuard {
           throw new Error("Unexpected fixture GraphQL identity");
       if (operation[1] === "query" && permittedQueries.has(operation[2] ?? ""))
         return;
-      if (operation[2] === "EnsembleDeliveryProject") {
+      if (operation[2] === "CabDeliveryProject") {
         this.permits("project.field");
         if (
           variables.project !== m.project.nodeId ||
@@ -251,7 +251,7 @@ export class FixtureGuard {
           throw new Error("Unexpected fixture Project field material");
         return;
       }
-      if (operation[2] === "EnsembleDeliveryReady") {
+      if (operation[2] === "CabDeliveryReady") {
         this.permits("pr.ready");
         if (!m.journeys.some((j) => j.pr.nodeId === variables.id))
           throw new Error("Unexpected fixture PR identity");

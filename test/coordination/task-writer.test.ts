@@ -79,7 +79,7 @@ class RuntimeFixture implements Runtime {
         threadId,
         turnId,
         callId: `fixture-result-${threadId}-${turnId}`,
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: {
           summary: "Task-writer fixture completed the exact lead assignment",
         },
@@ -95,7 +95,7 @@ class RuntimeFixture implements Runtime {
         threadId,
         turnId,
         callId: `fixture-question-${threadId}-${turnId}`,
-        tool: "ensemble_ask_question",
+        tool: "cab_ask_question",
         arguments: {
           question: "Task-writer fixture is waiting for the next step",
         },
@@ -209,7 +209,7 @@ async function fixture(
   options?: SupervisorTestOptions,
   repositories: TaskWorkspaceRepositoryInput[] = [],
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-task-writer-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-task-writer-"));
   const {
     createInitialAssignment = true,
     reportTaskLeadResult = false,
@@ -1426,9 +1426,7 @@ test("archival hold prevents writer admission after workspace validation", async
 });
 
 test("uncertain archive status keeps its archival hold across restart", async (t) => {
-  const repositoryRoot = mkdtempSync(
-    join(tmpdir(), "ensemble-archive-source-"),
-  );
+  const repositoryRoot = mkdtempSync(join(tmpdir(), "cab-archive-source-"));
   const source = sourceRepository(repositoryRoot, "source");
   const controlled = controlledGit();
   const failures: Parameters<
@@ -1817,7 +1815,7 @@ test("service stop settles archive status and worktree removal before database c
   for (const scenario of scenarios) {
     await t.test(scenario.name, async (t) => {
       const repositoryRoot = mkdtempSync(
-        join(tmpdir(), "ensemble-archive-stop-source-"),
+        join(tmpdir(), "cab-archive-stop-source-"),
       );
       const source = sourceRepository(repositoryRoot, "source");
       const controlled = controlledGit();
@@ -1969,7 +1967,7 @@ test("service stop settles archive status and worktree removal before database c
 
 test("service stop cancels startup workspace recovery and settles before database close", async (t) => {
   const repositoryRoot = mkdtempSync(
-    join(tmpdir(), "ensemble-startup-recovery-source-"),
+    join(tmpdir(), "cab-startup-recovery-source-"),
   );
   const source = sourceRepository(repositoryRoot, "source");
   const controlled = controlledGit();
@@ -2392,7 +2390,7 @@ test("startup does not continue after workspace recovery returns to a cancelled 
 });
 
 test("real Git service provisioning, execution lookup, and clean archive stay within measured bounds", async (t) => {
-  const repositoryRoot = mkdtempSync(join(tmpdir(), "ensemble-git-timing-"));
+  const repositoryRoot = mkdtempSync(join(tmpdir(), "cab-git-timing-"));
   const source = sourceRepository(repositoryRoot, "timing-source");
   const secondSource = sourceRepository(repositoryRoot, "timing-source-two");
   const controlled = controlledGit();

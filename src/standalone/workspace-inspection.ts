@@ -1132,7 +1132,7 @@ export function previewRetainedBytes(
     !expectedMime.startsWith("text/") &&
     expectedMime !== "application/json; charset=utf-8" &&
     expectedMime !== "application/sql; charset=utf-8" &&
-    expectedMime !== "application/vnd.ensemble.workspace-diff+json"
+    expectedMime !== "application/vnd.cab.workspace-diff+json"
   )
     return undefined;
   if (bytes.byteLength > inspectionLimits.maxTextBytes) return undefined;

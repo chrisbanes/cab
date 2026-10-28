@@ -13,7 +13,7 @@ import { resolveOnPath } from "../../src/standalone/executable-path.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 test("resolveOnPath returns the first executable regular file's PATH entry, not its target", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-onpath-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-onpath-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const [a, b, c, d] = ["a", "b", "c", "d"].map((name) => {
     const directory = join(root, name);

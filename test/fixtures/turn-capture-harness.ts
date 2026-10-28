@@ -667,7 +667,7 @@ export class RecordingTurnCaptureRuntime extends OperatorFixtureRuntime {
   ) {
     this.threadStartEntered.resolve(undefined);
     if (this.options.delayThreadStart) await this.threadStartGate.promise;
-    assert.ok(tools?.some((tool) => tool.name === "ensemble_report_result"));
+    assert.ok(tools?.some((tool) => tool.name === "cab_report_result"));
     return super.startThread(workspace, tools);
   }
 
@@ -683,7 +683,7 @@ export class RecordingTurnCaptureRuntime extends OperatorFixtureRuntime {
     assert.ok(prompt);
     writeFileSync(
       join(workspace, this.options.markerName ?? "turn-marker.txt"),
-      this.options.markerText ?? "ensemble-turn-capture-marker-v1\n",
+      this.options.markerText ?? "cab-turn-capture-marker-v1\n",
       { flag: "wx", mode: 0o600 },
     );
     return super.startTurn(threadId, workspace, prompt);
@@ -700,7 +700,7 @@ export class RecordingTurnCaptureRuntime extends OperatorFixtureRuntime {
         threadId,
         turnId,
         callId: `turn-capture-result-${turnId}`,
-        tool: "ensemble_report_result",
+        tool: "cab_report_result",
         arguments: {
           summary: "Wrote the bounded turn-capture marker as requested.",
         },
@@ -774,7 +774,7 @@ export async function createTurnCaptureHarness(
 ): Promise<TurnCaptureHarness> {
   const checkpointDirectory = options.checkpointPath
     ? dirname(options.checkpointPath)
-    : mkdtempSync(join(tmpdir(), "ensemble-wi03-attempt-"));
+    : mkdtempSync(join(tmpdir(), "cab-wi03-attempt-"));
   if (!existsSync(checkpointDirectory))
     throw new Error("turn-capture-checkpoint-directory-missing");
   const checkpointPath =
@@ -833,7 +833,7 @@ export async function createTurnCaptureHarness(
       title: options.taskTitle ?? "Write a turn marker",
       outcome:
         options.taskOutcome ??
-        "Create turn-marker.txt containing exactly ensemble-turn-capture-marker-v1 followed by a newline, then call ensemble_report_result with a short completion summary.",
+        "Create turn-marker.txt containing exactly cab-turn-capture-marker-v1 followed by a newline, then call cab_report_result with a short completion summary.",
       ready: false,
     });
     const assignment = domain.ensureLeadAssignment(taskId);
@@ -1059,6 +1059,6 @@ export async function createTurnCaptureHarness(
   }
 }
 
-export function markerSha256(text = "ensemble-turn-capture-marker-v1\n") {
+export function markerSha256(text = "cab-turn-capture-marker-v1\n") {
   return createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex");
 }

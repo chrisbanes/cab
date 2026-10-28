@@ -100,7 +100,7 @@ test("operator issue.comment uses server-owned imported identity, rejects spoofi
     ).state,
     "denied",
   );
-  const runtime = await f.call("ensemble_external_action", {
+  const runtime = await f.call("cab_external_action", {
     operationId: randomUUID(),
     action: {
       kind: "issue.comment",

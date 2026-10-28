@@ -27,10 +27,10 @@ import {
 } from "./data-directory.js";
 import { isWithin } from "./workspace-inspection.js";
 
-const SNAPSHOT_FORMAT = "ensemble-sqlite-snapshot-v1";
+const SNAPSHOT_FORMAT = "cab-sqlite-snapshot-v1";
 const DATABASE_NAME = "standalone.sqlite";
 const MANIFEST_NAME = "manifest.json";
-const RESTORE_SENTINEL_NAME = ".ensemble-restore-incomplete";
+const RESTORE_SENTINEL_NAME = ".cab-restore-incomplete";
 const RESTORE_SENTINEL_CONTENTS = STANDALONE_MARKER_CONTENTS;
 const MAX_SUPPORTED_SCHEMA_VERSION = 6;
 const HEX_SHA256 = /^[a-f0-9]{64}$/;
@@ -133,7 +133,7 @@ function schemaFingerprint(db: DatabaseSync): string {
 
 function logicalContentDigest(db: DatabaseSync): string {
   const hash = createHash("sha256");
-  addHashField(hash, "ensemble.sqlite.logical-content.v1");
+  addHashField(hash, "cab.sqlite.logical-content.v1");
   const tables = db
     .prepare(
       `SELECT name, sql

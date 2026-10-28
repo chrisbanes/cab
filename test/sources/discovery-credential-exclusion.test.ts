@@ -82,7 +82,7 @@ for (const c of cases)
     });
     const gh = createFakeGh();
     const dataDir = join(
-      mkdtempSync(join(tmpdir(), "ensemble-discovery-exclusion-")),
+      mkdtempSync(join(tmpdir(), "cab-discovery-exclusion-")),
       "data",
     );
     const contexts = new Map<ExecutionHarness, RuntimeSpawnContext>();
@@ -133,7 +133,7 @@ for (const c of cases)
     assert.ok("env" in turn, JSON.stringify(turn));
     clean(turn.env, "Claude env turn");
     // The file-sourced Claude branch excludes it as well.
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-dx-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-dx-")));
     chmodSync(root, 0o700);
     t.after(() => rmSync(root, { recursive: true, force: true }));
     writeFileSync(join(root, "token"), "dx-file-canary-5521\n", {

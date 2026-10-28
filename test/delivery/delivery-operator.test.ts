@@ -63,7 +63,7 @@ async function registered(t: { after: (fn: () => Promise<void>) => void }) {
   t.after(() => f.close());
   assert.equal(
     (
-      await f.call("ensemble_register_pr", {
+      await f.call("cab_register_pr", {
         repositoryId: "R1",
         prNumber: 7,
         expectedPrNodeId: "P7",
@@ -190,7 +190,7 @@ test("a draft or closed PR cannot be accepted but its outcome can still be close
   assert.equal((await settled(f, api))?.decision, "closed");
 });
 
-test("a branch pushed outside Ensemble cannot be accepted", async (t) => {
+test("a branch pushed outside cab cannot be accepted", async (t) => {
   const { f, api } = await registered(t);
   const db = new DatabaseSync(join(f.root, "data", "standalone.sqlite"));
   try {

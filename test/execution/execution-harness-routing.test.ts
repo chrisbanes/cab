@@ -186,7 +186,7 @@ class HarnessRuntime implements Runtime {
       threadId,
       turnId,
       callId: randomUUID(),
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Which harness owns this turn?" },
     });
   }
@@ -367,7 +367,7 @@ function diagnostics(service: StandaloneService, runtimes: Fakes) {
 }
 
 test("a mixed task routes each assignment, Stop and anomaly to its own harness", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-mixed-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-mixed-"));
   const runtimes = fakes();
   const service = open(join(root, "data"), runtimes);
   const describe = diagnostics(service, runtimes);
@@ -456,7 +456,7 @@ test("a mixed task routes each assignment, Stop and anomaly to its own harness",
 });
 
 test("a Claude unexpected request holds only its work with neutral text", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-unexpected-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-unexpected-"));
   const runtimes = fakes();
   const service = open(join(root, "data"), runtimes);
   const describe = diagnostics(service, runtimes);
@@ -499,7 +499,7 @@ test("a Claude unexpected request holds only its work with neutral text", async 
 });
 
 test("a Claude transient failure is held without retry", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-retry-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-retry-"));
   const runtimes = fakes();
   const service = open(join(root, "data"), runtimes);
   const describe = diagnostics(service, runtimes);
@@ -530,7 +530,7 @@ test("a Claude transient failure is held without retry", async () => {
 });
 
 test("a profile change keeps a live conversation on its harness", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-profile-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-profile-"));
   const runtimes = fakes();
   const service = open(join(root, "data"), runtimes);
   const describe = diagnostics(service, runtimes);
@@ -612,7 +612,7 @@ test("a profile change keeps a live conversation on its harness", async () => {
 });
 
 test("a Claude conversation omits unchanged instructions on its follow-up", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-claude-once-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-claude-once-"));
   const runtimes = fakes();
   const service = open(join(root, "data"), runtimes);
   const describe = diagnostics(service, runtimes);
@@ -640,7 +640,7 @@ test("a Claude conversation omits unchanged instructions on its follow-up", asyn
 });
 
 test("a first turn still waiting for capacity moves to the runtime of a re-captured profile revision", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-waiting-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-waiting-"));
   const runtimes = fakes();
   const service = open(join(root, "data"), runtimes);
   const describe = diagnostics(service, runtimes);
@@ -697,7 +697,7 @@ test("a first turn still waiting for capacity moves to the runtime of a re-captu
 });
 
 test("an unconfigured or failed harness holds its work visibly without fallback", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-unavailable-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-unavailable-"));
   const dataDir = join(root, "data");
   let runtimes = fakes();
   let service = open(dataDir, runtimes, ["codex"]);
@@ -784,7 +784,7 @@ test("an unconfigured or failed harness holds its work visibly without fallback"
 });
 
 test("a runtime that cannot run on this host is not enabled, not failed, and holds its work without fallback", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-not-enabled-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-not-enabled-"));
   const dataDir = join(root, "data");
   let runtimes = fakes();
   runtimes.claude.notEnabled = true;
@@ -840,7 +840,7 @@ test("a runtime that cannot run on this host is not enabled, not failed, and hol
 });
 
 test("restart recovery inspects admitted work only through its own harness", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-recovery-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-recovery-"));
   const dataDir = join(root, "data");
   let runtimes = fakes();
   let service = open(dataDir, runtimes);
@@ -889,7 +889,7 @@ test("restart recovery inspects admitted work only through its own harness", asy
 });
 
 test("an unidentified anomaly retracts only its own harness's last completed work", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-anomaly-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-anomaly-"));
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
   const runtimes = fakes();
@@ -923,7 +923,7 @@ test("an unidentified anomaly retracts only its own harness's last completed wor
 
 for (const failure of ["construction", "start"] as const)
   test(`a Claude runtime ${failure} failure leaves Codex running and Claude work waiting`, async () => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-harness-startup-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-harness-startup-"));
     const runtimes = fakes();
     runtimes.claude.failStart = failure === "start";
     const service = open(
@@ -963,7 +963,7 @@ for (const failure of ["construction", "start"] as const)
   });
 
 test("no runtime is required: a Codex start failure leaves the service running (ADR-1012)", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-default-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-default-"));
   const runtimes = fakes();
   runtimes.codex.failStart = true;
   const service = open(join(root, "data"), runtimes);
@@ -988,7 +988,7 @@ test("no runtime is required: a Codex start failure leaves the service running (
 });
 
 test("a runtime cannot act through another harness's execution or evidence", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-foreign-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-foreign-"));
   const runtimes = fakes();
   runtimes.codex.holdTurns = true;
   const service = open(join(root, "data"), runtimes);
@@ -1123,7 +1123,7 @@ test("a runtime cannot act through another harness's execution or evidence", asy
 });
 
 test("overlapping turns on the same thread ID keep separate per-harness captures", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-captures-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-captures-"));
   const runtimes = fakes();
   for (const runtime of Object.values(runtimes)) {
     runtime.holdTurns = true;
@@ -1182,7 +1182,7 @@ test("overlapping turns on the same thread ID keep separate per-harness captures
 });
 
 test("a failed harness with a hung identity blocks neither other work nor shutdown", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-hung-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-hung-"));
   const runtimes = fakes();
   const service = open(join(root, "data"), runtimes);
   const describe = diagnostics(service, runtimes);
@@ -1220,7 +1220,7 @@ test("a failed harness with a hung identity blocks neither other work nor shutdo
 });
 
 test("a harness failing during a pending recovery inspection does not stall start-up", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-inspect-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-inspect-"));
   const dataDir = join(root, "data");
   let runtimes = fakes();
   let service = open(dataDir, runtimes);
@@ -1271,7 +1271,7 @@ test("a harness failing during a pending recovery inspection does not stall star
 });
 
 test("start-up does not wait for a failed secondary runtime's cleanup, and shutdown does", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-cleanup-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-cleanup-"));
   const runtimes = fakes();
   let release!: () => void;
   runtimes.claude.failStart = true;
@@ -1319,7 +1319,7 @@ test("start-up does not wait for a failed secondary runtime's cleanup, and shutd
 });
 
 test("an unexpected request naming another harness's turn holds only the emitter's work", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-unexpected-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-unexpected-"));
   const runtimes = fakes();
   runtimes.codex.holdTurns = true;
   runtimes.claude.holdTurns = true;
@@ -1358,7 +1358,7 @@ test("an unexpected request naming another harness's turn holds only the emitter
 });
 
 test("a failed secondary runtime whose stop throws synchronously is still tracked", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-sync-stop-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-sync-stop-"));
   const runtimes = fakes();
   runtimes.claude.failStart = true;
   runtimes.claude.stop = () => {
@@ -1386,7 +1386,7 @@ test("a failed secondary runtime whose stop throws synchronously is still tracke
 });
 
 test("a failed secondary runtime cannot start new tool calls", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-failed-tool-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-failed-tool-"));
   const runtimes = fakes();
   runtimes.claude.holdTurns = true;
   const service = open(join(root, "data"), runtimes);
@@ -1426,9 +1426,7 @@ test("a failed secondary runtime cannot start new tool calls", async () => {
 
 for (const failure of ["callback", "start"] as const)
   test(`a secondary runtime ${failure} failure cannot retract completed work`, async () => {
-    const root = mkdtempSync(
-      join(tmpdir(), "ensemble-harness-failed-request-"),
-    );
+    const root = mkdtempSync(join(tmpdir(), "cab-harness-failed-request-"));
     const runtimes = fakes();
     const service = open(join(root, "data"), runtimes);
     const describe = diagnostics(service, runtimes);
@@ -1467,7 +1465,7 @@ for (const failure of ["callback", "start"] as const)
   });
 
 test("a secondary runtime with pending startup does not block healthy work", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-hung-start-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-hung-start-"));
   const runtimes = fakes();
   let release!: () => void;
   let childAlive = false;
@@ -1569,7 +1567,7 @@ test("secondary runtime startup deadlines reject invalid bounds", () => {
 });
 
 test("shutdown retains pending secondary startup until its late cleanup settles", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-late-start-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-harness-late-start-"));
   const runtimes = fakes();
   let release!: () => void;
   let childAlive = false;
@@ -1658,7 +1656,7 @@ const statusOf = (service: StandaloneService, harness: ExecutionHarness) => {
 };
 
 test("disabling Claude lets its running turn finish, then stops it; new Claude work waits and never runs on Codex", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-toggle-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-toggle-"));
   const live = openLive(join(root, "data"));
   const { service } = live;
   const describe = () => ({
@@ -1770,7 +1768,7 @@ test("disabling Claude lets its running turn finish, then stops it; new Claude w
 });
 
 test("re-enabling a draining runtime keeps it; disabling one with no bound work stops it at once", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-drain-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-drain-"));
   const live = openLive(join(root, "data"));
   const { service } = live;
   const describe = () => service.list().map((i) => [i.state, i.reason]);
@@ -1839,7 +1837,7 @@ test("re-enabling a draining runtime keeps it; disabling one with no bound work 
 });
 
 test("enabling is refused while the executable is missing; a failed start is unavailable until enabled again", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-refuse-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-refuse-"));
   let claudeOnPath = true;
   let failNext = false;
   const live = openLive(join(root, "data"), {
@@ -1906,7 +1904,7 @@ test("enabling is refused while the executable is missing; a failed start is una
 });
 
 test("the setting persists across restart; with none enabled the service starts and work waits", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-none-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-none-"));
   const dataDir = join(root, "data");
   let live = openLive(dataDir);
   try {

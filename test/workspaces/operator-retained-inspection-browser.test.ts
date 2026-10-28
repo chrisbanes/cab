@@ -87,7 +87,7 @@ test("production retained result evidence keeps original bytes and opens current
     threadId: work.threadId,
     turnId: work.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: {
       summary: "Retain callback evidence",
       review: {
@@ -370,7 +370,7 @@ test("production retained diff evidence renders its original Before and After re
         repositoryId: null,
         path: "notes.txt",
         originRoot: workspace.path,
-        mime: "application/vnd.ensemble.workspace-diff+json",
+        mime: "application/vnd.cab.workspace-diff+json",
         sha256: digest(payload),
         size: payload.byteLength,
         capturedAt,

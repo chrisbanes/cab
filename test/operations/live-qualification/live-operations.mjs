@@ -21,9 +21,9 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { OperatorAuth } from "../../../dist/src/standalone/operator-auth.js";
 
 const PINNED_NODE =
-  "/private/tmp/ensemble-node.T1JoRI/node-v24.21.0-darwin-arm64/bin/node";
+  "/private/tmp/cab-node.T1JoRI/node-v24.21.0-darwin-arm64/bin/node";
 const PINNED_NPM =
-  "/private/tmp/ensemble-node.T1JoRI/npm-12.1.0/package/bin/npm-cli.js";
+  "/private/tmp/cab-node.T1JoRI/npm-12.1.0/package/bin/npm-cli.js";
 const LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
 const LAUNCHCTL = "/bin/launchctl";
 const PS = "/bin/ps";
@@ -259,7 +259,7 @@ function readCookie(response) {
   const header = response.headers.get("set-cookie");
   assert.ok(header, "operator response sets a session cookie");
   const cookie = header.split(";", 1)[0];
-  assert.match(cookie, /^ensemble_operator_session=[A-Za-z0-9_-]{43}$/);
+  assert.match(cookie, /^cab_operator_session=[A-Za-z0-9_-]{43}$/);
   return cookie;
 }
 
@@ -297,7 +297,7 @@ async function authenticateOperator() {
   });
   assert.equal(home.status, 200);
   const html = await home.text();
-  assert.match(html, /<h1>Ensemble<\/h1>/);
+  assert.match(html, /<h1>cab<\/h1>/);
   return { cookie: sessionCookie, csrf: readCsrf(html) };
 }
 
@@ -413,8 +413,8 @@ async function writeLaunchAgent(dataDirectory, logDirectory) {
     ),
   );
   assert.deepEqual(parsed.EnvironmentVariables, {
-    ENSEMBLE_OPERATOR_AUTH_FILE: authFile,
-    ENSEMBLE_OPERATOR_ORIGIN: origin,
+    CAB_OPERATOR_AUTH_FILE: authFile,
+    CAB_OPERATOR_ORIGIN: origin,
     PATH: LAUNCHD_PATH,
   });
   assert.equal(parsed.ProgramArguments[0], PINNED_NODE);
@@ -545,7 +545,7 @@ async function run() {
 
   stage = "preflight-disposable-label";
   stageLog(stage);
-  label = `com.chrisbanes.ensemble.s08a-${randomBytes(6).toString("hex")}`;
+  label = `com.chrisbanes.cab.s08a-${randomBytes(6).toString("hex")}`;
   target = `${domain}/${label}`;
   assert.equal(
     labelIsAbsent(),
@@ -554,7 +554,7 @@ async function run() {
   );
   port = await reserveLoopbackPort();
   origin = `http://127.0.0.1:${port}`;
-  root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-s08a-live-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "cab-s08a-live-")));
   rootCreated = true;
   assert.equal(lstatSync(root).mode & 0o777 & 0o077, 0);
   sourceDataDirectory = join(root, "source", "data");
@@ -594,11 +594,7 @@ async function run() {
     domain,
     label,
     initialPlistLint: "passed",
-    exactEnvironment: [
-      "ENSEMBLE_OPERATOR_AUTH_FILE",
-      "ENSEMBLE_OPERATOR_ORIGIN",
-      "PATH",
-    ],
+    exactEnvironment: ["CAB_OPERATOR_AUTH_FILE", "CAB_OPERATOR_ORIGIN", "PATH"],
     keepAlive: false,
     runAtLoad: true,
     standardOutput: "private disposable log",
@@ -610,8 +606,8 @@ async function run() {
   let pid = await bootstrapAndWait(sourceDataDirectory);
   EVIDENCE.launchd.initialStartPid = pid;
   assert.equal(
-    readFileSync(join(sourceDataDirectory, ".ensemble-standalone"), "utf8"),
-    "ensemble-standalone-v1\n",
+    readFileSync(join(sourceDataDirectory, ".cab-standalone"), "utf8"),
+    "cab-standalone-v1\n",
   );
   const ownerSource = treeSha256(sourceDataDirectory);
   const session = await authenticateOperator();
@@ -667,7 +663,7 @@ async function run() {
   );
   assert.equal(snapshotResult.status, 0);
   const manifest = operationJson(snapshotResult).manifest;
-  assert.equal(manifest.format, "ensemble-sqlite-snapshot-v1");
+  assert.equal(manifest.format, "cab-sqlite-snapshot-v1");
   assert.equal(manifest.nodeVersion, "v24.21.0");
   const verifyResult = runOperations("verify", snapshotPath);
   assert.equal(verifyResult.status, 0);
@@ -728,11 +724,11 @@ async function run() {
     manifest.logicalContentSha256,
   );
   assert.equal(
-    readFileSync(join(restoredDataDirectory, ".ensemble-standalone"), "utf8"),
-    "ensemble-standalone-v1\n",
+    readFileSync(join(restoredDataDirectory, ".cab-standalone"), "utf8"),
+    "cab-standalone-v1\n",
   );
   const restoredOwner = lstatSync(
-    join(restoredDataDirectory, ".ensemble-owner.sqlite"),
+    join(restoredDataDirectory, ".cab-owner.sqlite"),
   );
   assert.equal(restoredOwner.isFile(), true);
   assert.equal(restoredOwner.mode & 0o777, 0o600);

@@ -103,13 +103,13 @@ const closureText = (closure: "held" | "completed" | "unattributed" | null) =>
     : closure === "completed"
       ? ", closed on GitHub"
       : closure === "unattributed"
-        ? ", closed on GitHub; closure not attributed to Ensemble; held"
+        ? ", closed on GitHub; closure not attributed to cab; held"
         : "";
 const closureDetail = {
   held: "Held · closed on GitHub. Resolve the source hold after the issue reopens.",
-  completed: "Done · closed on GitHub, not delivered by Ensemble.",
+  completed: "Done · closed on GitHub, not delivered by cab.",
   unattributed:
-    "Held · closed on GitHub; Ensemble could not prove its delivery closed it. Reopen the issue on GitHub, then resolve the source hold.",
+    "Held · closed on GitHub; cab could not prove its delivery closed it. Reopen the issue on GitHub, then resolve the source hold.",
 };
 
 function selectField(
@@ -205,7 +205,7 @@ export class LocalOperatorUi {
         value: String(profile.id),
         label: String(profile.name),
       }));
-    return `<main><h1>Ensemble</h1><h2>Projects</h2><ul>${projects}</ul>${form("project.create", field("name") + selectField("leadProfileId", [{ value: "", label: "Unconfigured" }, ...leadProfiles], ""), "projectId", csrfToken)}<h2>Profiles</h2><ul>${profiles}</ul>${form("profile.create", field("name") + textarea("instructions") + textarea("capabilities"), "profileId", csrfToken)}</main>`;
+    return `<main><h1>cab</h1><h2>Projects</h2><ul>${projects}</ul>${form("project.create", field("name") + selectField("leadProfileId", [{ value: "", label: "Unconfigured" }, ...leadProfiles], ""), "projectId", csrfToken)}<h2>Profiles</h2><ul>${profiles}</ul>${form("profile.create", field("name") + textarea("instructions") + textarea("capabilities"), "profileId", csrfToken)}</main>`;
   }
 
   async projectWithCredentialStatus(projectId: string, csrfToken = "") {
@@ -816,7 +816,7 @@ type OperatorHttpOptions = {
   push?: OperatorPush;
 };
 
-const SESSION_COOKIE = "ensemble_operator_session";
+const SESSION_COOKIE = "cab_operator_session";
 const CREDENTIAL_ACTION =
   /^\/api\/operator\/credentials\/([^/]+)\/(rotate|revoke)$/;
 const PUSH_ACTION =
@@ -1180,11 +1180,11 @@ function document(
         .map((href) => `<link rel="stylesheet" href="${href}">`)
         .join("")
     : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ensemble</title>${styles}</head><body${webEnabled ? ' class="legacy-operator"' : ""}>${navigation}${body}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>cab</title>${styles}</head><body${webEnabled ? ' class="legacy-operator"' : ""}>${navigation}${body}</body></html>`;
 }
 
 function loginContent(session: OperatorSession, message = "Sign in"): string {
-  return `<main><h1>Ensemble</h1><p>${escapeHtml(message)}</p><form method="post" action="/login">${hidden("csrfToken", session.csrfToken)}${field("password", "", "password")}<button type="submit">Sign in</button></form></main>`;
+  return `<main><h1>cab</h1><p>${escapeHtml(message)}</p><form method="post" action="/login">${hidden("csrfToken", session.csrfToken)}${field("password", "", "password")}<button type="submit">Sign in</button></form></main>`;
 }
 
 function isSafeRedirect(location: string): boolean {
@@ -1876,8 +1876,8 @@ export class LocalOperatorHttp {
           ...headers,
           "content-type": data.type,
           "x-content-type-options": "nosniff",
-          "x-ensemble-evidence-source": data.source,
-          "x-ensemble-sha256": data.sha256,
+          "x-cab-evidence-source": data.source,
+          "x-cab-sha256": data.sha256,
         });
         response.end(data.body);
         return true;
@@ -1986,8 +1986,8 @@ export class LocalOperatorHttp {
             ...API_HEADERS,
             "content-type": file.type,
             "x-content-type-options": "nosniff",
-            "x-ensemble-evidence-source": file.source,
-            "x-ensemble-sha256": file.sha256,
+            "x-cab-evidence-source": file.source,
+            "x-cab-sha256": file.sha256,
           });
           response.end(file.body);
           return;

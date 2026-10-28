@@ -133,7 +133,7 @@ def call(rid, method, params, timeout=90):
 
 
 def initialize(base):
-    call(base, "initialize", {"clientInfo": {"name": "ensemble_s01_native_history",
+    call(base, "initialize", {"clientInfo": {"name": "cab_s01_native_history",
         "title": "S01 Native History", "version": "0.1.0"}})
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

@@ -198,7 +198,7 @@ test("Project filter is passed unchanged and nested field/definition pages must 
         variables: Record<string, unknown>;
       };
       calls.push(body);
-      if (body.operationName === "EnsembleProjectPage") {
+      if (body.operationName === "CabProjectPage") {
         return new Response(
           JSON.stringify({
             data: {
@@ -256,7 +256,7 @@ test("Project filter is passed unchanged and nested field/definition pages must 
           }),
         );
       }
-      if (body.operationName === "EnsembleProjectFieldValues") {
+      if (body.operationName === "CabProjectFieldValues") {
         if (failNested)
           return new Response(
             JSON.stringify({ errors: [{ message: "denied" }] }),
@@ -281,7 +281,7 @@ test("Project filter is passed unchanged and nested field/definition pages must 
           }),
         );
       }
-      if (body.operationName === "EnsembleProjectFields")
+      if (body.operationName === "CabProjectFields")
         return new Response(
           JSON.stringify({
             data: {
@@ -340,11 +340,7 @@ test("Project filter is passed unchanged and nested field/definition pages must 
   assert.equal(calls[0]?.variables.query, "status:ready");
   assert.deepEqual(
     calls.map((call) => call.operationName),
-    [
-      "EnsembleProjectPage",
-      "EnsembleProjectFieldValues",
-      "EnsembleProjectFields",
-    ],
+    ["CabProjectPage", "CabProjectFieldValues", "CabProjectFields"],
   );
   failNested = true;
   const incomplete = await reader.readSelection(selection);

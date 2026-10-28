@@ -167,7 +167,7 @@ test("taskReadiness states recorded state and wait", () => {
       task: { state: "open", ready: false },
       source: { closure: "unattributed" },
     }),
-    "Held · closure not attributed to Ensemble",
+    "Held · closure not attributed to cab",
   );
   assert.equal(
     line({

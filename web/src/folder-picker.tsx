@@ -176,9 +176,8 @@ export function FolderPicker({
           />
         </label>
         <p className="metadata muted">
-          Listed by the Ensemble service on this Mac: folder names and Git
-          status only. Choosing a folder grants nothing until you create the
-          project.
+          Listed by the cab service on this Mac: folder names and Git status
+          only. Choosing a folder grants nothing until you create the project.
         </p>
         <div className="settings-actions">
           <Button

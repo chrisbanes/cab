@@ -106,7 +106,7 @@ const defaultProbeRetryMs = 30_000;
 /** The CLI falls back to the shared `/tmp/claude-<uid>` above this (AF_UNIX, #825 T1). */
 const maxSandboxTemporaryBytes = 44;
 
-const mcpServerName = "ensemble";
+const mcpServerName = "cab";
 const mcpToolPrefix = `mcp__${mcpServerName}__`;
 const builtInTools = ["Read", "Glob", "Grep", "Write", "Edit", "Bash"];
 const disallowedTools = [
@@ -263,7 +263,7 @@ async function ensureTemporaryBase(base: string): Promise<string | undefined> {
   return undefined;
 }
 
-/** Removes a task's sandbox temporary base when it is still the private directory Ensemble made. */
+/** Removes a task's sandbox temporary base when it is still the private directory cab made. */
 export async function releaseClaudeTemporaryBase(
   workspace: string,
 ): Promise<void> {
@@ -324,15 +324,15 @@ async function withinRoots(
 
 /** Disclosed with the effective policy; see ADR-1008 and the C0/T1 evidence. */
 export const claudePolicyLimits: readonly string[] = [
-  "File-editing tools are confined by Ensemble's PreToolUse hook, not by the OS sandbox.",
+  "File-editing tools are confined by cab's PreToolUse hook, not by the OS sandbox.",
   "A sandbox that stops working mid-turn shows only as failed commands (exit 126), not a failed turn.",
   "The sandbox self-test proves Seatbelt can start, not the exact profile Claude Code applies.",
-  "Untested: inertness of model-written Claude configuration (C0 F5.5), whether Claude Code honours dangerouslyDisableSandbox (F6.3; Ensemble's hook denies it), and a missing sandbox-exec binary (F6.4).",
+  "Untested: inertness of model-written Claude configuration (C0 F5.5), whether Claude Code honours dangerouslyDisableSandbox (F6.3; cab's hook denies it), and a missing sandbox-exec binary (F6.4).",
   "The subprocess environment scrub is qualified for sandboxed Bash only (#827): Bash saw neither the token variable nor its value, and could not read its parent's environment with ps. Other ways to read a parent process's environment are untested.",
   "After a service crash, a running Claude CLI process can outlive the service (#827); verify it has exited before recovering the turn.",
   "Only the Claude Code version the pinned SDK declares was qualified. The installed claude is not version-checked, and another version may enforce the sandbox, tool and permission controls differently.",
   "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",
-  "The sandboxed agent can write the per-task temporary directory; Ensemble checks only its top-level entries before each turn.",
+  "The sandboxed agent can write the per-task temporary directory; cab checks only its top-level entries before each turn.",
   "The per-task temporary directory has a predictable name under /tmp; another local user who creates it first makes Claude work wait, but never shares it.",
   "If the sandboxed agent changes the per-task temporary directory's permissions, the task's Claude work waits as not private until the operator repairs or removes it.",
 ];
@@ -469,7 +469,7 @@ interface ClaudeTurn {
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms).unref());
 
-/** One `query()` and `claude` subprocess per Ensemble turn; the session ID is the thread ID. */
+/** One `query()` and `claude` subprocess per cab turn; the session ID is the thread ID. */
 export class ClaudeRuntime implements Runtime {
   readonly harness = "claude" as const;
   private generation: string | undefined;
@@ -884,7 +884,7 @@ export class ClaudeRuntime implements Runtime {
         threadId,
         turnId: turn.turnId,
       });
-      return { behavior: "deny", message: "Ensemble grants no permissions" };
+      return { behavior: "deny", message: "cab grants no permissions" };
     };
     const options: Options = {
       cwd: workspace,
@@ -1231,7 +1231,7 @@ export class ClaudeRuntime implements Runtime {
     }
   }
 
-  /** Denies calls outside Ensemble's policy. */
+  /** Denies calls outside cab's policy. */
   private async preToolUse(turn: ClaudeTurn, raw: unknown) {
     const input = hookInputSchema.safeParse(raw);
     const deny = (reason: string) => ({
@@ -1241,11 +1241,11 @@ export class ClaudeRuntime implements Runtime {
         permissionDecisionReason: reason,
       },
     });
-    if (!input.success) return deny("Ensemble could not read this tool call");
+    if (!input.success) return deny("cab could not read this tool call");
     const { tool_name: name, tool_input: toolInput } = input.data;
     const fields = z.record(z.string(), z.unknown()).safeParse(toolInput);
     if (!builtInTools.includes(name) && !name.startsWith(mcpToolPrefix))
-      return deny(`${name} is outside Ensemble's tool policy`);
+      return deny(`${name} is outside cab's tool policy`);
     if (name === "Write" || name === "Edit") {
       const path = fields.success ? fields.data.file_path : undefined;
       if (
@@ -1262,7 +1262,7 @@ export class ClaudeRuntime implements Runtime {
       return deny("Commands never run outside the sandbox");
     if (name.startsWith(mcpToolPrefix)) {
       if (turn.pendingCount >= maxPendingToolUses)
-        return deny("Too many pending Ensemble tool calls");
+        return deny("Too many pending cab tool calls");
       const key = inputDigest(name.slice(mcpToolPrefix.length), toolInput);
       const queue = turn.pendingToolUses.get(key) ?? [];
       queue.push(input.data.tool_use_id);

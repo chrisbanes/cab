@@ -20,9 +20,7 @@ const harness = () =>
       .href
   );
 const probeRoots = () =>
-  readdirSync(tmpdir()).filter((name) =>
-    name.startsWith("ensemble-claude-c0-"),
-  );
+  readdirSync(tmpdir()).filter((name) => name.startsWith("cab-claude-c0-"));
 
 test("driver refuses anything but the exact live grammar and creates nothing", () => {
   const before = probeRoots();
@@ -84,18 +82,18 @@ test("redact removes tokens and private paths and truncates long fields", async 
   const { redact } = await harness();
   const context = {
     token: "fake-oauth-value",
-    root: "/var/folders/x/T/ensemble-claude-c0-abc",
-    repo: "/Users/someone/dev/ensemble",
+    root: "/var/folders/x/T/cab-claude-c0-abc",
+    repo: "/Users/someone/dev/cab",
     home: "/Users/someone",
   };
   const text = [
     "fake-oauth-value",
     "sk-ant-oat01-abc",
     "Bearer abc.def",
-    "/var/folders/x/T/ensemble-claude-c0-abc/config",
-    "/Users/someone/dev/ensemble/test",
+    "/var/folders/x/T/cab-claude-c0-abc/config",
+    "/Users/someone/dev/cab/test",
     "/Users/someone/.claude",
-    "projects/-var-folders-x-T-ensemble-claude-c0-abc-workspace",
+    "projects/-var-folders-x-T-cab-claude-c0-abc-workspace",
   ].join(" ");
   const out = redact({ nested: [text] }, context).nested[0];
   for (const secret of [

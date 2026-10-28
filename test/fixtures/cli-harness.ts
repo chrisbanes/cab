@@ -35,7 +35,7 @@ export const stdinOf = (text: string) => {
 };
 
 export function harness(t: After, overrides: Partial<CliDeps> = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-cli-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-cli-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const configDir = join(dir, "config");
   const keychain = new MemoryKeychain();
@@ -54,7 +54,7 @@ export function harness(t: After, overrides: Partial<CliDeps> = {}) {
         err += c;
       });
     const code = await main(args, {
-      env: { ENSEMBLE_CLI_CONFIG_DIR: configDir },
+      env: { CAB_CLI_CONFIG_DIR: configDir },
       stdin: new PassThrough() as unknown as NodeJS.ReadStream,
       stdout,
       stderr: stderr as unknown as NodeJS.WriteStream,

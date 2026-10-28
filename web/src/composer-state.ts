@@ -8,7 +8,7 @@ import {
 import type { OperatorClient } from "./api.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
-export const storageKey = "ensemble.ui03.composer.v1";
+export const storageKey = "cab.ui03.composer.v1";
 export const recoveryLimit = 262144,
   commandLimit = 65536;
 export const byteLength = (text: string) =>
@@ -254,7 +254,7 @@ export class ComposerState {
         this.details = this.describe(saved.command);
       } else
         this.notice =
-          "On-device unfinished input recovered. This is not a saved Ensemble task.";
+          "On-device unfinished input recovered. This is not a saved cab task.";
     }
   }
   private publish() {

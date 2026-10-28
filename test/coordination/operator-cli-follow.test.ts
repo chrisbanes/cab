@@ -87,7 +87,7 @@ test("following delivers each item once, ends when finished and resumes", async 
   );
   assert.equal(r.code, 0, r.err);
   const lines = records(r.out);
-  for (const line of lines) assert.equal(line.schema, "ensemble.cli/v1");
+  for (const line of lines) assert.equal(line.schema, "cab.cli/v1");
   const items = lines.filter((l) => l.type === "item");
   assert.deepEqual(
     items.map((l) => l.item.name),
@@ -133,7 +133,7 @@ test("following delivers each item once, ends when finished and resumes", async 
   });
   assert.match(human.out, /event-1/);
   assert.match(human.out, /End: execution-finished/);
-  assert.match(human.out, /Resume: ensemble logs --execution \S+ --cursor \S+/);
+  assert.match(human.out, /Resume: cab logs --execution \S+ --cursor \S+/);
 });
 
 test("following is bounded by duration and the interrupt signal", async (t) => {

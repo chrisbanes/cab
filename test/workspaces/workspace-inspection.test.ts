@@ -38,7 +38,7 @@ import {
 } from "../../src/standalone/workspace-inspection.js";
 
 function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-inspection-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-inspection-"));
   const db = new DatabaseSync(join(directory, "standalone.sqlite"));
   new Store(db).ensureHost("workspace-inspection-test");
   const manager = new WorkspaceManager(

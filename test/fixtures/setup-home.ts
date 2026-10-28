@@ -33,8 +33,8 @@ export async function checkout(dir: string, origin?: string) {
  * `/var` is a symlink, so containment must compare real paths on both sides).
  */
 export async function createSetupHome() {
-  const home = await mkdtemp(join(tmpdir(), "ensemble-setup-home-"));
-  const outside = await mkdtemp(join(tmpdir(), "ensemble-setup-outside-"));
+  const home = await mkdtemp(join(tmpdir(), "cab-setup-home-"));
+  const outside = await mkdtemp(join(tmpdir(), "cab-setup-outside-"));
   const src = join(home, "src");
   await checkout(join(src, "atlas"), "https://github.com/acme/atlas.git");
   await checkout(join(src, "relay"), "git@github.com:acme/relay.git");

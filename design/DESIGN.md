@@ -1,6 +1,6 @@
-# Ensemble UI design foundations
+# cab UI design foundations
 
-The visual foundations of the Ensemble operator web UI: direction, tokens,
+The visual foundations of the cab operator web UI: direction, tokens,
 typography, layout, shared components and interaction guidance. Shipped screens are
 defined by the web app (`web/src/`) and its browser journey tests; this document
 holds the rules that apply across them. Explore new screens in any tool; those
@@ -89,7 +89,7 @@ Review layouts at desktop 1366 wide (at least 768 high), phone 390 × 844, table
 1024 × 768 or 800 × 768, and short phone 390 × 480. These are review viewports, not
 fixed application dimensions.
 
-- **Shell:** a 232px sidebar (Ensemble mark, installation name, Search work field
+- **Shell:** a 232px sidebar (cab mark, installation name, Search work field
   with ⌘K, Overview, Inbox with an amber count, Tasks, the projects list with
   activity meta, a capacity meter and the account menu), a 48px top bar
   (breadcrumb, connection status — Connected, Updates delayed or Disconnected — and

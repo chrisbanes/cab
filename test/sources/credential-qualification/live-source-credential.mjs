@@ -405,7 +405,7 @@ export async function prepareOnly(
   writeLaunchAgent(configuration, plist);
   await lint(plist);
   const prepared = {
-    format: "ensemble-source-944-v1",
+    format: "cab-source-944-v1",
     root: input.root,
     configuration,
     metadata,
@@ -436,7 +436,7 @@ export async function prepareOnly(
 export function verifyPrepared(manifest, consumedRecord) {
   assert.equal(lstatSync(manifest).mode & 0o777, 0o600);
   const p = JSON.parse(readFileSync(manifest, "utf8"));
-  assert.equal(p.format, "ensemble-source-944-v1");
+  assert.equal(p.format, "cab-source-944-v1");
   assert.equal(realpathSync(p.root), p.root);
   assert.equal(digest(readFileSync(p.plist)), p.plistDigest);
   assert.equal(digest(readFileSync(p.configuration.authFile)), p.authDigest);

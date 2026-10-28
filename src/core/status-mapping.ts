@@ -34,7 +34,7 @@ export class StatusMappingRefusal extends DomainPolicyError {
 export interface StatusMappingTaskState {
   lastEvent: StatusMappingEvent | "none";
   operationId: string | null;
-  /** The Status option Ensemble last wrote and read back, with when. */
+  /** The Status option cab last wrote and read back, with when. */
   observedOptionNodeId: string | null;
   observedAt: number | null;
   /** The mapping has seen the task before it was done (a task first seen done was not worked on under it). */

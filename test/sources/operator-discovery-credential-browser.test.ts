@@ -702,7 +702,7 @@ test("Readiness keeps the fix line for a configured but unreadable credential", 
     type: "discovery.configure",
     actor: "operator",
     key: randomUUID(),
-    credentialRef: "env:ENSEMBLE_MISSING_DISCOVERY_VARIABLE",
+    credentialRef: "env:CAB_MISSING_DISCOVERY_VARIABLE",
   });
   await page.reload();
   const row = readinessRow(page);

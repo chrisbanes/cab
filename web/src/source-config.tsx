@@ -824,7 +824,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
             </DraftField>
             <p className="metadata muted">
               Treat closure as Done marks the task closed on GitHub, not
-              delivered by Ensemble, once its work has stopped.
+              delivered by cab, once its work has stopped.
             </p>
           </Panel>
           <Panel

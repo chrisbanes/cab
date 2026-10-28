@@ -89,7 +89,7 @@ def run_turn(rid, thread_id, policy, command):
 
 failure = None
 try:
-    call(1, "initialize", {"clientInfo": {"name": "ensemble_draft_turn_probe",
+    call(1, "initialize", {"clientInfo": {"name": "cab_draft_turn_probe",
                                           "title": "Draft turn read-only probe", "version": "0.1.0"}})
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

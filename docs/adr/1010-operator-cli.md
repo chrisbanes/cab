@@ -5,7 +5,7 @@ status: accepted
 # Provide an operator CLI through the live service
 
 External agents need to inspect instructions and execution evidence and apply
-operator-approved changes. Provide a local/private-remote CLI over Ensemble's
+operator-approved changes. Provide a local/private-remote CLI over cab's
 service read and command layer, using dedicated revocable read-only or read/write
 operator credentials. This preserves a single policy, revision and receipt
 boundary across the CLI and web UI, at the cost of a machine authentication

@@ -45,7 +45,7 @@ let executableSha256;
 try {
   executableSha256 = verifyInspectionJourneyExecutable(
     codexExecutable,
-    process.env.ENSEMBLE_WI782_CODEX_SHA256,
+    process.env.CAB_WI782_CODEX_SHA256,
   );
 } catch (error) {
   process.stderr.write(
@@ -54,9 +54,7 @@ try {
   process.exit(2);
 }
 
-const attemptDirectory = mkdtempSync(
-  join(tmpdir(), "ensemble-wi782-live-attempt-"),
-);
+const attemptDirectory = mkdtempSync(join(tmpdir(), "cab-wi782-live-attempt-"));
 chmodSync(attemptDirectory, 0o700);
 const checkpointPath = join(attemptDirectory, "journey.json");
 const evidencePath = join(attemptDirectory, "evidence.json");

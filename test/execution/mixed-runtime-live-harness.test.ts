@@ -27,8 +27,8 @@ const harness = () =>
   );
 const SENTINEL = "c5-sentinel-token-8812";
 const roots = () =>
-  readdirSync(tmpdir()).filter((name) => name.startsWith("ensemble-c5-"));
-const ledgerFile = () => join(tmpdir(), "ensemble-c5.ledger.json");
+  readdirSync(tmpdir()).filter((name) => name.startsWith("cab-c5-"));
+const ledgerFile = () => join(tmpdir(), "cab-c5.ledger.json");
 
 function run(args: string[], env: NodeJS.ProcessEnv) {
   return spawnSync(process.execPath, [driver, ...args], {
@@ -196,7 +196,7 @@ test("the leak scan flags secrets and local paths and passes a clean sample", as
   const { scanForLeaks } = await harness();
   const context = {
     token: SENTINEL,
-    roots: ["/private/tmp/ensemble-c5-abc"],
+    roots: ["/private/tmp/cab-c5-abc"],
     home: "/Users/someone",
   };
   for (const [sample, label] of [
@@ -204,7 +204,7 @@ test("the leak scan flags secrets and local paths and passes a clean sample", as
     ["key sk-ant-x", "sk-ant-prefix"],
     ["Authorization: Bearer abc", "bearer"],
     ["CLAUDE_CODE_OAUTH_TOKEN=abc", "token-assignment"],
-    ["at /private/tmp/ensemble-c5-abc/data", "disposable-root"],
+    ["at /private/tmp/cab-c5-abc/data", "disposable-root"],
     ["in /Users/someone/dev", "home-path"],
   ] as const)
     assert.deepEqual(scanForLeaks(sample, context), [label], sample);
@@ -217,14 +217,14 @@ test("the leak scan flags secrets and local paths and passes a clean sample", as
   );
 });
 
-test("cleanup removes only a real ensemble-c5- directory directly under the temp root", async () => {
+test("cleanup removes only a real cab-c5- directory directly under the temp root", async () => {
   const { removeRoot } = await harness();
-  const root = mkdtempSync(join(tmpdir(), "ensemble-c5-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-c5-"));
   mkdirSync(join(root, "data"));
   const other = mkdtempSync(join(tmpdir(), "c5-other-"));
-  const nested = join(other, "ensemble-c5-nested");
+  const nested = join(other, "cab-c5-nested");
   mkdirSync(nested);
-  const link = join(tmpdir(), `ensemble-c5-link-${process.pid}`);
+  const link = join(tmpdir(), `cab-c5-link-${process.pid}`);
   symlinkSync(other, link);
   try {
     for (const path of [other, nested, link])
@@ -312,12 +312,12 @@ test("facet turns that follow their brief need no repair turn, and the crash fol
     },
     async interruptTurn() {},
     async waitForTurn(threadId: string, turnId: string) {
-      if (prompts.at(-1)?.includes("ensemble_report_result"))
+      if (prompts.at(-1)?.includes("cab_report_result"))
         await listener({
           threadId,
           turnId,
           callId: `call-${turnId}`,
-          tool: "ensemble_report_result",
+          tool: "cab_report_result",
           arguments: { summary: "C5 probe done" },
         });
       return "completed" as const;

@@ -19,7 +19,7 @@ test("browser engine selection supports all, Chromium, and none", () => {
 test("browser engine selection rejects unknown values clearly", () => {
   assert.throws(
     () => selectedBrowserEngines("firefox"),
-    /Invalid ENSEMBLE_TEST_BROWSER_ENGINE value "firefox"; expected all, chromium, or none/,
+    /Invalid CAB_TEST_BROWSER_ENGINE value "firefox"; expected all, chromium, or none/,
   );
 });
 
@@ -30,12 +30,12 @@ test("browser test options default to Chromium and preserve requested skips", ()
   assert.deepEqual(
     browserEngineTestOptions("webkit", { skip: "intentional" }, "chromium"),
     {
-      skip: "intentional; browser engine webkit excluded by ENSEMBLE_TEST_BROWSER_ENGINE",
+      skip: "intentional; browser engine webkit excluded by CAB_TEST_BROWSER_ENGINE",
     },
   );
   assert.equal(
     browserEngineTestOptions("chromium", { browserEngine: "chromium" }, "none")
       .skip,
-    "browser engine chromium excluded by ENSEMBLE_TEST_BROWSER_ENGINE",
+    "browser engine chromium excluded by CAB_TEST_BROWSER_ENGINE",
   );
 });

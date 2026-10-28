@@ -101,8 +101,8 @@ export const productionService = (dataDir: string) =>
     diagnostics: { limits: diagnosticLimitsFromEnv(process.env) },
     runtimeHarnesses: productionRuntimeHarnesses,
     // Control paths like OperatorApi's: failure records must not disclose them.
-    failureRedactionPaths: process.env.ENSEMBLE_OPERATOR_AUTH_FILE
-      ? [process.env.ENSEMBLE_OPERATOR_AUTH_FILE]
+    failureRedactionPaths: process.env.CAB_OPERATOR_AUTH_FILE
+      ? [process.env.CAB_OPERATOR_AUTH_FILE]
       : [],
   });
 
@@ -116,7 +116,7 @@ export async function main(
   const [command, dataDir, ...args] = commandLine;
   if (!command || !dataDir)
     throw new Error(
-      "Usage: ensemble <serve|operator|run|list> ABSOLUTE_DATA_DIR [workId prompt workspace previousWorkId]",
+      "Usage: cab <serve|operator|run|list> ABSOLUTE_DATA_DIR [workId prompt workspace previousWorkId]",
     );
   const service = serviceFactory(dataDir);
   const records = log ?? new ServiceLog();
@@ -126,8 +126,8 @@ export async function main(
   const operatorAuth =
     command === "operator"
       ? await OperatorAuth.open({
-          authFile: process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "",
-          origin: process.env.ENSEMBLE_OPERATOR_ORIGIN ?? "",
+          authFile: process.env.CAB_OPERATOR_AUTH_FILE ?? "",
+          origin: process.env.CAB_OPERATOR_ORIGIN ?? "",
         })
       : undefined;
   // Called where main completes, never on a throw: that exit line is the entry point's.
@@ -204,7 +204,7 @@ export async function main(
         fileURLToPath(new URL("../../operator", import.meta.url)),
       );
       if (await consumeFatalFailure()) return;
-      const authFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "";
+      const authFile = process.env.CAB_OPERATOR_AUTH_FILE ?? "";
       const api = new OperatorApi(service, [dataDir, authFile]);
       const readiness = serviceReadiness(service, api, { dataDir, authFile });
       // The VAPID key sits beside the operator auth file; an unusable one only turns push off.

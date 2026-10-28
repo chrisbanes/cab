@@ -111,7 +111,7 @@ try:
     threading.Thread(target=lambda: [events.put(json.loads(x)) for x in server.stdout],
                      daemon=True).start()
     emit(server_pid=server.pid, server_pgid=os.getpgid(server.pid))
-    call(1, "initialize", {"clientInfo": {"name": "ensemble_s01_escalation",
+    call(1, "initialize", {"clientInfo": {"name": "cab_s01_escalation",
          "title": "S01 Escalation", "version": "0.1.0"}})
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

@@ -32,7 +32,7 @@ const turnId = "turn-retained-result";
 type WithoutKey<T> = T extends unknown ? Omit<T, "key"> : never;
 
 function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-retained-result-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-retained-result-"));
   const filename = join(directory, "standalone.sqlite");
   let db = new DatabaseSync(filename);
   let domain!: DomainStore;
@@ -240,7 +240,7 @@ function report(callId: string = randomUUID()): CoordinationCall {
     threadId,
     turnId,
     callId,
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary: "Completed work" },
   };
 }

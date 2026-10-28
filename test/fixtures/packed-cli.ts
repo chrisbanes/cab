@@ -45,10 +45,10 @@ export async function installPacked(dir: string) {
   ) as Lock;
   const packages: Lock["packages"] = {
     "": {
-      name: "ensemble-cli-smoke",
-      dependencies: { ensemble: `file:${tarball}` },
+      name: "cab-cli-smoke",
+      dependencies: { "@chrisbanes/cab": `file:${tarball}` },
     },
-    "node_modules/ensemble": {
+    "node_modules/@chrisbanes/cab": {
       version: manifest.version,
       resolved: `file:${tarball}`,
       integrity: `sha512-${createHash("sha512").update(readFileSync(tarball)).digest("base64")}`,
@@ -64,15 +64,15 @@ export async function installPacked(dir: string) {
   writeFileSync(
     join(project, "package.json"),
     JSON.stringify({
-      name: "ensemble-cli-smoke",
+      name: "cab-cli-smoke",
       private: true,
-      dependencies: { ensemble: `file:${tarball}` },
+      dependencies: { "@chrisbanes/cab": `file:${tarball}` },
     }),
   );
   writeFileSync(
     join(project, "package-lock.json"),
     JSON.stringify({
-      name: "ensemble-cli-smoke",
+      name: "cab-cli-smoke",
       lockfileVersion: 3,
       requires: true,
       packages,

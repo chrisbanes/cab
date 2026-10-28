@@ -78,7 +78,7 @@ else if (group === "auth" && command === "status") {
 
 /** Writes an executable fake `gh` into a fresh temporary directory. */
 export function createFakeGh(state: FakeGhState = "signed-in"): FakeGh {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-fake-gh-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-fake-gh-"));
   const executable = join(dir, "gh");
   writeFileSync(executable, `#!${process.execPath}\n${script}`);
   chmodSync(executable, 0o700);

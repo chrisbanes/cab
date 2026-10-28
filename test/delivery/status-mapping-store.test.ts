@@ -466,13 +466,13 @@ test("Done is written for a done task whose issue is closed, never for another n
     // Done and closed, but first seen that way: not worked on under the mapping.
     assert.equal(attempt("done", DONE), "denied");
     f.status.watch(f.taskId);
-    // Nothing observed yet, or a Status other than the one Ensemble last wrote: a human moved it.
+    // Nothing observed yet, or a Status other than the one cab last wrote: a human moved it.
     assert.equal(attempt("done", DONE, PROGRESS), "denied");
     f.status.observed(f.taskId, PROGRESS);
     assert.equal(attempt("done", DONE), "denied");
     assert.equal(attempt("done", DONE, null), "denied");
     assert.equal(attempt("done", DONE, TODO), "denied");
-    // Done and closed, against the Status Ensemble last wrote: the mapped Done option is written.
+    // Done and closed, against the Status cab last wrote: the mapped Done option is written.
     assert.equal(attempt("done", DONE, PROGRESS), "prepared");
     assert.equal(attempt("turnStarted", PROGRESS), "denied");
     // An option the readiness rule accepts is a Ready option: never written for a not-Ready task.

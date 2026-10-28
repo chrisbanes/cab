@@ -15,7 +15,7 @@ export function SignInBootstrap({
   return (
     <main className="login">
       <div className="login-content">
-        <h1 className="page-heading">Ensemble</h1>
+        <h1 className="page-heading">cab</h1>
         {unavailable ? (
           <>
             <p role="alert" className="body">
@@ -72,7 +72,7 @@ export function Login({
   return (
     <main className="login">
       <div className="login-content">
-        <p className="wordmark">Ensemble</p>
+        <p className="wordmark">cab</p>
         <div className="login-heading">
           <h1 className="page-heading">Sign in</h1>
           <p className="introduction muted">Your operator workspace.</p>

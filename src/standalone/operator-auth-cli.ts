@@ -10,7 +10,7 @@ type Io = {
   stderr: NodeJS.WritableStream;
 };
 
-/** `init ABSOLUTE_AUTH_FILE`; `ensemble service init-auth` shares it. */
+/** `init ABSOLUTE_AUTH_FILE`; `cab service init-auth` shares it. */
 export async function runOperatorAuth(
   argv: string[],
   io: Io = process,

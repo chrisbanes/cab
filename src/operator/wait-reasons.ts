@@ -354,25 +354,25 @@ export function cliFix(fix: WaitFix): string[] {
   switch (fix.kind) {
     case "resume-project":
       return [
-        `ensemble project prepare ${fix.projectId} --out project.json --paused false`,
-        "ensemble project apply --file project.json",
+        `cab project prepare ${fix.projectId} --out project.json --paused false`,
+        "cab project apply --file project.json",
       ];
     case "choose-lead":
       return [
-        `ensemble project prepare ${fix.projectId} --out project.json --lead-profile PROFILE_ID`,
-        "ensemble project apply --file project.json",
+        `cab project prepare ${fix.projectId} --out project.json --lead-profile PROFILE_ID`,
+        "cab project apply --file project.json",
       ];
     case "readiness":
-      return ["ensemble doctor"];
+      return ["cab doctor"];
     case "add-claude":
       return ["Settings → Add Claude"];
     case "open-profile":
       return [`Settings → Profiles → ${fix.profileId}`];
     case "open-repositories":
       return [
-        `ensemble project sources ${fix.projectId}`,
-        `ensemble project prepare-source ${fix.projectId} --out source.json --edit-file EDIT_FILE`,
-        "ensemble project apply --file source.json",
+        `cab project sources ${fix.projectId}`,
+        `cab project prepare-source ${fix.projectId} --out source.json --edit-file EDIT_FILE`,
+        "cab project apply --file source.json",
       ];
   }
 }

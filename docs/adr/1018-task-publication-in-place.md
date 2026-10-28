@@ -7,7 +7,7 @@ status: accepted
 A task was local or imported for its whole life. The operator can now publish a local
 task to GitHub, which creates an issue in a linked repository. If the sync then found that
 issue it would import a second, unrelated task. The glossary defines **Task publication**;
-delivery scope lives in [#1167](https://github.com/chrisbanes/ensemble/issues/1167).
+delivery scope lives in [#1167](https://github.com/chrisbanes/cab/issues/1167).
 
 ## Decision
 
@@ -36,7 +36,7 @@ delivery scope lives in [#1167](https://github.com/chrisbanes/ensemble/issues/11
   issue (it keeps its membership, Ready flag and no hold); a second consecutive omission withdraws it,
   and a complete read that lists it again releases the withdrawn hold once the task is Ready, as on any
   imported task. Only the one-read forgiveness is limited to just-published tasks.
-- **Recovery is closing the issue on GitHub.** Nothing in Ensemble reverses a publish, and
+- **Recovery is closing the issue on GitHub.** Nothing in cab reverses a publish, and
   Abandon only forgets an unproved create, which may leave a duplicate. Both are stated in the
   confirm step.
 - **Authority** is the operator publication caller and its readiness exemption, recorded in

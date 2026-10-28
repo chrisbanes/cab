@@ -7,7 +7,7 @@ by `test/operator/operator-task-restart-browser.test.ts`.
 
 ## Goal
 
-When Ensemble cannot say whether an execution has ended, the operator reaches the
+When cab cannot say whether an execution has ended, the operator reaches the
 evidence for it in a few steps, sees the next supported step, and is never offered
 an action that pretends to clear it.
 
@@ -48,7 +48,7 @@ beside the state:
 - Task detail, in the decisions beside the task: **Start again**.
 - Inbox intervention: the request pane's **Start again**.
 - Home "Needs you" card: **Start again** in the card.
-- `ensemble task start-again TASK_ID --expected-version N`.
+- `cab task start-again TASK_ID --expected-version N`.
 
 Start again re-captures the request at the current task, profile and instructions
 revisions and queues it under every current admission check, in the same workspace.
@@ -62,7 +62,7 @@ may have run stays Uncertain and follows the steps above.
 
 **Reset task** is the other way to start work again: it replaces every assignment's
 conversation and starts the lead fresh in the same workspace, from the task header
-(with a confirmation that says it cannot be undone) or `ensemble task reset`. It is
+(with a confirmation that says it cannot be undone) or `cab task reset`. It is
 offered only when nothing is queued, running or unresolved and the task has no hold.
 The old conversation and workspace stay readable.
 

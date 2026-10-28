@@ -91,7 +91,7 @@ test("the publication guard enforces the exact grant and the fixture's resources
   );
   for (const change of [
     {
-      repository: { ...manifest().repository, fullName: "chrisbanes/ensemble" },
+      repository: { ...manifest().repository, fullName: "chrisbanes/cab" },
     },
     { branchPrefix: "cb/" },
     { credential: "env:S07A_GITHUB_TOKEN" },
@@ -112,7 +112,7 @@ test("the publication guard enforces the exact grant and the fixture's resources
   g.assertRequest(api(`${root}/git/ref/heads/qualification`));
   for (const [url, init] of [
     [`https://attacker.example${root}/pulls`, { method: "POST" }],
-    [api("/repos/chrisbanes/ensemble/issues/1"), {}],
+    [api("/repos/chrisbanes/cab/issues/1"), {}],
     [api(`${root}/pulls/3/merge`), { method: "PUT", body: "{}" }],
     [
       api(`${root}/pulls`),
@@ -220,7 +220,7 @@ test("the publication guard enforces the exact grant and the fixture's resources
   });
   assert.throws(() =>
     g.assertPush({
-      nameWithOwner: "chrisbanes/ensemble",
+      nameWithOwner: "chrisbanes/cab",
       branch: "s07a-pub/abc",
     }),
   );
@@ -230,7 +230,7 @@ test("the publication guard enforces the exact grant and the fixture's resources
 });
 
 test("the live script refuses before any credential read, process or request", (t: TestContext) => {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-pub-harness-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-pub-harness-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   // A `gh` that records being run: a refusal must never reach the credential.
   const bin = join(dir, "bin");
@@ -244,7 +244,7 @@ test("the live script refuses before any credential read, process or request", (
   writeFileSync(manifestPath, f.raw);
   writeFileSync(grantPath, JSON.stringify(f.grant));
   const bad = files({
-    repository: { ...manifest().repository, fullName: "chrisbanes/ensemble" },
+    repository: { ...manifest().repository, fullName: "chrisbanes/cab" },
   });
   const badManifest = join(dir, "bad-manifest.json");
   writeFileSync(badManifest, bad.raw);
@@ -287,7 +287,7 @@ test("the live script refuses before any credential read, process or request", (
 
 /** A fake GitHub for the fixture repository, a local repository as its clone source and a fake push. */
 function fakeWorld(t: TestContext) {
-  const dir = mkdtempSync(join(tmpdir(), "ensemble-pub-journey-"));
+  const dir = mkdtempSync(join(tmpdir(), "cab-pub-journey-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const remote = join(dir, "remote");
   mkdirSync(remote);
@@ -441,7 +441,7 @@ function fakeWorld(t: TestContext) {
       }
       return outcome;
     };
-  /** Adoption: the outside commit comes from the fake GitHub into the worktree under Ensemble's ref. */
+  /** Adoption: the outside commit comes from the fake GitHub into the worktree under cab's ref. */
   const adopted: string[] = [];
   const adopt: AdoptFunction = async (request) => {
     assert.equal(request.token, token);
@@ -449,7 +449,7 @@ function fakeWorld(t: TestContext) {
     git(
       request.workspacePath,
       "update-ref",
-      `refs/ensemble/adopted/${request.branch}`,
+      `refs/cab/adopted/${request.branch}`,
       request.commitSha,
     );
     adopted.push(request.commitSha);

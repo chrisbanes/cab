@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Readiness } from "./github-source-contracts.js";
 
 const optionId = z.string().trim().min(1).max(512);
-/** The Ensemble work events that can move a task's Project Status, in precedence order of display. */
+/** The cab work events that can move a task's Project Status, in precedence order of display. */
 export const statusMappingEvents = [
   "turnStarted",
   "handedBack",

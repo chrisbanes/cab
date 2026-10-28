@@ -132,7 +132,7 @@ test("every wait label reads right mid-sentence, keeping proper nouns", () => {
   // A word that merely starts like a proper noun is not one.
   assert.equal(midSentence("Githubless"), "githubless");
   assert.equal(midSentence("Claude"), "Claude");
-  assert.equal(midSentence("Ensemble is paused"), "Ensemble is paused");
+  assert.equal(midSentence("cab is paused"), "cab is paused");
   assert.equal(midSentence(""), "");
 });
 

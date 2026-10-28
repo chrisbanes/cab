@@ -585,9 +585,9 @@ test("a draft turn allows questions and refuses every other tool without recordi
     action: { kind },
   });
   const refused: Array<[string, Record<string, unknown>]> = [
-    ["ensemble_delegate", { profileId: randomUUID(), brief: "Do it" }],
+    ["cab_delegate", { profileId: randomUUID(), brief: "Do it" }],
     [
-      "ensemble_register_pr",
+      "cab_register_pr",
       {
         repositoryId: "R",
         prNumber: 1,
@@ -595,12 +595,12 @@ test("a draft turn allows questions and refuses every other tool without recordi
         expectedHeadSha: "1".repeat(40),
       },
     ],
-    ["ensemble_external_action", action("pr.create")],
-    ["ensemble_external_action", action("pr.merge")],
-    ["ensemble_external_action", action("issue.close")],
-    ["ensemble_request_completion", { reviewedResultIds: [] }],
-    ["ensemble_report_result", { summary: "Done" }],
-    ["ensemble_request_follow_up", { brief: "More" }],
+    ["cab_external_action", action("pr.create")],
+    ["cab_external_action", action("pr.merge")],
+    ["cab_external_action", action("issue.close")],
+    ["cab_request_completion", { reviewedResultIds: [] }],
+    ["cab_report_result", { summary: "Done" }],
+    ["cab_request_follow_up", { brief: "More" }],
   ];
   for (const [tool, args] of refused) {
     const result = await f.runtime.callTool(call(running, tool, args));
@@ -615,7 +615,7 @@ test("a draft turn allows questions and refuses every other tool without recordi
   // Granted GitHub kinds pass the draft-turn filter; any refusal is the action's own.
   for (const kind of ["issue.comment", "issue.labels"]) {
     const result = await f.runtime.callTool(
-      call(running, "ensemble_external_action", action(kind)),
+      call(running, "cab_external_action", action(kind)),
     );
     assert.doesNotMatch(result.text, /^Draft turn: /, kind);
   }
@@ -627,7 +627,7 @@ test("a question asked in a draft turn is answered later and the answer reaches 
   const task = await draftTask(f, "Draft turn questions");
   const { running } = await runDraftTurn(f, task);
   const asked = await f.runtime.callTool(
-    call(running, "ensemble_ask_question", { question: "Which repository?" }),
+    call(running, "cab_ask_question", { question: "Which repository?" }),
   );
   assert.equal(asked.success, true, asked.text);
   const question = (await task.api.readTask(task.taskId)).data.questions[0];
@@ -747,7 +747,7 @@ test("making the task Ready runs the lead's initial turn in the draft conversati
   assert.equal(domain.assignment(task.assignmentId).state, "running");
   // Ordinary tools are available again: the refusal is no longer the draft-turn one.
   const delegated = await f.runtime.callTool(
-    call(initial, "ensemble_delegate", {
+    call(initial, "cab_delegate", {
       profileId: randomUUID(),
       brief: "Do it",
     }),
@@ -958,7 +958,7 @@ test("with routing on, a draft-only lead with a pending answer waits for the rou
     await routedDraftTask(t);
   const { running } = await runDraftTurn(f, task);
   const asked = await f.runtime.callTool(
-    call(running, "ensemble_ask_question", { question: "Which repository?" }),
+    call(running, "cab_ask_question", { question: "Which repository?" }),
   );
   assert.equal(asked.success, true, asked.text);
   const question = (await task.api.readTask(task.taskId)).data.questions[0];
@@ -1012,7 +1012,7 @@ test("with routing on, a draft-only lead with a pending answer waits for the rou
   const worker = f.service.list().find((work) => work.state === "running");
   assert.ok(worker?.threadId && worker.turnId);
   const reported = await f.runtime.callTool(
-    call(worker, "ensemble_report_result", {
+    call(worker, "cab_report_result", {
       summary: "Worker found the cause",
     }),
   );
@@ -1027,7 +1027,7 @@ test("with routing on and a fallback, the draft-only lead runs with its pending 
   const { f, task, domain, release } = await routedDraftTask(t, "lead_review");
   const { running } = await runDraftTurn(f, task);
   const asked = await f.runtime.callTool(
-    call(running, "ensemble_ask_question", { question: "Which repository?" }),
+    call(running, "cab_ask_question", { question: "Which repository?" }),
   );
   assert.equal(asked.success, true, asked.text);
   const question = (await task.api.readTask(task.taskId)).data.questions[0];
@@ -1081,7 +1081,7 @@ test("a queued draft turn survives a restart and still runs read-only", async (t
   const running = f.service.list().find((work) => work.state === "running");
   assert.ok(running);
   const refused = await f.runtime.callTool(
-    call(running, "ensemble_delegate", {
+    call(running, "cab_delegate", {
       profileId: randomUUID(),
       brief: "Do it",
     }),

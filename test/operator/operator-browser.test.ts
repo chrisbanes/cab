@@ -170,7 +170,7 @@ async function signIn(
 function sessionId(context: BrowserContext): Promise<string> {
   return context.cookies().then((cookies) => {
     const cookie = cookies.find(
-      (candidate) => candidate.name === "ensemble_operator_session",
+      (candidate) => candidate.name === "cab_operator_session",
     );
     assert.ok(cookie);
     return cookie.value;
@@ -238,7 +238,7 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
 }
 
 test("Chromium verifies the independent login and guarded browser session", async (_t, journey) => {
-  const directory = mkdtempSync(join(tmpdir(), "ensemble-operator-browser-"));
+  const directory = mkdtempSync(join(tmpdir(), "cab-operator-browser-"));
   chmodSync(directory, 0o700);
   const authFile = join(directory, "operator-auth.json");
   let service = new StandaloneService(directory, fakeRuntime);
@@ -371,7 +371,7 @@ test("Chromium verifies the independent login and guarded browser session", asyn
     "successful login rotates the session",
   );
   const storedCookie = (await context.cookies()).find(
-    (candidate) => candidate.name === "ensemble_operator_session",
+    (candidate) => candidate.name === "cab_operator_session",
   );
   assert.ok(storedCookie);
   assert.equal(storedCookie.httpOnly, true);
@@ -665,7 +665,7 @@ test("Chromium verifies the independent login and guarded browser session", asyn
 
 test("authenticated project pause and resume preserve captured instructions while changed instructions require apply", async (_t, journey) => {
   const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-operator-project-revision-"),
+    join(tmpdir(), "cab-operator-project-revision-"),
   );
   chmodSync(directory, 0o700);
   const authFile = join(directory, "operator-auth.json");
@@ -735,7 +735,7 @@ test("authenticated project pause and resume preserve captured instructions whil
   await profileForm.locator('input[name="name"]').fill("Revision test lead");
   await profileForm
     .locator('textarea[name="instructions"]')
-    .fill("Use only the registered Ensemble tools.");
+    .fill("Use only the registered cab tools.");
   await profileForm
     .locator('textarea[name="capabilities"]')
     .fill("coordinate bounded work");
@@ -809,7 +809,7 @@ test("authenticated project pause and resume preserve captured instructions whil
     threadId: activeWork.threadId,
     turnId: activeWork.turnId,
     callId: "revision-test-question",
-    tool: "ensemble_ask_question",
+    tool: "cab_ask_question",
     arguments: { question: "Which captured revision should I use?" },
   });
   assert.equal(question.success, true, "the fixture records a durable wait");
@@ -925,9 +925,7 @@ test("authenticated project pause and resume preserve captured instructions whil
 });
 
 test("operator commands and Chromium runtime controls keep durable readback", async (_t, journey) => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-operator-forms-browser-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-operator-forms-browser-"));
   chmodSync(directory, 0o700);
   const dataFile = join(directory, "data");
   const authFile = join(directory, "operator-auth.json");
@@ -1097,12 +1095,12 @@ test("operator commands and Chromium runtime controls keep durable readback", as
   assert.ok(leadWork?.threadId && leadWork.turnId);
   for (const [tool, arguments_, callId] of [
     [
-      "ensemble_ask_question",
+      "cab_ask_question",
       { question: "Which result format should I retain?" },
       "browser-question",
     ],
     [
-      "ensemble_request_approval",
+      "cab_request_approval",
       {
         action: "Record fixture-only operator approval",
         target: "fixture-only",
@@ -1111,7 +1109,7 @@ test("operator commands and Chromium runtime controls keep durable readback", as
       "browser-approval-approve",
     ],
     [
-      "ensemble_request_approval",
+      "cab_request_approval",
       {
         action: "Publish the fixture result",
         target: "operator-forms-fixture",
@@ -1241,7 +1239,7 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     threadId: workerWork.threadId,
     turnId: workerWork.turnId,
     callId: randomUUID(),
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary: "Browser-reviewed result awaiting reconciliation" },
   });
   assert.equal(reported.success, true, reported.text);

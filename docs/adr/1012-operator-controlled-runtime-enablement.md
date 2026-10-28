@@ -7,7 +7,7 @@ status: accepted
 The service ran every production runtime and required Codex: it refused to start
 without Codex, and profiles defaulted to it. An operator who uses only one runtime
 still saw the other's readiness checks and alerts. Delivery scope lives in
-[#989](https://github.com/chrisbanes/ensemble/issues/989).
+[#989](https://github.com/chrisbanes/cab/issues/989).
 
 ## Decision
 

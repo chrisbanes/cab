@@ -109,7 +109,7 @@ async function fixture(
     diagnostics?: ConstructorParameters<typeof StandaloneService>[3];
   } = {},
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-diagnostics-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-diagnostics-"));
   const dataDir = options.dataDir ?? join(root, "data");
   const service = new StandaloneService(dataDir, () => runtime, undefined, {
     power: { enabled: false },
@@ -195,7 +195,7 @@ async function fixture(
 }
 
 const BASELINE_PROMPT =
-  'Run one diagnostic turn.\n\nAssignment role: project assignee. The project lead remains accountable for coordinating this task and reviewing its results before completion. Report your result and durable next action through Ensemble.\n\nCaptured review references (JSON): {"sourceId":"S","sourceRevision":1,"criteriaOmittedCount":0,"criteria":[]}\n\nProject instructions:\nPROJECT_INSTRUCTION_TEXT token=abc123\n\nProfile instructions:\nPROFILE_INSTRUCTION_TEXT keeps FIXTURE_SECRET_CANARY private';
+  'Run one diagnostic turn.\n\nAssignment role: project assignee. The project lead remains accountable for coordinating this task and reviewing its results before completion. Report your result and durable next action through cab.\n\nCaptured review references (JSON): {"sourceId":"S","sourceRevision":1,"criteriaOmittedCount":0,"criteria":[]}\n\nProject instructions:\nPROJECT_INSTRUCTION_TEXT token=abc123\n\nProfile instructions:\nPROFILE_INSTRUCTION_TEXT keeps FIXTURE_SECRET_CANARY private';
 
 test("the submitted assignment prompt matches the first-turn layout", async () => {
   const runtime = new DiagnosticsRuntime();

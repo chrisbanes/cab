@@ -51,7 +51,7 @@ import { rejectUnusedFlags } from "./write.js";
 
 export type { CliDeps } from "./types.js";
 
-const SCHEMA = "ensemble.cli/v1";
+const SCHEMA = "cab.cli/v1";
 const KEYCHAIN_CLEANUP_MS = 20_000;
 const TASK_CAPABILITIES = ["cli.identity", "task.read"] as const;
 
@@ -96,7 +96,7 @@ const DEFAULT_CONNECTION = "local";
 /** The loopback origin `service install` serves on by default. */
 const DEFAULT_ORIGIN = "http://127.0.0.1:8787";
 const tokenSource = (origin: string) =>
-  `Create a token in Settings → CLI credentials in the web UI, then run: ensemble auth login --url ${origin}`;
+  `Create a token in Settings → CLI credentials in the web UI, then run: cab auth login --url ${origin}`;
 
 /** The first command of each help view for someone who has not used the CLI yet. */
 const START_HERE = [
@@ -142,14 +142,14 @@ const OPTIONS_HELP = `Options:
   --output human|json   Result format (default human)
   --limit N             Page size, 1-200 (default 50; some reads cap lower)
   --cursor TOKEN        Continue from the More: line of the previous page
-  --output jsonl        logs only: one ensemble.cli/v1 record per line
+  --output jsonl        logs only: one cab.cli/v1 record per line
   --follow              logs only: poll every --interval S (1-30, default 2)
                         for at most --max-duration S (default 900, max 86400)
   --help                Show this help
   --all                 With --help: list every command and option
   --verbose             execution list/get and logs only: also print capture notes
   --dry-run             apply only: print the stored change; connect and send nothing
-  --version             Show the Ensemble version
+  --version             Show the installed version
 `;
 
 const TASK_NOTE = `Task operations: task create, task message, task follow-up, task draft-turn, question answer
@@ -164,7 +164,7 @@ const RUNTIME_NOTE = `Runtimes: runtime enable and runtime disable are a reverse
 cancels a running turn; work bound to that runtime waits until it is enabled again,
 and disabling one that bound tasks use needs --yes.`;
 const DELIVERY_NOTE = `Sources and delivery: delivery send-comment posts a public GitHub comment that
-Ensemble cannot edit or retract, and a confirm-comment decision is final (deny
+The CLI cannot edit or retract, and a confirm-comment decision is final (deny
 is the counterpart of approve). Removing a source selection discards its saved
 definition. preview-source has no deactivate command; saving any source change
 deactivates every selection. place-task is final once the task has an
@@ -205,28 +205,28 @@ const ORIGIN_NOTE =
 
 const areasLine = () => `Areas: ${areaNames().join(", ")}`;
 /** What a usage error shows when no command or area could be recognised. */
-const areasBlock = () => `Usage: ensemble <command> [options]\n${areasLine()}`;
+const areasBlock = () => `Usage: cab <command> [options]\n${areasLine()}`;
 
-/** `ensemble` and `ensemble --help`: where to start, and how to find the rest. */
+/** `cab` and `cab --help`: where to start, and how to find the rest. */
 function startHelp() {
-  return `Usage: ensemble <command> [options]
+  return `Usage: cab <command> [options]
 
 Start here:
 ${indented(START_HERE.map((key) => COMMAND_USAGE.get(key) ?? key))}
 ${areasLine()}
 
-  ensemble help AREA     The commands of one area (also: ensemble AREA --help)
-  ensemble --help --all  Every command and option
+  cab help AREA     The commands of one area (also: cab AREA --help)
+  cab --help --all  Every command and option
 
 Options:
   --connection NAME     Use this saved connection
   --output human|json   Result format (default human)
   --help [--all]        Show help
-  --version             Show the Ensemble version
+  --version             Show the installed version
 `;
 }
 
-/** `ensemble help AREA` and `ensemble AREA --help`; undefined when `area` is not one. */
+/** `cab help AREA` and `cab AREA --help`; undefined when `area` is not one. */
 function areaHelp(area: string | undefined) {
   if (area === "service" || area === "snapshot") return serviceHelp(area);
   const lines = [...COMMAND_USAGE]
@@ -234,14 +234,14 @@ function areaHelp(area: string | undefined) {
     .flatMap(([key, usage]) => helpEntry(key, usage));
   if (!area || !lines.length) return undefined;
   const single = COMMAND_USAGE.has(area);
-  return `Usage: ensemble ${area}${single ? "" : " <action>"} [options]
+  return `Usage: cab ${area}${single ? "" : " <action>"} [options]
 
 ${indented(lines)}
 ${OPTIONS_HELP}${(AREA_NOTES[area] ?? []).map((note) => `\n${note}\n`).join("")}`;
 }
 
-/** `ensemble --help --all`: every command, with the local service commands in their own block. */
-const fullHelp = () => `Usage: ensemble <command> [options]
+/** `cab --help --all`: every command, with the local service commands in their own block. */
+const fullHelp = () => `Usage: cab <command> [options]
 
 Commands:
 ${indented([...COMMAND_USAGE].flatMap(([key, usage]) => helpEntry(key, usage))).trimEnd()}
@@ -404,13 +404,13 @@ export async function main(
       const pkg = JSON.parse(
         readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
       ) as { version: string };
-      deps.stdout.write(`ensemble ${pkg.version}\n`);
+      deps.stdout.write(`cab ${pkg.version}\n`);
       return 0;
     }
     if (values.all && !values.help)
       throw new CliError("usage", "--all only goes with --help.");
     if (values.help) {
-      // `ensemble help AREA --help` is the area's help too.
+      // `cab help AREA --help` is the area's help too.
       const [first, second] = positionals;
       deps.stdout.write(
         (values.all
@@ -428,7 +428,7 @@ export async function main(
     if (positionals[0] === "help") {
       const [, area, ...extra] = positionals;
       if (area === undefined)
-        throw new CliError("usage", "Name an area: ensemble help AREA.");
+        throw new CliError("usage", "Name an area: cab help AREA.");
       const help = areaHelp(area);
       if (help === undefined)
         throw new CliError("usage", `Unknown area '${area}'.`);
@@ -500,7 +500,7 @@ export async function main(
       const lines =
         error.code === "usage" ? usageBlock(positionals ?? lenient(argv)) : "";
       deps.stderr.write(
-        `ensemble: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId && !error.extra.notSent ? `, request ${error.extra.requestId}` : ""})\n${lines}${terminalSafe(fixLine(remedyFor(error, category)))}\n`,
+        `cab: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId && !error.extra.notSent ? `, request ${error.extra.requestId}` : ""})\n${lines}${terminalSafe(fixLine(remedyFor(error, category)))}\n`,
       );
     }
     return exit;
@@ -528,10 +528,10 @@ function expectArgs(positionals: string[], count: number) {
 
 function rejectManaged(env: NodeJS.ProcessEnv) {
   // Prevents accidental privilege crossing only; it is not OS isolation.
-  if (env.ENSEMBLE_MANAGED_ASSIGNMENT)
+  if (env.CAB_MANAGED_ASSIGNMENT)
     throw new CliError(
       "managed-assignment",
-      "Operator credentials are unavailable inside an Ensemble-managed assignment.",
+      "Operator credentials are unavailable inside a cab-managed assignment.",
     );
 }
 
@@ -555,7 +555,7 @@ async function run(
 ): Promise<Result> {
   const config = new ConnectionConfig(configDirectory(deps.env));
   const [area, action, argument] = positionals;
-  const requested = values.connection ?? deps.env.ENSEMBLE_CONNECTION;
+  const requested = values.connection ?? deps.env.CAB_CONNECTION;
   // `logs` and `doctor` are the only single-word commands.
   const singleWord = area === "logs" || area === "doctor";
   const key = singleWord ? area : `${area} ${action}`;
@@ -625,7 +625,7 @@ async function run(
                 `${r.default ? "*" : " "} ${r.name}  ${r.url}  ${r.credential ?? "logged out"}`,
             )
             .join("\n")
-        : "No connections. Run 'ensemble auth login'.",
+        : "No connections. Run 'cab auth login'.",
     };
   }
   if (key === "connection use" || key === "connection remove") {
@@ -692,12 +692,12 @@ async function run(
             ]
           : []),
         `Execution: ${read.data.execution.state}${held.length ? `; held: ${held.join(", ")}` : ""}`,
-        `Next:    ${next.text}${next.operator ? ` (ensemble inbox list --project ${task.projectId})` : ""}`,
+        `Next:    ${next.text}${next.operator ? ` (cab inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"
-            ? `Undelivered result ${r.resultId}: ensemble result deliver ${task.id} ${r.resultId}`
+            ? `Undelivered result ${r.resultId}: cab result deliver ${task.id} ${r.resultId}`
             : `Undelivered result ${r.resultId}: no lead or requester can receive it now`,
         ),
         ...(task.outcome ? ["", task.outcome] : []),
@@ -742,7 +742,7 @@ function operatorConnection(
   name: string | undefined,
 ): OperatorConnection {
   const config = new ConnectionConfig(configDirectory(deps.env));
-  const requested = name ?? deps.env.ENSEMBLE_CONNECTION;
+  const requested = name ?? deps.env.CAB_CONNECTION;
   return {
     async origin() {
       rejectManaged(deps.env);
@@ -794,9 +794,9 @@ async function connect(
   if (identity.service.installationId !== connection.installationId)
     throw new CliError(
       "service-identity-changed",
-      `The service at ${connection.url} is a different installation than when ${name} logged in. Run 'ensemble auth login' again if this is expected.`,
+      `The service at ${connection.url} is a different installation than when ${name} logged in. Run 'cab auth login' again if this is expected.`,
       {
-        fix: `If the reinstall is expected, run 'ensemble auth login --connection ${name} --url ${connection.url}'; otherwise check the URL with 'ensemble connection list'.`,
+        fix: `If the reinstall is expected, run 'cab auth login --connection ${name} --url ${connection.url}'; otherwise check the URL with 'cab connection list'.`,
       },
     );
   return {
@@ -820,9 +820,9 @@ async function loadToken(name: string, connection: Connection, deps: CliDeps) {
   if (!credential)
     throw new CliError(
       "credential-not-found",
-      "This connection is logged out. Run 'ensemble auth login'.",
+      "This connection is logged out. Run 'cab auth login'.",
       {
-        fix: `Run 'ensemble auth login --connection ${name} --url ${connection.url}' to store a credential.`,
+        fix: `Run 'cab auth login --connection ${name} --url ${connection.url}' to store a credential.`,
       },
     );
   if (credential.kind === "token-file")
@@ -830,7 +830,7 @@ async function loadToken(name: string, connection: Connection, deps: CliDeps) {
       if (error instanceof CliError && error.code === "invalid-token-file")
         throw new CliError(error.code, error.message, {
           ...error.extra,
-          fix: `${error.extra.fix ?? ""} Or log in again: 'ensemble auth login --connection ${name} --url ${connection.url} --token-file PATH'.`.trim(),
+          fix: `${error.extra.fix ?? ""} Or log in again: 'cab auth login --connection ${name} --url ${connection.url} --token-file PATH'.`.trim(),
         });
       throw error;
     });
@@ -893,7 +893,7 @@ export async function saveLogin(
         : keychain.set(name, prior, bound)
       ).catch(() =>
         deps.stderr.write(
-          `The previous ${name} login could not be restored in the Keychain; run 'ensemble auth login --connection ${name} --url ${origin}' again.\n`,
+          `The previous ${name} login could not be restored in the Keychain; run 'cab auth login --connection ${name} --url ${origin}' again.\n`,
         ),
       );
     }
@@ -952,14 +952,14 @@ async function login(
   values: Values,
   deps: CliDeps,
 ): Promise<Result> {
-  const requested = values.connection ?? deps.env.ENSEMBLE_CONNECTION;
+  const requested = values.connection ?? deps.env.CAB_CONNECTION;
   const nameResult = connectionNameSchema.safeParse(
     requested ?? DEFAULT_CONNECTION,
   );
   if (!nameResult.success)
     throw new CliError(
       "usage",
-      `${values.connection === undefined ? "ENSEMBLE_CONNECTION" : "--connection"} must be a connection name: letters, digits, . _ - starting with a letter or digit.`,
+      `${values.connection === undefined ? "CAB_CONNECTION" : "--connection"} must be a connection name: letters, digits, . _ - starting with a letter or digit.`,
     );
   if (!values.url) throw new CliError("usage", tokenSource(DEFAULT_ORIGIN));
   const name = nameResult.data;
@@ -975,7 +975,7 @@ async function login(
       .filter((other) => connections[other]?.url === origin)
       .sort();
     // Another connection already has this origin: replace it, or add a second on purpose.
-    const sameFix = `Run ${same.map((other) => `'ensemble auth login --url ${origin} --connection ${other}'`).join(" or ")} to replace the token, or pass --connection OTHER to add a second connection (then run 'ensemble connection use NAME' to pick the default).`;
+    const sameFix = `Run ${same.map((other) => `'cab auth login --url ${origin} --connection ${other}'`).join(" or ")} to replace the token, or pass --connection OTHER to add a second connection (then run 'cab connection use NAME' to pick the default).`;
     if (existing && existing.url !== origin)
       throw new CliError(
         "usage",
@@ -998,7 +998,7 @@ async function login(
         "usage",
         `${saved.length === 1 ? "Connection" : "Connections"} ${saved.join(", ")} ${saved.length === 1 ? "is" : "are"} saved and no default connection is set, so adding ${name} would make every command ask for --connection.`,
         {
-          fix: `Choose a default with 'ensemble connection use NAME' (${saved.join(", ")}) and run this again, or pass --connection NAME to add ${origin}, then choose a default with 'ensemble connection use NAME'.`,
+          fix: `Choose a default with 'cab connection use NAME' (${saved.join(", ")}) and run this again, or pass --connection NAME to add ${origin}, then choose a default with 'cab connection use NAME'.`,
         },
       );
   }
@@ -1013,7 +1013,7 @@ async function login(
   else if (deps.stdin.isTTY && deps.stderr.isTTY) {
     deps.stderr.write(`${tokenSource(origin)}\n`);
     token = (
-      await readHiddenPassword(deps.stdin, deps.stderr, "Ensemble CLI token: ")
+      await readHiddenPassword(deps.stdin, deps.stderr, "cab CLI token: ")
     ).trim();
   } else
     throw new CliError(
@@ -1021,7 +1021,7 @@ async function login(
       "Enter the token in an interactive terminal, or pass --token-file PATH.",
     );
   if (!operatorCredentialTokenSchema.safeParse(token).success)
-    throw new CliError("invalid-input", "That is not an Ensemble CLI token.");
+    throw new CliError("invalid-input", "That is not a cab CLI token.");
   const identity = await saveLogin(
     config,
     deps,
@@ -1051,13 +1051,13 @@ async function doctorCommandFor(
   try {
     const { name: selected } = config.select(
       await config.read(),
-      deps.env.ENSEMBLE_CONNECTION,
+      deps.env.CAB_CONNECTION,
     );
-    if (selected === name) return "ensemble doctor";
+    if (selected === name) return "cab doctor";
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
   }
-  return `ensemble doctor --connection ${shellWord(name)}`;
+  return `cab doctor --connection ${shellWord(name)}`;
 }
 
 if (

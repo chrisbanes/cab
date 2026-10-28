@@ -2,14 +2,14 @@
 import { createInterface } from "node:readline";
 if (process.argv.includes("--version")) {
   console.log(
-    process.env.ENSEMBLE_UI01_NATIVE_TRANSPORT_FIXTURE === "unknown-version"
+    process.env.CAB_UI01_NATIVE_TRANSPORT_FIXTURE === "unknown-version"
       ? "codex-cli 0.160.0"
       : "codex-cli 0.159.0",
   );
   process.exit(0);
 }
-const transport = process.env.ENSEMBLE_UI01_NATIVE_TRANSPORT_FIXTURE;
-const proof = process.env.ENSEMBLE_UI01_NATIVE_PROOF_FIXTURE;
+const transport = process.env.CAB_UI01_NATIVE_TRANSPORT_FIXTURE;
+const proof = process.env.CAB_UI01_NATIVE_PROOF_FIXTURE;
 const twoTurn = transport?.startsWith("two-turn-early");
 let turns = 0;
 let lastNative;
@@ -163,7 +163,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (m.method === "turn/start") {
     const turnId =
-      process.env.ENSEMBLE_UI01_NATIVE_TRANSPORT_INSTANCE === "2"
+      process.env.CAB_UI01_NATIVE_TRANSPORT_INSTANCE === "2"
         ? "native-turn-replacement"
         : "native-turn";
     send({ id: m.id, result: { turn: { id: turnId } } });

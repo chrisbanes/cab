@@ -29,9 +29,7 @@ import { tmpdir } from "../fixtures/temp.js";
 type T = { after(fn: () => unknown): void };
 
 async function world(t: T, mode: GenerationMode) {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-recovery-rejections-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-recovery-rejections-"));
   const runtime = generationRuntime(mode);
   const verifier = controllableVerifier();
   const service = new StandaloneService(

@@ -71,7 +71,7 @@ async function waitUntil(predicate: () => boolean, describe: () => unknown) {
 }
 
 test("Codex turns carry the captured profile revision's settings, wait on a preflight reason and keep the unchanged call shapes without settings", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-codex-settings-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-settings-"));
   const runtime = new SettingsRuntime();
   const service = new StandaloneService(
     join(root, "data"),

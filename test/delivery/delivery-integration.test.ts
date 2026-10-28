@@ -22,7 +22,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     const f = await createReleaseDeliveryFixture(mode);
     try {
       await f.register();
-      const premature = await f.call("ensemble_request_completion", {
+      const premature = await f.call("cab_request_completion", {
         reviewedResultIds: [],
       });
       assert.equal(premature.success, false, premature.text);
@@ -55,7 +55,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
       }
       await f.waitTurn(2);
       const completion = await f.call(
-        "ensemble_request_completion",
+        "cab_request_completion",
         { reviewedResultIds: [] },
         2,
       );
@@ -637,29 +637,19 @@ test("assembled active child and successful worker terminal cannot independently
       requesterAssignmentId: null,
     });
     assert.equal(
-      (
-        await f.call(
-          "ensemble_request_completion",
-          { reviewedResultIds: [] },
-          1,
-        )
-      ).success,
+      (await f.call("cab_request_completion", { reviewedResultIds: [] }, 1))
+        .success,
       false,
     );
     await f.terminal(1);
     await f.waitTurn(2);
     assert.equal(
-      (
-        await f.call(
-          "ensemble_request_completion",
-          { reviewedResultIds: [] },
-          2,
-        )
-      ).success,
+      (await f.call("cab_request_completion", { reviewedResultIds: [] }, 2))
+        .success,
       false,
     );
     const result = await f.call(
-      "ensemble_report_result",
+      "cab_report_result",
       { summary: "Worker successful result" },
       2,
     );
@@ -888,10 +878,7 @@ test("thread reply and resolve write once each, refuse stale or repeated resolve
     assert.equal(replied.success, true, replied.text);
     assert.equal(f.scripted.state.threadReplies, 1);
     assert.equal(thread.comments.length, 2);
-    assert.equal(
-      thread.comments[1]?.body.match(/ensemble-operation:/g)?.length,
-      1,
-    );
+    assert.equal(thread.comments[1]?.body.match(/cab-operation:/g)?.length, 1);
     // The post-success refresh shows the lead the thread's new latest comment.
     assert.equal(
       f.service.delivery().delivery(f.taskId)?.observation.reviewThreads?.[0]
@@ -1020,7 +1007,7 @@ test("approval mode refuses thread actions until the operator approves the exact
       },
     };
     assert.equal((await f.threadAction(reply())).success, false);
-    const requested = await f.call("ensemble_request_approval", {
+    const requested = await f.call("cab_request_approval", {
       action: action.kind,
       target: canonicalMaterial(action.target),
       material: action,
@@ -1080,7 +1067,7 @@ import { git as runGit } from "../fixtures/publication.js";
 
 /** A repository with one commit, provisioned as R1 for the task. */
 async function publicationWorld(mode: "allow" | "approval") {
-  const source = realpathSync(makeTemp(join(osTmp(), "ensemble-publish-src-")));
+  const source = realpathSync(makeTemp(join(osTmp(), "cab-publish-src-")));
   runGit(source, "init", "-q", "-b", "main");
   writeFile(join(source, "a.txt"), "a\n");
   runGit(source, "add", ".");
@@ -1110,7 +1097,7 @@ async function publicationWorld(mode: "allow" | "approval") {
   };
   const push = (commitSha: string, index?: number, approval?: object) =>
     f.call(
-      "ensemble_external_action",
+      "cab_external_action",
       {
         operationId: randomUUID(),
         action: {
@@ -1123,7 +1110,7 @@ async function publicationWorld(mode: "allow" | "approval") {
       index,
     );
   const createPr = (headRef: string, expectedHeadSha: string) =>
-    f.call("ensemble_external_action", {
+    f.call("cab_external_action", {
       operationId: randomUUID(),
       action: {
         kind: "pr.create",
@@ -1148,7 +1135,7 @@ async function publicationWorld(mode: "allow" | "approval") {
     approval?: object,
   ) =>
     f.call(
-      "ensemble_external_action",
+      "cab_external_action",
       {
         operationId: randomUUID(),
         action: recovery,
@@ -1159,7 +1146,7 @@ async function publicationWorld(mode: "allow" | "approval") {
   /** The lead requests approval of exact recovery material and the operator approves it. */
   const approve = async (recovery: Record<string, unknown>, turn: number) => {
     const requested = await f.call(
-      "ensemble_request_approval",
+      "cab_request_approval",
       {
         action: recovery.kind,
         target: canonicalMaterial(recovery.target),
@@ -1230,7 +1217,7 @@ test("an approval-mode push waits for the operator to approve the exact commit",
     };
     assert.equal((await push(sha)).success, false);
     assert.deepEqual(f.scripted.state.pushes, []);
-    const requested = await f.call("ensemble_request_approval", {
+    const requested = await f.call("cab_request_approval", {
       action: action.kind,
       target: canonicalMaterial(action.target),
       material: action,

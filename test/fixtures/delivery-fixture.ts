@@ -42,9 +42,7 @@ export async function deliveryFixture(
   /** How long a status-mapping write's provider call may take before it is given up. */
   statusWriteTimeoutMs?: number,
 ) {
-  const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "ensemble-delivery-bound-")),
-    ),
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-delivery-bound-"))),
     projectId = randomUUID(),
     profileId = randomUUID();
   let taskId: string = randomUUID();

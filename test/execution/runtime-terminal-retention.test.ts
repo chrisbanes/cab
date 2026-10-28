@@ -20,7 +20,7 @@ import {
 test("production adapter terminal evidence remains SQLite-backed past cache limits", {
   timeout: 120_000,
 }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-retention-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-retention-"));
   const f = fixture(root);
   try {
     await f.service.start();
@@ -146,9 +146,7 @@ test("production adapter terminal evidence remains SQLite-backed past cache limi
 test("unbound failed terminals retain exact retry facts only in durable evidence", {
   timeout: 120_000,
 }, async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-failure-retention-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-failure-retention-"));
   const f = fixture(root);
   try {
     await f.service.start();
@@ -312,9 +310,7 @@ test("missing, corrupt, and failed terminal evidence storage never authorizes tu
     "corrupt-row",
     "write-failure",
   ] as const) {
-    const root = mkdtempSync(
-      join(tmpdir(), `ensemble-runtime-retention-${mode}-`),
-    );
+    const root = mkdtempSync(join(tmpdir(), `cab-runtime-retention-${mode}-`));
     const f = fixture(root);
     try {
       await f.service.start();
@@ -389,9 +385,7 @@ test("missing, corrupt, and failed terminal evidence storage never authorizes tu
 test("legacy bound turns migrate to unknown evidence and cannot complete", {
   timeout: 10_000,
 }, async () => {
-  const root = mkdtempSync(
-    join(tmpdir(), "ensemble-runtime-retention-legacy-"),
-  );
+  const root = mkdtempSync(join(tmpdir(), "cab-runtime-retention-legacy-"));
   const f = fixture(root);
   try {
     await f.service.start();

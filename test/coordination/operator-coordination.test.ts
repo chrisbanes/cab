@@ -38,9 +38,7 @@ const runtime: Runtime = {
 };
 
 test("operator status follows a newer queued continuation over completed history", async (t) => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-operator-current-status-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-operator-current-status-"));
   const runtime = new OperatorRuntime();
   const service = new StandaloneService(
     join(directory, "data"),
@@ -207,7 +205,7 @@ test("operator status follows a newer queued continuation over completed history
 
 test("operator reads retain an active worker turn after applying next-turn revisions", async (t) => {
   const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-operator-active-old-version-"),
+    join(tmpdir(), "cab-operator-active-old-version-"),
   );
   const runtime = new OperatorRuntime();
   const service = new StandaloneService(
@@ -509,9 +507,7 @@ function route(
 }
 
 test("routing availability distinguishes credentials, clients, and project scope", async (t) => {
-  const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-routing-availability-"),
-  );
+  const directory = mkdtempSync(join(tmpdir(), "cab-routing-availability-"));
   const missingService = new StandaloneService(
     join(directory, "missing"),
     () => runtime,
@@ -595,7 +591,7 @@ test("routing availability distinguishes credentials, clients, and project scope
       leadProfileId,
     });
   }
-  const missingEnvironmentName = `ENSEMBLE_TEST_ROUTING_${randomUUID()
+  const missingEnvironmentName = `CAB_TEST_ROUTING_${randomUUID()
     .replaceAll("-", "")
     .toUpperCase()}`;
   assert.equal(process.env[missingEnvironmentName], undefined);
@@ -614,7 +610,7 @@ test("routing availability distinguishes credentials, clients, and project scope
     expectedVersion: 1,
     enabled: true,
     guidance: "Use the injected client with a configured reference.",
-    credentialRef: "env:ENSEMBLE_TEST_INJECTED_ROUTING",
+    credentialRef: "env:CAB_TEST_INJECTED_ROUTING",
     candidateProfileIds: [candidateProfileId],
   });
   command(injectedService, {
@@ -638,7 +634,7 @@ test("routing availability distinguishes credentials, clients, and project scope
     expectedVersion: 1,
     enabled: true,
     guidance: "No eligible profiles are configured.",
-    credentialRef: "env:ENSEMBLE_TEST_NO_CANDIDATE_ROUTING",
+    credentialRef: "env:CAB_TEST_NO_CANDIDATE_ROUTING",
     candidateProfileIds: [revokedCandidateProfileId],
   });
   command(injectedService, {
@@ -657,7 +653,7 @@ test("routing availability distinguishes credentials, clients, and project scope
     available: false,
     reason: "missing-client-credentials",
   });
-  assert.doesNotMatch(JSON.stringify(missing), /ENSEMBLE_TEST_ROUTING/);
+  assert.doesNotMatch(JSON.stringify(missing), /CAB_TEST_ROUTING/);
   assert.deepEqual(missingService.routingAvailability(unrelatedProjectId), {
     enabled: false,
     credentialReferenceConfigured: false,
@@ -695,7 +691,7 @@ test("routing availability distinguishes credentials, clients, and project scope
 
 test("coordination reads and keyed commands stay scoped and durable", async (t) => {
   const directory = mkdtempSync(
-    join(tmpdir(), "ensemble-operator-coordination-flow-"),
+    join(tmpdir(), "cab-operator-coordination-flow-"),
   );
   const filename = join(directory, "data");
   const runtime = new OperatorRuntime();
@@ -863,14 +859,14 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
     threadId: leadIntent.threadId,
     turnId: leadIntent.turnId,
     callId: "operator-question",
-    tool: "ensemble_ask_question",
+    tool: "cab_ask_question",
     arguments: { question: "Which supported format should I use?" },
   });
   await runtime.callTool({
     threadId: leadIntent.threadId,
     turnId: leadIntent.turnId,
     callId: "operator-approval",
-    tool: "ensemble_request_approval",
+    tool: "cab_request_approval",
     arguments: {
       action: "publish",
       target: "artifact-4",
@@ -966,7 +962,7 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
     threadId: workerIntent.threadId,
     turnId: workerIntent.turnId,
     callId: "operator-result",
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary: "Reviewed parser output." },
   });
   assert.equal(report.success, true, report.text);
@@ -1011,7 +1007,7 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
     threadId: leadContinuation.threadId,
     turnId: leadContinuation.turnId,
     callId: "operator-lead-result",
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary: "Lead reviewed the task scope." },
   });
   assert.equal(leadReport.success, true, leadReport.text);

@@ -6,11 +6,11 @@ status: accepted
 
 This amends [ADR-1011](1011-packaging-and-distribution.md), which deferred a desktop
 wrapper. The app is a second channel for the same build, first for the operator's own
-Macs, and ships under the `cab` name ([#1154](https://github.com/chrisbanes/ensemble/issues/1154))
+Macs, and ships under the `cab` name ([#1154](https://github.com/chrisbanes/cab/issues/1154))
 so its bundle identifier and paths never need a rename migration. It is post-MVP and
-does not gate the cutover ([#761](https://github.com/chrisbanes/ensemble/issues/761)).
+does not gate the cutover ([#761](https://github.com/chrisbanes/cab/issues/761)).
 Delivery scope and status live in
-[epic #1265](https://github.com/chrisbanes/ensemble/issues/1265).
+[epic #1265](https://github.com/chrisbanes/cab/issues/1265).
 
 ## App
 

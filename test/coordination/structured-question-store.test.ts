@@ -10,7 +10,7 @@ const call = {
   threadId: "thread-child-a",
   turnId: "turn-child-a",
   callId: "full-question",
-  tool: "ensemble_ask_question",
+  tool: "cab_ask_question",
   arguments: { form: mixedForm },
 };
 function request(f: ReturnType<typeof coordinationFixture>) {

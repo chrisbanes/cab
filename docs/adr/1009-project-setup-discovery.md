@@ -38,7 +38,7 @@ The discovery status read reports:
   source, where `GH_TOKEN` and then `GITHUB_TOKEN` override the stored login.
 
 It never reports the reference name or token, and runs no `gh auth token`. For
-discovery, detection only offers the login: Ensemble reads with it only after the
+discovery, detection only offers the login: cab reads with it only after the
 operator chooses it in Settings, on the Readiness row or in the setup alert, and never falls back to it
 implicitly.
 
@@ -59,8 +59,8 @@ while that command verifies its repositories, before it is recorded.
 A Codex runtime keeps the environment it was spawned with, so a reference set
 while it runs is excluded from it after the next service restart.
 
-Ensemble does not prevent an agent from running `gh` itself if its sandbox can
-reach the operator's keychain. That is a runtime limit, not an Ensemble guarantee.
+cab does not prevent an agent from running `gh` itself if its sandbox can
+reach the operator's keychain. That is a runtime limit, not a cab guarantee.
 A project can still set its own source credential later. Discovered lists are suggestions for
 the form; they are not stored as access, sources or task data.
 
@@ -75,7 +75,7 @@ compare node IDs and fail closed for it until project configuration replaces it.
 ## Folder picker
 
 A web page cannot learn a folder's absolute path, and the operator may use the UI
-from another device. The Ensemble service therefore serves the picker. An
+from another device. The cab service therefore serves the picker. An
 authenticated operator route lists subfolder names and their Git status under the
 operator's home folder. It never returns file contents or file names, dot-folders
 or symlinks, and returns home-relative paths only. A requested path inside a

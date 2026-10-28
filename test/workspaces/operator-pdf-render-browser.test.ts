@@ -12,7 +12,7 @@ test("production Vite bundle renders a synthetic PDF in its local worker without
   const repositoryRoot = resolve(
     fileURLToPath(new URL("../../..", import.meta.url)),
   );
-  const outputDirectory = mkdtempSync(join(tmpdir(), "ensemble-pdf-proof-"));
+  const outputDirectory = mkdtempSync(join(tmpdir(), "cab-pdf-proof-"));
   let browser: Browser | undefined;
   let server: Server | undefined;
   t.after(async () => {

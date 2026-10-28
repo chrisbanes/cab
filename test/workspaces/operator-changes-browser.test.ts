@@ -93,7 +93,7 @@ class ChangesRuntime extends OperatorFixtureRuntime {
       threadId,
       turnId,
       callId: `changes-report-${turnId}`,
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: {
         question: "The deterministic Changes fixture finished its observation",
       },

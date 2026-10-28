@@ -277,7 +277,7 @@ function configureGitHubSource(service: StandaloneService): {
 
 test("unattended GitHub polling failures close admission and emit one fixed diagnostic", async () => {
   await withCapturedIntervals(async (intervals) => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-github-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-github-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const runtime = new FixtureRuntime();
     const service = makeService(root, runtime, diagnostics, {
@@ -310,7 +310,7 @@ test("unattended GitHub polling failures close admission and emit one fixed diag
 
 test("power polling failures are fatal while known incomplete power history remains held and nonfatal", async () => {
   await withCapturedIntervals(async (intervals) => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-power-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-power-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const runtime = new FixtureRuntime();
     const service = makeService(root, runtime, diagnostics, {
@@ -342,7 +342,7 @@ test("power polling failures are fatal while known incomplete power history rema
       rmSync(root, { recursive: true, force: true });
     }
 
-    const heldRoot = mkdtempSync(join(tmpdir(), "ensemble-known-power-hold-"));
+    const heldRoot = mkdtempSync(join(tmpdir(), "cab-known-power-hold-"));
     const heldDiagnostics: BackgroundFailureDiagnostic[] = [];
     const heldService = makeService(
       heldRoot,
@@ -374,7 +374,7 @@ test("power polling failures are fatal while known incomplete power history rema
 
 test("domain wake failures use the generation latch", async () => {
   await withCapturedIntervals(async () => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-domain-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-domain-"));
     const data = join(root, "data");
     const workspace = join(root, "workspace");
     mkdirSync(workspace);
@@ -413,7 +413,7 @@ test("domain wake failures use the generation latch", async () => {
 
 test("admission closes across a gated process-identity await for queued and direct requests", async () => {
   await withCapturedIntervals(async (intervals) => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-admission-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-admission-"));
     const data = join(root, "data");
     const workspace = join(root, "workspace");
     mkdirSync(workspace);
@@ -467,7 +467,7 @@ test("admission closes across a gated process-identity await for queued and dire
 
 test("post-turn wake failure is observed after the turn without self-deadlocking shutdown", async () => {
   await withCapturedIntervals(async () => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-post-turn-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-post-turn-"));
     const data = join(root, "data");
     const workspace = join(root, "workspace");
     mkdirSync(workspace);
@@ -503,7 +503,7 @@ test("post-turn wake failure is observed after the turn without self-deadlocking
 
 test("replacement scheduler drain failures use the production service observer once", async () => {
   await withCapturedIntervals(async () => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-scheduler-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-scheduler-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const runtime = new FixtureRuntime();
     const service = makeService(root, runtime, diagnostics);
@@ -597,7 +597,7 @@ test("replacement scheduler drain failures use the production service observer o
 
 test("GitHub reader failures remain durable incomplete-source evidence and direct refresh errors stay caller-owned", async () => {
   await withCapturedIntervals(async (intervals) => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-known-github-failure-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-known-github-failure-"));
     const data = join(root, "data");
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const readerFactory = (_credentialRef: string): GitHubSourceReader => ({
@@ -667,9 +667,7 @@ test("diagnostic sink throw, rejection, and hang use one bounded redacted stderr
     const roots: string[] = [];
     try {
       for (const mode of ["throws", "rejects", "hangs"] as const) {
-        const root = mkdtempSync(
-          join(tmpdir(), `ensemble-diagnostic-${mode}-`),
-        );
+        const root = mkdtempSync(join(tmpdir(), `cab-diagnostic-${mode}-`));
         roots.push(root);
         const diagnostics: BackgroundFailureDiagnostic[] = [];
         const service = makeService(root, new FixtureRuntime(), diagnostics, {
@@ -727,7 +725,7 @@ test("the default sink writes the sanitised failure to stderr without credential
     });
     const credential = "fixture-credential-1185-value";
     process.env.FIXTURE_GITHUB = credential;
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-redaction-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-redaction-"));
     const service = new StandaloneService(
       root,
       () => new FixtureRuntime(),
@@ -772,7 +770,7 @@ test("the default sink writes the sanitised failure to stderr without credential
 
 test("a failed fatal shutdown retains the SQLite owner, records shutdown failure, and retries cleanup", async () => {
   await withCapturedIntervals(async (intervals) => {
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-stop-hold-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-stop-hold-"));
     const data = join(root, "data");
     const workspace = join(root, "workspace");
     mkdirSync(workspace);
@@ -860,7 +858,7 @@ test("a failed fatal shutdown retains the SQLite owner, records shutdown failure
 test("repeated synthetic timer-clear failures keep a late callback fatal signal bounded and joinable", async () => {
   await withCapturedIntervals(async (intervals) => {
     const root = mkdtempSync(
-      join(tmpdir(), "ensemble-background-repeated-stop-failure-"),
+      join(tmpdir(), "cab-background-repeated-stop-failure-"),
     );
     const data = join(root, "data");
     const diagnostics: BackgroundFailureDiagnostic[] = [];
@@ -971,7 +969,7 @@ test("repeated synthetic timer-clear failures keep a late callback fatal signal 
 test("serve-style signal wait succeeds normally and a fatal notification already latched remains visible", async () => {
   await withCapturedIntervals(async (intervals) => {
     const priorExitCode = process.exitCode;
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-serve-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-serve-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const service = makeService(root, new FixtureRuntime(), diagnostics, {
       github: { intervalMs: 1000 },
@@ -1015,9 +1013,7 @@ test("serve-style signal wait succeeds normally and a fatal notification already
 
 test("a late timer callback from a stopped generation cannot affect a restarted service", async () => {
   await withCapturedIntervals(async (intervals) => {
-    const root = mkdtempSync(
-      join(tmpdir(), "ensemble-background-old-callback-"),
-    );
+    const root = mkdtempSync(join(tmpdir(), "cab-background-old-callback-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const service = makeService(root, new FixtureRuntime(), diagnostics, {
       github: { intervalMs: 1000 },
@@ -1048,7 +1044,7 @@ test("a late timer callback from a stopped generation cannot affect a restarted 
 });
 
 test("run and list CLI branches remain bounded and keep their existing cleanup path", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-background-cli-bounded-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-background-cli-bounded-"));
   const originalExitCode = process.exitCode;
   const prototype = StandaloneService.prototype;
   const descriptors = new Map<string, PropertyDescriptor | undefined>();
@@ -1116,9 +1112,7 @@ test("run and list CLI branches remain bounded and keep their existing cleanup p
 test("an operator fatal notification already latched before its wait closes the live listener", async () => {
   await withCapturedIntervals(async () => {
     const priorExitCode = process.exitCode;
-    const root = mkdtempSync(
-      join(tmpdir(), "ensemble-background-operator-early-"),
-    );
+    const root = mkdtempSync(join(tmpdir(), "cab-background-operator-early-"));
     chmodSync(root, 0o700);
     const data = join(root, "data");
     const authFile = join(root, "operator-auth.json");
@@ -1225,16 +1219,16 @@ test("an operator fatal notification already latched before its wait closes the 
 test("production operator CLI joins an already-fatal service and closes the live listener", async () => {
   await withCapturedIntervals(async (intervals) => {
     const priorExitCode = process.exitCode;
-    const priorAuthFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
-    const priorOrigin = process.env.ENSEMBLE_OPERATOR_ORIGIN;
+    const priorAuthFile = process.env.CAB_OPERATOR_AUTH_FILE;
+    const priorOrigin = process.env.CAB_OPERATOR_ORIGIN;
     const root = mkdtempSync(
-      join(tmpdir(), "ensemble-background-cli-operator-early-"),
+      join(tmpdir(), "cab-background-cli-operator-early-"),
     );
     chmodSync(root, 0o700);
     const data = join(root, "data");
     const authFile = join(root, "operator-auth.json");
-    process.env.ENSEMBLE_OPERATOR_AUTH_FILE = authFile;
-    process.env.ENSEMBLE_OPERATOR_ORIGIN = "http://127.0.0.1:8790";
+    process.env.CAB_OPERATOR_AUTH_FILE = authFile;
+    process.env.CAB_OPERATOR_ORIGIN = "http://127.0.0.1:8790";
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const listenerStarted = deferred<void>();
     const cliService = deferred<StandaloneService>();
@@ -1329,11 +1323,10 @@ test("production operator CLI joins an already-fatal service and closes the live
       if (auth && authCloses === 0) auth.close();
       process.exitCode = priorExitCode;
       if (priorAuthFile === undefined)
-        delete process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
-      else process.env.ENSEMBLE_OPERATOR_AUTH_FILE = priorAuthFile;
-      if (priorOrigin === undefined)
-        delete process.env.ENSEMBLE_OPERATOR_ORIGIN;
-      else process.env.ENSEMBLE_OPERATOR_ORIGIN = priorOrigin;
+        delete process.env.CAB_OPERATOR_AUTH_FILE;
+      else process.env.CAB_OPERATOR_AUTH_FILE = priorAuthFile;
+      if (priorOrigin === undefined) delete process.env.CAB_OPERATOR_ORIGIN;
+      else process.env.CAB_OPERATOR_ORIGIN = priorOrigin;
       await cliService.promise
         .then((service) => service.stop().catch(() => {}))
         .catch(() => {});
@@ -1350,16 +1343,16 @@ test("operator CLI consumes fatal failures before first accessor and across bund
       "during-push-open",
     ] as const) {
       const priorExitCode = process.exitCode;
-      const priorAuthFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
-      const priorOrigin = process.env.ENSEMBLE_OPERATOR_ORIGIN;
-      const root = mkdtempSync(join(tmpdir(), `ensemble-operator-${timing}-`));
+      const priorAuthFile = process.env.CAB_OPERATOR_AUTH_FILE;
+      const priorOrigin = process.env.CAB_OPERATOR_ORIGIN;
+      const root = mkdtempSync(join(tmpdir(), `cab-operator-${timing}-`));
       chmodSync(root, 0o700);
       const data = join(root, "data");
       const workspace = join(root, "workspace");
       const authFile = join(root, "operator-auth.json");
       mkdirSync(workspace);
-      process.env.ENSEMBLE_OPERATOR_AUTH_FILE = authFile;
-      process.env.ENSEMBLE_OPERATOR_ORIGIN = "http://127.0.0.1:8792";
+      process.env.CAB_OPERATOR_AUTH_FILE = authFile;
+      process.env.CAB_OPERATOR_ORIGIN = "http://127.0.0.1:8792";
       const diagnostics: BackgroundFailureDiagnostic[] = [];
       const loadEntered = deferred<void>();
       const releaseLoad = deferred<void>();
@@ -1607,11 +1600,10 @@ test("operator CLI consumes fatal failures before first accessor and across bund
           ).start;
         process.exitCode = priorExitCode;
         if (priorAuthFile === undefined)
-          delete process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
-        else process.env.ENSEMBLE_OPERATOR_AUTH_FILE = priorAuthFile;
-        if (priorOrigin === undefined)
-          delete process.env.ENSEMBLE_OPERATOR_ORIGIN;
-        else process.env.ENSEMBLE_OPERATOR_ORIGIN = priorOrigin;
+          delete process.env.CAB_OPERATOR_AUTH_FILE;
+        else process.env.CAB_OPERATOR_AUTH_FILE = priorAuthFile;
+        if (priorOrigin === undefined) delete process.env.CAB_OPERATOR_ORIGIN;
+        else process.env.CAB_OPERATOR_ORIGIN = priorOrigin;
         rmSync(root, { recursive: true, force: true });
       }
     }
@@ -1621,16 +1613,16 @@ test("operator CLI consumes fatal failures before first accessor and across bund
 test("production operator CLI handles SIGTERM first, then joins fatal shutdown and closes listener once", async () => {
   await withCapturedIntervals(async (intervals) => {
     const priorExitCode = process.exitCode;
-    const priorAuthFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
-    const priorOrigin = process.env.ENSEMBLE_OPERATOR_ORIGIN;
+    const priorAuthFile = process.env.CAB_OPERATOR_AUTH_FILE;
+    const priorOrigin = process.env.CAB_OPERATOR_ORIGIN;
     const root = mkdtempSync(
-      join(tmpdir(), "ensemble-background-cli-operator-race-"),
+      join(tmpdir(), "cab-background-cli-operator-race-"),
     );
     chmodSync(root, 0o700);
     const data = join(root, "data");
     const authFile = join(root, "operator-auth.json");
-    process.env.ENSEMBLE_OPERATOR_AUTH_FILE = authFile;
-    process.env.ENSEMBLE_OPERATOR_ORIGIN = "http://127.0.0.1:8791";
+    process.env.CAB_OPERATOR_AUTH_FILE = authFile;
+    process.env.CAB_OPERATOR_ORIGIN = "http://127.0.0.1:8791";
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const listenerStarted = deferred<void>();
     const stopStarted = deferred<void>();
@@ -1732,11 +1724,10 @@ test("production operator CLI handles SIGTERM first, then joins fatal shutdown a
       if (auth && authCloses === 0) auth.close();
       process.exitCode = priorExitCode;
       if (priorAuthFile === undefined)
-        delete process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
-      else process.env.ENSEMBLE_OPERATOR_AUTH_FILE = priorAuthFile;
-      if (priorOrigin === undefined)
-        delete process.env.ENSEMBLE_OPERATOR_ORIGIN;
-      else process.env.ENSEMBLE_OPERATOR_ORIGIN = priorOrigin;
+        delete process.env.CAB_OPERATOR_AUTH_FILE;
+      else process.env.CAB_OPERATOR_AUTH_FILE = priorAuthFile;
+      if (priorOrigin === undefined) delete process.env.CAB_OPERATOR_ORIGIN;
+      else process.env.CAB_OPERATOR_ORIGIN = priorOrigin;
       await cliService.promise
         .then((service) => service.stop().catch(() => {}))
         .catch(() => {});
@@ -1748,9 +1739,7 @@ test("production operator CLI handles SIGTERM first, then joins fatal shutdown a
 test("production serve CLI sees a fatal service signal that predates its wait", async () => {
   await withCapturedIntervals(async (intervals) => {
     const priorExitCode = process.exitCode;
-    const root = mkdtempSync(
-      join(tmpdir(), "ensemble-background-cli-serve-early-"),
-    );
+    const root = mkdtempSync(join(tmpdir(), "cab-background-cli-serve-early-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const runtime = new FixtureRuntime();
     let service: StandaloneService | undefined;
@@ -1809,7 +1798,7 @@ test("production serve CLI exits successfully on a normal SIGTERM", async () => 
   await withCapturedIntervals(async () => {
     const priorExitCode = process.exitCode;
     const root = mkdtempSync(
-      join(tmpdir(), "ensemble-background-cli-serve-signal-"),
+      join(tmpdir(), "cab-background-cli-serve-signal-"),
     );
     let service: StandaloneService | undefined;
     let stopOwnedCalls = 0;
@@ -1851,9 +1840,9 @@ interface LogRecord {
 test("serve and operator CLIs record shutdown failures as sanitised structured lines", async () => {
   await withCapturedIntervals(async () => {
     const priorExitCode = process.exitCode;
-    const priorAuthFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
-    const priorOrigin = process.env.ENSEMBLE_OPERATOR_ORIGIN;
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-cli-stop-"));
+    const priorAuthFile = process.env.CAB_OPERATOR_AUTH_FILE;
+    const priorOrigin = process.env.CAB_OPERATOR_ORIGIN;
+    const root = mkdtempSync(join(tmpdir(), "cab-background-cli-stop-"));
     chmodSync(root, 0o700);
     const prototype = LocalOperatorHttp.prototype;
     const stopDescriptor = Object.getOwnPropertyDescriptor(prototype, "stop");
@@ -1903,8 +1892,8 @@ test("serve and operator CLIs record shutdown failures as sanitised structured l
       lines = [];
       process.exitCode = 0;
       const authFile = join(root, "operator-auth.json");
-      process.env.ENSEMBLE_OPERATOR_AUTH_FILE = authFile;
-      process.env.ENSEMBLE_OPERATOR_ORIGIN = "http://127.0.0.1:8792";
+      process.env.CAB_OPERATOR_AUTH_FILE = authFile;
+      process.env.CAB_OPERATOR_ORIGIN = "http://127.0.0.1:8792";
       await OperatorAuth.initialize(authFile, "fixture password");
       Object.defineProperty(prototype, "stop", {
         configurable: true,
@@ -1937,18 +1926,17 @@ test("serve and operator CLIs record shutdown failures as sanitised structured l
       assert.equal(records[1]?.stage, "listener-shutdown");
       assert.match(records[1]?.error?.message ?? "", /listener stop failed/);
       assert.equal(records[2]?.reason, "shutdown-failure");
-      assert.doesNotMatch(lines.join(""), /Ensemble (service|operator)/);
+      assert.doesNotMatch(lines.join(""), /cab (service|operator)/);
     } finally {
       if (stopDescriptor)
         Object.defineProperty(prototype, "stop", stopDescriptor);
       for (const service of services) await service.stop().catch(() => {});
       process.exitCode = priorExitCode;
       if (priorAuthFile === undefined)
-        delete process.env.ENSEMBLE_OPERATOR_AUTH_FILE;
-      else process.env.ENSEMBLE_OPERATOR_AUTH_FILE = priorAuthFile;
-      if (priorOrigin === undefined)
-        delete process.env.ENSEMBLE_OPERATOR_ORIGIN;
-      else process.env.ENSEMBLE_OPERATOR_ORIGIN = priorOrigin;
+        delete process.env.CAB_OPERATOR_AUTH_FILE;
+      else process.env.CAB_OPERATOR_AUTH_FILE = priorAuthFile;
+      if (priorOrigin === undefined) delete process.env.CAB_OPERATOR_ORIGIN;
+      else process.env.CAB_OPERATOR_ORIGIN = priorOrigin;
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -1957,9 +1945,7 @@ test("serve and operator CLIs record shutdown failures as sanitised structured l
 test("production serve CLI joins a fatal failure that arrives after SIGTERM wins", async () => {
   await withCapturedIntervals(async (intervals) => {
     const priorExitCode = process.exitCode;
-    const root = mkdtempSync(
-      join(tmpdir(), "ensemble-background-cli-serve-race-"),
-    );
+    const root = mkdtempSync(join(tmpdir(), "cab-background-cli-serve-race-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const poll = deferred<void>();
     const stopStarted = deferred<void>();
@@ -2007,7 +1993,7 @@ test("production serve CLI joins a fatal failure that arrives after SIGTERM wins
 test("operator signal-first shutdown joins a later fatal failure and closes its listener and auth once", async () => {
   await withCapturedIntervals(async (intervals) => {
     const priorExitCode = process.exitCode;
-    const root = mkdtempSync(join(tmpdir(), "ensemble-background-operator-"));
+    const root = mkdtempSync(join(tmpdir(), "cab-background-operator-"));
     chmodSync(root, 0o700);
     const data = join(root, "data");
     const authFile = join(root, "operator-auth.json");
@@ -2100,7 +2086,7 @@ test("operator signal-first shutdown joins a later fatal failure and closes its 
 test("the production service runs Claude beside Codex, with Codex still the profile default", () => {
   assert.deepEqual(productionRuntimeHarnesses, ["codex", "claude"]);
   assert.equal(defaultExecutionHarness, "codex");
-  const root = mkdtempSync(join(tmpdir(), "ensemble-production-harnesses-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-production-harnesses-"));
   try {
     assert.deepEqual(
       productionService(join(root, "data"))

@@ -1,13 +1,13 @@
-# Ensemble
+# cab
 
-Ensemble coordinates agents working on tasks within projects. Agents decide
-how work proceeds; Ensemble owns durable coordination.
+cab coordinates agents working on tasks within projects. Agents decide
+how work proceeds; cab owns durable coordination.
 
 ## Language
 
 **Operator CLI**:
 A command-line interface through which the operator or an external agent acting
-on their behalf inspects and manages Ensemble. It is distinct from the tools
+on their behalf inspects and manages cab. It is distinct from the tools
 used by an assignee to carry out its assignment.
 See the [accepted operator CLI contract](docs/design/operator-cli.md).
 _Avoid_: Agent callback interface
@@ -26,8 +26,8 @@ _Avoid_: Notification feed
 
 **Project**:
 A container for tasks, optional linked repositories, agent profiles, instructions, and permissions.
-Its identity belongs to Ensemble and is independent of the application hosting it.
-_Avoid_: Board or GitHub Project when referring to the Ensemble container
+Its identity belongs to cab and is independent of the application hosting it.
+_Avoid_: Board or GitHub Project when referring to the cab container
 
 **Task**:
 A piece of work belonging to one project, created locally or linked to an external item.
@@ -60,7 +60,7 @@ _Avoid_: Retry when referring to a restart
 
 **Closure hold**:
 The hold on an imported open task whose external item was closed without
-Ensemble delivering it. It is distinct from a project pause. An own closure that a
+cab delivering it. It is distinct from a project pause. An own closure that a
 reopen superseded no longer exempts the task.
 _Avoid_: Paused when referring to an externally closed task
 
@@ -78,8 +78,8 @@ takes the item's external reference and becomes imported.
 _Avoid_: Export or sync when referring to creating the external item
 
 **Status mapping**:
-A project's rules for which external status option Ensemble writes when its own
-work reaches a given point. It reflects Ensemble work back to the external system
+A project's rules for which external status option cab writes when its own
+work reaches a given point. It reflects cab work back to the external system
 and never makes a task Ready.
 _Avoid_: Board sync or column mapping
 
@@ -137,7 +137,7 @@ _Avoid_: Assignment when referring only to its conversation history
 
 **Execution runtime**:
 The agent harness or execution engine that carries out admitted agent turns and
-reports their observations to Ensemble.
+reports their observations to cab.
 _Avoid_: Scheduler when referring to the system executing one agent turn; runtime provider
 
 **Disabled runtime**:
@@ -165,13 +165,13 @@ The working files allocated to a task, retained independently of its conversatio
 _Avoid_: Conversation when referring to a task's working files
 
 **Task branch**:
-The one branch Ensemble assigns a task in each repository and pushes its commits
+The one branch cab assigns a task in each repository and pushes its commits
 to; agents cannot choose or push it. A PR created for the task uses it as its head.
-A remote head on it that Ensemble did not push is an outside change.
-_Avoid_: Head branch when meaning the assigned, Ensemble-published branch
+A remote head on it that cab did not push is an outside change.
+_Avoid_: Head branch when meaning the assigned, cab-published branch
 
 **Outside change**:
-A task branch head that Ensemble did not push, or a deleted branch, seen at a push or
+A task branch head that cab did not push, or a deleted branch, seen at a push or
 on the task's PR. Plain pushes are refused and completion held until the lead recovers
 the branch, with the operator's approval, by overwriting the outside head or adopting it.
 _Avoid_: Outside push
@@ -180,7 +180,7 @@ _Avoid_: Outside push
 The recovery that records an outside head as the task branch's last push after proving
 it descends from the task's provisioned base, without moving the task workspace. The
 agent then integrates the outside commits offline and pushes on top of the adopted head.
-_Avoid_: Merge or sync when meaning the record Ensemble keeps
+_Avoid_: Merge or sync when meaning the record cab keeps
 
 **Current workspace contents**:
 The files observed in a task workspace at an identified inspection time. They may
@@ -205,7 +205,7 @@ that a review comment addresses. Later file changes do not move the anchor.
 _Avoid_: Current line number when referring to historical reviewed content
 
 **Local review**:
-A code review composed and sent inside Ensemble, with no GitHub involvement.
+A code review composed and sent inside cab, with no GitHub involvement.
 It is delivered to the accountable project lead as one operator message.
 _Avoid_: Pull request review
 

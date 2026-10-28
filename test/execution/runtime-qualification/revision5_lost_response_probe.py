@@ -100,7 +100,7 @@ def receive(predicate, timeout=45):
 
 try:
     emit({"server": process(server.pid)})
-    send("initialize", 1, {"clientInfo": {"name": "ensemble_s01_revision5", "title": "Ensemble S01 Revision 5", "version": "0.1.0"}})
+    send("initialize", 1, {"clientInfo": {"name": "cab_s01_revision5", "title": "cab S01 Revision 5", "version": "0.1.0"}})
     receive(lambda event: event.get("id") == 1)
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

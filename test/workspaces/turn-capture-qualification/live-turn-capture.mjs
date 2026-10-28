@@ -33,11 +33,11 @@ if (
 const codexExecutable =
   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex";
 const codexVersion = "0.162.0-alpha.2";
-const markerText = "ensemble-turn-capture-marker-v1\n";
+const markerText = "cab-turn-capture-marker-v1\n";
 const markerHash = createHash("sha256")
   .update(Buffer.from(markerText, "utf8"))
   .digest("hex");
-const expectedExecutableHash = process.env.ENSEMBLE_WI03_CODEX_SHA256;
+const expectedExecutableHash = process.env.CAB_WI03_CODEX_SHA256;
 if (!expectedExecutableHash || !/^[0-9a-f]{64}$/.test(expectedExecutableHash)) {
   process.stderr.write(
     "Refusing actual Codex execution without the controller-verified executable SHA-256.\n",
@@ -60,9 +60,7 @@ if (actualExecutableHash !== expectedExecutableHash) {
   process.exit(2);
 }
 
-const attemptDirectory = mkdtempSync(
-  join(tmpdir(), "ensemble-wi03-live-attempt-"),
-);
+const attemptDirectory = mkdtempSync(join(tmpdir(), "cab-wi03-live-attempt-"));
 chmodSync(attemptDirectory, 0o700);
 const checkpointPath = join(attemptDirectory, "attempt.json");
 const evidencePath = join(attemptDirectory, "evidence.json");
@@ -369,7 +367,7 @@ try {
     harness = await createTurnCaptureHarness({
       checkpointPath,
       taskTitle: "Capture one real workspace turn",
-      taskOutcome: `Create turn-marker.txt containing exactly ${markerText.trimEnd()} followed by a newline, then call ensemble_report_result with a short completion summary. Use only the local workspace write and required result-reporting action. Do not delegate, ask a question, request approval, invoke an external action, use network access or modify any other file.`,
+      taskOutcome: `Create turn-marker.txt containing exactly ${markerText.trimEnd()} followed by a newline, then call cab_report_result with a short completion summary. Use only the local workspace write and required result-reporting action. Do not delegate, ask a question, request approval, invoke an external action, use network access or modify any other file.`,
       runtimeFactory(context) {
         if (!context.safety || typeof context.spawnEnvironment !== "function")
           throw new Error("turn-capture-production-runtime-context-incomplete");

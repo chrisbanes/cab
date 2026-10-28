@@ -13,7 +13,7 @@ admission or execution.
 
 ## Login and session lifecycle
 
-Ensemble operator credentials are independent of the Codex App Server login.
+cab operator credentials are independent of the Codex App Server login.
 `npm run operator-auth -- init ABSOLUTE_AUTH_FILE` prompts for the password
 without echoing it or putting it in argv. Initialization writes a salted scrypt
 verifier, not the password, into a new same-user regular file with mode `0600`.
@@ -21,8 +21,8 @@ The auth file must be an absolute path; opening rejects symlinks, an exposed or
 foreign-owned file, an oversized file, and an unsupported format. Configuration
 and initialization failures are generic and do not include credential material.
 
-The `operator` command requires `ENSEMBLE_OPERATOR_AUTH_FILE` and
-`ENSEMBLE_OPERATOR_ORIGIN`. The configured origin is canonical: loopback HTTP
+The `operator` command requires `CAB_OPERATOR_AUTH_FILE` and
+`CAB_OPERATOR_ORIGIN`. The configured origin is canonical: loopback HTTP
 is limited to `127.0.0.1`, and remote origins must use HTTPS. Sessions are
 process-local, so service restart invalidates them. Login rotates the anonymous
 session ID and CSRF token; logout deletes the session. Idle and absolute expiry,

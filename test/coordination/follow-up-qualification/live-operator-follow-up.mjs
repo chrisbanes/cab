@@ -46,7 +46,7 @@ let executableSha256;
 try {
   executableSha256 = verifyInspectionJourneyExecutable(
     codexExecutable,
-    process.env.ENSEMBLE_WI782_CODEX_SHA256,
+    process.env.CAB_WI782_CODEX_SHA256,
   );
 } catch (error) {
   process.stderr.write(
@@ -58,9 +58,7 @@ const codexVersion = execFileSync(codexExecutable, ["--version"], {
   encoding: "utf8",
 }).trim();
 
-const attemptDirectory = mkdtempSync(
-  join(tmpdir(), "ensemble-wi828-live-attempt-"),
-);
+const attemptDirectory = mkdtempSync(join(tmpdir(), "cab-wi828-live-attempt-"));
 chmodSync(attemptDirectory, 0o700);
 const checkpointPath = join(attemptDirectory, "journey.json");
 const evidencePath = join(attemptDirectory, "evidence.json");
@@ -380,7 +378,7 @@ try {
       },
     ],
   });
-  const comment = `Create followup-ack.txt in the workspace root containing exactly the retained anchor ID printed in this comment's context (the UUID after "retained anchor") followed by one newline. Then call ensemble_report_result with a short summary and review {"changes":{"files":["followup-ack.txt"]}}. ${scope}`;
+  const comment = `Create followup-ack.txt in the workspace root containing exactly the retained anchor ID printed in this comment's context (the UUID after "retained anchor") followed by one newline. Then call cab_report_result with a short summary and review {"changes":{"files":["followup-ack.txt"]}}. ${scope}`;
   const saved = await operator.post({
     type: "review.draft.save",
     key: randomUUID(),

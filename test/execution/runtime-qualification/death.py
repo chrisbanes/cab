@@ -57,7 +57,7 @@ def alive(pid):
 try:
     print("start", time.time(), "app-server pid", proc.pid, flush=True)
     response_id = 1
-    send("initialize", response_id, {"clientInfo": {"name": "ensemble_s01_death", "title": "Ensemble S01 Death", "version": "0.1.0"}})
+    send("initialize", response_id, {"clientInfo": {"name": "cab_s01_death", "title": "cab S01 Death", "version": "0.1.0"}})
     response(response_id)
     proc.stdin.write('{"method":"initialized","params":{}}\n')
     proc.stdin.flush()

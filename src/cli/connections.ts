@@ -61,7 +61,7 @@ const configSchema = z
 export type CliConfig = z.infer<typeof configSchema>;
 
 export function configDirectory(env: NodeJS.ProcessEnv): string {
-  return env.ENSEMBLE_CLI_CONFIG_DIR || join(homedir(), ".config", "ensemble");
+  return env.CAB_CLI_CONFIG_DIR || join(homedir(), ".config", "cab");
 }
 
 /** connections.json holds names, origins and credential references, never tokens. */
@@ -122,17 +122,17 @@ export class ConnectionConfig {
       throw names.length
         ? new CliError(
             "connection-ambiguous",
-            `Choose a connection with --connection or 'ensemble connection use': ${names.join(", ")}`,
+            `Choose a connection with --connection or 'cab connection use': ${names.join(", ")}`,
           )
         : new CliError(
             "connection-not-found",
-            "No connection. Run 'ensemble auth login'.",
+            "No connection. Run 'cab auth login'.",
           );
     }
     const connection = config.connections[name];
     if (!connection)
       throw new CliError("connection-not-found", `Unknown connection ${name}`, {
-        fix: "Run 'ensemble connection list' for the saved names, or log in with 'ensemble auth login --connection NAME --url ORIGIN'.",
+        fix: "Run 'cab connection list' for the saved names, or log in with 'cab auth login --connection NAME --url ORIGIN'.",
       });
     return { name, connection };
   }
@@ -179,7 +179,7 @@ const unavailable = () =>
 /** macOS Keychain generic passwords; the token reaches `security` only on stdin. */
 export class KeychainCredentialStore implements CredentialStore {
   constructor(
-    private readonly service = "ensemble-cli",
+    private readonly service = "cab-cli",
     private readonly run: SecurityRunner = runSecurity,
   ) {}
 
@@ -220,7 +220,7 @@ export class KeychainCredentialStore implements CredentialStore {
     if (result.code === 44)
       throw new CliError(
         "credential-not-found",
-        "No stored credential for this connection. Run 'ensemble auth login'.",
+        "No stored credential for this connection. Run 'cab auth login'.",
       );
     if (result.code !== 0) throw unavailable();
     return result.stdout.replace(/\n$/, "");
@@ -263,7 +263,7 @@ export async function readTokenFile(
   if (!operatorCredentialTokenSchema.safeParse(token).success)
     throw new CliError(
       "invalid-token-file",
-      "Token file does not hold one Ensemble token.",
+      "Token file does not hold one CLI token.",
     );
   return token;
 }

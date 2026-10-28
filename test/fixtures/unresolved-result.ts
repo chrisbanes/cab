@@ -54,7 +54,7 @@ export async function reportUnresolvedResult(
     threadId: work.threadId,
     turnId: work.turnId,
     callId: "result1",
-    tool: "ensemble_report_result",
+    tool: "cab_report_result",
     arguments: { summary: "Exact retained result <script>still text</script>" },
   });
   assert.equal(result.success, true, result.text);

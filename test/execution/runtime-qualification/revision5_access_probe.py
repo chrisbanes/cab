@@ -71,7 +71,7 @@ def turn(rid, thread_id, text):
 
 
 try:
-    send(1, "initialize", {"clientInfo": {"name": "ensemble_s01_r5_access", "title": "Ensemble S01 R5 Access", "version": "0.1.0"}})
+    send(1, "initialize", {"clientInfo": {"name": "cab_s01_r5_access", "title": "cab S01 R5 Access", "version": "0.1.0"}})
     require(receive(lambda e: e.get("id") == 1))
     server.stdin.write('{"method":"initialized","params":{}}\n')
     server.stdin.flush()

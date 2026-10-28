@@ -52,7 +52,7 @@ function request(workId: string): TurnRequestInput {
 async function withStore(
   run: (db: DatabaseSync, store: SchedulerStore) => Promise<void>,
 ): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "ensemble-scheduler-drain-"));
+  const directory = await mkdtemp(join(tmpdir(), "cab-scheduler-drain-"));
   const db = new DatabaseSync(join(directory, "standalone.sqlite"));
   try {
     await run(db, new SchedulerStore(db));

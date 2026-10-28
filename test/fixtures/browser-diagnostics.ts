@@ -352,14 +352,14 @@ export async function createTestEvidenceDirectory(
 ) {
   if (!/^[a-z0-9-]{1,40}$/.test(suite))
     throw Error("Invalid browser evidence suite");
-  let root = configured ?? process.env.ENSEMBLE_TEST_EVIDENCE_DIR;
+  let root = configured ?? process.env.CAB_TEST_EVIDENCE_DIR;
   if (!root) {
-    defaultRoot ??= mkdtemp(join(tmpdir(), "ensemble-test-evidence-"));
+    defaultRoot ??= mkdtemp(join(tmpdir(), "cab-test-evidence-"));
     root = await defaultRoot;
   }
   if (!isAbsolute(root)) throw Error("Browser evidence root must be absolute");
   await ownedDirectory(root);
-  const marker = ".ensemble-test-evidence-v1";
+  const marker = ".cab-test-evidence-v1";
   const existing = await readdir(root);
   if (
     existing.length &&
@@ -404,9 +404,7 @@ export async function writeTestEvidence(
     !/^[a-z0-9-]{1,40}-\d+$/.test(basename(parent)) ||
     !(await lstat(directory)).isDirectory() ||
     !(await lstat(parent)).isDirectory() ||
-    !(
-      await lstat(join(dirname(parent), ".ensemble-test-evidence-v1"))
-    ).isDirectory()
+    !(await lstat(join(dirname(parent), ".cab-test-evidence-v1"))).isDirectory()
   )
     throw Error("evidence.write: unowned evidence directory");
   const bytes = Buffer.byteLength(data);

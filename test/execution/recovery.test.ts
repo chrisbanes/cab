@@ -60,7 +60,7 @@ function recoveryApi(service: StandaloneService): RecoveryApi {
 }
 
 test("legacy interrupted archive recovery clears its ordinary transient hold", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-archive-recovery-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-archive-recovery-"));
   const workspaceRoot = join(root, "workspaces");
   const database = new DatabaseSync(join(root, "standalone.sqlite"));
   try {
@@ -182,7 +182,7 @@ class RecoveryRuntime implements Runtime {
       threadId: this.currentThreadId,
       turnId: this.currentTurnId,
       callId: `fixture-question-${this.currentThreadId}-${this.currentTurnId}`,
-      tool: "ensemble_ask_question",
+      tool: "cab_ask_question",
       arguments: { question: "Recovery fixture is waiting for the next step" },
     });
     this.turnEntered.resolve();
@@ -231,7 +231,7 @@ class ManualClock {
 async function activeFixture(
   options?: ServiceOptions & { holdTurnStart?: boolean },
 ) {
-  const root = mkdtempSync(join(tmpdir(), "ensemble-recovery-"));
+  const root = mkdtempSync(join(tmpdir(), "cab-recovery-"));
   const dataDir = join(root, "data");
   const runtime = new RecoveryRuntime();
   const turnStartResponse = options?.holdTurnStart
