@@ -117,6 +117,7 @@ import {
   criterionRows,
   deliveryApplies,
   taskNextActor,
+  trackerName,
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
@@ -1532,7 +1533,7 @@ export function TaskWorkspace({
       changed();
     },
   });
-  const briefSummary = `Requirements · ${source?.kind === "github" || data.source ? "GitHub" : "Local"} · ${(() => {
+  const briefSummary = `Requirements · ${source?.kind === "jira" ? "Jira" : source?.kind === "github" || data.source ? trackerName(data.source) : "Local"} · ${(() => {
     if (!source) return "Retained source unavailable";
     const { criteria, known } = briefParts(source),
       n = criteria.length;
@@ -1808,7 +1809,9 @@ export function TaskWorkspace({
             {data.source && (
               <>
                 <ActionLink variant="secondary" href={data.source.url ?? "#"}>
-                  Open GitHub to edit source
+                  {data.source.identity.tracker === "jira"
+                    ? "Edit in Jira"
+                    : "Open GitHub to edit source"}
                 </ActionLink>
                 {improvePolicy && (
                   <Button
@@ -2243,7 +2246,11 @@ export function TaskWorkspace({
                             brief.known && <p>None supplied</p>
                           )}
                           <p className="metadata muted">
-                            {source.kind === "github" ? "GitHub" : "Local"}{" "}
+                            {source.kind === "jira"
+                              ? "Jira"
+                              : source.kind === "github"
+                                ? "GitHub"
+                                : "Local"}{" "}
                             source · revision {source.revision} ·{" "}
                             <ShortId value={source.sourceId} />
                           </p>

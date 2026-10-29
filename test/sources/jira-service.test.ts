@@ -211,7 +211,7 @@ test("JQL preview lists matches without saving, and bad JQL is refused with noth
   await assert.rejects(
     f.configureJira([{ id: "S-1", kind: "jql", jql: "BAD =" }], 1),
     (error: { status: number; fieldPaths?: string[] }) =>
-      error.status === 409 && error.fieldPaths?.[0] === "selections.0.jql",
+      error.status === 400 && error.fieldPaths?.[0] === "selections.0.jql",
   );
   assert.equal(f.service.domain().jiraConfiguration(f.projectId), null);
   assert.equal(f.service.domain().githubConfiguration(f.projectId).version, 1);

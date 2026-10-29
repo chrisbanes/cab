@@ -152,11 +152,17 @@ export function taskIdentity(data: Pick<Data, "source">) {
   const s = data.source;
   return s
     ? {
-        label: `${s.repositoryName ?? "repository unavailable"}#${s.number ?? "?"}`,
+        label:
+          s.key ??
+          `${s.repositoryName ?? "repository unavailable"}#${s.number ?? "?"}`,
         url: s.url,
       }
     : { label: "Local task", url: null };
 }
+
+/** The issue tracker a task was imported from, as the operator reads it. */
+export const trackerName = (source: Data["source"]) =>
+  source?.identity.tracker === "jira" ? "Jira" : "GitHub";
 
 const syncProblems = {
   "sync-unavailable": "sync unavailable",
@@ -183,7 +189,13 @@ export function sourceFacts(source: NonNullable<Data["source"]>) {
           source.memberships.some((m) => m.sync.complete !== true)
         ? "sync incomplete"
         : null;
-  return { state: source.state, synced, problem };
+  return {
+    state: source.state,
+    synced,
+    problem,
+    status: source.status?.name ?? null,
+    site: source.identity.tracker === "jira" ? source.identity.provider : null,
+  };
 }
 
 const deliveryModes = {

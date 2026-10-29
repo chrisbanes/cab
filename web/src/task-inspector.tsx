@@ -15,6 +15,7 @@ import {
   sourceFacts,
   taskColumnOf,
   taskIdentity,
+  trackerName,
 } from "./task-overview.js";
 
 type Data = TaskRead["data"];
@@ -61,10 +62,10 @@ export function TaskInspector({
     <aside className="task-inspector" aria-label="Task context">
       {source && (
         <>
-          <Group label="GitHub source · read-only">
+          <Group label={`${trackerName(source)} source · read-only`}>
             {(() => {
               const identity = taskIdentity(data),
-                { state, synced, problem } = sourceFacts(source);
+                { state, synced, problem, status, site } = sourceFacts(source);
               return (
                 <>
                   {identity.url ? (
@@ -75,20 +76,23 @@ export function TaskInspector({
                     <span className="task-id">{identity.label}</span>
                   )}
                   <p>
-                    Issue {state ?? "state unknown"} ·{" "}
+                    {site && `${site} · `}
+                    Issue {state ?? "state unknown"}
+                    {status && ` (${status})`} ·{" "}
                     {synced
                       ? `synced ${clockLabel(Date.parse(synced))}`
                       : "no successful sync"}
                     {problem && ` · ${problem}`}
                   </p>
                   <p className="muted">
-                    GitHub owns the issue. cab coordinates the work.
+                    {trackerName(source)} owns the issue. cab coordinates the
+                    work.
                   </p>
                 </>
               );
             })()}
             <h5 className="inspector-label">
-              Dependencies · managed in GitHub
+              Dependencies · managed in {trackerName(source)}
             </h5>
             {source.nativeBlockers.length ? (
               <ul className="inspector-rows">
@@ -108,11 +112,16 @@ export function TaskInspector({
                   </li>
                 ))}
               </ul>
+            ) : source.identity.tracker === "jira" ? (
+              <p className="muted">
+                Not read from Jira yet, so this task cannot start.
+              </p>
             ) : (
               <p className="muted">None</p>
             )}
             <p>
-              GitHub commenting {comment.postable ? "permitted" : "unavailable"}
+              {trackerName(source)} commenting{" "}
+              {comment.postable ? "permitted" : "unavailable"}
             </p>
             {comment.sentence && <p className="muted">{comment.sentence}</p>}
           </Group>

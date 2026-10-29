@@ -63,6 +63,14 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
       result.resourceId === `system:code-host-credential:gitlab:${c.host}` &&
       result.configured === (c.credentialRef !== null)
     );
+  if (c.type === "issue-tracker-credential.configure")
+    return (
+      result.commandType === "issue-tracker-credential.configure" &&
+      result.configured === !c.clear &&
+      (!c.instance ||
+        result.resourceId ===
+          `system:issue-tracker-credential:jira:${c.instance}`)
+    );
   if (c.type === "claude-token.configure")
     return (
       result.commandType === "claude-token.configure" &&
@@ -558,10 +566,17 @@ export class ConfigurationDraft {
         result.code === "invalid-input"
           ? result.message
           : undefined;
+      // Jira's own verdict on a rejected query, in the service's words.
+      const jqlRefusal =
+        result.state !== "recorded" &&
+        c.type === "jira.configure" &&
+        result.code === "invalid-input"
+          ? result.message
+          : undefined;
       this.errors = Object.fromEntries(
         fieldPaths.map((p) => [
           p,
-          nameTaken ?? mappingRefusal ?? "Check this field.",
+          nameTaken ?? mappingRefusal ?? jqlRefusal ?? "Check this field.",
         ]),
       );
       this.credentialRefusal =

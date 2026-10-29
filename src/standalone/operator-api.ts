@@ -6619,8 +6619,8 @@ export class OperatorApi {
       );
       if (problem)
         throw new OperatorApiError(
-          409,
-          "conflict",
+          400,
+          "invalid-input",
           [`selections.${index}.jql`],
           undefined,
           problem,
