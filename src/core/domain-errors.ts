@@ -1,3 +1,5 @@
+import type { RepositoryVerificationReason } from "./github-source.js";
+
 export class DomainConflictError extends Error {
   constructor(message: string) {
     super(message);
@@ -46,6 +48,33 @@ export class ProjectNameTakenError extends DomainPolicyError {
   constructor(readonly existingName: string) {
     super("invalid-input", "Another project has this name", ["name"]);
     this.name = "ProjectNameTakenError";
+  }
+}
+
+const verificationRefusals: Record<RepositoryVerificationReason, string> = {
+  "path-invalid": "the path is not an absolute directory path",
+  "not-checkout": "the path is not a Git checkout",
+  "origin-missing": "the checkout has no origin remote",
+  "origin-provider":
+    "the origin remote is not a project on the configured host",
+  "origin-mismatch": "the origin remote is a different project than configured",
+  "ref-unavailable": "the ref does not name a commit in the checkout",
+};
+
+/** A linked checkout failed verification; the message names the row and reason, never a path. */
+export class RepositoryVerificationRefusedError extends DomainPolicyError {
+  constructor(
+    readonly reason: RepositoryVerificationReason,
+    index: number,
+  ) {
+    super(
+      "invalid-input",
+      `Repository ${index + 1}: ${verificationRefusals[reason]}.`,
+      [
+        `repositories.${index}.${reason === "ref-unavailable" ? "ref" : "path"}`,
+      ],
+    );
+    this.name = "RepositoryVerificationRefusedError";
   }
 }
 

@@ -123,6 +123,52 @@ export class RepositoryVerificationError extends Error {
   }
 }
 const githubSegment = /^[A-Za-z0-9_.-]{1,100}$/;
+/** A GitLab project-path segment; `.` and `..` are excluded separately. */
+const gitLabSegment = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}$/;
+/** A GitLab project path: 2-21 segments, none `.`, `..` or ending in `.git`. */
+export function isGitLabProjectPath(path: string): boolean {
+  const parts = path.split("/");
+  return (
+    parts.length >= 2 &&
+    parts.length <= 21 &&
+    parts.every(
+      (part) =>
+        gitLabSegment.test(part) &&
+        part !== "." &&
+        part !== ".." &&
+        !part.endsWith(".git"),
+    )
+  );
+}
+/** The host, port, scheme and path of a remote URL or scp-style address; never kept. */
+function splitOrigin(url: string): {
+  protocol: string | null;
+  host: string;
+  port: string;
+  path: string;
+} | null {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+    try {
+      const parsed = new URL(url);
+      return {
+        protocol: parsed.protocol,
+        host: parsed.hostname,
+        port: parsed.port,
+        path: decodeURIComponent(parsed.pathname),
+      };
+    } catch {
+      return null;
+    }
+  }
+  const scp = /^(?:[^@/:]+@)?([^/:]+):(.+)$/.exec(url);
+  if (!scp?.[1] || !scp[2]) return null;
+  return { protocol: null, host: scp[1], port: "", path: scp[2] };
+}
+const trimmedOriginPath = (path: string) =>
+  path
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "");
 /**
  * `owner/name` of a `github.com` remote URL, or null for any other host or shape.
  * Userinfo, a trailing `/` and a `.git` suffix are ignored; the URL itself is never returned.
@@ -130,30 +176,16 @@ const githubSegment = /^[A-Za-z0-9_.-]{1,100}$/;
 export function parseGitHubOrigin(
   url: string,
 ): { owner: string; name: string } | null {
-  let host: string, path: string;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return null;
-    }
-    if (!["https:", "ssh:", "git:"].includes(parsed.protocol) || parsed.port)
-      return null;
-    host = parsed.hostname;
-    path = decodeURIComponent(parsed.pathname);
-  } else {
-    const scp = /^(?:[^@/:]+@)?([^/:]+):(.+)$/.exec(url);
-    if (!scp?.[1] || !scp[2]) return null;
-    host = scp[1];
-    path = scp[2];
-  }
-  if (host.toLowerCase() !== "github.com") return null;
-  const parts = path
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "")
-    .replace(/\.git$/i, "")
-    .split("/");
+  const origin = splitOrigin(url);
+  if (
+    !origin ||
+    (origin.protocol !== null &&
+      !["https:", "ssh:", "git:"].includes(origin.protocol)) ||
+    origin.port ||
+    origin.host.toLowerCase() !== "github.com"
+  )
+    return null;
+  const parts = trimmedOriginPath(origin.path).split("/");
   const [owner, name] = parts;
   if (
     parts.length !== 2 ||
@@ -166,10 +198,34 @@ export function parseGitHubOrigin(
     return null;
   return { owner, name };
 }
+/**
+ * The full project path of a remote URL on `host` (compared case-insensitively), or null
+ * for another host or shape. Accepts `https://`, `ssh://` (the only form that may carry a
+ * port, as identity is host and path) and scp-style addresses; the URL is never returned.
+ */
+export function parseGitLabOrigin(url: string, host: string): string | null {
+  const origin = splitOrigin(url);
+  if (
+    !origin ||
+    origin.host.toLowerCase() !== host.toLowerCase() ||
+    !(
+      origin.protocol === null ||
+      origin.protocol === "ssh:" ||
+      (origin.protocol === "https:" && !origin.port)
+    )
+  )
+    return null;
+  const path = trimmedOriginPath(origin.path);
+  return isGitLabProjectPath(path) ? path : null;
+}
+/** The repository identity a checkout's `origin` must match. */
+export type ExpectedOrigin =
+  | { owner: string; name: string }
+  | { codeHost: "gitlab"; host: string; projectPath: string };
 /** Verifies a local checkout; the host supplies the implementation (see `DomainStore`). */
 export type RepositoryVerifier = (
   input: z.output<typeof repositoryLinkSchema>,
-  expectedOrigin?: { owner: string; name: string },
+  expectedOrigin?: ExpectedOrigin,
 ) => Promise<LinkedRepository>;
 
 type Row = Record<string, string | number | null>;

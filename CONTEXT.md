@@ -183,6 +183,8 @@ _Avoid_: Assignment identity when referring only to an execution session
 
 **Task workspace**:
 The working files allocated to a task, retained independently of its conversations.
+A local task's holds the project's repository links; an imported task's holds its source
+repository.
 _Avoid_: Conversation when referring to a task's working files
 
 **Task branch**:

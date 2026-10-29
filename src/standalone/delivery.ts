@@ -139,18 +139,29 @@ export class DeliveryCoordinator {
     private readonly store: DeliveryStore,
     private readonly options: DeliveryCoordinatorOptions,
   ) {}
+  private codeHost(
+    projectId: string,
+    repositoryId: string,
+  ): { codeHost: CodeHost; host: string } {
+    // shortcut: unlinked targets default to GitHub on github.com, replace when the issue-tracker seam (#1317) routes issue writes and GitLab delivery (#1313) refuses unlinked code-host targets
+    return (
+      this.options.codeHostOf?.(projectId, repositoryId) ?? {
+        codeHost: "github",
+        host: "github.com",
+      }
+    );
+  }
   private provider(
     projectId: string,
     repositoryId: string,
     policy = this.store.configuration(projectId),
+    resolved = this.codeHost(projectId, repositoryId),
   ): CodeHostDeliveryProvider {
-    // shortcut: unlinked targets default to GitHub on github.com, replace when the issue-tracker seam (#1317) routes issue writes and GitLab delivery (#1313) refuses unlinked code-host targets
-    const { codeHost, host } = this.options.codeHostOf?.(
-      projectId,
-      repositoryId,
-    ) ?? { codeHost: "github", host: "github.com" };
+    const { codeHost, host } = resolved;
     const factory = this.options.providerFactories?.[codeHost];
     if (factory) return factory(projectId, policy, host);
+    if (codeHost !== "github")
+      throw new Error("Code host delivery unavailable");
     const credential = policy.credentialRef
       ? process.env[policy.credentialRef.slice(4)]
       : undefined;
@@ -309,11 +320,20 @@ export class DeliveryCoordinator {
   ): Promise<DeliveryActionRecord> {
     const caller = record.binding,
       policy = this.store.configuration(caller.projectId);
-    const provider = this.provider(
-      caller.projectId,
-      record.request.action.target.repositoryId,
-      policy,
-    );
+    const target = record.request.action.target.repositoryId,
+      resolved = this.codeHost(caller.projectId, target);
+    // Refused before any provider, preflight or Git transport runs for the target.
+    // GitHub has a built-in provider; any other code host needs an injected factory.
+    if (
+      resolved.codeHost !== "github" &&
+      !this.options.providerFactories?.[resolved.codeHost]
+    )
+      return this.store.recordObservation(record.operationId, {
+        state: "confirmed-failure",
+        reason: "code-host-delivery-unavailable",
+        receipt: null,
+      });
+    const provider = this.provider(caller.projectId, target, policy, resolved);
     const action = record.request.action;
     let publication: PublicationContext | undefined;
     let adoption: AdoptionContext | undefined;

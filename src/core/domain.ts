@@ -17,6 +17,7 @@ import {
   DomainPolicyError,
   DomainStaleDispositionError,
   ProjectNameTakenError,
+  RepositoryVerificationRefusedError,
 } from "./domain-errors.js";
 import { projectNameKey } from "./project-names.js";
 import { StatusMappingStore } from "./status-mapping.js";
@@ -60,6 +61,7 @@ export {
   DomainPolicyError,
   DomainStaleDispositionError,
   ProjectNameTakenError,
+  RepositoryVerificationRefusedError,
   TaskNotOpenError,
 } from "./domain-errors.js";
 
@@ -438,7 +440,22 @@ function legacyDomainPayloadHash(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("hex");
 }
 
-/** Verified checkouts as stored links; only GitHub on github.com is supported. */
+/** A verified checkout as the stored link its command row names. */
+const storedLink = (
+  link: LinkRow,
+  repository: LinkedRepository,
+  projectPath: string | undefined,
+): StoredRepositoryLink =>
+  link.codeHost === "gitlab"
+    ? {
+        ...repository,
+        codeHost: "gitlab",
+        host: link.host,
+        projectPath: projectPath as string,
+      }
+    : { ...repository, codeHost: "github", host: "github.com" };
+
+/** Verified checkouts as stored GitHub links, for the migration and guided setup. */
 const asGitHubLinks = (
   repositories: LinkedRepository[],
 ): StoredRepositoryLink[] =>
@@ -447,6 +464,46 @@ const asGitHubLinks = (
     codeHost: "github",
     host: "github.com",
   }));
+
+type LinkRow = z.output<
+  typeof repositoriesConfigurationCommandSchema
+>["repositories"][number];
+
+/**
+ * The checkout path and GitLab project path of a command row: a row without them keeps
+ * those of the saved link with the same repository ID, and a link never changes code host.
+ */
+function resolvedLink(
+  link: LinkRow,
+  saved: StoredRepositoryLink[],
+  index: number,
+): { path: string | undefined; projectPath: string | undefined } {
+  const kept = saved.find((item) => item.repositoryId === link.repositoryId);
+  const keptSameHost =
+    kept && kept.codeHost === link.codeHost && kept.host === link.host
+      ? kept
+      : undefined;
+  if (link.path === undefined && kept && !keptSameHost)
+    throw new DomainPolicyError(
+      "invalid-input",
+      "A saved repository link cannot change its code host or host",
+      [`repositories.${index}.host`],
+    );
+  const projectPath =
+    link.codeHost === "gitlab"
+      ? (link.projectPath ??
+        (keptSameHost?.codeHost === "gitlab"
+          ? keptSameHost.projectPath
+          : undefined))
+      : undefined;
+  if (link.codeHost === "gitlab" && projectPath === undefined)
+    throw new DomainPolicyError(
+      "invalid-input",
+      "A new GitLab repository link needs its project path",
+      [`repositories.${index}.projectPath`],
+    );
+  return { path: link.path ?? kept?.path, projectPath };
+}
 
 /** Fail closed: the host injects the verifier that touches the filesystem and Git. */
 const unconfiguredVerifier: RepositoryVerifier = () =>
@@ -840,28 +897,61 @@ export class DomainStore {
     this.operator(command);
     const { version, links: saved } = this.repositoryLinks(command.projectId);
     this.version({ version }, command.expectedVersion);
+    const rows = command.repositories.map((link, index) => ({
+      link,
+      index,
+      ...resolvedLink(link, saved, index),
+    }));
+    const seen = new Set<string>();
+    for (const { link, index, projectPath } of rows) {
+      if (link.codeHost !== "gitlab" || projectPath === undefined) continue;
+      const key = `${link.host}/${projectPath.toLowerCase()}`;
+      if (seen.has(key))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "GitLab repositories must be unique",
+          [`repositories.${index}.projectPath`],
+        );
+      seen.add(key);
+    }
     let verified: LinkedRepository[];
     try {
-      verified = await Promise.all(
+      const settled = await Promise.allSettled(
         // Async, so a missing saved path rejects like a failed verification instead of
         // throwing past `Promise.all` and leaving earlier verifications unhandled.
-        command.repositories.map(async (link) => {
-          // A link without `path` keeps the saved path for that repository.
-          const path =
-            link.path ??
-            saved.find((item) => item.repositoryId === link.repositoryId)?.path;
+        rows.map(async ({ link, index, path, projectPath }) => {
           if (path === undefined) throw new Error("No saved repository path");
-          return parseLinkedRepositoryResult(
-            await this.verifyRepository({
-              repositoryId: link.repositoryId,
-              path,
-              ref: link.ref,
-            }),
-          );
+          try {
+            return parseLinkedRepositoryResult(
+              await this.verifyRepository(
+                { repositoryId: link.repositoryId, path, ref: link.ref },
+                link.codeHost === "gitlab" && projectPath !== undefined
+                  ? { codeHost: "gitlab", host: link.host, projectPath }
+                  : undefined,
+              ),
+            );
+          } catch (error) {
+            // GitLab rows name the failing row and reason; GitHub keeps its generic refusal.
+            if (
+              link.codeHost === "gitlab" &&
+              error instanceof RepositoryVerificationError
+            )
+              throw new RepositoryVerificationRefusedError(error.reason, index);
+            throw error;
+          }
         }),
       );
+      // The first failing row in row order is the one reported.
+      verified = settled.map((item) => {
+        if (item.status === "rejected") throw item.reason;
+        return item.value;
+      });
     } catch (error) {
-      if (error instanceof CommandResultValidationError) throw error;
+      if (
+        error instanceof CommandResultValidationError ||
+        error instanceof DomainPolicyError
+      )
+        throw error;
       throw new DomainPolicyError(
         "invalid-input",
         "Repository verification failed",
@@ -2476,14 +2566,23 @@ export class DomainStore {
       }
       case "repositories.configure": {
         this.operator(command);
-        const { version } = this.repositoryLinks(command.projectId);
+        const { version, links: saved } = this.repositoryLinks(
+          command.projectId,
+        );
         this.version({ version }, command.expectedVersion);
         const repositories = verifiedRepositories ?? [];
         if (command.repositories.length !== repositories.length)
           throw new Error(
             "Linked repositories require asynchronous verification",
           );
-        const links = asGitHubLinks(repositories);
+        const links = repositories.map((repository, index) => {
+          const row = command.repositories[index] as LinkRow;
+          return storedLink(
+            row,
+            repository,
+            resolvedLink(row, saved, index).projectPath,
+          );
+        });
         this.db
           .prepare(
             "UPDATE project_repository_links SET version = version + 1, links = ? WHERE projectId = ?",

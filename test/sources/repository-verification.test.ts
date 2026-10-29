@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import { parseGitLabOrigin } from "../../src/core/github-source.js";
 import {
   checkoutOrigin,
   verifiedRepository,
@@ -149,4 +150,79 @@ test("checkoutOrigin reports a missing origin as a verification reason", async (
     checkoutOrigin(bare),
     (e: { reason?: string }) => e.reason === "origin-missing",
   );
+});
+
+test("a GitLab link verifies the origin's host and full project path", async (t) => {
+  const home = await createSetupHome();
+  t.after(() => home.close());
+  const expected = {
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    projectPath: "Group/Sub/Atlas",
+  } as const;
+  const origins: Record<string, string> = {
+    https: "https://gitlab.example.com/group/sub/atlas.git",
+    userinfo: "https://oauth2@GitLab.Example.com/Group/Sub/Atlas/",
+    ssh: "ssh://git@gitlab.example.com:2222/group/sub/atlas.git",
+    scp: "git@gitlab.example.com:group/sub/atlas",
+    other: "https://gitlab.example.com/group/sub/other.git",
+    dotcom: "https://gitlab.com/group/sub/atlas.git",
+    port: "https://gitlab.example.com:8443/group/sub/atlas.git",
+    single: "https://gitlab.example.com/atlas.git",
+  };
+  const dirs: Record<string, string> = {};
+  for (const [name, origin] of Object.entries(origins)) {
+    dirs[name] = join(home.home, "gitlab", name);
+    await checkout(dirs[name], origin);
+  }
+  for (const name of ["https", "userinfo", "ssh", "scp"])
+    assert.equal(
+      await reason(verifiedRepository(link(dirs[name] as string), expected)),
+      "verified",
+      name,
+    );
+  assert.equal(
+    await reason(verifiedRepository(link(dirs.other as string), expected)),
+    "origin-mismatch:group/sub/other",
+  );
+  for (const name of ["dotcom", "port", "single"])
+    assert.equal(
+      await reason(verifiedRepository(link(dirs[name] as string), expected)),
+      "origin-provider",
+      name,
+    );
+  assert.equal(
+    await reason(
+      verifiedRepository(link(dirs.https as string, "nope"), expected),
+    ),
+    "ref-unavailable",
+  );
+  await git(dirs.https as string, "remote", "remove", "origin");
+  assert.equal(
+    await reason(verifiedRepository(link(dirs.https as string), expected)),
+    "origin-missing",
+  );
+});
+
+test("parseGitLabOrigin accepts project URLs on its host and nothing else", () => {
+  const host = "gitlab.example.com";
+  for (const url of [
+    "https://gitlab.example.com/a/b/c.git",
+    "https://user@GITLAB.example.com/a/b/c/",
+    "ssh://git@gitlab.example.com:22/a/b/c.git",
+    "git@gitlab.example.com:a/b/c",
+  ])
+    assert.equal(parseGitLabOrigin(url, host), "a/b/c", url);
+  for (const url of [
+    "http://gitlab.example.com/a/b",
+    "file:///gitlab.example.com/a/b",
+    "https://gitlab.example.com/a/../b",
+    "https://gitlab.example.com/a/.git",
+    "https://gitlab.example.com/a/b.git.git",
+    "https://gitlab.example.com/a/%zz",
+    "https://gitlab.example.com:8443/a/b",
+    "https://other.example.com/a/b",
+    "not a url",
+  ])
+    assert.equal(parseGitLabOrigin(url, host), null, url);
 });

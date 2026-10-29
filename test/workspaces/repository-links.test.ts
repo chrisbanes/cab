@@ -6,8 +6,14 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DomainCommands, DomainStore } from "../../src/core/domain.js";
-import { DomainPolicyError } from "../../src/core/domain-errors.js";
+import {
+  DomainPolicyError,
+  RepositoryVerificationRefusedError,
+} from "../../src/core/domain-errors.js";
+import type { RepositoryVerifier } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
+import { verifiedRepository } from "../../src/standalone/repository-verification.js";
+import { checkout, createSetupHome } from "../fixtures/setup-home.js";
 
 const link = (repositoryId: string, path: string, ref = "main") => ({
   codeHost: "github" as const,
@@ -17,14 +23,22 @@ const link = (repositoryId: string, path: string, ref = "main") => ({
   ref,
 });
 
-function fixture(verify?: (path: string) => void) {
+function fixture(
+  verify?: (path: string) => void,
+  verifier?: RepositoryVerifier,
+) {
   const root = mkdtempSync(join(tmpdir(), "cab-repository-links-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   new Store(db).ensureHost("test");
-  const domain = new DomainStore(db, undefined, async (input) => {
-    verify?.(input.path);
-    return { ...input, gitCommonDirectory: `${input.path}/.git` };
-  });
+  const domain = new DomainStore(
+    db,
+    undefined,
+    verifier ??
+      (async (input) => {
+        verify?.(input.path);
+        return { ...input, gitCommonDirectory: `${input.path}/.git` };
+      }),
+  );
   domain.migrate();
   const projectId = randomUUID();
   domain.execute({
@@ -319,6 +333,108 @@ test("GitHub source configuration refuses links but older recorded commands stil
     assert.deepEqual(f.domain.execute(old), recorded);
     assert.deepEqual(await new DomainCommands(f.domain).execute(old), recorded);
     assert.equal(f.domain.repositoryLinks(f.projectId).version, 2);
+  } finally {
+    f.close();
+  }
+});
+
+const gitlab = (
+  repositoryId: string,
+  path: string | undefined,
+  projectPath: string | undefined,
+  extra: Record<string, unknown> = {},
+) => ({
+  codeHost: "gitlab",
+  host: "gitlab.example.com",
+  repositoryId,
+  ref: "main",
+  ...(path === undefined ? {} : { path }),
+  ...(projectPath === undefined ? {} : { projectPath }),
+  ...extra,
+});
+
+test("GitLab links are recorded with their host and project path, and refused with a specific reason", async (t) => {
+  const home = await createSetupHome();
+  t.after(() => home.close());
+  const hub = join(home.home, "hub");
+  const lab = join(home.home, "lab");
+  const other = join(home.home, "other");
+  await checkout(hub, "https://github.com/acme/atlas.git");
+  await checkout(lab, "git@gitlab.example.com:group/sub/atlas.git");
+  await checkout(other, "https://gitlab.example.com/group/sub/other.git");
+  const f = fixture(undefined, verifiedRepository);
+  try {
+    const saved = await f.configure(1, [
+      link("R_1", hub),
+      gitlab("4242", lab, "Group/Sub/Atlas"),
+    ]);
+    assert.deepEqual(
+      f.domain
+        .repositoryLinks(f.projectId)
+        .links.map((l) => [
+          l.repositoryId,
+          l.codeHost,
+          l.host,
+          "projectPath" in l ? l.projectPath : null,
+        ]),
+      [
+        ["R_1", "github", "github.com", null],
+        ["4242", "gitlab", "gitlab.example.com", "Group/Sub/Atlas"],
+      ],
+    );
+    // Keeping the GitLab link without path or projectPath keeps both.
+    const kept = await f.configure(saved.version, [
+      link("R_1", hub),
+      gitlab("4242", undefined, undefined, { ref: "main" }),
+    ]);
+    assert.deepEqual(kept.repositories[1], saved.repositories[1]);
+
+    const version = kept.version;
+    const unchanged = () =>
+      assert.equal(f.domain.repositoryLinks(f.projectId).version, version);
+    await assert.rejects(
+      f.configure(version, [
+        link("R_1", hub),
+        gitlab("4242", other, "Group/Sub/Atlas"),
+      ]),
+      (error) =>
+        error instanceof RepositoryVerificationRefusedError &&
+        error.reason === "origin-mismatch" &&
+        error.fieldPaths?.[0] === "repositories.1.path" &&
+        !error.message.includes(other),
+    );
+    unchanged();
+    for (const repositories of [
+      [gitlab("4242", lab, "Group/Sub/Atlas", { host: "github.com" })],
+      [gitlab("abc", lab, "Group/Sub/Atlas")],
+      [gitlab("4242", lab, "Group/Sub/Atlas", { codeHost: "github" })],
+      // A kept link cannot change code host or host.
+      [gitlab("R_1", undefined, undefined, { host: "gitlab.example.com" })],
+      // A new GitLab link needs its project path.
+      [gitlab("77", lab, undefined)],
+      // Hosts and project paths are unique ignoring case.
+      [
+        gitlab("1", lab, "Group/Sub/Atlas"),
+        gitlab("2", lab, "group/sub/atlas"),
+      ],
+      // ...including against a kept link, which carries no project path.
+      [
+        gitlab("4242", undefined, undefined),
+        gitlab("77", lab, "group/sub/atlas"),
+      ],
+    ]) {
+      const key = randomUUID();
+      await assert.rejects(
+        async () => f.configure(version, repositories, key),
+        (error) =>
+          error instanceof Error &&
+          (error instanceof DomainPolicyError
+            ? error.code === "invalid-input"
+            : error.name === "ZodError"),
+      );
+      assert.equal(f.domain.recordedResult(f.projectId, key), undefined);
+    }
+    unchanged();
   } finally {
     f.close();
   }

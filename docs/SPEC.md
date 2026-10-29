@@ -45,8 +45,9 @@ select permitted profiles but cannot create profiles or expand project authority
 
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
-items; readiness is separate. Jira Cloud as an issue tracker and GitLab, including
-self-managed instances, as a code host are planned and not implemented
+items; readiness is separate. Jira Cloud as an issue tracker and GitLab delivery,
+including self-managed instances, as a code host are planned and not implemented; a
+project can already link a GitLab checkout
 ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
 a plugin marketplace, multiple execution machines, team/RBAC administration and
 migration of old live runs are outside the first release. Source interfaces follow
@@ -513,8 +514,11 @@ worktree per participating repository per task, shared by assignments with one
 admitted writer generation at a time under the cooperative rule below. Independent
 tasks can proceed concurrently; parallel reviews
 reference a fixed revision. Repository-free tasks need no Git worktree.
-A local task's workspace is created at its first admitted turn. An imported task's
-is created then too, holding only its issue's source repository at the project's
+A local task's workspace is created at its first admitted turn and holds every
+repository link of its project, for every code host, at its configured ref; each is
+verified then, and the turn waits without a workspace if one has changed. A project
+with no links gives a repository-free workspace. An imported task's is created then
+too, holding only its issue's source repository at the project's
 linked path and ref, and only once the turn is otherwise admissible, so a held or
 not-Ready task gets no checkout. An imported task whose source repository the
 project does not link waits, without a workspace, until it is linked.
@@ -802,11 +806,16 @@ there is no `file:` GitHub reference. See the
 
 Settings present each project's repository links and GitHub discovery sources as
 separate sections. Repository links are project configuration, not part of any
-source: each link records its code host and host name (GitHub on `github.com` is the
-only supported pair), and links change through one versioned, receipted
-`repositories.configure` command that verifies every checkout before anything is
-recorded. Saving the GitHub source neither changes nor needs repository links, and
-saving links neither deactivates a selection nor changes the source version.
+source: each link records its code host and host name (GitHub on `github.com`, or
+GitLab on a configured host with the project's full path and numeric ID), and links
+change through one versioned, receipted `repositories.configure` command that
+verifies every checkout before anything is recorded. A GitLab link must also have an
+`origin` remote on its host whose full project path matches, case-insensitively, and
+a refusal names the link and reason without echoing a path or remote. Delivery
+actions that name a GitLab link are refused with `code-host-delivery-unavailable`,
+before any provider or Git transport runs, until GitLab delivery exists. Saving the
+GitHub source neither changes nor needs repository links, and saving links neither
+deactivates a selection nor changes the source version.
 
 An agent profile has a name, an optional short summary, private instructions and
 capabilities. Settings and routing candidate lists show the name with its summary

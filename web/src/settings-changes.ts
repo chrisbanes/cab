@@ -245,6 +245,8 @@ export function repositoryRowsFrom(saved: Repositories) {
   return {
     // `savedRef` remembers the loaded ref, so adoption can tell an edited ref from a stale one.
     repositories: saved.links.map((r) => ({
+      codeHost: r.codeHost,
+      host: r.host,
       repositoryId: r.repositoryId ?? "",
       ref: r.ref ?? "",
       savedRef: r.ref ?? "",
@@ -489,6 +491,8 @@ export function adoptRepositoryRows(saved: Repositories, v: Values) {
         (r) => r.repositoryId,
         (r, latest) => ({
           ...r,
+          codeHost: String(latest.codeHost),
+          host: String(latest.host),
           ref: String(r.ref === r.savedRef ? latest.ref : r.ref),
           savedRef: String(latest.ref),
         }),
@@ -564,10 +568,10 @@ export function repositoryCommand(
     key: v.key,
     projectId,
     expectedVersion: Number(v.expectedVersion),
-    // Only GitHub on github.com is supported.
+    // A saved row keeps its code host and host; a row added in the form is GitHub.
     repositories: live(parseRows(v.repositories)).map((r) => ({
-      codeHost: "github",
-      host: "github.com",
+      codeHost: r.codeHost ?? "github",
+      host: r.host ?? "github.com",
       repositoryId: r.repositoryId,
       ref: r.ref,
       ...(r.keep

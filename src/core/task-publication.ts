@@ -195,7 +195,9 @@ export class TaskPublicationStore {
       ).flatMap((row) =>
         z
           .array(storedRepositoryLinkSchema)
-          .parse(JSON.parse(String(row.links))),
+          .parse(JSON.parse(String(row.links)))
+          // A GitLab link is never a GitHub issue target.
+          .filter((link) => link.codeHost === "github"),
       ),
       policy = new DeliveryStore(this.db).configuration(projectId),
       ready = Number(task.ready) === 1;

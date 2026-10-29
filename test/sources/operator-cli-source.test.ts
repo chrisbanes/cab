@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -10,6 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import {
   repositoryCommand,
   repositoryRowsFrom,
@@ -700,6 +702,85 @@ test("prepare-repositories writes the exact UI command and project get lists the
     "ro",
   ]);
   assert.ok(!sources.out.includes("acme/second"));
+});
+
+test("prepare-repositories links a GitLab checkout and project get shows its code host and host", async (t) => {
+  const w = await world(t);
+  const checkout = await createCheckout(w.s.f.directory, "lab");
+  await promisify(execFile)("git", [
+    "-C",
+    checkout,
+    "remote",
+    "add",
+    "origin",
+    "https://gitlab.example.com/group/sub/atlas.git",
+  ]);
+  const prepare = async (name: string, edit: unknown) => {
+    const out = join(w.h.dir, `${name}.json`);
+    await w.ok("ro", [
+      "project",
+      "prepare-repositories",
+      w.ids.atlas,
+      "--out",
+      out,
+      "--edit-file",
+      w.file(`${name}-edit.json`, JSON.stringify(edit)),
+    ]);
+    return { out, document: JSON.parse(readFileSync(out, "utf8")) };
+  };
+  const lab = {
+    repositoryId: "4242",
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    projectPath: "group/sub/atlas",
+    path: checkout,
+    ref: "main",
+  };
+  const linked = await prepare("gitlab-link", { linkRepositories: [lab] });
+  assert.deepEqual(linked.document.command.repositories[1], lab);
+  assert.deepEqual(linked.document.preview.diff.lines, [
+    "+ Repository access: 4242 · main · GitLab gitlab.example.com",
+  ]);
+  await w.ok("rw", ["project", "apply", "--file", linked.out]);
+  const human = await w.h.run([
+    "project",
+    "get",
+    w.ids.atlas,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /4242 +gitlab +gitlab\.example\.com +main/);
+
+  // A later edit keeps the GitLab link by its saved code host, without a path.
+  const kept = await prepare("gitlab-kept", {
+    setRefs: { "acme/atlas": "HEAD" },
+  });
+  assert.deepEqual(kept.document.command.repositories[1], {
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    repositoryId: "4242",
+    ref: "main",
+  });
+
+  // A GitLab row without its project path is refused before anything is written.
+  const { projectPath: _omit, ...incomplete } = lab;
+  const target = join(w.h.dir, "incomplete.json");
+  const refused = await w.cli("ro", [
+    "project",
+    "prepare-repositories",
+    w.ids.atlas,
+    "--out",
+    target,
+    "--edit-file",
+    w.file(
+      "incomplete-edit.json",
+      JSON.stringify({
+        linkRepositories: [{ ...incomplete, repositoryId: "7" }],
+      }),
+    ),
+  ]);
+  assert.equal(refused.code, 2, refused.out);
+  assert.equal(existsSync(target), false);
 });
 
 test("prepare-repositories refuses bad edits and unlinking everything needs confirmation", async (t) => {

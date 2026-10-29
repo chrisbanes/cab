@@ -267,7 +267,7 @@ export function repositoryLines(c: ProjectConfigurationData) {
   return c.repositories.links.length
     ? c.repositories.links.map(
         (r) =>
-          `${r.repositoryId ?? "Repository unavailable"} · ${r.ref ?? "ref unavailable"} · checkout configured`,
+          `${r.repositoryId ?? "Repository unavailable"} · ${r.ref ?? "ref unavailable"} · checkout configured · ${r.codeHost === "gitlab" ? "GitLab" : "GitHub"} ${r.host}`,
       )
     : ["None · repository-free"];
 }

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
 import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
+import { checkout } from "../fixtures/setup-home.js";
 import { databaseOf } from "../fixtures/service-internals.js";
 import { publicationFixture } from "../fixtures/task-publication.js";
 
@@ -203,6 +205,44 @@ test("the task read reports where a task can be published, the first reason in o
   assert.equal(after?.reasonCode, "task-imported");
   assert.deepEqual(after?.targets, []);
   assert.equal(after?.latest?.state, "converted");
+});
+
+test("a GitLab link is never a GitHub issue target", async (t) => {
+  const { f, api } = await world(t, {
+    selections: ["project"],
+    grants: ["create"],
+  });
+  const lab = join(f.root, "lab");
+  await checkout(lab, "https://gitlab.example.com/group/atlas.git");
+  const domain = f.service.domain();
+  await domain.configureRepositories({
+    type: "repositories.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: domain.repositoryLinks(f.projectId).version,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R1",
+        ref: "main",
+      },
+      {
+        codeHost: "gitlab",
+        host: "gitlab.example.com",
+        repositoryId: "4242",
+        projectPath: "group/atlas",
+        path: lab,
+        ref: "main",
+      },
+    ],
+  });
+  const read = (await api.readTask(f.task(true))).data.publication;
+  assert.deepEqual(
+    read?.targets.map((x) => x.repository),
+    ["R1"],
+  );
 });
 
 test("text the exclusions would change cannot be published", async (t) => {

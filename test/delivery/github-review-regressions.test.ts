@@ -137,7 +137,10 @@ test("persisted GitHub repository bindings and Project field arrays are validate
       '[{"repositoryId":7,"path":false,"ref":null,"gitCommonDirectory":[]}]',
       projectId,
     );
-    assert.throws(() => domain.repositoryLinks(projectId), /Invalid input/);
+    assert.throws(
+      () => domain.repositoryLinks(projectId),
+      /Invalid discriminator value/,
+    );
     db.prepare(
       "UPDATE project_repository_links SET links = '[]' WHERE projectId = ?",
     ).run(projectId);

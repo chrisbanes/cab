@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { DeliveryStore, type DeliveryCaller } from "../../src/core/delivery.js";
+import {
+  type DeliveryCaller,
+  DeliveryStore,
+  type ExternalAction,
+} from "../../src/core/delivery.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
@@ -901,6 +905,142 @@ test("delivery resolves the code-host factory from the target's repository link"
       [projectId, "R1"],
       [projectId, "R2"],
     ]);
+    await coordinator.stop();
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a delivery action naming a GitLab link is refused and nothing is pushed", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "cab-delivery-"));
+  const db = new DatabaseSync(join(directory, "delivery.sqlite"));
+  const projectId = randomUUID(),
+    taskId = randomUUID();
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  domain.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "P",
+    leadProfileId: null,
+  });
+  domain.execute({
+    type: "task.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    taskId,
+    title: "T",
+    outcome: "O",
+  });
+  domain.execute({
+    type: "delivery.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: 1,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: ["R1", "4242"].flatMap((repositoryId) =>
+      (["issue.comment", "branch.push"] as const).map((action) => ({
+        action,
+        repositoryId,
+        mode: "allow" as const,
+      })),
+    ),
+    requiredChecks: [],
+  });
+  const store = new DeliveryStore(db);
+  store.migrate();
+  const calls: string[] = [];
+  const provider: CodeHostDeliveryProvider = {
+    async preflight() {
+      calls.push("preflight");
+      return { nodeId: "I1" };
+    },
+    async performAction() {
+      calls.push("perform");
+      return {
+        state: "confirmed-success",
+        reason: null,
+        receipt: { nodeId: "C1" },
+      };
+    },
+    async inspectAction() {
+      throw new Error("unused");
+    },
+    async inspectPr() {
+      throw new Error("unused");
+    },
+  };
+  const coordinator = new DeliveryCoordinator(store, {
+    providerFactories: {
+      github: () => {
+        calls.push("github");
+        return provider;
+      },
+    },
+    codeHostOf: (_project, repositoryId) =>
+      repositoryId === "4242"
+        ? { codeHost: "gitlab", host: "gitlab.example.com" }
+        : { codeHost: "github", host: "github.com" },
+    verifyPush: async () => {
+      calls.push("verifyPush");
+      return null;
+    },
+    push: async () => {
+      calls.push("push");
+      throw new Error("unused");
+    },
+    authorize: () => {},
+    approved: () => true,
+  });
+  const caller: DeliveryCaller = {
+    projectId,
+    taskId,
+    assignmentId: randomUUID(),
+    taskVersion: 1,
+    assignmentVersion: 1,
+    workId: "w",
+    workRevision: 1,
+    conversationRevision: 1,
+  };
+  const submit = (action: ExternalAction) =>
+    coordinator.submit({ operationId: randomUUID(), action }, caller);
+  try {
+    for (const action of [
+      {
+        kind: "branch.push",
+        target: { repositoryId: "4242" },
+        commitSha: "a".repeat(40),
+      },
+      {
+        kind: "issue.comment",
+        target: { repositoryId: "4242", number: 1, nodeId: "I1" },
+        body: "B",
+      },
+    ] as const) {
+      const refused = await submit(action);
+      assert.equal(refused.state, "confirmed-failure");
+      assert.equal(
+        refused.observation?.reason,
+        "code-host-delivery-unavailable",
+      );
+      assert.equal(refused.observation?.receipt, null);
+    }
+    assert.deepEqual(calls, []);
+    // A GitHub-linked repository in the same coordinator still reaches its factory.
+    const delivered = await submit({
+      kind: "issue.comment",
+      target: { repositoryId: "R1", number: 1, nodeId: "I1" },
+      body: "B",
+    });
+    assert.equal(delivered.state, "confirmed-success");
+    assert.deepEqual(calls, ["github", "preflight", "perform"]);
     await coordinator.stop();
   } finally {
     db.close();

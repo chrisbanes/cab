@@ -42,6 +42,7 @@ import {
   DomainPolicyError,
   type DomainStore,
   ProjectNameTakenError,
+  RepositoryVerificationRefusedError,
   TaskNotOpenError,
 } from "../core/domain.js";
 import {
@@ -442,6 +443,14 @@ function domainApiError(error: unknown): OperatorApiError | undefined {
         : "Another project has this name. Choose a different name.",
     );
   }
+  if (error instanceof RepositoryVerificationRefusedError)
+    return new OperatorApiError(
+      400,
+      "invalid-input",
+      error.fieldPaths,
+      undefined,
+      error.message,
+    );
   if (error instanceof DomainPolicyError)
     return new OperatorApiError(
       error.code === "forbidden" ? 403 : 400,
