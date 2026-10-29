@@ -156,10 +156,28 @@ export class OperatorWebBundle {
         type: mime.js ?? "text/javascript; charset=utf-8",
       });
     }
+    const faviconPath = join(directory, "favicon.svg");
+    const favicon = await lstat(faviconPath).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      },
+    );
+    if (favicon) {
+      if (!favicon.isFile() || favicon.isSymbolicLink())
+        throw Error("Unsafe operator build asset");
+      files.set("/favicon.svg", {
+        body: await readFile(faviconPath),
+        type: "image/svg+xml",
+      });
+    }
     for (const match of html
       .toString("utf8")
       .matchAll(/(?:src|href)="([^"]+)"/g)) {
-      if (!match[1]?.startsWith("/assets/") || !files.has(match[1]))
+      if (
+        (!match[1]?.startsWith("/assets/") && match[1] !== "/favicon.svg") ||
+        !files.has(match[1])
+      )
         throw Error("Operator build references unavailable asset");
       if (match[0].startsWith("href=") && match[1].endsWith(".css"))
         stylesheets.push(match[1]);

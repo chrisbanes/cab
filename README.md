@@ -1,4 +1,4 @@
-![Colourful abstract shapes coming together as an ensemble.](docs/assets/ensemble-hero.png)
+![An amber-lit taxi roof sign reading lowercase cab.](docs/assets/brand/hero.png)
 
 # cab
 

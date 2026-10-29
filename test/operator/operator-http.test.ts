@@ -1,3 +1,4 @@
+import { cabFaviconSvg } from "../../src/operator/brand.js";
 import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
@@ -248,6 +249,14 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     routes.registerSlot("runtime", runtimeRoutes);
     http = new LocalOperatorHttp(ui, auth, { routes });
     assert.equal(await http.start(port), port);
+    // Branding remains public without a web bundle and never mints a login session.
+    for (const method of ["GET", "HEAD", "POST"]) {
+      const icon = await fetch(`${origin}/favicon.svg`, { method });
+      assert.equal(icon.status, method === "POST" ? 405 : 200);
+      assert.equal(icon.headers.get("content-type"), "image/svg+xml");
+      assert.equal(icon.headers.get("set-cookie"), null);
+      assert.equal(await icon.text(), method === "GET" ? cabFaviconSvg : "");
+    }
 
     const privatePaths = [
       "/",

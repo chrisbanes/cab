@@ -1,3 +1,4 @@
+import { cabMarkSvg } from "../../src/operator/brand.js";
 import {
   forwardRef,
   useRef,
@@ -228,6 +229,20 @@ export function ResourceStatus<T>({
   );
 }
 
+/** The adjacent cab label names the brand; the roof-sign artwork is decorative. */
+export function BrandMark() {
+  return (
+    <img
+      className="workspace-mark"
+      src={`data:image/svg+xml,${encodeURIComponent(cabMarkSvg)}`}
+      width="20"
+      height="20"
+      alt=""
+      aria-hidden="true"
+    />
+  );
+}
+
 export function MobileNavigation({
   children,
   open,
@@ -261,6 +276,10 @@ export function MobileNavigation({
         }}
       >
         <SheetHeader>
+          <span className="brand-lockup">
+            <BrandMark />
+            <span>cab</span>
+          </span>
           <SheetTitle className="section-heading">
             Projects and navigation
           </SheetTitle>
@@ -413,6 +432,10 @@ export function TopBar({
 }) {
   return (
     <header className="top-bar">
+      <span className="brand-lockup top-bar-brand">
+        <BrandMark />
+        <span>cab</span>
+      </span>
       {trail.length > 0 ? (
         <nav aria-label="Breadcrumb" className="top-bar-trail metadata">
           <ol>

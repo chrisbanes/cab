@@ -180,8 +180,20 @@ p {
   width: 20px;
   height: 20px;
   flex: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent-fill);
+  display: block;
+}
+
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-weight: var(--weight-medium);
+  flex: none;
+}
+
+.top-bar-brand {
+  padding-right: var(--space-12);
+  border-right: 1px solid var(--line);
 }
 
 .search-work {

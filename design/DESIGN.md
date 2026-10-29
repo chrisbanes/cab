@@ -47,6 +47,15 @@ properties and maps the shadcn names onto them. Keep this table in step with it.
 | `--ok`, `--ok-soft`, `--ok-border` | `#34D399`, emerald 12%, emerald 32% | Completed results, recorded answers, confirmed saves |
 | `--idle`, `--idle-soft`, `--idle-border` | `#A6B0C3`, slate 14%, slate 35% | Waiting, paused, queued, capacity, ready, stopping, stopped, cancelled, provider closed, unknown |
 
+The cab identity is an amber taxi roof sign. Shared shell and sign-in branding
+use the flat 20 × 20px symbol beside a readable cab label; the symbol is decorative.
+The desktop top bar adds the compact lockup before its breadcrumb, separated by
+a hairline. The navigation drawer carries the same identity. The illuminated
+full-word sign belongs to the README hero; the dedicated favicon uses the roof
+silhouette and c without illumination. Amber retains its attention meaning in
+state badges: identity uses silhouette and label, while states use a bordered
+badge with a symbol and a word.
+
 Project identity uses a small square dot per project (Atlas indigo, Relay teal,
 Fieldnotes violet); it is never a state colour.
 

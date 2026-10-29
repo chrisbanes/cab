@@ -24,7 +24,7 @@ test("one guarded listener serves shell and authenticated JSON with rotated CSRF
   await mkdir(join(bundlePath, "assets"), { recursive: true });
   await writeFile(
     join(bundlePath, "index.html"),
-    '<html><link rel="stylesheet" href="/assets/main.css"><script src="/assets/main.js"></script><script type="module" src="/assets/pdf.worker.mjs"></script></html>',
+    '<html><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/main.css"><script src="/assets/main.js"></script><script type="module" src="/assets/pdf.worker.mjs"></script></html>',
   );
   await writeFile(join(bundlePath, "assets/main.js"), 'console.log("static");');
   await writeFile(
@@ -34,6 +34,10 @@ test("one guarded listener serves shell and authenticated JSON with rotated CSRF
   await writeFile(
     join(bundlePath, "assets/main.css"),
     "body { color: white; }",
+  );
+  await writeFile(
+    join(bundlePath, "favicon.svg"),
+    '<svg xmlns="http://www.w3.org/2000/svg"/>',
   );
   const authFile = join(f.directory, "auth");
   await OperatorAuth.initialize(authFile, "fixture-password");
@@ -48,6 +52,7 @@ test("one guarded listener serves shell and authenticated JSON with rotated CSRF
   t.after(() => auth.close());
   const bundle = await OperatorWebBundle.open(bundlePath);
   assert.deepEqual(bundle.stylesheets, ["/assets/main.css"]);
+  assert.equal(bundle.asset("/favicon.svg")?.type, "image/svg+xml");
   const http = new LocalOperatorHttp(
     new LocalOperatorUi(f.service.domain()),
     auth,
@@ -356,6 +361,23 @@ test("bundle denies symlinks, unsupported assets and missing emitted references"
     '<script src="/assets/missing.js"></script>',
   );
   await assert.rejects(OperatorWebBundle.open(path));
+  await writeFile(
+    join(path, "index.html"),
+    '<link rel="icon" href="/favicon.svg">',
+  );
+  await assert.rejects(OperatorWebBundle.open(path));
+  await writeFile(
+    join(path, "favicon.svg"),
+    '<svg xmlns="http://www.w3.org/2000/svg"/>',
+  );
+  assert.equal(
+    (await OperatorWebBundle.open(path)).asset("/favicon.svg")?.type,
+    "image/svg+xml",
+  );
+  await unlink(join(path, "favicon.svg"));
+  await symlink(join(path, "index.html"), join(path, "favicon.svg"));
+  await assert.rejects(OperatorWebBundle.open(path));
+  await unlink(join(path, "favicon.svg"));
   await writeFile(join(path, "index.html"), "<html></html>");
   await writeFile(join(path, "assets/source.map"), "sensitive");
   await assert.rejects(OperatorWebBundle.open(path));
