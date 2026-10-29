@@ -36,15 +36,16 @@ providers. Jira and GitLab are planned and not yet implemented.
   request mergeable, leased to the expected head SHA. On a project that uses merge trains, the
   merge adds the request to the train and stays pending until it merges or drops out. cab
   never sets auto-merge.
-- **Jira Cloud has the same scope as GitHub sources.**
+- **Jira Cloud has the scope of GitHub sources, except issue edit and task publication.**
+  Those two are deferred: on a Jira task they are shown as unavailable with a reason.
   - Selections are JQL queries. Readiness checks status, labels and single-select fields.
     "is blocked by" links are source-owned task dependencies.
   - Status mapping maps each event to a target status. At write time cab uses the single
     available transition to that status and records a skip when none or several apply.
-  - Descriptions are ADF. An issue edit is refused unless the current body converts to
-    Markdown and back without loss.
-  - Publication chooses a Jira project and issue type. A target whose create screen requires
-    other fields is disabled.
+  - Descriptions are ADF and are read as Markdown. When issue edit is added, it is refused
+    unless the current body converts to Markdown and back without loss.
+  - When publication is added, it chooses a Jira project and issue type, and a target whose
+    create screen requires other fields is disabled.
 - **cab proves Jira closure through its own transition.** Change request text carries no
   closing keywords for Jira issues. A transition made by GitLab's Jira integration or by a
   person is an external closure, which holds the task and is reconciled.
