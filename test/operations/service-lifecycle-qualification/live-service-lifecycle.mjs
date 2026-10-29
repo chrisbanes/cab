@@ -433,6 +433,13 @@ async function main() {
     processCommand(jobB.pid).includes(join(b.directory, "node", "bin", "node")),
   );
   const report = evidence.upgradeOutput;
+  // Release B's own start took it: the CLI no longer snapshots.
+  assert.ok(
+    report.snapshot?.startsWith(
+      join(state, "snapshots", `startup.${a.version}-to-${b.version}.`),
+    ),
+    `service-taken snapshot, got ${report.snapshot}`,
+  );
   const verify = cab(b, ["snapshot", "verify", report.snapshot]);
   assert.equal(verify.code, 0, "snapshot verify");
   step("6-upgrade", {

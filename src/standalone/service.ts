@@ -178,6 +178,12 @@ import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
 import { resolveOnPath } from "./executable-path.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
 import {
+  protectBeforeMigration,
+  recordStartedRelease,
+  releaseVersion,
+  type StartupSnapshotOptions,
+} from "./startup-snapshot.js";
+import {
   encodeNativeInputReply,
   nativeEndpointKey,
   type RuntimeUserInputOutcome,
@@ -508,6 +514,8 @@ export interface StandaloneServiceOptions {
   };
   /** Private paths beyond the data directory that failure records redact, such as the operator auth file. */
   failureRedactionPaths?: readonly string[];
+  /** Test-only: the running release, the snapshot directory and failure points of the pre-migration snapshot. */
+  startupSnapshot?: Partial<StartupSnapshotOptions>;
   /** Controlled fixtures may replace the bounded, redacted service diagnostic sink. */
   backgroundDiagnosticSink?: (
     diagnostic: BackgroundFailureDiagnostic,
@@ -830,6 +838,13 @@ export class StandaloneService {
       return value;
     };
     try {
+      // Before the database is opened for writing: an older release's data is
+      // snapshotted and verified under the held owner lock, or startup is refused.
+      const release = this.options.startupSnapshot?.release ?? releaseVersion();
+      const startupState = await protectBeforeMigration(dataDirectory, {
+        ...this.options.startupSnapshot,
+        release,
+      });
       const rawDb = new DatabaseSync(database);
       this.db = rawDb;
       // Created before the pragmas so every close path goes through the facade.
@@ -1502,6 +1517,7 @@ export class StandaloneService {
           ).unref(),
         );
       }
+      recordStartedRelease(dataDirectory, startupState, release);
     } catch (error) {
       generation.accepting = false;
       this.abortRuntimeRestarts();

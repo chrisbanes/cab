@@ -46,7 +46,7 @@ import {
   VERIFY_OPTIONS,
 } from "../../src/cli/service.js";
 import type { CliDeps } from "../../src/cli/types.js";
-import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
+import { createSnapshot } from "../../src/standalone/operations.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { fakeStatusGh } from "../fixtures/fake-status-gh.js";
 import { markedDataDirectory } from "../fixtures/marked-data.js";
@@ -106,7 +106,7 @@ class FakeLaunchd {
   logoutStatus = 200;
   onApi: (path: string) => void = () => {};
   opened: string[] = [];
-  onBootstrap: () => void = () => {};
+  onBootstrap: () => void | Promise<void> = () => {};
   overrides: Partial<ServiceHost> = {};
 
   constructor(
@@ -141,7 +141,7 @@ class FakeLaunchd {
           this.events.push(
             `bootstrap snapshots=${readdirSync(this.snapshots).length}`,
           );
-          this.onBootstrap();
+          await this.onBootstrap();
           if (this.failBootstrap) return { status: 5, stdout: "" };
           const path = args[2] ?? "";
           const pid = this.nextPid++;
@@ -834,8 +834,41 @@ function verifySnapshot(path: string) {
   ).status;
 }
 
-test("upgrade stops, snapshots, re-renders, starts and checks readiness in order", async (t) => {
+/** The state file a service writes into its data directory (src/standalone/startup-snapshot.ts). */
+function writeStartupState(
+  f: { stateDir: string },
+  state: { release: string | null; snapshot?: object },
+) {
+  writeFileSync(
+    join(f.stateDir, "data", "startup-state.json"),
+    JSON.stringify({ format: "cab-startup-state-v1", ...state }),
+    { mode: 0o600 },
+  );
+}
+
+/** Stands in for the service: its first start takes, verifies and records the pre-migration snapshot. */
+function serviceSnapshotsOnStart(
+  f: { stateDir: string; snapshots: string; launchd: FakeLaunchd },
+  from: string,
+  to: string,
+) {
+  f.launchd.onBootstrap = async () => {
+    if (existsSync(join(f.stateDir, "data", "startup-state.json"))) return;
+    const path = join(
+      f.snapshots,
+      `startup.${from}-to-${to}.20260101T000000000Z-0000`,
+    );
+    await createSnapshot(join(f.stateDir, "data"), path);
+    writeStartupState(f, {
+      release: from,
+      snapshot: { from, to, path, verifiedAt: new Date().toISOString() },
+    });
+  };
+}
+
+test("upgrade stops, re-renders, starts and checks readiness in order, reporting the service's snapshot", async (t) => {
   const f = await installed(t);
+  serviceSnapshotsOnStart(f, "0.1.0", "0.2.0");
   const oldLogs = f.record().configuration.stdoutPath;
   const result = await f.upgrade();
   assert.equal(result.code, 0, result.stderr);
@@ -843,7 +876,7 @@ test("upgrade stops, snapshots, re-renders, starts and checks readiness in order
     "readiness", // Preflight read while the old job still runs.
     "bootout",
     "exited",
-    "bootstrap snapshots=1",
+    "bootstrap snapshots=0", // The CLI took none: the service does when it starts.
     "readiness",
   ]);
   const { report } = result;
@@ -856,10 +889,7 @@ test("upgrade stops, snapshots, re-renders, starts and checks readiness in order
     { id: "codex-login", status: "pass" },
     { id: "claude-token", status: "not-configured" },
   ]);
-  assert.match(
-    basename(report.snapshot),
-    /^local\.cab\.test\.0\.1\.0-to-0\.2\.0\.\d{8}T\d{6}Z$/,
-  );
+  assert.match(basename(report.snapshot), /^startup\.0\.1\.0-to-0\.2\.0\./);
   assert.equal(verifySnapshot(report.snapshot), 0);
   assert.equal(f.record().version, "0.2.0");
   assert.equal(f.record().plistSha256, sha256(f.activation));
@@ -874,8 +904,9 @@ test("upgrade stops, snapshots, re-renders, starts and checks readiness in order
   ]);
 });
 
-test("an upgrade failing at start leaves the job stopped with a verified snapshot", async (t) => {
+test("an upgrade failing at start leaves the job stopped and reports the service's snapshot", async (t) => {
   const f = await installed(t);
+  serviceSnapshotsOnStart(f, "0.1.0", "0.2.0");
   f.launchd.failBootstrap = true;
   const result = await f.upgrade();
   assert.equal(result.code, 1);
@@ -893,12 +924,16 @@ test("an upgrade failing at start leaves the job stopped with a verified snapsho
   f.launchd.clock += 60_000;
   const retry = await f.upgrade();
   assert.equal(retry.code, 0, retry.stderr);
+  // The retried start reuses the verified snapshot, and the upgrade still reports it.
+  assert.equal(retry.report.snapshot, report.snapshot);
+  assert.equal(readdirSync(f.snapshots).length, 1);
   assert.equal(f.launchd.jobs.size, 1);
   assert.equal(existsSync(f.activation), true);
 });
 
 test("an upgrade failing readiness boots out the new job and removes the activation", async (t) => {
   const f = await installed(t);
+  serviceSnapshotsOnStart(f, "0.1.0", "0.2.0");
   f.setChecks([{ id: "codex-login", status: "fail" }]);
   const result = await f.upgrade();
   assert.equal(result.code, 1);
@@ -983,21 +1018,48 @@ test("upgrade preflight refuses a credential that cannot read readiness before s
   assert.equal(existsSync(f.activation), true);
 });
 
-test("an upgrade fails at snapshot, job stopped, while another process owns the data", async (t) => {
+test("an upgrade whose service refuses to start without a snapshot reports none and stays stopped", async (t) => {
   const f = await installed(t);
-  const owner = StandaloneDataDirectory.openExclusive(join(f.stateDir, "data"));
-  try {
-    const result = await f.upgrade();
-    assert.equal(result.code, 1);
-    assert.equal(result.report.stage, "snapshot");
-    assert.equal(result.report.jobStopped, true);
-    assert.equal(result.report.snapshot, null);
-    assert.equal(f.launchd.jobs.size, 0);
-    assert.equal(existsSync(f.activation), false);
-    assert.equal(f.record().version, "0.1.0");
-  } finally {
-    owner.close();
-  }
+  f.launchd.failBootstrap = true;
+  const result = await f.upgrade();
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "start");
+  assert.equal(result.report.jobStopped, true);
+  assert.equal(result.report.snapshot, null);
+  assert.equal(f.launchd.jobs.size, 0);
+  assert.deepEqual(readdirSync(f.snapshots), []);
+});
+
+test("an upgrade to the release the service last started reports no snapshot", async (t) => {
+  const f = await installed(t);
+  const stale = join(
+    f.snapshots,
+    "startup.0.1.0-to-0.2.0.20260101T000000000Z-0000",
+  );
+  writeStartupState(f, {
+    release: "0.2.0",
+    snapshot: {
+      from: "0.1.0",
+      to: "0.2.0",
+      path: stale,
+      verifiedAt: new Date().toISOString(),
+    },
+  });
+  const result = await f.upgrade();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.report.snapshot, null);
+});
+
+test("upgrade refuses an older release before stopping anything", async (t) => {
+  const f = await installed(t);
+  const older = release(f.stateDir, "0.0.9");
+  const result = await f.upgrade(older);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "preflight");
+  assert.equal(result.report.jobStopped, null);
+  assert.match(result.report.error, /runs 0\.1\.0, newer than 0\.0\.9/);
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.equal(f.launchd.jobs.size, 1);
 });
 
 test("upgrade preflight refuses an unowned activation or an invalid record", async (t) => {
@@ -1147,7 +1209,7 @@ test("an interrupt during the stop poll still confirms the exit before failing",
   };
   const result = await f.upgrade(f.releaseB, interrupt.signal);
   assert.equal(result.code, 1);
-  assert.equal(result.report.stage, "snapshot");
+  assert.equal(result.report.stage, "render");
   assert.equal(result.report.error, "interrupted");
   assert.equal(result.report.jobStopped, true);
   assert.equal(polls, 3);
@@ -1291,7 +1353,7 @@ test("upgrade keeps, changes and clears the recorded diagnostic values", async (
   assert.equal(environment(f.activation)[STORAGE], "256");
   assert.equal(f.record().configuration.diagnosticRetentionDays, 7);
 
-  // The same release directory is the reload route; advance past the snapshot stamp.
+  // The same release directory is the reload route; advance past the log stamp.
   f.launchd.clock += 60_000;
   result = await f.upgrade(f.releaseB, undefined, { retentionDays: null });
   assert.equal(result.code, 0, result.stderr);
@@ -1315,12 +1377,12 @@ test("upgrade to the installed release re-renders a changed value through every 
     "readiness",
     "bootout",
     "exited",
-    "bootstrap snapshots=1",
+    "bootstrap snapshots=0",
     "readiness",
   ]);
   assert.equal(environment(f.activation)[RETENTION], "90");
   assert.equal(f.record().version, "0.1.0");
-  assert.equal(verifySnapshot(result.report.snapshot), 0);
+  assert.equal(result.report.snapshot, null);
 });
 
 test("service install, upgrade and uninstall validate diagnostic options before acting", async (t) => {

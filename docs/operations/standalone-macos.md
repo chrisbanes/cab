@@ -145,21 +145,21 @@ describes, and loads the connection's token (`--connection`,
 `CAB_CONNECTION` or the default connection), which must be for the
 installed origin. It also makes one readiness read with that token while the old
 job still runs, and refuses if the read fails (an expired or revoked token, or one
-without `diagnostics.read`). It then runs these stages:
+without `diagnostics.read`), and it refuses a target older than the installed
+release. It then runs these stages:
 
 1. `stop`: boots out the job and confirms that its process exited, within 30
    seconds.
-2. `snapshot`: writes `STATE/snapshots/<label>.<from>-to-<to>.<UTC time>` and
-   verifies it. The data directory's owner lock refuses if any process still
-   holds the data.
-3. `render`: renders, lints and records the new plist, with new log files.
-4. `start`: `launchctl bootstrap`.
-5. `health`: waits up to 120 seconds for `/app`.
-6. `readiness`: reads readiness until no check reports Fail, for up to 120
+2. `render`: renders, lints and records the new plist, with new log files.
+3. `start`: `launchctl bootstrap`. The starting service takes and verifies the
+   [startup snapshot](#startup-snapshot) before it migrates, or refuses to start.
+4. `health`: waits up to 120 seconds for `/app`.
+5. `readiness`: reads readiness until no check reports Fail, for up to 120
    seconds. Not configured is accepted, so an unused GitHub discovery or Claude
    does not block it. The identity check confirms the same installation.
 
-On success it prints the version, snapshot, log paths and each readiness
+On success it prints the version, the startup snapshot (null when this start
+needed none, as when it reloads the release that last started), log paths and each readiness
 status. On a failure from `stop` onward it leaves the job stopped: it boots out
 the new job if it started, with its exit confirmed, and removes the LaunchAgent
 so nothing starts at login. It keeps the install record and prints
@@ -168,7 +168,7 @@ so nothing starts at login. It keeps the install record and prints
 no rollback command. Recover by running `upgrade` again, with a fixed release or
 the same one once the cause is fixed, or restore the reported snapshot (see
 [Offline snapshot and restore](#offline-snapshot-and-restore)). An older release
-refuses a newer database schema, so going back to an older release needs that
+refuses data a newer release started, so going back to an older release needs that
 restore.
 
 Upgrade refuses a [LaunchDaemon](#launchdaemon-mode) install at its first check,
@@ -240,8 +240,8 @@ outside `STATE`, with any missing parents), and writes the staged plist and the 
 record in `STATE/launchd`; it also creates `STATE/auth/operator-auth.json` when that file
 is missing (after the password prompt) and, with a TARBALL, `STATE` itself (mode `0700`,
 with any missing parents) and the unpacked `STATE/versions/<version>`. It creates no
-`STATE/snapshots` (a daemon takes no snapshot, and the LaunchAgent flow creates that
-directory when it needs it). Transient files (`STATE/.<label>.lock`, a staging directory in
+`STATE/snapshots` (the LaunchAgent flow creates it; a daemon's first start against older
+data creates it, owned by the service account). Transient files (`STATE/.<label>.lock`, a staging directory in
 `STATE/launchd`, the record's temporary file) are removed again. It creates no
 LaunchAgents directory and writes nothing under `/Library` or `/Library/LaunchDaemons`.
 launchd, not cab, creates the log files, as the daemon account; that ownership is
@@ -817,7 +817,7 @@ LaunchAgent environment and recorded, so a later upgrade keeps it unless an
 option changes it; `default` removes the variable and the service default
 applies. An out-of-range value is refused before anything changes. To change a
 value on an installed service, run `service upgrade` with the installed release
-directory and the new option: it stops the job, takes a verified snapshot,
+directory and the new option: it stops the job,
 re-renders the plist, restarts the job and checks readiness. A hand-edited
 plist is unsupported: upgrade refuses an activation that no longer matches its
 recorded hash. A release built before these options rejects an install record
@@ -829,9 +829,34 @@ filesystem. Pruning deletes payload items only and keeps per-execution gap
 counts. There is no manual purge, and older snapshots keep any payloads they
 held until those snapshots are deleted.
 
+## Startup snapshot
+
+Whenever the service starts against an existing database that an older release last
+started, or that no release recorded, it takes and verifies an offline snapshot
+before anything migrates, while it holds the data directory's exclusive owner lock.
+The snapshot is `STATE/snapshots/startup.<from>-to-<to>.<UTC time>-<id>`, in a
+private directory beside the data directory (`0700`, owned by the service account;
+the service creates it and refuses to start if it is anything else). If creating or
+verifying the snapshot fails, the service refuses to start and the database stays
+unmigrated; a partial snapshot is never reused or deleted, and the next start takes a
+new one. `STATE/data/startup-state.json` records the release that last completed
+startup and the verified snapshot for the latest release change, so repeated or
+interrupted starts reuse that snapshot rather than taking another. The same applies
+to a LaunchDaemon. A fresh data directory takes no snapshot. A directory restored
+from a snapshot has no recorded release, so its first start takes one more.
+
+The release is the package version and compares by semantic-version precedence:
+builds of one version take no snapshot of each other's data. A service refuses to
+start, before it writes anything, on a database that a newer release last started or
+whose schema it does not support. The refusal reaches the launchd log as a
+`StartupRefusedError` with a stable `code` (`startup-release-newer`,
+`startup-schema-newer`, `startup-snapshot-failed`, `startup-snapshot-directory`,
+`startup-state-invalid`, `startup-database-invalid`), and `service upgrade` reports
+the stage and logs, so a refusal is readable with no service endpoint running.
+
 ## Offline snapshot and restore
 
-`service upgrade` takes and verifies a snapshot itself. For a separate backup,
+For a separate backup,
 stop the job with `launchctl bootout "gui/$(id -u)/local.cab.service"`,
 wait for its process to exit, and confirm the label is absent (`launchctl print`
 fails). Then back up to a new snapshot directory and verify it before relying on

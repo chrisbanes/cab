@@ -68,8 +68,9 @@ Service uninstall keeps data, auth and snapshots; reinstall finds retained state
 Migrations remain forward-only with the fix-forward recovery boundary in
 [ADR-1011](adr/1011-packaging-and-distribution.md).
 
-These are target requirements: npm publishing, the npm service lifecycle and
-startup snapshots are not yet implemented or qualified. The existing bundled-Node
+Service startup takes and verifies the offline snapshot before migrating (see
+[ADR-1011](adr/1011-packaging-and-distribution.md)). These are target requirements:
+npm publishing and the npm service lifecycle are not yet implemented or qualified. The existing bundled-Node
 tarball is an optional channel. The desktop app and Homebrew channel are deferred
 ([ADR-1019](adr/1019-mac-app-channel.md)) and do not gate the npm release.
 
@@ -487,8 +488,10 @@ is promised exactly-once effects.
 
 `cab snapshot create|verify|restore` provides generic standalone SQLite snapshot,
 verification and restore. `cab service install|upgrade|uninstall` manages a
-per-user LaunchAgent bound to an unpacked release: upgrade stops the job, takes and
-verifies a snapshot, then starts the new release and checks readiness; a failed
+per-user LaunchAgent bound to an unpacked release: upgrade stops the job, then starts
+the new release and checks readiness; the service takes and verifies a snapshot
+before it migrates data an older release wrote, and refuses to start if it cannot.
+Upgrade refuses a release older than the installed one. A failed
 upgrade leaves the job stopped with no automatic rollback. `service install --mode daemon`
 is the opt-in route to starting at boot before login: it prepares a LaunchDaemon that
 runs as the service account, never as root, and prints the `sudo` commands that install
