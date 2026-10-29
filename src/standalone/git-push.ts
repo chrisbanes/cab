@@ -61,9 +61,9 @@ export function transportUsername(
     return isGitLabProjectPath(nameWithOwner) ? "oauth2" : null;
   return repositoryPath.test(nameWithOwner) ? "x-access-token" : null;
 }
-// shortcut: no port in host, upgrade if a self-managed host needs one
+// shortcut: no port in host, upgrade if a self-managed host needs one. One label is allowed, as in gitLabHostSchema.
 export const hostName =
-  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const bounds = {
   timeoutMs: 120_000,
   terminationGraceMs: 5_000,

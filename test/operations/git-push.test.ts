@@ -390,6 +390,16 @@ test("a GitLab push rejects paths GitLab and Git would read differently", async 
       "not-attempted",
       nameWithOwner,
     );
+  // A self-managed host may be a single label, as repository links allow.
+  assert.equal(
+    await pushTaskCommit({
+      ...request(repo, shim(t).executable),
+      host: "gitlab",
+      codeHost: "gitlab",
+      nameWithOwner: "group/sub/app",
+    }),
+    "pushed",
+  );
   // GitHub keeps its two-segment rule when no code host is given.
   assert.equal(
     await pushTaskCommit({
