@@ -5227,7 +5227,8 @@ export class OperatorApi {
       omittedActionCount: Math.max(0, v.actions.length - 128),
       branches: v.branches.slice(0, 20).map((r) => ({
         repositoryName:
-          source?.identity.repositoryId === r.repositoryId
+          source?.identity.repositoryId === r.repositoryId &&
+          !source.identity.tracker
             ? (source.repositoryName ?? r.repositoryId)
             : r.repositoryId,
         branch: this.safe(r.branch, excluded),
@@ -5812,16 +5813,7 @@ export class OperatorApi {
         commandNetworkAccess: d.commandNetworkAccess(projectId),
         placements: [
           this.service.githubSources(),
-          ...d
-            .projects()
-            .flatMap((x) => d.jiraConfiguration(String(x.id)) ?? [])
-            .map((j) => j.instance)
-            .filter((v, i, all) => all.indexOf(v) === i)
-            .map((instance) =>
-              this.service
-                .githubSources()
-                .forTracker({ provider: "jira", instance }),
-            ),
+          ...this.service.githubSources().jiraStores(),
         ]
           .flatMap((store) => store.conflicts())
           .filter((c) => c.projectIds.includes(projectId))

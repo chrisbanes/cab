@@ -147,5 +147,9 @@ test("no status, failure or exclusion output carries the email or token", async 
   }
   const excluded = jiraCredentialExclusions([refs], env);
   assert.deepEqual(excluded.names.sort(), Object.keys(env).sort());
-  assert.deepEqual(excluded.values.sort(), Object.values(env).sort());
+  // The site address is the task link, not a secret: only the email and token values.
+  assert.deepEqual(
+    excluded.values.sort(),
+    [env.FIXTURE_JIRA_EMAIL, env.FIXTURE_JIRA_TOKEN].sort(),
+  );
 });

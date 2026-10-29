@@ -126,7 +126,7 @@ test("the Jira site, email and token reach no runtime, Claude turn, helper child
     for (const secret of [
       `env:${name}`,
       name,
-      name === "FIXTURE_JX_SITE" ? name : (process.env[name] ?? ""),
+      ...(name === "FIXTURE_JX_SITE" ? [] : [process.env[name] ?? ""]),
     ])
       assert.ok(redactions.includes(secret), `redaction ${secret}`);
 
@@ -164,9 +164,21 @@ test("the Jira site, email and token reach no runtime, Claude turn, helper child
     );
   }
 
-  // The site address is the task's link, not a secret: it leaves child environments but is
-  // not a redaction, so imported text that links to its own site stays readable.
+  // The site address is the task's link, not a secret: its variable name leaves child
+  // environments, but text that links to its own site stays readable.
+  const linked = randomUUID();
+  execute({
+    type: "task.create",
+    projectId,
+    taskId: linked,
+    title: "Links https://jx-canary.atlassian.net/browse/ABC-1 here",
+    outcome: "See https://jx-canary.atlassian.net/browse/ABC-1",
+    ready: false,
+  });
+  const readable = JSON.stringify((await api.readReview(linked)).data);
+  assert.ok(readable.includes("https://jx-canary.atlassian.net/browse/ABC-1"));
   const exclusions = service.providerCredentialExclusions();
-  assert.ok(exclusions.values.includes(env.FIXTURE_JX_SITE));
+  assert.equal(exclusions.values.includes(env.FIXTURE_JX_SITE), false);
+  assert.ok(exclusions.names.includes("FIXTURE_JX_SITE"));
   assert.equal(exclusions.redactions.includes(env.FIXTURE_JX_SITE), false);
 });

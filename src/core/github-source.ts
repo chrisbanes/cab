@@ -272,6 +272,20 @@ export class GitHubSourceStore {
     private readonly tracker: SourceTracker = githubIssueTracker,
   ) {}
 
+  /** One store per Jira site that has a source or imported items. */
+  jiraStores(): GitHubSourceStore[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT instance FROM external_items WHERE provider = 'jira'
+           UNION SELECT instance FROM project_task_sources WHERE provider = 'jira'`,
+        )
+        .all() as Row[]
+    ).map((row) =>
+      this.forTracker({ provider: "jira", instance: String(row.instance) }),
+    );
+  }
+
   /** The store bound to another issue tracker over the same database. */
   forTracker(tracker: SourceTracker): GitHubSourceStore {
     return new GitHubSourceStore(this.db, tracker);

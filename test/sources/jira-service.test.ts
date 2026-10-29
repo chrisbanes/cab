@@ -386,3 +386,37 @@ test("switching a project that has imported tasks between trackers is refused bo
   );
   assert.equal(f.service.domain().jiraConfiguration(githubProject), null);
 });
+
+test("a Jira issue matched in two projects on one site offers a placement choice", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  f.state.issues["project = ABC"] = [jiraIssue(1)];
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }]);
+  const second = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: second,
+    name: "Beta",
+    leadProfileId: null,
+  });
+  await f.api.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId: second,
+    expectedVersion: 1,
+    instance: site,
+    selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
+  });
+  await f.api.refreshSources();
+  for (const projectId of [f.projectId, second]) {
+    const { placements } = (await f.api.readProjectConfiguration(projectId))
+      .data;
+    assert.equal(placements.length, 1);
+    assert.deepEqual(
+      placements[0]?.choices.map((c) => c.id).sort(),
+      [f.projectId, second].sort(),
+    );
+  }
+});
