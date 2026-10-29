@@ -11,6 +11,7 @@ import {
 import {
   discoveryCredentialReference,
   gitLabCredentialReference,
+  jiraCredentialReferencesSchema,
   glabReferenceMatchesHost,
 } from "./credential-reference.js";
 import { DeliveryStore, deliveryPolicySchema } from "./delivery.js";
@@ -49,6 +50,9 @@ import {
 import {
   closedIssuesSchema,
   githubIssueTracker,
+  jiraConfigurationSchema,
+  jiraInstanceSchema,
+  jiraSelectionSchema,
 } from "./github-source-contracts.js";
 import {
   gitLabHostSchema,
@@ -229,6 +233,15 @@ const commandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...commandBase,
+      type: z.literal("jira.configure"),
+      projectId: id,
+      expectedVersion: z.number().int().positive(),
+      ...jiraConfigurationSchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...commandBase,
       type: z.literal("repositories.configure"),
       projectId: id,
       expectedVersion: z.number().int().positive(),
@@ -361,6 +374,16 @@ const commandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...commandBase,
+      type: z.literal("issue-tracker-credential.configure"),
+      issueTracker: z.literal("jira"),
+      instance: jiraInstanceSchema,
+      /** `null` removes the site's credential. */
+      credential: jiraCredentialReferencesSchema.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      ...commandBase,
       type: z.literal("claude-token.configure"),
       /** `env:NAME`, or `file:` and an absolute path with no empty, `.` or `..` segment. */
       credentialRef: z
@@ -442,13 +465,15 @@ function scopeOf(command: ParsedCommand): string {
         ? "system:discovery"
         : command.type === "code-host-credential.configure"
           ? `system:code-host-credential:${command.codeHost}:${command.host}`
-          : command.type === "claude-token.configure"
-            ? "system:claude-token"
-            : command.type === "getting-started.configure"
-              ? "system:getting-started"
-              : command.type === "runtime.configure"
-                ? `system:runtime:${command.harness}`
-                : "system:capacity";
+          : command.type === "issue-tracker-credential.configure"
+            ? `system:issue-tracker-credential:${command.issueTracker}:${command.instance}`
+            : command.type === "claude-token.configure"
+              ? "system:claude-token"
+              : command.type === "getting-started.configure"
+                ? "system:getting-started"
+                : command.type === "runtime.configure"
+                  ? `system:runtime:${command.harness}`
+                  : "system:capacity";
 }
 
 function canonical(value: unknown): string {
@@ -650,6 +675,11 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS installation_code_host_credentials (
           codeHost TEXT NOT NULL CHECK(codeHost = 'gitlab'), host TEXT NOT NULL,
           credentialRef TEXT NOT NULL, PRIMARY KEY(codeHost, host)
+        );
+        CREATE TABLE IF NOT EXISTS installation_issue_tracker_credentials (
+          issueTracker TEXT NOT NULL CHECK(issueTracker = 'jira'), instance TEXT NOT NULL,
+          siteRef TEXT NOT NULL, emailRef TEXT NOT NULL, tokenRef TEXT NOT NULL,
+          PRIMARY KEY(issueTracker, instance)
         );
         CREATE TABLE IF NOT EXISTS claude_runtime_credentials (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -1054,6 +1084,29 @@ export class DomainStore {
     }));
   }
 
+  /** Installation-level Jira credential references by site; never their values. */
+  issueTrackerCredentials(): {
+    issueTracker: "jira";
+    instance: string;
+    siteRef: string;
+    emailRef: string;
+    tokenRef: string;
+  }[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT instance, siteRef, emailRef, tokenRef FROM installation_issue_tracker_credentials ORDER BY instance",
+        )
+        .all() as Row[]
+    ).map((row) => ({
+      issueTracker: "jira" as const,
+      instance: String(row.instance),
+      siteRef: String(row.siteRef),
+      emailRef: String(row.emailRef),
+      tokenRef: String(row.tokenRef),
+    }));
+  }
+
   /** The Claude subscription token's `env:NAME` or `file:/path` reference; never its value. */
   claudeTokenReference(): string | null {
     const row = this.one(
@@ -1249,9 +1302,18 @@ export class DomainStore {
   } {
     this.project(projectId);
     const row = this.required(
-      "SELECT version, credentialRef, selections, readiness, closedIssues FROM project_task_sources WHERE projectId = ?",
+      "SELECT provider, version, credentialRef, selections, readiness, closedIssues FROM project_task_sources WHERE projectId = ?",
       id.parse(projectId),
     );
+    // A Jira project has no GitHub view, so GitHub sweeps and callers skip it unchanged.
+    if (row.provider !== githubIssueTracker.provider)
+      return {
+        version: Number(row.version),
+        credentialRef: null,
+        selections: [],
+        readiness: null,
+        closedIssues: "skip",
+      };
     return {
       version: Number(row.version),
       credentialRef:
@@ -1264,6 +1326,42 @@ export class DomainStore {
         .parse(JSON.parse(String(row.readiness))),
       closedIssues: closedIssuesSchema.parse(row.closedIssues),
     };
+  }
+
+  /** The project's Jira site and JQL selections with the source version, or null for another tracker. */
+  jiraConfiguration(projectId: string): {
+    version: number;
+    instance: string;
+    selections: z.output<typeof jiraSelectionSchema>[];
+  } | null {
+    this.project(projectId);
+    const row = this.required(
+      "SELECT provider, instance, version, selections FROM project_task_sources WHERE projectId = ?",
+      id.parse(projectId),
+    );
+    return row.provider === "jira"
+      ? {
+          version: Number(row.version),
+          instance: String(row.instance),
+          selections: z
+            .array(jiraSelectionSchema)
+            .parse(JSON.parse(String(row.selections))),
+        }
+      : null;
+  }
+
+  /** Whether the project's source has selections or imported tasks, so its tracker cannot change. */
+  private sourceInUse(projectId: string): boolean {
+    return (
+      this.required(
+        "SELECT selections FROM project_task_sources WHERE projectId = ?",
+        projectId,
+      ).selections !== "[]" ||
+      this.one(
+        "SELECT 1 AS present FROM imported_tasks i JOIN domain_tasks t ON t.id = i.taskId WHERE t.projectId = ? LIMIT 1",
+        projectId,
+      ) !== undefined
+    );
   }
 
   /** The project's linked repositories with their configuration version; includes paths. */
@@ -2482,6 +2580,20 @@ export class DomainStore {
         this.operator(command);
         const current = this.githubConfiguration(command.projectId);
         this.version({ version: current.version }, command.expectedVersion);
+        // Back to GitHub only from an unused Jira source; the GitHub view of a Jira project is empty.
+        if (this.jiraConfiguration(command.projectId)) {
+          if (this.sourceInUse(command.projectId))
+            throw new DomainConflictError("Issue tracker in use");
+          this.db
+            .prepare(
+              "UPDATE project_task_sources SET provider = ?, instance = ? WHERE projectId = ?",
+            )
+            .run(
+              githubIssueTracker.provider,
+              githubIssueTracker.instance,
+              command.projectId,
+            );
+        }
         const selections = command.selections.map((selection) => {
           if (!("keep" in selection)) return selection;
           const kept = current.selections.find(
@@ -2563,6 +2675,77 @@ export class DomainStore {
           )
           .run(command.projectId);
         return this.githubConfiguration(command.projectId);
+      }
+      case "jira.configure": {
+        this.operator(command);
+        const row = this.required(
+          "SELECT provider, instance, version FROM project_task_sources WHERE projectId = ?",
+          command.projectId,
+        );
+        this.version({ version: Number(row.version) }, command.expectedVersion);
+        if (
+          (row.provider !== "jira" || row.instance !== command.instance) &&
+          this.sourceInUse(command.projectId)
+        )
+          throw new DomainConflictError("Issue tracker in use");
+        if (
+          !this.issueTrackerCredentials().some(
+            (c) => c.instance === command.instance,
+          )
+        )
+          throw new DomainConflictError("Jira site has no credential");
+        this.db
+          .prepare(
+            "UPDATE project_task_sources SET provider = 'jira', instance = ?, version = version + 1, credentialRef = NULL, selections = ?, readiness = 'null', closedIssues = 'skip' WHERE projectId = ?",
+          )
+          .run(
+            command.instance,
+            JSON.stringify(command.selections),
+            command.projectId,
+          );
+        const selectionIds = JSON.stringify(
+          command.selections.map((selection) => selection.id),
+        );
+        const affectedTasks = (
+          this.db
+            .prepare(`SELECT DISTINCT e.taskId FROM source_memberships m
+              JOIN external_items e ON ${sameItem("e", "m")}
+              WHERE m.projectId = ? AND m.selectionId NOT IN (SELECT value FROM json_each(?))`)
+            .all(command.projectId, selectionIds) as Row[]
+        ).map((member) => String(member.taskId));
+        for (const table of ["source_memberships", "source_sync_state"])
+          this.db
+            .prepare(
+              `DELETE FROM ${table} WHERE projectId = ? AND selectionId NOT IN (SELECT value FROM json_each(?))`,
+            )
+            .run(command.projectId, selectionIds);
+        // JQL is validated before the command runs, so every saved selection is active at once.
+        this.db
+          .prepare("DELETE FROM project_active_selections WHERE projectId = ?")
+          .run(command.projectId);
+        for (const selection of command.selections)
+          this.db
+            .prepare(
+              "INSERT INTO project_active_selections (projectId, selectionId, configVersion) VALUES (?, ?, ?)",
+            )
+            .run(command.projectId, selection.id, Number(row.version) + 1);
+        const sources = new GitHubSourceStore(this.db);
+        for (const taskId of affectedTasks) sources.updateReadiness(taskId);
+        this.db
+          .prepare(
+            "UPDATE source_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",
+          )
+          .run(command.projectId);
+        this.db
+          .prepare(
+            "UPDATE domain_tasks SET version = version + 1 WHERE projectId = ? AND id IN (SELECT taskId FROM imported_tasks)",
+          )
+          .run(command.projectId);
+        return {
+          version: Number(row.version) + 1,
+          instance: command.instance,
+          selections: command.selections,
+        };
       }
       case "repositories.configure": {
         this.operator(command);
@@ -2911,6 +3094,29 @@ export class DomainStore {
             .run(command.codeHost, command.host, command.credentialRef);
         // The receipt never carries the reference name.
         return { configured: command.credentialRef !== null };
+      }
+      case "issue-tracker-credential.configure": {
+        this.operator(command);
+        if (command.credential === null)
+          this.db
+            .prepare(
+              "DELETE FROM installation_issue_tracker_credentials WHERE issueTracker = ? AND instance = ?",
+            )
+            .run(command.issueTracker, command.instance);
+        else
+          this.db
+            .prepare(
+              "INSERT INTO installation_issue_tracker_credentials (issueTracker, instance, siteRef, emailRef, tokenRef) VALUES (?, ?, ?, ?, ?) ON CONFLICT(issueTracker, instance) DO UPDATE SET siteRef = excluded.siteRef, emailRef = excluded.emailRef, tokenRef = excluded.tokenRef",
+            )
+            .run(
+              command.issueTracker,
+              command.instance,
+              command.credential.siteRef,
+              command.credential.emailRef,
+              command.credential.tokenRef,
+            );
+        // The receipt never carries a reference name.
+        return { configured: command.credential !== null };
       }
       case "claude-token.configure": {
         this.operator(command);

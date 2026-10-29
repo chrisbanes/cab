@@ -1306,7 +1306,7 @@ test("mounted reference and placement fields have unique associated controls", a
   d.markImportedTask(second, "I_SECOND", "R_SECOND");
   f.seedPersistedState((db) => {
     db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I_SECOND',?,'R_SECOND','owner/repo',2,'Second','Body','open','[]')",
+      "INSERT INTO external_items VALUES ('github','github.com','I_SECOND',?,'R_SECOND','owner/repo',2,'Second','Body','open','[]',NULL)",
     ).run(second);
     for (const projectId of [ids.projectId, target])
       db.prepare(

@@ -78,13 +78,13 @@ export class TaskReviewStore {
           else {
             const observed = this.db
               .prepare(
-                "SELECT observedTitle,observedBody FROM external_items WHERE taskId=?",
+                "SELECT provider,observedTitle,observedBody FROM external_items WHERE taskId=?",
               )
               .get(taskId) as Row | undefined;
             if (observed)
               this.captureSourceWithSnapshot(
                 taskId,
-                "github",
+                observed.provider === "jira" ? "jira" : "github",
                 {
                   title: String(observed.observedTitle),
                   body: String(observed.observedBody),
@@ -247,6 +247,26 @@ export class TaskReviewStore {
           )
           .all() as Row[]),
       );
+    // Installation Jira credentials: the site, email and token variables.
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE name='installation_issue_tracker_credentials'",
+        )
+        .get()
+    )
+      for (const row of this.db
+        .prepare(
+          "SELECT siteRef, emailRef, tokenRef FROM installation_issue_tracker_credentials",
+        )
+        .all() as Row[]) {
+        // The site address is not secret and appears in imported text; only its names are excluded.
+        excluded.push(String(row.siteRef), String(row.siteRef).slice(4));
+        refs.push(
+          { credentialRef: row.emailRef ?? null },
+          { credentialRef: row.tokenRef ?? null },
+        );
+      }
     for (const ref of refs) {
       // A `gh:` or `glab:` reference has no variable; its token values come from the exclusions below.
       if (/^(?:gh|glab):/.test(String(ref.credentialRef)))
@@ -344,7 +364,7 @@ export class TaskReviewStore {
   captureSources(
     entries: readonly {
       taskId: string;
-      kind: "local" | "github";
+      kind: "local" | "github" | "jira";
       supplied?: { title: string; body: string };
     }[],
   ) {
@@ -361,7 +381,7 @@ export class TaskReviewStore {
   }
   captureSource(
     taskId: string,
-    kind: "local" | "github" = "local",
+    kind: "local" | "github" | "jira" = "local",
     supplied?: { title: string; body: string },
   ) {
     return this.captureSourceWithSnapshot(
@@ -373,7 +393,7 @@ export class TaskReviewStore {
   }
   private captureSourceWithSnapshot(
     taskId: string,
-    kind: "local" | "github" = "local",
+    kind: "local" | "github" | "jira" = "local",
     supplied: { title: string; body: string } | undefined,
     snapshot: { excluded: readonly string[] | undefined },
   ) {

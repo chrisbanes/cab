@@ -9,6 +9,7 @@ import { z } from "zod";
 import { sourceCredentialReference } from "../core/credential-reference.js";
 import {
   closedIssuesSchema,
+  jiraInstanceSchema,
   type Readiness,
   readinessSchema,
   selectionSchema,
@@ -59,7 +60,9 @@ const kindLabel = (kind: string) =>
     ? "Repository"
     : kind === "project"
       ? "GitHub Project"
-      : "Search";
+      : kind === "jql"
+        ? "Jira JQL"
+        : "Search";
 const conditions = (n: number) => `${n} condition${n === 1 ? "" : "s"}`;
 const ruleSummary = (r: Readiness | null) =>
   r ? `${r.mode} of ${conditions(r.conditions.length)}` : "No readiness rule";
@@ -114,7 +117,9 @@ const sourcesCommand: BrowseCommand = {
     if (
       unnamed(source) ||
       source.readiness.kind === "unavailable" ||
-      source.selections.some((s) => s.kind !== "search" && !s.descriptor)
+      source.selections.some(
+        (s) => s.kind !== "search" && s.kind !== "jql" && !s.descriptor,
+      )
     )
       gaps.push("content-unavailable");
     if (observations.some((o) => o.state === "partial"))
@@ -135,15 +140,27 @@ const sourcesCommand: BrowseCommand = {
         keyValues([
           ["Project", id],
           ["Source version", String(source.version)],
+          ...(source.tracker === "jira"
+            ? [
+                ["Issue tracker", `Jira ${source.instance ?? ""}`.trim()] as [
+                  string,
+                  string,
+                ],
+              ]
+            : []),
           [
             "Credential",
-            source.credential?.source === "gh"
-              ? "GitHub CLI"
-              : source.credential?.source === "env"
-                ? "environment variable"
-                : source.credentialConfigured
-                  ? "configured"
-                  : "not configured",
+            source.tracker === "jira"
+              ? source.credentialConfigured
+                ? "Jira site credential configured"
+                : "Jira site credential not configured"
+              : source.credential?.source === "gh"
+                ? "GitHub CLI"
+                : source.credential?.source === "env"
+                  ? "environment variable"
+                  : source.credentialConfigured
+                    ? "configured"
+                    : "not configured",
           ],
           ...(source.credential
             ? [
@@ -189,7 +206,7 @@ const sourcesCommand: BrowseCommand = {
                 return [
                   unavailable(s.id),
                   kindLabel(s.kind),
-                  s.kind === "search"
+                  s.kind === "search" || s.kind === "jql"
                     ? "(query private)"
                     : unavailable(s.descriptor),
                   s.active ? "yes" : "no",
@@ -266,6 +283,16 @@ const editSchema = z
     readiness: readinessSchema.nullable().optional(),
     closedIssues: closedIssuesSchema.optional(),
     credentialRef: sourceCredentialReference.nullable().optional(),
+    /** A Jira project's whole source: its site and JQL selections, which replace the saved ones. */
+    jira: z
+      .object({
+        instance: jiraInstanceSchema,
+        selections: z
+          .array(z.object({ jql: z.string().trim().min(1).max(4096) }).strict())
+          .max(30),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type SourceEdit = z.infer<typeof editSchema>;
@@ -350,6 +377,48 @@ const readEdit = (path: string | undefined) =>
 const duplicates = (values: string[]) =>
   values.filter((v, i) => values.indexOf(v) !== i);
 
+/** The exact `jira.configure` that replaces a project's Jira source, with its preview. */
+function jiraEditCommand(
+  projectId: string,
+  source: Source,
+  jira: NonNullable<SourceEdit["jira"]>,
+) {
+  const selections = jira.selections.map((s, i) => ({
+    id: `S-${i + 1}`,
+    kind: "jql" as const,
+    jql: s.jql,
+  }));
+  const ids = (list: { id: string | null }[]) =>
+    list.map((s) => s.id).join(",") || "none";
+  return {
+    command: {
+      type: "jira.configure",
+      projectId,
+      expectedVersion: source.version,
+      instance: jira.instance,
+      selections,
+    },
+    changes: [
+      {
+        field: "instance",
+        from: source.instance ?? null,
+        to: jira.instance,
+      },
+      {
+        field: "selections",
+        from: ids(source.selections),
+        to: ids(selections),
+      },
+    ] as Change[],
+    // Queries are never shown; Jira checks each new or changed one before anything is saved.
+    diff: selections.map((s) => `${s.id} · Jira JQL (query private) · active`),
+    notes: [
+      "Saving replaces every selection and activates all of them; Jira validates each new or changed JQL first, and a rejected query saves nothing.",
+      "Selections are numbered S-1 onward in the order given. The Jira site's credential must be configured first.",
+    ],
+  };
+}
+
 /** The exact `github.configure` the edit makes of the saved source, with its preview. */
 export function sourceEditCommand(
   projectId: string,
@@ -357,6 +426,17 @@ export function sourceEditCommand(
   edit: SourceEdit,
 ) {
   const bad = (why: string) => new CliError("invalid-input", why);
+  const isJira = source.tracker === "jira";
+  if (edit.jira || isJira) {
+    const { jira, ...others } = edit;
+    if (!jira || Object.keys(others).length)
+      throw bad(
+        isJira
+          ? 'A Jira project\'s source is edited with only "jira": {"instance", "selections"}.'
+          : 'A "jira" edit carries no other key.',
+      );
+    return jiraEditCommand(projectId, source, jira);
+  }
   if (unnamed(source))
     throw new CliError(
       "conflict",
@@ -542,7 +622,10 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
         checkExpected(read.data.source.version, expected);
         const prepared = sourceEditCommand(id, read.data.source, edit);
         return writePrepared(ctx, session, {
-          kind: "github.configure",
+          kind:
+            prepared.command.type === "jira.configure"
+              ? "jira.configure"
+              : "github.configure",
           ...prepared,
           gaps: [],
         });

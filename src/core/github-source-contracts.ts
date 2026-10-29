@@ -40,6 +40,25 @@ export const selectionSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
+/** A Jira Cloud site: a DNS hostname without port or userinfo, stored as the source `instance`. */
+export const jiraInstanceSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253)
+  .regex(
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/,
+  );
+
+/** A Jira Cloud selection: the issues a JQL query matches. */
+export const jiraSelectionSchema = z
+  .object({
+    id: nonempty,
+    kind: z.literal("jql"),
+    jql: z.string().trim().min(1).max(4096),
+  })
+  .strict();
+
 export const readinessConditionSchema = z.discriminatedUnion("kind", [
   z
     .object({
@@ -186,3 +205,19 @@ export type GitHubConfigurationInput = z.input<
   typeof githubConfigurationSchema
 >;
 export type GitHubSelection = z.output<typeof selectionSchema>;
+
+/** A Jira project's whole source configuration: its site and JQL selections, all active when saved. */
+export const jiraConfigurationSchema = z
+  .object({
+    instance: jiraInstanceSchema,
+    selections: z
+      .array(jiraSelectionSchema)
+      .max(30)
+      .refine(
+        (values) =>
+          new Set(values.map((value) => value.id)).size === values.length,
+        "Selection IDs must be unique",
+      ),
+  })
+  .strict();
+export type JiraSelection = z.output<typeof jiraSelectionSchema>;

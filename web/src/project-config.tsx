@@ -56,6 +56,7 @@ import { RepositoryTab } from "./repository-config.js";
 import { SourceTab } from "./source-config.js";
 import { readinessAnchor } from "./observation-counts.js";
 import { SyncTab } from "./sync-placement.js";
+import { JiraSourceTab } from "./jira-source.js";
 
 export interface TabProps extends SettingsProps {
   projectId: string;
@@ -162,14 +163,33 @@ export function ProjectConfiguration(
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
-          ) : tab === "github" ? (
-            <SourceTab
+          ) : tab === "github" && jiraSource(data, p.query) ? (
+            <JiraSourceTab
               {...p}
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
               observations={observations}
             />
+          ) : tab === "github" ? (
+            <>
+              {data.source.selections.length === 0 && (
+                <p className="metadata muted">
+                  <a
+                    href={`/app/projects/${projectId}/settings?tab=github&tracker=jira`}
+                  >
+                    Use Jira Cloud for this project instead
+                  </a>
+                </p>
+              )}
+              <SourceTab
+                {...p}
+                data={data}
+                loadedAt={resource.state.fetchedAt}
+                refreshConfiguration={refreshConfiguration}
+                observations={observations}
+              />
+            </>
           ) : tab === "sync" ? (
             <SyncTab
               {...p}
@@ -189,6 +209,14 @@ export function ProjectConfiguration(
         </>
       )}
     </div>
+  );
+}
+
+/** A Jira project shows the Jira source; an unused GitHub one may switch with `tracker=jira`. */
+function jiraSource(data: ProjectConfigurationData, query: string) {
+  return (
+    data.source.tracker === "jira" ||
+    new URLSearchParams(query).get("tracker") === "jira"
   );
 }
 

@@ -36,6 +36,8 @@ export async function setupJourney(
     readerFactory?: GitHubReaderFactory;
     /** Enable the Claude runtime beside Codex, with a Claude-shaped fake. */
     claude?: boolean;
+    /** A scripted Jira Cloud `fetch`, used by the default Jira reader and credential status. */
+    jiraFetcher?: typeof fetch;
   } = {},
 ) {
   const home = await createSetupHome();
@@ -44,6 +46,9 @@ export async function setupJourney(
   const gh = options.ghExecutable ? { ghExecutable: options.ghExecutable } : {};
   const glab = options.glabExecutable
     ? { glabExecutable: options.glabExecutable }
+    : {};
+  const jira = options.jiraFetcher
+    ? { issueTrackers: { jiraFetcher: options.jiraFetcher } }
     : {};
   const f = await journey.start("fixture.create", () =>
     options.claude
@@ -56,7 +61,7 @@ export async function setupJourney(
             harness === "claude"
               ? new ClaudeShapedFixtureRuntime()
               : new OperatorFixtureRuntime(),
-          { runtimeHarnesses: ["codex", "claude"], ...gh, ...glab },
+          { runtimeHarnesses: ["codex", "claude"], ...gh, ...glab, ...jira },
         )
       : createOperatorFixture(
           null,
@@ -64,7 +69,7 @@ export async function setupJourney(
           undefined,
           journey.fixtureOptions,
           undefined,
-          { ...gh, ...glab },
+          { ...gh, ...glab, ...jira },
         ),
   );
   let browser: Browser | undefined;

@@ -4,6 +4,7 @@ import { credentialFreeEnvironment } from "../core/child-environment.js";
 import type { DomainStore } from "../core/domain.js";
 import { claudeTokenExclusions } from "./claude-token.js";
 import { gitLabCredentialExclusions } from "./glab-credential.js";
+import { jiraCredentialExclusions } from "./jira-credential.js";
 
 export type GhFailureState = "not-installed" | "not-signed-in" | "unreadable";
 /** The detected github.com login; never a token. */
@@ -190,7 +191,14 @@ export function ghEnvironment(
     | "deliveryCredentialReference"
     | "discoveryCredentialReference"
   > &
-    Partial<Pick<DomainStore, "githubConfiguration" | "codeHostCredentials">>,
+    Partial<
+      Pick<
+        DomainStore,
+        | "githubConfiguration"
+        | "codeHostCredentials"
+        | "issueTrackerCredentials"
+      >
+    >,
   options?: { reference: string | null; environment?: NodeJS.ProcessEnv },
 ): NodeJS.ProcessEnv {
   const environment = options?.environment ?? process.env;
@@ -217,6 +225,11 @@ export function ghEnvironment(
     (domain.codeHostCredentials?.() ?? []).map((c) => c.credentialRef),
     environment,
   );
+  // Jira credentials never reach gh: the site, email and token variable names, and the email and token values.
+  const jira = jiraCredentialExclusions(
+    domain.issueTrackerCredentials?.() ?? [],
+    environment,
+  );
   const result = credentialFreeEnvironment(
     environment,
     [
@@ -226,12 +239,14 @@ export function ghEnvironment(
       ...discovery,
       ...gh,
       ...gitlab.names,
+      ...jira.names,
     ],
     environment,
     [
       ...claude.values,
       ...credentialReferenceExclusions(null, environment).values,
       ...gitlab.values,
+      ...jira.values,
     ],
   );
   // Explicit gh selection permits only these current variables, even when another

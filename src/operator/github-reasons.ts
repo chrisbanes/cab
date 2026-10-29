@@ -88,6 +88,7 @@ export const sourceStateSentences: Record<SourceState, string> = {
  * held task are not reasons: an edit does not wait for admission.
  */
 export const issueEditReasonCodes = [
+  "issue-tracker-unsupported",
   "no-source-issue",
   "task-not-open",
   "no-edit-grant",
@@ -103,6 +104,8 @@ export const issueChangedReason = "provider-issue-changed";
 export const projectFieldChangedReason = "provider-project-field-changed";
 
 export const issueEditReasonSentences: Record<IssueEditReasonCode, string> = {
+  "issue-tracker-unsupported":
+    "Improve with lead isn’t available for Jira issues yet.",
   "no-source-issue": "This task isn’t imported from a GitHub issue.",
   "task-not-open": "Improve with lead needs an open task.",
   "no-edit-grant":
@@ -118,6 +121,7 @@ export const issueEditReasonSentences: Record<IssueEditReasonCode, string> = {
 /** Why a local task cannot be published to GitHub at all. */
 export const publicationReasonSentences: Record<PublicationReasonCode, string> =
   {
+    "issue-tracker-unsupported": "cab can’t publish tasks to Jira yet.",
     "task-imported": "This task already is a GitHub issue.",
     "task-not-open": "Only an open task can be published.",
     "task-started":

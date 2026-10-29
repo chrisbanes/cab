@@ -5,6 +5,7 @@ import { z } from "zod";
  * The first reason that applies wins.
  */
 export const publicationReasonCodes = [
+  "issue-tracker-unsupported",
   "task-imported",
   "task-not-open",
   "task-started",

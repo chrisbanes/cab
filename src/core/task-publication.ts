@@ -178,12 +178,16 @@ export class TaskPublicationStore {
     const projectId = String(task.projectId),
       source = this.db
         .prepare(
-          "SELECT selections,readiness FROM project_task_sources WHERE projectId=?",
+          "SELECT provider,selections,readiness FROM project_task_sources WHERE projectId=?",
         )
         .get(projectId) as Row | undefined,
-      selections = source
-        ? z.array(selectionSchema).parse(JSON.parse(String(source.selections)))
-        : [],
+      jira = source !== undefined && source.provider !== "github",
+      selections =
+        source && !jira
+          ? z
+              .array(selectionSchema)
+              .parse(JSON.parse(String(source.selections)))
+          : [],
       readiness = source
         ? readinessSchema.nullable().parse(JSON.parse(String(source.readiness)))
         : null,
@@ -207,21 +211,23 @@ export class TaskPublicationStore {
         "SELECT 1 FROM task_publications WHERE taskId=? AND state='sending'",
       )
       .get(taskId);
-    const reasonCode: PublicationReasonCode | null = task.imported
-      ? "task-imported"
-      : task.state !== "open"
-        ? "task-not-open"
-        : context.started
-          ? "task-started"
-          : task.edges
-            ? "local-dependencies"
-            : sending
-              ? "publication-unresolved"
-              : !selections.length || !linked.length
-                ? "no-github-source"
-                : policy.credentialRef === null
-                  ? "no-delivery-credential"
-                  : null;
+    const reasonCode: PublicationReasonCode | null = jira
+      ? "issue-tracker-unsupported"
+      : task.imported
+        ? "task-imported"
+        : task.state !== "open"
+          ? "task-not-open"
+          : context.started
+            ? "task-started"
+            : task.edges
+              ? "local-dependencies"
+              : sending
+                ? "publication-unresolved"
+                : !selections.length || !linked.length
+                  ? "no-github-source"
+                  : policy.credentialRef === null
+                    ? "no-delivery-credential"
+                    : null;
     const grants = policy.grants;
     const known = (repositoryId: string) =>
       selections.flatMap((s) =>

@@ -2,13 +2,18 @@ import { githubIssueTracker } from "./github-source-contracts.js";
 import { moveLegacyGitHubSourceStorage } from "./github-source-migration.js";
 import type { Database } from "./store.js";
 
-/** Binds an item key to its three columns (`provider`, `instance`, `externalId`). */
-export const itemKey = (externalId: string) =>
-  [githubIssueTracker.provider, githubIssueTracker.instance, externalId] as [
-    string,
-    string,
-    string,
-  ];
+/** An issue tracker's identity: the `provider` and `instance` columns of its items. */
+export type SourceTracker = {
+  readonly provider: string;
+  readonly instance: string;
+};
+
+/** Binds an item key to its three columns (`provider`, `instance`, `externalId`); GitHub unless a tracker is given. */
+export const itemKey = (
+  externalId: string,
+  tracker: SourceTracker = githubIssueTracker,
+) =>
+  [tracker.provider, tracker.instance, externalId] as [string, string, string];
 
 /** SQL selecting one item by `itemKey`; `alias` qualifies the columns. */
 export const itemIs = (alias = "") => {
@@ -55,7 +60,7 @@ export function migrateSourceStorage(db: Database): void {
       taskId TEXT NOT NULL UNIQUE REFERENCES domain_tasks(id), containerId TEXT NOT NULL,
       containerName TEXT NOT NULL, number INTEGER NOT NULL,
       observedTitle TEXT NOT NULL, observedBody TEXT NOT NULL, observedState TEXT NOT NULL,
-      labels TEXT NOT NULL, PRIMARY KEY(provider, instance, externalId)
+      labels TEXT NOT NULL, observedStatus TEXT, PRIMARY KEY(provider, instance, externalId)
     );
     CREATE TABLE IF NOT EXISTS source_memberships (
       projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
@@ -126,6 +131,15 @@ export function migrateSourceStorage(db: Database): void {
       fieldId TEXT NOT NULL, name TEXT NOT NULL, options TEXT NOT NULL,
       PRIMARY KEY(provider, instance, scopeId, fieldId)
     );`);
+  // The tracker's own status as JSON `{id,name,categoryKey}`; NULL for GitHub.
+  if (
+    !(
+      db.prepare("PRAGMA table_info(external_items)").all() as {
+        name: string;
+      }[]
+    ).some((column) => column.name === "observedStatus")
+  )
+    db.exec("ALTER TABLE external_items ADD COLUMN observedStatus TEXT");
   moveLegacyGitHubSourceStorage(db);
 }
 

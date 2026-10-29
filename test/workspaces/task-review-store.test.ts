@@ -522,7 +522,7 @@ test("upgrade atomically populates only missing retained sources and result inde
     f.stores.d.markImportedTask(f.taskId, "imported-node", "repo");
     f.db
       .prepare(
-        "INSERT INTO external_items VALUES('github','github.com','imported-node',?,'repo','owner/repo',7,'Observed imported title','- [ ] Observed imported body','open','[]')",
+        "INSERT INTO external_items VALUES('github','github.com','imported-node',?,'repo','owner/repo',7,'Observed imported title','- [ ] Observed imported body','open','[]',NULL)",
       )
       .run(f.taskId);
     f.db.exec(

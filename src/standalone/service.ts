@@ -183,6 +183,13 @@ import {
 } from "./github-source-credential.js";
 import { projectIssueTracker } from "../core/source-storage.js";
 import { GitHubSynchronizer } from "./github-sync.js";
+import {
+  jiraCredentialExclusions,
+  jiraCredentialStatus,
+  resolveJiraAccess,
+} from "./jira-credential.js";
+import { JiraSourceReader } from "./jira-source.js";
+import { JiraSynchronizer } from "./jira-sync.js";
 import type {
   IssueTracker,
   IssueTrackerReaderFactories,
@@ -498,6 +505,8 @@ export interface StandaloneServiceOptions {
   };
   issueTrackers?: {
     readerFactories?: IssueTrackerReaderFactories;
+    /** Test-only: the `fetch` the default Jira reader and credential status use. */
+    jiraFetcher?: typeof fetch;
     intervalMs?: number;
   };
   routingClient?: RoutingChoiceClient | null;
@@ -581,6 +590,7 @@ interface Started {
   domain: DomainStore;
   githubSources: GitHubSourceStore;
   githubSynchronizer: GitHubSynchronizer;
+  jiraSynchronizer: JiraSynchronizer;
   coordination: CoordinationStore;
   deliveryStore: DeliveryStore;
   deliveryCoordinator: DeliveryCoordinator;
@@ -673,6 +683,7 @@ function providerCredentialExclusions(domain: DomainStore) {
     gitLabCredentialExclusions(
       domain.codeHostCredentials().map((c) => c.credentialRef),
     ),
+    jiraCredentialExclusions(domain.issueTrackerCredentials()),
   ];
   return {
     names: [...new Set(excluded.flatMap((value) => value.names))],
@@ -924,6 +935,15 @@ export class StandaloneService {
           this.sourceReader(() => domain, reference),
         ),
       );
+      const jiraSynchronizer = acquire(
+        "jiraSynchronizer",
+        new JiraSynchronizer(
+          domain,
+          (instance) =>
+            githubSources.forTracker({ provider: "jira", instance }),
+          (instance) => this.jiraReader(() => domain, instance),
+        ),
+      );
       const routingAttempts = new RoutingAttemptStore(db);
       routingAttempts.migrate();
       const schedulerStore = new SchedulerStore(db);
@@ -1099,10 +1119,12 @@ export class StandaloneService {
         },
         issueTrackerOf: (projectId) => {
           const source = projectIssueTracker(db, projectId);
-          // Only GitHub rows exist today; the coordinator refuses a tracker without a writer.
+          // The coordinator refuses a tracker without a writer, which Jira has not.
           return source
             ? {
-                issueTracker: source.provider as IssueTracker,
+                issueTracker: z
+                  .enum(["github", "jira"])
+                  .parse(source.provider) satisfies IssueTracker,
                 instance: source.instance,
               }
             : null;
@@ -1473,6 +1495,7 @@ export class StandaloneService {
         deliveryCoordinator,
       });
       await githubSynchronizer.refresh();
+      await jiraSynchronizer.refresh();
       this.completeSettledProviderClosures({ githubSources, state });
       this.emitSourceHoldNotices({ githubSources, domain, coordination });
       // Nothing is published until provider reconciliation and queued-inbox
@@ -1540,6 +1563,7 @@ export class StandaloneService {
         domain,
         githubSources,
         githubSynchronizer,
+        jiraSynchronizer,
         coordination,
         deliveryStore,
         deliveryCoordinator,
@@ -1609,6 +1633,7 @@ export class StandaloneService {
           await this.acquired?.power?.stop().catch(() => {});
           this.acquired?.supervisor?.cancelObservations();
           await this.acquired?.githubSynchronizer?.stop().catch(() => {});
+          await this.acquired?.jiraSynchronizer?.stop().catch(() => {});
           await this.acquired?.statusMappingWriter?.stop().catch(() => {});
           await this.acquired?.deliveryCoordinator?.stop().catch(() => {});
           // An attempt may be mid-start: let it land in `runtimes` so it is stopped below.
@@ -2410,6 +2435,7 @@ export class StandaloneService {
       scheduler,
       supervisor,
       githubSynchronizer: synchronizer,
+      jiraSynchronizer: jiraSynchronizerStop,
       deliveryCoordinator: delivery,
       statusMappingWriter: statusMapping,
       power,
@@ -2454,6 +2480,9 @@ export class StandaloneService {
     }
 
     await attempt("GitHub synchronization stop", () => synchronizer?.stop());
+    await attempt("Jira synchronization stop", () =>
+      jiraSynchronizerStop?.stop(),
+    );
     await attempt("status mapping stop", () => statusMapping?.stop());
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
@@ -3214,7 +3243,6 @@ export class StandaloneService {
   }
 
   private sourceReader(domain: () => DomainStore, reference: string) {
-    // shortcut: every project reads through the GitHub reader, revisit when #1318 adds a second issue tracker
     return (
       this.options.issueTrackers?.readerFactories?.github?.(reference) ??
       new CredentialGitHubSourceReader(reference, {
@@ -3224,6 +3252,45 @@ export class StandaloneService {
         }),
       })
     );
+  }
+
+  /** The reader of one Jira site; it resolves the site's installation credential on every call. */
+  private jiraReader(domain: () => DomainStore, instance: string) {
+    return (
+      this.options.issueTrackers?.readerFactories?.jira?.(instance) ??
+      new JiraSourceReader(
+        () =>
+          resolveJiraAccess(
+            domain()
+              .issueTrackerCredentials()
+              .find((c) => c.instance === instance),
+          ),
+        this.options.issueTrackers?.jiraFetcher,
+      )
+    );
+  }
+
+  /** Whether each configured Jira site's credential works; never a name or secret. */
+  async jiraCredentialStatuses() {
+    const domain = this.domain();
+    return Promise.all(
+      domain.issueTrackerCredentials().map(async (credential) => ({
+        instance: credential.instance,
+        status: await jiraCredentialStatus(
+          resolveJiraAccess(credential),
+          this.options.issueTrackers?.jiraFetcher,
+        ),
+      })),
+    );
+  }
+
+  /** Jira's verdict on JQL before it is saved: no messages when it is valid. */
+  async jiraJqlErrors(instance: string, jql: string): Promise<string[]> {
+    return this.jiraReader(() => this.domain(), instance).parseJql(jql);
+  }
+
+  async jiraPreview(instance: string, jql: string) {
+    return this.jiraReader(() => this.domain(), instance).preview(jql);
   }
 
   async gitHubSourceCredentialStatus(projectId: string, scope?: GhLoginScope) {
@@ -3582,21 +3649,23 @@ export class StandaloneService {
     })();
     const reasonCode: IssueEditReasonCode | null = !imported
       ? "no-source-issue"
-      : task.state !== "open"
-        ? "task-not-open"
-        : !policy.grants.some(
-              (g) =>
-                g.action === "issue.edit" &&
-                g.repositoryId === String(imported.repositoryId),
-            )
-          ? "no-edit-grant"
-          : !hasLead
-            ? "no-project-lead"
-            : this.delivery().actionBlockers(taskId).length
-              ? "action-unresolved"
-              : policy.credentialRef === null
-                ? "no-delivery-credential"
-                : null;
+      : imported.provider === "jira"
+        ? "issue-tracker-unsupported"
+        : task.state !== "open"
+          ? "task-not-open"
+          : !policy.grants.some(
+                (g) =>
+                  g.action === "issue.edit" &&
+                  g.repositoryId === String(imported.repositoryId),
+              )
+            ? "no-edit-grant"
+            : !hasLead
+              ? "no-project-lead"
+              : this.delivery().actionBlockers(taskId).length
+                ? "action-unresolved"
+                : policy.credentialRef === null
+                  ? "no-delivery-credential"
+                  : null;
     return { available: reasonCode === null, reasonCode };
   }
   /** Sends the reviewed edit exactly as reviewed; the review's key is its operation id. */
@@ -3849,6 +3918,7 @@ export class StandaloneService {
     await started.publicationDriver.advanceAll();
     await this.reconcileOwnDeliveryClosures(started);
     await started.githubSynchronizer.refresh();
+    await started.jiraSynchronizer.refresh();
     this.completeSettledProviderClosures(started);
     this.emitSourceHoldNotices(started);
     // The wake starts the status-mapping pass; this call does not wait for its network writes.
@@ -3941,7 +4011,10 @@ export class StandaloneService {
           String(binding.assignmentId),
         ]),
     );
-    for (const hold of sources.activeHolds()) {
+    const holds = [sources, ...sources.jiraStores()].flatMap((store) =>
+      store.activeHolds(),
+    );
+    for (const hold of holds) {
       const recipients = new Set(
         domain
           .assignments(hold.taskId)

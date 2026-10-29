@@ -214,7 +214,7 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
   d.markImportedTask(held.taskId, "I_HELD", "R_HELD");
   f.seedPersistedState((db) => {
     db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I_HELD',?,'R_HELD','owner/repo',7,'Closed upstream','Body','closed','[]')",
+      "INSERT INTO external_items VALUES ('github','github.com','I_HELD',?,'R_HELD','owner/repo',7,'Closed upstream','Body','closed','[]',NULL)",
     ).run(held.taskId);
   });
   const web = await journey.start("fixture.web", () => f.startWeb());

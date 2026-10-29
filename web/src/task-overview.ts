@@ -152,11 +152,23 @@ export function taskIdentity(data: Pick<Data, "source">) {
   const s = data.source;
   return s
     ? {
-        label: `${s.repositoryName ?? "repository unavailable"}#${s.number ?? "?"}`,
+        label:
+          s.key ??
+          `${s.repositoryName ?? "repository unavailable"}#${s.number ?? "?"}`,
         url: s.url,
       }
     : { label: "Local task", url: null };
 }
+
+/** What only a Jira source reports: its site and the issue's status in Jira. */
+export const jiraFacts = (source: NonNullable<Data["source"]>) => ({
+  status: source.status?.name ?? null,
+  site: source.identity.tracker === "jira" ? source.identity.provider : null,
+});
+
+/** The issue tracker a task was imported from, as the operator reads it. */
+export const trackerName = (source: Data["source"]) =>
+  source?.identity.tracker === "jira" ? "Jira" : "GitHub";
 
 const syncProblems = {
   "sync-unavailable": "sync unavailable",

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
-import { readinessSchema, selectionSchema } from "./github-source-contracts.js";
+import {
+  jiraSelectionSchema,
+  readinessSchema,
+  selectionSchema,
+} from "./github-source-contracts.js";
 import {
   isInFlightEvent,
   readinessAccepts,
@@ -79,7 +83,7 @@ export class StatusMappingStore {
       .prepare("SELECT selections FROM project_task_sources WHERE projectId=?")
       .get(projectId) as { selections: string } | undefined;
     return z
-      .array(selectionSchema)
+      .array(z.union([selectionSchema, jiraSelectionSchema]))
       .parse(row ? JSON.parse(row.selections) : [])
       .flatMap((s) => (s.kind === "project" ? [s] : []));
   }

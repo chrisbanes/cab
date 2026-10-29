@@ -109,7 +109,7 @@ export const sourceSnapshotSchema = z
     taskId: uuid,
     projectId: uuid,
     revision,
-    kind: z.enum(["local", "github"]),
+    kind: z.enum(["local", "github", "jira"]),
     title: text.nullable(),
     body: text.nullable(),
     digest: z.string().length(64),

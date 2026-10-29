@@ -216,6 +216,8 @@ export function sourceName(
     return extra.query?.trim()
       ? { name: extra.query, kind: "search", private: true }
       : { name: "Saved search", kind: "search", private: false };
+  if (s.kind === "jql")
+    return { name: "Jira query", kind: "Jira JQL", private: false };
   return {
     name: extra.projectTitle || "GitHub Project",
     kind: "GitHub Project",
@@ -281,7 +283,9 @@ export function selectionLine(
       ? `${s.descriptor ?? "repository"} issues`
       : s.kind === "project"
         ? "GitHub Project"
-        : "search";
+        : s.kind === "jql"
+          ? "Jira JQL"
+          : "search";
   return `${s.id ?? "ID unavailable"} ${kind}${s.active ? "" : " · inactive"}`;
 }
 
