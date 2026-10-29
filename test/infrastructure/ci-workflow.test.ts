@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { globSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
@@ -155,17 +155,14 @@ test("pull requests skip checks only when every change is untested documentation
   ])
     assert.equal(docsOnly(paths), false, paths.join());
   // Documents read by tests (quoted paths, not comments) must not be skippable.
-  const docs = readdirSync("test", { recursive: true, encoding: "utf8" })
-    .filter(
-      (path) =>
-        /\.(ts|mjs)$/.test(path) && !path.endsWith("ci-workflow.test.ts"),
-    )
-    .flatMap(
-      (path) =>
-        readFileSync(join("test", path), "utf8").match(
-          /(?<=["'`](?:\.\.\/)*)docs\/[\w./-]+/g,
-        ) ?? [],
-    );
+  const docs = globSync("test/**/*.{ts,mjs}", {
+    exclude: ["test/infrastructure/ci-workflow.test.ts"],
+  }).flatMap(
+    (path) =>
+      readFileSync(path, "utf8").match(
+        /(?<=["'`](?:\.\.\/)*)docs\/[\w./-]+/g,
+      ) ?? [],
+  );
   assert.ok(docs.length);
   for (const doc of docs.filter((d) => d.endsWith(".md") || !d.includes(".")))
     assert.equal(
@@ -194,21 +191,17 @@ test("unchanged nightly and documentation-only skips require a successful change
       { result: name === "changes" ? "success" : "skipped" },
     ]),
   );
-  assert.deepEqual(ciFailures(skipped, true, false), []);
-  assert.deepEqual(ciFailures(skipped, false, false), []);
-  for (const name of Object.keys(skipped)) {
-    assert.ok(
-      ciFailures({ ...skipped, [name]: { result: "failure" } }, true, false)
-        .length,
-    );
-    assert.ok(
-      ciFailures({ ...skipped, [name]: { result: "failure" } }, false, false)
-        .length,
-    );
-    const missing = { ...skipped };
-    delete missing[name];
-    assert.ok(ciFailures(missing, true, false).length);
-    assert.ok(ciFailures(missing, false, false).length);
+  for (const full of [true, false]) {
+    assert.deepEqual(ciFailures(skipped, full, false), []);
+    for (const name of Object.keys(skipped)) {
+      assert.ok(
+        ciFailures({ ...skipped, [name]: { result: "failure" } }, full, false)
+          .length,
+      );
+      const missing = { ...skipped };
+      delete missing[name];
+      assert.ok(ciFailures(missing, full, false).length);
+    }
   }
 });
 test("failed, cancelled, missing and unexpectedly skipped applicable jobs cannot pass check", () => {
