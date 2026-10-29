@@ -14,6 +14,7 @@ import {
   type AdoptionContext,
   type PublicationContext,
 } from "../../src/standalone/github-delivery.js";
+import { scriptedGitLabRemote } from "../fixtures/gitlab-remote.js";
 import { GitLabHttpDeliveryProvider } from "../../src/standalone/gitlab-delivery.js";
 
 const host = "gitlab.example.com";
@@ -27,12 +28,10 @@ const outside = "3".repeat(40);
 const policy = {} as DeliveryPolicy;
 
 function world(options: { token?: string | null } = {}) {
-  const state = {
-    head: old as string | null,
-    project: { id: 42, path_with_namespace: "Group/Sub/App" } as unknown,
-    redirect: false,
-  };
-  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const remote = scriptedGitLabRemote({ repositoryId });
+  const { state, requests } = remote;
+  state.head = old;
+  state.project = { id: 42, path_with_namespace: "Group/Sub/App" };
   const pushes: Array<Record<string, unknown>> = [];
   const adopts: Array<Record<string, unknown>> = [];
   const outcomes = {
@@ -43,31 +42,11 @@ function world(options: { token?: string | null } = {}) {
       state.head = commit;
     },
   };
-  const json = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), { status });
-  const fetcher = (async (url: string, init: RequestInit) => {
-    requests.push({ url, init });
-    if (state.redirect)
-      return new Response(null, {
-        status: 302,
-        headers: { location: "https://evil.example/" },
-      });
-    const path = new URL(url).pathname;
-    if (path === `/api/v4/projects/${repositoryId}`) return json(state.project);
-    if (
-      path ===
-      `/api/v4/projects/${repositoryId}/repository/branches/${encodeURIComponent(branch)}`
-    )
-      return state.head
-        ? json({ name: branch, commit: { id: state.head } })
-        : json({ message: "404 Branch Not Found" }, 404);
-    return json({}, 404);
-  }) as typeof fetch;
   const provider = new GitLabHttpDeliveryProvider({
     host,
     link: (id) => (id === repositoryId ? { projectPath } : null),
     token: async () => (options.token === undefined ? token : options.token),
-    fetcher,
+    fetcher: remote.fetcher,
     push: async (request) => {
       pushes.push({ ...request });
       if (outcomes.push === "pushed") outcomes.onPush();

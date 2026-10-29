@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { test } from "node:test";
 import {
   createReleaseDeliveryFixture,
+  publicationWorld,
   until,
   scriptedDeliveryProvider,
 } from "../fixtures/delivery-integration.js";
@@ -1056,126 +1056,6 @@ test("approval mode refuses thread actions until the operator approves the exact
     await f.close();
   }
 });
-
-import {
-  mkdtempSync as makeTemp,
-  writeFileSync as writeFile,
-  realpathSync,
-} from "node:fs";
-import { tmpdir as osTmp } from "node:os";
-import { git as runGit } from "../fixtures/publication.js";
-
-/** A repository with one commit, provisioned as R1 for the task. */
-async function publicationWorld(mode: "allow" | "approval") {
-  const source = realpathSync(makeTemp(join(osTmp(), "cab-publish-src-")));
-  runGit(source, "init", "-q", "-b", "main");
-  writeFile(join(source, "a.txt"), "a\n");
-  runGit(source, "add", ".");
-  runGit(source, "commit", "-q", "-m", "base");
-  const f = await createReleaseDeliveryFixture(
-    "reviewable-pr",
-    {},
-    true,
-    null,
-    source,
-  );
-  f.grant(
-    { action: "branch.push", mode },
-    // Recovery is approval-gated whatever the grant: an overwrite is granted as allow on purpose.
-    { action: "branch.force-push", mode: "allow" },
-    { action: "branch.adopt", mode: "approval" },
-    { action: "pr.create", mode: "allow" },
-  );
-  const binding = await f.service.taskWorkspace(f.taskId);
-  const workspace = binding?.repositories[0]?.workspacePath;
-  assert.ok(workspace);
-  const commit = (name: string) => {
-    writeFile(join(workspace, name), `${name}\n`);
-    runGit(workspace, "add", ".");
-    runGit(workspace, "commit", "-q", "-m", name);
-    return runGit(workspace, "rev-parse", "HEAD");
-  };
-  const push = (commitSha: string, index?: number, approval?: object) =>
-    f.call(
-      "cab_external_action",
-      {
-        operationId: randomUUID(),
-        action: {
-          kind: "branch.push",
-          target: { repositoryId: "R1" },
-          commitSha,
-        },
-        ...(approval ? { approval } : {}),
-      },
-      index,
-    );
-  const createPr = (headRef: string, expectedHeadSha: string) =>
-    f.call("cab_external_action", {
-      operationId: randomUUID(),
-      action: {
-        kind: "pr.create",
-        target: {
-          repositoryId: "R1",
-          baseRef: "main",
-          headRef,
-          expectedHeadSha,
-        },
-        title: "Change",
-        body: "Body",
-        draft: true,
-      },
-    });
-  const action = (
-    kind: "branch.force-push" | "branch.adopt",
-    material: Record<string, unknown>,
-  ) => ({ kind, target: { repositoryId: "R1" }, ...material });
-  const recover = (
-    recovery: Record<string, unknown>,
-    index: number,
-    approval?: object,
-  ) =>
-    f.call(
-      "cab_external_action",
-      {
-        operationId: randomUUID(),
-        action: recovery,
-        ...(approval ? { approval } : {}),
-      },
-      index,
-    );
-  /** The lead requests approval of exact recovery material and the operator approves it. */
-  const approve = async (recovery: Record<string, unknown>, turn: number) => {
-    const requested = await f.call(
-      "cab_request_approval",
-      {
-        action: recovery.kind,
-        target: canonicalMaterial(recovery.target),
-        material: recovery,
-      },
-      turn,
-    );
-    assert.equal(requested.success, true, requested.text);
-    const interaction = f.service
-      .coordinationView()
-      .readTask(f.taskId)
-      .approvals.at(-1);
-    assert.ok(interaction);
-    await f.terminal(turn);
-    await f.service.coordinationView().decideApproval({
-      taskId: f.taskId,
-      key: randomUUID(),
-      interactionId: interaction.interactionId,
-      expectedRevision: 1,
-      decision: "approved",
-      action: String(recovery.kind),
-      target: canonicalMaterial(recovery.target),
-      material: recovery,
-    });
-    await f.waitTurn(turn + 1);
-    return { interactionId: interaction.interactionId, expectedRevision: 2 };
-  };
-  return { f, commit, push, createPr, action, recover, approve };
-}
 
 test("an allowed push publishes the lead's commit to the assigned branch and pr.create targets only that branch", async () => {
   const { f, commit, push, createPr } = await publicationWorld("allow");

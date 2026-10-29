@@ -45,9 +45,9 @@ select permitted profiles but cannot create profiles or expand project authority
 
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
-items; readiness is separate. Jira Cloud as an issue tracker and GitLab delivery,
-including self-managed instances, as a code host are planned and not implemented; a
-project can already link a GitLab checkout
+items; readiness is separate. Jira Cloud as an issue tracker and GitLab merge
+requests on self-managed instances are planned and not implemented; a
+project can link a GitLab checkout and deliver its branches
 ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
 a plugin marketplace, multiple execution machines, team/RBAC administration and
 migration of old live runs are outside the first release. Source interfaces follow
@@ -819,9 +819,10 @@ the token acts as (from `GET /api/v4/user`); never the variable name, token or g
 output. A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
 environment overrides a stored glab login; Settings and `cab doctor` (GitLab
 credentials) warn when it does, and the account shown is the token's. The credential
-only lists GitLab projects for guided setup and shows the account: it grants no
-repository access (access is exactly the links the operator adds) and no delivery
-authority. Guided setup offers a GitLab repository row for each configured host, takes
+lists GitLab projects for guided setup, shows the account, and is the identity GitLab
+branch delivery acts as (below): it grants no repository access (access is exactly
+the links the operator adds) and no delivery authority, which comes only from the
+project's delivery grants. Guided setup offers a GitLab repository row for each configured host, takes
 the project and its numeric ID from the discovered list, verifies the chosen checkout's
 `origin` against the host and project path, and records the link in the same atomic
 `project.create`; a GitLab-only project records no GitHub source credential. GitLab
@@ -837,9 +838,12 @@ GitLab on a configured host with the project's full path and numeric ID), and li
 change through one versioned, receipted `repositories.configure` command that
 verifies every checkout before anything is recorded. A GitLab link must also have an
 `origin` remote on its host whose full project path matches, case-insensitively, and
-a refusal names the link and reason without echoing a path or remote. Code-host
-delivery actions that name a GitLab link are refused with `code-host-delivery-unavailable`,
-before any provider or Git transport runs, until GitLab delivery exists. Saving the
+a refusal names the link and reason without echoing a path or remote. Branch
+actions (`branch.push`, `branch.force-push`, `branch.adopt`) on a GitLab link are
+delivered to that project with the host's credential, resolved on every use; every
+other code-host action that names a GitLab link is refused with `code-host-delivery-unavailable`,
+before any provider or Git transport runs. A host with no usable credential holds the
+action as `provider-preflight-held`, with no request and no Git. Saving the
 GitHub source neither changes nor needs repository links, and saving links neither
 deactivates a selection nor changes the source version.
 
@@ -2048,6 +2052,13 @@ against that observed head (creation expects the branch to be absent), so a bran
 created or moved after the read rejects the push and is an outside change. `branch.push` also
 refuses a commit that does not descend from the last pushed commit; `branch.force-push` needs a
 recorded last push, which is its lease.
+
+On a GitLab link all three branch actions (these two and `branch.adopt`) follow the same
+lifecycle. Before any push or fetch cab reads the project by its numeric ID and requires the
+reported ID and path to match the link, then pushes and fetches that project over HTTPS as
+`oauth2` with the host credential, which is only in the request header and the Git child's
+environment. Redirects are refused and every request stays on the link's host. The branch head is
+read through the branches API; a missing branch counts as absent only while the project still reads.
 
 cab owns a commit on the task branch only if it pushed it or an attempt of that push may have
 landed: one that ended unproved, was reported pushed by Git, was concluded not applied from a read,
