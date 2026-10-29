@@ -660,7 +660,7 @@ async function verifyNpm(tarballPath) {
   const temp = await mkdtemp(join(realpathSync(tmpdir()), "cab verify-npm-"));
   try {
     const prefix = join(temp, "prefix");
-    const home = join(temp, "home");
+    const home = join(temp, "npm-home");
     await mkdir(home, { mode: 0o700 });
     await run(
       "npm",
