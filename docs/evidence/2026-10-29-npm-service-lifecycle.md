@@ -46,7 +46,7 @@ Result: pass, exit 0, about 65 s.
 
 Local tarballs, not a published package, and one Mac with one Node.js (the harness's own
 `process.execPath`). A Node.js removed after install (nvm, a Homebrew cellar) was not
-exercised live; it is a disclosed limit with `cab service upgrade --node PATH` as the
+exercised live; it is a disclosed limit with `cab service upgrade STATE/versions/<version> --node PATH` as the
 re-bind. Dependencies were resolved from the npm registry and cache by `npm install -g`,
 not from the repository lockfile. Trusted publishing, the first publish and the first
 tag are not exercised here.

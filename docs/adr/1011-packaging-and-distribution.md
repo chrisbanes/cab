@@ -73,7 +73,7 @@ manifest. The install record binds an explicit Node.js: the one running the CLI 
 `--node PATH`, resolved to its real path and required to be an even-numbered
 (LTS) release at or above `engines.node`, validated before anything stops, and never
 looked up on `PATH` again. A removed Node.js (an nvm version, a Homebrew cellar) stops the
-service from starting until `cab service upgrade --node PATH` re-binds it. The upgrade
+service from starting until `cab service upgrade STATE/versions/<version> --node PATH` re-binds it. The upgrade
 sequence is `npm install -g @chrisbanes/cab@<version>` then
 `cab service upgrade [--connection NAME]`, which stages the running package before it
 stops the job. The tarball's bundled-Node channel is unchanged.

@@ -160,7 +160,8 @@ or above the package's `engines.node`. It is checked, by running `--version`, be
 anything is staged or stopped, and recorded as its real path in the install record; it is
 never looked up on `PATH` again. If that Node.js is removed (for example an nvm version or
 a Homebrew cellar the next upgrade deletes) the service fails to start until you re-bind
-it with `cab service upgrade --node PATH`. `--node` is refused with a TARBALL or any
+it with `cab service upgrade "$STATE/versions/<version>" --node PATH`, which re-binds the
+staged copy without staging again. `--node` is refused with a TARBALL or any
 other tarball release.
 
 To update, install the new version, then upgrade:
@@ -175,8 +176,11 @@ the usual checks and the readiness read, and before it stops the job, it stages 
 running package as `STATE/versions/<version>`. A staging or Node.js failure therefore
 leaves the old job running. The stages and failure handling are those of
 [Upgrade](#upgrade). The binding recorded at install is kept unless `--node PATH` changes
-it; running the same version again with `--node` re-binds it. An explicit `VERSION_DIR`
-also takes a staged npm version. Uninstall is unchanged and keeps every staged version. The
+it. To re-bind without a version change, pass the staged copy as `VERSION_DIR` with
+`--node`; running the package's upgrade again re-stages it, which is refused when a reinstall
+resolved other dependency versions for the same package version. A package that does not
+hold its dependencies under it (a project-local or `npx` install) is refused. An explicit
+`VERSION_DIR` also takes a staged npm version. Uninstall is unchanged and keeps every staged version. The
 sequence is automated in `test/operations/npm-service-lifecycle.test.ts` (a launchd
 stand-in that runs the rendered plist as a real process) and had one bounded live run
 on local tarballs under a throwaway label
@@ -1114,7 +1118,8 @@ publisher for `@chrisbanes/cab` (repository `chrisbanes/cab`, workflow `release.
 environment `npm`), optionally with required reviewers on the `npm` environment. If npm
 needs the package to exist before a trusted publisher can be added, the first version is a
 one-time maintainer bootstrap. No version has been published, and a tag push is the
-publication.
+publication. Rerun a failed publish with "Re-run failed jobs": a full rerun packs again,
+and the publish check passes only if the registry's integrity matches the new bytes.
 
 ## Checkout and low-level procedure
 

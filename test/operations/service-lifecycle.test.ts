@@ -784,6 +784,7 @@ function npmPackage(t: { after(fn: () => void): void }, version = "0.1.0") {
         name: "@chrisbanes/cab",
         version: next,
         engines: { node: ">=24" },
+        dependencies: { zod: "*" },
       }),
     );
     write("dist/src/standalone/cli.js", `// ${next}\n`);
@@ -791,6 +792,7 @@ function npmPackage(t: { after(fn: () => void): void }, version = "0.1.0") {
     write("dist/operator/index.html", "<html></html>\n");
     write("LICENSE", "license\n");
     write("node_modules/zod/index.js", "\n");
+    write("node_modules/zod/package.json", '{"name":"zod"}');
     symlinkSync("../zod/index.js", join(root, "node_modules", ".bin-zod"));
     write("node_modules/@anthropic-ai/claude-agent-sdk/index.js", "\n");
     // The platform binary the stage leaves out.
@@ -4050,6 +4052,10 @@ test("upgrade --node re-binds an npm release at the same version", async (t) => 
   });
   assert.equal(result.code, 0, result.stderr);
   assert.equal(f.record().configuration.nodePath, NODE);
+  // The staged copy re-binds without staging again.
+  const staged = join(f.stateDir, "versions", "0.2.0");
+  const rebound = await f.upgrade(staged, undefined, undefined, { node: NODE });
+  assert.equal(rebound.code, 0, rebound.stderr);
   // A recorded Node.js that has gone is reported, and --node is the way out.
   const gone = join(f.home, "gone-node");
   const second = await installed(t, undefined, npmPackage(t));
@@ -4068,6 +4074,21 @@ test("upgrade --node re-binds an npm release at the same version", async (t) => 
   assert.match(stale.report.error, /pass --node PATH/);
   assert.equal(stale.report.jobStopped, null);
   assert.deepEqual(second.launchd.events, []);
+});
+
+test("a package whose dependencies are not under it is not a global installation", async (t) => {
+  const npm = npmPackage(t);
+  const f = await setup(t, false, { unpacked: false });
+  // A project-local or npx install: the dependencies sit beside the package.
+  rmSync(join(npm.root, "node_modules", "zod"), { recursive: true });
+  const result = await installNpm(f, npm.root);
+  assert.equal(result.code, 1);
+  assert.match(
+    JSON.parse(result.stderr).error,
+    /not a global npm installation/,
+  );
+  assert.deepEqual(f.launchd.calls, []);
+  assert.equal(existsSync(join(f.stateDir, "versions")), false);
 });
 
 test("an npm upgrade that cannot stage leaves the old job running", async (t) => {

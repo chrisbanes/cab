@@ -46,8 +46,8 @@ capability.
 The primary release channel is the single `@chrisbanes/cab` npm package
 ([ADR-1011](adr/1011-packaging-and-distribution.md)). The packed-package contents, the
 no-side-effect install, the staged service lifecycle, package update and removal,
-upgrade, uninstall with reinstall, remote CLI use and the gated publish job have
-automated evidence on local tarballs
+upgrade, uninstall with reinstall and remote CLI use have automated evidence, and the gated
+publish job a structural check on local tarballs
 (`test/infrastructure/npm-package.test.ts`, `test/operations/npm-service-lifecycle.test.ts`,
 `test/operations/service-lifecycle.test.ts`, `test/infrastructure/package-release.test.ts`)
 and a bounded live run ([evidence](evidence/2026-10-29-npm-service-lifecycle.md)). The published-package items below stay unproved;

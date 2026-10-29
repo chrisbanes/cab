@@ -96,7 +96,7 @@ the manual login line. --connection defaults to local; --no-open skips the brows
 Run from a global npm installation (npm install -g @chrisbanes/cab), install copies
 that package into STATE/versions/V and binds the service to the Node.js that runs it,
 or to --node PATH: an absolute path to an even-numbered release at or above the
-package's engines.node. The binding is kept until upgrade --node PATH changes it; a
+package's engines.node. The binding is kept until upgrade STATE/versions/V --node PATH changes it; a
 removed Node.js stops the service from starting.
 install --mode daemon prepares a LaunchDaemon that starts at boot, before anyone logs
 in. It runs as you, never as root: it renders and records the plist, then prints the
@@ -109,8 +109,8 @@ refuses a daemon install; see the macOS operations guide for the switch-back pro
 upgrade stops the job, starts VERSION_DIR (or, with no VERSION_DIR, the global npm
 installation it runs from, copied into STATE/versions/V first) and checks readiness
 through a logged-in CLI connection with a read credential. The service takes and
-verifies its own snapshot before it migrates older data, and refuses to start without one. A failed
-upgrade leaves the job stopped and reports the snapshot and logs; recover with
+verifies its own snapshot before it migrates older data, and refuses to start without
+one. A failed upgrade leaves the job stopped and reports the snapshot and logs; recover with
 a fixed release and another upgrade, or snapshot restore. uninstall removes the
 job and keeps data, auth, snapshots, versions and logs.
 `;
@@ -590,6 +590,18 @@ class Service {
     }
     if (version === undefined)
       throw refuse(`${real} does not hold a valid @chrisbanes/cab package`);
+    // A project-local or npx install keeps its dependencies beside the package, not under it.
+    const dependencies = Object.keys(
+      JSON.parse(readFileSync(join(real, "package.json"), "utf8"))
+        .dependencies ?? {},
+    );
+    const absent = dependencies.find(
+      (name) => !existsSync(join(real, "node_modules", name, "package.json")),
+    );
+    if (absent !== undefined)
+      throw refuse(
+        `${real} is not a global npm installation: its dependency ${absent} is not installed under it; run npm install -g @chrisbanes/cab`,
+      );
     return { version, root: real };
   }
 

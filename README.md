@@ -220,8 +220,8 @@ each acceptance scenario to its evidence and disposition.
   `npm install -g @chrisbanes/cab`: one package containing the server, web UI and
   `cab` commands, with Node installed separately. `cab service install` and
   `cab service upgrade` stage the installed package and bind a Node.js, and a
-  tag-gated workflow job publishes the package; both are implemented and tested
-  locally, but no version is published and the lifecycle is not qualified on a
+  tag-gated workflow job publishes the package; the staging is tested locally and the
+  job's gating is checked structurally, but its publish step has never run, no version is published and the lifecycle is not qualified on a
   published package ([ADR-1011](docs/adr/1011-packaging-and-distribution.md),
   [#1267](https://github.com/chrisbanes/cab/issues/1267)). The tarball is optional;
   the desktop app and Homebrew channel are deferred under
