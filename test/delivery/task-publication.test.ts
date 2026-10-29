@@ -246,7 +246,7 @@ test("a Draft task is refused where the project has no readiness rule, and a fie
   );
 });
 
-test("publication writes the first option of an in condition, nothing for lacks, and refuses not-in under all", async (t) => {
+test("publication writes the first option of an in condition, nothing for lacks, and refuses a rule its planned writes cannot satisfy", async (t) => {
   const field = {
     kind: "project-field" as const,
     projectNodeId: publicationProject.projectNodeId,

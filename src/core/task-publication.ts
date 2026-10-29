@@ -686,21 +686,20 @@ function readinessWrites(
   const labels = rule.conditions.flatMap((c) =>
     c.kind === "label" && c.operator === "has" ? [c.name] : [],
   );
+  // One write per field of the target Project, since a field holds one value.
   const written = new Map<
     string,
     z.output<typeof publicationProjectFieldSchema>
   >();
   for (const c of rule.conditions) {
-    const key =
-      c.kind === "project-field" && `${c.projectNodeId}\0${c.fieldNodeId}`;
     if (
-      c.kind === "project-field" &&
-      c.operator === "in" &&
-      c.projectNodeId === projectNodeId &&
-      key &&
-      !written.has(key)
+      c.kind !== "project-field" ||
+      c.operator !== "in" ||
+      c.projectNodeId !== projectNodeId
     )
-      written.set(key, {
+      continue;
+    if (!written.has(c.fieldNodeId))
+      written.set(c.fieldNodeId, {
         projectNodeId: c.projectNodeId,
         fieldNodeId: c.fieldNodeId,
         optionNodeId: c.optionNodeIds[0] as string,

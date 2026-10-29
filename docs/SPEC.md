@@ -1105,8 +1105,8 @@ from local to imported; its title and description are source-owned from then on.
   selections are listed disabled (`selection-unpredictable`), because whether a new issue
   would match cannot be predicted. A target is also disabled without an `issue.create` grant on
   the repository, a `project.item.add` grant for the Project, or the `project.field` grants its
-  readiness writes need; when a Ready task's rule needs a Project field the target cannot set
-  (`readiness-unsatisfiable`, including a `not-in` condition under `all`); and for a Draft task where a new issue with no labels or field values would already meet the
+  readiness writes need; when no write this target can make satisfies a Ready task's rule
+  (`readiness-unsatisfiable`, below); and for a Draft task where a new issue with no labels or field values would already meet the
   readiness rule (no rule, or a `lacks` condition that satisfies it), since it would then be Ready
   (`would-become-ready`). Every enabled target predicts
   that the new issue matches the selection and that the task stays as Ready as it is.
@@ -1117,7 +1117,8 @@ from local to imported; its title and description are source-owned from then on.
   else the first `in` condition on the Project. The planned writes must satisfy the whole
   rule: a `not-in` condition nothing satisfies, an `in` condition on another Project, or a write
   that contradicts another condition (a `has` label a `lacks` condition names, case-insensitively,
-  or two `in` sets on one field that share no option) makes the target `readiness-unsatisfiable`. The task keeps its Ready flag through conversion and the next sync recomputes it from
+  or two `in` conditions on one field whose sets the first `in` condition's first option does not
+  satisfy together) makes the target `readiness-unsatisfiable`. The task keeps its Ready flag through conversion and the next sync recomputes it from
   GitHub; a write that did not land leaves the ordinary readiness-lost or withdrawn hold
   ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 - **Review, confirm, send.** Review freezes the exact issue (title, body, labels), the target and

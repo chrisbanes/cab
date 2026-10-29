@@ -146,7 +146,7 @@ export const publicationTargetReasonSentences: Record<
   "no-field-grant":
     "This project doesn't allow setting the Project field the readiness rule needs. Allow it in project configuration.",
   "readiness-unsatisfiable":
-    "The readiness rule needs a Project field that publishing here can't set. Choose a Project target or a Draft task.",
+    "Publishing here can't make the new issue meet the readiness rule: it needs a Project field this target can't set, or its labels and fields contradict each other. Change the readiness rule, or choose another target or a Draft task.",
   "would-become-ready":
     "A new issue here would already meet the readiness rule, so it would make a Draft task Ready. Mark the task Ready or change the readiness rule.",
 };
