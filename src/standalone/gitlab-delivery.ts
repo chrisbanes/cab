@@ -92,6 +92,7 @@ type MergeRequest = z.output<typeof mergeRequestSchema>;
 
 /** GitLab has no draft field to write: a draft is a title that starts with `Draft:` (or its variants). */
 const draftPrefix = /^\s*(\[draft\]|\(draft\)|draft:)/i;
+const quickAction = /^[ \t]*\/[A-Za-z]/m;
 const draftTitle = (title: string, draft: boolean) =>
   draft ? `Draft: ${title}` : title;
 const pipelineStatus = (status: string) =>
@@ -311,19 +312,17 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     verified: async (repositoryId) =>
       this.remoteFor(repositoryId, await this.project(repositoryId)),
   };
-  /** A merge request in the linked project, read by IID. */
-  private async mergeRequest(repositoryId: string, iid: number) {
-    return mergeRequestSchema.parse(
-      await this.get(`/projects/${repositoryId}/merge_requests/${iid}`),
-    );
-  }
   /** The merge request a target names: the same instance-wide ID and IID, and never a fork. */
   private async boundMergeRequest(target: {
     repositoryId: string;
     nodeId: string;
     number: number;
   }): Promise<MergeRequest> {
-    const mr = await this.mergeRequest(target.repositoryId, target.number);
+    const mr = mergeRequestSchema.parse(
+      await this.get(
+        `/projects/${target.repositoryId}/merge_requests/${target.number}`,
+      ),
+    );
     if (
       String(mr.id) !== target.nodeId ||
       mr.iid !== target.number ||
@@ -399,6 +398,18 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         draftPrefix.test(action.fields.title))
     )
       throw new Error("provider-title-draft-prefix");
+    // GitLab runs a line that starts with `/command` in a description or note as the credential
+    // user, which would bypass the grants (`/merge`, `/ready`, `/close`), so such text is held.
+    const text =
+      action.kind === "pr.create"
+        ? action.body
+        : action.kind === "pr.edit"
+          ? action.fields.body
+          : action.kind === "pr.thread.reply"
+            ? action.body
+            : undefined;
+    if (text !== undefined && quickAction.test(text))
+      throw new Error("provider-quick-action-held");
     if (action.kind === "pr.create") {
       const remote = this.remoteFor(repositoryId, projectPath);
       const head = await remote.readRef(action.target.headRef);

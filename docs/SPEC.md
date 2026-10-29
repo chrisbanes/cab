@@ -1967,7 +1967,9 @@ resolvable discussions are the review threads; system notes are not feedback. An
 merge request has an unchanged observation, so a poll wakes the lead only for a new fact.
 Readback finds exactly one merge request or note carrying the operation marker, by the
 credential user, with the exact text, draft status, head commit and branches in the linked
-project; a thread resolves only when the credential user resolved it. Merging, approvals and
+project; a thread resolves only when the credential user resolved it. GitLab runs a line starting
+with `/command` in a description or note as the credential user, so a create, edit or reply whose
+text has one is held as `provider-preflight-held` before any write. Merging, approvals and
 GitLab merge gates are not implemented, so a merge request always reports `merge-unsupported`.
 
 The operator publishes a local task through three more actions on the same lifecycle,

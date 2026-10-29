@@ -3294,8 +3294,8 @@ function Changes({
           ))}
           {d.binding.state === "MERGED" && (
             <p>
-              PR merged; task completion still requires its recorded completion
-              workflow.
+              {d.binding.codeHost === "gitlab" ? "Merge request" : "PR"} merged;
+              task completion still requires its recorded completion workflow.
             </p>
           )}
         </>

@@ -286,7 +286,6 @@ test("thread actions need a grant, and approval mode waits for the operator to a
     const done = await act(reply(), { approval }, 2);
     assert.equal(done.success, true, done.text);
     assert.equal(writes(w), before + 1);
-    assert.equal(canonicalMaterial(reply().target).length > 0, true);
   } finally {
     await w.f.close();
   }
@@ -322,6 +321,15 @@ test("the delivery and approval reads name the GitLab merge request, its link an
     assert.equal(read.delivery?.binding?.repositoryName, projectPath);
     assert.equal(read.approvals.at(-1)?.codeHost, "gitlab");
     assert.equal(JSON.stringify(read).includes(token), false);
+    // A project path the operator may not see gives no link and no name.
+    const withheld = (
+      await new OperatorApi(w.f.service, [w.f.directory, projectPath]).readTask(
+        w.f.taskId,
+      )
+    ).data.delivery?.binding;
+    assert.equal(withheld?.url, undefined);
+    assert.equal(withheld?.repositoryName, repositoryId);
+    assert.equal(withheld?.codeHost, "gitlab");
   } finally {
     await w.f.close();
   }

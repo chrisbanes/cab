@@ -982,3 +982,70 @@ test("a redirect on a merge request route is refused and nothing carries the tok
   );
   assert.equal(w2.requests.length, 0);
 });
+
+test("text GitLab would run as a quick action is held before any write", async () => {
+  const w = mergeRequestWorld();
+  w.state.head = commit;
+  w.state.discussions.push(gitLabDiscussion("abc", [{}]));
+  for (const text of ["/merge", "Done\n/ready", "ok\n  /approve now"]) {
+    for (const action of [
+      created({ body: text }),
+      {
+        kind: "pr.edit",
+        target: prTarget,
+        fields: { body: text },
+      } as ExternalAction,
+      {
+        kind: "pr.thread.reply",
+        target: threadTarget,
+        body: text,
+      } as ExternalAction,
+    ])
+      await assert.rejects(
+        w.provider.preflight(action, policy),
+        /provider-quick-action-held/,
+        `${action.kind} ${JSON.stringify(text)}`,
+      );
+  }
+  assert.equal(w.requests.filter((r) => r.init.method !== "GET").length, 0);
+  // A slash inside a line is ordinary text.
+  const fine = await w.provider.preflight(
+    {
+      kind: "pr.thread.reply",
+      target: threadTarget,
+      body: "see src/a.ts and https://x/y",
+    } as ExternalAction,
+    policy,
+  );
+  assert.equal(fine.threadNodeId, "abc");
+});
+
+test("a redirect on a write or the GraphQL route is refused and never followed", async () => {
+  for (const [kind, path] of [
+    ["pr.edit", "/merge_requests/12"],
+    ["pr.ready", "/api/graphql"],
+    ["pr.thread.reply", "/notes"],
+  ] as const) {
+    const w = mergeRequestWorld({ draft: true, title: "Draft: Change" });
+    w.state.discussions.push(gitLabDiscussion("abc", [{}]));
+    const action = (
+      kind === "pr.edit"
+        ? { kind, target: prTarget, fields: { title: "T" } }
+        : kind === "pr.ready"
+          ? { kind, target: prTarget }
+          : { kind, target: threadTarget, body: "B" }
+    ) as ExternalAction;
+    const before = await w.provider.preflight(action, policy);
+    w.state.intercept = (method, requestPath) =>
+      method !== "GET" && requestPath.endsWith(path)
+        ? new Response(null, {
+            status: 302,
+            headers: { location: "https://evil.example/" },
+          })
+        : undefined;
+    const done = await w.provider.performAction(record(action, before));
+    assert.equal(done.state, "uncertain", kind);
+    for (const { url } of w.requests)
+      assert.equal(new URL(url).origin, `https://${host}`);
+  }
+});
