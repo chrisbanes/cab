@@ -315,21 +315,20 @@ export async function protectBeforeMigration(
 }
 
 /**
- * Records a completed startup. The verified snapshot stays recorded for the release change it
- * protected; a completed start at the recorded release drops it, so a later upgrade that
- * finds the database moved on takes a fresh one.
+ * Records a completed startup. A snapshot stays recorded once it protected the release now
+ * running (`to` is this release); one for another release change is dropped, so a later
+ * upgrade that finds the database moved on takes a fresh snapshot.
  */
 export function recordStartedRelease(
   dataDirectory: StandaloneDataDirectory,
   state: StartupState,
   release: string,
 ): void {
-  if (state.release === release && !state.snapshot) return;
+  const kept = state.snapshot?.to === release ? state.snapshot : undefined;
+  if (state.release === release && !state.snapshot === !kept) return;
   writeStartupState(dataDirectory.root, {
     format: STATE_FORMAT,
     release,
-    ...(state.release !== release && state.snapshot
-      ? { snapshot: state.snapshot }
-      : {}),
+    ...(kept ? { snapshot: kept } : {}),
   });
 }
