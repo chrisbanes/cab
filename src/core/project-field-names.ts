@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { githubIssueTracker } from "./github-source-contracts.js";
 import type { Database } from "./store.js";
 
 /** A single-select Project field and its options, as a complete Project read listed them. */
@@ -27,14 +28,25 @@ export function replaceProjectFieldNames(
   projectNodeId: string,
   fields: readonly ProjectFieldName[],
 ): void {
-  db.prepare("DELETE FROM github_project_fields WHERE projectNodeId = ?").run(
+  db.prepare(
+    "DELETE FROM source_field_names WHERE provider = ? AND instance = ? AND scopeId = ?",
+  ).run(
+    githubIssueTracker.provider,
+    githubIssueTracker.instance,
     projectNodeId,
   );
   const insert = db.prepare(
-    "INSERT INTO github_project_fields (projectNodeId, fieldNodeId, name, options) VALUES (?, ?, ?, ?)",
+    "INSERT INTO source_field_names (provider, instance, scopeId, fieldId, name, options) VALUES (?, ?, ?, ?, ?, ?)",
   );
   for (const f of fields)
-    insert.run(projectNodeId, f.fieldNodeId, f.name, JSON.stringify(f.options));
+    insert.run(
+      githubIssueTracker.provider,
+      githubIssueTracker.instance,
+      projectNodeId,
+      f.fieldNodeId,
+      f.name,
+      JSON.stringify(f.options),
+    );
 }
 
 /** The stored field names of these Projects, in the order GitHub listed their options. */
@@ -46,9 +58,13 @@ export function projectFieldNames(
   if (ids.length === 0) return [];
   const rows = db
     .prepare(
-      `SELECT projectNodeId, fieldNodeId, name, options FROM github_project_fields WHERE projectNodeId IN (${ids.map(() => "?").join(", ")}) ORDER BY rowid`,
+      `SELECT scopeId AS projectNodeId, fieldId AS fieldNodeId, name, options FROM source_field_names WHERE provider = ? AND instance = ? AND scopeId IN (${ids.map(() => "?").join(", ")}) ORDER BY rowid`,
     )
-    .all(...ids) as Record<string, unknown>[];
+    .all(
+      githubIssueTracker.provider,
+      githubIssueTracker.instance,
+      ...ids,
+    ) as Record<string, unknown>[];
   return rows.map((r) => ({
     projectNodeId: String(r.projectNodeId),
     fieldNodeId: String(r.fieldNodeId),

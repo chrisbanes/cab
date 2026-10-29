@@ -1162,7 +1162,7 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
   assert.deepEqual(
     db
       .prepare(
-        "SELECT selectionId FROM project_github_active WHERE projectId = ? ORDER BY selectionId",
+        "SELECT selectionId FROM project_active_selections WHERE projectId = ? ORDER BY selectionId",
       )
       .all(projectId)
       .map((row) => row.selectionId),

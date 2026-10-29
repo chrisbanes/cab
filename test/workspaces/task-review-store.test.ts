@@ -522,7 +522,7 @@ test("upgrade atomically populates only missing retained sources and result inde
     f.stores.d.markImportedTask(f.taskId, "imported-node", "repo");
     f.db
       .prepare(
-        "INSERT INTO github_external_issues VALUES('github.com','imported-node',?,'repo','owner/repo',7,'Observed imported title','- [ ] Observed imported body','open','[]')",
+        "INSERT INTO external_items VALUES('github','github.com','imported-node',?,'repo','owner/repo',7,'Observed imported title','- [ ] Observed imported body','open','[]')",
       )
       .run(f.taskId);
     f.db.exec(
@@ -570,7 +570,7 @@ test("upgrade atomically populates only missing retained sources and result inde
       retained,
     );
     f.db.exec(
-      "DELETE FROM task_review_search; DELETE FROM task_review_sources; DELETE FROM github_external_issues",
+      "DELETE FROM task_review_search; DELETE FROM task_review_sources; DELETE FROM external_items",
     );
     f.stores.c.migrate();
     assert.equal(f.stores.review.sources(f.taskId).length, 0);
@@ -990,8 +990,8 @@ test("ordinary GitHub selection capture shares one fresh exclusion snapshot and 
     const counts = () =>
       [
         "tasks",
-        "github_external_issues",
-        "github_memberships",
+        "external_items",
+        "source_memberships",
         "task_review_sources",
         "task_review_search",
       ].map(

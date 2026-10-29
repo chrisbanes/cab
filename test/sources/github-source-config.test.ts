@@ -30,6 +30,7 @@ import { type Browser, chromium } from "playwright";
 import { DomainCommands, DomainStore } from "../../src/core/domain.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
+import { restorePreviousSourceSchema } from "../fixtures/previous-source-schema.js";
 import type { GitHubSourceReader } from "../../src/standalone/github-source.js";
 import {
   LocalOperatorHttp,
@@ -1087,7 +1088,7 @@ test("existing standalone projects acquire inactive source configuration on migr
         (
           db
             .prepare(
-              "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+              "SELECT readiness FROM project_task_sources WHERE projectId = ?",
             )
             .get(id) as { readiness: string }
         ).readiness,
@@ -1095,7 +1096,7 @@ test("existing standalone projects acquire inactive source configuration on migr
     // A new project stores no readiness rule, not a hardcoded label.
     assert.equal(rawReadiness(projectId), "null");
     assert.equal(domain.githubConfiguration(projectId).readiness, null);
-    db.prepare("DELETE FROM project_github_sources WHERE projectId = ?").run(
+    db.prepare("DELETE FROM project_task_sources WHERE projectId = ?").run(
       projectId,
     );
     domain.migrate();
@@ -1125,7 +1126,7 @@ test("saved readiness rules, including label ready, are untouched by migration a
         (
           db
             .prepare(
-              "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+              "SELECT readiness FROM project_task_sources WHERE projectId = ?",
             )
             .get(id) as { readiness: string }
         ).readiness,
@@ -1146,7 +1147,7 @@ test("saved readiness rules, including label ready, are untouched by migration a
       });
       // Rows written before no-rule defaults, stored exactly as they were.
       db.prepare(
-        "UPDATE project_github_sources SET readiness = ? WHERE projectId = ?",
+        "UPDATE project_task_sources SET readiness = ? WHERE projectId = ?",
       ).run(rule, projectId);
     }
     domain.migrate();
@@ -1336,7 +1337,11 @@ test("closed-issue mode defaults to skip and changes only through keyed, version
     });
     assert.equal(domain.githubConfiguration(projectId).closedIssues, "skip");
     // A source saved before the mode existed reads as skip without a rewrite.
+    restorePreviousSourceSchema(db);
     db.exec("ALTER TABLE project_github_sources DROP COLUMN closedIssues");
+    db.prepare(
+      "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness) VALUES (?, 1, NULL, '[]', 'null')",
+    ).run(projectId);
     domain.migrate();
     const legacy = domain.githubConfiguration(projectId);
     assert.equal(legacy.closedIssues, "skip");
@@ -1384,7 +1389,7 @@ test("closed-issue mode defaults to skip and changes only through keyed, version
     assert.throws(() =>
       db
         .prepare(
-          "UPDATE project_github_sources SET closedIssues = 'closed' WHERE projectId = ?",
+          "UPDATE project_task_sources SET closedIssues = 'closed' WHERE projectId = ?",
         )
         .run(projectId),
     );

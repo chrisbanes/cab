@@ -175,7 +175,7 @@ test("initial and later incomplete native blocker reads hold imported admission"
       (
         db
           .prepare(
-            "SELECT observedDigest FROM github_source_reviews WHERE nodeId = 'I_1'",
+            "SELECT observedDigest FROM source_reviews WHERE externalId = 'I_1'",
           )
           .get() as { observedDigest: string }
       ).observedDigest,

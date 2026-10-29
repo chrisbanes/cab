@@ -170,14 +170,14 @@ export class TaskPublicationStore {
   ): PublicationAvailability {
     const task = this.db
       .prepare(
-        "SELECT t.projectId,t.state,t.ready,(SELECT 1 FROM github_imported_tasks i WHERE i.taskId=t.id) AS imported,(SELECT 1 FROM local_dependencies d WHERE d.taskId=t.id LIMIT 1) AS edges FROM domain_tasks t WHERE t.id=?",
+        "SELECT t.projectId,t.state,t.ready,(SELECT 1 FROM imported_tasks i WHERE i.taskId=t.id) AS imported,(SELECT 1 FROM local_dependencies d WHERE d.taskId=t.id LIMIT 1) AS edges FROM domain_tasks t WHERE t.id=?",
       )
       .get(taskId) as Row | undefined;
     if (!task) throw new DomainConflictError("Unknown task");
     const projectId = String(task.projectId),
       source = this.db
         .prepare(
-          "SELECT selections,readiness FROM project_github_sources WHERE projectId=?",
+          "SELECT selections,readiness FROM project_task_sources WHERE projectId=?",
         )
         .get(projectId) as Row | undefined,
       selections = source
@@ -231,10 +231,10 @@ export class TaskPublicationStore {
       (
         this.db
           .prepare(
-            "SELECT repositoryName FROM github_external_issues WHERE repositoryId=? LIMIT 1",
+            "SELECT containerName FROM external_items WHERE containerId=? LIMIT 1",
           )
           .get(repositoryId) as Row | undefined
-      )?.repositoryName;
+      )?.containerName;
     const targets: PublicationTarget[] = [];
     const add = (
       selection: (typeof selections)[number],

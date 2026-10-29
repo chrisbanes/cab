@@ -167,13 +167,13 @@ test("persisted GitHub repository bindings and Project field arrays are validate
       [{ projectNodeId: "P", fieldNodeId: "F", optionNodeId: 7 }],
     ]) {
       db.prepare(
-        "UPDATE github_memberships SET projectFields = ? WHERE nodeId = ?",
+        "UPDATE source_memberships SET fields = ? WHERE externalId = ?",
       ).run(JSON.stringify(fields), issue.nodeId);
       assert.throws(() => sources.updateReadiness(taskId), /Invalid input/);
       assert.equal(domain.task(taskId).ready, 0);
     }
     db.prepare(
-      "UPDATE github_memberships SET projectFields = ? WHERE nodeId = ?",
+      "UPDATE source_memberships SET fields = ? WHERE externalId = ?",
     ).run(
       JSON.stringify([
         { projectNodeId: "P", fieldNodeId: "F", optionNodeId: "O" },
@@ -219,7 +219,7 @@ test("removing one overlapping selection retires its membership and preserves re
     assert.equal(sources.issue(issue.nodeId)?.taskId, taskId);
     // Reconcile obsolete rows left by a previously removed configuration too.
     db.prepare(
-      "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?, 'retired', ?, '[]')",
+      "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?, 'retired', 'github', 'github.com', ?, '[]')",
     ).run(projectId, issue.nodeId);
     assert.ok(domain.admission(taskId).reasons.includes("source-unknown"));
     domain.execute(configuration(domain, projectId, [repo]));

@@ -207,11 +207,11 @@ export function seedImportedConflict(
   f.service.domain().markImportedTask(taskId, nodeId, "R_PLACEMENT");
   f.seedPersistedState((db) => {
     db.prepare(
-      "INSERT INTO github_external_issues VALUES ('github.com',?,?,'R_PLACEMENT','owner/repo',?,'Imported','Body','open','[]')",
+      "INSERT INTO external_items VALUES ('github','github.com',?,?,'R_PLACEMENT','owner/repo',?,'Imported','Body','open','[]')",
     ).run(nodeId, taskId, issueNumber);
     for (const projectId of projectIds)
       db.prepare(
-        "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?,'selection',?,'[]')",
+        "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'selection','github','github.com',?,'[]')",
       ).run(projectId, nodeId);
   });
 }

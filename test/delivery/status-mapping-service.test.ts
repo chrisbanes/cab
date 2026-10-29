@@ -311,9 +311,7 @@ test("a task that is not Ready, or has no Project item, gets no write", async ()
     f.setStatus(todo);
     await f.service.refreshGitHub();
     assert.equal(f.domain.task(f.taskId).ready, 1);
-    databaseOf(f.service).exec(
-      "UPDATE github_memberships SET itemNodeId = NULL",
-    );
+    databaseOf(f.service).exec("UPDATE source_memberships SET itemId = NULL");
     await f.service.controlTask({
       type: "task.resume",
       key: randomUUID(),
@@ -685,7 +683,7 @@ test("a task watched under one mapping that finishes while the mapping is cleare
       state: "done",
     });
     databaseOf(f.service).exec(
-      "UPDATE domain_tasks SET ready=0; UPDATE github_external_issues SET observedState='closed'",
+      "UPDATE domain_tasks SET ready=0; UPDATE external_items SET observedState='closed'",
     );
     save(f, mapping());
     await run();
@@ -783,7 +781,7 @@ test("a task watched under the current mapping still writes Done on closure afte
       state: "done",
     });
     databaseOf(f.service).exec(
-      "UPDATE domain_tasks SET ready=0; UPDATE github_external_issues SET observedState='closed'",
+      "UPDATE domain_tasks SET ready=0; UPDATE external_items SET observedState='closed'",
     );
     await run();
     assert.deepEqual(optionsWritten(f), [inProgress, done]);
@@ -796,7 +794,7 @@ test("a task first seen done and closed was not worked on under the mapping and 
   const { f, run } = await mappedManually();
   try {
     databaseOf(f.service).exec(
-      "UPDATE domain_tasks SET state='done', ready=0; UPDATE github_external_issues SET observedState='closed'",
+      "UPDATE domain_tasks SET state='done', ready=0; UPDATE external_items SET observedState='closed'",
     );
     await run();
     await run();
@@ -826,7 +824,7 @@ test("Done recorded while the issue was open and the task not Ready is written o
     await run();
     assert.equal(writes(f).length, 1);
     databaseOf(f.service).exec(
-      "UPDATE github_external_issues SET observedState='closed'",
+      "UPDATE external_items SET observedState='closed'",
     );
     await run();
     assert.deepEqual(optionsWritten(f), [inProgress, done]);
@@ -872,7 +870,7 @@ test("a Done operation stored before a crash, with no action persisted, is writt
   try {
     await run();
     databaseOf(f.service).exec(
-      "UPDATE domain_tasks SET state='done', ready=0; UPDATE github_external_issues SET observedState='closed'",
+      "UPDATE domain_tasks SET state='done', ready=0; UPDATE external_items SET observedState='closed'",
     );
     const operationId = randomUUID();
     new StatusMappingStore(databaseOf(f.service)).enter(

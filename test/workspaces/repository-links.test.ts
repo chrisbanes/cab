@@ -13,6 +13,7 @@ import {
 import type { RepositoryVerifier } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
 import { verifiedRepository } from "../../src/standalone/repository-verification.js";
+import { restorePreviousSourceSchema } from "../fixtures/previous-source-schema.js";
 import { checkout, createSetupHome } from "../fixtures/setup-home.js";
 
 const link = (repositoryId: string, path: string, ref = "main") => ({
@@ -83,14 +84,15 @@ test("repository links from the previous schema migrate as GitHub on github.com"
     ].map((l) => ({ ...l, gitCommonDirectory: `${l.path}/.git` }));
     // The previous schema kept the links in the GitHub source row.
     f.db.exec("DROP TABLE project_repository_links");
+    restorePreviousSourceSchema(f.db);
     f.db.exec(
       "ALTER TABLE project_github_sources ADD COLUMN repositories TEXT NOT NULL DEFAULT '[]'",
     );
     f.db
       .prepare(
-        "UPDATE project_github_sources SET repositories = ? WHERE projectId = ?",
+        "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, NULL, '[]', 'null', ?)",
       )
-      .run(JSON.stringify(old), f.projectId);
+      .run(f.projectId, JSON.stringify(old));
     f.domain.migrate();
     const migrated = f.domain.repositoryLinks(f.projectId);
     assert.equal(migrated.version, 1);
@@ -118,14 +120,15 @@ test("a failed migration commits nothing", () => {
   const f = fixture();
   try {
     f.db.exec("DROP TABLE project_repository_links");
+    restorePreviousSourceSchema(f.db);
     f.db.exec(
       "ALTER TABLE project_github_sources ADD COLUMN repositories TEXT NOT NULL DEFAULT '[]'",
     );
     f.db
       .prepare(
-        "UPDATE project_github_sources SET repositories = '[{\"repositoryId\":1}]'",
+        "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, NULL, '[]', 'null', '[{\"repositoryId\":1}]')",
       )
-      .run();
+      .run(f.projectId);
     assert.throws(() => f.domain.migrate());
     assert.equal(
       (

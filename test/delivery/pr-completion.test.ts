@@ -843,7 +843,7 @@ async function closeOwnFixtureIssue(f: Fixture) {
 function supersessions(f: Fixture) {
   const db = (f.service as unknown as { db: DatabaseSync }).db;
   return db
-    .prepare("SELECT operationId FROM github_delivery_closure_supersessions")
+    .prepare("SELECT operationId FROM source_closure_supersessions")
     .all()
     .map((row) => String(row.operationId));
 }

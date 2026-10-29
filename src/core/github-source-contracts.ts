@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { sourceCredentialReference } from "./credential-reference.js";
 export const nonempty = z.string().trim().min(1).max(512);
+
+/** The provider and instance every GitHub task-source row is stored under (ADR-1020). */
+export const githubIssueTracker = {
+  provider: "github",
+  instance: "github.com",
+} as const;
 export const projectFieldsSchema = z.array(
   z
     .object({
