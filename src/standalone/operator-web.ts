@@ -268,6 +268,8 @@ export class OperatorWebBoundary {
       return this.api.readDiscoveryProjectFields(query);
     if (path === "/api/operator/discovery/gitlab-projects")
       return this.api.readGitLabProjects(query);
+    if (path === "/api/operator/jira/preview")
+      return this.api.readJiraPreview(query);
     const reviewDraft = path.match(
       /^\/api\/operator\/tasks\/([^/]+)\/review-draft$/,
     );
@@ -453,6 +455,8 @@ export class OperatorWebBoundary {
       return this.api.readClaudeTokenStatus();
     if (path === "/api/operator/code-host-credentials")
       return this.api.readCodeHostCredentials();
+    if (path === "/api/operator/issue-tracker-credentials")
+      return this.api.readIssueTrackerCredentials();
     if (path === "/api/operator/setup/home")
       return this.api.readSetupHome(reviewSession);
     if (path === "/api/operator/readiness") return this.readiness?.read();

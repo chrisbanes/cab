@@ -38,3 +38,16 @@ export const glabReferenceMatchesHost = (command: {
 }): boolean =>
   !command.credentialRef?.startsWith("glab:") ||
   command.credentialRef === `glab:${command.host}`;
+
+/** A Jira Cloud site's installation credential: `env:` references only, never their values. */
+export const jiraCredentialReferencesSchema = z
+  .object({
+    siteRef: envCredentialReference,
+    emailRef: envCredentialReference,
+    tokenRef: envCredentialReference,
+  })
+  .strict()
+  .refine(
+    (refs) => new Set([refs.siteRef, refs.emailRef, refs.tokenRef]).size === 3,
+    "Site, email and token must use different variables",
+  );

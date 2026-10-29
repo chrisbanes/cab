@@ -15,6 +15,7 @@ import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import {
   discoveryCredentialReference,
+  envCredentialReference,
   gitLabCredentialReference,
   glabReferenceMatchesHost,
 } from "../core/credential-reference.js";
@@ -33,6 +34,8 @@ import {
   closedIssuesSchema,
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
+  jiraConfigurationSchema,
+  jiraInstanceSchema,
   readinessConditionSchema,
   readinessSchema,
   setupRepositorySchema,
@@ -875,7 +878,10 @@ export const executionSchema = z
 const taskState = z.enum(["open", "done", "cancelled"]);
 const sourceIdentity = z
   .object({
-    provider: z.literal("github.com"),
+    /** The issue tracker's instance: `github.com`, or a Jira site host. */
+    provider: z.string().min(1).max(253),
+    /** Absent for GitHub. */
+    tracker: z.literal("jira").optional(),
     nodeId: z.string().min(1),
     repositoryId: z.string().min(1),
   })
@@ -925,6 +931,22 @@ function taskSchemaAdmission() {
 }
 // The server only builds https GitHub URLs; reject javascript: and data: links.
 const sourceUrl = z.url().startsWith("https://");
+/** A GitHub `owner/name`, or a Jira project key. */
+const sourceRepositoryName = z
+  .string()
+  .regex(/^(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|[A-Z][A-Z0-9_]{0,254})$/);
+/** What only a Jira task reports: its issue key and its status in Jira. */
+const jiraSourceDetail = {
+  key: z.string().min(1).max(280).optional(),
+  status: z
+    .object({
+      name: z.string().max(255),
+      categoryKey: z.string().max(64),
+    })
+    .strict()
+    .nullable()
+    .optional(),
+};
 /**
  * Provider-closure provenance: closed on GitHub while held, completed by that closure, or
  * held because GitHub's closure could not be attributed to cab's own delivery.
@@ -1030,12 +1052,10 @@ export const selectionProjectFieldsSchema = z
 export const taskSourceSummarySchema = z
   .object({
     identity: sourceIdentity,
-    repositoryName: z
-      .string()
-      .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
-      .nullable(),
+    repositoryName: sourceRepositoryName.nullable(),
     number: revision.nullable(),
     url: sourceUrl.nullable(),
+    ...jiraSourceDetail,
     state: z.enum(["open", "closed"]).nullable(),
     closure: sourceClosure,
     readiness: taskReadinessSchema,
@@ -1325,12 +1345,10 @@ export const unresolvedResultSchema = z
 const source = z
   .object({
     identity: sourceIdentity,
-    repositoryName: z
-      .string()
-      .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
-      .nullable(),
+    repositoryName: sourceRepositoryName.nullable(),
     number: revision.nullable(),
     url: sourceUrl.nullable(),
+    ...jiraSourceDetail,
     title: safeText,
     body: safeText,
     state: z.enum(["open", "closed"]).nullable(),
@@ -2295,6 +2313,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...domainBase,
+      type: z.literal("jira.configure"),
+      expectedVersion: revision,
+      ...jiraConfigurationSchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
       type: z.literal("github.configure"),
       expectedVersion: revision,
       ...githubConfigurationCommandSchema.shape,
@@ -2335,6 +2361,26 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
     })
     .strict()
     .refine(glabReferenceMatchesHost, { path: ["credentialRef"] }),
+  z
+    .object({
+      ...base,
+      type: z.literal("issue-tracker-credential.configure"),
+      issueTracker: z.literal("jira"),
+      /** Only to remove a site's credential; saving derives the site from `siteRef`. */
+      instance: jiraInstanceSchema.optional(),
+      siteRef: envCredentialReference.optional(),
+      emailRef: envCredentialReference.optional(),
+      tokenRef: envCredentialReference.optional(),
+      clear: z.literal(true).optional(),
+    })
+    .strict()
+    .refine((c) =>
+      c.clear
+        ? c.instance !== undefined && !c.siteRef && !c.emailRef && !c.tokenRef
+        : c.instance === undefined &&
+          Boolean(c.siteRef && c.emailRef && c.tokenRef) &&
+          new Set([c.siteRef, c.emailRef, c.tokenRef]).size === 3,
+    ),
   z
     .object({
       ...base,
@@ -2683,6 +2729,14 @@ export const configurationReceiptSchema = z
         .strict(),
       z
         .object({
+          commandType: z.literal("jira.configure"),
+          resourceId: uuid,
+          version: revision,
+          selectionCount: time,
+        })
+        .strict(),
+      z
+        .object({
           commandType: z.literal("github.configure"),
           resourceId: uuid,
           version: revision,
@@ -2722,6 +2776,15 @@ export const configurationReceiptSchema = z
           resourceId: z
             .string()
             .regex(/^system:code-host-credential:gitlab:[a-z0-9.-]{1,253}$/),
+          configured: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("issue-tracker-credential.configure"),
+          resourceId: z
+            .string()
+            .regex(/^system:issue-tracker-credential:jira:[a-z0-9.-]{1,253}$/),
           configured: z.boolean(),
         })
         .strict(),
@@ -3032,6 +3095,8 @@ export const sourceObservationSchema = envelope(
         z
           .object({
             projectId: uuid,
+            /** Absent for GitHub. A Jira project reports no GitHub credential. */
+            tracker: z.literal("jira").optional(),
             credential: sourceCredentialStatusSchema.optional(),
             readiness: readinessRuleViewSchema,
             selections: z.array(
@@ -3164,13 +3229,16 @@ export const projectConfigurationSchema = envelope(
       source: z
         .object({
           version: revision,
+          /** Absent for GitHub; for Jira, `instance` names the site. */
+          tracker: z.literal("jira").optional(),
+          instance: safeText.optional(),
           credentialConfigured: z.boolean(),
           credential: sourceCredentialStatusSchema.optional(),
           selections: z.array(
             z
               .object({
                 id: safeText,
-                kind: z.enum(["repository", "search", "project"]),
+                kind: z.enum(["repository", "search", "project", "jql"]),
                 descriptor: safeText,
                 active: z.boolean(),
               })
@@ -3202,6 +3270,8 @@ export const projectPrivateValuesSchema = envelope(
         .object({
           version: revision,
           searches: z.array(z.object({ id: text, query: text }).strict()),
+          /** A Jira project's selections; empty for GitHub. */
+          jql: z.array(z.object({ id: text, jql: text }).strict()).optional(),
         })
         .strict(),
       repositories: z
@@ -3801,6 +3871,60 @@ export const codeHostCredentialsSchema = envelope(
     })
     .strict(),
 );
+/** Why a Jira site's credential is unusable; never a message or secret. */
+export const jiraCredentialReasons = [
+  "missing-credential",
+  "site-invalid",
+  "site-mismatch",
+  "site-unreachable",
+  "not-jira",
+  "unauthorized",
+] as const;
+/** Installation Jira credentials: usability and the account, never a variable name or secret. */
+export const issueTrackerCredentialsSchema = envelope(
+  z
+    .object({
+      credentials: z
+        .array(
+          z
+            .object({
+              issueTracker: z.literal("jira"),
+              instance: jiraInstanceSchema,
+              usable: z.boolean(),
+              account: z
+                .object({
+                  accountId: z.string().min(1).max(128),
+                  displayName: safeText,
+                })
+                .strict()
+                .nullable(),
+              reason: z.enum(jiraCredentialReasons).nullable(),
+            })
+            .strict(),
+        )
+        .max(100),
+    })
+    .strict(),
+);
+/** Up to 20 issues a JQL query matches, read without saving anything. */
+export const jiraPreviewSchema = envelope(
+  z
+    .object({
+      matches: z
+        .array(
+          z
+            .object({
+              key: z.string().min(1).max(280),
+              title: safeText,
+              status: safeText,
+            })
+            .strict(),
+        )
+        .max(20),
+      more: z.boolean(),
+    })
+    .strict(),
+);
 export const gitLabProjectsSchema = envelope(
   z.discriminatedUnion("state", [
     z
@@ -4179,6 +4303,7 @@ export const operationTypeSchema = z.enum([
   "runtime.configure",
   "assignment.apply",
   "github.configure",
+  "jira.configure",
   "repositories.configure",
   "status-mapping.configure",
   "github.preview",

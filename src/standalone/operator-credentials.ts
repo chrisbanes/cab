@@ -251,6 +251,8 @@ export function operatorRouteAuthority(
       "/api/operator/discovery",
       "/api/operator/claude-token",
       "/api/operator/code-host-credentials",
+      "/api/operator/issue-tracker-credentials",
+      "/api/operator/jira/preview",
       "/api/operator/readiness",
       "/api/operator/readiness/claude-token",
       "/api/operator/discovery/repositories",

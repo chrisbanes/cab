@@ -3,7 +3,10 @@ import { canonicalMaterial, deliveryPolicySchema } from "./delivery.js";
 import type { DomainCommand } from "./domain.js";
 import { executionHarnessSchema } from "./execution-runtime.js";
 import { linkedRepositorySchema } from "./github-source.js";
-import { githubConfigurationSchema } from "./github-source-contracts.js";
+import {
+  githubConfigurationSchema,
+  jiraConfigurationSchema,
+} from "./github-source-contracts.js";
 import { repositoriesConfigurationCommandResultSchema } from "./repository-links.js";
 import { statusMappingSchema } from "./status-mapping-contracts.js";
 
@@ -152,6 +155,10 @@ const legacyGithubConfigurationCommandResultSchema =
     })
     .strict();
 
+export const jiraConfigurationCommandResultSchema = jiraConfigurationSchema
+  .extend({ version: positiveInteger })
+  .strict();
+
 export const githubActivationCommandResultSchema = z
   .object({
     projectId: id,
@@ -209,6 +216,7 @@ export interface DomainCommandResultMap {
   "github.configure": z.output<
     typeof legacyGithubConfigurationCommandResultSchema
   >;
+  "jira.configure": z.output<typeof jiraConfigurationCommandResultSchema>;
   "github.activate": z.output<typeof legacyGithubActivationCommandResultSchema>;
   "github.place": z.output<typeof taskCommandResultSchema>;
   "source.review": z.output<typeof taskCommandResultSchema>;
@@ -220,6 +228,9 @@ export interface DomainCommandResultMap {
   "capacity.configure": z.output<typeof capacityCommandResultSchema>;
   "discovery.configure": z.output<typeof credentialStatusCommandResultSchema>;
   "code-host-credential.configure": z.output<
+    typeof credentialStatusCommandResultSchema
+  >;
+  "issue-tracker-credential.configure": z.output<
     typeof credentialStatusCommandResultSchema
   >;
   "claude-token.configure": z.output<
@@ -361,6 +372,11 @@ function parseCommandOutcome(
           value,
         ),
       };
+    case "jira.configure":
+      return {
+        type,
+        result: parseUnchanged(jiraConfigurationCommandResultSchema, value),
+      };
     case "github.activate":
       return {
         type,
@@ -389,6 +405,7 @@ function parseCommandOutcome(
       };
     case "discovery.configure":
     case "code-host-credential.configure":
+    case "issue-tracker-credential.configure":
     case "claude-token.configure":
       return {
         type,

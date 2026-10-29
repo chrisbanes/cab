@@ -96,6 +96,8 @@ import {
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
   codeHostCredentialsSchema,
+  issueTrackerCredentialsSchema,
+  jiraPreviewSchema,
   discoveryStatusSchema,
   gitLabProjectsSchema,
   type Execution,
@@ -198,6 +200,9 @@ import {
   ghEnvironment,
   ghToken,
 } from "./gh-credential.js";
+import { jiraInstanceSchema } from "../core/github-source-contracts.js";
+import { jiraSiteHost } from "./jira-credential.js";
+import { JiraFailure } from "./jira-http.js";
 import {
   gitLabCredentialLocalState,
   readCodeHostCredentials,
@@ -2224,11 +2229,78 @@ export class OperatorApi {
     const imported = this.domain().importedTask(taskId);
     return imported
       ? {
-          provider: "github.com" as const,
+          provider: String(imported.instance),
+          ...(imported.provider === "jira" ? { tracker: "jira" as const } : {}),
           nodeId: String(imported.nodeId),
           repositoryId: String(imported.repositoryId),
         }
       : null;
+  }
+  /** The source store of the task's issue tracker. */
+  private sourceStore(identity: { provider: string; tracker?: "jira" }) {
+    const store = this.service.githubSources();
+    return identity.tracker
+      ? store.forTracker({
+          provider: identity.tracker,
+          instance: identity.provider,
+        })
+      : store;
+  }
+  /** What a source reports of its issue: the display name, key, link and Jira-only detail. */
+  private issueFacts(
+    identity: { provider: string; tracker?: "jira" },
+    issue: Row | undefined,
+    excluded: readonly string[] | undefined,
+    /** Whether a GitHub repository name must also pass the exclusions. */
+    disclose = true,
+  ) {
+    const number =
+      issue &&
+      Number.isSafeInteger(Number(issue.issueNumber)) &&
+      Number(issue.issueNumber) > 0
+        ? Number(issue.issueNumber)
+        : null;
+    if (!identity.tracker) {
+      const repositoryName = !issue?.repositoryName
+        ? null
+        : disclose
+          ? this.repositoryName(issue.repositoryName, excluded)
+          : /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(
+                String(issue.repositoryName),
+              )
+            ? String(issue.repositoryName)
+            : null;
+      return {
+        repositoryName,
+        number,
+        url: githubIssueUrl(repositoryName, number),
+        detail: {},
+      };
+    }
+    const projectKey = /^[A-Z][A-Z0-9_]{0,254}$/.test(
+      String(issue?.repositoryName),
+    )
+      ? String(issue?.repositoryName)
+      : null;
+    const key = projectKey && number ? `${projectKey}-${number}` : null;
+    const status = z
+      .object({ name: z.string(), categoryKey: z.string() })
+      .passthrough()
+      .safeParse(JSON.parse(String(issue?.observedStatus ?? "null")));
+    return {
+      repositoryName: projectKey,
+      number,
+      url: key ? `https://${identity.provider}/browse/${key}` : null,
+      detail: {
+        ...(key ? { key } : {}),
+        status: status.success
+          ? {
+              name: this.safe(status.data.name, excluded) ?? "",
+              categoryKey: status.data.categoryKey,
+            }
+          : null,
+      },
+    };
   }
   /** Instruction revisions and linked repositories: the exclusion base inputs no other fence covers. */
   private exclusionFence() {
@@ -2659,21 +2731,18 @@ export class OperatorApi {
   ) {
     const identity = this.identity(taskId);
     if (!identity) return null;
-    const issue = this.service.githubSources().issue(identity.nodeId);
-    const repositoryName = issue?.repositoryName
-      ? this.repositoryName(issue.repositoryName, excluded)
-      : null;
-    const number =
-      issue &&
-      Number.isSafeInteger(Number(issue.issueNumber)) &&
-      Number(issue.issueNumber) > 0
-        ? Number(issue.issueNumber)
-        : null;
+    const issue = this.sourceStore(identity).issue(identity.nodeId);
+    const { repositoryName, number, url, detail } = this.issueFacts(
+      identity,
+      issue,
+      excluded,
+    );
     return {
       identity,
       repositoryName,
       number,
-      url: githubIssueUrl(repositoryName, number),
+      url,
+      ...detail,
       state: issue?.observedState ?? null,
       closure: this.domain().providerClosure(taskId),
       readiness: this.taskReadiness(
@@ -3529,7 +3598,7 @@ export class OperatorApi {
     const profile = p.leadProfileId ? d.profile(String(p.leadProfileId)) : null;
     const identity = this.identity(taskId),
       issue = identity
-        ? this.service.githubSources().issue(identity.nodeId)
+        ? this.sourceStore(identity).issue(identity.nodeId)
         : undefined;
     const messages = view.messages.map((m) => ({
       eventId: m.eventId,
@@ -4528,25 +4597,16 @@ export class OperatorApi {
     projectId: string,
     excluded: readonly string[] | undefined,
   ) {
-    const store = this.service.githubSources(),
-      repositoryName =
-        issue &&
-        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(issue.repositoryName))
-          ? String(issue.repositoryName)
-          : null;
-    const number =
-      issue &&
-      Number.isSafeInteger(Number(issue.issueNumber)) &&
-      Number(issue.issueNumber) > 0
-        ? Number(issue.issueNumber)
-        : null;
+    const store = this.sourceStore(identity),
+      facts = this.issueFacts(identity, issue, excluded, false);
     const review = store.review(identity.nodeId),
       hold = store.hold(identity.nodeId);
     return {
       identity,
-      repositoryName,
-      number,
-      url: githubIssueUrl(repositoryName, number),
+      repositoryName: facts.repositoryName,
+      number: facts.number,
+      url: facts.url,
+      ...facts.detail,
       title: this.safe(issue?.observedTitle, excluded),
       body: this.safe(issue?.observedBody, excluded),
       state: issue?.observedState ?? null,
@@ -5665,6 +5725,7 @@ export class OperatorApi {
       d = this.domain(),
       r = d.routing(projectId),
       g = d.githubConfiguration(projectId),
+      jira = d.jiraConfiguration(projectId),
       links = d.repositoryLinks(projectId);
     return projectPrivateValuesSchema.parse({
       data: {
@@ -5679,6 +5740,7 @@ export class OperatorApi {
           searches: g.selections.flatMap((s) =>
             s.kind === "search" ? [{ id: s.id, query: s.query }] : [],
           ),
+          jql: jira?.selections ?? [],
         },
         repositories: {
           version: links.version,
@@ -5725,7 +5787,10 @@ export class OperatorApi {
       d = this.domain(),
       g = d.githubConfiguration(projectId),
       links = d.repositoryLinks(projectId),
-      credential = await this.service.gitHubSourceCredentialStatus(projectId),
+      jira = d.jiraConfiguration(projectId),
+      credential = jira
+        ? undefined
+        : await this.service.gitHubSourceCredentialStatus(projectId),
       excluded = await this.exclusions(projectId),
       r = d.routing(projectId),
       active = d.githubActiveSelectionIds(projectId);
@@ -5777,21 +5842,39 @@ export class OperatorApi {
         },
         source: {
           version: g.version,
-          credentialConfigured: g.credentialRef !== null,
-          credential,
-          selections: g.selections.map((s) => ({
-            id: this.exact(s.id, excluded),
-            kind: s.kind,
-            descriptor: this.safe(
-              s.kind === "repository"
-                ? `${s.owner}/${s.name}`
-                : s.kind === "project"
-                  ? s.projectNodeId
-                  : null,
-              excluded,
-            ),
-            active: active.includes(s.id),
-          })),
+          ...(jira
+            ? {
+                tracker: "jira" as const,
+                instance: this.safe(jira.instance, excluded),
+              }
+            : {}),
+          credentialConfigured: jira
+            ? d
+                .issueTrackerCredentials()
+                .some((c) => c.instance === jira.instance)
+            : g.credentialRef !== null,
+          ...(credential ? { credential } : {}),
+          selections: [
+            ...(jira?.selections ?? []).map((s) => ({
+              id: this.exact(s.id, excluded),
+              kind: "jql" as const,
+              descriptor: null,
+              active: active.includes(s.id),
+            })),
+            ...g.selections.map((s) => ({
+              id: this.exact(s.id, excluded),
+              kind: s.kind,
+              descriptor: this.safe(
+                s.kind === "repository"
+                  ? `${s.owner}/${s.name}`
+                  : s.kind === "project"
+                    ? s.projectNodeId
+                    : null,
+                excluded,
+              ),
+              active: active.includes(s.id),
+            })),
+          ],
           readiness: this.readinessRuleView(g.readiness, excluded),
           closedIssues: g.closedIssues,
         },
@@ -6109,7 +6192,8 @@ export class OperatorApi {
     const scope = new GhLoginScope();
     const projects: {
       projectId: string;
-      credential: Awaited<
+      /** Absent for a Jira project, which reads no GitHub credential. */
+      credential?: Awaited<
         ReturnType<StandaloneService["gitHubSourceCredentialStatus"]>
       >;
     }[] = new Array(pending.length);
@@ -6119,13 +6203,15 @@ export class OperatorApi {
         while (next < pending.length) {
           const index = next++;
           const projectId = String(pending[index]!.id);
-          projects[index] = {
-            projectId,
-            credential: await this.service.gitHubSourceCredentialStatus(
-              projectId,
-              scope,
-            ),
-          };
+          projects[index] = d.jiraConfiguration(projectId)
+            ? { projectId }
+            : {
+                projectId,
+                credential: await this.service.gitHubSourceCredentialStatus(
+                  projectId,
+                  scope,
+                ),
+              };
         }
       }),
     );
@@ -6156,11 +6242,15 @@ export class OperatorApi {
                 })),
               })),
             };
+          const jira = d.jiraConfiguration(projectId);
           return {
             projectId,
-            credential,
+            ...(jira ? { tracker: "jira" as const } : {}),
+            ...(credential ? { credential } : {}),
             readiness,
-            selections: d.githubConfiguration(projectId).selections.map((s) => {
+            selections: (
+              jira?.selections ?? d.githubConfiguration(projectId).selections
+            ).map((s) => {
               const store = this.service.githubSources(),
                 sync = store.syncState(projectId, s.id);
               const at =
@@ -6168,7 +6258,7 @@ export class OperatorApi {
                   ? null
                   : String(sync.refreshedAt);
               const state =
-                excluded === undefined || !credential.usable
+                excluded === undefined || credential?.usable === false
                   ? "unavailable"
                   : sync
                     ? sync.complete
@@ -6183,10 +6273,10 @@ export class OperatorApi {
               return {
                 selectionId: this.safe(s.id, excluded),
                 state,
-                credentialReason: credential.reason,
+                ...(credential ? { credentialReason: credential.reason } : {}),
                 lastAttemptAt: at,
                 lastSuccessfulAt:
-                  sync?.complete && credential.usable ? at : null,
+                  sync?.complete && credential?.usable !== false ? at : null,
                 counts: counts && {
                   ...counts,
                   matching:
@@ -6430,6 +6520,154 @@ export class OperatorApi {
     return codeHostCredentialsSchema.parse({
       data: {
         credentials: await readCodeHostCredentials(this.domain(), this.setup),
+      },
+      observedAt: Date.now(),
+    });
+  }
+  /** The host of the Jira site variable a credential is configured with. */
+  private jiraSiteOf(siteRef: string): string {
+    const site = jiraSiteHost(process.env[siteRef.slice(4)] ?? "");
+    if ("reason" in site)
+      throw new OperatorApiError(
+        400,
+        "invalid-input",
+        ["siteRef"],
+        undefined,
+        site.reason === "missing-credential"
+          ? "The Jira site variable is not set."
+          : "The Jira site variable must be an https:// address with no path, port or credentials.",
+      );
+    return site.instance;
+  }
+  /** Each Jira site's credential usability and account; never a variable name or secret. */
+  async readIssueTrackerCredentials() {
+    const excluded = await this.exclusions();
+    return issueTrackerCredentialsSchema.parse({
+      data: {
+        credentials: (await this.service.jiraCredentialStatuses()).map(
+          ({ instance, status }) => ({
+            issueTracker: "jira",
+            instance,
+            usable: status.usable,
+            account: status.account && {
+              accountId: status.account.accountId,
+              displayName: this.safe(status.account.displayName, excluded),
+            },
+            reason: status.reason,
+          }),
+        ),
+      },
+      observedAt: Date.now(),
+    });
+  }
+  /** The sentence for a Jira call that could not answer about the JQL. */
+  private async jiraJqlProblem(
+    instance: string,
+    jql: string,
+    excluded: readonly string[] | undefined,
+    where: string,
+  ): Promise<string | null> {
+    try {
+      const messages = await this.service.jiraJqlErrors(instance, jql);
+      return messages.length
+        ? `Jira rejected the JQL${where}: ${messages
+            .map((m) => this.safe(m, excluded) ?? "invalid")
+            .join(" ")}`
+        : null;
+    } catch (error) {
+      const reason = error instanceof JiraFailure ? error.reason : "";
+      throw new OperatorApiError(
+        503,
+        "unavailable",
+        undefined,
+        undefined,
+        reason === "missing-credential"
+          ? "No Jira credential is configured for this site."
+          : reason === "unauthorized"
+            ? "Jira rejected the credential for this site."
+            : "Jira could not check the JQL. Try again.",
+      );
+    }
+  }
+  /** Refuses the whole save when Jira rejects any new or changed JQL. */
+  private async verifyJiraSelections(
+    c: Extract<
+      z.infer<typeof operatorCommandSchema>,
+      { type: "jira.configure" }
+    >,
+  ) {
+    const current = this.domain().jiraConfiguration(c.projectId),
+      excluded = await this.exclusions(c.projectId);
+    for (const [index, selection] of c.selections.entries()) {
+      if (
+        current?.instance === c.instance &&
+        current.selections.some(
+          (s) => s.id === selection.id && s.jql === selection.jql,
+        )
+      )
+        continue;
+      const problem = await this.jiraJqlProblem(
+        c.instance,
+        selection.jql,
+        excluded,
+        ` of selection ${this.safe(selection.id, excluded) ?? index + 1}`,
+      );
+      if (problem)
+        throw new OperatorApiError(
+          409,
+          "conflict",
+          [`selections.${index}.jql`],
+          undefined,
+          problem,
+        );
+    }
+  }
+  /** Up to 20 issues a valid JQL matches on a configured site, without saving anything. */
+  async readJiraPreview(query: URLSearchParams) {
+    const parsed = z
+      .object({
+        instance: jiraInstanceSchema,
+        jql: z.string().trim().min(1).max(4096),
+      })
+      .strict()
+      .safeParse(Object.fromEntries(query));
+    if (
+      !parsed.success ||
+      [...query.keys()].some((k) => query.getAll(k).length !== 1)
+    )
+      throw new OperatorApiError(400, "invalid-input");
+    const excluded = await this.exclusions();
+    const problem = await this.jiraJqlProblem(
+      parsed.data.instance,
+      parsed.data.jql,
+      excluded,
+      "",
+    );
+    if (problem)
+      throw new OperatorApiError(409, "conflict", ["jql"], undefined, problem);
+    let preview: Awaited<ReturnType<StandaloneService["jiraPreview"]>>;
+    try {
+      preview = await this.service.jiraPreview(
+        parsed.data.instance,
+        parsed.data.jql,
+      );
+    } catch {
+      throw new OperatorApiError(
+        503,
+        "unavailable",
+        undefined,
+        undefined,
+        "Jira could not run the search. Try again.",
+      );
+    }
+    return jiraPreviewSchema.parse({
+      data: {
+        matches: preview.matches.map((m) => ({
+          key: m.key,
+          title: this.safe(m.title, excluded),
+          status: this.safe(m.status, excluded),
+        })),
+        more: preview.more,
       },
       observedAt: Date.now(),
     });
@@ -7469,6 +7707,44 @@ export class OperatorApi {
           parseDomainCommandOutcome("code-host-credential.configure", outcome),
           c.key,
           `system:code-host-credential:${c.codeHost}:${c.host}`,
+        );
+      }
+      if (c.type === "issue-tracker-credential.configure") {
+        const instance = c.clear ? c.instance! : this.jiraSiteOf(c.siteRef!);
+        const outcome = await this.executeDomain({
+          key: c.key,
+          type: c.type,
+          issueTracker: c.issueTracker,
+          instance,
+          credential: c.clear
+            ? null
+            : {
+                siteRef: c.siteRef!,
+                emailRef: c.emailRef!,
+                tokenRef: c.tokenRef!,
+              },
+          actor: "operator",
+        });
+        return commandReceipt(
+          parseDomainCommandOutcome(
+            "issue-tracker-credential.configure",
+            outcome,
+          ),
+          c.key,
+          `system:issue-tracker-credential:jira:${instance}`,
+        );
+      }
+      if (c.type === "jira.configure") {
+        this.requireProject(c.projectId);
+        const command = { ...c, actor: "operator" as const };
+        // An exact replay returns its recorded receipt whatever Jira says now.
+        if (this.domain().recordedCommand(command) === undefined)
+          await this.verifyJiraSelections(c);
+        const raw = await this.executeDomain(command);
+        return commandReceipt(
+          parseDomainCommandOutcome("jira.configure", raw),
+          c.key,
+          c.projectId,
         );
       }
       if (c.type === "discovery.configure") {

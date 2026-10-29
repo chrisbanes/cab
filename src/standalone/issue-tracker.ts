@@ -5,9 +5,10 @@ import type {
   PublishedIssueInspection,
 } from "./github-delivery.js";
 import type { GitHubSourceReader } from "./github-source.js";
+import type { JiraSourceReader } from "./jira-source.js";
 
-/** Issue trackers cab can read and write; GitHub is the only implementation (ADR-1020). */
-export type IssueTracker = "github";
+/** Issue trackers cab can read; only GitHub can also write (ADR-1020). */
+export type IssueTracker = "github" | "jira";
 
 /** What cab reads of an issue tracker; today's GitHub source contract. */
 export type IssueTrackerReader = GitHubSourceReader;
@@ -15,9 +16,12 @@ export type IssueTrackerReader = GitHubSourceReader;
 export type IssueTrackerReaderFactory = (
   credentialRef: string,
 ) => IssueTrackerReader;
-export type IssueTrackerReaderFactories = Partial<
-  Record<IssueTracker, IssueTrackerReaderFactory>
->;
+/** Builds the reader of the Jira site `instance`, which finds its own installation credential. */
+export type JiraReaderFactory = (instance: string) => JiraSourceReader;
+export type IssueTrackerReaderFactories = {
+  github?: IssueTrackerReaderFactory;
+  jira?: JiraReaderFactory;
+};
 
 /** What cab asks of an issue tracker for issue-action writes and their read-back. */
 export interface IssueTrackerWriter

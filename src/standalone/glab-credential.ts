@@ -3,6 +3,7 @@ import { credentialFreeEnvironment } from "../core/child-environment.js";
 import type { DomainStore } from "../core/domain.js";
 import { claudeTokenExclusions } from "./claude-token.js";
 import { credentialReferenceExclusions } from "./gh-credential.js";
+import { jiraCredentialExclusions } from "./jira-credential.js";
 
 export type GlabFailureState = "not-installed" | "not-signed-in" | "unreadable";
 
@@ -140,6 +141,7 @@ export function glabEnvironment(
   > &
     Partial<Pick<DomainStore, "githubConfiguration">> & {
       codeHostCredentials?: () => { credentialRef: string }[];
+      issueTrackerCredentials?: DomainStore["issueTrackerCredentials"];
     },
   environment: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
@@ -163,10 +165,21 @@ export function glabEnvironment(
     "GH_TOKEN",
     "GITHUB_TOKEN",
   ];
-  const result = credentialFreeEnvironment(environment, names, environment, [
-    ...claude.values,
-    ...credentialReferenceExclusions(null, environment).values,
-  ]);
+  // Jira credentials never reach glab either.
+  const jira = jiraCredentialExclusions(
+    domain.issueTrackerCredentials?.() ?? [],
+    environment,
+  );
+  const result = credentialFreeEnvironment(
+    environment,
+    [...names, ...jira.names],
+    environment,
+    [
+      ...claude.values,
+      ...credentialReferenceExclusions(null, environment).values,
+      ...jira.values,
+    ],
+  );
   for (const key of glabTokenVariables)
     if (environment[key] !== undefined) result[key] = environment[key];
   return result;

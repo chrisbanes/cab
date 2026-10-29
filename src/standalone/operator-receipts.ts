@@ -108,6 +108,18 @@ export function commandReceipt(
               : { repositoryCount: outcome.result.repositories.length }),
           },
         };
+      case "jira.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId,
+            version: outcome.result.version,
+            selectionCount: outcome.result.selections.length,
+          },
+        };
       case "repositories.configure":
         return {
           kind: "configuration" as const,
@@ -181,6 +193,18 @@ export function commandReceipt(
             commandType: outcome.type,
             resourceId:
               resourceId as `system:code-host-credential:gitlab:${string}`,
+            configured: outcome.result.configured,
+          },
+        };
+      case "issue-tracker-credential.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId:
+              resourceId as `system:issue-tracker-credential:jira:${string}`,
             configured: outcome.result.configured,
           },
         };

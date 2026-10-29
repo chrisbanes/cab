@@ -207,21 +207,27 @@ export class TaskPublicationStore {
         "SELECT 1 FROM task_publications WHERE taskId=? AND state='sending'",
       )
       .get(taskId);
-    const reasonCode: PublicationReasonCode | null = task.imported
-      ? "task-imported"
-      : task.state !== "open"
-        ? "task-not-open"
-        : context.started
-          ? "task-started"
-          : task.edges
-            ? "local-dependencies"
-            : sending
-              ? "publication-unresolved"
-              : !selections.length || !linked.length
-                ? "no-github-source"
-                : policy.credentialRef === null
-                  ? "no-delivery-credential"
-                  : null;
+    const reasonCode: PublicationReasonCode | null = this.db
+      .prepare(
+        "SELECT 1 FROM project_task_sources WHERE projectId=? AND provider<>'github'",
+      )
+      .get(projectId)
+      ? "issue-tracker-unsupported"
+      : task.imported
+        ? "task-imported"
+        : task.state !== "open"
+          ? "task-not-open"
+          : context.started
+            ? "task-started"
+            : task.edges
+              ? "local-dependencies"
+              : sending
+                ? "publication-unresolved"
+                : !selections.length || !linked.length
+                  ? "no-github-source"
+                  : policy.credentialRef === null
+                    ? "no-delivery-credential"
+                    : null;
     const grants = policy.grants;
     const known = (repositoryId: string) =>
       selections.flatMap((s) =>
