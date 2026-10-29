@@ -169,6 +169,9 @@ import {
   ghToken,
 } from "./gh-credential.js";
 import type { CodeHostProviderFactories } from "./code-host.js";
+import type { AdoptFunction } from "./git-fetch.js";
+import type { PushFunction } from "./github-delivery.js";
+import { gitLabDeliveryFactory } from "./gitlab-delivery.js";
 import {
   gitLabCredentialExclusions,
   glabEnvironment,
@@ -487,6 +490,9 @@ export interface StandaloneServiceOptions {
     fetcher?: typeof fetch;
     providerFactories?: CodeHostProviderFactories;
     issueTrackerFactories?: IssueTrackerWriterFactories;
+    /** Test-only: the HTTPS push and the fetch of an adopted head, in place of Git. */
+    push?: PushFunction;
+    adopt?: AdoptFunction;
     /** Test-only: how long a status-mapping write's provider call may take. */
     statusWriteTimeoutMs?: number;
   };
@@ -1070,8 +1076,11 @@ export class StandaloneService {
         ...(this.options.delivery?.fetcher
           ? { fetcher: this.options.delivery.fetcher }
           : {}),
-        ...(this.options.delivery?.providerFactories
-          ? { providerFactories: this.options.delivery.providerFactories }
+        ...(this.options.delivery?.push
+          ? { push: this.options.delivery.push }
+          : {}),
+        ...(this.options.delivery?.adopt
+          ? { adopt: this.options.delivery.adopt }
           : {}),
         ...(this.options.delivery?.issueTrackerFactories
           ? {
@@ -1079,6 +1088,15 @@ export class StandaloneService {
                 this.options.delivery.issueTrackerFactories,
             }
           : {}),
+        providerFactories: {
+          gitlab: gitLabDeliveryFactory(domain, {
+            glabExecutable: this.options.glabExecutable,
+            fetcher: this.options.delivery?.fetcher,
+            push: this.options.delivery?.push,
+            adopt: this.options.delivery?.adopt,
+          }),
+          ...this.options.delivery?.providerFactories,
+        },
         issueTrackerOf: (projectId) => {
           const source = projectIssueTracker(db, projectId);
           // Only GitHub rows exist today; the coordinator refuses a tracker without a writer.

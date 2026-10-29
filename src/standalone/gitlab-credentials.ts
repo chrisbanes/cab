@@ -50,6 +50,20 @@ async function resolve(
     : { reason: `glab-${result.state}` as GitLabCredentialReason };
 }
 
+/** The token of the host's configured credential, or null when there is none or it is unusable. */
+export async function codeHostToken(
+  domain: Domain,
+  seams: GitLabSeams,
+  host: string,
+): Promise<string | null> {
+  const ref = domain
+    .codeHostCredentials()
+    .find((c) => c.host === host)?.credentialRef;
+  if (!ref) return null;
+  const resolved = await resolve(domain, seams, { host, credentialRef: ref });
+  return "token" in resolved ? resolved.token : null;
+}
+
 const overridden = (domain: Domain, ref: string) =>
   ref.startsWith("glab:") && glabOverridden(glabEnvironment(domain));
 

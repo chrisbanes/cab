@@ -15,8 +15,10 @@ import type {
 
 export type CodeHost = StoredRepositoryLink["codeHost"];
 
-/** What cab asks of a code host for one project; GitHub is the only implementation. */
+/** What cab asks of a code host for one project. */
 export interface CodeHostDeliveryProvider {
+  /** Whether the provider delivers this kind of action; omitted means all of them. */
+  supportsAction?(kind: ExternalAction["kind"]): boolean;
   inspectAction(
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation>;

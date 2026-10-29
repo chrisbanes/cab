@@ -1064,6 +1064,52 @@ test("a delivery action naming a GitLab link is refused and nothing is pushed", 
       "perform",
     ]);
     await coordinator.stop();
+
+    // A GitLab provider that implements only branch actions refuses the rest before preflight.
+    const seen: string[] = [];
+    const branchOnly = new DeliveryCoordinator(store, {
+      providerFactories: {
+        gitlab: () => ({
+          ...provider,
+          supportsAction: (kind) => kind.startsWith("branch."),
+        }),
+      },
+      codeHostOf: () => ({ codeHost: "gitlab", host: "gitlab.example.com" }),
+      verifyPush: async () => {
+        seen.push("verifyPush");
+        return null;
+      },
+      authorize: () => {},
+      approved: () => true,
+    });
+    const comment = await branchOnly.submit(
+      {
+        operationId: randomUUID(),
+        action: {
+          kind: "issue.comment",
+          target: { repositoryId: "4242", number: 1, nodeId: "I1" },
+          body: "B",
+        },
+      },
+      caller,
+    );
+    assert.equal(comment.observation?.reason, "code-host-delivery-unavailable");
+    assert.deepEqual(seen, []);
+    const branch = await branchOnly.submit(
+      {
+        operationId: randomUUID(),
+        action: {
+          kind: "branch.push",
+          target: { repositoryId: "4242" },
+          commitSha: "a".repeat(40),
+        },
+      },
+      caller,
+    );
+    // Supported, so it went on to the offline commit check.
+    assert.equal(branch.observation?.reason, "push-commit-not-verified");
+    assert.deepEqual(seen, ["verifyPush"]);
+    await branchOnly.stop();
   } finally {
     db.close();
     rmSync(directory, { recursive: true, force: true });

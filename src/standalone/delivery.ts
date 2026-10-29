@@ -387,6 +387,13 @@ export class DeliveryCoordinator {
           receipt: null,
         });
       provider = this.provider(caller.projectId, target, policy, resolved);
+      // A provider that implements only some actions refuses the rest the same way.
+      if (provider.supportsAction?.(action.kind) === false)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "code-host-delivery-unavailable",
+          receipt: null,
+        });
     }
     let publication: PublicationContext | undefined;
     let adoption: AdoptionContext | undefined;
