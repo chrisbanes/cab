@@ -12,13 +12,13 @@ user home path or disposable-root path.
 
 ## Environment and configuration
 
-- Checkout `75d22ddcbf0edd7430bc9bf02ce5cf5dadb9575f`; macOS 27.0.1; Node 24.22.1;
-  npm 11.19.1 (`package.json` pins npm 12.2.1; `npm ci` completed with it).
+- Base `75d22ddcbf0edd7430bc9bf02ce5cf5dadb9575f` plus this branch's probe harness; macOS 27.0.1; Node 24.22.1;
+  npm 11.19.1 (`package.json` pins npm 12.2.1; `npm ci` completed under 11.19.1).
 - Claude Agent SDK 0.3.310 (the `package.json` pin) with bundled Claude Code 2.1.310,
   reached through a disposable root's `sdk/node_modules` link to the checkout's
   installed dependencies; `init` fails if the installed version differs from the pin.
 - Model `claude-haiku-5-5` at `low` effort, through the harness's subscription token
-  allowlist (`CLAUDE_CODE_OAUTH_TOKEN` only). 17 model-backed queries of the 60 cap.
+  allowlist (`CLAUDE_CODE_OAUTH_TOKEN` only). 17 model-backed queries of the 60 cap: 2 for `q1`, 2 for `q2`, 8 for four runs of `q3`, 2 for `q3-crash` and 3 for the one-off diagnosis below.
 - Every query used the existing `baseOptions` (`settingSources: []`,
   `strictMcpConfig: true`, `permissionMode: "dontAsk"`, disposable `HOME`,
   `CLAUDE_CONFIG_DIR` and workspace), the cab fixture MCP server, the recording and
@@ -86,7 +86,8 @@ Observations for the decision:
 ## Question 3: subagents
 
 `Agent` was added to `tools` and `allowedTools` and removed from `disallowedTools`.
-`Task` must be removed as well: the first attempt left it disallowed and the CLI
+The init tool list advertises the tool as `Task`, and cab's callback sees it as
+`Agent`. `Task` must be removed from `disallowedTools` as well: the first attempt left it disallowed and the CLI
 reported `Agent is disabled for this session, in subagents as well as here`, with
 `Agent` absent from the init tool list. Subagent type `general-purpose`.
 
@@ -97,9 +98,22 @@ reported `Agent is disabled for this session, in subagents as well as here`, wit
 | F3.3 Stop mid-subagent leaves no process | demonstrated | The query was aborted once the subagent's `Bash` had written `started`; the query ended in 2.0 s, the CLI exited 143 without a harness signal, and the recorded `/bin/zsh` and `sleep` descendants were verified gone by identity. `finished` was not written. |
 | F3.4 killing the service mid-subagent leaves no process | demonstrated failure | After SIGKILL of the probe-owned parent, the CLI, `/bin/zsh` and `sleep` were still alive 30 s later. The main-agent kill, run as the baseline in the same step, behaves identically and matches [issue-822 F3.3](issue-822-claude-sdk-probes-2026-10-11.md); terminating the CLI by its recorded identity also ended its tool processes. Subagents add no new class of survivor, and the same recovery boundary covers them. |
 
+`q3` ran four times, and the trace holds all four under the same labels; the facets
+above are from the last. The first ran with `Task` still disallowed (no subagent
+started). The second and third counted every request at the loopback listener and
+reported F3.2 as a failure, which the stray requests below explain; the counting
+was corrected to `/probe` only. Details quoted from the CLI, such as the
+`Agent is disabled` error and the sandbox's `operation not permitted` and network
+denial text, come from the session transcripts in the disposable config directory.
+The trace holds message shapes, exit codes and facet observations, not tool output.
+
 Harness findings during the run:
 
-- A listener on loopback also receives two `GET /` requests (`user-agent: node`,
+- Three one-off diagnosis queries (`diag-*` in the trace, from a throwaway script
+  that is not in the repository) ran a no-op, a URL-in-prompt and a sandboxed
+  `curl` against fresh listeners. Each listener received exactly one `GET /` and
+  no `/probe` request, which showed the requests were not the agent's.
+- A listener on loopback also receives `GET /` requests (`user-agent: node`,
   `host: localhost`) from a local process outside the probe, independent of any
   agent request. The network facet counts only `/probe`, which the subagent's `curl`
   requests, and records the others as stray requests. A first counting scheme that

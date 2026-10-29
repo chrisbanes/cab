@@ -61,7 +61,8 @@ test("plugin fixture declares a skill, hook and MCP server inside the root, and 
     join(full.dir, ".mcp.json"),
   ])
     assert.ok(existsSync(path), path);
-  assert.ok(full.script.startsWith(root));
+  for (const path of Object.values(full))
+    assert.ok(String(path).startsWith(root), String(path));
   assert.equal(
     JSON.parse(
       readFileSync(join(full.dir, ".claude-plugin", "plugin.json"), "utf8"),
