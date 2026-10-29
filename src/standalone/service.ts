@@ -6012,26 +6012,10 @@ export class StandaloneService {
       return undefined;
     }
     try {
-      const links = this.domain().repositoryLinks(run.projectId);
-      this.draftingGrants.set(runId, StandaloneService.grantOf(links));
-      const repositories = [];
-      for (const match of links.links) {
-        const current = await verifiedRepository({
-          repositoryId: match.repositoryId,
-          path: match.path,
-          ref: match.ref,
-        });
-        if (
-          current.gitCommonDirectory !== match.gitCommonDirectory ||
-          current.path !== match.path
-        )
-          throw new Error("Linked repository identity changed");
-        repositories.push({
-          repositoryId: match.repositoryId,
-          path: match.path,
-          ref: match.ref,
-        });
-      }
+      const { grant, repositories } = await this.verifiedLinkedRepositories(
+        run.projectId,
+      );
+      this.draftingGrants.set(runId, grant);
       // A Stop during verification has settled the run: build nothing for it.
       if (drafting.get(runId)?.state !== "queued") return undefined;
       const binding = await draftingWorkspaces.provision(runId, repositories);
@@ -6050,6 +6034,36 @@ export class StandaloneService {
       await this.failQueuedDrafting(request);
       return undefined;
     }
+  }
+
+  /**
+   * Every repository the project links, checked as a task grant does: each must still be the
+   * checkout it was linked as. The grant is the links as they were read, for the caller to
+   * compare after it provisions.
+   */
+  private async verifiedLinkedRepositories(
+    projectId: string,
+  ): Promise<{ grant: string; repositories: TaskWorkspaceRepositoryInput[] }> {
+    const links = this.domain().repositoryLinks(projectId);
+    const repositories: TaskWorkspaceRepositoryInput[] = [];
+    for (const match of links.links) {
+      const current = await verifiedRepository({
+        repositoryId: match.repositoryId,
+        path: match.path,
+        ref: match.ref,
+      });
+      if (
+        current.gitCommonDirectory !== match.gitCommonDirectory ||
+        current.path !== match.path
+      )
+        throw new Error("Linked repository identity changed");
+      repositories.push({
+        repositoryId: match.repositoryId,
+        path: match.path,
+        ref: match.ref,
+      });
+    }
+    return { grant: StandaloneService.grantOf(links), repositories };
   }
 
   /** The access a copy was built from: the linked repositories, not unrelated source settings. */
@@ -6956,17 +6970,28 @@ export class StandaloneService {
   }
 
   /**
-   * An imported task's first workspace holds only its source repository, at the project's
-   * link. It is provisioned only once the turn would otherwise be admitted, so a held or
+   * A task's first workspace. An imported task's holds only its source repository, at the
+   * project's link. A local task's holds every repository the project links, verified now.
+   * Either is provisioned only once the turn would otherwise be admitted, so a held or
    * not-Ready task gets no checkout. A stale assignment waits here for its explicit apply,
    * after which the scheduler wake re-captures the request.
    */
-  private importedWorkspaceRepositories(
+  private async firstWorkspaceRepositories(
     request: TurnRequest,
-  ): TaskWorkspaceRepositoryInput[] {
+  ): Promise<TaskWorkspaceRepositoryInput[]> {
     const taskId = String(request.taskId);
     const imported = this.domain().importedTask(taskId);
-    if (!imported) return [];
+    if (!imported) {
+      const projectId = String(this.domain().task(taskId).projectId);
+      const { grant, repositories } =
+        await this.verifiedLinkedRepositories(projectId);
+      if (
+        grant !==
+        StandaloneService.grantOf(this.domain().repositoryLinks(projectId))
+      )
+        throw new Error("Linked repository access changed");
+      return repositories;
+    }
     const reasons = this.domain()
       .assignmentAdmission(String(request.assignmentId))
       .reasons.filter(
@@ -7070,8 +7095,9 @@ export class StandaloneService {
         if (prepared === undefined) return;
         workspaceKey = prepared;
       } else if (request.taskId && request.assignmentId && request.projectId) {
-        // Initial local tasks need no repository grant. Existing bindings,
-        // including held/missing workspaces, remain the recovery authority.
+        // A first workspace holds the project's links (an imported task's, its source
+        // repository). Existing bindings, including held/missing workspaces, remain
+        // the recovery authority.
         if (
           !this.current?.workspaceBindings.get(request.taskId) &&
           !state.taskHold(request.taskId) &&
@@ -7079,7 +7105,7 @@ export class StandaloneService {
         )
           await this.provisionTaskWorkspace(
             request.taskId,
-            this.importedWorkspaceRepositories(request),
+            await this.firstWorkspaceRepositories(request),
           );
         const binding = await this.started().workspaces.forExecution(
           request.taskId,

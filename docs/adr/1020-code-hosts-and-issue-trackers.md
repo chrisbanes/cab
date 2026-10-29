@@ -23,6 +23,8 @@ providers. Jira and GitLab are planned and not yet implemented.
   Hosts are configurable per link, because work runs a self-managed GitLab. A GitLab link
   verifies its checkout's origin against the host and full project path; the numeric project
   ID is operator-supplied until discovery.
+- **Local tasks hold every repository link of the project,** for every code host, in their first
+  workspace. An imported task still holds only its source repository.
 - **Interfaces follow concrete integrations.** The code-host seam is extracted, without
   changing behaviour, when GitLab delivery is built. The issue-tracker seam is extracted when
   Jira is built. Neither is generalised in advance.

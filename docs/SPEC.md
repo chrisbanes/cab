@@ -514,8 +514,11 @@ worktree per participating repository per task, shared by assignments with one
 admitted writer generation at a time under the cooperative rule below. Independent
 tasks can proceed concurrently; parallel reviews
 reference a fixed revision. Repository-free tasks need no Git worktree.
-A local task's workspace is created at its first admitted turn. An imported task's
-is created then too, holding only its issue's source repository at the project's
+A local task's workspace is created at its first admitted turn and holds every
+repository link of its project, for every code host, at its configured ref; each is
+verified then, and the turn waits without a workspace if one has changed. A project
+with no links gives a repository-free workspace. An imported task's is created then
+too, holding only its issue's source repository at the project's
 linked path and ref, and only once the turn is otherwise admissible, so a held or
 not-Ready task gets no checkout. An imported task whose source repository the
 project does not link waits, without a workspace, until it is linked.
