@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
 import { ROOT_REFUSAL } from "./launchd.js";
@@ -6,6 +5,7 @@ import { OperatorApi } from "./operator-api.js";
 import { OperatorWebBundle, OperatorWebBoundary } from "./operator-web.js";
 import { serviceReadiness } from "./readiness.js";
 import { ServiceLog } from "./service-log.js";
+import { releaseVersion } from "./startup-snapshot.js";
 import {
   StandaloneService,
   type BackgroundFailureDiagnostic,
@@ -186,7 +186,7 @@ export async function main(
           startup,
           onListening: () =>
             log?.started({
-              version: packageVersion(),
+              version: releaseVersion(),
               mode: "serve",
               port: null,
               serviceId: service.serviceId(),
@@ -239,7 +239,7 @@ export async function main(
             startup,
             onListening: () =>
               log?.started({
-                version: packageVersion(),
+                version: releaseVersion(),
                 mode: "operator",
                 port,
                 serviceId: service.serviceId(),
@@ -279,15 +279,6 @@ export async function main(
     }
   }
   await writeExit();
-}
-
-function packageVersion(): string {
-  // Resolves from dist/src/standalone/cli.js in a checkout, an npm install and a release.
-  return (
-    JSON.parse(
-      readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
-    ) as { version: string }
-  ).version;
 }
 
 /**

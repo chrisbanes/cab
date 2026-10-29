@@ -32,7 +32,7 @@ const DATABASE_NAME = "standalone.sqlite";
 const MANIFEST_NAME = "manifest.json";
 const RESTORE_SENTINEL_NAME = ".cab-restore-incomplete";
 const RESTORE_SENTINEL_CONTENTS = STANDALONE_MARKER_CONTENTS;
-const MAX_SUPPORTED_SCHEMA_VERSION = 6;
+export const MAX_SUPPORTED_SCHEMA_VERSION = 6;
 const HEX_SHA256 = /^[a-f0-9]{64}$/;
 
 const snapshotManifestSchema = z
@@ -379,14 +379,30 @@ export async function createSnapshot(
   snapshotDirectory: string,
   options: OperationsOptions = {},
 ): Promise<SnapshotManifestV1> {
+  const dataDirectory = StandaloneDataDirectory.openExclusive(sourceDirectory, {
+    createFreshMarker: false,
+    requireExistingOwner: true,
+  });
+  try {
+    return await snapshotOwnedDirectory(
+      dataDirectory,
+      snapshotDirectory,
+      options,
+    );
+  } finally {
+    dataDirectory.close();
+  }
+}
+
+/** The snapshot body for a caller that already holds the data directory's owner lock. */
+export async function snapshotOwnedDirectory(
+  dataDirectory: StandaloneDataDirectory,
+  snapshotDirectory: string,
+  options: OperationsOptions = {},
+): Promise<SnapshotManifestV1> {
   const snapshotPath = canonicalTargetPath(snapshotDirectory, "Snapshot", true);
-  let dataDirectory: StandaloneDataDirectory | undefined;
   let sourceDb: DatabaseSync | undefined;
   try {
-    dataDirectory = StandaloneDataDirectory.openExclusive(sourceDirectory, {
-      createFreshMarker: false,
-      requireExistingOwner: true,
-    });
     assertDisjoint(dataDirectory.root, snapshotPath);
     sourceDb = openVerifiedDatabase(dataDirectory.databasePath);
     const sourceMetadata = validateDatabase(sourceDb);
@@ -442,7 +458,6 @@ export async function createSnapshot(
     return manifest;
   } finally {
     sourceDb?.close();
-    dataDirectory?.close();
   }
 }
 

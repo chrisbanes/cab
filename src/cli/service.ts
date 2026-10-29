@@ -98,8 +98,9 @@ job's own process serves the port. It does not sign in or run doctor. The two mo
 never both installed; uninstall prints the matching sudo commands for a daemon and clears
 its record only once every service process it saw has exited. upgrade
 refuses a daemon install; see the macOS operations guide for the switch-back procedure.
-upgrade stops the job, takes a verified snapshot, starts VERSION_DIR and checks
-readiness through a logged-in CLI connection with a read credential. A failed
+upgrade stops the job, starts VERSION_DIR and checks readiness through a logged-in CLI
+connection with a read credential. The service takes and verifies its own snapshot
+before it migrates older data, and refuses to start without one. A failed
 upgrade leaves the job stopped and reports the snapshot and logs; recover with
 a fixed release and another upgrade, or snapshot restore. uninstall removes the
 job and keeps data, auth, snapshots, versions and logs.
@@ -649,8 +650,8 @@ class Service {
   prepareDirectories(daemon = false) {
     const { stateDir, logDir, agentsDir } = this.options;
     for (const [path, name, exclusive] of [
-      // A daemon is staged in the launchd directory, and takes no snapshot (upgrade, the
-      // only command that does, refuses it): neither directory is created for one.
+      // A daemon is staged in the launchd directory. Neither directory is created for one: its
+      // service creates the snapshot directory when a start needs one.
       ...(daemon
         ? []
         : ([
@@ -1750,7 +1751,10 @@ async function finishInstall(
   }
 }
 
-/** Stop, snapshot, re-render for `target`, start and check readiness. Never rolls back. */
+/**
+ * Stop, re-render for `target`, start and check readiness. Never rolls back. The service takes
+ * and verifies the pre-migration snapshot itself when it starts; this reports it.
+ */
 export async function upgradeService(
   options: ServiceOptions,
   target: string,
@@ -1775,8 +1779,8 @@ async function upgradeServiceLocked(
   const service = new Service(options, host, io);
   let stage = "preflight";
   let record: InstallRecord | null = null;
-  let snapshot: string | null = null;
   let logs: string[] = [];
+  let startupSnapshot: () => Promise<string | null> = async () => null;
   try {
     record = service.readRecord();
     if (!record)
@@ -1789,6 +1793,30 @@ async function upgradeServiceLocked(
       );
     const from = record.version;
     const version = service.releaseVersion(target);
+    const { compareReleaseVersions, readStartupState } = await import(
+      "../standalone/startup-snapshot.js"
+    );
+    // Equal versions are the reload route; a database a newer release started is never reopened.
+    if (compareReleaseVersions(version, from) < 0)
+      throw refuse(
+        `${options.label} runs ${from}, newer than ${version}; upgrade never goes back: restore a snapshot into a new data directory instead`,
+      );
+    const dataDirectory = record.configuration.dataDirectory;
+    const readState = () => {
+      try {
+        return readStartupState(dataDirectory);
+      } catch {
+        return undefined;
+      }
+    };
+    const before = readState();
+    // The snapshot this upgrade's start took or reused; none for a reload.
+    startupSnapshot = async () => {
+      const taken = readState()?.snapshot;
+      return taken?.to === version && before?.release !== version
+        ? taken.path
+        : null;
+    };
     service.requireOwned(record, await service.loadedJob());
     let origin: string | undefined;
     try {
@@ -1816,28 +1844,10 @@ async function upgradeServiceLocked(
     // an activation that no longer matches the record.
     rmSync(service.activation, { force: true });
 
-    stage = "snapshot";
-    service.checkInterrupt();
-    service.prepareDirectories();
-    const path = join(
-      options.stateDir,
-      "snapshots",
-      `${options.label}.${from}-to-${version}.${service.stamp()}`,
-    );
-    const { createSnapshot, verifySnapshot } = await import(
-      "../standalone/operations.js"
-    );
-    try {
-      await createSnapshot(record.configuration.dataDirectory, path);
-      await verifySnapshot(path);
-    } catch {
-      throw new ServiceFailure("The snapshot could not be taken");
-    }
-    snapshot = path;
-
     stage = "render";
     // Nothing new starts once the operator has interrupted.
     service.checkInterrupt();
+    service.prepareDirectories();
     ({ record, logs } = await service.activate(
       version,
       target,
@@ -1866,7 +1876,7 @@ async function upgradeServiceLocked(
       operation: "upgrade",
       label: options.label,
       version,
-      snapshot,
+      snapshot: await startupSnapshot(),
       logs,
       readiness,
     });
@@ -1880,7 +1890,7 @@ async function upgradeServiceLocked(
       stage,
       error: message(error),
       jobStopped,
-      snapshot,
+      snapshot: stage === "preflight" ? null : await startupSnapshot(),
       logs,
     });
     return 1;
