@@ -1,8 +1,6 @@
 import { pathToFileURL } from "node:url";
 
 export function ciFailures(jobs, full, run = true) {
-  if (!run && !full)
-    return ["Only nightly compatibility checks can be skipped"];
   const expected = {
     changes: "success",
     quality: run ? "success" : "skipped",
@@ -33,9 +31,9 @@ if (
     throw Error("RUN_CHECKS must be true or false");
   if (
     process.env.RUN_CHECKS === "false" &&
-    process.env.GITHUB_EVENT_NAME !== "schedule"
+    !["schedule", "pull_request"].includes(process.env.GITHUB_EVENT_NAME)
   )
-    throw Error("Only scheduled checks can be skipped");
+    throw Error("Only scheduled and pull request checks can be skipped");
   const failures = ciFailures(
     JSON.parse(process.env.RESULTS ?? "null"),
     process.env.FULL_COMPATIBILITY === "true",
