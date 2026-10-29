@@ -17,6 +17,10 @@ const printable = /^[\x20-\x7e]{1,512}$/;
 const envValue = (ref: string, env: NodeJS.ProcessEnv) =>
   env[ref.slice(4)] ?? "";
 
+/** Jira Cloud sites only; credentials are never sent to another host (Data Center is out of scope). */
+const jiraCloudHost =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:atlassian\.net|jira\.com)$/;
+
 /**
  * The host of a Jira site variable: an `https://` origin with no path, credentials, port,
  * query or fragment. Anything else is not a site cab sends credentials to.
@@ -35,7 +39,7 @@ export function jiraSiteHost(
       url.search ||
       url.hash ||
       url.pathname !== "/" ||
-      !url.hostname
+      !jiraCloudHost.test(url.hostname)
     )
       return { reason: "site-invalid" };
     return { instance: url.hostname };

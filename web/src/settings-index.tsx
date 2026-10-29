@@ -272,7 +272,11 @@ export function SettingsWorkspace(
                     <dt>Discovery</dt>
                     <dd>
                       {c.source.selections.length === 0 ? (
-                        "No GitHub source"
+                        c.source.tracker === "jira" ? (
+                          "No Jira selections"
+                        ) : (
+                          "No GitHub source"
+                        )
                       ) : (
                         <ul>
                           {c.source.selections.map((s, i) => {

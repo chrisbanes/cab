@@ -314,6 +314,13 @@ export function JiraSourceTab(
   return (
     <div className="settings-split settings-split-even">
       <div className="settings-column">
+        {!saved && (
+          <p className="metadata muted">
+            <a href={`/app/projects/${projectId}/settings?tab=github`}>
+              Use GitHub for this project instead
+            </a>
+          </p>
+        )}
         <Panel
           id="jira-source"
           title="Jira source"

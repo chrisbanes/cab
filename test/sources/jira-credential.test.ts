@@ -32,6 +32,10 @@ test("only an https origin names a site", () => {
     "https://user:pw@example.atlassian.net",
     "https://example.atlassian.net?x=1",
     "not a url",
+    "https://jira.example.test",
+    "https://127.0.0.1",
+    "https://atlassian.net",
+    "https://example.atlassian.net.evil.test",
   ])
     assert.deepEqual(jiraSiteHost(value), { reason: "site-invalid" }, value);
   assert.deepEqual(jiraSiteHost(""), { reason: "missing-credential" });

@@ -172,13 +172,24 @@ export function ProjectConfiguration(
               observations={observations}
             />
           ) : tab === "github" ? (
-            <SourceTab
-              {...p}
-              data={data}
-              loadedAt={resource.state.fetchedAt}
-              refreshConfiguration={refreshConfiguration}
-              observations={observations}
-            />
+            <>
+              {data.source.selections.length === 0 && (
+                <p className="metadata muted">
+                  <a
+                    href={`/app/projects/${projectId}/settings?tab=github&tracker=jira`}
+                  >
+                    Use Jira Cloud for this project instead
+                  </a>
+                </p>
+              )}
+              <SourceTab
+                {...p}
+                data={data}
+                loadedAt={resource.state.fetchedAt}
+                refreshConfiguration={refreshConfiguration}
+                observations={observations}
+              />
+            </>
           ) : tab === "sync" ? (
             <SyncTab
               {...p}

@@ -2508,7 +2508,7 @@ test("a task read reports source review, hold and unknown source as source-held"
   );
   f.seedPersistedState((db) => {
     db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]')",
+      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]',NULL)",
     ).run(taskId);
     db.prepare(
       "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'repo','github','github.com','I1','[]')",
