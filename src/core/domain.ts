@@ -8,7 +8,11 @@ import {
   parseFreshDomainCommandOutcome,
   parseLinkedRepositoryResult,
 } from "./command-results.js";
-import { discoveryCredentialReference } from "./credential-reference.js";
+import {
+  discoveryCredentialReference,
+  gitLabCredentialReference,
+  glabReferenceMatchesHost,
+} from "./credential-reference.js";
 import { DeliveryStore, deliveryPolicySchema } from "./delivery.js";
 import {
   DomainConflictError,
@@ -48,6 +52,7 @@ import {
   setupRepositoriesSchema,
 } from "./github-source-contracts.js";
 import {
+  gitLabHostSchema,
   repositoriesConfigurationCommandSchema,
   repositoryLinkListSchema,
   type StoredRepositoryLink,
@@ -345,6 +350,16 @@ const commandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...commandBase,
+      type: z.literal("code-host-credential.configure"),
+      codeHost: z.literal("gitlab"),
+      host: gitLabHostSchema,
+      credentialRef: gitLabCredentialReference.nullable(),
+    })
+    .strict()
+    .refine(glabReferenceMatchesHost, { path: ["credentialRef"] }),
+  z
+    .object({
+      ...commandBase,
       type: z.literal("claude-token.configure"),
       /** `env:NAME`, or `file:` and an absolute path with no empty, `.` or `..` segment. */
       credentialRef: z
@@ -424,13 +439,15 @@ function scopeOf(command: ParsedCommand): string {
       ? `profile:${command.profileId}`
       : command.type === "discovery.configure"
         ? "system:discovery"
-        : command.type === "claude-token.configure"
-          ? "system:claude-token"
-          : command.type === "getting-started.configure"
-            ? "system:getting-started"
-            : command.type === "runtime.configure"
-              ? `system:runtime:${command.harness}`
-              : "system:capacity";
+        : command.type === "code-host-credential.configure"
+          ? `system:code-host-credential:${command.codeHost}:${command.host}`
+          : command.type === "claude-token.configure"
+            ? "system:claude-token"
+            : command.type === "getting-started.configure"
+              ? "system:getting-started"
+              : command.type === "runtime.configure"
+                ? `system:runtime:${command.harness}`
+                : "system:capacity";
 }
 
 function canonical(value: unknown): string {
@@ -628,6 +645,10 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS installation_discovery (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
           credentialRef TEXT
+        );
+        CREATE TABLE IF NOT EXISTS installation_code_host_credentials (
+          codeHost TEXT NOT NULL CHECK(codeHost = 'gitlab'), host TEXT NOT NULL,
+          credentialRef TEXT NOT NULL, PRIMARY KEY(codeHost, host)
         );
         CREATE TABLE IF NOT EXISTS claude_runtime_credentials (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -1005,6 +1026,24 @@ export class DomainStore {
       "SELECT credentialRef FROM installation_discovery WHERE singleton = 1",
     );
     return row?.credentialRef ? String(row.credentialRef) : null;
+  }
+
+  /** Installation-level code-host credential references by host; never their values. */
+  codeHostCredentials(): {
+    codeHost: "gitlab";
+    host: string;
+    credentialRef: string;
+  }[] {
+    const rows = this.db
+      .prepare(
+        "SELECT host, credentialRef FROM installation_code_host_credentials ORDER BY host",
+      )
+      .all() as Row[];
+    return rows.map((row) => ({
+      codeHost: "gitlab" as const,
+      host: String(row.host),
+      credentialRef: String(row.credentialRef),
+    }));
   }
 
   /** The Claude subscription token's `env:NAME` or `file:/path` reference; never its value. */
@@ -2830,6 +2869,23 @@ export class DomainStore {
             "UPDATE installation_discovery SET credentialRef = ? WHERE singleton = 1",
           )
           .run(command.credentialRef);
+        // The receipt never carries the reference name.
+        return { configured: command.credentialRef !== null };
+      }
+      case "code-host-credential.configure": {
+        this.operator(command);
+        if (command.credentialRef === null)
+          this.db
+            .prepare(
+              "DELETE FROM installation_code_host_credentials WHERE codeHost = ? AND host = ?",
+            )
+            .run(command.codeHost, command.host);
+        else
+          this.db
+            .prepare(
+              "INSERT INTO installation_code_host_credentials (codeHost, host, credentialRef) VALUES (?, ?, ?) ON CONFLICT(codeHost, host) DO UPDATE SET credentialRef = excluded.credentialRef",
+            )
+            .run(command.codeHost, command.host, command.credentialRef);
         // The receipt never carries the reference name.
         return { configured: command.credentialRef !== null };
       }

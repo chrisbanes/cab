@@ -13,12 +13,21 @@ import {
 import { publicationStates } from "../core/task-publication-contracts.js";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
-import { discoveryCredentialReference } from "../core/credential-reference.js";
+import {
+  discoveryCredentialReference,
+  gitLabCredentialReference,
+  glabReferenceMatchesHost,
+} from "../core/credential-reference.js";
 import {
   statusMappingEvents,
   statusMappingSchema,
 } from "../core/status-mapping-contracts.js";
-import { repositoriesConfigurationCommandSchema } from "../core/repository-links.js";
+import {
+  gitLabHostSchema,
+  gitLabProjectPathSchema,
+  gitLabRepositoryId,
+  repositoriesConfigurationCommandSchema,
+} from "../core/repository-links.js";
 import {
   closedIssuesSchema,
   githubConfigurationSchema,
@@ -2306,6 +2315,17 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...base,
+      type: z.literal("code-host-credential.configure"),
+      codeHost: z.literal("gitlab"),
+      host: gitLabHostSchema,
+      /** `env:NAME`, or `glab:` and the same host; null removes the host's credential. */
+      credentialRef: gitLabCredentialReference.nullable(),
+    })
+    .strict()
+    .refine(glabReferenceMatchesHost, { path: ["credentialRef"] }),
+  z
+    .object({
+      ...base,
       type: z.literal("claude-token.configure"),
       /** `env:NAME`, or `file:` and an absolute path with no empty, `.` or `..` segment. */
       credentialRef: z
@@ -2681,6 +2701,15 @@ export const configurationReceiptSchema = z
         .object({
           commandType: z.literal("discovery.configure"),
           resourceId: z.literal("system:discovery"),
+          configured: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("code-host-credential.configure"),
+          resourceId: z
+            .string()
+            .regex(/^system:code-host-credential:gitlab:[a-z0-9.-]{1,253}$/),
           configured: z.boolean(),
         })
         .strict(),
@@ -3714,6 +3743,79 @@ const discoveryRead = <T extends z.ZodRawShape>(shape: T) =>
       discoveryUnavailable,
     ]),
   );
+/** Why a GitLab credential or discovery read is unavailable; never a message or token. */
+export const gitLabCredentialReasons = [
+  "missing-credential",
+  "glab-not-installed",
+  "glab-not-signed-in",
+  "glab-unreadable",
+  "unauthorized",
+  "forbidden",
+  "rate-limited",
+  "unreadable",
+] as const;
+const gitLabCredentialBase = {
+  codeHost: z.literal("gitlab"),
+  host: gitLabHostSchema,
+  /** The kind only: an `env:` reference's variable name is never disclosed. */
+  kind: z.enum(["glab", "env"]),
+  /** A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` shadows a `glab` login. */
+  glabOverridden: z.boolean(),
+};
+/** Installation GitLab credentials: kind, usability and the account, never a name or token. */
+export const codeHostCredentialsSchema = envelope(
+  z
+    .object({
+      credentials: z
+        .array(
+          z.discriminatedUnion("state", [
+            z
+              .object({
+                ...gitLabCredentialBase,
+                state: z.literal("usable"),
+                account: z.string().min(1).max(255),
+              })
+              .strict(),
+            z
+              .object({
+                ...gitLabCredentialBase,
+                state: z.literal("unavailable"),
+                reason: z.enum(gitLabCredentialReasons),
+              })
+              .strict(),
+          ]),
+        )
+        .max(1000),
+    })
+    .strict(),
+);
+export const gitLabProjectsSchema = envelope(
+  z.discriminatedUnion("state", [
+    z
+      .object({
+        state: z.literal("ready"),
+        truncated: z.boolean(),
+        projects: z
+          .array(
+            z
+              .object({
+                repositoryId: gitLabRepositoryId,
+                projectPath: gitLabProjectPathSchema,
+                defaultBranch: z.string().min(1).max(255),
+              })
+              .strict(),
+          )
+          .max(1000),
+      })
+      .strict(),
+    z
+      .object({
+        state: z.literal("unavailable"),
+        reason: z.enum(["unconfigured", ...gitLabCredentialReasons]),
+      })
+      .strict(),
+  ]),
+);
 export const discoveredRepositorySchema = z
   .object({
     repositoryId: z.string().min(1).max(512),

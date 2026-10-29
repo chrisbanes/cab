@@ -87,7 +87,7 @@ test("exclusions cover glab's variables, resolved values and env references", as
   glab.setToken("glpat-excluded-311");
   await glabToken(host, { executable: glab.executable });
   const env = { GITLAB_TOKEN: "glpat-env-311", CAB_GL: "glpat-named-311" };
-  const g = gitLabCredentialExclusions(`glab:${host}`, env);
+  const g = gitLabCredentialExclusions([`glab:${host}`], env);
   assert.deepEqual(g.names, [
     "GITLAB_TOKEN",
     "GITLAB_ACCESS_TOKEN",
@@ -97,11 +97,11 @@ test("exclusions cover glab's variables, resolved values and env references", as
     assert.ok(g.values.includes(value), value);
     assert.ok(g.redactions.includes(value), value);
   }
-  const e = gitLabCredentialExclusions("env:CAB_GL", env);
+  const e = gitLabCredentialExclusions(["env:CAB_GL"], env);
   assert.deepEqual(e.names, ["CAB_GL"]);
   assert.ok(e.values.includes("glpat-named-311"));
   assert.ok(e.redactions.includes("CAB_GL"));
-  assert.deepEqual(gitLabCredentialExclusions(null, {}).names, []);
+  assert.deepEqual(gitLabCredentialExclusions([], {}).names, []);
 });
 
 test("glab environment keeps only glab's variables and drops every other credential", () => {

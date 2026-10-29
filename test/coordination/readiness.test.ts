@@ -68,6 +68,11 @@ function deps(f: Fixture, over: Partial<ReadinessDeps> = {}): ReadinessDeps {
     authFile: f.auth,
     codexLogin: async () => "verified",
     discovery: async () => ({ configured: false, available: false }),
+    gitLabCredentials: async () => ({
+      configured: false,
+      unusable: false,
+      overridden: false,
+    }),
     claudeTokenReference: () => null,
     claudeTokenStatus: () => ({ state: "not-configured" }),
     harnessStatuses: () => [
@@ -488,6 +493,44 @@ test("github discovery is not configured, readable or failing", async (t) => {
   }
 });
 
+test("GitLab credentials check is not configured, passes, or fails with a fixed reason", async (t) => {
+  const f = fixture(t);
+  const state = (
+    configured: boolean,
+    unusable = false,
+    overridden = false,
+  ) => ({
+    gitLabCredentials: async () => ({ configured, unusable, overridden }),
+  });
+  const none = await check(f, "gitlab-credentials", state(false));
+  assert.equal(none.status, "not-configured");
+  assert.ok(none.fix);
+  assert.equal(
+    (await check(f, "gitlab-credentials", state(true))).status,
+    "pass",
+  );
+  const unusable = await check(f, "gitlab-credentials", state(true, true));
+  assert.equal(unusable.status, "fail");
+  assert.equal(unusable.reason, "A GitLab credential is not readable");
+  const overridden = await check(
+    f,
+    "gitlab-credentials",
+    state(true, true, true),
+  );
+  assert.equal(
+    overridden.reason,
+    "A glab login is overridden by GITLAB_TOKEN in the service environment",
+  );
+  assert.match(
+    overridden.fix ?? "",
+    /^Unset GITLAB_TOKEN in the service environment/,
+  );
+  const stalled = await check(f, "gitlab-credentials", {
+    gitLabCredentials: () => new Promise<never>(() => {}),
+  });
+  assert.equal(stalled.status, "fail");
+});
+
 test("service discovery probes gh only for a gh reference", async (t) => {
   const f = fixture(t);
   const variable = "CAB_READINESS_DISCOVERY_TEST";
@@ -897,7 +940,7 @@ test("the data and auth paths check names the rule, not the path", async (t) => 
       assert.ok(!JSON.stringify(result).includes(path));
 });
 
-test("read returns all nine checks in fixed order and parses with the shared schema", async (t) => {
+test("read returns every check in fixed order and parses with the shared schema", async (t) => {
   const f = fixture(t);
   const result = await new Readiness(deps(f)).read();
   assert.deepEqual(

@@ -12,9 +12,10 @@ import {
   verifiedRepository,
 } from "./repository-verification.js";
 import { isWithin } from "./workspace-inspection.js";
+import type { GitLabSeams } from "./gitlab-credentials.js";
 
-/** Test seams for guided setup: the home folder, the discovery reader factory and `gh`. */
-export interface OperatorSetupSeams {
+/** Test seams for guided setup: the home folder, the discovery reader factory, `gh` and `glab`. */
+export interface OperatorSetupSeams extends GitLabSeams {
   home?: string;
   /** Receives the reference and its resolved token (undefined when the variable is unset). */
   discovery?: (

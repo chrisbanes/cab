@@ -290,7 +290,7 @@ for (const source of ["gh:github.com", "env:FIXTURE_SX_SOURCE"])
         );
         assert.ok(
           f.service
-            .gitHubCredentialExclusions()
+            .providerCredentialExclusions()
             .redactions.includes("source-old-0"),
         );
       }

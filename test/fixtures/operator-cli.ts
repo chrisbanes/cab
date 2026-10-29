@@ -121,7 +121,11 @@ export async function serveCli<F extends Fixture>(
       options.controlPaths ?? [f.directory],
       undefined,
       options.previewReader,
-      options.setup,
+      {
+        // Fixtures never run the host's real glab unless a test provides one.
+        glabExecutable: join(f.directory, "no-glab", "glab"),
+        ...options.setup,
+      },
     );
     return new LocalOperatorHttp(
       new LocalOperatorUi(

@@ -93,26 +93,33 @@ export function glabOverridden(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
- * What children and public output must exclude for a GitLab credential reference: env names
- * to drop, values to drop wherever they appear, and every string to redact. For `glab:` these
- * are glab's token variables and every token value this process has resolved.
+ * What children and public output must exclude for GitLab credential references: env names
+ * to drop, values to drop wherever they appear, and every string to redact. A `glab:` reference
+ * contributes glab's token variables; every token value this process has resolved is always
+ * included. Pass no references for the resolved values alone.
  */
 export function gitLabCredentialExclusions(
-  ref: string | null,
+  refs: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
 ): { names: string[]; values: string[]; redactions: string[] } {
-  const names = ref?.startsWith("glab:")
-    ? [...glabTokenVariables]
-    : ref?.startsWith("env:")
-      ? [ref.slice(4)]
-      : [];
+  const names = [
+    ...new Set(
+      refs.flatMap((ref) =>
+        ref.startsWith("glab:")
+          ? glabTokenVariables
+          : ref.startsWith("env:")
+            ? [ref.slice(4)]
+            : [],
+      ),
+    ),
+  ];
   const values = [...resolved, ...names.flatMap((name) => env[name] || [])];
   return {
     names,
     values,
     redactions: [
-      ...(ref ? [ref] : []),
-      ...(ref?.startsWith("env:") ? names : []),
+      ...refs,
+      ...refs.filter((r) => r.startsWith("env:")).map((r) => r.slice(4)),
       ...values,
     ],
   };

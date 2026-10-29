@@ -30,3 +30,11 @@ export const gitLabCredentialReference = z.union([
   envCredentialReference,
   glabCredentialReference,
 ]);
+
+/** A `glab:` reference names the host it configures; `env:` references name no host. */
+export const glabReferenceMatchesHost = (command: {
+  host: string;
+  credentialRef: string | null;
+}): boolean =>
+  !command.credentialRef?.startsWith("glab:") ||
+  command.credentialRef === `glab:${command.host}`;

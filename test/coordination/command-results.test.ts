@@ -133,6 +133,7 @@ const cases = {
   "imported-blockers.set": task,
   "capacity.configure": capacity,
   "discovery.configure": { configured: false },
+  "code-host-credential.configure": { configured: false },
   "claude-token.configure": { configured: false },
   "getting-started.configure": { dismissed: false },
   "runtime.configure": { harness: "claude", enabled: false },

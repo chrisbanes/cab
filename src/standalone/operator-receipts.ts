@@ -172,6 +172,18 @@ export function commandReceipt(
             enabled: outcome.result.enabled,
           },
         };
+      case "code-host-credential.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId:
+              resourceId as `system:code-host-credential:gitlab:${string}`,
+            configured: outcome.result.configured,
+          },
+        };
       case "discovery.configure":
       case "claude-token.configure":
         return {

@@ -219,6 +219,9 @@ export interface DomainCommandResultMap {
   "imported-blockers.set": z.output<typeof taskCommandResultSchema>;
   "capacity.configure": z.output<typeof capacityCommandResultSchema>;
   "discovery.configure": z.output<typeof credentialStatusCommandResultSchema>;
+  "code-host-credential.configure": z.output<
+    typeof credentialStatusCommandResultSchema
+  >;
   "claude-token.configure": z.output<
     typeof credentialStatusCommandResultSchema
   >;
@@ -385,6 +388,7 @@ function parseCommandOutcome(
         result: parseUnchanged(capacityCommandResultSchema, value),
       };
     case "discovery.configure":
+    case "code-host-credential.configure":
     case "claude-token.configure":
       return {
         type,

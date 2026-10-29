@@ -84,6 +84,7 @@ test("doctor reports the service's readiness checks, equal to the API read and w
     /Fix Claude token: Make the token file a private regular file/,
   );
   assert.match(human.out, /GitHub discovery\s+Not configured/);
+  assert.match(human.out, /GitLab credentials\s+Not configured/);
   assert.ok(api.data.checks.some((c) => c.status === "pass"));
   assert.ok(!human.out.includes("(unavailable)"), "a pass has no reason");
 
@@ -107,6 +108,37 @@ test("doctor reports the service's readiness checks, equal to the API read and w
     /Fix An execution runtime is enabled: Enable a runtime in Settings → Runtime/,
   );
   assert.match(none.out, /Codex login\s+Not configured\s+Disabled in Settings/);
+});
+
+test("doctor warns when GITLAB_TOKEN overrides a configured glab login", async (t) => {
+  const previous = process.env.GITLAB_TOKEN;
+  t.after(() => {
+    if (previous === undefined) delete process.env.GITLAB_TOKEN;
+    else process.env.GITLAB_TOKEN = previous;
+  });
+  process.env.GITLAB_TOKEN = "glpat-doctor-override-canary";
+  const s = await startCliService(t);
+  s.f.service.domain().execute({
+    type: "code-host-credential.configure",
+    key: randomUUID(),
+    actor: "operator",
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    credentialRef: "glab:gitlab.example.com",
+  });
+  const h = await loggedIn(
+    t,
+    s.origin,
+    (await s.issue("read", "doctor")).token,
+  );
+  const human = await h.run(["doctor"]);
+  assert.equal(human.code, 0, human.err);
+  assert.match(
+    human.out,
+    /GitLab credentials\s+Fail\s+A glab login is overridden by GITLAB_TOKEN in the service environment/,
+  );
+  assert.match(human.out, /Fix GitLab credentials: Unset GITLAB_TOKEN/);
+  assert.ok(!human.out.includes("glpat-doctor-override-canary"));
 });
 
 test("doctor exits 5 when the service is unavailable and takes no arguments", async (t) => {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { credentialFreeEnvironment } from "../core/child-environment.js";
 import type { DomainStore } from "../core/domain.js";
 import { claudeTokenExclusions } from "./claude-token.js";
+import { gitLabCredentialExclusions } from "./glab-credential.js";
 
 export type GhFailureState = "not-installed" | "not-signed-in" | "unreadable";
 /** The detected github.com login; never a token. */
@@ -189,7 +190,7 @@ export function ghEnvironment(
     | "deliveryCredentialReference"
     | "discoveryCredentialReference"
   > &
-    Partial<Pick<DomainStore, "githubConfiguration">>,
+    Partial<Pick<DomainStore, "githubConfiguration" | "codeHostCredentials">>,
   options?: { reference: string | null; environment?: NodeJS.ProcessEnv },
 ): NodeJS.ProcessEnv {
   const environment = options?.environment ?? process.env;
@@ -211,13 +212,26 @@ export function ghEnvironment(
     ? [discoveryRef.slice(4)]
     : [];
   const gh = ["GH_TOKEN", "GITHUB_TOKEN"];
+  // GitLab credentials never reach gh: glab's variables, `env:` GitLab names and resolved values.
+  const gitlab = gitLabCredentialExclusions(
+    (domain.codeHostCredentials?.() ?? []).map((c) => c.credentialRef),
+    environment,
+  );
   const result = credentialFreeEnvironment(
     environment,
-    [...delivery, ...sources, ...claude.names, ...discovery, ...gh],
+    [
+      ...delivery,
+      ...sources,
+      ...claude.names,
+      ...discovery,
+      ...gh,
+      ...gitlab.names,
+    ],
     environment,
     [
       ...claude.values,
       ...credentialReferenceExclusions(null, environment).values,
+      ...gitlab.values,
     ],
   );
   // Explicit gh selection permits only these current variables, even when another

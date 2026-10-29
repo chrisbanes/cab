@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
+import { gitLabHostSchema } from "../core/repository-links.js";
 import {
   CommandResultValidationError,
   type DomainCommandResultMap,
@@ -91,7 +92,9 @@ import {
   discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
+  codeHostCredentialsSchema,
   discoveryStatusSchema,
+  gitLabProjectsSchema,
   type Execution,
   executionDetailSchema,
   executionEventsSchema,
@@ -192,6 +195,11 @@ import {
   ghEnvironment,
   ghToken,
 } from "./gh-credential.js";
+import {
+  gitLabCredentialLocalState,
+  readCodeHostCredentials,
+  readGitLabProjects,
+} from "./gitlab-credentials.js";
 import {
   DiscoveryFailure,
   type DiscoveryReader,
@@ -612,7 +620,7 @@ export class OperatorApi {
     const claudeRead = claude && readClaudeToken(claudeTokenSource(claude));
     const discovery = d.discoveryCredentialReference();
     return JSON.stringify([
-      digest(this.service.gitHubCredentialExclusions().values.join("\0")),
+      digest(this.service.providerCredentialExclusions().values.join("\0")),
       // Discovery reference also fences identity.
       discovery
         ? [
@@ -706,7 +714,7 @@ export class OperatorApi {
         };
       add(...this.controlPaths);
       const claude = d.claudeTokenReference();
-      add(...this.service.gitHubCredentialExclusions().redactions);
+      add(...this.service.providerCredentialExclusions().redactions);
       if (claude) add(...claudeTokenExclusions(claude).redactions);
       // Bound retained-revision lookups before iterating persisted counters.
       let remaining: number = redactionExclusionLimits.values;
@@ -6380,6 +6388,32 @@ export class OperatorApi {
       throw new OperatorApiError(400, "invalid-input");
     return [match[1], match[2]] as const;
   }
+  /** Configured GitLab hosts with each credential's kind, usability and account. */
+  async readCodeHostCredentials() {
+    return codeHostCredentialsSchema.parse({
+      data: {
+        credentials: await readCodeHostCredentials(this.domain(), this.setup),
+      },
+      observedAt: Date.now(),
+    });
+  }
+  /** Local credential state for readiness: no GitLab request. */
+  codeHostCredentialLocalState() {
+    return gitLabCredentialLocalState(this.domain(), this.setup);
+  }
+  async readGitLabProjects(query: URLSearchParams) {
+    const host = gitLabHostSchema.safeParse(query.get("host"));
+    if (
+      [...query.keys()].some((k) => k !== "host") ||
+      query.getAll("host").length !== 1 ||
+      !host.success
+    )
+      throw new OperatorApiError(400, "invalid-input");
+    return gitLabProjectsSchema.parse({
+      data: await readGitLabProjects(this.domain(), this.setup, host.data),
+      observedAt: Date.now(),
+    });
+  }
   readDiscoveryRepositories() {
     return this.discoveryRead(discoveryRepositoriesSchema, (r) =>
       r.repositories(),
@@ -7390,6 +7424,14 @@ export class OperatorApi {
           parseDomainCommandOutcome("getting-started.configure", outcome),
           c.key,
           "system:getting-started",
+        );
+      }
+      if (c.type === "code-host-credential.configure") {
+        const outcome = await this.executeDomain({ ...c, actor: "operator" });
+        return commandReceipt(
+          parseDomainCommandOutcome("code-host-credential.configure", outcome),
+          c.key,
+          `system:code-host-credential:${c.codeHost}:${c.host}`,
         );
       }
       if (c.type === "discovery.configure") {

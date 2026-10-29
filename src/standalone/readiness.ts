@@ -51,6 +51,12 @@ export type ReadinessDeps = {
   /** Re-runs the running App Server's authentication initialization; no model turn. */
   codexLogin: () => Promise<"verified" | "policy" | "failed" | "unavailable">;
   discovery: () => Promise<Discovery>;
+  /** Local state of the configured GitLab credentials; makes no GitLab request. */
+  gitLabCredentials: () => Promise<{
+    configured: boolean;
+    unusable: boolean;
+    overridden: boolean;
+  }>;
   claudeTokenReference: () => string | null;
   claudeTokenStatus: () => {
     state:
@@ -87,6 +93,7 @@ const labels: Record<ReadinessCheckId, string> = {
   "claude-token": "Claude token",
   "runtime-harness": "Runtime harness",
   "data-paths": "Data and auth paths",
+  "gitlab-credentials": "GitLab credentials",
 };
 
 const pass = (id: ReadinessCheckId): ReadinessCheck => ({
@@ -116,6 +123,10 @@ const fixes = {
   codexLogin: "Run `codex login` as the service user",
   git: "Install git",
   discovery: "Run `gh auth login`, or Settings → discovery credential",
+  gitlab:
+    "Run `glab auth login --hostname <host>`, or set the credential in Settings → GitLab credentials",
+  gitlabOverride:
+    "Unset GITLAB_TOKEN in the service environment, or choose an environment variable reference",
   claudeInstall:
     "Install Claude Code into the fixed PATH, then turn Claude off and on in Settings → Runtime",
   claudeVersion:
@@ -246,6 +257,8 @@ export class Readiness {
         return this.runtimeHarness();
       case "data-paths":
         return this.dataPaths();
+      case "gitlab-credentials":
+        return this.gitLabCredentials();
     }
   }
 
@@ -340,6 +353,31 @@ export class Readiness {
         ? readinessFix("codex", this.restartOf("codex"))
         : fixes.codexLogin,
     );
+  }
+
+  private async gitLabCredentials(): Promise<ReadinessCheck> {
+    const id = "gitlab-credentials";
+    const state = await bounded(
+      this.deps.gitLabCredentials(),
+      this.deps.timeoutMs ?? 10_000,
+    );
+    if (!state.configured)
+      return outcome(
+        id,
+        "not-configured",
+        "No GitLab credential is configured",
+        fixes.gitlab,
+      );
+    if (state.overridden)
+      return outcome(
+        id,
+        "fail",
+        "A glab login is overridden by GITLAB_TOKEN in the service environment",
+        fixes.gitlabOverride,
+      );
+    return state.unusable
+      ? outcome(id, "fail", "A GitLab credential is not readable", fixes.gitlab)
+      : pass(id);
   }
 
   private async discovery(): Promise<ReadinessCheck> {
@@ -618,7 +656,10 @@ export class Readiness {
 /** Readiness over a running service, reading what the service itself sees. */
 export function serviceReadiness(
   service: StandaloneService,
-  api: Pick<OperatorApi, "readDiscoveryStatus">,
+  api: Pick<
+    OperatorApi,
+    "readDiscoveryStatus" | "codeHostCredentialLocalState"
+  >,
   paths: { dataDir: string; authFile: string },
 ): Readiness {
   return new Readiness({
@@ -635,6 +676,7 @@ export function serviceReadiness(
         available: ref !== null && Boolean(process.env[ref.slice(4)]),
       };
     },
+    gitLabCredentials: () => api.codeHostCredentialLocalState(),
     claudeTokenReference: () => service.domain().claudeTokenReference(),
     claudeTokenStatus: () => service.claudeTokenStatus(),
     harnessStatuses: () => service.harnessStatuses(),
