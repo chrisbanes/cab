@@ -45,7 +45,9 @@ select permitted profiles but cannot create profiles or expand project authority
 
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
-items; readiness is separate. Jira Cloud as an issue tracker and GitLab merge
+items; readiness is separate. Jira Cloud imports issues by JQL: a project uses one
+tracker, and Jira readiness conditions, dependencies, comments, closure, status
+mapping and issue edit or publication are planned and not implemented. GitLab merge
 requests (gitlab.com and self-managed) are planned and not implemented; a
 project can link a GitLab checkout and deliver its branches
 ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
@@ -772,6 +774,21 @@ Discovery never reads with a login the operator did not choose for it. The disco
 Discovery, source selection and a linked GitHub Project do not grant repository
 access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).
+
+A Jira Cloud site's credential is installation-wide and uses three `env:` references:
+the site address (an `https://` origin with no path, port or credentials), the account
+email and an API token. cab resolves them on every use, fails closed with
+`site-mismatch` when the site variable later names another host, and removes all
+three variables and their values from agent and helper environments and from
+receipts, logs and errors. A Jira project's source is its site and up to 30 JQL
+selections, saved and activated together; Jira's strict JQL parse must accept every
+new or changed query before anything is saved, and the preview reads at most 20
+matches without saving. An issue is closed when Jira's status category is Done. A
+read that is incomplete for any reason (rate limit, credential, network, malformed
+or truncated pages) never withdraws a task. Imported Jira tasks keep unknown imported
+blockers, so admission refuses them until Jira dependencies are read. A project that
+has Jira selections or imported tasks cannot switch tracker, and a GitHub project
+with selections or imported tasks cannot become a Jira project.
 
 Project GitHub sources independently choose `env:NAME` or exactly `gh:github.com`.
 Guided setup shows the GitHub CLI login a new project's source would use once a

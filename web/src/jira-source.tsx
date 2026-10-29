@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import type { z } from "zod";
 import {
   issueTrackerCredentialsSchema,
@@ -31,6 +31,7 @@ type Credential = z.infer<
 >["data"]["credentials"][number];
 
 const envName = /^[A-Z][A-Z0-9_]*$/;
+const blank = () => ({ site: "", email: "", token: "", key: key() });
 
 const reasonCopy: Record<NonNullable<Credential["reason"]>, string> = {
   "missing-credential": "a variable has no value in the service environment",
@@ -66,7 +67,6 @@ function JiraCredentials({
   const status = useOperatorResource(session.csrfToken, loader);
   useHeaderRefresh(refreshNonce, status.refresh);
   const d = useDraft(drafts, "issue-tracker-credential.configure");
-  const blank = () => ({ site: "", email: "", token: "", key: key() });
   useEffect(() => d.initialize(blank()), [d]);
   const [open, setOpen] = useState(false);
   const credentials = status.state.data?.data.credentials;
@@ -217,6 +217,7 @@ export function JiraSourceTab(
   p: TabProps & { observations: ObservationResource },
 ) {
   const { data, projectId } = p;
+  const siteId = useId();
   const saved = data.source.tracker === "jira";
   const d = useDraft(p.drafts, `jira.configure:${projectId}`);
   const priv = usePrivateValues(
@@ -342,9 +343,10 @@ export function JiraSourceTab(
               )
             }
           >
-            <label className="field body">
+            <label className="field body" htmlFor={siteId}>
               Jira site
               <NativeSelect
+                id={siteId}
                 aria-label="Jira site"
                 className="control"
                 disabled={locked(d) || saved}

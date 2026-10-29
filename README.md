@@ -171,7 +171,7 @@ owns delivery scope and status.
   and lead follow-ups, lists the attention inbox, answers questions explicitly,
   decides approvals on exact material and requests receipted task Stop and Resume,
   reporting whether each write saved, queued or requested cancellation. It inspects
-  and changes a project's GitHub sources through the same reviewed change documents,
+  and changes a project's GitHub or Jira sources through the same reviewed change documents,
   activates a selection after a complete provider read, places conflicting imported
   tasks, inspects and refreshes delivery, and stages issue comments through review,
   confirmation and one receipted send. It shows each held generation's exact identity,

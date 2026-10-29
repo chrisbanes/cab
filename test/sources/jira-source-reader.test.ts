@@ -55,7 +55,7 @@ test("a search across pages is one complete snapshot with Markdown bodies and Ji
     ],
   );
   assert.equal(
-    (requests[1]?.body as { nextPageToken: string }).nextPageToken,
+    (requests[1]?.body as { nextPageToken: string } | undefined)?.nextPageToken,
     "page-2",
   );
 });
@@ -192,7 +192,7 @@ test("JQL validation surfaces Jira's messages and preview returns at most 20 mat
     status: "To Do",
   });
   assert.equal(
-    (requests.at(-1)?.body as { maxResults: number }).maxResults,
+    (requests.at(-1)?.body as { maxResults: number } | undefined)?.maxResults,
     20,
   );
 });
