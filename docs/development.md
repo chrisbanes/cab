@@ -479,7 +479,7 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
    - `project sources PROJECT_ID` lists the source version, whether a credential
      reference is configured, selections (id, kind, descriptor, active, observation
      state and times, and stored observed/open/matching item counts), readiness, the
-     closed-issue mode, linked repositories and refs, and placement conflicts. A
+     closed-issue mode and placement conflicts; linked repositories are in `project get`. A
      complete read with open items and none matching the readiness rule adds a
      warning line naming `project prepare-source`; JSON carries the counts and
      `readinessRule`. Readiness reads as its summary and conditions ("all of 1
@@ -501,13 +501,23 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      `removeSelections` (ids), `readiness` (a rule replaces, `null` removes the
      rule, omitted keeps it; a saved rule the read withholds must be given),
      `closedIssues` (`"skip"`
-     or `"done"`; omitted keeps the saved mode), `linkRepositories`
-     (`{"repositoryId","path","ref"}`), `unlinkRepositories` (ids), `setRefs`
-     (`{"REPOSITORY_ID":"REF"}`), `credentialRef` (`"env:NAME"` or `null`) and
-     `confirmUnlinkAll`. Saving makes every selection inactive until it is
+     or `"done"`; omitted keeps the saved mode) and `credentialRef` (`"env:NAME"` or
+     `null`). The repository keys of earlier releases are refused with a pointer to
+     `project prepare-repositories`. Saving makes every selection inactive until it is
      previewed again and marks observations incomplete until the next sync
-     refresh. Removing a selection discards its saved definition; unlinking
-     discards its path. A saved value the read cannot name exits 4.
+     refresh. Removing a selection discards its saved definition. A saved value the
+     read cannot name exits 4.
+   - `project prepare-repositories PROJECT_ID [--out FILE] --edit-file FILE
+     [--expected-version N]` writes a `repositories.configure` change document for
+     the project's repository links (`repositories.version` in `project get`); apply
+     it with `project apply --file FILE`. The edit file is strict JSON with any of
+     `linkRepositories` (`{"repositoryId","path","ref"}`), `unlinkRepositories`
+     (ids), `setRefs` (`{"REPOSITORY_ID":"REF"}`) and `confirmUnlinkAll`. Every link
+     is GitHub on `github.com`; a kept link is sent without its path, so the saved
+     path is kept, and applying verifies every checkout before anything is
+     recorded. Unlinking discards the path, and unlinking every link needs
+     `confirmUnlinkAll`. A link change does not touch the GitHub source or its
+     selections.
    - `project preview-source PROJECT_ID --selection ID --expected-version N`
      activates one selection after a complete provider read (an incomplete read
      exits 4). The receipt and output say whether the selection was already
@@ -561,7 +571,7 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
    `confirmed-failure` exits 4 `conflict`, both with nothing posted; an
    `uncertain`, `attempting` or `prepared` send exits 6: do not resend with a new
    key, run `delivery refresh` and then `delivery get`. `operation get` reads
-   `github.configure` and `github.preview` receipts; placements, refreshes and
+   `github.configure`, `repositories.configure` and `github.preview` receipts; placements, refreshes and
    comments are settled by rerunning with the same key. `delivery settle` and
    `result deliver` are settled by rerunning with the printed `--request-id` and the
    `--expected-*` values, because a recorded settlement moves the binding revision and

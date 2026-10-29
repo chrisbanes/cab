@@ -180,15 +180,19 @@ export function reference(v: Values) {
 }
 
 /**
- * One row of the GitHub source form. A saved row carries no private definition until the
- * operator edits it: `query` (search) and `path` (repository link) then hold the edit.
+ * One row of the GitHub source or repository form. A saved row carries no private definition
+ * until the operator edits it: `query` (search) and `path` (repository link) then hold the edit.
  */
 export type SourceRow = Record<string, string | boolean>;
 type Source = ProjectConfigurationData["source"];
+type Repositories = ProjectConfigurationData["repositories"];
 /** What the session-only read returned for this source version: the baseline of any edit. */
 export interface SourcePrivate {
   searches: { id: string; query: string }[];
-  repositories: { repositoryId: string; path: string }[];
+}
+/** What the session-only read returned for this repository-link version. */
+export interface RepositoryPrivate {
+  links: { repositoryId: string; path: string }[];
 }
 /** A saved search row whose query the operator changed from the loaded one. */
 const queryEdited = (r: SourceRow, known?: SourcePrivate) =>
@@ -196,11 +200,10 @@ const queryEdited = (r: SourceRow, known?: SourcePrivate) =>
   typeof r.query === "string" &&
   r.query !== known?.searches.find((s) => s.id === r.id)?.query;
 /** A saved repository link whose local path the operator changed from the loaded one. */
-const pathEdited = (r: SourceRow, known?: SourcePrivate) =>
+const pathEdited = (r: SourceRow, known?: RepositoryPrivate) =>
   Boolean(r.keep) &&
   typeof r.path === "string" &&
-  r.path !==
-    known?.repositories.find((x) => x.repositoryId === r.repositoryId)?.path;
+  r.path !== known?.links.find((x) => x.repositoryId === r.repositoryId)?.path;
 
 export function parseRows(value: Values[string] | undefined): SourceRow[] {
   try {
@@ -224,24 +227,32 @@ export function sourceRowsFrom(source: Source) {
       active: s.active,
       keep: true,
     })),
-    // `savedRef` remembers the loaded ref, so adoption can tell an edited ref from a stale one.
-    repositories: source.repositories.map((r) => ({
-      repositoryId: r.repositoryId ?? "",
-      ref: r.ref ?? "",
-      savedRef: r.ref ?? "",
-      keep: true,
-    })),
     // No rule and an unavailable rule both load no condition; nothing is prefilled.
     conditions: (readinessCommandValue(source.readiness)?.conditions ?? []).map(
       (c) => ({ ...c }),
     ),
     mode: source.readiness.kind === "rule" ? source.readiness.mode : "all",
     closedIssues: source.closedIssues,
-    incomplete:
-      source.selections.some((s) => s.id === null) ||
-      source.repositories.some(
-        (r) => r.repositoryId === null || r.ref === null,
-      ),
+    incomplete: source.selections.some((s) => s.id === null),
+  };
+}
+
+/**
+ * Draft values for the repository form from the saved read. `incomplete` is true when a
+ * saved link cannot be named, so an in-place save could not keep it.
+ */
+export function repositoryRowsFrom(saved: Repositories) {
+  return {
+    // `savedRef` remembers the loaded ref, so adoption can tell an edited ref from a stale one.
+    repositories: saved.links.map((r) => ({
+      repositoryId: r.repositoryId ?? "",
+      ref: r.ref ?? "",
+      savedRef: r.ref ?? "",
+      keep: true,
+    })),
+    incomplete: saved.links.some(
+      (r) => r.repositoryId === null || r.ref === null,
+    ),
   };
 }
 
@@ -260,11 +271,8 @@ const strip = ({ rowKey: _rowKey, ...row }: SourceRow) => row;
 const live = (rows: SourceRow[]) => rows.filter((r) => !r.removed);
 
 /** Whether the draft removes every saved repository link. */
-export function removesAllAccess(source: Source, v: Values) {
-  return (
-    source.repositories.length > 0 &&
-    live(parseRows(v.repositories)).length === 0
-  );
+export function removesAllAccess(saved: Repositories, v: Values) {
+  return saved.links.length > 0 && live(parseRows(v.repositories)).length === 0;
 }
 
 function newSelectionLine(r: SourceRow) {
@@ -290,7 +298,6 @@ export function sourceChanges(
 ) {
   const lines: string[] = [];
   const selections = parseRows(v.selections),
-    repositories = parseRows(v.repositories),
     conditions = parseRows(v.conditions);
   for (const r of selections)
     if (r.keep && r.removed)
@@ -319,22 +326,37 @@ export function sourceChanges(
   // A draft without the field keeps the saved mode.
   if (v.closedIssues !== undefined && v.closedIssues !== source.closedIssues)
     lines.push(`Closed issues: ${closedIssueLabels[String(v.closedIssues)]}`);
+  return [
+    ...lines,
+    ...(v.referenceMode === "gh"
+      ? ["Credential reference: use GitHub CLI login"]
+      : referenceChange(v)),
+  ];
+}
+
+export function repositoryChanges(
+  saved: Repositories,
+  v: Values,
+  known?: RepositoryPrivate,
+) {
+  const lines: string[] = [];
+  const repositories = parseRows(v.repositories);
   for (const r of repositories) {
     if (r.keep && r.removed)
       lines.push(`− Repository access: ${r.repositoryId}`);
     else if (!r.keep && !r.removed)
       lines.push(`+ Repository access: ${r.repositoryId} · ${r.ref}`);
     else if (r.keep) {
-      const saved = source.repositories.find(
+      const current = saved.links.find(
         (s) => s.repositoryId === r.repositoryId,
       );
-      if (saved && saved.ref !== r.ref)
-        lines.push(`Ref for ${r.repositoryId}: ${saved.ref} → ${r.ref}`);
+      if (current && current.ref !== r.ref)
+        lines.push(`Ref for ${r.repositoryId}: ${current.ref} → ${r.ref}`);
       if (pathEdited(r, known))
         lines.push(`Local path changed for ${r.repositoryId}`);
     }
   }
-  for (const s of source.repositories)
+  for (const s of saved.links)
     if (
       s.repositoryId !== null &&
       !repositories.some((r) => r.repositoryId === s.repositoryId)
@@ -342,12 +364,7 @@ export function sourceChanges(
       lines.push(
         `− Repository access: ${s.repositoryId} (saved since this form loaded)`,
       );
-  return [
-    ...lines,
-    ...(v.referenceMode === "gh"
-      ? ["Credential reference: use GitHub CLI login"]
-      : referenceChange(v)),
-  ];
+  return lines;
 }
 
 /**
@@ -360,39 +377,48 @@ export function staleSourceRows(source: Source, v: Values) {
       (r) =>
         r.keep && !r.removed && !source.selections.some((s) => s.id === r.id),
     ),
-    ...parseRows(v.repositories).filter(
+  ].map((r) => String(r.id));
+}
+
+/** Kept links that are no longer saved (removed elsewhere); Save is blocked until reviewed. */
+export function staleRepositoryRows(saved: Repositories, v: Values) {
+  return parseRows(v.repositories)
+    .filter(
       (r) =>
         r.keep &&
         !r.removed &&
-        !source.repositories.some((s) => s.repositoryId === r.repositoryId),
-    ),
-  ].map((r) => String(r.id ?? r.repositoryId));
+        !saved.links.some((s) => s.repositoryId === r.repositoryId),
+    )
+    .map((r) => String(r.repositoryId));
 }
 
 /**
- * Rows for a newly adopted revision. Kept rows take the latest saved definition (and the
- * latest ref unless the operator edited it); rows saved elsewhere join as kept rows; kept
- * rows removed elsewhere are dropped; a new selection whose id was saved elsewhere takes the
- * next free id. A new repository link whose id was saved elsewhere stays beside the saved
- * link, and `duplicateSourceIds` blocks Save until the operator removes one of them.
+ * Merges the draft rows with the latest saved rows: kept rows take the latest saved
+ * definition, rows saved elsewhere join as kept rows, and kept rows removed elsewhere drop.
+ */
+const mergeRows = (
+  draft: SourceRow[],
+  saved: SourceRow[],
+  id: (r: SourceRow) => unknown,
+  refresh: (draft: SourceRow, saved: SourceRow) => SourceRow,
+) => [
+  ...draft.flatMap((r) => {
+    if (!r.keep) return [r];
+    const latest = saved.find((s) => id(s) === id(r));
+    return latest ? [refresh(r, latest)] : [];
+  }),
+  ...saved
+    .filter((s) => !draft.some((r) => r.keep && id(r) === id(s)))
+    .map((s) => ({ ...s, rowKey: crypto.randomUUID() })),
+];
+
+/**
+ * Rows for a newly adopted revision. Kept rows take the latest saved definition; rows saved
+ * elsewhere join as kept rows; kept rows removed elsewhere are dropped; a new selection whose
+ * id was saved elsewhere takes the next free id.
  */
 export function adoptSourceRows(source: Source, v: Values) {
   const loaded = sourceRowsFrom(source);
-  const merge = (
-    draft: SourceRow[],
-    saved: SourceRow[],
-    id: (r: SourceRow) => unknown,
-    refresh: (draft: SourceRow, saved: SourceRow) => SourceRow,
-  ) => [
-    ...draft.flatMap((r) => {
-      if (!r.keep) return [r];
-      const latest = saved.find((s) => id(s) === id(r));
-      return latest ? [refresh(r, latest)] : [];
-    }),
-    ...saved
-      .filter((s) => !draft.some((r) => r.keep && id(r) === id(s)))
-      .map((s) => ({ ...s, rowKey: crypto.randomUUID() })),
-  ];
   const saved = source.selections.flatMap((x) => (x.id ? [x.id] : []));
   const taken = parseRows(v.selections).map((x) => String(x.id));
   const selections = parseRows(v.selections).map((r) => {
@@ -401,16 +427,6 @@ export function adoptSourceRows(source: Source, v: Values) {
     taken.push(id);
     return { ...r, id };
   });
-  // Kept links the operator edited but that were removed elsewhere; adoption drops them.
-  const dropped = parseRows(v.repositories)
-    .filter(
-      (r) =>
-        r.keep &&
-        !r.removed &&
-        (r.ref !== r.savedRef || typeof r.path === "string") &&
-        !loaded.repositories.some((s) => s.repositoryId === r.repositoryId),
-    )
-    .map((r) => String(r.repositoryId));
   // Saved sources the operator edited or marked for removal that were removed elsewhere, or
   // replaced by a source of another kind under the same id: the edit does not fit the new
   // source, so it is dropped rather than carried onto it.
@@ -425,9 +441,9 @@ export function adoptSourceRows(source: Source, v: Values) {
     })
     .map((r) => String(r.id));
   return {
-    dropped: [...droppedSelections, ...dropped],
+    dropped: droppedSelections,
     selections: JSON.stringify(
-      merge(
+      mergeRows(
         selections,
         loaded.selections,
         (r) => r.id,
@@ -445,8 +461,29 @@ export function adoptSourceRows(source: Source, v: Values) {
               },
       ),
     ),
+  };
+}
+
+/**
+ * Rows for a newly adopted link revision. A new link whose id was saved elsewhere stays
+ * beside the saved link, and `duplicateRepositoryIds` blocks Save until one is removed.
+ */
+export function adoptRepositoryRows(saved: Repositories, v: Values) {
+  const loaded = repositoryRowsFrom(saved);
+  // Kept links the operator edited but that were removed elsewhere; adoption drops them.
+  const dropped = parseRows(v.repositories)
+    .filter(
+      (r) =>
+        r.keep &&
+        !r.removed &&
+        (r.ref !== r.savedRef || typeof r.path === "string") &&
+        !loaded.repositories.some((s) => s.repositoryId === r.repositoryId),
+    )
+    .map((r) => String(r.repositoryId));
+  return {
+    dropped,
     repositories: JSON.stringify(
-      merge(
+      mergeRows(
         parseRows(v.repositories),
         loaded.repositories,
         (r) => r.repositoryId,
@@ -460,20 +497,24 @@ export function adoptSourceRows(source: Source, v: Values) {
   };
 }
 
-/** Selection or repository ids held by more than one live row; Save is blocked until one goes. */
+/** Selection ids held by more than one live row; Save is blocked until one goes. */
 export function duplicateSourceIds(v: Values) {
-  const ids = (rows: SourceRow[], id: (r: SourceRow) => unknown) =>
+  return duplicateIds(parseRows(v.selections), (r) => r.id);
+}
+
+/** Repository ids held by more than one live row; Save is blocked until one goes. */
+export function duplicateRepositoryIds(v: Values) {
+  return duplicateIds(parseRows(v.repositories), (r) => r.repositoryId);
+}
+
+const duplicateIds = (rows: SourceRow[], id: (r: SourceRow) => unknown) => [
+  ...new Set(
     rows
       .filter((r) => !r.removed)
       .map((r) => String(id(r)))
-      .filter((x, i, all) => x !== "" && all.indexOf(x) !== i);
-  return [
-    ...new Set([
-      ...ids(parseRows(v.selections), (r) => r.id),
-      ...ids(parseRows(v.repositories), (r) => r.repositoryId),
-    ]),
-  ];
-}
+      .filter((x, i, all) => x !== "" && all.indexOf(x) !== i),
+  ),
+];
 
 export const kindLabel = (kind: unknown) =>
   kind === "repository"
@@ -507,18 +548,34 @@ export function sourceCommand(
     }),
     readiness: draftedRule(v),
     closedIssues: v.closedIssues,
-    repositories: live(parseRows(v.repositories)).map((r) =>
-      r.keep
-        ? {
-            repositoryId: r.repositoryId,
-            ref: r.ref,
-            ...(pathEdited(r, known) ? { path: r.path } : {}),
-          }
-        : { repositoryId: r.repositoryId, path: r.path, ref: r.ref },
-    ),
     ...(v.referenceMode === "gh"
       ? { credentialRef: "gh:github.com" }
       : reference(v)),
+  };
+}
+
+export function repositoryCommand(
+  projectId: string,
+  v: Values,
+  known?: RepositoryPrivate,
+) {
+  return {
+    type: "repositories.configure",
+    key: v.key,
+    projectId,
+    expectedVersion: Number(v.expectedVersion),
+    // Only GitHub on github.com is supported.
+    repositories: live(parseRows(v.repositories)).map((r) => ({
+      codeHost: "github",
+      host: "github.com",
+      repositoryId: r.repositoryId,
+      ref: r.ref,
+      ...(r.keep
+        ? pathEdited(r, known)
+          ? { path: r.path }
+          : {}
+        : { path: r.path }),
+    })),
   };
 }
 

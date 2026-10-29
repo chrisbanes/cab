@@ -10,7 +10,6 @@ import {
   duplicateSourceIds,
   nextSelectionId,
   parseRows,
-  removesAllAccess,
   sourceChanges,
   sourceCommand,
   sourceRowsFrom,
@@ -21,7 +20,6 @@ import {
 import {
   Aside,
   ChangeList,
-  DraftCheck,
   DraftField,
   DraftOutcome,
   Panel,
@@ -106,55 +104,43 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     conditions: withKeys(loaded.conditions),
     mode: loaded.mode,
     closedIssues: loaded.closedIssues,
-    repositories: withKeys(loaded.repositories),
-    removeAll: false,
   };
   // Row keys are regenerated per render, so the load is identified by the saved read.
   useLoadedDraft(d, initial, p.loadedAt, data.source);
   const v = d.values,
     selections = parseRows(v.selections),
     conditions = parseRows(v.conditions),
-    repositories = parseRows(v.repositories),
     isLocked = locked(d);
-  // A retained query or path edit is compared with the saved value before it is sent.
+  // A retained query edit is compared with the saved value before it is sent.
   const holdSave =
     known === undefined &&
-    [...selections, ...repositories].some(
-      (r) =>
-        r.keep &&
-        !r.removed &&
-        (typeof r.query === "string" || typeof r.path === "string"),
-    );
+    selections.some((r) => r.keep && !r.removed && typeof r.query === "string");
   // An edit that now equals the saved value (another writer saved the same) is no edit: drop it
   // so the form is clean and later reads apply.
-  const equalsSaved = (r: SourceRow, name: "query" | "path") => {
-    const saved =
-      name === "query"
-        ? known?.searches.find((x) => x.id === r.id)?.query
-        : known?.repositories.find((x) => x.repositoryId === r.repositoryId)
-            ?.path;
-    return r.keep && typeof r[name] === "string" && saved === r[name];
-  };
+  const equalsSaved = (r: SourceRow) =>
+    r.keep &&
+    typeof r.query === "string" &&
+    known?.searches.find((x) => x.id === r.id)?.query === r.query;
   const matchedSaved =
     (d.phase === "editing" ||
       d.phase === "conflict" ||
       d.phase === "rejected") &&
-    ([...selections].some((r) => equalsSaved(r, "query")) ||
-      [...repositories].some((r) => equalsSaved(r, "path")));
+    selections.some(equalsSaved);
   // biome-ignore lint/correctness/useExhaustiveDependencies: act when a read makes an edit equal.
   useEffect(() => {
     if (!matchedSaved) return;
-    const strip = (rows: SourceRow[], name: "query" | "path") =>
-      rows.map((r) => {
-        if (!equalsSaved(r, name)) return r;
-        const { [name]: _v, [`${name}Base`]: _b, ...rest } = r;
-        return rest;
-      });
-    d.set("selections", JSON.stringify(strip(selections, "query")));
-    d.set("repositories", JSON.stringify(strip(repositories, "path")));
+    d.set(
+      "selections",
+      JSON.stringify(
+        selections.map((r) => {
+          if (!equalsSaved(r)) return r;
+          const { query: _v, queryBase: _b, ...rest } = r;
+          return rest;
+        }),
+      ),
+    );
   }, [matchedSaved, known]);
   const lines = sourceChanges(data.source, v, known),
-    removesAll = removesAllAccess(data.source, v),
     stale = staleSourceRows(data.source, v),
     duplicates = duplicateSourceIds(v),
     blocked =
@@ -166,8 +152,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
       (data.source.readiness.kind === "unavailable" &&
         conditions.length === 0) ||
       (v.referenceMode === "gh" &&
-        data.source.credential?.gh.state !== "signed-in") ||
-      (removesAll && !v.removeAll);
+        data.source.credential?.gh.state !== "signed-in");
   const readinessDiscovery = useReadinessDiscovery({
     client: p.client,
     csrfToken: p.session.csrfToken,
@@ -176,7 +161,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
       conditions.some((r) => r.kind === "project-field") ||
       hasProjectSource(data.source),
     labels: conditions.some((r) => r.kind === "label"),
-    saved: data.source.repositories.map((r) => ({
+    saved: data.repositories.links.map((r) => ({
       repositoryId: r.repositoryId ?? "",
     })),
     projectIds: conditions.flatMap((r) =>
@@ -196,13 +181,9 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     if (rows.dropped.length)
       d.notice = `Loaded the latest version. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed or replaced elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
     d.set("selections", rows.selections);
-    d.set("repositories", rows.repositories);
   };
-  const setRows = (field: string, rows: SourceRow[]) => {
+  const setRows = (field: string, rows: SourceRow[]) =>
     d.set(field, JSON.stringify(rows));
-    if (field === "repositories" && rows.some((r) => !r.removed))
-      d.set("removeAll", false);
-  };
   const update = (
     field: string,
     index: number,
@@ -272,7 +253,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const savedValue = (
     field: string,
     index: number,
-    name: "query" | "path",
+    name: "query",
     label: string,
     unavailable: string,
     baseline: string | undefined,
@@ -314,7 +295,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 <Button
                   type="button"
                   variant="secondary"
-                  aria-label={`Try again to check the ${label.toLowerCase()} for ${String(row?.[name === "query" ? "id" : "repositoryId"] ?? "")}`}
+                  aria-label={`Try again to check the ${label.toLowerCase()} for ${String(row?.id ?? "")}`}
                   onClick={priv.refresh}
                 >
                   Try again
@@ -333,7 +314,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
           <Button
             type="button"
             variant="secondary"
-            aria-label={`Try again to load the ${label.toLowerCase()} for ${String(parseRows(v[field])[index]?.[name === "query" ? "id" : "repositoryId"] ?? "")}`}
+            aria-label={`Try again to load the ${label.toLowerCase()} for ${String(parseRows(v[field])[index]?.id ?? "")}`}
             aria-busy={priv.state.pending || undefined}
             aria-disabled={priv.state.pending || undefined}
             onClick={() => {
@@ -423,14 +404,13 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
       {duplicates.length > 0 && (
         <Alert variant="destructive" role="alert">
           {duplicates.join(", ")} {duplicates.length === 1 ? "is" : "are"}{" "}
-          linked twice. Remove one of the rows before saving: remove the new row
-          to keep the saved link, or remove the saved link to replace it.
+          listed twice. Remove one of the rows before saving.
         </Alert>
       )}
       {loaded.incomplete && (
         <Alert variant="destructive" role="alert">
-          A saved source or repository link cannot be shown here, so this form
-          cannot keep it. Use the advanced source editor.
+          A saved source cannot be shown here, so this form cannot keep it. Use
+          the advanced source editor.
         </Alert>
       )}
       <div className="settings-split">
@@ -827,133 +807,10 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
               delivered by cab, once its work has stopped.
             </p>
           </Panel>
-          <Panel
-            title="3 · Repository access"
-            description="Every change is listed for review before saving. Removing all access asks for confirmation."
-          >
-            <fieldset
-              disabled={isLocked}
-              className="settings-rows"
-              aria-describedby={
-                d.errors.repositories ? "source-repositories-error" : undefined
-              }
-            >
-              <legend className="sr-only">Repository access</legend>
-              {repositories.map((r, i) => {
-                const name = String(r.repositoryId || `row ${i + 1}`);
-                return (
-                  <div className="settings-row" key={String(r.rowKey)}>
-                    {r.keep ? (
-                      <div className="settings-row-heading">
-                        <div>
-                          <h3 className="small-heading">{name}</h3>
-                        </div>
-                        {r.removed && (
-                          <StatusBadge tone="warning">
-                            Will be removed
-                          </StatusBadge>
-                        )}
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => toggleRemoved("repositories", i)}
-                        >
-                          {r.removed
-                            ? `Undo remove repository ${name}`
-                            : `Remove repository ${name}`}
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="settings-row-heading">
-                        <StatusBadge>New repository link</StatusBadge>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => drop("repositories", i)}
-                        >
-                          Remove new repository {name}
-                        </Button>
-                      </div>
-                    )}
-                    {!r.removed && (
-                      <div className="settings-fields">
-                        {!r.keep &&
-                          input(
-                            "repositories",
-                            i,
-                            "repositoryId",
-                            "Linked repository ID",
-                          )}
-                        {input(
-                          "repositories",
-                          i,
-                          "ref",
-                          "Linked repository ref",
-                        )}
-                        {r.keep
-                          ? savedValue(
-                              "repositories",
-                              i,
-                              "path",
-                              "Local repository path",
-                              "Local path unavailable",
-                              known?.repositories.find(
-                                (x) => x.repositoryId === r.repositoryId,
-                              )?.path,
-                            )
-                          : input(
-                              "repositories",
-                              i,
-                              "path",
-                              "New local repository path",
-                            )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
-                    add("repositories", {
-                      repositoryId: "",
-                      path: "",
-                      ref: "main",
-                    })
-                  }
-                >
-                  Add repository
-                </Button>
-              </div>
-              {errorText(
-                "repositories",
-                "source-repositories-error",
-                "Check linked repository IDs, paths and refs.",
-              )}
-            </fieldset>
-          </Panel>
         </div>
         <div className="settings-column">
           <SourceCredential draft={d} source={data.source} />
-          <ChangeList
-            lines={
-              removesAll
-                ? [
-                    ...lines,
-                    `Removes every repository from ${data.project.name ?? "this project"}.`,
-                  ]
-                : lines
-            }
-          >
-            {removesAll && (
-              <DraftCheck
-                draft={d}
-                field="removeAll"
-                label="Remove all repository access"
-              />
-            )}
+          <ChangeList lines={lines}>
             <p className="metadata muted">
               Saving imports nothing. After saving, Preview and import now
               appears here.

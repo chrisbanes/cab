@@ -304,7 +304,6 @@ test("agents cannot change readiness labels or fields, and no readiness rule pro
           },
         ],
       },
-      repositories: [],
     });
     assert.throws(labels, /readiness labels/);
     // GitHub matches label names case-insensitively, so a case variant is the same label.
@@ -563,7 +562,6 @@ function publicationWorld(options: { ready: boolean; grants?: boolean }) {
         },
       ],
     },
-    repositories: [],
   });
   domain.execute({
     type: "task.create",

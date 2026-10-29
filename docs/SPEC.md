@@ -94,8 +94,10 @@ remove-dependency|message|follow-up|draft-turn`, `inbox list`, `question get|ans
 service's existing commands, plus receipted `task.stop` and `task.resume` commands
 that share the web UI's Stop hold; Resume clears only the operator Stop.
 `project sources|prepare-source|preview-source|place-task` inspect and change GitHub
-sources and repository links (a `github.configure` change document applied with
-`project apply`), activate a selection and place a conflicting imported task;
+sources (a `github.configure` change document applied with `project apply`), activate
+a selection and place a conflicting imported task; `project prepare-repositories`
+changes the project's repository links (a `repositories.configure` change document
+applied the same way);
 `delivery get|refresh|settle|review-comment|confirm-comment|send-comment` inspect delivery
 and drive the existing refresh, handback settlement and staged comment commands;
 `result deliver` delivers an undelivered result to its permitted recipient; and
@@ -702,7 +704,7 @@ A revoked or changed profile opens that profile, which does not re-bind the
 assignment; changed instructions, a profile that project routing does not permit and
 a held assignment have no Fix; a held assignment is explained whether or not a turn
 is queued for it. Revoked repository access (an imported task's ready workspace uses a
-repository the project no longer links) opens the project's GitHub settings, names no
+repository the project no longer links) opens the project's repository settings, names no
 repository and grants nothing by itself. An assignment whose operator-reconciled
 recovery has no recorded continuation has no Fix and links to its recovery; opening
 it releases nothing. A request refused before it ran because the captured task or assignment
@@ -795,8 +797,13 @@ the `gh:github.com` source credential works through a file-based `gh` login;
 there is no `file:` GitHub reference. See the
 [macOS operations procedure](operations/standalone-macos.md#launchdaemon-mode).
 
-Settings present each project's repository access and GitHub discovery sources
-together, labelled separately, rather than as two unrelated lists.
+Settings present each project's repository links and GitHub discovery sources as
+separate sections. Repository links are project configuration, not part of any
+source: each link records its code host and host name (GitHub on `github.com` is the
+only supported pair), and links change through one versioned, receipted
+`repositories.configure` command that verifies every checkout before anything is
+recorded. Saving the GitHub source neither changes nor needs repository links, and
+saving links neither deactivates a selection nor changes the source version.
 
 An agent profile has a name, an optional short summary, private instructions and
 capabilities. Settings and routing candidate lists show the name with its summary
@@ -1552,8 +1559,8 @@ byte range, side, source identity and observation time. Comments stage exact
 anchors through `review.anchor.stage` from a current file (`workspace-file`), a
 comparison side (`comparison-side`) or a retained file item (`result-evidence`);
 Shift extends a line range. Anchors are allowed for the repository-free root and
-for repositories linked in the project's GitHub configuration, which is how
-production binds task repositories. Drafts may select a current workspace file or
+for repositories linked to the project, which is how production binds task
+repositories. Drafts may select a current workspace file or
 an exact comparison side without a result. A supplied result association is
 validated against the same task/work and exact source comparison where
 applicable; a comparison-side anchor remains comparison evidence even when

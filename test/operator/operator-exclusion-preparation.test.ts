@@ -154,15 +154,17 @@ test("a repository linked while a shared-base read is held is redacted in every 
         f.seedPersistedState((db) => {
           const row = db
             .prepare(
-              "SELECT repositories FROM project_github_sources WHERE projectId=?",
+              "SELECT links FROM project_repository_links WHERE projectId=?",
             )
-            .get(projectId) as { repositories: string };
+            .get(projectId) as { links: string };
           db.prepare(
-            "UPDATE project_github_sources SET version=version+1, repositories=? WHERE projectId=?",
+            "UPDATE project_repository_links SET version=version+1, links=? WHERE projectId=?",
           ).run(
             JSON.stringify([
-              ...JSON.parse(row.repositories),
+              ...JSON.parse(row.links),
               {
+                codeHost: "github",
+                host: "github.com",
                 repositoryId: name,
                 path: canary,
                 ref: "main",

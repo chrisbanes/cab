@@ -248,13 +248,11 @@ export class TaskReviewStore {
       }
     }
     const repositories = this.db
-      .prepare(
-        `SELECT repositories FROM project_github_sources LIMIT ${cap + 1}`,
-      )
+      .prepare(`SELECT links FROM project_repository_links LIMIT ${cap + 1}`)
       .all() as Row[];
     if (repositories.length > cap) throw new RedactionLimitError();
     for (const row of repositories) {
-      const repos = JSON.parse(String(row.repositories)) as {
+      const repos = JSON.parse(String(row.links)) as {
         path?: string;
         gitCommonDirectory?: string;
       }[];

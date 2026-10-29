@@ -426,7 +426,23 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
       paused: false,
     });
     const domain = service.domain();
-    await domain.configureGitHub({
+    await domain.configureRepositories({
+      type: "repositories.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: domain.repositoryLinks(projectId).version,
+      repositories: [
+        {
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: "repo-alpha",
+          path: source.path,
+          ref: "main",
+        },
+      ],
+    });
+    domain.execute({
       type: "github.configure",
       actor: "operator",
       key: randomUUID(),
@@ -441,9 +457,6 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
           owner: "acme",
           name: "atlas",
         },
-      ],
-      repositories: [
-        { repositoryId: "repo-alpha", path: source.path, ref: "main" },
       ],
       readiness: {
         mode: "all",
@@ -473,7 +486,7 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
     process.env.FIXTURE_DRAFTING_SOURCE = "offline-drafting-source-value";
     const domain = service.domain();
     const configured = domain.githubConfiguration(projectId);
-    await domain.configureGitHub({
+    await domain.execute({
       type: "github.configure",
       actor: "operator",
       key: randomUUID(),
@@ -481,11 +494,6 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
       expectedVersion: Number(configured.version),
       credentialRef: "env:FIXTURE_DRAFTING_SOURCE",
       selections: configured.selections as never,
-      repositories: configured.repositories.map((r) => ({
-        repositoryId: r.repositoryId,
-        path: r.path,
-        ref: r.ref,
-      })),
       readiness: configured.readiness as never,
     });
     execute(service, {
@@ -968,24 +976,13 @@ test("a repository grant that changes while the copy is built is never used", as
   );
   // The operator unlinks the repository while the copy is still being made.
   const domain = service.domain();
-  await domain.configureGitHub({
-    type: "github.configure",
+  await domain.configureRepositories({
+    type: "repositories.configure",
     actor: "operator",
     key: randomUUID(),
     projectId,
-    expectedVersion: Number(domain.githubConfiguration(projectId).version),
-    credentialRef: null,
-    selections: [
-      {
-        id: "repo",
-        kind: "repository",
-        repositoryId: "R_1",
-        owner: "acme",
-        name: "atlas",
-      },
-    ],
+    expectedVersion: domain.repositoryLinks(projectId).version,
     repositories: [],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   });
   rmSync(block);
   await started;
@@ -1052,24 +1049,13 @@ test("a run that failed to prepare still settles as failed once its copy is fina
     () => w.tracked(service).runs(),
   );
   const domain = service.domain();
-  await domain.configureGitHub({
-    type: "github.configure",
+  await domain.configureRepositories({
+    type: "repositories.configure",
     actor: "operator",
     key: randomUUID(),
     projectId,
-    expectedVersion: Number(domain.githubConfiguration(projectId).version),
-    credentialRef: null,
-    selections: [
-      {
-        id: "repo",
-        kind: "repository",
-        repositoryId: "R_1",
-        owner: "acme",
-        name: "atlas",
-      },
-    ],
+    expectedVersion: domain.repositoryLinks(projectId).version,
     repositories: [],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   });
   rmSync(block);
   await started;
@@ -1379,24 +1365,13 @@ test("an unlinked repository's paths stay private to the run built from it", asy
     () => w.tracked(service).runs(),
   );
   const domain = service.domain();
-  await domain.configureGitHub({
-    type: "github.configure",
+  await domain.configureRepositories({
+    type: "repositories.configure",
     actor: "operator",
     key: randomUUID(),
     projectId,
-    expectedVersion: Number(domain.githubConfiguration(projectId).version),
-    credentialRef: null,
-    selections: [
-      {
-        id: "repo",
-        kind: "repository",
-        repositoryId: "R_1",
-        owner: "acme",
-        name: "atlas",
-      },
-    ],
+    expectedVersion: domain.repositoryLinks(projectId).version,
     repositories: [],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   });
   unlinked = true;
   await waitUntil(

@@ -263,7 +263,6 @@ export async function runStatusMappingJourney(
           optionNodeId: optionId(name),
         })),
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",

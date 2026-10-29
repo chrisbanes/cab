@@ -69,7 +69,19 @@ const github: DomainCommandResultMap["github.configure"] = {
   selections: [],
   readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   closedIssues: "skip",
-  repositories: [],
+};
+const repositories: DomainCommandResultMap["repositories.configure"] = {
+  version: 2,
+  repositories: [
+    {
+      codeHost: "github",
+      host: "github.com",
+      repositoryId: "R_kgDOExample",
+      path: "/repo",
+      ref: "main",
+      gitCommonDirectory: "/repo/.git",
+    },
+  ],
 };
 
 const cases = {
@@ -95,6 +107,7 @@ const cases = {
     candidateProfileIds: "[]",
   },
   "github.configure": github,
+  "repositories.configure": repositories,
   "status-mapping.configure": {
     version: 2,
     mapping: {
@@ -458,6 +471,32 @@ test("legacy receipt validation preserves only the known migrated omissions", ()
   );
   assert.throws(() =>
     parseFreshDomainCommandOutcome("github.configure", legacyGithub),
+  );
+  // Links moved to the project: a new source result carries none, and a result recorded with
+  // them still parses.
+  const legacyLinks = {
+    ...github,
+    repositories: [
+      {
+        repositoryId: "R_kgDOExample",
+        path: "/repo",
+        ref: "main",
+        gitCommonDirectory: "/repo/.git",
+      },
+    ],
+  };
+  assert.deepEqual(
+    parseDomainCommandOutcome("github.configure", legacyLinks).result,
+    legacyLinks,
+  );
+  assert.throws(() =>
+    parseFreshDomainCommandOutcome("github.configure", legacyLinks),
+  );
+  assert.throws(() =>
+    parseDomainCommandOutcome("repositories.configure", {
+      ...repositories,
+      repositories: [{ repositoryId: "R_1", path: "/r", ref: "main" }],
+    }),
   );
   assert.deepEqual(
     parseFreshDomainCommandOutcome("github.configure", {

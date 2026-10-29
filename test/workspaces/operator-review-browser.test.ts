@@ -558,7 +558,6 @@ for (const [limitCase, sourceBody] of [
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     d.execute({
       type: "github.activate",

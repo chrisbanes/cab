@@ -615,7 +615,6 @@ test("source replacement verifies repositories without diagnostic echo and obser
         query: "PRIVATE SAVED QUERY",
       },
     ],
-    repositories: [],
     readiness: {
       mode: "all",
       conditions: [{ kind: "label", name: "ready" }],
@@ -636,7 +635,11 @@ test("source replacement verifies repositories without diagnostic echo and obser
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=github`);
+  await signIn(
+    page,
+    web,
+    `/app/projects/${ids.projectId}/settings?tab=repositories`,
+  );
   await page
     .getByRole("button", { name: "Add repository", exact: true })
     .click();
@@ -677,7 +680,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
   await page.waitForFunction(
     () => {
       const field = document.querySelector(
-        '[aria-describedby="source-repositories-error"][aria-invalid="true"]',
+        '[aria-describedby="repository-error"][aria-invalid="true"]',
       );
       return (
         field !== null &&
@@ -746,7 +749,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
     "-m",
     "Fixture",
   ]);
-  await sections.getByRole("link", { name: "GitHub source" }).click();
+  await sections.getByRole("link", { name: "Repositories" }).click();
   // The unsaved repository row survives the tab change.
   await page
     .getByLabel("New local repository path", { exact: true })
@@ -754,16 +757,17 @@ test("source replacement verifies repositories without diagnostic echo and obser
   await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
+  // Saving links leaves the GitHub source alone.
   assert.equal(
     f.service.domain().githubConfiguration(ids.projectId).version,
-    3,
+    2,
   );
   assert.equal(
     f.service.domain().githubConfiguration(ids.projectId).credentialRef,
     "env:FIXTURE_GITHUB",
   );
   assert.equal(
-    f.service.domain().githubConfiguration(ids.projectId).repositories.length,
+    f.service.domain().repositoryLinks(ids.projectId).links.length,
     1,
   );
   const configResponse = await page.request.get(
@@ -777,13 +781,11 @@ test("source replacement verifies repositories without diagnostic echo and obser
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
   assert.equal(
-    f.service.domain().githubConfiguration(ids.projectId).repositories.length,
+    f.service.domain().repositoryLinks(ids.projectId).links.length,
     0,
   );
-  assert.equal(
-    f.service.domain().githubConfiguration(ids.projectId).version,
-    4,
-  );
+  assert.equal(f.service.domain().repositoryLinks(ids.projectId).version, 3);
+  await sections.getByRole("link", { name: "GitHub source" }).click();
   await page
     .getByLabel("Closed GitHub issues", { exact: true })
     .selectOption("done");
@@ -797,7 +799,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
       f.service.domain().githubConfiguration(ids.projectId).version,
       f.service.domain().githubConfiguration(ids.projectId).closedIssues,
     ],
-    [5, "done"],
+    [3, "done"],
   );
   assert.equal(
     await page.getByLabel("Closed GitHub issues", { exact: true }).inputValue(),
@@ -1110,7 +1112,6 @@ function seedPlacement(f: Awaited<ReturnType<typeof createOperatorFixture>>) {
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
   seedImportedConflict(f, taskId, [ids.projectId, target, destination]);
   return { ids, target, destination, taskId, d };

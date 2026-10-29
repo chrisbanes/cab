@@ -132,7 +132,7 @@ async function launch(
   const { projectId } = await seedDraftingProject(f);
   const d = f.service.domain();
   const configured = d.githubConfiguration(projectId);
-  await d.configureGitHub({
+  await d.execute({
     type: "github.configure",
     actor: "operator",
     key: randomUUID(),
@@ -140,11 +140,6 @@ async function launch(
     expectedVersion: Number(configured.version),
     credentialRef: `env:${sourceName}`,
     selections: configured.selections as never,
-    repositories: configured.repositories.map((r) => ({
-      repositoryId: r.repositoryId,
-      path: r.path,
-      ref: r.ref,
-    })),
     readiness: configured.readiness as never,
   });
   d.execute({

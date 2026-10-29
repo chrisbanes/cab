@@ -18,6 +18,14 @@ import { browserSuite } from "../fixtures/browser-diagnostics.js";
 
 const browserTest = browserSuite("github-source");
 
+const link = (repositoryId: string, path: string, ref = "main") => ({
+  codeHost: "github" as const,
+  host: "github.com" as const,
+  repositoryId,
+  path,
+  ref,
+});
+
 import { type Browser, chromium } from "playwright";
 import { DomainCommands, DomainStore } from "../../src/core/domain.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
@@ -86,7 +94,6 @@ test("operator-owned GitHub configuration survives restart and rejects stale or 
           },
         ],
       },
-      repositories: [],
     };
     const receipt = domain.execute(command);
     assert.deepEqual(domain.execute(command), receipt);
@@ -161,7 +168,6 @@ test("a version-matched successful source preview activates only that selection"
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     let previewComplete = true;
     const reader = {
@@ -206,7 +212,6 @@ test("a version-matched successful source preview activates only that selection"
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
     previewComplete = false;
@@ -256,7 +261,6 @@ test("github.activate reports whether the selection was already active at the so
           mode: "any",
           conditions: [{ kind: "label", name: "ready" }],
         },
-        repositories: [],
       });
     const activate = (
       selectionId: string,
@@ -334,7 +338,6 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -510,7 +513,6 @@ browserTest(
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -568,7 +570,6 @@ browserTest(
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -793,36 +794,26 @@ test("linked repository verification is asynchronous and stale configuration can
       leadProfileId: null,
     });
     const command = {
-      type: "github.configure" as const,
+      type: "repositories.configure" as const,
       actor: "operator" as const,
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: "env:CAB_TEST_GITHUB",
-      selections: [],
-      readiness: {
-        mode: "any" as const,
-        conditions: [{ kind: "label" as const, name: "ready" }],
-      },
-      repositories: [{ repositoryId: "R_1", path: root, ref: "main" }],
+      repositories: [link("R_1", root)],
     };
     const pending = new DomainCommands(domain).execute(command);
     for (let i = 0; i < 100 && !entered; i++)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     assert.equal(entered, true);
-    assert.equal(domain.githubConfiguration(projectId).version, 1);
-    domain.execute({
-      ...command,
-      key: randomUUID(),
-      repositories: [],
-      credentialRef: null,
-    });
+    assert.equal(domain.repositoryLinks(projectId).version, 1);
+    // An empty list needs no verification, so it commits while the other waits.
+    domain.execute({ ...command, key: randomUUID(), repositories: [] });
     release();
     await assert.rejects(pending, /version conflict/i);
-    assert.equal(domain.githubConfiguration(projectId).version, 2);
-    assert.deepEqual(domain.githubConfiguration(projectId).repositories, []);
+    assert.equal(domain.repositoryLinks(projectId).version, 2);
+    assert.deepEqual(domain.repositoryLinks(projectId).links, []);
     await assert.rejects(
-      domain.configureGitHub({
+      domain.configureRepositories({
         ...command,
         key: randomUUID(),
         actor: "agent",
@@ -831,18 +822,21 @@ test("linked repository verification is asynchronous and stale configuration can
       /operator/i,
     );
     await assert.rejects(
-      domain.configureGitHub({ ...command, key: randomUUID() }),
+      domain.configureRepositories({ ...command, key: randomUUID() }),
       /version conflict/i,
     );
     assert.equal(verifications, 1);
     const accepted = { ...command, key: randomUUID(), expectedVersion: 2 };
-    const first = await domain.configureGitHub(accepted);
+    const first = await domain.configureRepositories(accepted);
     assert.equal(verifications, 2);
-    assert.deepEqual(await domain.configureGitHub(accepted), first);
+    assert.deepEqual(await domain.configureRepositories(accepted), first);
     assert.deepEqual(domain.execute(accepted), first);
     assert.equal(verifications, 2);
     await assert.rejects(
-      domain.configureGitHub({ ...accepted, credentialRef: null }),
+      domain.configureRepositories({
+        ...accepted,
+        repositories: [link("R_1", root, "dev")],
+      }),
       /different payload/i,
     );
     assert.equal(verifications, 2);
@@ -878,18 +872,12 @@ test("malformed repository verification output fails as an internal result error
       leadProfileId: null,
     });
     const command = {
-      type: "github.configure" as const,
+      type: "repositories.configure" as const,
       actor: "operator" as const,
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: null,
-      selections: [],
-      readiness: {
-        mode: "all" as const,
-        conditions: [{ kind: "label" as const, name: "ready" }],
-      },
-      repositories: [{ repositoryId: "R_1", path: root, ref: "main" }],
+      repositories: [link("R_1", root)],
     };
 
     const commands = new DomainCommands(domain);
@@ -897,14 +885,14 @@ test("malformed repository verification output fails as an internal result error
       commands.execute(command),
       CommandResultValidationError,
     );
-    assert.equal(domain.githubConfiguration(projectId).version, 1);
-    assert.deepEqual(domain.githubConfiguration(projectId).repositories, []);
+    assert.equal(domain.repositoryLinks(projectId).version, 1);
+    assert.deepEqual(domain.repositoryLinks(projectId).links, []);
     assert.equal(domain.recordedResult(projectId, command.key), undefined);
 
     malformed = false;
     const result = await commands.execute(command);
     assert.equal(verificationCount, 2);
-    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.equal(domain.repositoryLinks(projectId).version, 2);
     assert.deepEqual(domain.recordedResult(projectId, command.key), result);
   } finally {
     db.close();
@@ -938,21 +926,12 @@ test("duplicate verified repository identities roll back and corrupt receipts fa
       leadProfileId: null,
     });
     const command = {
-      type: "github.configure" as const,
+      type: "repositories.configure" as const,
       actor: "operator" as const,
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: null,
-      selections: [],
-      readiness: {
-        mode: "all" as const,
-        conditions: [{ kind: "label" as const, name: "ready" }],
-      },
-      repositories: [
-        { repositoryId: "R_1", path: root, ref: "main" },
-        { repositoryId: "R_2", path: root, ref: "main" },
-      ],
+      repositories: [link("R_1", root), link("R_2", root)],
     };
     const commands = new DomainCommands(domain);
 
@@ -961,14 +940,14 @@ test("duplicate verified repository identities roll back and corrupt receipts fa
       CommandResultValidationError,
     );
     assert.equal(verificationCount, 2);
-    assert.equal(domain.githubConfiguration(projectId).version, 1);
-    assert.deepEqual(domain.githubConfiguration(projectId).repositories, []);
+    assert.equal(domain.repositoryLinks(projectId).version, 1);
+    assert.deepEqual(domain.repositoryLinks(projectId).links, []);
     assert.equal(domain.recordedResult(projectId, command.key), undefined);
 
     duplicate = false;
     const result = await commands.execute(command);
     assert.equal(verificationCount, 4);
-    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.equal(domain.repositoryLinks(projectId).version, 2);
     assert.deepEqual(
       result.repositories.map((repository) => repository.repositoryId),
       ["R_1", "R_2"],
@@ -985,19 +964,18 @@ test("duplicate verified repository identities roll back and corrupt receipts fa
       "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
     ).run(JSON.stringify(corrupted), projectId, command.key);
     await assert.rejects(
-      domain.configureGitHub(command),
+      domain.configureRepositories(command),
       CommandResultValidationError,
     );
     assert.throws(
-      () => domain.recordedResult(projectId, command.key, "github.configure"),
+      () =>
+        domain.recordedResult(projectId, command.key, "repositories.configure"),
       CommandResultValidationError,
     );
     assert.equal(verificationCount, 4);
-    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.equal(domain.repositoryLinks(projectId).version, 2);
     assert.deepEqual(
-      domain
-        .githubConfiguration(projectId)
-        .repositories.map((repository) => repository.repositoryId),
+      domain.repositoryLinks(projectId).links.map((r) => r.repositoryId),
       ["R_1", "R_2"],
     );
   } finally {
@@ -1035,18 +1013,12 @@ test("verified GitHub command duplicates share correlation and replay without re
       leadProfileId: null,
     });
     const command = {
-      type: "github.configure" as const,
+      type: "repositories.configure" as const,
       actor: "operator" as const,
       key: randomUUID(),
       projectId,
       expectedVersion: 1,
-      credentialRef: null,
-      selections: [],
-      readiness: {
-        mode: "all" as const,
-        conditions: [{ kind: "label" as const, name: "ready" }],
-      },
-      repositories: [{ repositoryId: "R_1", path: root, ref: "main" }],
+      repositories: [link("R_1", root)],
     };
     const commands = new DomainCommands(domain);
     const first = commands.execute(command);
@@ -1056,7 +1028,10 @@ test("verified GitHub command duplicates share correlation and replay without re
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     assert.equal(entered, true);
     await assert.rejects(
-      commands.execute({ ...command, credentialRef: "env:OTHER" }),
+      commands.execute({
+        ...command,
+        repositories: [link("R_1", root, "dev")],
+      }),
       /different payload/i,
     );
     release();
@@ -1065,15 +1040,10 @@ test("verified GitHub command duplicates share correlation and replay without re
     assert.deepEqual(domain.recordedResult(projectId, command.key), result);
     assert.deepEqual(result, {
       version: 2,
-      credentialRef: null,
-      selections: [],
-      readiness: {
-        mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
-      },
-      closedIssues: "skip",
       repositories: [
         {
+          codeHost: "github",
+          host: "github.com",
           repositoryId: "R_1",
           path: root,
           ref: "main",
@@ -1231,7 +1201,6 @@ test("readiness rule is added, removed and re-added through keyed, versioned con
         credentialRef: null,
         selections: [],
         readiness,
-        repositories: [],
       });
     configure(1, rule);
     assert.deepEqual(domain.githubConfiguration(projectId).readiness, rule);
@@ -1287,7 +1256,6 @@ test("the HTML project page names the readiness state and its form removes or se
         expectedVersion: String(domain.githubConfiguration(projectId).version),
         selections: "[]",
         readiness,
-        repositories: "[]",
       });
     await submit(
       JSON.stringify({
@@ -1303,6 +1271,47 @@ test("the HTML project page names the readiness state and its form removes or se
     assert.equal(domain.githubConfiguration(projectId).readiness, null);
     assert.equal(domain.githubConfiguration(projectId).version, 3);
     assert.match(ui.project(projectId), noRule);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the HTML project page saves repository links through their own form", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-github-links-html-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db, undefined, async (input) => ({
+      ...input,
+      gitCommonDirectory: `${root}/.git`,
+    }));
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Links",
+      leadProfileId: null,
+    });
+    const ui = new LocalOperatorUi(domain);
+    const html = () => ui.project(projectId);
+    assert.match(html(), /data-command="repositories\.configure"/);
+    // The source form no longer carries the links.
+    assert.equal(html().match(/name="repositories"/g)?.length, 1);
+    await ui.submit({
+      type: "repositories.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: "1",
+      repositories: JSON.stringify([link("R_1", root)]),
+    });
+    assert.equal(domain.repositoryLinks(projectId).version, 2);
+    assert.equal(domain.githubConfiguration(projectId).version, 1);
+    assert.match(html(), /&quot;repositoryId&quot;: &quot;R_1&quot;/);
+    assert.doesNotMatch(html(), /gitCommonDirectory/);
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
@@ -1351,7 +1360,6 @@ test("closed-issue mode defaults to skip and changes only through keyed, version
           conditions: [{ kind: "label", name: "ready" }],
         },
         ...(closedIssues ? { closedIssues } : {}),
-        repositories: [],
       });
     const key = randomUUID();
     configure(key, 1, "done");
@@ -1395,7 +1403,6 @@ test("closed-issue mode defaults to skip and changes only through keyed, version
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       }),
-      repositories: "[]",
     };
     await assert.rejects(
       ui.submit({
@@ -1497,7 +1504,7 @@ test("imported task provisioning requires the project's exact linked Git reposit
       ]),
       /linked repository/i,
     );
-    await domain.configureGitHub({
+    await domain.execute({
       type: "github.configure",
       actor: "operator",
       key: randomUUID(),
@@ -1517,7 +1524,14 @@ test("imported task provisioning requires the project's exact linked Git reposit
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [{ repositoryId: "R_1", path: repository, ref: "main" }],
+    });
+    await domain.configureRepositories({
+      type: "repositories.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      repositories: [link("R_1", repository)],
     });
     await assert.rejects(
       service.provisionTask(importedId, [
@@ -1545,17 +1559,11 @@ test("imported task provisioning requires the project's exact linked Git reposit
       { repositoryId: "R_1", path: repository, ref: "main" },
     ]);
     domain.execute({
-      type: "github.configure",
+      type: "repositories.configure",
       actor: "operator",
       key: randomUUID(),
       projectId,
       expectedVersion: 2,
-      credentialRef: null,
-      selections: [],
-      readiness: {
-        mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
-      },
       repositories: [],
     });
     await assert.rejects(

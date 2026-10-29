@@ -580,7 +580,6 @@ try {
         mode: "all",
         conditions: [{ kind: "label", name: m.readinessLabel }],
       },
-      repositories: [],
     });
     command(domain, {
       type: "github.activate",

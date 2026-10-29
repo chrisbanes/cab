@@ -237,6 +237,7 @@ export class LocalOperatorUi {
     const project = this.store.project(projectId);
     const routing = this.store.routing(projectId);
     const github = this.store.githubConfiguration(projectId);
+    const links = this.store.repositoryLinks(projectId);
     const activeGithub = new Set(
       this.store.githubActiveSelectionIds(projectId),
     );
@@ -385,11 +386,17 @@ export class LocalOperatorUi {
             { value: "done", label: "Treat closure as Done" },
           ],
           github.closedIssues,
-        ) +
+        ),
+      undefined,
+      csrfToken,
+    )}<h2 id="repositories">Repositories</h2>${form(
+      "repositories.configure",
+      field("projectId", projectId, "hidden") +
+        field("expectedVersion", String(links.version), "hidden") +
         textarea(
           "repositories",
           JSON.stringify(
-            github.repositories.map(
+            links.links.map(
               ({ gitCommonDirectory: _ignored, ...repository }) => repository,
             ),
             null,
@@ -656,10 +663,18 @@ export class LocalOperatorUi {
           ...(fields.closedIssues === undefined
             ? {}
             : { closedIssues: closedIssuesSchema.parse(fields.closedIssues) }),
-          repositories: JSON.parse(required("repositories")),
         };
         break;
       }
+      case "repositories.configure":
+        command = {
+          ...common,
+          type: "repositories.configure",
+          projectId: required("projectId"),
+          expectedVersion: version(),
+          repositories: JSON.parse(required("repositories")),
+        };
+        break;
       case "github.preview": {
         const projectId = required("projectId");
         command = {
@@ -833,6 +848,7 @@ const COMMANDS = new Set([
   "routing.configure",
   "delivery.configure",
   "github.configure",
+  "repositories.configure",
   "github.preview",
   "github.refresh",
   "github.place",

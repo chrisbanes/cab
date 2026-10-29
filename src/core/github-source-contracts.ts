@@ -154,15 +154,6 @@ export const githubConfigurationSchema = z
     /** `null` is no readiness rule: open issues in active selections are not filtered. */
     readiness: readinessSchema.nullable(),
     closedIssues: closedIssuesSchema,
-    repositories: z
-      .array(repositoryLinkSchema)
-      .max(20)
-      .refine(
-        (values) =>
-          new Set(values.map((value) => value.repositoryId)).size ===
-          values.length,
-        "Repository IDs must be unique",
-      ),
   })
   .strict();
 
@@ -178,15 +169,12 @@ export const githubConfigurationCommandSchema =
           new Set(values.map((value) => value.id)).size === values.length,
         "Selection IDs must be unique",
       ),
-    repositories: z
-      .array(repositoryLinkInputSchema)
-      .max(20)
-      .refine(
-        (values) =>
-          new Set(values.map((value) => value.repositoryId)).size ===
-          values.length,
-        "Repository IDs must be unique",
-      ),
+    /**
+     * Repository links are project configuration (`repositories.configure`). Only commands
+     * recorded before the move carry this field, so they still parse and replay; a new one
+     * is refused.
+     */
+    repositories: z.array(repositoryLinkInputSchema).max(20).optional(),
   });
 
 export type GitHubConfigurationInput = z.input<

@@ -163,7 +163,6 @@ try {
     credentialRef: manifest.credentialRef,
     selections,
     readiness: manifest.readiness,
-    repositories: [],
   });
   for (const selection of selections)
     domain.execute({

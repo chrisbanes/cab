@@ -174,11 +174,26 @@ const projectGet: BrowseCommand = {
             "Routing",
             `${d.routing.availability} (${d.routing.enabled ? "enabled" : "disabled"}, ${d.routing.candidateProfileIds.length} candidates)`,
           ],
+          ["Sources", `${d.source.selections.length} selections`],
           [
-            "Sources",
-            `${d.source.selections.length} selections, ${d.source.repositories.length} repositories`,
+            "Repositories",
+            `${d.repositories.links.length} linked (version ${d.repositories.version})`,
           ],
         ]),
+        ...(d.repositories.links.length
+          ? [
+              "",
+              table(
+                ["Repository", "Code host", "Host", "Ref"],
+                d.repositories.links.map((r) => [
+                  unavailable(r.repositoryId),
+                  r.codeHost,
+                  r.host,
+                  unavailable(r.ref),
+                ]),
+              ),
+            ]
+          : []),
         commandNetworkDisclosure,
         "",
         d.profiles.length

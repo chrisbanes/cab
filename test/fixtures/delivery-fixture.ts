@@ -366,7 +366,6 @@ export async function deliveryFixture(
             }))
           : [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",

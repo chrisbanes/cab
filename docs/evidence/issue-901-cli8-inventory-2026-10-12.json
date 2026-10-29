@@ -354,13 +354,27 @@
         "test/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
-      "effect": "Writes a github.configure change document from a strict edit file (kept rows as {id, keep: true}, new ids above every saved id, no private query or path resent); sends no write.",
-      "denial": "n/a: prepare sends no write; empty edit, unknown or duplicate additions or removals, removing every link without confirmUnlinkAll, unknown fields, malformed JSON and a symlinked edit file exit 2 with no document.",
+      "effect": "Writes a github.configure change document from a strict edit file (kept rows as {id, keep: true}, new ids above every saved id, no private query resent); sends no write.",
+      "denial": "n/a: prepare sends no write; empty edit, unknown or duplicate additions or removals, repository link keys (refused with a pointer to project prepare-repositories), unknown fields, malformed JSON and a symlinked edit file exit 2 with no document.",
       "revision": "A stale --expected-version exits 4; an unnamed saved selection exits 4; the command equals the web UI sourceCommand for the same edit.",
       "retry": "n/a: prepare is local.",
       "observation": "synthetic",
       "state": "bounded",
       "gap": "Source readers are injected and no live GitHub was used. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
+      "id": "project prepare-repositories",
+      "kind": "command",
+      "area": "project",
+      "scenarios": ["CLI01", "CLI03"],
+      "evidence": ["test/operator-cli-source.test.ts"],
+      "effect": "Writes a repositories.configure change document from a strict edit file (kept links as {codeHost, host, repositoryId, ref} without their path); sends no write.",
+      "denial": "n/a: prepare sends no write; empty edit, unknown, duplicate or already linked repositories, removing every link without confirmUnlinkAll, unknown fields, malformed JSON and a symlinked edit file exit 2 with no document.",
+      "revision": "A stale --expected-version exits 4; an unnamed saved link exits 4; the command equals the web UI repositoryCommand for the same edit.",
+      "retry": "n/a: prepare is local.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project preview-source",

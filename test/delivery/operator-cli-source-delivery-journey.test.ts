@@ -148,7 +148,6 @@ test("sources and delivery journey through the CLI, read back as the operator UI
             conditions: saved.source.readiness.conditions,
           }
         : null,
-    repositories: saved.source.repositories,
   });
   assert.equal(clearCredential.status, 200);
   const cleared = await configuration();

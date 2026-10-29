@@ -58,7 +58,11 @@ test("a signed-in session reads exact private values with their versions", async
   assert.deepEqual(atlas.source.searches, [
     { id: "S-2", query: "PRIVATE SAVED QUERY" },
   ]);
-  assert.deepEqual(atlas.source.repositories, [
+  assert.equal(
+    atlas.repositories.version,
+    s.d.repositoryLinks(s.ids.atlas).version,
+  );
+  assert.deepEqual(atlas.repositories.links, [
     { repositoryId: "acme/atlas", path: s.ids.checkout },
   ]);
   const relay = projectPrivateValuesSchema.parse(

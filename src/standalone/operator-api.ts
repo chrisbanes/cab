@@ -576,6 +576,7 @@ export class OperatorApi {
               p.version,
               p.instructionsRevision,
               d.githubConfiguration(String(p.id)).version,
+              d.repositoryLinks(String(p.id)).version,
               d.routing(String(p.id)).version,
               this.service.delivery().configuration(String(p.id)).version,
             ]),
@@ -725,7 +726,7 @@ export class OperatorApi {
           values.push([`project:${id}`, d.instructionRevision(id, revision)]);
           covered.add(`project:${id}:${revision}`);
         }
-        const g = d.githubConfiguration(id);
+        const links = d.repositoryLinks(id).links;
         for (const ref of [
           d.routingCredentialReference(id),
           d.deliveryCredentialReference(id),
@@ -736,9 +737,8 @@ export class OperatorApi {
             const value = process.env[envKey];
             if (value) add(value);
           }
-        if (g.repositories.length > 128) return null;
-        for (const repo of g.repositories)
-          add(repo.path, repo.gitCommonDirectory);
+        if (links.length > 128) return null;
+        for (const repo of links) add(repo.path, repo.gitCommonDirectory);
       }
       return { values, covered };
     } catch (error) {
@@ -857,8 +857,8 @@ export class OperatorApi {
     const excluded = await this.exclusions(projectId, taskId);
     if (!excluded) return undefined;
     const repositories = this.domain()
-      .githubConfiguration(projectId)
-      .repositories.map((repository) => repository.repositoryId)
+      .repositoryLinks(projectId)
+      .links.map((repository) => repository.repositoryId)
       .sort();
     const current = this.requireTask(taskId);
     if (
@@ -2202,6 +2202,7 @@ export class OperatorApi {
           p.id,
           p.instructionsRevision,
           d.githubConfiguration(String(p.id)).version,
+          d.repositoryLinks(String(p.id)).version,
         ]),
     });
   }
@@ -3663,8 +3664,7 @@ export class OperatorApi {
       issueEdit: this.issueEditPolicy(taskId, excluded),
       publication: this.publicationPolicy(taskId, excluded),
       repositoryLinked:
-        this.domain().githubConfiguration(String(t.projectId)).repositories
-          .length > 0,
+        this.domain().repositoryLinks(String(t.projectId)).links.length > 0,
       contentUnavailable:
         excluded === undefined ||
         [
@@ -5587,7 +5587,8 @@ export class OperatorApi {
     const p = this.requireProject(projectId),
       d = this.domain(),
       r = d.routing(projectId),
-      g = d.githubConfiguration(projectId);
+      g = d.githubConfiguration(projectId),
+      links = d.repositoryLinks(projectId);
     return projectPrivateValuesSchema.parse({
       data: {
         project: {
@@ -5601,7 +5602,10 @@ export class OperatorApi {
           searches: g.selections.flatMap((s) =>
             s.kind === "search" ? [{ id: s.id, query: s.query }] : [],
           ),
-          repositories: g.repositories.map((x) => ({
+        },
+        repositories: {
+          version: links.version,
+          links: links.links.map((x) => ({
             repositoryId: x.repositoryId,
             path: x.path,
           })),
@@ -5643,6 +5647,7 @@ export class OperatorApi {
     const p = this.requireProject(projectId),
       d = this.domain(),
       g = d.githubConfiguration(projectId),
+      links = d.repositoryLinks(projectId),
       credential = await this.service.gitHubSourceCredentialStatus(projectId),
       excluded = await this.exclusions(projectId),
       r = d.routing(projectId),
@@ -5684,6 +5689,15 @@ export class OperatorApi {
             this.service.routingAvailability(projectId).reason ?? "available",
         },
         statusMapping: this.statusMappingView(projectId, g.selections, active),
+        repositories: {
+          version: links.version,
+          links: links.links.map((r) => ({
+            repositoryId: this.safe(r.repositoryId, excluded),
+            codeHost: r.codeHost,
+            host: r.host,
+            ref: this.safe(r.ref, excluded),
+          })),
+        },
         source: {
           version: g.version,
           credentialConfigured: g.credentialRef !== null,
@@ -5703,10 +5717,6 @@ export class OperatorApi {
           })),
           readiness: this.readinessRuleView(g.readiness, excluded),
           closedIssues: g.closedIssues,
-          repositories: g.repositories.map((r) => ({
-            repositoryId: this.safe(r.repositoryId, excluded),
-            ref: this.safe(r.ref, excluded),
-          })),
         },
       },
       observedAt: Date.now(),
@@ -7400,6 +7410,7 @@ export class OperatorApi {
         c.type === "profile.create" ||
         c.type === "profile.configure" ||
         c.type === "routing.configure" ||
+        c.type === "repositories.configure" ||
         c.type === "github.configure" ||
         c.type === "github.place"
       ) {
@@ -7434,7 +7445,9 @@ export class OperatorApi {
         return commandReceipt(
           parseDomainCommandOutcome(c.type, raw),
           c.key,
-          c.type === "routing.configure" || c.type === "github.configure"
+          c.type === "routing.configure" ||
+            c.type === "repositories.configure" ||
+            c.type === "github.configure"
             ? c.projectId
             : "",
         );

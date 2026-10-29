@@ -13,6 +13,7 @@ import { workspaceCommands } from "./browse-workspace.js";
 import { capacityWriteCommands } from "./configure-capacity.js";
 import { profileWriteCommands } from "./configure-profile.js";
 import { projectWriteCommands } from "./configure-project.js";
+import { repositoryWriteCommands } from "./configure-repositories.js";
 import { routingWriteCommands } from "./configure-routing.js";
 import { deliveryBrowseCommands, deliveryWriteCommands } from "./delivery.js";
 import { deliveryPublishCommands } from "./delivery-publish.js";
@@ -44,6 +45,7 @@ export const writeCommands = new Map<string, WriteCommand>([
   ...profileWriteCommands,
   ...projectWriteCommands,
   ...routingWriteCommands,
+  ...repositoryWriteCommands,
   ...capacityWriteCommands,
   ...adoptCommands,
   ...operationCommands,

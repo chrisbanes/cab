@@ -2223,11 +2223,8 @@ export class StandaloneService {
               domain.deliveryCredentialReference(id),
             ].flatMap((ref) => credentialReferenceValues(ref)),
             ...domain
-              .githubConfiguration(id)
-              .repositories.flatMap((repo) => [
-                repo.path,
-                repo.gitCommonDirectory,
-              ]),
+              .repositoryLinks(id)
+              .links.flatMap((repo) => [repo.path, repo.gitCommonDirectory]),
           ];
         }),
       ];
@@ -3966,7 +3963,8 @@ export class StandaloneService {
     const imported = this.domain().importedTask(taskId);
     if (imported) {
       const config = this.domain().githubConfiguration(String(task.projectId));
-      const linked = config.repositories;
+      const links = this.domain().repositoryLinks(String(task.projectId));
+      const linked = links.links;
       for (const repository of repositories) {
         const match = linked.find(
           (candidate) => candidate.repositoryId === repository.repositoryId,
@@ -3995,13 +3993,15 @@ export class StandaloneService {
       const latestConfig = this.domain().githubConfiguration(
         String(task.projectId),
       );
+      const latestLinks = this.domain().repositoryLinks(String(task.projectId));
       if (
         latestTask.version !== task.version ||
         latestTask.projectId !== task.projectId ||
         latestImported?.nodeId !== imported.nodeId ||
         latestImported?.repositoryId !== imported.repositoryId ||
         latestConfig.version !== config.version ||
-        JSON.stringify(latestConfig.repositories) !== JSON.stringify(linked)
+        latestLinks.version !== links.version ||
+        JSON.stringify(latestLinks.links) !== JSON.stringify(linked)
       )
         throw new Error(
           "Imported task repository grant changed during verification",
@@ -5996,10 +5996,10 @@ export class StandaloneService {
       return undefined;
     }
     try {
-      const config = this.domain().githubConfiguration(run.projectId);
-      this.draftingGrants.set(runId, StandaloneService.grantOf(config));
+      const links = this.domain().repositoryLinks(run.projectId);
+      this.draftingGrants.set(runId, StandaloneService.grantOf(links));
       const repositories = [];
-      for (const match of config.repositories) {
+      for (const match of links.links) {
         const current = await verifiedRepository({
           repositoryId: match.repositoryId,
           path: match.path,
@@ -6037,15 +6037,15 @@ export class StandaloneService {
   }
 
   /** The access a copy was built from: the linked repositories, not unrelated source settings. */
-  private static grantOf(config: { repositories: unknown }): string {
-    return JSON.stringify(config.repositories);
+  private static grantOf(links: { version: number; links: unknown }): string {
+    return JSON.stringify(links);
   }
 
   /** Whether the project's linked repositories differ from those the copy was built from. */
   private draftingGrantChanged(runId: string, projectId: string): boolean {
     return (
       this.draftingGrants.get(runId) !==
-      StandaloneService.grantOf(this.domain().githubConfiguration(projectId))
+      StandaloneService.grantOf(this.domain().repositoryLinks(projectId))
     );
   }
 
@@ -6924,9 +6924,9 @@ export class StandaloneService {
       const binding = this.current?.workspaceBindings.get(taskId);
       repositories = binding?.state === "ready" ? binding.repositories : [];
     }
-    const linked = domain.githubConfiguration(
+    const linked = domain.repositoryLinks(
       String(domain.task(taskId).projectId),
-    ).repositories;
+    ).links;
     return repositories.some(
       (repository) =>
         !linked.some(
@@ -6959,10 +6959,8 @@ export class StandaloneService {
     if (reasons.length)
       throw new Error(`Imported task is not admissible: ${reasons.join(", ")}`);
     const linked = this.domain()
-      .githubConfiguration(String(this.domain().task(taskId).projectId))
-      .repositories.find(
-        (r) => r.repositoryId === String(imported.repositoryId),
-      );
+      .repositoryLinks(String(this.domain().task(taskId).projectId))
+      .links.find((r) => r.repositoryId === String(imported.repositoryId));
     if (!linked)
       throw new Error("Imported task's source repository is not linked");
     return [

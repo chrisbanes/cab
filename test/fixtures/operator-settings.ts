@@ -130,7 +130,20 @@ export async function seedSettingsWorld(f: Fixture) {
       },
     ],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [{ repositoryId: "acme/atlas", path: checkout, ref: "main" }],
+  });
+  await run({
+    type: "repositories.configure",
+    projectId: atlas,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "acme/atlas",
+        path: checkout,
+        ref: "main",
+      },
+    ],
   });
   await run({
     type: "routing.configure",

@@ -59,8 +59,27 @@ export async function seedDraftingProject(
     expectedVersion: 1,
     paused: false,
   });
-  if (options.lead !== false)
-    await domain.configureGitHub({
+  if (options.lead !== false) {
+    await domain.configureRepositories({
+      type: "repositories.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: domain.repositoryLinks(projectId).version,
+      repositories: [
+        {
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: "repo-alpha",
+          path: sourceRepository(
+            f.directory,
+            `drafting-source-${projectId.slice(0, 8)}`,
+          ),
+          ref: "main",
+        },
+      ],
+    });
+    domain.execute({
       type: "github.configure",
       actor: "operator",
       key: randomUUID(),
@@ -76,21 +95,12 @@ export async function seedDraftingProject(
           name: "atlas",
         },
       ],
-      repositories: [
-        {
-          repositoryId: "repo-alpha",
-          path: sourceRepository(
-            f.directory,
-            `drafting-source-${projectId.slice(0, 8)}`,
-          ),
-          ref: "main",
-        },
-      ],
       readiness: {
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
     });
+  }
   return { projectId, leadId };
 }
 

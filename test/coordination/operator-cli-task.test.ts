@@ -43,7 +43,6 @@ function seedImported(o: Operator) {
       },
     ],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   d.execute({
     type: "github.activate",
@@ -1031,7 +1030,6 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
     selections: [{ id: "repo", keep: true }],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
     closedIssues: "done",
-    repositories: [],
   });
   d.execute({
     type: "github.activate",

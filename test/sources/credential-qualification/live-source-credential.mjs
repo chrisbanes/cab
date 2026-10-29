@@ -142,12 +142,11 @@ export async function qualifySource(
       mode: "all",
       conditions: [{ kind: "label", name: metadata.readinessLabel }],
     },
-    repositories: [],
   });
   const before = await transport.configuration(projectId);
   assert.equal(before.project.paused, true);
   assert.equal(before.routing.enabled, false);
-  assert.deepEqual(before.source.repositories, []);
+  assert.deepEqual(before.repositories.links, []);
   assert.equal(before.source.selections[0].active, false);
   const preview = {
     type: "github.preview",

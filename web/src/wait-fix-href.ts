@@ -12,5 +12,5 @@ export const waitFixHref = (
       : fix.kind === "add-claude"
         ? addClaudeHref
         : fix.kind === "open-repositories"
-          ? `/app/projects/${fix.projectId}/settings?tab=github`
+          ? `/app/projects/${fix.projectId}/settings?tab=repositories`
           : `/app/profiles/${fix.profileId}/settings`;

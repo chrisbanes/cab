@@ -162,7 +162,23 @@ try {
     expectedVersion: 1,
     paused: false,
   });
-  await domain.configureGitHub({
+  await domain.configureRepositories({
+    type: "repositories.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: domain.repositoryLinks(projectId).version,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "greeter",
+        path: repository,
+        ref: "main",
+      },
+    ],
+  });
+  await domain.execute({
     type: "github.configure",
     actor: "operator",
     key: randomUUID(),
@@ -178,7 +194,6 @@ try {
         name: "greeter",
       },
     ],
-    repositories: [{ repositoryId: "greeter", path: repository, ref: "main" }],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   });
 

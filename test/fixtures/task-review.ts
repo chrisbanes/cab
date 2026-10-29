@@ -15,13 +15,15 @@ export function setLinkedRepository(
   f.seedPersistedState((db) =>
     db
       .prepare(
-        "UPDATE project_github_sources SET version=version+1, repositories=? WHERE projectId=?",
+        "UPDATE project_repository_links SET version=version+1, links=? WHERE projectId=?",
       )
       .run(
         JSON.stringify(
           linked
             ? [
                 {
+                  codeHost: "github",
+                  host: "github.com",
                   repositoryId: "R-LINKED",
                   path: "/fixture/linked",
                   ref: "main",
@@ -161,7 +163,6 @@ export async function seedImportedCommentTask(
       },
     ],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   d.execute({
     type: "github.activate",

@@ -45,6 +45,11 @@ import {
   closedIssuesSchema,
   setupRepositoriesSchema,
 } from "./github-source-contracts.js";
+import {
+  repositoriesConfigurationCommandSchema,
+  repositoryLinkListSchema,
+  type StoredRepositoryLink,
+} from "./repository-links.js";
 import { type Database, transaction } from "./store.js";
 import { TaskReviewStore } from "./task-review.js";
 
@@ -203,6 +208,15 @@ const commandSchema = z.discriminatedUnion("type", [
       expectedVersion: z.number().int().positive(),
       ...githubConfigurationCommandSchema.shape,
       credentialRef: githubConfigurationSchema.shape.credentialRef.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("repositories.configure"),
+      projectId: id,
+      expectedVersion: z.number().int().positive(),
+      ...repositoriesConfigurationCommandSchema.shape,
     })
     .strict(),
   z
@@ -424,6 +438,16 @@ function legacyDomainPayloadHash(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("hex");
 }
 
+/** Verified checkouts as stored links; only GitHub on github.com is supported. */
+const asGitHubLinks = (
+  repositories: LinkedRepository[],
+): StoredRepositoryLink[] =>
+  repositories.map((link) => ({
+    ...link,
+    codeHost: "github",
+    host: "github.com",
+  }));
+
 /** Fail closed: the host injects the verifier that touches the filesystem and Git. */
 const unconfiguredVerifier: RepositoryVerifier = () =>
   Promise.reject(new Error("Repository verification is not configured"));
@@ -498,8 +522,11 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS project_github_sources (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
           credentialRef TEXT, selections TEXT NOT NULL, readiness TEXT NOT NULL,
-          repositories TEXT NOT NULL,
           closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))
+        );
+        CREATE TABLE IF NOT EXISTS project_repository_links (
+          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
+          links TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS project_github_active (
           projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
@@ -635,6 +662,35 @@ export class DomainStore {
         this.db.exec(
           "ALTER TABLE project_github_sources ADD COLUMN closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))",
         );
+      // Repository links moved from the GitHub source to the project: existing links are
+      // GitHub on github.com. One-way: an older build cannot read the dropped column.
+      if (
+        (
+          this.db
+            .prepare("PRAGMA table_info(project_github_sources)")
+            .all() as Row[]
+        ).some((column) => column.name === "repositories")
+      ) {
+        const insert = this.db.prepare(
+          "INSERT OR IGNORE INTO project_repository_links (projectId, version, links) VALUES (?, 1, ?)",
+        );
+        for (const row of this.db
+          .prepare("SELECT projectId, repositories FROM project_github_sources")
+          .all() as Row[])
+          insert.run(
+            String(row.projectId),
+            JSON.stringify(
+              asGitHubLinks(
+                z
+                  .array(linkedRepositorySchema)
+                  .parse(JSON.parse(String(row.repositories))),
+              ),
+            ),
+          );
+        this.db.exec(
+          "ALTER TABLE project_github_sources DROP COLUMN repositories",
+        );
+      }
       if (!routingColumns.some((column) => column.name === "brief"))
         this.db.exec(
           "ALTER TABLE routing_operations ADD COLUMN brief TEXT NOT NULL DEFAULT ''",
@@ -708,10 +764,13 @@ export class DomainStore {
         .run();
       this.db
         .prepare(
-          "INSERT OR IGNORE INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) SELECT id, 1, NULL, '[]', ?, '[]' FROM domain_projects",
+          "INSERT OR IGNORE INTO project_github_sources (projectId, version, credentialRef, selections, readiness) SELECT id, 1, NULL, '[]', ? FROM domain_projects",
         )
         // No readiness rule: a backfilled source filters nothing.
         .run(JSON.stringify(null));
+      this.db.exec(
+        "INSERT OR IGNORE INTO project_repository_links (projectId, version, links) SELECT id, 1, '[]' FROM domain_projects",
+      );
       // Existing Ready flags are taken as evaluated under their project's current rule;
       // `ready` and `version` stay untouched.
       if (
@@ -731,10 +790,13 @@ export class DomainStore {
   execute<C extends DomainCommand>(input: C): DomainCommandResultMap[C["type"]];
   execute(input: DomainCommand): DomainCommandResultMap[DomainCommand["type"]] {
     const command = parseCommand(input);
+    const legacyLinks =
+      command.type === "github.configure" && command.repositories !== undefined;
     if (
-      (command.type === "github.configure" ||
-        command.type === "project.create") &&
-      (command.repositories?.length ?? 0) > 0
+      legacyLinks ||
+      ((command.type === "project.create" ||
+        command.type === "repositories.configure") &&
+        (command.repositories?.length ?? 0) > 0)
     ) {
       const prior = this.replayed(
         command.projectId,
@@ -743,19 +805,25 @@ export class DomainStore {
         command.type,
       );
       if (prior !== undefined) return prior.result;
-      throw new Error(
-        "Linked GitHub configuration requires asynchronous verification",
-      );
+      // Recorded commands replay; a new one carrying links belongs to repositories.configure.
+      if (legacyLinks)
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Repository links are configured with repositories.configure",
+          ["repositories"],
+        );
+      throw new Error("Linked repositories require asynchronous verification");
     }
     return this.executeParsed(command).result;
   }
 
-  async configureGitHub(
-    input: Extract<DomainCommand, { type: "github.configure" }>,
-  ): Promise<DomainCommandResultMap["github.configure"]> {
+  /** Verifies every link's checkout, then records the project's repository links. */
+  async configureRepositories(
+    input: Extract<DomainCommand, { type: "repositories.configure" }>,
+  ): Promise<DomainCommandResultMap["repositories.configure"]> {
     const command = parseCommand(input);
-    if (command.type !== "github.configure")
-      throw new Error("Expected GitHub configuration");
+    if (command.type !== "repositories.configure")
+      throw new Error("Expected repository configuration");
     const prior = this.replayed(
       command.projectId,
       command.key,
@@ -763,54 +831,52 @@ export class DomainStore {
       command.type,
     );
     if (prior !== undefined) {
-      if (prior.type !== "github.configure")
+      if (prior.type !== "repositories.configure")
         throw new CommandResultValidationError(
-          "Recorded command result does not match GitHub configuration",
+          "Recorded command result does not match repository configuration",
         );
       return prior.result;
     }
     this.operator(command);
-    const release = this.select(command.credentialRef);
+    this.version(
+      { version: this.repositoryLinks(command.projectId).version },
+      command.expectedVersion,
+    );
+    const saved = this.repositoryLinks(command.projectId).links;
+    let verified: LinkedRepository[];
     try {
-      this.version(
-        { version: this.githubConfiguration(command.projectId).version },
-        command.expectedVersion,
+      verified = await Promise.all(
+        // Async, so a missing saved path rejects like a failed verification instead of
+        // throwing past `Promise.all` and leaving earlier verifications unhandled.
+        command.repositories.map(async (link) => {
+          // A link without `path` keeps the saved path for that repository.
+          const path =
+            link.path ??
+            saved.find((item) => item.repositoryId === link.repositoryId)?.path;
+          if (path === undefined) throw new Error("No saved repository path");
+          return parseLinkedRepositoryResult(
+            await this.verifyRepository({
+              repositoryId: link.repositoryId,
+              path,
+              ref: link.ref,
+            }),
+          );
+        }),
       );
-      const saved = this.githubConfiguration(command.projectId).repositories;
-      let verified: LinkedRepository[];
-      try {
-        verified = await Promise.all(
-          // Async, so a missing saved path rejects like a failed verification instead of
-          // throwing past `Promise.all` and leaving earlier verifications unhandled.
-          command.repositories.map(async (link) => {
-            // A link without `path` keeps the saved path for that repository.
-            const path =
-              link.path ??
-              saved.find((item) => item.repositoryId === link.repositoryId)
-                ?.path;
-            if (path === undefined) throw new Error("No saved repository path");
-            return parseLinkedRepositoryResult(
-              await this.verifyRepository({ ...link, path }),
-            );
-          }),
-        );
-      } catch (error) {
-        if (error instanceof CommandResultValidationError) throw error;
-        throw new DomainPolicyError(
-          "invalid-input",
-          "Repository verification failed",
-          ["repositories"],
-        );
-      }
-      const outcome = this.executeParsed(command, verified);
-      if (outcome.type !== "github.configure")
-        throw new CommandResultValidationError(
-          "GitHub configuration result has the wrong command type",
-        );
-      return outcome.result;
-    } finally {
-      release();
+    } catch (error) {
+      if (error instanceof CommandResultValidationError) throw error;
+      throw new DomainPolicyError(
+        "invalid-input",
+        "Repository verification failed",
+        ["repositories"],
+      );
     }
+    const outcome = this.executeParsed(command, verified);
+    if (outcome.type !== "repositories.configure")
+      throw new CommandResultValidationError(
+        "Repository configuration result has the wrong command type",
+      );
+    return outcome.result;
   }
 
   /** Guided setup: verify every repository, then record the whole project in one transaction. */
@@ -1082,11 +1148,10 @@ export class DomainStore {
     selections: z.output<typeof selectionSchema>[];
     readiness: z.output<typeof readinessSchema> | null;
     closedIssues: z.output<typeof closedIssuesSchema>;
-    repositories: LinkedRepository[];
   } {
     this.project(projectId);
     const row = this.required(
-      "SELECT version, credentialRef, selections, readiness, closedIssues, repositories FROM project_github_sources WHERE projectId = ?",
+      "SELECT version, credentialRef, selections, readiness, closedIssues FROM project_github_sources WHERE projectId = ?",
       id.parse(projectId),
     );
     return {
@@ -1100,9 +1165,22 @@ export class DomainStore {
         .nullable()
         .parse(JSON.parse(String(row.readiness))),
       closedIssues: closedIssuesSchema.parse(row.closedIssues),
-      repositories: z
-        .array(linkedRepositorySchema)
-        .parse(JSON.parse(String(row.repositories))),
+    };
+  }
+
+  /** The project's linked repositories with their configuration version; includes paths. */
+  repositoryLinks(projectId: string): {
+    version: number;
+    links: StoredRepositoryLink[];
+  } {
+    this.project(projectId);
+    const row = this.required(
+      "SELECT version, links FROM project_repository_links WHERE projectId = ?",
+      id.parse(projectId),
+    );
+    return {
+      version: Number(row.version),
+      links: repositoryLinkListSchema.parse(JSON.parse(String(row.links))),
     };
   }
 
@@ -2056,7 +2134,7 @@ export class DomainStore {
           .run(command.projectId);
         this.db
           .prepare(
-            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, ?, ?, ?, ?)",
+            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness) VALUES (?, 1, ?, ?, ?)",
           )
           .run(
             command.projectId,
@@ -2076,8 +2154,12 @@ export class DomainStore {
             ),
             // No readiness rule until the operator adds one.
             JSON.stringify(null),
-            JSON.stringify(repositories),
           );
+        this.db
+          .prepare(
+            "INSERT INTO project_repository_links (projectId, version, links) VALUES (?, 1, ?)",
+          )
+          .run(command.projectId, JSON.stringify(asGitHubLinks(repositories)));
         return this.project(command.projectId);
       }
       case "project.configure": {
@@ -2304,11 +2386,6 @@ export class DomainStore {
         this.operator(command);
         const current = this.githubConfiguration(command.projectId);
         this.version({ version: current.version }, command.expectedVersion);
-        const repositories = verifiedRepositories ?? [];
-        if (command.repositories.length !== repositories.length)
-          throw new Error(
-            "Linked GitHub configuration requires asynchronous verification",
-          );
         const selections = command.selections.map((selection) => {
           if (!("keep" in selection)) return selection;
           const kept = current.selections.find(
@@ -2319,7 +2396,7 @@ export class DomainStore {
         });
         this.db
           .prepare(
-            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, closedIssues = ?, repositories = ? WHERE projectId = ?",
+            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, closedIssues = ? WHERE projectId = ?",
           )
           .run(
             command.credentialRef === undefined
@@ -2328,7 +2405,6 @@ export class DomainStore {
             JSON.stringify(selections),
             JSON.stringify(command.readiness),
             command.closedIssues ?? current.closedIssues,
-            JSON.stringify(repositories),
             command.projectId,
           );
         if (
@@ -2400,6 +2476,24 @@ export class DomainStore {
             .run(command.projectId);
         }
         return this.githubConfiguration(command.projectId);
+      }
+      case "repositories.configure": {
+        this.operator(command);
+        const { version } = this.repositoryLinks(command.projectId);
+        this.version({ version }, command.expectedVersion);
+        const repositories = verifiedRepositories ?? [];
+        if (command.repositories.length !== repositories.length)
+          throw new Error(
+            "Linked repositories require asynchronous verification",
+          );
+        const links = asGitHubLinks(repositories);
+        this.db
+          .prepare(
+            "UPDATE project_repository_links SET version = version + 1, links = ? WHERE projectId = ?",
+          )
+          .run(JSON.stringify(links), command.projectId);
+        // Validated as the result before the transaction commits.
+        return { version: version + 1, repositories: links };
       }
       case "github.activate": {
         this.operator(command);
@@ -2980,8 +3074,8 @@ export class DomainCommands {
     }
     const promise = Promise.resolve().then(async () => {
       const result =
-        command.type === "github.configure" && command.repositories.length > 0
-          ? await this.store.configureGitHub(command)
+        command.type === "repositories.configure"
+          ? await this.store.configureRepositories(command)
           : command.type === "project.create" &&
               (command.repositories?.length ?? 0) > 0
             ? await this.store.createProject(command)
