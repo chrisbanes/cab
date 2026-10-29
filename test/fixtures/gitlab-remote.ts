@@ -34,6 +34,7 @@ export interface ScriptedNote {
   resolvable: boolean;
   resolved?: boolean;
   resolved_by?: { id: number } | null;
+  resolved_at?: string | null;
   position?: { head_sha: string | null } | null;
 }
 export interface ScriptedDiscussion {
@@ -230,10 +231,12 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       return json(note, 201);
     }
     if (method === "PUT")
+      // Only notes still unresolved are updated, as GitLab does.
       for (const note of found.notes)
-        if (note.resolvable) {
+        if (note.resolvable && !note.resolved) {
           note.resolved = true;
           note.resolved_by = { id: gitLabUser.id };
+          note.resolved_at = new Date().toISOString();
         }
     return json(found);
   }) as typeof fetch;

@@ -1061,3 +1061,26 @@ test("a redirect on a write or the GraphQL route is refused and never followed",
       assert.equal(new URL(url).origin, `https://${host}`);
   }
 });
+
+test("a resolve settles on the latest resolution even when the last note was resolved by someone else earlier", async () => {
+  const w = mergeRequestWorld();
+  w.state.discussions.push(
+    gitLabDiscussion("abc", [
+      {},
+      {
+        resolved: true,
+        resolved_by: { id: gitLabUser.id + 1 },
+        resolved_at: "2026-01-01T00:00:00.000Z",
+      },
+    ]),
+  );
+  const action = {
+    kind: "pr.thread.resolve",
+    target: threadTarget,
+    expectedLatestCommentNodeId: String(0xabc * 10 + 1),
+  } as ExternalAction;
+  const before = await w.provider.preflight(action, policy);
+  const done = await w.provider.performAction(record(action, before));
+  assert.equal(done.state, "confirmed-success");
+  assert.deepEqual(done.receipt, { nodeId: "abc" });
+});

@@ -80,6 +80,7 @@ const noteSchema = z.object({
   resolvable: z.boolean(),
   resolved: z.boolean().optional(),
   resolved_by: userId.nullish(),
+  resolved_at: z.string().nullish(),
   position: z.object({ head_sha: z.string().nullish() }).nullish(),
 });
 const discussionSchema = z.object({
@@ -625,9 +626,14 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           )
             receipt = { nodeId: String(note.id) };
         } else {
+          // Resolving updates only the notes still unresolved, so the resolver is the latest resolution.
           const resolver = discussion.notes
-            .filter((n) => n.resolvable)
-            .at(-1)?.resolved_by;
+            .filter((n) => n.resolvable && n.resolved && n.resolved_at)
+            .sort(
+              (a, b) =>
+                Date.parse(b.resolved_at ?? "") -
+                Date.parse(a.resolved_at ?? ""),
+            )[0]?.resolved_by;
           if (thread.isResolved && resolver?.id === user.id)
             receipt = { nodeId: thread.nodeId };
         }
