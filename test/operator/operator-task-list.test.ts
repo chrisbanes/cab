@@ -790,40 +790,19 @@ test("shared task reasons retain all current interventions and deduplicate uncer
 test("task summaries name an open GitHub blocker by its imported task's title", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
-  const { projectId } = await projectFixture(f),
-    d = f.service.domain(),
+  const d = f.service.domain(),
     sources = f.service.githubSources();
-  d.execute({
-    type: "github.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    expectedVersion: 1,
-    credentialRef: null,
-    selections: [
-      {
-        id: "repo",
-        kind: "repository",
-        repositoryId: "R-1",
-        owner: "acme",
-        name: "atlas",
-      },
-    ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-  });
-  d.execute({
-    type: "github.activate",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    selectionId: "repo",
-    expectedVersion: 2,
-  });
-  const issue = (nodeId: string, number: number, title: string) => ({
+  const issue = (
+    nodeId: string,
+    number: number,
+    title: string,
+    repositoryId = "R-1",
+    repositoryName = "acme/atlas",
+  ) => ({
     providerInstance: "github.com" as const,
     nodeId,
-    repositoryId: "R-1",
-    repositoryName: "acme/atlas",
+    repositoryId,
+    repositoryName,
     number,
     title,
     body: "Scope",
@@ -831,17 +810,62 @@ test("task summaries name an open GitHub blocker by its imported task's title", 
     labels: ["ready"],
     projectFields: [],
   });
+  /** A project importing `issues` from one repository. */
+  const importInto = async (
+    repositoryId: string,
+    name: string,
+    issues: ReturnType<typeof issue>[],
+  ) => {
+    const { projectId } = await projectFixture(f);
+    d.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: null,
+      selections: [
+        { id: "repo", kind: "repository", repositoryId, owner: "acme", name },
+      ],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+    });
+    d.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      selectionId: "repo",
+      expectedVersion: 2,
+    });
+    sources.reconcileSelection(projectId, "repo", {
+      complete: true,
+      issues,
+      reason: null,
+    });
+  };
   const blocked = issue("I-BLOCKED", 1, "Blocked work"),
     imported = issue("I-BLOCKER", 2, "Ship the API"),
-    outside = { ...issue("I-OUTSIDE", 9, "Not imported"), repositoryId: "R-2" };
-  sources.reconcileSelection(projectId, "repo", {
-    complete: true,
-    issues: [blocked, imported],
-    reason: null,
-  });
+    closed = {
+      ...issue("I-CLOSED", 3, "Done already"),
+      state: "closed" as const,
+    },
+    elsewhere = issue(
+      "I-ELSEWHERE",
+      4,
+      "Other project work",
+      "R-2",
+      "acme/other",
+    ),
+    outside = issue("I-OUTSIDE", 9, "Not imported");
+  await importInto("R-1", "atlas", [blocked, imported]);
+  // Imported, but by another project: its title stays out of this project's reads.
+  await importInto("R-2", "other", [elsewhere]);
   sources.reconcileBlockers("I-BLOCKED", {
     complete: true,
-    blockers: [imported, outside],
+    blockers: [imported, closed, elsewhere, outside],
     reason: null,
   });
   const api = new OperatorApi(f.service, [f.directory]);
@@ -855,6 +879,11 @@ test("task summaries name an open GitHub blocker by its imported task's title", 
         title: "Ship the API",
       },
       url: "https://github.com/acme/atlas/issues/2",
+    },
+    {
+      label: "acme/other#4",
+      task: null,
+      url: "https://github.com/acme/other/issues/4",
     },
     {
       label: "acme/atlas#9",

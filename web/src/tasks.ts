@@ -195,7 +195,7 @@ function blockerReasons(task: TaskListSummary): TaskReason[] {
   const blockers = task.source?.openBlockers ?? [];
   return blockers.length
     ? blockers.map((b) =>
-        b.task?.title
+        b.task
           ? {
               text: `Waiting on ${b.task.title} (${b.label})`,
               href: taskDetailHref(b.task),

@@ -2594,7 +2594,7 @@ export class OperatorApi {
       ? String(value)
       : null;
   }
-  /** Open GitHub blockers; one imported into cab is named by its task's title. */
+  /** Open GitHub blockers; one imported into the same project is named by its task's disclosable title. */
   private openBlockers(
     nodeId: string,
     excluded: readonly string[] | undefined,
@@ -2605,15 +2605,11 @@ export class OperatorApi {
       .filter((b) => b.status === "open")
       .slice(0, 100)
       .map((b) => {
-        const name = this.repositoryName(b.repositoryName, excluded);
+        const name = this.repositoryName(b.repositoryName, excluded),
+          title = b.taskId ? this.safe(b.taskTitle, excluded) : null;
         return {
           label: `${name ?? "GitHub"}#${Number(b.issueNumber)}`,
-          task: b.taskId
-            ? {
-                id: String(b.taskId),
-                title: this.safe(b.taskTitle, excluded),
-              }
-            : null,
+          task: title ? { id: String(b.taskId), title } : null,
           url: githubIssueUrl(name, Number(b.issueNumber) || null),
         };
       });
