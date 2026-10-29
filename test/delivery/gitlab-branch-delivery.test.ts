@@ -1,77 +1,16 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import type { AdoptOutcome } from "../../src/standalone/git-fetch.js";
-import type { PushOutcome } from "../../src/standalone/git-push.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { publicationWorld } from "../fixtures/delivery-integration.js";
-import { scriptedGitLabRemote } from "../fixtures/gitlab-remote.js";
-
-const host = "gitlab.example.com";
-const projectPath = "group/sub/app";
-const repositoryId = "42";
-const credentialVariable = "CAB_TEST_GITLAB_DELIVERY_TOKEN";
-const token = "glpat-synthetic-journey-token";
-
-/** A task whose checkout is linked to a GitLab project that a scripted instance stands in for. */
-async function gitlabWorld(
-  t: { after: (cleanup: () => void) => void },
-  mode: "allow" | "approval" = "allow",
-  options: { credential?: boolean } = {},
-) {
-  const remote = scriptedGitLabRemote({ repositoryId });
-  remote.state.project = { id: 42, path_with_namespace: projectPath };
-  const pushes: Array<Record<string, unknown>> = [];
-  const adopts: Array<Record<string, unknown>> = [];
-  const script = {
-    push: "pushed" as PushOutcome,
-    adopt: "adopted" as AdoptOutcome,
-  };
-  const prior = process.env[credentialVariable];
-  process.env[credentialVariable] = token;
-  t.after(() => {
-    if (prior === undefined) delete process.env[credentialVariable];
-    else process.env[credentialVariable] = prior;
-  });
-  const world = await publicationWorld(mode, {
-    host,
-    repositoryId,
-    projectPath,
-    origin: `https://${host}/${projectPath}.git`,
-    delivery: {
-      fetcher: remote.fetcher,
-      push: async (request) => {
-        pushes.push({ ...request });
-        if (script.push === "pushed") remote.state.head = request.commitSha;
-        return script.push;
-      },
-      adopt: async (request) => {
-        adopts.push({ ...request });
-        return script.adopt;
-      },
-    },
-  });
-  if (options.credential !== false)
-    world.f.service.domain().execute({
-      type: "code-host-credential.configure",
-      actor: "operator",
-      key: randomUUID(),
-      codeHost: "gitlab",
-      host,
-      credentialRef: `env:${credentialVariable}`,
-    });
-  return { ...world, remote, pushes, adopts, script };
-}
-
-const branchOf = (w: Awaited<ReturnType<typeof gitlabWorld>>) =>
-  w.f.service.delivery().taskBranch(w.f.taskId, repositoryId);
-
-/** Nothing the service shows or stores carries the token. */
-function assertNoToken(w: Awaited<ReturnType<typeof gitlabWorld>>) {
-  const actions = w.f.service.delivery().actions(w.f.taskId);
-  assert.equal(JSON.stringify(actions).includes(token), false);
-  assert.equal(JSON.stringify(branchOf(w)).includes(token), false);
-}
+import {
+  assertNoToken,
+  branchOf,
+  gitlabWorld,
+  host,
+  projectPath,
+  repositoryId,
+  token,
+} from "../fixtures/gitlab-delivery.js";
 
 test("an allowed push publishes to the GitLab project and settles on the branch read", async (t) => {
   const w = await gitlabWorld(t);
@@ -235,13 +174,57 @@ test("a host without a usable credential holds the push before any request or Gi
   }
 });
 
-test("merge requests stay unavailable on a GitLab link until they are implemented", async (t) => {
+test("a merge stays unavailable on a GitLab link until it is implemented", async (t) => {
   const w = await gitlabWorld(t);
   try {
+    w.f.grant(
+      { action: "branch.push", mode: "allow" },
+      { action: "pr.create", mode: "allow" },
+      { action: "pr.merge", mode: "allow" },
+    );
+    const delivery = w.f.service.delivery();
+    w.f.service.domain().execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: w.f.projectId,
+      expectedVersion: delivery.configuration(w.f.projectId).version,
+      mode: "through-merge",
+      credentialRef: null,
+      grants: delivery.configuration(w.f.projectId).grants,
+      requiredChecks: [{ name: "pipeline" }],
+    });
     const sha = w.commit("one.txt");
     assert.equal((await w.push(sha)).success, true);
+    const headRef = String(branchOf(w)?.branch);
+    const created = await w.createPr(headRef, sha);
+    assert.equal(created.success, true, created.text);
+    const mr = w.remote.state.mergeRequests[0];
+    assert.ok(mr);
+    const registered = await w.f.call("cab_register_pr", {
+      repositoryId,
+      prNumber: mr.iid,
+      expectedPrNodeId: String(mr.id),
+      expectedHeadSha: sha,
+    });
+    assert.equal(registered.success, true, registered.text);
     const requests = w.remote.requests.length;
-    const refused = await w.createPr(String(branchOf(w)?.branch), sha);
+    const refused = await w.f.call("cab_external_action", {
+      operationId: randomUUID(),
+      action: {
+        kind: "pr.merge",
+        target: {
+          repositoryId,
+          number: mr.iid,
+          nodeId: String(mr.id),
+          baseRef: "main",
+          headRef,
+          expectedHeadSha: sha,
+        },
+        method: "squash",
+        reviewedResultIds: [],
+      },
+    });
     assert.equal(refused.success, false);
     assert.match(refused.text, /code-host-delivery-unavailable/);
     assert.equal(w.remote.requests.length, requests);

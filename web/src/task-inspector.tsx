@@ -217,7 +217,9 @@ export function TaskInspector({
             {data.delivery?.binding && (
               <li>
                 {pullRequestRepository(data.delivery.binding)
-                  ? "Pull request "
+                  ? data.delivery.binding.codeHost === "gitlab"
+                    ? "Merge request "
+                    : "Pull request "
                   : ""}
                 {pullRequestReference(data.delivery.binding)} ·{" "}
                 {data.delivery.binding.state.toLowerCase()}

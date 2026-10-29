@@ -23,14 +23,14 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
     type: "function",
     name: "cab_external_action",
     description:
-      "Request an exact policy-authorized GitHub action. Intent precedes effect; uncertain actions hold this task. Never run git push: commit in your worktree, then request branch.push (or branch.force-push after rewriting history) with that commit SHA. cab pushes it to this task's assigned branch and the receipt names the branch; use that branch as the pr.create headRef. Uncommitted changes are never pushed. After an outside change on the branch, recover with the operator's approval of the exact material {branch, outsideHeadSha, lastPushedSha}: branch.adopt keeps the outside head as the branch's recorded head (merge or rebase it in your worktree, then push), and branch.force-push with that material and your commit overwrites it.",
+      "Request an exact policy-authorized code-host action (GitHub, or GitLab for the task's linked project). Intent precedes effect; uncertain actions hold this task. Never run git push: commit in your worktree, then request branch.push (or branch.force-push after rewriting history) with that commit SHA. cab pushes it to this task's assigned branch and the receipt names the branch; use that branch as the pr.create headRef. A pull request or GitLab merge request is the same pr.* target: a GitLab one is named by its project ID, its IID as number and the pr.create receipt's nodeId. Uncommitted changes are never pushed. After an outside change on the branch, recover with the operator's approval of the exact material {branch, outsideHeadSha, lastPushedSha}: branch.adopt keeps the outside head as the branch's recorded head (merge or rebase it in your worktree, then push), and branch.force-push with that material and your commit overwrites it.",
     inputSchema: z.toJSONSchema(externalActionArgumentsSchema),
   },
   {
     type: "function",
     name: "cab_register_pr",
     description:
-      "Bind an existing identity-verified PR to this task and retain its lead for delivery feedback.",
+      "Bind an existing identity-verified PR or merge request (its IID as prNumber and the pr.create receipt's nodeId as expectedPrNodeId) to this task and retain its lead for delivery feedback.",
     inputSchema: object(
       {
         repositoryId: text,

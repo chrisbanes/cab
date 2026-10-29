@@ -1057,6 +1057,50 @@ test("an approval shows its exact action, target and independent holds, and deci
   );
 });
 
+test("an approval for a GitLab discussion names the code host in the Inbox and in the task's request view", async (_t, j) => {
+  const { page, more: approval } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnApproval(f),
+  );
+  const taskUrl = `**/api/operator/tasks/${approval.taskId}`;
+  await page.route(taskUrl, async (route) => {
+    const response = await route.fetch(),
+      body = (await response.json()) as TaskRead;
+    for (const a of body.data.approvals) {
+      a.material = { kind: "pr.thread.resolve" };
+      a.codeHost = "gitlab";
+    }
+    taskSchema.parse(body);
+    await route.fulfill({ response, json: body });
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.reload();
+  await page.locator(".inbox-row").click();
+  const detail = page.getByRole("region", { name: "Selected request" });
+  await detail.getByText("GitLab discussion", { exact: true }).waitFor();
+  // The literal action stays; the named line is additive.
+  await detail
+    .getByText("Create a pull request. No merge or deployment.")
+    .first()
+    .waitFor();
+  await page.goto(
+    `${new URL(page.url()).origin}/app/tasks/${approval.taskId}?request=${approval.interactionId}`,
+  );
+  const item = page.locator(
+    `.approval-review[data-record-id="${approval.interactionId}"]`,
+  );
+  await item.getByText("GitLab discussion", { exact: true }).waitFor();
+  await item
+    .locator("dd.literal", {
+      hasText: "Create a pull request. No merge or deployment.",
+    })
+    .waitFor();
+  await page.unroute(taskUrl);
+});
+
 test("an intervention shows its recorded reason and links to the execution", async (_t, j) => {
   const { page, more: held } = await openInbox(
     j,

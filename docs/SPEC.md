@@ -47,10 +47,10 @@ Local tasks are built in. GitHub.com repository issues and GitHub Projects are t
 first external sources. Import the selected backlog, excluding PRs and draft
 items; readiness is separate. Jira Cloud imports issues by JQL: a project uses one
 tracker, and Jira readiness conditions, dependencies, comments, closing issues in
-Jira, status mapping and issue edit or publication are planned and not implemented. GitLab merge
-requests (gitlab.com and self-managed) are planned and not implemented; a
-project can link a GitLab checkout and deliver its branches
-([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
+Jira, status mapping and issue edit or publication are planned and not implemented.
+GitLab merge request merging is planned and not implemented; a project can link a
+GitLab checkout and deliver its branches and open, edit, ready and discuss its merge
+requests ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
 a plugin marketplace, multiple execution machines, team/RBAC administration and
 migration of old live runs are outside the first release. Source interfaces follow
 concrete integrations.
@@ -858,10 +858,12 @@ change through one versioned, receipted `repositories.configure` command that
 verifies every checkout before anything is recorded. A GitLab link must also have an
 `origin` remote on its host whose full project path matches, case-insensitively, and
 a refusal names the link and reason without echoing a path or remote. Branch
-actions (`branch.push`, `branch.force-push`, `branch.adopt`) on a GitLab link are
-delivered to that project with the host's credential, resolved on every use; every
-other code-host action that names a GitLab link is refused with `code-host-delivery-unavailable`,
-before any provider or Git transport runs. A host with no usable credential holds the
+actions (`branch.push`, `branch.force-push`, `branch.adopt`) and merge request actions
+(`pr.create`, `pr.edit`, `pr.ready`, `pr.thread.reply`, `pr.thread.resolve`) on a GitLab link
+are delivered to that project with the host's credential, resolved on every use;
+`pr.merge` and every other code-host action that names a GitLab link is refused with
+`code-host-delivery-unavailable`, before any provider or Git transport runs. Only merge
+requests inside the linked project are acted on, never a fork's. A host with no usable credential holds the
 action as `provider-preflight-held`, with no request and no Git. Saving the
 GitHub source neither changes nor needs repository links, and saving links neither
 deactivates a selection nor changes the source version.
@@ -1954,6 +1956,19 @@ Readback requires exactly one submitted marker reply by the credential user, or 
 thread resolved by that user; a lost response stays uncertain and is not replayed.
 Unresolving threads, editing or deleting comments and submitting reviews are not
 supported, and the operator comment path is unchanged.
+
+On a GitLab link the same lifecycle applies to merge requests. The lead names a merge request
+by the project's numeric ID, its IID as the number and the instance-wide merge request ID as
+the node ID, which the `pr.create` receipt returns. A merge request is a draft when its title
+begins with `Draft:`: `pr.create` with `draft` sends that prefix, `pr.edit` keeps the merge
+request's draft status, and `pr.ready` uses GitLab's `mergeRequestSetDraft` GraphQL mutation.
+The head pipeline is the one check, named `pipeline`; discussions are the feedback and
+resolvable discussions are the review threads; system notes are not feedback. An unchanged
+merge request has an unchanged observation, so a poll wakes the lead only for a new fact.
+Readback finds exactly one merge request or note carrying the operation marker, by the
+credential user, with the exact text, draft status, head commit and branches in the linked
+project; a thread resolves only when the credential user resolved it. Merging, approvals and
+GitLab merge gates are not implemented, so a merge request always reports `merge-unsupported`.
 
 The operator publishes a local task through three more actions on the same lifecycle,
 sent by the **operator publication caller** and never by an agent or the service

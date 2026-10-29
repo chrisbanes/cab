@@ -686,7 +686,8 @@ export async function createReleaseDeliveryFixture(
           ...g,
           repositoryId: gitlab?.repositoryId ?? "R1",
         })) as never,
-        requiredChecks: [{ name: "build", appId: 17 }],
+        requiredChecks: f.service.delivery().configuration(projectId)
+          .requiredChecks,
       });
     },
     async threadAction(

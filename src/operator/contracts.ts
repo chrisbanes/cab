@@ -1298,6 +1298,8 @@ export const interactionSchema = z
     /** For a recovery from an outside change: the code host's view of what the outside writer changed. */
     compareUrl: z.url().startsWith("https://").optional(),
     compareCodeHost: z.enum(["github", "gitlab"]).optional(),
+    /** For a pull request, merge request, thread or branch action: the code host of its repository link; absent means GitHub. */
+    codeHost: z.enum(["github", "gitlab"]).optional(),
     materialUnavailable: z.boolean(),
     response: safeText,
     revision,
@@ -1515,8 +1517,10 @@ export const deliveryReadSchema = z
         revision,
         number: revision,
         repositoryName: text,
+        /** The code host of the repository link; absent means GitHub, as on older servers. */
+        codeHost: z.enum(["github", "gitlab"]).optional(),
         /** Built by the server for the PR's own repository only; the web renders no other link. */
-        url: z.url().startsWith("https://github.com/").optional(),
+        url: z.url().startsWith("https://").optional(),
         draft: z.boolean().optional(),
         headSha: text,
         state: z.enum(["OPEN", "CLOSED", "MERGED"]),
@@ -1561,6 +1565,13 @@ export const deliveryReadSchema = z
           .max(128),
       })
       .strict()
+      // A GitHub link stays on github.com; a GitLab instance may be any https host.
+      .refine(
+        (b) =>
+          b.codeHost === "gitlab" ||
+          b.url === undefined ||
+          b.url.startsWith("https://github.com/"),
+      )
       .nullable(),
     actions: z
       .array(
