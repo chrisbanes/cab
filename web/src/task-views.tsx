@@ -26,7 +26,7 @@ import type {
   Workspace,
   TaskListSummary,
 } from "../../src/operator/contracts.js";
-import { ResourceStatus } from "./components.js";
+import { ReasonText, ResourceStatus } from "./components.js";
 import { ProjectPausedBanner, type WaitProps } from "./wait-reasons.js";
 import { Button } from "./ui/button.js";
 import { Card } from "./ui/card.js";
@@ -59,7 +59,7 @@ import {
   operatorNext,
   readyButBlocked,
   nextActor,
-  taskReasons,
+  taskReasonItems,
   visibleColumns,
   type TaskAggregate,
   type TaskColumn,
@@ -109,9 +109,9 @@ function TaskFacts({ task }: { task: TaskListSummary }) {
   const next = nextActor(task.attention.codes, taskColumn(task));
   return (
     <>
-      {taskReasons(task).map((reason) => (
-        <p key={reason} className="body muted task-reason">
-          {reason}
+      {taskReasonItems(task).map((r) => (
+        <p key={r.text} className="body muted task-reason">
+          <ReasonText reason={r} />
         </p>
       ))}
       {next.code && (

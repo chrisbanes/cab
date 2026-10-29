@@ -1026,6 +1026,18 @@ export const taskSourceSummarySchema = z
     state: z.enum(["open", "closed"]).nullable(),
     closure: sourceClosure,
     readiness: taskReadinessSchema,
+    /** The open GitHub issues blocking it; the cab task and its disclosable title when imported into the same project. */
+    openBlockers: z
+      .array(
+        z
+          .object({
+            label: safeText,
+            task: z.object({ id: uuid, title: text }).strict().nullable(),
+            url: sourceUrl.nullable(),
+          })
+          .strict(),
+      )
+      .max(100),
   })
   .strict()
   .nullable();

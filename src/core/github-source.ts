@@ -529,10 +529,18 @@ export class GitHubSourceStore {
       }));
   }
 
+  /** The issue's recorded blockers, with the cab task each was imported as when it is in the blocked task's project. */
   nativeBlockers(nodeId: string): Row[] {
     return this.db
       .prepare(
-        "SELECT blockerNodeId, repositoryId, repositoryName, issueNumber, status FROM github_native_blockers WHERE nodeId = ? ORDER BY blockerNodeId",
+        `SELECT b.blockerNodeId, b.repositoryId, b.repositoryName, b.issueNumber, b.status,
+          i.taskId, t.title AS taskTitle FROM github_native_blockers b
+          LEFT JOIN github_imported_tasks i ON i.providerInstance = 'github.com' AND i.nodeId = b.blockerNodeId
+            AND (SELECT projectId FROM tasks WHERE id = i.taskId) =
+              (SELECT bt.projectId FROM github_imported_tasks bi JOIN tasks bt ON bt.id = bi.taskId
+                WHERE bi.providerInstance = 'github.com' AND bi.nodeId = b.nodeId)
+          LEFT JOIN tasks t ON t.id = i.taskId
+          WHERE b.nodeId = ? ORDER BY b.blockerNodeId`,
       )
       .all(nodeId) as Row[];
   }

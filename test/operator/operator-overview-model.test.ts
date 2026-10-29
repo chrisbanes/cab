@@ -134,11 +134,15 @@ test("intervention evidence is the lead, recorded reasons and the ownership hold
     }),
   );
   assert.equal(held.lead, "Jonas · lead");
-  assert.ok(held.reasons.includes("Execution ownership is uncertain"));
+  assert.ok(
+    held.reasons.some((r) => r.text === "Execution ownership is uncertain"),
+  );
   assert.equal(held.ownershipHeld, true);
   const calm = interventionEvidence(summary({ codes: ["lead-review"] }));
   assert.equal(calm.lead, "No lead configured");
-  assert.deepEqual(calm.reasons, ["Routing fell back to the project lead"]);
+  assert.deepEqual(calm.reasons, [
+    { text: "Routing fell back to the project lead" },
+  ]);
   assert.equal(calm.ownershipHeld, false);
 });
 

@@ -19,6 +19,7 @@ export type Overrides = {
   globalUsage?: number;
   projectUsage?: number;
   projectName?: string | null;
+  openBlockers?: object[];
 };
 /** A parsed task-list summary with only the facts a presentation test names. */
 export function summary(o: Overrides = {}): TaskListSummary {
@@ -78,6 +79,7 @@ export function summary(o: Overrides = {}): TaskListSummary {
               outcome: "not-evaluated",
               unmet: [],
             },
+            openBlockers: o.openBlockers ?? [],
           },
     attention: { codes: o.codes ?? [], count: o.codes?.length ?? 0 },
   });

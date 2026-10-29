@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import type { ResourceState } from "./resource.js";
+import type { TaskReason } from "./tasks.js";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   ChevronLeft,
@@ -465,4 +466,9 @@ export function TopBar({
       {action}
     </header>
   );
+}
+
+/** A task reason, linked to the task it names when it names one. */
+export function ReasonText({ reason }: { reason: TaskReason }) {
+  return reason.href ? <a href={reason.href}>{reason.text}</a> : reason.text;
 }

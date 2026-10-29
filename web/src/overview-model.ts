@@ -16,7 +16,7 @@ import {
   isActiveColumn,
   isUncertain,
   taskColumn,
-  taskReasons,
+  taskReasonItems,
 } from "./tasks.js";
 
 /**
@@ -83,7 +83,7 @@ export function interventionEvidence(task: TaskListSummary) {
     lead: task.lead
       ? `${task.lead.name ?? "Name unavailable"} · lead`
       : "No lead configured",
-    reasons: taskReasons(task),
+    reasons: taskReasonItems(task),
     ownershipHeld: isUncertain(task),
   };
 }
