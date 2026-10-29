@@ -152,8 +152,6 @@ const legacyGithubConfigurationCommandResultSchema =
     })
     .strict();
 
-export { repositoriesConfigurationCommandResultSchema };
-
 export const githubActivationCommandResultSchema = z
   .object({
     projectId: id,

@@ -838,11 +838,8 @@ export class DomainStore {
       return prior.result;
     }
     this.operator(command);
-    this.version(
-      { version: this.repositoryLinks(command.projectId).version },
-      command.expectedVersion,
-    );
-    const saved = this.repositoryLinks(command.projectId).links;
+    const { version, links: saved } = this.repositoryLinks(command.projectId);
+    this.version({ version }, command.expectedVersion);
     let verified: LinkedRepository[];
     try {
       verified = await Promise.all(

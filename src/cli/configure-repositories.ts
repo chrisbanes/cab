@@ -21,14 +21,14 @@ const editSchema = z
     confirmUnlinkAll: z.literal(true).optional(),
   })
   .strict();
-export type RepositoryEdit = z.infer<typeof editSchema>;
+type RepositoryEdit = z.infer<typeof editSchema>;
 type Links = Awaited<ReturnType<typeof readProject>>["data"]["repositories"];
 
 const duplicates = (values: string[]) =>
   values.filter((v, i) => values.indexOf(v) !== i);
 
 /** The exact `repositories.configure` the edit makes of the saved links, with its preview. */
-export function repositoriesEditCommand(
+function repositoriesEditCommand(
   projectId: string,
   saved: Links,
   edit: RepositoryEdit,

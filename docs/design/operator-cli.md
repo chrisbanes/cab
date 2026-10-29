@@ -457,8 +457,8 @@ the same command with its key and checked with `task get`, `question get` or
 applied before paging; a cursor from other parameters is `409`. A `runtime` item is
 derived on each read and carries `harness` and `since` instead of task fields.
 
-Sources, repository links and delivery drive the existing operator commands; no route,
-command or receipt is added. `project prepare-source` writes a `github.configure`
+Sources, repository links and delivery drive the operator commands; the CLI adds no
+route of its own. `project prepare-source` writes a `github.configure`
 change document from a strict edit file: kept selections are sent as `{id, keep: true}`,
 so no private query or filter is sent again, new selections take the next free `S-n`,
 and preview lines follow the web UI and never show a query, filter, path or reference
