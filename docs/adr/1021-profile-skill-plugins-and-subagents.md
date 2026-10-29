@@ -39,17 +39,30 @@ questions; ADR-1008 and `docs/SPEC.md` describe the current contract until then.
 
 ## Open enforcement questions
 
-The probe must answer these before the decision is accepted:
+The [probe record](../evidence/skill-plugin-probes-2026-10-29.md) answers these
+against Claude Agent SDK 0.3.310 and Codex 0.164.0. What remains open blocks
+acceptance.
 
-- Whether disabling hooks (`disableAllHooks`, applied as managed-hooks-only) also
-  disables cab's in-process `PreToolUse` callback. If it does, cab instead refuses a
-  plugin that declares hooks.
-- Whether strict MCP configuration excludes plugin MCP servers, or a managed server
-  allowlist naming only cab's server is needed.
-- Whether subagent tool calls reach cab's hook and sandbox, and whether Stop and a
-  crash mid-subagent leave no process running unsupervised.
-- How Codex App Server discovers skills under an isolated home, how its login is
-  supplied there, and whether its subagents meet the same coverage.
+- Answered: `disableAllHooks` does not disable cab's in-process `PreToolUse`
+  callback. It still ran and denied an out-of-policy call, the plugin's own hook
+  did not run (with a control showing it runs otherwise), and the skill's script ran
+  under the sandbox with its outside write denied. Refusing hook-declaring plugins
+  is not needed.
+- Answered: `strictMcpConfig` excludes a plugin's MCP server (a control without it
+  loaded the server), so no managed server allowlist is needed.
+- Answered for Claude subagents, with one open item: their tool calls reach cab's callback (marked with
+  `agent_id`) and the sandbox, including a denied outside write and denied network,
+  and an operator Stop leaves no process. Enabling `Agent` requires removing `Task`
+  from the disallowed tools too. Killing the service mid-subagent leaves the CLI and
+  its tool processes running until terminated by identity, exactly as for the main
+  agent; whether that existing recovery boundary is acceptable for subagents is
+  open.
+- Open for Codex: a skill in `$CODEX_HOME/skills`, an extra root, or an installed
+  plugin is discovered under an isolated home, but `HOME` must be isolated as well
+  or the service user's `~/.agents/skills` also load. How login is supplied to a
+  cab-owned home without copying the operator's credentials, and whether Codex
+  subagents meet the same sandbox and Stop coverage, are untested pending a login
+  decision.
 
 ## Considered options
 
