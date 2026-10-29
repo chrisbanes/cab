@@ -858,8 +858,8 @@ test("delivery resolves the code-host factory from the target's repository link"
         return provider;
       },
     },
-    codeHostOf: (_project, repositoryId) => {
-      requested.push([projectId, repositoryId]);
+    codeHostOf: (project, repositoryId) => {
+      requested.push([project, repositoryId]);
       return repositoryId === "R1"
         ? { codeHost: "github", host: "github.com" }
         : null;
