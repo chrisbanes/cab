@@ -166,6 +166,79 @@ test("guided create records instructions, verified repositories and one inactive
   assert.equal(f.runtime.turns, 0);
 });
 
+const glRow = (path: string, extra: Record<string, unknown> = {}) => ({
+  codeHost: "gitlab",
+  host: "gitlab.com",
+  projectPath: "acme/atlas",
+  repositoryId: "42",
+  path,
+  ref: "main",
+  ...extra,
+});
+
+test("guided create records GitLab and GitHub links together atomically", async (t) => {
+  const { f, home, api, counts } = await setupWorld(t);
+  const both = create({
+    repositories: [atlas("~/src/atlas"), glRow("~/src/gitlab")],
+  });
+  await api.execute(both);
+  const real = await realpath(join(home.home, "src", "gitlab"));
+  const links = f.service
+    .domain()
+    .repositoryLinks(String(both.projectId)).links;
+  assert.deepEqual(
+    links.map((l) => [l.codeHost, l.host, l.repositoryId]),
+    [
+      ["github", "github.com", "R_atlas"],
+      ["gitlab", "gitlab.com", "42"],
+    ],
+  );
+  assert.deepEqual(links[1], {
+    codeHost: "gitlab",
+    host: "gitlab.com",
+    projectPath: "acme/atlas",
+    repositoryId: "42",
+    path: real,
+    ref: "main",
+    gitCommonDirectory: join(real, ".git"),
+  });
+  // A failed GitLab verification records nothing and names the failing row.
+  const before = counts();
+  await assert.rejects(
+    api.execute(
+      create({
+        repositories: [atlas("~/src/atlas"), glRow("~/src/relay")],
+      }),
+    ),
+    (e) =>
+      e instanceof OperatorApiError &&
+      e.status === 400 &&
+      JSON.stringify(e.fieldPaths) === '["repositories.1.path"]',
+  );
+  assert.deepEqual(counts(), before);
+  // The same GitLab project twice is refused as a duplicate before anything runs.
+  await assert.rejects(
+    api.execute(
+      create({
+        repositories: [
+          glRow("~/src/gitlab"),
+          glRow("~/src/gitlab", { repositoryId: "43" }),
+        ],
+      }),
+    ),
+    (e) => e instanceof Error && /Repositor/.test(JSON.stringify(e)),
+  );
+  assert.deepEqual(counts(), before);
+  // A GitLab-only project records no GitHub source credential.
+  const only = create({ repositories: [glRow("~/src/gitlab")] });
+  await api.execute(only);
+  assert.equal(
+    f.service.domain().githubConfiguration(String(only.projectId))
+      .credentialRef,
+    null,
+  );
+});
+
 test("guided create records the setup source credential at version 1 and replays", async (t) => {
   const { f, home, api, db } = await setupWorld(t);
   const command = create({

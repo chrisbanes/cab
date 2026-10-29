@@ -170,6 +170,11 @@ import {
 } from "./gh-credential.js";
 import type { CodeHostProviderFactories } from "./code-host.js";
 import {
+  gitLabCredentialExclusions,
+  glabEnvironment,
+  glabToken,
+} from "./glab-credential.js";
+import {
   CredentialGitHubSourceReader,
   gitHubSourceCredentialStatus,
 } from "./github-source-credential.js";
@@ -482,6 +487,8 @@ export interface StandaloneServiceOptions {
   routingClient?: RoutingChoiceClient | null;
   /** The `gh` executable for a `gh:github.com` discovery reference; defaults to `gh`. */
   ghExecutable?: string;
+  /** The `glab` executable for a `glab:<host>` credential; defaults to `glab`. */
+  glabExecutable?: string;
   /** Test-only values remain in memory and are never persisted. */
   conversationHistoryExclusions?: () => readonly string[];
   supervisor?: ExecutionSupervisorOptions;
@@ -629,8 +636,11 @@ function retractWriterAndSuccessors(
       state.holdTerminalConflict(item.id, reason);
 }
 
-/** Includes lifetime gh values even after every source/discovery reference has been cleared. */
-function gitHubCredentialExclusions(domain: DomainStore) {
+/**
+ * Source, discovery and code-host credentials to exclude. Includes lifetime gh and glab values
+ * even after every reference has been cleared.
+ */
+function providerCredentialExclusions(domain: DomainStore) {
   const references = [
     domain.discoveryCredentialReference(),
     ...domain
@@ -641,7 +651,13 @@ function gitHubCredentialExclusions(domain: DomainStore) {
       ),
     ...domain.pendingCredentialReferences(),
   ];
-  const excluded = references.map((ref) => credentialReferenceExclusions(ref));
+  const excluded = [
+    ...references.map((ref) => credentialReferenceExclusions(ref)),
+    // Resolved glab values stay excluded after the last GitLab reference is cleared.
+    gitLabCredentialExclusions(
+      domain.codeHostCredentials().map((c) => c.credentialRef),
+    ),
+  ];
   return {
     names: [...new Set(excluded.flatMap((value) => value.names))],
     values: [...new Set(excluded.flatMap((value) => value.values))],
@@ -1211,8 +1227,20 @@ export class StandaloneService {
           executable: this.options.ghExecutable,
           environment: ghEnvironment(domain, { reference: "gh:github.com" }),
         });
-      const githubExcluded = () => gitHubCredentialExclusions(domain);
-      // Helper children exclude configured delivery, Claude and GitHub credentials.
+      // Likewise each configured glab host, so its value is excluded from the spawn snapshot.
+      await Promise.all(
+        domain
+          .codeHostCredentials()
+          .filter(({ host, credentialRef }) => credentialRef === `glab:${host}`)
+          .map(({ host }) =>
+            glabToken(host, {
+              executable: this.options.glabExecutable,
+              environment: glabEnvironment(domain),
+            }),
+          ),
+      );
+      const githubExcluded = () => providerCredentialExclusions(domain);
+      // Helper children exclude configured delivery, Claude, GitHub and GitLab credentials.
       setChildCredentialExclusions(() => {
         const claude = claudeTokenExcluded(),
           github = githubExcluded();
@@ -2224,7 +2252,7 @@ export class StandaloneService {
         this.canonicalDataDir,
         ...(this.options.failureRedactionPaths ?? []),
         ...secretEnvironmentValues(),
-        ...gitHubCredentialExclusions(domain).redactions,
+        ...providerCredentialExclusions(domain).redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...this.claudeTokensHandedOut,
         // Copies still in use keep their grant's paths private even once it is unlinked.
@@ -3181,8 +3209,8 @@ export class StandaloneService {
   }
 
   /** Includes lifetime gh values even after every source/discovery reference has been cleared. */
-  gitHubCredentialExclusions() {
-    return gitHubCredentialExclusions(this.domain());
+  providerCredentialExclusions() {
+    return providerCredentialExclusions(this.domain());
   }
 
   operatorCredentials(): OperatorCredentialStore {
@@ -8420,7 +8448,7 @@ export class StandaloneService {
         ...managedPaths,
         ...additionalPaths,
         ...secretEnvironmentValues(),
-        ...this.gitHubCredentialExclusions().redactions,
+        ...this.providerCredentialExclusions().redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {

@@ -175,7 +175,9 @@ export class OperatorClient {
   verifyCheckout(
     input: {
       path: string;
-      repository: { owner: string; name: string };
+      repository:
+        | { owner: string; name: string }
+        | { codeHost: "gitlab"; host: string; projectPath: string };
       ref: string;
     },
     csrfToken: string,

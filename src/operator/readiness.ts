@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** The nine readiness checks, in the fixed order they are reported. */
+/** The readiness checks, in the fixed order they are reported. */
 export const readinessCheckIds = [
   "runtime-enabled",
   "codex-executable",
@@ -11,6 +11,7 @@ export const readinessCheckIds = [
   "claude-token",
   "runtime-harness",
   "data-paths",
+  "gitlab-credentials",
 ] as const;
 export type ReadinessCheckId = (typeof readinessCheckIds)[number];
 

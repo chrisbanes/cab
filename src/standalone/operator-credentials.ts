@@ -250,6 +250,7 @@ export function operatorRouteAuthority(
       "/api/operator/source-observations",
       "/api/operator/discovery",
       "/api/operator/claude-token",
+      "/api/operator/code-host-credentials",
       "/api/operator/readiness",
       "/api/operator/readiness/claude-token",
       "/api/operator/discovery/repositories",
@@ -257,6 +258,7 @@ export function operatorRouteAuthority(
       "/api/operator/discovery/labels",
       "/api/operator/discovery/projects",
       "/api/operator/discovery/project-fields",
+      "/api/operator/discovery/gitlab-projects",
       "/api/operator/operations",
       "/api/operator/executions",
     ].includes(path) ||

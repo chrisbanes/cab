@@ -307,6 +307,8 @@ export async function createOperatorFixture<
         supervisor: { shutdownWaitMs: 50, ...serviceOptions.supervisor },
         ghExecutable:
           serviceOptions.ghExecutable ?? join(directory, "no-gh", "gh"),
+        glabExecutable:
+          serviceOptions.glabExecutable ?? join(directory, "no-glab", "glab"),
         power: serviceOptions.power ?? { enabled: false },
         routingClient,
         ...(delivery ? { delivery } : {}),
@@ -489,6 +491,8 @@ export async function createOperatorFixture<
             ...setup,
             // Fixtures never run the host's real gh unless a test provides one.
             ghExecutable: setup?.ghExecutable ?? join(directory, "no-gh", "gh"),
+            glabExecutable:
+              setup?.glabExecutable ?? join(directory, "no-glab", "glab"),
           },
         );
         // Like the operator command, every listener has push; ticks are manual unless asked.

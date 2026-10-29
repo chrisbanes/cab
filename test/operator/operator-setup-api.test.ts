@@ -554,6 +554,22 @@ test("setup routes require an operator session, CSRF and same origin and are not
     }).then(async (r) => ((await r.json()) as { data: unknown }).data);
   const folders = await post("/api/operator/setup/folders", { path: "~/src" });
   assert.equal(folders.status, 200);
+  const verifyGitLab = (path: string, projectPath: string) =>
+    post("/api/operator/setup/verify-checkout", {
+      path,
+      repository: { codeHost: "gitlab", host: "gitlab.com", projectPath },
+      ref: "main",
+    }).then(async (r) => ((await r.json()) as { data: unknown }).data);
+  assert.deepEqual(await verifyGitLab("~/src/gitlab", "acme/atlas"), {
+    state: "verified",
+    origin: "gitlab.com/acme/atlas",
+    branch: "main",
+  });
+  assert.deepEqual(await verifyGitLab("~/src/gitlab", "acme/other"), {
+    state: "rejected",
+    reason: "origin-mismatch",
+    origin: "acme/atlas",
+  });
   const realAtlas = await realpath(join(home.home, "src", "atlas"));
   assert.deepEqual(await verify("~/src/atlas"), {
     state: "verified",
@@ -613,6 +629,8 @@ test("setup routes require an operator session, CSRF and same origin and are not
     "/api/operator/discovery/labels?repository=acme/atlas",
     "/api/operator/discovery/projects?repository=acme/atlas",
     "/api/operator/discovery/project-fields?project=PVT_atlas",
+    "/api/operator/code-host-credentials",
+    "/api/operator/discovery/gitlab-projects?host=gitlab.example.com",
   ]) {
     assert.equal((await fetch(`${web.origin}${path}`)).status, 401, path);
     assert.equal(
@@ -632,6 +650,10 @@ test("setup routes require an operator session, CSRF and same origin and are not
     "/api/operator/discovery/project-fields?project=",
     "/api/operator/discovery/project-fields?project=PVT_a&project=PVT_b",
     "/api/operator/discovery?x=1",
+    "/api/operator/discovery/gitlab-projects",
+    "/api/operator/discovery/gitlab-projects?host=github.com",
+    "/api/operator/discovery/gitlab-projects?host=a.example&host=b.example",
+    "/api/operator/code-host-credentials?x=1",
   ])
     assert.equal(
       (await fetch(`${web.origin}${path}`, { headers: { cookie } })).status,

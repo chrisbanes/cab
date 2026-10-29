@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readinessSchema } from "../../src/operator/readiness.js";
+import {
+  readinessCheckIds,
+  readinessSchema,
+} from "../../src/operator/readiness.js";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -85,7 +88,7 @@ for (const [name, viewport] of [
         (await fetch("/api/operator/readiness")).json(),
       ),
     );
-    assert.equal(api.data.checks.length, 9);
+    assert.equal(api.data.checks.length, readinessCheckIds.length);
     for (const c of api.data.checks) {
       const row = panel.getByRole("article", {
         name: c.label,

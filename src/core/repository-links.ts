@@ -3,7 +3,10 @@ import {
   isGitLabProjectPath,
   linkedRepositorySchema,
 } from "./github-source.js";
-import { repositoryLinkInputSchema } from "./github-source-contracts.js";
+import {
+  repositoryLinkInputSchema,
+  setupRepositorySchema,
+} from "./github-source-contracts.js";
 
 /** A DNS hostname without port or userinfo. `github.com` belongs to GitHub links only. */
 export const gitLabHostSchema = z
@@ -106,3 +109,43 @@ export const repositoriesConfigurationCommandResultSchema = z
     repositories: repositoryLinkListSchema,
   })
   .strict();
+
+/**
+ * Setup-only GitLab row: the project identity its checkout's `origin` must match. A GitHub
+ * row (`setupRepositorySchema`) carries no `codeHost`, so existing payloads are unchanged.
+ */
+const setupGitLabRepositorySchema = setupRepositorySchema
+  .extend({
+    codeHost: z.literal("gitlab"),
+    host: gitLabHostSchema,
+    projectPath: gitLabProjectPathSchema,
+    repositoryId: gitLabRepositoryId,
+  })
+  .omit({ owner: true, name: true })
+  .strict();
+
+/** One project-setup repository list: unique ids and unique repository identities. */
+export const setupRepositoriesSchema = z
+  .array(
+    z.discriminatedUnion("codeHost", [
+      setupRepositorySchema.extend({ codeHost: z.undefined().optional() }),
+      setupGitLabRepositorySchema,
+    ]),
+  )
+  .max(20)
+  .refine(
+    (values) =>
+      new Set(values.map((value) => value.repositoryId)).size === values.length,
+    "Repository IDs must be unique",
+  )
+  .refine(
+    (values) =>
+      new Set(
+        values.map((value) =>
+          value.codeHost === "gitlab"
+            ? `gitlab:${value.host}/${value.projectPath}`.toLowerCase()
+            : `${value.owner}/${value.name}`.toLowerCase(),
+        ),
+      ).size === values.length,
+    "Repositories must be unique",
+  );

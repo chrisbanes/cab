@@ -232,9 +232,24 @@ export class TaskReviewStore {
           )
           .all() as Row[]),
       );
+    // Installation GitLab credentials too; the table exists from the same migration as discovery.
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE name='installation_code_host_credentials'",
+        )
+        .get()
+    )
+      refs.push(
+        ...(this.db
+          .prepare(
+            "SELECT credentialRef FROM installation_code_host_credentials",
+          )
+          .all() as Row[]),
+      );
     for (const ref of refs) {
-      // A `gh:` discovery reference has no variable; its token values come from the exclusions below.
-      if (String(ref.credentialRef).startsWith("gh:"))
+      // A `gh:` or `glab:` reference has no variable; its token values come from the exclusions below.
+      if (/^(?:gh|glab):/.test(String(ref.credentialRef)))
         excluded.push(String(ref.credentialRef));
       else if (ref.credentialRef) {
         const name = String(ref.credentialRef).slice(4);

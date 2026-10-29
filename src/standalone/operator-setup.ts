@@ -12,9 +12,10 @@ import {
   verifiedRepository,
 } from "./repository-verification.js";
 import { isWithin } from "./workspace-inspection.js";
+import type { GitLabSeams } from "./gitlab-credentials.js";
 
-/** Test seams for guided setup: the home folder, the discovery reader factory and `gh`. */
-export interface OperatorSetupSeams {
+/** Test seams for guided setup: the home folder, the discovery reader factory, `gh` and `glab`. */
+export interface OperatorSetupSeams extends GitLabSeams {
   home?: string;
   /** Receives the reference and its resolved token (undefined when the variable is unset). */
   discovery?: (
@@ -152,15 +153,24 @@ export async function listHomeFolders(
   };
 }
 
-/** Check a chosen checkout against the expected `github.com` repository and ref. */
+/** Check a chosen checkout against the expected repository (GitHub or GitLab) and ref. */
 export async function verifyCheckout(
   home: string,
   input: {
     path: string;
-    repository: { owner: string; name: string };
+    repository:
+      | { owner: string; name: string }
+      | { codeHost: "gitlab"; host: string; projectPath: string };
     ref: string;
   },
 ): Promise<CheckoutVerification["data"]> {
+  const origin =
+    "owner" in input.repository
+      ? `${input.repository.owner}/${input.repository.name}`
+      : `${input.repository.host}/${input.repository.projectPath}`.slice(
+          0,
+          201,
+        );
   try {
     const verified = await verifiedRepository(
       {
@@ -172,12 +182,16 @@ export async function verifyCheckout(
     );
     return {
       state: "verified",
-      origin: `${input.repository.owner}/${input.repository.name}`,
+      origin,
       branch: await currentBranch(verified.path, probeTimeout),
     };
   } catch (error) {
     return error instanceof RepositoryVerificationError
-      ? { state: "rejected", reason: error.reason, origin: error.actual }
+      ? {
+          state: "rejected",
+          reason: error.reason,
+          origin: error.actual?.slice(0, 201) ?? null,
+        }
       : { state: "rejected", reason: "unreadable", origin: null };
   }
 }

@@ -806,6 +806,27 @@ the `gh:github.com` source credential works through a file-based `gh` login;
 there is no `file:` GitHub reference. See the
 [macOS operations procedure](operations/standalone-macos.md#launchdaemon-mode).
 
+Each GitLab host has one installation-level credential, set in Settings → GitLab
+credentials through the receipted `code-host-credential.configure` command: `env:NAME`,
+or `glab:<host>` for that same host, which runs
+`glab auth status --hostname <host> --show-token` on every use, with no stdin and a
+bounded time, and parses one token line from its combined output. Reads report the
+kind, whether the credential is usable, a fixed reason when it is not, and the account
+the token acts as (from `GET /api/v4/user`); never the variable name, token or glab
+output. A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
+environment overrides a stored glab login; Settings and `cab doctor` (GitLab
+credentials) warn when it does, and the account shown is the token's. The credential
+only lists GitLab projects for guided setup and shows the account: it grants no
+repository access (access is exactly the links the operator adds) and no delivery
+authority. Guided setup offers a GitLab repository row for each configured host, takes
+the project and its numeric ID from the discovered list, verifies the chosen checkout's
+`origin` against the host and project path, and records the link in the same atomic
+`project.create`; a GitLab-only project records no GitHub source credential. GitLab
+credential names and values, including every value glab has resolved, are excluded
+like source credentials, with the same limits: a reference added after start needs a
+restart before running Codex spawns exclude it, and agents may still reach a glab
+login or config file on the host.
+
 Settings present each project's repository links and GitHub discovery sources as
 separate sections. Repository links are project configuration, not part of any
 source: each link records its code host and host name (GitHub on `github.com`, or

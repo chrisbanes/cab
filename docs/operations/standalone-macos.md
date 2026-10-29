@@ -216,8 +216,9 @@ release. It then runs these stages:
    [startup snapshot](#startup-snapshot) before it migrates, or refuses to start.
 4. `health`: waits up to 120 seconds for `/app`.
 5. `readiness`: reads readiness until no check reports Fail, for up to 120
-   seconds. Not configured is accepted, so an unused GitHub discovery or Claude
-   does not block it. The identity check confirms the same installation.
+   seconds. Not configured is accepted, so an unused GitHub discovery, GitLab
+   credential or Claude does not block it. A configured GitLab credential that
+   fails, or a `glab` login shadowed by `GITLAB_TOKEN`, does block it. The identity check confirms the same installation.
 
 On success it prints the version, the startup snapshot (null when this start
 needed none, as when it reloads the release that last started), log paths and each readiness
@@ -610,7 +611,7 @@ not patch launchctl's shared environment or add arbitrary plist variables locall
 
 After the service starts, run `cab doctor` or open Settings → Readiness. Both
 show what the running service sees: Codex executable and login, git, GitHub
-discovery, the Claude executable and token, runtime harness and data and auth paths, each as Pass,
+discovery, GitLab credentials, the Claude executable and token, runtime harness and data and auth paths, each as Pass,
 Fail or Not configured with one fix line and no token value or path. The checks
 change nothing and request no model turn; re-run them after any fix.
 
@@ -618,6 +619,20 @@ The service uses the logged-in user's existing Codex login; it does not copy,
 read, or alter Codex credentials. The separate cab auth file is not that
 login. The launchd proof starts App Server and verifies authentication/config
 initialization without requesting a model turn.
+
+### GitLab credentials
+
+Each GitLab host has one installation credential, set in Settings → GitLab
+credentials: the GitLab CLI login (`glab auth login --hostname <host>`) or an
+environment variable. The service runs `glab auth status --hostname <host>
+--show-token` by name from the fixed `PATH` for each read, without prompts, and
+never stores the token. A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in
+the service environment overrides the stored login, and `cab doctor` reports it as
+a failed GitLab credentials check: unset it, or choose an environment variable
+reference. A [LaunchDaemon](#launchdaemon-mode) cannot read a keychain-backed glab
+login before login; use a login glab keeps in its config file, or an environment
+variable. A credential added after the service started needs a restart before new
+Codex spawns exclude it.
 
 ### GitHub discovery credential
 

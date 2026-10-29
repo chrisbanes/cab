@@ -126,7 +126,10 @@ export function ReadyCheck({
   );
   // Only a project with a repository records a source credential; a repository-free
   // project shows no credential line and has none to check again.
-  const withRepositories = Boolean(created.repositories?.length);
+  // The source credential line concerns GitHub sources only.
+  const withRepositories = Boolean(
+    created.repositories?.some((r) => r.codeHost !== "gitlab"),
+  );
   // A source fixed in another tab is re-read by Check again, as readiness items are.
   const recheckCredential =
     withRepositories &&
@@ -185,7 +188,10 @@ export function ReadyCheck({
             Repository access:{" "}
             {created.repositories?.length
               ? `${created.repositories
-                  .map((r) => `${r.owner}/${r.name} (${r.ref})`)
+                  .map(
+                    (r) =>
+                      `${r.codeHost === "gitlab" ? `${r.host}/${r.projectPath}` : `${r.owner}/${r.name}`} (${r.ref})`,
+                  )
                   .join(", ")}, checked on this Mac`
               : "none · repository-free"}
             .

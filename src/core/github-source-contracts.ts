@@ -119,23 +119,6 @@ export const setupRepositorySchema = repositoryLinkSchema.extend({
     .regex(/^[^-\s\p{Cc}][^\s\p{Cc}]*$/u),
 });
 
-/** One project-setup repository list: unique ids and unique GitHub identities. */
-export const setupRepositoriesSchema = z
-  .array(setupRepositorySchema)
-  .max(20)
-  .refine(
-    (values) =>
-      new Set(values.map((value) => value.repositoryId)).size === values.length,
-    "Repository IDs must be unique",
-  )
-  .refine(
-    (values) =>
-      new Set(
-        values.map((value) => `${value.owner}/${value.name}`.toLowerCase()),
-      ).size === values.length,
-    "Repositories must be unique",
-  );
-
 /** Command-only: keep a saved selection by id without re-sending its private definition. */
 export const selectionKeepSchema = z
   .object({ id: nonempty, keep: z.literal(true) })

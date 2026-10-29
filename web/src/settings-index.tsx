@@ -23,6 +23,7 @@ import {
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
 import { ActionLink, Button, ProjectName, StatusBadge } from "./components.js";
+import { GitLabCredentialsSection } from "./gitlab-credentials.js";
 import {
   ClaudeTokenRow,
   DiscoveryCredentialRow,
@@ -436,6 +437,15 @@ export function SettingsWorkspace(
         description="Read-only credential for listing repositories, refs and GitHub Projects. It grants no repository access."
       >
         <DiscoveryCredentialRow {...shared} onChange={discoveryChanged} />
+      </Panel>
+    ),
+    "gitlab-credentials": (
+      <Panel
+        id="gitlab-credentials"
+        title="GitLab credentials"
+        description="Read-only credential for each GitLab host, used to list projects and show the account. It grants no repository access."
+      >
+        <GitLabCredentialsSection {...p} />
       </Panel>
     ),
     "cli-credentials": (
