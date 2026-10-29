@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { packTarball } from "./npm-package.js";
 
 const run = promisify(execFile);
 // Configuration exported by an enclosing `npm run` must not leak into the nested installs.
@@ -21,33 +22,8 @@ type Lock = {
 export async function installPacked(dir: string) {
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   assert.equal(manifest.name, "@chrisbanes/cab");
-  const packed = await run(
-    "npm",
-    ["pack", "--ignore-scripts", "--json", "--pack-destination", dir],
-    { cwd: root, env: npmEnv },
-  );
-  // npm 11 prints an array of pack results; npm 12 keys them by package name.
-  const results = JSON.parse(packed.stdout) as
-    | { filename: string; name: string }[]
-    | Record<string, { filename: string; name: string }>;
-  const [result, ...extra] = Array.isArray(results)
-    ? results
-    : Object.values(results);
-  assert.ok(
-    result?.filename && extra.length === 0,
-    packed.stdout.slice(0, 200),
-  );
-  if (Array.isArray(results)) {
-    assert.equal(result?.name, manifest.name, packed.stdout.slice(0, 200));
-  } else {
-    assert.deepEqual(
-      Object.keys(results),
-      [manifest.name],
-      packed.stdout.slice(0, 200),
-    );
-  }
-  const { filename } = result;
-  const tarball = join(dir, filename);
+  const { tarball, name } = await packTarball(root, dir);
+  assert.equal(name, manifest.name);
   const project = join(dir, "project");
   rmSync(project, { recursive: true, force: true });
   const lock = JSON.parse(
