@@ -134,7 +134,7 @@ for (let i = 0; i < at; i += 2) {
   // Only \`-c key=value\` pairs precede fetch; the transport restrictions give way to a local path.
   if (!/^(protocol|credential)\\./.test(args[i + 1])) kept.push(args[i], args[i + 1]);
 }
-const rest = args.slice(at).map((a) => a.startsWith("https://") && a.endsWith("/octo/fixture.git") ? ${JSON.stringify(remote)} : a);
+const rest = args.slice(at).map((a) => a.startsWith("https://") && a.endsWith(".git") ? ${JSON.stringify(remote)} : a);
 const r = spawnSync(${JSON.stringify(realGit)}, [...kept, "-c", "protocol.file.allow=always", ...rest], { stdio: "inherit", env: { ...process.env, GIT_ALLOW_PROTOCOL: "file" } });
 process.exit(r.status ?? 1);
 `
@@ -297,6 +297,44 @@ test("a fetch from a non-GitHub host targets that host", async (t) => {
     "https://gitlab.example.com/octo/fixture.git",
     `+${outside}:refs/cab/adopt`,
   ]);
+});
+
+test("a GitLab adoption fetches the nested project path as oauth2 and rejects bad paths", async (t) => {
+  const repo = repository(t);
+  const outside = repo.commitOutside();
+  const fake = shim(t, repo.remote);
+  assert.equal(
+    await adoptOutsideHead({
+      ...request(repo, fake.executable, outside),
+      host: "gitlab.example.com",
+      codeHost: "gitlab",
+      nameWithOwner: "group/sub/app",
+    }),
+    "adopted",
+  );
+  const seen = fake.recorded();
+  assert.equal(seen.env.CAB_PUSH_PATH, "group/sub/app.git");
+  assert.equal(seen.env.CAB_PUSH_USERNAME, "oauth2");
+  assert.deepEqual(seen.args.slice(-2), [
+    "https://gitlab.example.com/group/sub/app.git",
+    `+${outside}:refs/cab/adopt`,
+  ]);
+  assert.equal(seen.args.join("\n").includes(token), false);
+  assert.equal(seen.config.includes(token), false);
+
+  const never = shim(t, repo.remote);
+  for (const nameWithOwner of ["app", "group/../app", "group/app.git"])
+    assert.equal(
+      await adoptOutsideHead({
+        ...request(repo, never.executable, outside),
+        host: "gitlab.example.com",
+        codeHost: "gitlab",
+        nameWithOwner,
+      }),
+      "not-attempted",
+      nameWithOwner,
+    );
+  assert.equal(existsSync(never.started), false);
 });
 
 test("repository-local and user configuration and hooks cannot redirect the fetch or its credential", async (t) => {

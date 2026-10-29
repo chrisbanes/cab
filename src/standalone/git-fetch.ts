@@ -12,7 +12,12 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeBranchName } from "../core/delivery.js";
-import { hostName, pushCredentialHelper } from "./git-push.js";
+import {
+  type TransportCodeHost,
+  hostName,
+  pushCredentialHelper,
+  transportUsername,
+} from "./git-push.js";
 import { runGit } from "./git-process.js";
 import { type Git, provedAncestor } from "./push-verification.js";
 
@@ -37,7 +42,9 @@ export interface AdoptRequest {
   baseCommit: string | null;
   /** The code host's lowercase DNS name, from the repository link. */
   host: string;
-  /** `owner/name` of the verified repository on `host`. */
+  /** The code host of `host`; GitHub when omitted. */
+  codeHost?: TransportCodeHost;
+  /** `owner/name` of the verified repository on `host`; the full project path on GitLab. */
   nameWithOwner: string;
   commitSha: string;
   branch: string;
@@ -50,7 +57,6 @@ export interface AdoptRequest {
 }
 export type AdoptFunction = (request: AdoptRequest) => Promise<AdoptOutcome>;
 
-const repositoryPath = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 const oid = /^[0-9a-f]{40}$/;
 const bounds = {
   timeoutMs: 120_000,
@@ -112,12 +118,13 @@ export async function adoptOutsideHead(
     branch,
     token,
   } = request;
+  const username = transportUsername(request.codeHost, nameWithOwner);
   if (
     !token ||
     !baseCommit ||
     !oid.test(baseCommit) ||
     !hostName.test(host) ||
-    !repositoryPath.test(nameWithOwner) ||
+    !username ||
     !oid.test(commitSha) ||
     !safeBranchName(branch)
   )
@@ -223,6 +230,7 @@ export async function adoptOutsideHead(
         GIT_ALLOW_PROTOCOL: "https",
         CAB_PUSH_HOST: host,
         CAB_PUSH_PATH: `${nameWithOwner}.git`,
+        CAB_PUSH_USERNAME: username,
         CAB_PUSH_TOKEN: token,
       },
     }).finally(() => clearInterval(watcher));

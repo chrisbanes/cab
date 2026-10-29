@@ -323,6 +323,84 @@ test("a push to a non-GitHub host targets that host", async (t) => {
   ]);
 });
 
+test("a GitLab push uses the oauth2 username and a nested project path", async (t) => {
+  const repo = repository(t);
+  const fake = shim(t);
+  assert.equal(
+    await pushTaskCommit({
+      ...request(repo, fake.executable),
+      host: "gitlab.example.com",
+      codeHost: "gitlab",
+      nameWithOwner: "group/sub/app",
+    }),
+    "pushed",
+  );
+  const seen = fake.recorded();
+  assert.equal(seen.env.CAB_PUSH_HOST, "gitlab.example.com");
+  assert.equal(seen.env.CAB_PUSH_PATH, "group/sub/app.git");
+  assert.equal(seen.env.CAB_PUSH_USERNAME, "oauth2");
+  assert.deepEqual(seen.args.slice(-2), [
+    "https://gitlab.example.com/group/sub/app.git",
+    `${repo.sha}:refs/heads/cab/abcd1234-task`,
+  ]);
+  assert.equal(seen.args.join("\n").includes(token), false);
+  assert.equal(seen.config.includes(token), false);
+  assert.deepEqual(filesContaining(repo.root, token), []);
+});
+
+test("the credential helper sends the configured username and only to the exact GitLab path", () => {
+  const ask = (path: string) =>
+    spawnSync("sh", ["-c", `${pushCredentialHelper.slice(1)} get`], {
+      input: `protocol=https\nhost=gitlab.example.com\npath=${path}\n`,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        CAB_PUSH_TOKEN: token,
+        CAB_PUSH_HOST: "gitlab.example.com",
+        CAB_PUSH_PATH: "group/sub/app.git",
+        CAB_PUSH_USERNAME: "oauth2",
+      },
+    }).stdout;
+  assert.equal(
+    ask("group/sub/app.git"),
+    `username=oauth2\npassword=${token}\n`,
+  );
+  assert.equal(ask("group/sub/other.git"), "");
+  assert.equal(ask("group/sub/app/extra.git"), "");
+});
+
+test("a GitLab push rejects paths GitLab and Git would read differently", async (t) => {
+  const repo = repository(t);
+  const never = shim(t);
+  for (const nameWithOwner of [
+    "app",
+    "group/../app",
+    "group/./app",
+    "group/app.git",
+    "group//app",
+    "group/app; rm",
+  ])
+    assert.equal(
+      await pushTaskCommit({
+        ...request(repo, never.executable),
+        host: "gitlab.example.com",
+        codeHost: "gitlab",
+        nameWithOwner,
+      }),
+      "not-attempted",
+      nameWithOwner,
+    );
+  // GitHub keeps its two-segment rule when no code host is given.
+  assert.equal(
+    await pushTaskCommit({
+      ...request(repo, never.executable),
+      nameWithOwner: "group/sub/app",
+    }),
+    "not-attempted",
+  );
+  assert.equal(existsSync(never.started), false);
+});
+
 test("a lease push names the lease commit and the refusal reports map to outcomes", async (t) => {
   const repo = repository(t);
   const lease = "1".repeat(40);
