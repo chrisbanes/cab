@@ -992,6 +992,8 @@ test("text GitLab would run as a quick action is held before any write", async (
     "Done\n/ready",
     "ok\n  /approve now",
     "\u00a0/merge",
+    "/\rmerge",
+    "a\n/me\rrge",
   ]) {
     for (const action of [
       created({ body: text }),
