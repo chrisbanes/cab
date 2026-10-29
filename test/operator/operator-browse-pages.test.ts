@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { cliCapabilities } from "../../src/operator/contracts.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -166,8 +167,13 @@ test("browse pages filter, page and reject stale cursors without changing UI def
     assert.equal((await get(`${history}?limit=${limit}`)).status, 400);
 
   // 4. Results and messages page in readTask order with identical projections.
-  for (let i = 1; i < 120; i++)
+  // Yield between synchronous writes: on a slow CI disk an unbroken loop blocks
+  // past the server's 6s keep-alive window, and the next fetch reuses a socket
+  // the server then resets (ECONNRESET).
+  for (let i = 1; i < 120; i++) {
     review.result(`Result ${i} PRIVATE REVIEW INSTRUCTIONS`);
+    await setImmediate();
+  }
   const task = await api.readTask(review.taskId);
   assert.equal(task.data.results.length, 120);
   const results = `/api/operator/tasks/${review.taskId}/results`;
