@@ -102,9 +102,14 @@ explicit engine for WebKit. Keep non-browser cases independently runnable in mix
 files; Node 26 service CI deliberately has no browser executables.
 
 Use Node.js from `.nvmrc` and the package manager pinned in `package.json`.
-Run `npm ci` then `npm run check` (type checking, lint, formatting, build, tests).
-CI runs the static checks and build once, then the runtime profiles documented in
-`docs/development.md`. Existing tests use real SQLite and a fake host.
+Run `npm ci`, then `npm run typecheck`, `npm run lint` and `npm run format:check`.
+Locally, run only the suites that cover the change after `npm run build`, for example
+`npm run test:built -- --suite=workspaces`, adding `--profile=service` when no UI
+changed. Run the full `npm run check` only for changes to shared test
+infrastructure, fixtures, store migrations or cross-suite contracts. The required
+`check` CI context is the full-suite gate: it runs the static checks and build
+once, then the runtime profiles documented in `docs/development.md`, and must pass
+at the final head before merge. Existing tests use real SQLite and a fake host.
 Claude Code cloud sessions get the toolchain from `scripts/cloud-environment-setup.sh`
 and dependencies from the `scripts/cloud-session-start.sh` SessionStart hook. Their
 GitHub proxy rejects GraphQL, so `gh issue`, `gh pr` and Projects v2 fail there; use
