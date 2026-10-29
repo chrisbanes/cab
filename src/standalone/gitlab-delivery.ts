@@ -408,7 +408,8 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           : action.kind === "pr.thread.reply"
             ? action.body
             : undefined;
-    if (text !== undefined && quickAction.test(text))
+    // GitLab deletes carriage returns before it extracts commands, so `/\rmerge` is `/merge`.
+    if (text !== undefined && quickAction.test(text.replaceAll("\r", "")))
       throw new Error("provider-quick-action-held");
     if (action.kind === "pr.create") {
       const remote = this.remoteFor(repositoryId, projectPath);
