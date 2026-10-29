@@ -64,7 +64,7 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-const unescape = (text: string) =>
+const xmlText = (text: string) =>
   text
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
@@ -131,18 +131,18 @@ class SpawningLaunchd {
             ...plistSection(plist, "ProgramArguments").matchAll(
               /<string>([^<]*)<\/string>/g,
             ),
-          ].map((match) => unescape(match[1] as string));
+          ].map((match) => xmlText(match[1] as string));
           const environment = Object.fromEntries(
             [
               ...plistSection(plist, "EnvironmentVariables").matchAll(
                 /<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g,
               ),
-            ].map((match) => [match[1], unescape(match[2] as string)]),
+            ].map((match) => [match[1], xmlText(match[2] as string)]),
           );
           const [stdout, stderr] = ["StandardOutPath", "StandardErrorPath"].map(
             (key) =>
               openSync(
-                unescape(
+                xmlText(
                   new RegExp(
                     `<key>${key}</key>\\s*<string>([^<]*)</string>`,
                   ).exec(plist)?.[1] as string,
