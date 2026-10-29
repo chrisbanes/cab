@@ -63,7 +63,10 @@ function configuration(
     expectedVersion: domain.githubConfiguration(projectId).version,
     credentialRef: "env:TEST_GITHUB",
     selections,
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   };
 }
 
@@ -153,7 +156,8 @@ test("persisted GitHub repository bindings and Project field arrays are validate
             kind: "project-field",
             projectNodeId: "P",
             fieldNodeId: "F",
-            optionNodeId: "O",
+            operator: "in",
+            optionNodeIds: ["O"],
           },
         ],
       },

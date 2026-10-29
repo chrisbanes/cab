@@ -278,9 +278,14 @@ export async function runTaskPublicationJourney(
       kind: "project-field" as const,
       projectNodeId: project.nodeId,
       fieldNodeId: statusField.id,
-      optionNodeId: readyOption,
+      operator: "in" as const,
+      optionNodeIds: [readyOption],
     };
-    const labelCondition = { kind: "label" as const, name: label };
+    const labelCondition = {
+      kind: "label" as const,
+      operator: "has" as const,
+      name: label,
+    };
     const configure = async (readiness: Readiness) => {
       await domain.configureRepositories({
         type: "repositories.configure",

@@ -293,7 +293,7 @@ test("creates without the setup credential, and existing sources, are never re-d
       selections: [],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
   const cleared = create({ sourceCredentialRef: "gh:github.com" });

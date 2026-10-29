@@ -11,6 +11,7 @@ import {
   rowState,
   selectField,
   selectProject,
+  toggleOption,
 } from "../../web/src/readiness-discovery.js";
 
 const repositories: RepositoriesRead = {
@@ -61,11 +62,11 @@ const fields: FieldsRead = {
     },
   ],
 };
-const ids = (projectNodeId = "", fieldNodeId = "", optionNodeId = "") => ({
-  projectNodeId,
-  fieldNodeId,
-  optionNodeId,
-});
+const ids = (
+  projectNodeId = "",
+  fieldNodeId = "",
+  ...optionNodeIds: string[]
+) => ({ projectNodeId, fieldNodeId, optionNodeIds });
 const saved = [{ repositoryId: "R_atlas" }];
 const ready = projectChoices(repositories, saved, {
   "Acme/Atlas": projects([project("PVT_atlas", "Atlas roadmap")]),
@@ -202,6 +203,11 @@ test("a row shows selects for empty or fully listed IDs and keeps typed IDs othe
     rowState(ids("PVT_atlas", "F_status", "O_ready"), ready, read).state,
     "picker",
   );
+  // A saved option the read does not list is kept by the checkboxes, so it never forces typing.
+  assert.equal(
+    rowState(ids("PVT_atlas", "F_status", "O_gone"), ready, read).state,
+    "picker",
+  );
   // The Project list stays selectable while its fields load.
   assert.deepEqual(rowState(ids("PVT_atlas"), ready, {}), {
     state: "loading",
@@ -211,8 +217,6 @@ test("a row shows selects for empty or fully listed IDs and keeps typed IDs othe
   for (const unlisted of [
     ids("PVT_gone"),
     ids("PVT_atlas", "F_gone"),
-    ids("PVT_atlas", "F_status", "O_gone"),
-    ids("PVT_atlas", "", "O_ready"),
     ids("", "F_status"),
   ])
     assert.equal(rowState(unlisted, ready, read).state, "typed");
@@ -230,7 +234,19 @@ test("a row shows selects for empty or fully listed IDs and keeps typed IDs othe
   );
 });
 
-test("choosing a Project clears field and option, and choosing a field clears the option", () => {
+test("checking options keeps the field's board order and any saved option the read does not list", () => {
+  const board = ["O_a", "O_b", "O_c"];
+  assert.deepEqual(toggleOption(board, [], "O_c", true), ["O_c"]);
+  assert.deepEqual(toggleOption(board, ["O_c"], "O_a", true), ["O_a", "O_c"]);
+  assert.deepEqual(toggleOption(board, ["O_a", "O_c"], "O_a", false), ["O_c"]);
+  assert.deepEqual(toggleOption(board, ["O_gone", "O_b"], "O_a", true), [
+    "O_a",
+    "O_b",
+    "O_gone",
+  ]);
+});
+
+test("choosing a Project clears field and options, and choosing a field clears the options", () => {
   assert.deepEqual(selectProject("PVT_b"), ids("PVT_b"));
   assert.deepEqual(
     selectField(ids("PVT_a", "F_old", "O_old"), "F_new"),

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
+import type { Readiness } from "../../src/core/github-source-contracts.js";
 import {
   fieldReady,
   labelAndFieldReady,
@@ -243,6 +244,133 @@ test("a Draft task is refused where the project has no readiness rule, and a fie
     fieldOnly.target(fieldOnly.task(false), "repo").reasonCode,
     null,
   );
+});
+
+test("publication writes the first option of an in condition, nothing for lacks, and refuses a rule its planned writes cannot satisfy", async (t) => {
+  const field = {
+    kind: "project-field" as const,
+    projectNodeId: publicationProject.projectNodeId,
+    fieldNodeId: publicationProject.fieldNodeId,
+  };
+  const has = {
+    kind: "label" as const,
+    operator: "has" as const,
+    name: "ready",
+  };
+  const lacks = { ...has, operator: "lacks" as const, name: "blocked" };
+  const inOptions = {
+    ...field,
+    operator: "in" as const,
+    optionNodeIds: [publicationProject.ready, publicationProject.other],
+  };
+  const notIn = {
+    ...field,
+    operator: "not-in" as const,
+    optionNodeIds: [publicationProject.other],
+  };
+  const writes = async (readiness: Readiness) => {
+    const f = await publicationFixture({
+      selections: ["project"],
+      readiness,
+    });
+    t.after(() => f.close());
+    const target = f.target(f.task(true), "project");
+    return [target.reasonCode, target.labels, target.projectFields] as const;
+  };
+  const first = [
+    {
+      projectNodeId: field.projectNodeId,
+      fieldNodeId: field.fieldNodeId,
+      optionNodeId: publicationProject.ready,
+    },
+  ];
+  assert.deepEqual(
+    await writes({ mode: "all", conditions: [has, lacks, inOptions] }),
+    [null, ["ready"], first],
+  );
+  assert.deepEqual(await writes({ mode: "all", conditions: [lacks] }), [
+    null,
+    [],
+    [],
+  ]);
+  assert.equal(
+    (await writes({ mode: "all", conditions: [has, notIn] }))[0],
+    "readiness-unsatisfiable",
+  );
+  // Any: a lacks condition holds without a write, so it is chosen before a label or a field.
+  assert.deepEqual(
+    await writes({ mode: "any", conditions: [has, inOptions, lacks] }),
+    [null, [], []],
+  );
+  assert.deepEqual(
+    await writes({ mode: "any", conditions: [notIn, inOptions] }),
+    [null, [], first],
+  );
+  assert.equal(
+    (await writes({ mode: "any", conditions: [notIn] }))[0],
+    "readiness-unsatisfiable",
+  );
+  // The planned writes are checked against every condition, so a write that contradicts one
+  // (label match is case-insensitive; a field holds one value) disables the target.
+  const clash = { ...lacks, name: "READY" };
+  assert.equal(
+    (await writes({ mode: "all", conditions: [has, clash] }))[0],
+    "readiness-unsatisfiable",
+  );
+  assert.deepEqual(await writes({ mode: "any", conditions: [has, clash] }), [
+    null,
+    [],
+    [],
+  ]);
+  const other = { ...inOptions, optionNodeIds: [publicationProject.other] };
+  assert.equal(
+    (await writes({ mode: "all", conditions: [inOptions, other] }))[0],
+    "readiness-unsatisfiable",
+  );
+  assert.equal(
+    (await writes({ mode: "all", conditions: [inOptions, notIn] }))[0],
+    null,
+  );
+  assert.equal(
+    (
+      await writes({
+        mode: "all",
+        conditions: [
+          inOptions,
+          { ...notIn, optionNodeIds: [publicationProject.ready] },
+        ],
+      })
+    )[0],
+    "readiness-unsatisfiable",
+  );
+});
+
+test("a Draft task is refused where a bare new issue would satisfy the rule through a lacks condition", async (t) => {
+  const lacks = {
+    kind: "label" as const,
+    operator: "lacks" as const,
+    name: "blocked",
+  };
+  const has = { ...lacks, operator: "has" as const, name: "ready" };
+  const reason = async (readiness: Readiness, ready: boolean) => {
+    const f = await publicationFixture({ readiness });
+    t.after(() => f.close());
+    return f.target(f.task(ready), "repo").reasonCode;
+  };
+  assert.equal(
+    await reason({ mode: "all", conditions: [lacks] }, false),
+    "would-become-ready",
+  );
+  assert.equal(
+    await reason({ mode: "any", conditions: [has, lacks] }, false),
+    "would-become-ready",
+  );
+  assert.equal(
+    await reason({ mode: "all", conditions: [has, lacks] }, false),
+    null,
+  );
+  // A Ready task is not made Ready by publication, so the same rule is fine for it.
+  assert.equal(await reason({ mode: "all", conditions: [lacks] }, true), null);
 });
 
 test("an unknown create outcome holds the task, never resends, and a racing sync imports no duplicate", async (t) => {

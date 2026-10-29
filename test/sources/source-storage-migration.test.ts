@@ -75,6 +75,15 @@ const fieldsJson = (...ids: string[]) =>
     })),
   );
 const digest = (c: string) => c.repeat(64);
+/** The saved rule of the first project as stored before operators, and as re-encoded. */
+const legacyRule = JSON.stringify({
+  mode: "all",
+  conditions: [{ kind: "label", name: "ready" }],
+});
+const operatorRule = JSON.stringify({
+  mode: "all",
+  conditions: [{ kind: "label", operator: "has", name: "ready" }],
+});
 
 /** A previous-schema database with every kind of source record, in two projects. */
 function seededPreviousDatabase() {
@@ -104,10 +113,7 @@ function seededPreviousDatabase() {
       { id: "S-1", kind: "search", query: "is:open label:ready" },
       { id: "S-2", kind: "project", projectNodeId: "PRJ_1", filter: "" },
     ]),
-    JSON.stringify({
-      mode: "all",
-      conditions: [{ kind: "label", name: "ready" }],
-    }),
+    legacyRule,
   );
   run(
     "INSERT INTO project_github_sources VALUES (?, 1, NULL, '[]', 'null', 'skip')",
@@ -256,7 +262,14 @@ test("source records from the previous schema migrate once and read back identic
 
     domain.migrate();
 
-    assert.deepEqual(readNeutral(db), before);
+    // Every column moves byte for byte, except the readiness rule, which is re-encoded.
+    const migrated = structuredClone(before);
+    assert.equal(migrated.project_github_sources?.[0]?.readiness, legacyRule);
+    (migrated.project_github_sources as Record<string, unknown>[])[0] = {
+      ...migrated.project_github_sources?.[0],
+      readiness: operatorRule,
+    };
+    assert.deepEqual(readNeutral(db), migrated);
     for (const table of neutralTables.filter(
       (name) =>
         name !== "project_active_selections" && name !== "source_sync_state",
@@ -275,7 +288,7 @@ test("source records from the previous schema migrate once and read back identic
     // Running again changes nothing.
     domain.migrate();
     new GitHubSourceStore(db).migrate();
-    assert.deepEqual(readNeutral(db), before);
+    assert.deepEqual(readNeutral(db), migrated);
 
     const sources = new GitHubSourceStore(db);
     assert.deepEqual(domain.githubConfiguration(p1), {
@@ -287,7 +300,7 @@ test("source records from the previous schema migrate once and read back identic
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
       closedIssues: "done",
     });
@@ -414,6 +427,91 @@ test("a failed source migration leaves every previous table and row in place", (
       neutralTables.filter((table) => tableNames(db).includes(table)),
       [],
     );
+  } finally {
+    db.close();
+  }
+});
+
+test("upgrading re-encodes readiness conditions without changing Ready, versions, holds or rule identity", () => {
+  const { db, domain, p1 } = seededPreviousDatabase();
+  try {
+    const field = {
+      kind: "project-field",
+      projectNodeId: "PRJ_1",
+      fieldNodeId: "F_A",
+    };
+    const legacy = {
+      mode: "any",
+      conditions: [
+        { kind: "label", name: "ready" },
+        { ...field, optionNodeId: "O_2" },
+      ],
+    };
+    const stale = { mode: "all", conditions: [{ kind: "label", name: "old" }] };
+    const upgraded = JSON.stringify({
+      mode: "any",
+      conditions: [
+        { kind: "label", operator: "has", name: "ready" },
+        { ...field, operator: "in", optionNodeIds: ["O_2"] },
+      ],
+    });
+    const staleUpgraded = JSON.stringify({
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "old" }],
+    });
+    db.prepare(
+      "UPDATE project_github_sources SET readiness = ? WHERE projectId = ?",
+    ).run(JSON.stringify(legacy), p1);
+    // Snapshots as the previous release stored them: equal to the rule, stale, and unreadable.
+    for (const [id, text] of [
+      [t1, JSON.stringify(legacy)],
+      [t2, JSON.stringify(stale)],
+      [t3, "not json"],
+    ] as const)
+      db.prepare("UPDATE domain_tasks SET readinessRule = ? WHERE id = ?").run(
+        text,
+        id,
+      );
+    const snapshot = (id: string) =>
+      db.prepare("SELECT readinessRule FROM domain_tasks WHERE id = ?").get(id)
+        ?.readinessRule;
+    const saved = (table: string) =>
+      db.prepare(`SELECT readiness FROM ${table} WHERE projectId = ?`).get(p1)
+        ?.readiness;
+    const tasks = () =>
+      rows(
+        db,
+        "SELECT id, version, ready, state FROM domain_tasks ORDER BY id",
+      );
+    const holds = (table: string, key: string) =>
+      rows(
+        db,
+        `SELECT ${key} AS nodeId, active, reason, generation FROM ${table} ORDER BY ${key}`,
+      );
+    const tasksBefore = tasks();
+    const holdsBefore = holds("github_source_holds", "nodeId");
+    assert.ok(holdsBefore.length > 0);
+
+    // A failure partway through keeps every legacy text.
+    db.exec(
+      "CREATE TEMP TRIGGER refuse_snapshot BEFORE UPDATE OF readinessRule ON domain_tasks BEGIN SELECT RAISE(ABORT, 'snapshot refused'); END",
+    );
+    assert.throws(() => domain.migrate(), /snapshot refused/);
+    assert.equal(saved("project_github_sources"), JSON.stringify(legacy));
+    assert.equal(snapshot(t1), JSON.stringify(legacy));
+    assert.equal(snapshot(t2), JSON.stringify(stale));
+    db.exec("DROP TRIGGER refuse_snapshot");
+
+    for (let pass = 0; pass < 2; pass++) {
+      domain.migrate();
+      assert.equal(saved("project_task_sources"), upgraded);
+      // Equal texts stay equal, the stale one stays different, an unreadable one is untouched.
+      assert.equal(snapshot(t1), upgraded);
+      assert.equal(snapshot(t2), staleUpgraded);
+      assert.equal(snapshot(t3), "not json");
+      assert.deepEqual(tasks(), tasksBefore);
+      assert.deepEqual(holds("source_holds", "externalId"), holdsBefore);
+    }
   } finally {
     db.close();
   }

@@ -362,9 +362,10 @@ export async function deliveryFixture(
               kind: "project-field" as const,
               projectNodeId: fixtureProject.projectNodeId,
               fieldNodeId: fixtureProject.fieldNodeId,
-              optionNodeId,
+              operator: "in" as const,
+              optionNodeIds: [optionNodeId],
             }))
-          : [{ kind: "label", name: "ready" }],
+          : [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({

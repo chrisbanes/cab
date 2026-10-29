@@ -157,7 +157,7 @@ test("actual imported state-only configure keeps GitHub source provenance; place
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     d.execute({

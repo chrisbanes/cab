@@ -1657,7 +1657,10 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
     expectedVersion: 1,
     credentialRef: "gh:github.com",
     selections: [],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   await ready.getByRole("button", { name: "Check again" }).click();
   await ready
@@ -1857,7 +1860,10 @@ test("Setup's ready check reviews a source saved elsewhere before importing agai
     projectId: t.projectId,
     expectedVersion: 1,
     selections: [{ id: "S-1", keep: true }],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   } as never);
   await t.importButton.click();
   const warning = outcomeMessages(t.ready).filter({

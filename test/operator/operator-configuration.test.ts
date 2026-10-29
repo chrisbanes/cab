@@ -100,7 +100,13 @@ test("the project read shows no readiness rule, a rule, and no rule again after 
   assert.deepEqual(await read(), { kind: "none" });
   const rule = {
     mode: "any" as const,
-    conditions: [{ kind: "label" as const, name: "ready-for-agent" }],
+    conditions: [
+      {
+        kind: "label" as const,
+        operator: "has" as const,
+        name: "ready-for-agent",
+      },
+    ],
   };
   const configure = (
     readiness: unknown,
@@ -189,7 +195,10 @@ test("GitHub omitted reference is preserved at apply and its original receipt re
     type: "github.configure" as const,
     projectId,
     selections: [],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   };
   await api.execute({
     ...base,
@@ -276,7 +285,10 @@ test("preview original activation receipt replays without provider access after 
     selections: [
       { id: "search", kind: "search", query: "repo:example/private" },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
     credentialRef: "env:FIXTURE_PREVIEW",
   };
   await api.execute({ ...config, key: randomUUID(), expectedVersion: 1 });
@@ -339,7 +351,10 @@ async function previewFixture(
     selections: [
       { id: "search", kind: "search", query: "repo:example/private" },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
     credentialRef: "env:FIXTURE_PREVIEW",
     key: randomUUID(),
     expectedVersion: 1,
@@ -776,7 +791,7 @@ test("delivery and source credential reference, key and value are excluded from 
       selections: [],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: privateText }],
+        conditions: [{ kind: "label", operator: "has", name: privateText }],
       },
     });
     d.execute({
@@ -1084,7 +1099,9 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
   });
   const readiness = {
     mode: "all" as const,
-    conditions: [{ kind: "label" as const, name: "ready" }],
+    conditions: [
+      { kind: "label" as const, operator: "has" as const, name: "ready" },
+    ],
   };
   const s1 = {
     id: "S-1",
@@ -1385,7 +1402,10 @@ test("a github.configure command recorded with links replays its receipt through
 test("GitHub configuration command contract accepts only exact keep markers and unique ids", () => {
   const base = {
     credentialRef: null,
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   };
   const parse = (selections: unknown[]) =>
     githubConfigurationCommandSchema.safeParse({ ...base, selections }).success;
@@ -1529,7 +1549,7 @@ setTimeout(() => {
       selections: [],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
   }
@@ -1589,7 +1609,7 @@ setTimeout(() => {
       selections: [],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
   };

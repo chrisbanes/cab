@@ -227,8 +227,12 @@ boundaries. Typed judgments and confidence are not proof of correctness or autho
 The operator admits local work or configures the source's optional readiness rule.
 Unready tasks run no turns, except that the operator can start a
 [draft turn](#draft-turns) of the lead; the lead cannot grant readiness. For
-GitHub, a rule uses simple all/any label (matched case-insensitively) and Project-field conditions; nested
-expressions are deferred. A new project's source has no rule, and the operator may
+GitHub, a rule is a flat all/any list of label and Project-field conditions; nested
+expressions and ordered comparisons are deferred. A label condition is `has` or `lacks` a
+label, matched case-insensitively. A Project-field condition is `in` or `not-in` a set of option
+node IDs of a single-select field: `in` is met when the item's value is one of them, `not-in`
+only when the item holds a value for the field and it is none of them, so an item with no value
+or outside the Project never satisfies it. Adding an option on GitHub never widens an `in` set. A new project's source has no rule, and the operator may
 add or remove one: with no rule, every open imported issue with current source
 membership satisfies readiness whatever its labels or Project fields. Absence of a
 rule is stored explicitly (`null`), never as an empty condition list, and a rule
@@ -242,9 +246,8 @@ source observation counts its observed items (including closed issues skipped wi
 task), open items and open items matching the readiness rule, and warns when a complete
 read matches none; an imported open Draft task names the conditions it does not meet.
 A GitHub Project selection's observation also lists each single-select field with how many
-of its open items hold each option, and the operator can add an option as a
-Project-field condition from that list; the condition still saves only with the
-source configuration. Conditions, unmet reasons and observed field values read by the
+of its open items hold each option, as read-only counts; conditions are made only in the
+condition editor and save with the source configuration. Conditions, unmet reasons and observed field values read by the
 field and option names the Project's last complete read listed; a partial read keeps
 them, and a field or option no complete read has named shows its node ID. Names are
 display only: rules, commands and readiness matching use node IDs.
@@ -1102,14 +1105,20 @@ from local to imported; its title and description are source-owned from then on.
   selections are listed disabled (`selection-unpredictable`), because whether a new issue
   would match cannot be predicted. A target is also disabled without an `issue.create` grant on
   the repository, a `project.item.add` grant for the Project, or the `project.field` grants its
-  readiness writes need; when a Ready task's rule needs a Project field the target cannot set
-  (`readiness-unsatisfiable`); and for a Draft task where the project has no readiness rule,
-  since a new issue would then make it Ready (`would-become-ready`). Every enabled target predicts
+  readiness writes need; when no write this target can make satisfies a Ready task's rule
+  (`readiness-unsatisfiable`, below); and for a Draft task where a new issue with no labels or field values would already meet the
+  readiness rule (no rule, or a `lacks` condition that satisfies it), since it would then be Ready
+  (`would-become-ready`). Every enabled target predicts
   that the new issue matches the selection and that the task stays as Ready as it is.
 - **Ready.** A Draft task never receives readiness labels or fields. A Ready task gets what its
-  rule needs on the new issue: under `all`, every label condition and every field condition on the
-  target Project; under `any`, the first label condition, else the first field condition on the
-  Project. The task keeps its Ready flag through conversion and the next sync recomputes it from
+  rule needs on the new issue: under `all`, every `has` label and the first option of every `in`
+  condition on the target Project (one write per field), with `lacks` writing nothing; under `any`, a `lacks`
+  condition first (a new issue has no labels, so it needs no write), else the first `has` label,
+  else the first `in` condition on the Project. The planned writes must satisfy the whole
+  rule: a `not-in` condition nothing satisfies, an `in` condition on another Project, or a write
+  that contradicts another condition (a `has` label a `lacks` condition names, case-insensitively,
+  or two `in` conditions on one field whose sets the first `in` condition's first option does not
+  satisfy together) makes the target `readiness-unsatisfiable`. The task keeps its Ready flag through conversion and the next sync recomputes it from
   GitHub; a write that did not land leaves the ordinary readiness-lost or withdrawn hold
   ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 - **Review, confirm, send.** Review freezes the exact issue (title, body, labels), the target and
@@ -1982,7 +1991,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   while its issue is open writes nothing until the issue closes, and a task first seen already
   done (for example a closed issue a Done-mode source imports, or a Ready task done before the
   mapping was saved) was not worked on under the mapping and writes nothing for Done. Clearing the mapping, rebinding it to another Project or Status field, or a pass while its Project is no longer a source selection forgets what it watched, so a task that finishes in between writes nothing when a mapping returns. An in-flight event may name only an option the
-  readiness rule accepts, checked at save and again at write against the task's stored facts with only
+  readiness rule accepts (an `in` set holding it, a `not-in` set leaving it out), checked at save and again at write against the task's stored facts with only
   that value replaced. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
   an in-flight Status drops the item from the selection on the next sync and the ordinary

@@ -97,7 +97,7 @@ export async function seedDraftingProject(
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
   }

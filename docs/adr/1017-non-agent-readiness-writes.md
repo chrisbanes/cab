@@ -59,8 +59,9 @@ caller type, so a new one is a new decision that extends this record, not a flag
   when all of these hold at write time:
   - the task is Ready (`domain_tasks.ready = 1`), so a publication never makes a Draft task
     Ready; for a Draft task the same writes stay refused;
-  - for `issue.create`, every label is one the readiness rule names; for `project.field`, the rule
-    has a condition naming exactly that Project, field and option.
+  - for `issue.create`, every label is one a `has` condition of the readiness rule names; for
+    `project.field`, the rule has an `in` condition on that Project and field whose first option is
+    the one written. Negated conditions (`lacks`, `not-in`) are never written by a publication.
   The task's Ready flag is not recomputed on conversion: the next sync does that from GitHub, so
   a write that failed leaves the ordinary readiness-lost or withdrawn hold, not a silent
   Ready. The readiness refusal now also covers readiness labels carried by `issue.create`.

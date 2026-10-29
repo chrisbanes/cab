@@ -58,6 +58,7 @@ import {
   type StoredRepositoryLink,
 } from "./repository-links.js";
 import { extractLegacyRepositoryLinks } from "./github-source-migration.js";
+import { upgradeReadinessConditions } from "./readiness-condition-migration.js";
 import {
   itemIs,
   itemParams,
@@ -826,6 +827,7 @@ export class DomainStore {
             WHERE c.projectId = domain_tasks.projectId)
           WHERE id IN (SELECT taskId FROM imported_tasks)`);
       }
+      upgradeReadinessConditions(this.db);
     });
   }
 

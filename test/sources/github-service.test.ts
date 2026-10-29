@@ -124,7 +124,7 @@ test("startup invalidates prior clear source/dependency evidence before the firs
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -309,7 +309,7 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -539,7 +539,7 @@ test("a held canonical lead receives one source-hold notice without changing ass
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -717,7 +717,7 @@ test("an unassigned routing-enabled source hold does not invent a lead assignmen
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -913,7 +913,7 @@ test("explicit and timer refresh converge, and stop settles an in-flight read be
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -1000,7 +1000,10 @@ function addGitHubProject(
     expectedVersion: 1,
     credentialRef: "env:TEST_GITHUB",
     selections: [selection],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   execute({
     type: "github.activate",
@@ -1590,7 +1593,10 @@ async function closedIssueService(closedIssues: "skip" | "done") {
         name: "repo",
       },
     ],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
     closedIssues,
   });
   domain.execute({
@@ -1895,7 +1901,7 @@ async function importedWorkspaceService(options: {
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     for (const selectionId of ["repo", "other"])

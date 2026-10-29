@@ -356,7 +356,10 @@ test("a placement recorded through Check in a mounted row shows one saved line a
     expectedVersion: d.githubConfiguration(ids.fieldnotes).version,
     credentialRef: "env:FIXTURE_GITHUB",
     selections: [],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   const taskId = randomUUID();
   seedImportedConflict(f, taskId, [ids.atlas, ids.fieldnotes]);
@@ -459,7 +462,10 @@ const saveSourceElsewhere = async (d: Fixture) => {
       { id: "S-2", keep: true },
       { id: "S-3", keep: true },
     ],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
 };
 

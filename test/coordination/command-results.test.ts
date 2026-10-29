@@ -67,7 +67,10 @@ const github: DomainCommandResultMap["github.configure"] = {
   version: 1,
   credentialRef: null,
   selections: [],
-  readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+  readiness: {
+    mode: "all",
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
+  },
   closedIssues: "skip",
 };
 const repositories: DomainCommandResultMap["repositories.configure"] = {
@@ -223,7 +226,7 @@ test("rejects schemas that normalize result identities", () => {
     ],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: " ready " }],
+      conditions: [{ kind: "label", operator: "has", name: " ready " }],
     },
     repositories: [
       {

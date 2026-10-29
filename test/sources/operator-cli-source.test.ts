@@ -204,7 +204,7 @@ test("project sources and prepare-source show and round-trip no readiness rule, 
   const keptRule = await prepare(w.ids.atlas, { closedIssues: "done" });
   assert.deepEqual(keptRule.document.command.readiness, {
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   });
   // `null` removes the rule, and applying it reads back as none.
   const removed = await prepare(w.ids.atlas, { readiness: null });
@@ -224,7 +224,7 @@ test("project sources and prepare-source show and round-trip no readiness rule, 
     selections: [],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: "FIXTURE_GITHUB" }],
+      conditions: [{ kind: "label", operator: "has", name: "FIXTURE_GITHUB" }],
     },
   });
   assert.equal(r.status, 200);
@@ -259,8 +259,8 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
     readiness: {
       mode: "any",
       conditions: [
-        { kind: "label", name: "ready" },
-        { kind: "label", name: "go" },
+        { kind: "label", operator: "has", name: "ready" },
+        { kind: "label", operator: "lacks", name: "blocked" },
       ],
     },
   };
@@ -391,6 +391,37 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
   await reject(2, {
     linkRepositories: [{ repositoryId: "acme/atlas", path: "/x", ref: "main" }],
   });
+  // The previous condition shapes are no longer accepted.
+  await reject(2, {
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+  });
+  await reject(2, {
+    readiness: {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "P",
+          fieldNodeId: "F",
+          optionNodeId: "O",
+        },
+      ],
+    },
+  });
+  await reject(2, {
+    readiness: {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "P",
+          fieldNodeId: "F",
+          operator: "not-in",
+          optionNodeIds: [],
+        },
+      ],
+    },
+  });
   await reject(2, { surprise: true });
   await reject(2, { closedIssues: "closed" });
   await reject(2, { credentialRef: "gh:example.com" });
@@ -409,7 +440,10 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
     projectId: fieldnotes,
     expectedVersion: (await w.config(fieldnotes)).source.version,
     selections: [{ id: secret, kind: "search", query: "q" }],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   assert.equal(r.status, 200);
   const hidden = await w.ok("ro", ["project", "sources", fieldnotes]);
@@ -531,7 +565,10 @@ test("project apply sends the prepared source change once, deactivating selectio
       { id: "S-1", keep: true },
       { id: "S-2", keep: true },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   assert.equal(r.status, 200);
   const at = await version();
@@ -991,7 +1028,7 @@ test("CLI source readback offers the same environment-precedence account before 
       selections: [],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
   configure(null);

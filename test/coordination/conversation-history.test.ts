@@ -1098,7 +1098,7 @@ test("history capture and reads exclude every project's source and routing refer
       selections: [],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     command(f.service, {

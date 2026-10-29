@@ -183,7 +183,7 @@ export function reference(v: Values) {
  * One row of the GitHub source or repository form. A saved row carries no private definition
  * until the operator edits it: `query` (search) and `path` (repository link) then hold the edit.
  */
-export type SourceRow = Record<string, string | boolean>;
+export type SourceRow = Record<string, string | boolean | string[]>;
 type Source = ProjectConfigurationData["source"];
 type Repositories = ProjectConfigurationData["repositories"];
 /** What the session-only read returned for this source version: the baseline of any edit. */

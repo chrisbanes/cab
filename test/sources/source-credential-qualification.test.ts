@@ -243,7 +243,7 @@ test("qualification separates preview activation/import and retains replay/Clear
     selections: [{ id: result.selectionId, keep: true }],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: "ready-for-agent" }],
+      conditions: [{ kind: "label", operator: "has", name: "ready-for-agent" }],
     },
   });
   await f.api.readSourceObservations();
@@ -266,7 +266,7 @@ test("qualification separates preview activation/import and retains replay/Clear
     selections: [{ id: result.selectionId, keep: true }],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: "ready-for-agent" }],
+      conditions: [{ kind: "label", operator: "has", name: "ready-for-agent" }],
     },
   });
   await assert.rejects(
@@ -290,7 +290,9 @@ test("qualification separates preview activation/import and retains replay/Clear
       selections: [{ id: result.selectionId, keep: true }],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready-for-agent" }],
+        conditions: [
+          { kind: "label", operator: "has", name: "ready-for-agent" },
+        ],
       },
     }),
   );
@@ -354,7 +356,9 @@ for (const failure of [
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready-for-agent" }],
+        conditions: [
+          { kind: "label", operator: "has", name: "ready-for-agent" },
+        ],
       },
     });
     await assert.rejects(
@@ -588,7 +592,7 @@ test("qualification missing source reference refuses preview without fallback or
     ],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: "ready-for-agent" }],
+      conditions: [{ kind: "label", operator: "has", name: "ready-for-agent" }],
     },
   });
   await assert.rejects(

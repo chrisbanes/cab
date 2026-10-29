@@ -260,7 +260,8 @@ export async function runStatusMappingJourney(
           kind: "project-field" as const,
           projectNodeId: project?.nodeId ?? "",
           fieldNodeId: statusField.id,
-          optionNodeId: optionId(name),
+          operator: "in" as const,
+          optionNodeIds: [optionId(name)],
         })),
       },
     });

@@ -32,12 +32,13 @@ import {
 import { summary, type Overrides } from "../fixtures/task-summary.js";
 
 test("an imported Draft task names its unmet readiness conditions; other tasks keep the generic reason", () => {
-  const label = (name: string) => ({ kind: "label", name });
+  const label = (name: string) => ({ kind: "label", operator: "has", name });
   const field = {
     kind: "project-field",
     projectNodeId: "P_1",
     fieldNodeId: "F_1",
-    optionNodeId: "O_1",
+    operator: "in",
+    optionNodeIds: ["O_1"],
   };
   const draft = (readiness?: object, closure: "held" | null = null) =>
     summary({ ready: false, closure, reasons: ["task-unready"], readiness });
@@ -50,10 +51,10 @@ test("an imported Draft task names its unmet readiness conditions; other tasks k
       }),
     );
   assert.deepEqual(unmet("all", [label("ready")], [label("ready")]), [
-    "Not Ready: missing label `ready`",
+    "Not Ready: needs label `ready`",
   ]);
   assert.deepEqual(unmet("all", [label("a"), field], [label("a"), field]), [
-    "Not Ready: missing label `a`, Project field F_1 = O_1",
+    "Not Ready: needs label `a`, Project field F_1 = O_1",
   ]);
   assert.deepEqual(
     unmet("any", [label("a"), label("b")], [label("a"), label("b")]),

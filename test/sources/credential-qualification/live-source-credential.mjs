@@ -140,7 +140,9 @@ export async function qualifySource(
     ],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: metadata.readinessLabel }],
+      conditions: [
+        { kind: "label", operator: "has", name: metadata.readinessLabel },
+      ],
     },
   });
   const before = await transport.configuration(projectId);

@@ -184,7 +184,7 @@ test("taskReadiness states recorded state and wait", () => {
   const rule = {
     kind: "rule",
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   };
   assert.equal(
     line({
@@ -194,11 +194,11 @@ test("taskReadiness states recorded state and wait", () => {
         readiness: {
           rule,
           outcome: "unmet",
-          unmet: [{ kind: "label", name: "ready" }],
+          unmet: [{ kind: "label", operator: "has", name: "ready" }],
         },
       },
     }),
-    "Draft · missing label `ready`",
+    "Draft · needs label `ready`",
   );
   for (const outcome of ["matched", "not-evaluated"])
     assert.equal(

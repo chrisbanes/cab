@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { Check } from "lucide-react";
 import type { z } from "zod";
 import {
   discoveryLabelsSchema,
@@ -32,9 +31,9 @@ import {
   projectChoices,
   type RepositoriesRead,
   rowState,
-  sameCondition,
   selectField,
   selectProject,
+  toggleOption,
   unlistedLabelNote,
 } from "./readiness-discovery.js";
 import { useOperatorResource } from "./resource.js";
@@ -46,6 +45,7 @@ import {
   useDraft,
   type SettingsProps,
 } from "./settings.js";
+import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 
 const unreadable = { state: "unavailable", reason: "unreadable" } as const;
@@ -200,115 +200,155 @@ type SelectionFields = NonNullable<
 >;
 
 /**
- * A Project source's single-select fields with each option's open items. Choosing an option
- * adds it to the drafted readiness conditions; Save applies it.
+ * A Project source's single-select fields with each option's open items, read only: readiness
+ * conditions are made in the condition editor.
  */
 export function ProjectFieldOptions(p: {
   projectFields: SelectionFields | null | undefined;
-  drafted: readonly ConditionIds[];
-  disabled: boolean;
-  onAdd: (ids: ConditionIds) => void;
 }) {
   if (!p.projectFields?.fields.some((f) => f.options.length)) return null;
-  const { projectNodeId, fields } = p.projectFields;
   return (
     <div className="settings-rows">
       <p className="metadata">Project fields</p>
-      {fields.map((f) => (
+      {p.projectFields.fields.map((f) => (
         <div key={f.fieldNodeId}>
           <p className="body">{f.name}</p>
           <ul className="settings-pills">
-            {f.options.map((o) => {
-              const ids = {
-                projectNodeId,
-                fieldNodeId: f.fieldNodeId,
-                optionNodeId: o.optionNodeId,
-              };
-              const added = p.drafted.some((c) => sameCondition(c, ids));
-              return (
-                <li key={o.optionNodeId}>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={p.disabled || added}
-                    aria-label={
-                      added
-                        ? `${f.name} = ${o.name} is a readiness condition`
-                        : `Require ${f.name} = ${o.name} for Ready (${o.open} open)`
-                    }
-                    onClick={() => p.onAdd(ids)}
-                  >
-                    {added && <Check aria-hidden="true" />}
-                    {o.name} · {o.open}
-                  </Button>
-                </li>
-              );
-            })}
+            {f.options.map((o) => (
+              <li key={o.optionNodeId}>
+                <span className="metadata">
+                  {o.name} · {o.open}
+                </span>
+              </li>
+            ))}
           </ul>
         </div>
       ))}
       <p className="metadata muted">
         Open items of this source per option, from its last complete read.
-        Choosing one adds it as a readiness condition; Save applies it.
       </p>
     </div>
   );
 }
 
+/** The select value that reveals the text input for a label not on the repositories. */
+const otherLabel = " other";
+
 /**
- * The Ready label input. The listed labels are suggestions only: any typed name is kept, so a
- * label that doesn't exist yet, or a saved one that is no longer listed, saves as typed.
+ * The Ready label select: the source repositories' labels, a saved label they no longer list,
+ * and "Other…" for a name that doesn't exist yet. When labels can't be listed, a text input.
  */
 export function ReadyLabelPicker(p: {
   index: number;
   value: string;
   discovery: ReadinessDiscovery;
-  /** The text input, given the id of the datalist that suggests labels, if any. */
-  input: (list: string | undefined) => ReactNode;
+  invalid: boolean;
+  onChange: (name: string) => void;
+  /** The text input, named `label`. */
+  input: (label: string) => ReactNode;
 }) {
   const { labels } = p.discovery;
-  const list = `source-conditions-${p.index}-labels`;
-  const ready = labels.state === "ready";
+  const [other, setOther] = useState(false);
+  // Until the labels are listed (or when they can't be) the text input stands alone.
+  if (labels.state !== "ready")
+    return (
+      <>
+        {p.input("Ready label")}
+        {labels.state === "typed" && labels.note && (
+          <p className="metadata muted">{labels.note}</p>
+        )}
+      </>
+    );
+  // The id a row error focuses; the revealed text input takes it over under "Other…".
+  const id = `source-conditions-${p.index}-${other ? "name-select" : "name"}`;
+  const unlisted = p.value !== "" && !other && !labels.labels.includes(p.value);
   return (
     <>
-      {p.input(ready ? list : undefined)}
-      {ready && (
-        <datalist id={list}>
+      <label className="field body" htmlFor={id}>
+        Ready label
+        <NativeSelect
+          className="control"
+          id={id}
+          aria-label="Ready label"
+          aria-invalid={p.invalid}
+          aria-describedby={p.invalid ? "source-conditions-error" : undefined}
+          value={other ? otherLabel : p.value}
+          onChange={(e) => {
+            setOther(e.target.value === otherLabel);
+            if (e.target.value !== otherLabel) p.onChange(e.target.value);
+          }}
+        >
+          <option value="">Choose a label</option>
           {labels.labels.map((name) => (
-            <option key={name} value={name} />
+            <option key={name} value={name}>
+              {name}
+            </option>
           ))}
-        </datalist>
+          {unlisted && <option value={p.value}>{p.value}</option>}
+          <option value={otherLabel}>Other…</option>
+        </NativeSelect>
+      </label>
+      {unlisted && labels.labels.length > 0 && (
+        <p className="metadata muted">{unlistedLabelNote}</p>
       )}
-      {labels.state === "typed" && labels.note && (
-        <p className="metadata muted">{labels.note}</p>
-      )}
-      {ready &&
-        labels.labels.length > 0 &&
-        p.value !== "" &&
-        !labels.labels.includes(p.value) && (
-          <p className="metadata muted">{unlistedLabelNote}</p>
-        )}
+      {other && p.input("Other label")}
     </>
   );
 }
 
+/** Option node IDs typed as a list; the text is kept as typed, so a separator can be entered. */
+function OptionIdsInput(p: {
+  id: string;
+  value: readonly string[];
+  invalid: boolean;
+  onChange: (ids: string[]) => void;
+}) {
+  const [text, setText] = useState(p.value.join(", "));
+  return (
+    <label className="field body" htmlFor={p.id}>
+      Readiness option node IDs
+      <Input
+        className="control"
+        id={p.id}
+        aria-label="Readiness option node IDs"
+        aria-invalid={p.invalid}
+        aria-describedby={p.invalid ? "source-conditions-error" : undefined}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          p.onChange(
+            e.target.value
+              .split(/[,\n]/)
+              .map((x) => x.trim())
+              .filter(Boolean),
+          );
+        }}
+      />
+    </label>
+  );
+}
+
 /**
- * Name selects for one Project-field condition. A row whose state falls back to typed node IDs
- * stays typed while it is mounted, so controls never swap under the cursor.
+ * Name selects for one Project-field condition: Project, field, operator, then a checkbox per
+ * option. A row whose state falls back to typed node IDs stays typed while it is mounted, so
+ * controls never swap under the cursor.
  */
 export function ProjectFieldPicker(p: {
   index: number;
   row: SourceRow;
   discovery: ReadinessDiscovery;
-  /** The typed node-ID inputs. */
-  typed: ReactNode;
+  /** A typed text input for a row value, named `label`. */
+  input: (name: string, label: string) => ReactNode;
   invalid: (name: string) => boolean;
-  onChange: (patch: ConditionIds) => void;
+  onChange: (patch: Partial<ConditionIds> & { operator?: string }) => void;
 }) {
+  const optionNodeIds = Array.isArray(p.row.optionNodeIds)
+    ? p.row.optionNodeIds.map(String)
+    : [];
   const ids: ConditionIds = {
     projectNodeId: String(p.row.projectNodeId ?? ""),
     fieldNodeId: String(p.row.fieldNodeId ?? ""),
-    optionNodeId: String(p.row.optionNodeId ?? ""),
+    optionNodeIds,
   };
   const state = rowState(ids, p.discovery.choices, p.discovery.fieldReads);
   const sticky = useRef<string | null>(null);
@@ -319,10 +359,37 @@ export function ProjectFieldPicker(p: {
     sticky.current = null;
   }
   if (state.state === "typed") sticky.current = state.note;
+  const operator = (
+    <label
+      className="field body"
+      htmlFor={`source-conditions-${p.index}-operator`}
+    >
+      Readiness operator
+      <NativeSelect
+        className="control"
+        id={`source-conditions-${p.index}-operator`}
+        aria-label="Readiness operator"
+        aria-invalid={p.invalid("operator")}
+        value={String(p.row.operator ?? "in")}
+        onChange={(e) => p.onChange({ operator: e.target.value })}
+      >
+        <option value="in">is one of</option>
+        <option value="not-in">is not one of</option>
+      </NativeSelect>
+    </label>
+  );
   if (sticky.current !== null)
     return (
       <>
-        {p.typed}
+        {p.input("projectNodeId", "Readiness Project node ID")}
+        {p.input("fieldNodeId", "Readiness field node ID")}
+        {operator}
+        <OptionIdsInput
+          id={`source-conditions-${p.index}-optionNodeIds`}
+          value={optionNodeIds}
+          invalid={p.invalid("optionNodeIds")}
+          onChange={(next) => p.onChange({ optionNodeIds: next })}
+        />
         <p className="metadata muted">{sticky.current}</p>
       </>
     );
@@ -330,8 +397,9 @@ export function ProjectFieldPicker(p: {
   const projects = state.state === "typed" ? [] : (state.projects ?? []);
   const fields = state.state === "picker" ? state.fields : [];
   const field = fields.find((f) => f.fieldNodeId === ids.fieldNodeId);
+  const listed = (field?.options ?? []).map((o) => o.optionNodeId);
   const select = (
-    name: keyof ConditionIds,
+    name: "projectNodeId" | "fieldNodeId",
     label: string,
     empty: string,
     options: { id: string; name: string }[],
@@ -382,16 +450,49 @@ export function ProjectFieldPicker(p: {
         (v) => p.onChange(selectField(ids, v)),
         loading || !ids.projectNodeId,
       )}
-      {select(
-        "optionNodeId",
-        "Readiness option",
-        "Choose an option",
-        (field?.options ?? []).map((o) => ({
-          id: o.optionNodeId,
-          name: o.name,
-        })),
-        (v) => p.onChange({ ...ids, optionNodeId: v }),
-        loading || !field,
+      {operator}
+      {field && (
+        <fieldset className="settings-rows">
+          <legend className="body">Readiness options</legend>
+          {[
+            ...(field.options ?? []),
+            // A saved option the read does not list stays checked, shown by its node ID.
+            ...optionNodeIds
+              .filter((id) => !listed.includes(id))
+              .map((id) => ({ optionNodeId: id, name: id })),
+          ].map((o, n) => (
+            <label
+              key={o.optionNodeId}
+              className="body check-field"
+              htmlFor={`source-conditions-${p.index}-option-${n}`}
+            >
+              <Input
+                id={`source-conditions-${p.index}-option-${n}`}
+                type="checkbox"
+                className="native-check size-5 shrink-0 p-0 accent-foreground"
+                // A fieldset cannot take focus, so the first option carries the row's error.
+                aria-invalid={n === 0 && p.invalid("optionNodeIds")}
+                aria-describedby={
+                  n === 0 && p.invalid("optionNodeIds")
+                    ? "source-conditions-error"
+                    : undefined
+                }
+                checked={optionNodeIds.includes(o.optionNodeId)}
+                onChange={(e) =>
+                  p.onChange({
+                    optionNodeIds: toggleOption(
+                      listed,
+                      optionNodeIds,
+                      o.optionNodeId,
+                      e.target.checked,
+                    ),
+                  })
+                }
+              />
+              {o.name}
+            </label>
+          ))}
+        </fieldset>
       )}
     </>
   );

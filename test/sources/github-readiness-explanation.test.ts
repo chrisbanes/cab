@@ -105,7 +105,7 @@ test("readiness counts and unmet reasons come from stored observations without p
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     execute({
@@ -125,7 +125,7 @@ test("readiness counts and unmet reasons come from stored observations without p
     assert.deepEqual(observed?.readiness, {
       kind: "rule",
       mode: "all",
-      conditions: [{ kind: "label", name: "ready" }],
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
     });
     assert.deepEqual(observed?.selections[0]?.counts, {
       observed: 4,
@@ -137,7 +137,7 @@ test("readiness counts and unmet reasons come from stored observations without p
     const unmet = {
       rule: observed?.readiness,
       outcome: "unmet",
-      unmet: [{ kind: "label", name: "ready" }],
+      unmet: [{ kind: "label", operator: "has", name: "ready" }],
     };
     const tasks = (await api.readTaskListPage()).data.tasks.filter(
       (t) => t.projectId === projectId,

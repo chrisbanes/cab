@@ -257,7 +257,10 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
         name: "atlas",
       },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   f.runtime.complete(4);
   await until(

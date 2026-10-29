@@ -150,7 +150,10 @@ test("approval-mode exact operator review and unknown remote comment retain orig
         name: "repo",
       },
     ],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   d.execute({
     type: "github.activate",

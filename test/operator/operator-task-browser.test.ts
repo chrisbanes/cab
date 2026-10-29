@@ -2055,7 +2055,7 @@ test("List and Board name an imported Draft task's unmet readiness condition", a
       await page.getByRole("button", { name: "Board", exact: true }).click();
     const card = page.locator(`${surface} [data-task-id="${unready}"]`);
     await card
-      .getByText("Not Ready: missing label `ready`", { exact: true })
+      .getByText("Not Ready: needs label `ready`", { exact: true })
       .waitFor();
     assert.equal(
       await card.getByText("Draft: not Ready", { exact: true }).count(),

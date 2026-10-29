@@ -95,7 +95,10 @@ test("retained rendered form actions, fields and mounted route controls match do
         name: "repo",
       },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   const importedId = randomUUID();
   command({

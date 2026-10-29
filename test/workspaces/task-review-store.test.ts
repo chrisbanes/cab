@@ -895,7 +895,7 @@ test("ordinary GitHub selection capture shares one fresh exclusion snapshot and 
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     d.execute({

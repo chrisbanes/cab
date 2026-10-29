@@ -11,6 +11,7 @@ import {
 } from "./delivery.js";
 import { DomainConflictError } from "./domain-errors.js";
 import {
+  evaluateReadiness,
   type Readiness,
   readinessSchema,
   selectionSchema,
@@ -280,8 +281,11 @@ export class TaskPublicationStore {
           ) &&
           "no-field-grant",
         ready && !satisfiable && "readiness-unsatisfiable",
-        // A null rule is satisfied by any member, so a Draft task would be Ready on import.
-        !ready && readiness === null && "would-become-ready",
+        // A new issue has no labels and a new item no field values: a rule that holds for it (no
+        // rule, or one a `lacks` condition satisfies) would make a Draft task Ready on import.
+        !ready &&
+          evaluateReadiness(readiness, { labels: [], fields: [] }).satisfied &&
+          "would-become-ready",
       ];
       const reasonCodeOfTarget = reasons.find((r) => r !== false) ?? null;
       targets.push(
@@ -662,8 +666,13 @@ export class TaskPublicationStore {
 
 /**
  * The labels and Project fields a Ready task needs on a new issue so that the project's rule holds
- * on import, and whether that is possible from this target. `all` writes every condition; `any`
- * writes the cheapest one: the first label, else the first field on the target Project.
+ * on import, and whether that is possible from this target. A new issue has no labels or field
+ * values, so `lacks` holds without a write. The writes are the `has` labels and the first option of
+ * each `in` condition on the target Project (one write per field, since a field holds one value);
+ * they are possible only if the rule evaluates as satisfied with exactly those facts, so a write
+ * that contradicts another condition, a `not-in` nothing satisfies, or an `in` on another Project
+ * disables the target. `all` plans every write. `any` plans the cheapest one that satisfies it:
+ * nothing, else the first `has` label, else the first `in` on the Project.
  */
 function readinessWrites(
   rule: Readiness | null,
@@ -675,29 +684,48 @@ function readinessWrites(
 } {
   if (!rule) return { labels: [], projectFields: [], satisfiable: true };
   const labels = rule.conditions.flatMap((c) =>
-    c.kind === "label" ? [c.name] : [],
+    c.kind === "label" && c.operator === "has" ? [c.name] : [],
   );
-  const fields = rule.conditions.flatMap((c) =>
-    c.kind === "project-field"
-      ? [
-          {
-            projectNodeId: c.projectNodeId,
-            fieldNodeId: c.fieldNodeId,
-            optionNodeId: c.optionNodeId,
-          },
+  // One write per field of the target Project, since a field holds one value.
+  const written = new Map<
+    string,
+    z.output<typeof publicationProjectFieldSchema>
+  >();
+  for (const c of rule.conditions) {
+    if (
+      c.kind !== "project-field" ||
+      c.operator !== "in" ||
+      c.projectNodeId !== projectNodeId
+    )
+      continue;
+    if (!written.has(c.fieldNodeId))
+      written.set(c.fieldNodeId, {
+        projectNodeId: c.projectNodeId,
+        fieldNodeId: c.fieldNodeId,
+        optionNodeId: c.optionNodeIds[0] as string,
+      });
+  }
+  const fields = [...written.values()];
+  const plans = (
+    rule.mode === "all"
+      ? [{ labels, projectFields: fields }]
+      : [
+          { labels: [], projectFields: [] },
+          { labels: labels.slice(0, 1), projectFields: [] },
+          { labels: [], projectFields: fields.slice(0, 1) },
         ]
-      : [],
+  ).map((plan) => ({
+    ...plan,
+    satisfiable: evaluateReadiness(rule, {
+      labels: plan.labels,
+      fields: plan.projectFields,
+    }).satisfied,
+  }));
+  return (
+    plans.find((plan) => plan.satisfiable) ?? {
+      labels: [],
+      projectFields: [],
+      satisfiable: false,
+    }
   );
-  const here = fields.filter((f) => f.projectNodeId === projectNodeId);
-  if (rule.mode === "all")
-    return {
-      labels,
-      projectFields: here,
-      satisfiable: here.length === fields.length,
-    };
-  if (labels[0] !== undefined)
-    return { labels: [labels[0]], projectFields: [], satisfiable: true };
-  return here[0]
-    ? { labels: [], projectFields: [here[0]], satisfiable: true }
-    : { labels: [], projectFields: [], satisfiable: false };
 }

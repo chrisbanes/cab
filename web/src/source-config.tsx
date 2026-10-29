@@ -226,8 +226,6 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     fallback = "",
     /** Replaces the plain row update, for a saved value that tracks its baseline. */
     change?: (value: string) => void,
-    /** The id of a datalist that suggests values. */
-    list?: string,
   ) => (
     <label className="field body" htmlFor={`source-${field}-${index}-${name}`}>
       {label}
@@ -235,7 +233,6 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         className="control"
         id={`source-${field}-${index}-${name}`}
         aria-label={label}
-        list={list}
         aria-invalid={Boolean(rowError(field, index, name))}
         aria-describedby={
           rowError(field, index, name) ? `source-${field}-error` : undefined
@@ -346,17 +343,6 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     observed?.selections.find((o) => o.selectionId === id);
   const projectSources = data.source.selections.filter(
     (s) => s.kind === "project" && s.descriptor,
-  );
-  const draftedFieldConditions = conditions.flatMap((c) =>
-    c.kind === "project-field"
-      ? [
-          {
-            projectNodeId: String(c.projectNodeId ?? ""),
-            fieldNodeId: String(c.fieldNodeId ?? ""),
-            optionNodeId: String(c.optionNodeId ?? ""),
-          },
-        ]
-      : [],
   );
   /** The Remove and Undo names carry the S-n id, so two rows with one name stay distinct. */
   const rowName = (n: SourceNaming, id: unknown) =>
@@ -472,11 +458,6 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                     {r.kind === "project" && !r.removed && (
                       <ProjectFieldOptions
                         projectFields={observedRow(r.id)?.projectFields}
-                        drafted={draftedFieldConditions}
-                        disabled={isLocked}
-                        onAdd={(ids) =>
-                          add("conditions", { kind: "project-field", ...ids })
-                        }
                       />
                     )}
                     {r.kind === "search" && !r.removed && (
@@ -699,7 +680,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                             rows = parseRows(v.conditions);
                           rows[i] = {
                             ...(kind === "label"
-                              ? { kind, name: "" }
+                              ? { kind, operator: "has", name: "" }
                               : {
                                   kind,
                                   // The source's only GitHub Project is the likely one.
@@ -708,7 +689,8 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                                       ? String(projectSources[0]?.descriptor)
                                       : "",
                                   fieldNodeId: "",
-                                  optionNodeId: "",
+                                  operator: "in",
+                                  optionNodeIds: [],
                                 }),
                             rowKey: String(r.rowKey),
                           };
@@ -720,22 +702,41 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                       </NativeSelect>
                     </label>
                     {r.kind === "label" ? (
-                      <ReadyLabelPicker
-                        index={i}
-                        value={String(r.name ?? "")}
-                        discovery={readinessDiscovery}
-                        input={(list) =>
-                          input(
-                            "conditions",
-                            i,
-                            "name",
-                            "Ready label",
-                            "",
-                            undefined,
-                            list,
-                          )
-                        }
-                      />
+                      <>
+                        <label
+                          className="field body"
+                          htmlFor={`source-conditions-${i}-operator`}
+                        >
+                          Label operator
+                          <NativeSelect
+                            className="control"
+                            id={`source-conditions-${i}-operator`}
+                            aria-label="Label operator"
+                            aria-invalid={Boolean(
+                              rowError("conditions", i, "operator"),
+                            )}
+                            value={String(r.operator ?? "has")}
+                            onChange={(e) =>
+                              update("conditions", i, {
+                                operator: e.target.value,
+                              })
+                            }
+                          >
+                            <option value="has">has</option>
+                            <option value="lacks">does not have</option>
+                          </NativeSelect>
+                        </label>
+                        <ReadyLabelPicker
+                          index={i}
+                          value={String(r.name ?? "")}
+                          discovery={readinessDiscovery}
+                          invalid={Boolean(rowError("conditions", i, "name"))}
+                          onChange={(name) => update("conditions", i, { name })}
+                          input={(label) =>
+                            input("conditions", i, "name", label)
+                          }
+                        />
+                      </>
                     ) : (
                       <ProjectFieldPicker
                         index={i}
@@ -745,27 +746,8 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                           Boolean(rowError("conditions", i, name))
                         }
                         onChange={(patch) => update("conditions", i, patch)}
-                        typed={
-                          <>
-                            {input(
-                              "conditions",
-                              i,
-                              "projectNodeId",
-                              "Readiness Project node ID",
-                            )}
-                            {input(
-                              "conditions",
-                              i,
-                              "fieldNodeId",
-                              "Readiness field node ID",
-                            )}
-                            {input(
-                              "conditions",
-                              i,
-                              "optionNodeId",
-                              "Readiness option node ID",
-                            )}
-                          </>
+                        input={(name, label) =>
+                          input("conditions", i, name, label)
                         }
                       />
                     )}
@@ -785,7 +767,13 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => add("conditions", { kind: "label", name: "" })}
+                  onClick={() =>
+                    add("conditions", {
+                      kind: "label",
+                      operator: "has",
+                      name: "",
+                    })
+                  }
                 >
                   Add readiness condition
                 </Button>
