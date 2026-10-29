@@ -54,6 +54,7 @@ const AREA: Record<ChangeKind, string> = {
   "routing.configure": "project",
   "capacity.configure": "capacity",
   "github.configure": "project",
+  "jira.configure": "project",
   "repositories.configure": "project",
 };
 /**
@@ -89,6 +90,10 @@ export const CHANGE_COMMANDS: Record<
     read: () => "cab capacity get",
   },
   "github.configure": {
+    prepare: "cab project prepare-source",
+    read: (id) => `cab project sources ${id}`,
+  },
+  "jira.configure": {
     prepare: "cab project prepare-source",
     read: (id) => `cab project sources ${id}`,
   },
@@ -455,6 +460,11 @@ function effectNote(document: ChangeDocument): string[] {
       "Source configuration saved; nothing was imported, dispatched or started.",
       "Every selection is now inactive until previewed again at the new version with 'cab project preview-source'; observations are incomplete until the next sync refresh.",
     ];
+  if (c.type === "jira.configure")
+    return [
+      "Jira source saved; every selection is active, and nothing was dispatched or started.",
+      "The next sync refresh imports the matching issues; they stay unadmitted until their blockers are read.",
+    ];
   if (c.type === "repositories.configure")
     return [
       "Repository links saved; nothing was dispatched, started, stopped or cancelled.",
@@ -559,6 +569,7 @@ export async function applyFile(
     "configuration.write",
     ...(creation ? ["workspace.read"] : []),
     ...(document.kind === "github.configure" ||
+    document.kind === "jira.configure" ||
     document.kind === "repositories.configure"
       ? ["source.write"]
       : []),

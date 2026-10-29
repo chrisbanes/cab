@@ -64,6 +64,7 @@ export const operationCommands = new Map<string, WriteCommand>([
           "cli.identity",
           "operation.read",
           ...(type.data.startsWith("github.") ||
+          type.data.startsWith("jira.") ||
           type.data === "repositories.configure"
             ? ["source.write"]
             : []),
