@@ -92,11 +92,12 @@ to TARBALL unpacked into STATE/versions. It asks once for the operator password
 (creating the auth file when it is missing), then signs the CLI in with a read
 credential (90 days, kept in the Keychain or --token-file), runs doctor and opens
 the app. Those steps never undo a started service; if one fails, install prints
-the manual login line. Run from a global npm installation (npm install -g
-@chrisbanes/cab), install copies that package into STATE/versions/V and binds the
-service to the Node.js that runs it, or to --node PATH: an absolute path to an
-even-numbered release at or above the package's engines.node. The binding is kept
-until upgrade --node PATH changes it; a removed Node.js stops the service from starting. --connection defaults to local; --no-open skips the browser.
+the manual login line. --connection defaults to local; --no-open skips the browser.
+Run from a global npm installation (npm install -g @chrisbanes/cab), install copies
+that package into STATE/versions/V and binds the service to the Node.js that runs it,
+or to --node PATH: an absolute path to an even-numbered release at or above the
+package's engines.node. The binding is kept until upgrade --node PATH changes it; a
+removed Node.js stops the service from starting.
 install --mode daemon prepares a LaunchDaemon that starts at boot, before anyone logs
 in. It runs as you, never as root: it renders and records the plist, then prints the
 sudo commands that install and start it; run them, then run the same install command
@@ -107,8 +108,8 @@ its record only once every service process it saw has exited. upgrade
 refuses a daemon install; see the macOS operations guide for the switch-back procedure.
 upgrade stops the job, starts VERSION_DIR (or, with no VERSION_DIR, the global npm
 installation it runs from, copied into STATE/versions/V first) and checks readiness
-through a logged-in CLI connection with a read credential. The service takes and verifies its own snapshot
-before it migrates older data, and refuses to start without one. A failed
+through a logged-in CLI connection with a read credential. The service takes and
+verifies its own snapshot before it migrates older data, and refuses to start without one. A failed
 upgrade leaves the job stopped and reports the snapshot and logs; recover with
 a fixed release and another upgrade, or snapshot restore. uninstall removes the
 job and keeps data, auth, snapshots, versions and logs.
