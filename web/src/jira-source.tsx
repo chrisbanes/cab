@@ -311,6 +311,15 @@ export function JiraSourceTab(
     (c) => c.usable,
   );
   const blocked = !instance || lines.length === 0 || lines.length > 30;
+  // The saved queries are private text: the editor opens only once they are read.
+  if (saved && !known)
+    return (
+      <p className="metadata" role="status">
+        {priv.state.error
+          ? "Saved queries unavailable"
+          : "Loading saved queries…"}
+      </p>
+    );
   return (
     <div className="settings-split settings-split-even">
       <div className="settings-column">
