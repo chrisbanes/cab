@@ -2123,7 +2123,7 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
   }
   assert.equal(
     await style(page, "#column-Running .board-column-name", "color"),
-    await resolved(page, "color", "var(--accent-text)"),
+    await resolved(page, "color", "var(--run)"),
   );
   assert.equal(
     await style(page, "#column-Uncertain .board-column-name", "color"),

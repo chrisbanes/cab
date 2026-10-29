@@ -240,7 +240,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
     return { decoration: style.textDecorationLine, color: style.color };
   });
   assert.equal(ordinaryStyle.decoration, "underline");
-  assert.equal(ordinaryStyle.color, "rgb(241, 245, 249)");
+  assert.equal(ordinaryStyle.color, "rgb(244, 244, 245)");
 
   await page.goto(`${web.origin}/app/settings`);
   const navigation = page.locator(".sidebar .nav-link").first();
@@ -264,8 +264,8 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
     };
   });
   assert.equal(actionStyle.slot, "button");
-  assert.equal(actionStyle.foreground, "rgb(255, 255, 255)");
-  assert.equal(actionStyle.background, "rgb(79, 70, 229)");
+  assert.equal(actionStyle.foreground, "rgb(10, 10, 11)");
+  assert.equal(actionStyle.background, "rgb(244, 244, 245)");
   assert.equal(actionStyle.decoration, "none");
   assert.ok(contrast(actionStyle.foreground, actionStyle.background) >= 4.5);
 
@@ -701,8 +701,8 @@ test("source replacement verifies repositories without diagnostic echo and obser
   assert.equal(invalidStyle.slot, "input");
   assert.equal(invalidStyle.invalid, "true");
   assert.match(invalidStyle.border, /251, 113, 133/);
-  assert.equal(invalidStyle.foreground, "rgb(241, 245, 249)");
-  assert.equal(invalidStyle.background, "rgb(9, 10, 15)");
+  assert.equal(invalidStyle.foreground, "rgb(244, 244, 245)");
+  assert.equal(invalidStyle.background, "rgb(10, 10, 11)");
   await capture(page, "1366-repository-error");
   const sections = page.getByRole("navigation", {
     name: "Project configuration sections",

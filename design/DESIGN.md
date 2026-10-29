@@ -14,7 +14,7 @@ contracts.
 ## Visual direction
 
 A dense dark workbench for one trusted operator: obsidian surfaces separated by
-hairlines, tonal depth instead of shadows, one indigo accent, and compact rows with
+hairlines, tonal depth instead of shadows, a black-and-white accent, and compact rows with
 monospaced identifiers. Calm surfaces, clear decisions: the next decision and its
 evidence get the space; navigation metadata stays quiet.
 
@@ -32,20 +32,21 @@ properties and maps the shadcn names onto them. Keep this table in step with it.
 
 | Token | Value | Purpose |
 | --- | --- | --- |
-| `--bg` | `#090A0F` | Page ground, inputs, segmented-control track |
-| `--surface` | `#0D0F17` | Sidebar, panels, lists, cards, sticky bars |
-| `--raised` | `#151824` | Row hover, secondary buttons, evidence and excerpt blocks |
-| `--overlay` | `#1E2235` | Selection, menus, dialogs, active tab |
-| `--line`, `--line-strong` | `#23283B`, `#2A3047` | Hairline separators; control and card borders |
-| `--fg`, `--fg-2`, `--fg-3` | `#F1F5F9`, `#A6B0C3`, `#8390A6` | Primary, secondary and muted text (muted is at least 5.4:1 on `--raised`) |
-| `--accent-fill` (shadcn `--primary`) | `#4F46E5` | Primary action fill, white text (6.3:1) |
-| `--accent-edge` | `#6366F1` | Selected-row left edge |
-| `--accent-text` | `#A5B4FC` | Links, running state text, selection marks |
-| `--focus` | `#818CF8` | 2px focus outline with 2px offset |
+| `--bg` | `#0A0A0B` | Page ground, inputs, segmented-control track |
+| `--surface` | `#0F0F11` | Sidebar, panels, lists, cards, sticky bars |
+| `--raised` | `#17171A` | Row hover, secondary buttons, evidence and excerpt blocks |
+| `--overlay` | `#202024` | Selection, menus, dialogs, active tab |
+| `--line`, `--line-strong` | `#26262B`, `#2E2E34` | Hairline separators; control and card borders |
+| `--fg`, `--fg-2`, `--fg-3` | `#F4F4F5`, `#A6A6AE`, `#8E8E97` | Primary, secondary and muted text (muted is at least 5.5:1 on `--raised`) |
+| `--accent-fill` (shadcn `--primary`) | `#F4F4F5` | Primary action fill, near-black `#0A0A0B` text (18:1) |
+| `--accent-edge` | `#E4E4E7` | Selected-row left edge, selected tab underline |
+| `--accent-text` | `#E4E4E7` | Links, Not started state text, selection marks |
+| `--focus` | `#E4E4E7` | 2px focus outline with 2px offset |
 | `--attn`, `--attn-soft`, `--attn-border` | `#FBBF24`, amber 12%, amber 35% | Attention: questions, approvals, "Next: you" |
 | `--risk`, `--risk-soft`, `--risk-border` | `#FB7185`, rose 12%, rose 38% | Uncertain execution, interventions, confirmed failures, destructive actions, field errors |
+| `--run`, `--run-soft`, `--run-border` | `#7CC7B2`, mint 12%, mint 35% | Running work; cooler and quieter than `--ok` |
 | `--ok`, `--ok-soft`, `--ok-border` | `#34D399`, emerald 12%, emerald 32% | Completed results, recorded answers, confirmed saves |
-| `--idle`, `--idle-soft`, `--idle-border` | `#A6B0C3`, slate 14%, slate 35% | Waiting, paused, queued, capacity, ready, stopping, stopped, cancelled, provider closed, unknown |
+| `--idle`, `--idle-soft`, `--idle-border` | `#A6A6AE`, grey 14%, grey 35% | Waiting, paused, queued, capacity, ready, stopping, stopped, cancelled, provider closed, unknown |
 
 The cab identity is an amber taxi roof sign. Shared shell and sign-in branding
 use the flat 20 × 20px symbol beside a readable cab label; the symbol is decorative.
@@ -79,7 +80,7 @@ plain-language state, never the headline.
 | --- | --- |
 | Badges | 20px high, 4px radius, soft fill + border + text in the state colour, symbol + word |
 | Buttons, inputs, selects | 30–32px desktop, 6px radius, 10–12px side padding; phone 44px |
-| Primary button | `--accent-fill` fill, white text, 1px white 12% border; one per view |
+| Primary button | `--accent-fill` fill, near-black text, 1px white 12% border; one per view |
 | Secondary button | `--raised` fill, `--line-strong` border |
 | Destructive button | rose-tinted fill and border with `--risk` text, never solid red |
 | Panels, cards, dialogs | 8px radius, 1px `--line` border, `--surface` fill; header row separated by a hairline |

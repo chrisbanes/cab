@@ -565,10 +565,10 @@ test("Composer predicts start or wait before submission from the same waits", as
   const background = (l: Locator) =>
     l.evaluate((e) => getComputedStyle(e).backgroundColor);
   const create = page.getByRole("button", { name: "Create and start" });
-  assert.equal(await background(create), "rgb(79, 70, 229)");
+  assert.equal(await background(create), "rgb(244, 244, 245)");
   assert.notEqual(
     await background(fix),
-    "rgb(79, 70, 229)",
+    "rgb(244, 244, 245)",
     "Fix is secondary",
   );
   assert.equal(commands, 0);

@@ -108,8 +108,8 @@ for (const viewport of [
           radius: s.borderRadius,
         };
       });
-    assert.equal(loginStyle.background, "rgb(79, 70, 229)");
-    assert.equal(loginStyle.foreground, "rgb(255, 255, 255)");
+    assert.equal(loginStyle.background, "rgb(244, 244, 245)");
+    assert.equal(loginStyle.foreground, "rgb(10, 10, 11)");
     assert.ok(contrast(loginStyle.foreground, loginStyle.background) >= 4.5);
     assert.match(loginStyle.family, /Geist/);
     assert.equal(loginStyle.size, "13px");
@@ -130,7 +130,7 @@ for (const viewport of [
         return { active: document.activeElement === el, ring: s.boxShadow };
       });
     assert.equal(focus.active, true);
-    assert.match(focus.ring, /129, 140, 248/);
+    assert.match(focus.ring, /228, 228, 231/);
     await page.keyboard.press("Shift+Tab");
     assert.equal(
       await page
@@ -160,8 +160,8 @@ for (const viewport of [
         const style = getComputedStyle(el);
         return { foreground: style.color, background: style.backgroundColor };
       });
-    assert.equal(primaryAction.foreground, "rgb(255, 255, 255)");
-    assert.equal(primaryAction.background, "rgb(79, 70, 229)");
+    assert.equal(primaryAction.foreground, "rgb(10, 10, 11)");
+    assert.equal(primaryAction.background, "rgb(244, 244, 245)");
     assert.ok(
       contrast(primaryAction.foreground, primaryAction.background) >= 4.5,
     );

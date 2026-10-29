@@ -264,7 +264,7 @@ a.task-source-chip:hover {
   margin: 0;
 }
 
-/* Tabs: 13px labels, a 2px indigo underline on the selected tab, the hairline under the row. */
+/* Tabs: 13px labels, a 2px light underline on the selected tab, the hairline under the row. */
 .task-tabs {
   display: flex;
   gap: var(--space-4);

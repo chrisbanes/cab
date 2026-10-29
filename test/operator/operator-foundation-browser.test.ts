@@ -145,8 +145,8 @@ test("retained HTML routes share the production foundation and native interactio
     });
     assert.match(style.href, /^\/assets\/[A-Za-z0-9_.-]+\.css$/);
     assert.equal(style.loaded, true, path);
-    assert.equal(style.background, "rgb(9, 10, 15)", path);
-    assert.equal(style.foreground, "rgb(241, 245, 249)", path);
+    assert.equal(style.background, "rgb(10, 10, 11)", path);
+    assert.equal(style.foreground, "rgb(244, 244, 245)", path);
     assert.match(style.family, /Geist/);
     assert.equal(style.scripts, 0, "legacy HTML remains non-hydrated");
     assert.equal(style.overflow, false, path);
