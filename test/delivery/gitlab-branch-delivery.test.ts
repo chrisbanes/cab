@@ -174,6 +174,15 @@ test("overwrite and adoption of a GitLab outside head need the exact approval an
     assert.equal(w.pushes.at(-1)?.lease, moved);
     assert.equal(w.pushes.at(-1)?.codeHost, "gitlab");
     assert.equal(branchOf(w)?.lastPushedSha, next);
+    // The approval shows GitLab's comparison on the link's host.
+    const shown = (
+      await new OperatorApi(w.f.service, [w.f.directory]).readTask(w.f.taskId)
+    ).data.approvals.at(-1);
+    assert.equal(
+      shown?.compareUrl,
+      `https://${host}/${projectPath}/-/compare/${first}...${moved}`,
+    );
+    assert.equal(shown?.compareCodeHost, "gitlab");
     assertNoToken(w);
   } finally {
     await w.f.close();

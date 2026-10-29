@@ -2092,8 +2092,9 @@ operator, whatever the grants: it is never covered by an `allow` grant, and the 
 operator-delivery and publication callers cannot use it. Both paths name the task branch, the
 outside head (git's all-zero id for a deleted branch) and the commit cab last pushed (null
 before any push); the approval binds all of it, and the approval view shows these values with a
-GitHub compare link from the last push to the outside head (the outside commit alone when nothing was
-pushed; no link for a deleted branch). The values must still be the task branch's recorded outside
+GitHub or GitLab compare link, on the link's host, from the last push to the outside head (the outside
+commit alone when nothing was pushed; no link for a deleted branch). A GitLab link is built from the
+link's verified project path. The values must still be the task branch's recorded outside
 change when the approval is used and again immediately before the effect, so a record that moved
 refuses it, and an approval is never reused after a refusal.
 

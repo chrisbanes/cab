@@ -71,7 +71,10 @@ import {
 import type { StructuredQuestionSet } from "../core/structured-questions.js";
 import type { Readiness } from "../core/github-source-contracts.js";
 import type { ProjectFieldIds } from "../core/project-field-names.js";
-import type { TaskReadiness } from "../core/github-source.js";
+import {
+  isGitLabProjectPath,
+  type TaskReadiness,
+} from "../core/github-source.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
@@ -557,6 +560,23 @@ export function githubCompareUrl(
   return lastPushedSha
     ? `https://${host}/${repositoryName}/compare/${lastPushedSha}...${outsideHeadSha}`
     : `https://${host}/${repositoryName}/commit/${outsideHeadSha}`;
+}
+
+/**
+ * GitLab's comparison of what an outside writer changed on a task branch, from the link's verified
+ * project path; the same rules as `githubCompareUrl`.
+ */
+export function gitlabCompareUrl(
+  projectPath: string,
+  lastPushedSha: string | null,
+  outsideHeadSha: string,
+  host: string,
+) {
+  if (outsideHeadSha === absentBranchHead || !isGitLabProjectPath(projectPath))
+    return null;
+  return lastPushedSha
+    ? `https://${host}/${projectPath}/-/compare/${lastPushedSha}...${outsideHeadSha}`
+    : `https://${host}/${projectPath}/-/commit/${outsideHeadSha}`;
 }
 
 /** See `OperatorApi.exclusionBase`; one read attempt owns it. */
@@ -3386,7 +3406,7 @@ export class OperatorApi {
       } catch {}
     }
     const recovery = externalActionSchema.safeParse(material);
-    const compareUrl =
+    const compare =
       recovery.success && isRecoveryAction(recovery.data)
         ? this.recoveryCompareUrl(i.taskId, recovery.data, excluded)
         : null;
@@ -3410,7 +3430,7 @@ export class OperatorApi {
         !materialUnavailable &&
         this.disclosable(i.action, excluded) &&
         this.disclosable(i.target, excluded),
-      ...(compareUrl ? { compareUrl } : {}),
+      ...(compare ?? {}),
       materialUnavailable,
       response: this.safe(i.response, excluded),
       revision: i.revision,
@@ -3418,15 +3438,16 @@ export class OperatorApi {
       updatedAt: i.updatedAt,
     };
   }
+  /** The repository's link; an unlinked repository is taken to be on github.com. */
+  private link(taskId: string, repositoryId: string) {
+    const d = this.domain();
+    return d
+      .repositoryLinks(String(d.task(taskId).projectId))
+      .links.find((l) => l.repositoryId === repositoryId);
+  }
   /** The host of the repository's link; an unlinked repository is on github.com. */
   private linkHost(taskId: string, repositoryId: string) {
-    const d = this.domain();
-    return (
-      d
-        .repositoryLinks(String(d.task(taskId).projectId))
-        .links.find((l) => l.repositoryId === repositoryId)?.host ??
-      "github.com"
-    );
+    return this.link(taskId, repositoryId)?.host ?? "github.com";
   }
   /** The compare link of a recovery's material, named for the source repository or the one a push verified. */
   private recoveryCompareUrl(
@@ -3439,20 +3460,36 @@ export class OperatorApi {
     excluded: readonly string[] | undefined,
   ) {
     const repositoryId = recovery.target.repositoryId,
-      identity = this.identity(taskId),
-      name =
-        identity?.repositoryId === repositoryId
-          ? this.service.githubSources().issue(identity.nodeId)?.repositoryName
-          : this.service
-              .delivery()
-              .verifiedRepositoryName(taskId, repositoryId);
-    const url = githubCompareUrl(
-      name ? String(name) : null,
-      recovery.lastPushedSha,
-      recovery.outsideHeadSha,
-      this.linkHost(taskId, repositoryId),
-    );
-    return url && this.disclosable(url, excluded) ? url : null;
+      link = this.link(taskId, repositoryId);
+    let url: string | null;
+    let compareCodeHost: "github" | "gitlab" = "github";
+    if (link?.codeHost === "gitlab") {
+      compareCodeHost = "gitlab";
+      url = gitlabCompareUrl(
+        link.projectPath,
+        recovery.lastPushedSha,
+        recovery.outsideHeadSha,
+        link.host,
+      );
+    } else {
+      const identity = this.identity(taskId),
+        name =
+          identity?.repositoryId === repositoryId
+            ? this.service.githubSources().issue(identity.nodeId)
+                ?.repositoryName
+            : this.service
+                .delivery()
+                .verifiedRepositoryName(taskId, repositoryId);
+      url = githubCompareUrl(
+        name ? String(name) : null,
+        recovery.lastPushedSha,
+        recovery.outsideHeadSha,
+        this.linkHost(taskId, repositoryId),
+      );
+    }
+    return url && this.disclosable(url, excluded)
+      ? { compareUrl: url, compareCodeHost }
+      : null;
   }
   private completion(c: TaskCompletionRequest) {
     return {

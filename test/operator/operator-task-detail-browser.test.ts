@@ -1561,7 +1561,7 @@ test("An approval request opens the approval review, not the question form", asy
   );
 });
 
-test("A recovery approval shows its exact material and a GitHub compare link, and never a foreign link", async (_t, j) => {
+test("A recovery approval shows its exact material and a compare link on its code host, and never a foreign link", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -1587,14 +1587,19 @@ test("A recovery approval shows its exact material and a GitHub compare link, an
     outsideHeadSha: "b".repeat(40),
     lastPushedSha: "a".repeat(40),
   };
+  const gitlabCompare = `https://gitlab.example.com/group/sub/app/-/compare/${"a".repeat(40)}...${"b".repeat(40)}`;
   let link: string | undefined = compare;
+  let codeHost: "github" | "gitlab" = "github";
   await page.route(
     (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
     async (route) => {
       const response = await route.fetch();
       const json = await response.json();
       json.data.approvals[0].material = material;
-      if (link) json.data.approvals[0].compareUrl = link;
+      if (link) {
+        json.data.approvals[0].compareUrl = link;
+        json.data.approvals[0].compareCodeHost = codeHost;
+      }
       await route.fulfill({ response, json });
     },
   );
@@ -1612,6 +1617,18 @@ test("A recovery approval shows its exact material and a GitHub compare link, an
   assert.deepEqual(
     await panel.locator(".approval-material-fields dt").allInnerTexts(),
     ["kind", "target", "branch", "outsideHeadSha", "lastPushedSha"],
+  );
+  // A GitLab link is named for GitLab, whatever its host.
+  link = gitlabCompare;
+  codeHost = "gitlab";
+  await page.reload();
+  const gitlabAnchor = panel.getByRole("link", { name: /Compare on GitLab/ });
+  await gitlabAnchor.waitFor();
+  assert.equal(await gitlabAnchor.getAttribute("href"), gitlabCompare);
+  assert.equal(await gitlabAnchor.getAttribute("rel"), "noopener noreferrer");
+  assert.equal(
+    await panel.getByRole("link", { name: /Compare on GitHub/ }).count(),
+    0,
   );
   // No link without server-verified repository naming.
   link = undefined;

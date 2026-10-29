@@ -10,6 +10,7 @@ import {
 } from "../fixtures/delivery-integration.js";
 import {
   githubCompareUrl,
+  gitlabCompareUrl,
   OperatorApi,
 } from "../../src/standalone/operator-api.js";
 import {
@@ -1181,6 +1182,7 @@ test("an overwrite of an outside head waits for the operator to approve its exac
       shown?.compareUrl,
       `https://github.com/org/repo/compare/${material.lastPushedSha}...${outside}`,
     );
+    assert.equal(shown?.compareCodeHost, "github");
     // Other material, or a different commit, is not what was approved.
     const other = action("branch.force-push", {
       commitSha: next,
@@ -1236,4 +1238,24 @@ test("a compare link names a verified repository and the outside change only", (
   for (const name of [null, "../app", "acme/..", "acme/app/extra", "a b/c"])
     assert.equal(githubCompareUrl(name, last, outside), null, String(name));
   assert.equal(githubCompareUrl("acme/app", last, absentBranchHead), null);
+});
+
+test("a GitLab compare link names the link's verified project path and the outside change only", () => {
+  const last = "a".repeat(40),
+    outside = "b".repeat(40),
+    host = "gitlab.example.com";
+  assert.equal(
+    gitlabCompareUrl("group/sub/app", last, outside, host),
+    `https://${host}/group/sub/app/-/compare/${last}...${outside}`,
+  );
+  assert.equal(
+    gitlabCompareUrl("group/sub/app", null, outside, host),
+    `https://${host}/group/sub/app/-/commit/${outside}`,
+  );
+  for (const path of ["app", "group/../app", "group/./app", "group/app.git"])
+    assert.equal(gitlabCompareUrl(path, last, outside, host), null, path);
+  assert.equal(
+    gitlabCompareUrl("group/app", last, absentBranchHead, host),
+    null,
+  );
 });

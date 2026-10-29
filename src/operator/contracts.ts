@@ -1275,15 +1275,23 @@ const interaction = z
     materialHash: hash.nullable(),
     material: materialSchema.nullable(),
     approvable: z.boolean(),
-    /** For a recovery from an outside change: GitHub's view of what the outside writer changed. */
-    compareUrl: z.url().startsWith("https://github.com/").optional(),
+    /** For a recovery from an outside change: the code host's view of what the outside writer changed. */
+    compareUrl: z.url().startsWith("https://").optional(),
+    compareCodeHost: z.enum(["github", "gitlab"]).optional(),
     materialUnavailable: z.boolean(),
     response: safeText,
     revision,
     createdAt: time,
     updatedAt: time,
   })
-  .strict();
+  .strict()
+  // The link and its code host come together, and a GitHub link stays on github.com.
+  .refine(
+    (i) =>
+      (i.compareUrl === undefined) === (i.compareCodeHost === undefined) &&
+      (i.compareCodeHost !== "github" ||
+        i.compareUrl?.startsWith("https://github.com/")),
+  );
 const completion = z
   .object({
     requestId: uuid,
