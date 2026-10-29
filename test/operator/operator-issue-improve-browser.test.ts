@@ -84,37 +84,39 @@ async function launch(
         },
       }),
       {
-        providerFactory: () => ({
-          async preflight() {
-            if (hooks.changed) throw new IssueChangedRefusal();
-            return { nodeId: "I_1" };
-          },
-          async performAction(record) {
-            effects.push(record.request.action);
-            if (options.outcome === "uncertain")
+        providerFactories: {
+          github: () => ({
+            async preflight() {
+              if (hooks.changed) throw new IssueChangedRefusal();
+              return { nodeId: "I_1" };
+            },
+            async performAction(record) {
+              effects.push(record.request.action);
+              if (options.outcome === "uncertain")
+                return {
+                  state: "uncertain",
+                  reason: "response-lost",
+                  receipt: null,
+                };
+              if (record.request.action.kind === "issue.edit")
+                current = {
+                  title: record.request.action.fields.title ?? current.title,
+                  body: record.request.action.fields.body ?? current.body,
+                };
               return {
-                state: "uncertain",
-                reason: "response-lost",
-                receipt: null,
+                state: "confirmed-success",
+                reason: null,
+                receipt: { nodeId: "C1" },
               };
-            if (record.request.action.kind === "issue.edit")
-              current = {
-                title: record.request.action.fields.title ?? current.title,
-                body: record.request.action.fields.body ?? current.body,
-              };
-            return {
-              state: "confirmed-success",
-              reason: null,
-              receipt: { nodeId: "C1" },
-            };
-          },
-          async inspectAction() {
-            return { state: "uncertain", reason: "unproved", receipt: null };
-          },
-          async inspectPr() {
-            throw Error("No PR in fixture");
-          },
-        }),
+            },
+            async inspectAction() {
+              return { state: "uncertain", reason: "unproved", receipt: null };
+            },
+            async inspectPr() {
+              throw Error("No PR in fixture");
+            },
+          }),
+        },
       },
       j.fixtureOptions,
     ),

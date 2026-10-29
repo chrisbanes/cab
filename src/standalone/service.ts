@@ -40,7 +40,6 @@ import {
   canonicalMaterial,
   type DeliveryActionRecord,
   type DeliveryCaller,
-  type DeliveryPolicy,
   DeliveryStore,
   type ExternalAction,
   isOperatorAction,
@@ -169,7 +168,7 @@ import {
   ghEnvironment,
   ghToken,
 } from "./gh-credential.js";
-import type { GitHubDeliveryProvider } from "./github-delivery.js";
+import type { CodeHostProviderFactories } from "./code-host.js";
 import {
   CredentialGitHubSourceReader,
   gitHubSourceCredentialStatus,
@@ -475,10 +474,7 @@ export interface StandaloneServiceOptions {
   resolveExecutable?: (harness: ExecutionHarness) => Promise<boolean>;
   delivery?: {
     fetcher?: typeof fetch;
-    providerFactory?: (
-      projectId: string,
-      policy: DeliveryPolicy,
-    ) => GitHubDeliveryProvider;
+    providerFactories?: CodeHostProviderFactories;
     /** Test-only: how long a status-mapping write's provider call may take. */
     statusWriteTimeoutMs?: number;
   };
@@ -1048,9 +1044,13 @@ export class StandaloneService {
         ...(this.options.delivery?.fetcher
           ? { fetcher: this.options.delivery.fetcher }
           : {}),
-        ...(this.options.delivery?.providerFactory
-          ? { providerFactory: this.options.delivery.providerFactory }
+        ...(this.options.delivery?.providerFactories
+          ? { providerFactories: this.options.delivery.providerFactories }
           : {}),
+        codeHostOf: (projectId, repositoryId) =>
+          domain
+            .repositoryLinks(projectId)
+            .links.find((l) => l.repositoryId === repositoryId) ?? null,
         ...(this.options.delivery?.statusWriteTimeoutMs
           ? {
               statusWriteTimeoutMs: this.options.delivery.statusWriteTimeoutMs,

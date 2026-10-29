@@ -30,7 +30,6 @@ import type { PushWorkspace } from "./push-verification.js";
 import {
   type AdoptFunction,
   type AdoptionContext,
-  type GitHubDeliveryProvider,
   GitHubHttpDeliveryProvider,
   IssueChangedRefusal,
   ProjectFieldChangedRefusal,
@@ -39,6 +38,11 @@ import {
   type PushFunction,
   type PushVerification,
 } from "./github-delivery.js";
+import type {
+  CodeHost,
+  CodeHostDeliveryProvider,
+  CodeHostProviderFactories,
+} from "./code-host.js";
 
 /** The unresolved review threads a lead can reply to or resolve, capped with an omitted count. */
 export function unresolvedThreadSummary(
@@ -67,10 +71,12 @@ class DeliveryReadUnavailable extends Error {
 
 export interface DeliveryCoordinatorOptions {
   fetcher?: typeof fetch;
-  providerFactory?: (
+  providerFactories?: CodeHostProviderFactories;
+  /** The code host the project's repository link names, or null when the repository is not linked. */
+  codeHostOf?: (
     projectId: string,
-    policy: DeliveryPolicy,
-  ) => GitHubDeliveryProvider;
+    repositoryId: string,
+  ) => { codeHost: CodeHost; host: string } | null;
   authorize: (
     caller: DeliveryCaller,
     exceptOperationId?: string,
@@ -135,10 +141,16 @@ export class DeliveryCoordinator {
   ) {}
   private provider(
     projectId: string,
+    repositoryId: string,
     policy = this.store.configuration(projectId),
-  ): GitHubDeliveryProvider {
-    if (this.options.providerFactory)
-      return this.options.providerFactory(projectId, policy);
+  ): CodeHostDeliveryProvider {
+    // shortcut: unlinked targets default to GitHub on github.com, replace when the issue-tracker seam (#1317) routes issue writes and GitLab delivery (#1313) refuses unlinked code-host targets
+    const { codeHost, host } = this.options.codeHostOf?.(
+      projectId,
+      repositoryId,
+    ) ?? { codeHost: "github", host: "github.com" };
+    const factory = this.options.providerFactories?.[codeHost];
+    if (factory) return factory(projectId, policy, host);
     const credential = policy.credentialRef
       ? process.env[policy.credentialRef.slice(4)]
       : undefined;
@@ -147,6 +159,7 @@ export class DeliveryCoordinator {
       this.options.fetcher,
       this.options.push,
       this.options.adopt,
+      host,
     );
   }
   /**
@@ -285,7 +298,7 @@ export class DeliveryCoordinator {
     operationId: string,
   ) {
     return this.serialize([`task:${projectId}:${operationId}`], async () => {
-      const provider = this.provider(projectId);
+      const provider = this.provider(projectId, target.repositoryId);
       if (!provider.inspectPublishedIssue)
         throw new Error("Published issue inspection unavailable");
       return provider.inspectPublishedIssue(target, operationId);
@@ -296,7 +309,11 @@ export class DeliveryCoordinator {
   ): Promise<DeliveryActionRecord> {
     const caller = record.binding,
       policy = this.store.configuration(caller.projectId);
-    const provider = this.provider(caller.projectId, policy);
+    const provider = this.provider(
+      caller.projectId,
+      record.request.action.target.repositoryId,
+      policy,
+    );
     const action = record.request.action;
     let publication: PublicationContext | undefined;
     let adoption: AdoptionContext | undefined;
@@ -539,6 +556,7 @@ export class DeliveryCoordinator {
           this.options.taskVersion?.(caller.taskId) ?? caller.taskVersion;
       const observation = await this.provider(
         caller.projectId,
+        identity.repositoryId,
         policy,
       ).inspectPr(identity, policy);
       return this.store.transaction(() => {
@@ -601,7 +619,10 @@ export class DeliveryCoordinator {
     return this.serialize(
       [`task:${taskId}`, `target:${target.repositoryId}:${target.number}`],
       async () => {
-        const provider = this.provider(record.binding.projectId);
+        const provider = this.provider(
+          record.binding.projectId,
+          target.repositoryId,
+        );
         if (!provider.inspectClosedIssue)
           throw new Error("Fresh closure inspection unavailable");
         const closerPrNodeId =
@@ -652,7 +673,7 @@ export class DeliveryCoordinator {
     if (!binding) throw new Error("Unknown PR delivery");
     const policy = this.store.configuration(binding.projectId),
       p = binding.observation,
-      provider = this.provider(binding.projectId, policy);
+      provider = this.provider(binding.projectId, p.repositoryId, policy);
     let observation: PrDeliveryObservation;
     try {
       observation = await provider.inspectPr(
@@ -814,7 +835,10 @@ export class DeliveryCoordinator {
         try {
           observation = await this.bounded(
             current.binding,
-            this.provider(current.binding.projectId).inspectAction(current),
+            this.provider(
+              current.binding.projectId,
+              current.request.action.target.repositoryId,
+            ).inspectAction(current),
           );
         } catch {
           observation = {

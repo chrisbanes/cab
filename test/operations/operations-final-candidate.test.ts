@@ -562,7 +562,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     restored = new StandaloneService(restoredData, () => runtime, undefined, {
       power: { enabled: false },
       routingClient: routing,
-      delivery: { providerFactory: () => f.scripted.provider },
+      delivery: { providerFactories: { github: () => f.scripted.provider } },
       github: {
         readerFactory: () => ({
           async readSelection() {
@@ -675,7 +675,7 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     restored = new StandaloneService(restoredData, () => runtime2, undefined, {
       power: { enabled: false },
       routingClient: null,
-      delivery: { providerFactory: () => f.scripted.provider },
+      delivery: { providerFactories: { github: () => f.scripted.provider } },
     });
     await restored.start();
     assert.equal(runtime2.turns, 0);

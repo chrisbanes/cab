@@ -366,8 +366,9 @@ export async function runStatusMappingJourney(
     } as unknown as ExecutionState;
     const facts = { domain, state, deliveryStore: store, mappings };
     const coordinator = new DeliveryCoordinator(store, {
-      providerFactory: () =>
-        new GitHubHttpDeliveryProvider(token, guardedFetch),
+      providerFactories: {
+        github: () => new GitHubHttpDeliveryProvider(token, guardedFetch),
+      },
       // The service's own check: the event the write was minted for is still the task's.
       authorize: (caller) => {
         if (

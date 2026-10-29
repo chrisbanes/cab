@@ -506,6 +506,7 @@ export function githubPullUrl(
   sourceRepositoryId: string | null,
   pullRequestRepositoryId: string,
   number: number,
+  host = "github.com",
 ) {
   if (
     !repositoryName ||
@@ -514,7 +515,7 @@ export function githubPullUrl(
     repositoryName.split("/").some((part) => part === "." || part === "..")
   )
     return null;
-  return `https://github.com/${repositoryName}/pull/${number}`;
+  return `https://${host}/${repositoryName}/pull/${number}`;
 }
 
 /**
@@ -527,6 +528,7 @@ export function githubCompareUrl(
   repositoryName: string | null,
   lastPushedSha: string | null,
   outsideHeadSha: string,
+  host = "github.com",
 ) {
   if (
     !repositoryName ||
@@ -536,8 +538,8 @@ export function githubCompareUrl(
   )
     return null;
   return lastPushedSha
-    ? `https://github.com/${repositoryName}/compare/${lastPushedSha}...${outsideHeadSha}`
-    : `https://github.com/${repositoryName}/commit/${outsideHeadSha}`;
+    ? `https://${host}/${repositoryName}/compare/${lastPushedSha}...${outsideHeadSha}`
+    : `https://${host}/${repositoryName}/commit/${outsideHeadSha}`;
 }
 
 /** See `OperatorApi.exclusionBase`; one read attempt owns it. */
@@ -3390,6 +3392,16 @@ export class OperatorApi {
       updatedAt: i.updatedAt,
     };
   }
+  /** The host of the repository's link; an unlinked repository is on github.com. */
+  private linkHost(taskId: string, repositoryId: string) {
+    const d = this.domain();
+    return (
+      d
+        .repositoryLinks(String(d.task(taskId).projectId))
+        .links.find((l) => l.repositoryId === repositoryId)?.host ??
+      "github.com"
+    );
+  }
   /** The compare link of a recovery's material, named for the source repository or the one a push verified. */
   private recoveryCompareUrl(
     taskId: string,
@@ -3412,6 +3424,7 @@ export class OperatorApi {
       name ? String(name) : null,
       recovery.lastPushedSha,
       recovery.outsideHeadSha,
+      this.linkHost(taskId, repositoryId),
     );
     return url && this.disclosable(url, excluded) ? url : null;
   }
@@ -5075,6 +5088,7 @@ export class OperatorApi {
           source?.identity.repositoryId ?? null,
           b.observation.repositoryId,
           b.observation.number,
+          this.linkHost(taskId, b.observation.repositoryId),
         )
       : null;
     return deliveryReadSchema.parse({

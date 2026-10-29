@@ -1551,12 +1551,14 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
       null,
       undefined,
       {
-        providerFactory: () => ({
-          inspectAction: unexpectedProviderCall,
-          preflight: unexpectedProviderCall,
-          performAction: unexpectedProviderCall,
-          inspectPr: unexpectedProviderCall,
-        }),
+        providerFactories: {
+          github: () => ({
+            inspectAction: unexpectedProviderCall,
+            preflight: unexpectedProviderCall,
+            performAction: unexpectedProviderCall,
+            inspectPr: unexpectedProviderCall,
+          }),
+        },
       },
       journey.fixtureOptions,
     ),

@@ -475,7 +475,7 @@ test("a run publishes two Ready tasks through the real service, matches them on 
     attempt: 1,
     gh: fake.gh,
     fetcher: fixtureFetch(),
-    providerFactory: () => github.provider(),
+    providerFactories: { github: () => github.provider() },
     readerFactory: github.readerFactory(),
     ghRetryMs: 0,
     readRetryMs: 0,
@@ -529,7 +529,7 @@ test("a run that fails after creating the Project still deletes it and proves th
     attempt: 1,
     gh: fake.gh,
     fetcher: fixtureFetch(),
-    providerFactory: () => github.provider(),
+    providerFactories: { github: () => github.provider() },
     readerFactory: github.readerFactory(),
     ghRetryMs: 0,
     readRetryMs: 0,
@@ -554,7 +554,7 @@ test("a login without the project scope stops before anything is created", async
         ? "HTTP/2.0 200 OK\nX-Oauth-Scopes: repo\n\n{}"
         : fake.gh(args),
     fetcher: fixtureFetch(),
-    providerFactory: () => github.provider(),
+    providerFactories: { github: () => github.provider() },
     readerFactory: github.readerFactory(),
   });
   assert.equal(evidence.qualification, "failed");
@@ -573,7 +573,7 @@ test("a fixture whose visibility differs from the grant stops before anything is
     attempt: 1,
     gh: fake.gh,
     fetcher: fixtureFetch(true),
-    providerFactory: () => github.provider(),
+    providerFactories: { github: () => github.provider() },
     readerFactory: github.readerFactory(),
   });
   assert.equal(evidence.qualification, "failed");
@@ -595,13 +595,15 @@ test("a create GitHub's list does not show at first is proved by a later refresh
     gh: fake.gh,
     fetcher: fixtureFetch(),
     // The list catches up by the first read-back.
-    providerFactory: () => ({
-      ...provider,
-      inspectAction: async (record) => {
-        for (const issue of github.issues.values()) issue.hidden = false;
-        return provider.inspectAction(record);
-      },
-    }),
+    providerFactories: {
+      github: () => ({
+        ...provider,
+        inspectAction: async (record) => {
+          for (const issue of github.issues.values()) issue.hidden = false;
+          return provider.inspectAction(record);
+        },
+      }),
+    },
     readerFactory: github.readerFactory(),
     ghRetryMs: 0,
     readRetryMs: 0,

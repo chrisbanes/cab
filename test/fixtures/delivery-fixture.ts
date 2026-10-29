@@ -14,9 +14,9 @@ import type {
 } from "../../src/standalone/codex.js";
 import {
   type ClosedIssueInspection,
-  type GitHubDeliveryProvider,
   ProjectFieldChangedRefusal,
 } from "../../src/standalone/github-delivery.js";
+import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 import type {
   ExternalAction,
   PrDeliveryObservation,
@@ -136,7 +136,7 @@ export async function deliveryFixture(
   let movedAfterWrite: string | undefined;
   let statusHold: Promise<void> | undefined;
   let closedIssueReads = 0;
-  const provider: GitHubDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider = {
     async inspectClosedIssue() {
       closedIssueReads += 1;
       if (closedIssue instanceof Error) throw closedIssue;
@@ -246,7 +246,7 @@ export async function deliveryFixture(
     undefined,
     {
       delivery: {
-        providerFactory: () => provider,
+        providerFactories: { github: () => provider },
         ...(statusWriteTimeoutMs ? { statusWriteTimeoutMs } : {}),
       },
       github: {

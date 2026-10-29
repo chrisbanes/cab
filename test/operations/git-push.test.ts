@@ -116,6 +116,7 @@ ${behaviour.sleep ? "setTimeout(() => {}, 60000);" : `process.stdout.write(${JSO
 
 const request = (repo: ReturnType<typeof repository>, executable: string) => ({
   workspacePath: repo.workspace,
+  host: "github.com",
   nameWithOwner: "octo/fixture",
   commitSha: repo.sha,
   branch: "cab/abcd1234-task",
@@ -246,6 +247,7 @@ test("the credential helper answers only for https github.com and the exact repo
       env: {
         PATH: process.env.PATH,
         CAB_PUSH_TOKEN: token,
+        CAB_PUSH_HOST: "github.com",
         CAB_PUSH_PATH: "octo/fixture.git",
       },
     }).stdout;
@@ -267,11 +269,58 @@ test("the credential helper answers only for https github.com and the exact repo
       env: {
         PATH: process.env.PATH,
         CAB_PUSH_TOKEN: token,
+        CAB_PUSH_HOST: "github.com",
         CAB_PUSH_PATH: "octo/fixture.git",
       },
     }).stdout,
     "",
   );
+});
+
+test("the credential helper answers only for the configured host", () => {
+  const ask = (host: string, input: string) =>
+    spawnSync("sh", ["-c", `${pushCredentialHelper.slice(1)} get`], {
+      input,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        CAB_PUSH_TOKEN: token,
+        CAB_PUSH_HOST: host,
+        CAB_PUSH_PATH: "group/repo.git",
+      },
+    }).stdout;
+  const good = "protocol=https\nhost=gitlab.example.com\npath=group/repo.git\n";
+  assert.equal(
+    ask("gitlab.example.com", good),
+    `username=x-access-token\npassword=${token}\n`,
+  );
+  for (const bad of [
+    good.replace("gitlab.example.com", "github.com"),
+    good.replace("gitlab.example.com", "gitlab.example.com.evil.example"),
+    good.replace("https", "http"),
+    good.replace("group/repo.git", "group/other.git"),
+  ])
+    assert.equal(ask("gitlab.example.com", bad), "", bad);
+  // An unset host never matches an empty `host=` line.
+  assert.equal(ask("", "protocol=https\nhost=\npath=group/repo.git\n"), "");
+});
+
+test("a push to a non-GitHub host targets that host", async (t) => {
+  const repo = repository(t);
+  const fake = shim(t);
+  assert.equal(
+    await pushTaskCommit({
+      ...request(repo, fake.executable),
+      host: "gitlab.example.com",
+    }),
+    "pushed",
+  );
+  const seen = fake.recorded();
+  assert.equal(seen.env.CAB_PUSH_HOST, "gitlab.example.com");
+  assert.deepEqual(seen.args.slice(-2), [
+    "https://gitlab.example.com/octo/fixture.git",
+    `${repo.sha}:refs/heads/cab/abcd1234-task`,
+  ]);
 });
 
 test("a lease push names the lease commit and the refusal reports map to outcomes", async (t) => {
@@ -329,6 +378,9 @@ test("a cancelled push is uncertain and an invalid request never starts Git", as
     { nameWithOwner: "octo/fixture; rm" },
     { commitSha: "HEAD" },
     { lease: "main" },
+    ...["GitHub.com", "github.com:443", "evil/x", "", "a..b"].map((host) => ({
+      host,
+    })),
   ])
     assert.equal(
       await pushTaskCommit({ ...request(repo, never.executable), ...bad }),
