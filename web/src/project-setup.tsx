@@ -15,12 +15,19 @@ import {
   discoveryBranchesSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
+  codeHostCredentialsSchema,
   discoveryStatusSchema,
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import { ActionLink, Button } from "./components.js";
 import { runtimeErrors } from "./execution-runtime.js";
 import { FolderPicker } from "./folder-picker.js";
+import {
+  GitLabSetupRows,
+  gitLabRowsFromDraft,
+  gitLabRowsToDraft,
+  withGitLabRepositories,
+} from "./gitlab-setup.js";
 import { ReadyCheck } from "./ready-check.js";
 import {
   harnessSettings,
@@ -82,6 +89,7 @@ const blank = () => ({
   leadProfileId: "",
   instructions: "",
   rows: rowsToDraft([emptyRow("discovered")]),
+  gitlabRows: gitLabRowsToDraft([]),
   githubProject: "",
   projectId: key(),
   key: key(),
@@ -134,6 +142,22 @@ export function ProjectSetup(
   const csrf = p.session.csrfToken;
   const rows = rowsFromDraft(d.values.rows);
   const setRows = (next: SetupRow[]) => d.set("rows", rowsToDraft(next));
+  const gitlabRows = gitLabRowsFromDraft(d.values.gitlabRows);
+  // Configured GitLab hosts offer GitLab repository rows next to GitHub's.
+  const [gitlabHosts, setGitlabHosts] = useState<string[]>([]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the session (CSRF token) changes.
+  useEffect(() => {
+    let live = true;
+    p.client
+      .read("/api/operator/code-host-credentials", codeHostCredentialsSchema)
+      .then(
+        (r) => live && setGitlabHosts(r.data.credentials.map((c) => c.host)),
+        () => {},
+      );
+    return () => {
+      live = false;
+    };
+  }, [p.client, p.session.csrfToken]);
   const disabled = locked(d);
   const [attempt, setAttempt] = useState(0);
   const attemptRef = useRef(attempt);
@@ -375,13 +399,20 @@ export function ProjectSetup(
   };
   // A Project can only be linked alongside a discovered repository.
   // Submitting with Enter skips the field's blur, so listed typed rows are adopted here too.
-  const { command, rowIndex } = buildProjectCreate(
+  const github = buildProjectCreate(
     values,
     rows.map((r) => adoptListed(r, false)),
     // Only a Project the current list shows can be sent; the control is empty otherwise.
     listedProject(chosenProject, projectList),
     sourceGh,
   );
+  const { rowIndex } = github;
+  const gitlab = withGitLabRepositories(
+    github.command,
+    rowIndex.length,
+    gitlabRows,
+  );
+  const { command } = gitlab;
   const fieldError = (i: number, ...fields: string[]) => {
     const k = rowIndex.indexOf(i);
     return k >= 0 && fields.some((f) => d.errors[`repositories.${k}.${f}`]);
@@ -464,6 +495,7 @@ export function ProjectSetup(
   );
   const forced =
     rows.some((r) => !blankRow(r)) ||
+    gitlabRows.length > 0 ||
     rowIssue ||
     ghDraft.phase === "pending" ||
     ghDraft.phase === "unknown";
@@ -1120,6 +1152,29 @@ export function ProjectSetup(
                       A project can have up to 20 repositories.
                     </p>
                   )}
+                  <GitLabSetupRows
+                    client={p.client}
+                    csrfToken={csrf}
+                    disabled={disabled}
+                    hosts={gitlabHosts}
+                    rows={gitlabRows}
+                    setRows={(next) => {
+                      // Row indices shift, so the service's row errors no longer apply.
+                      d.clearErrors("repositories.");
+                      d.set("gitlabRows", gitLabRowsToDraft(next));
+                    }}
+                    rejected={(index, field) => {
+                      const k = gitlab.rowIndex.indexOf(index);
+                      return (
+                        k >= 0 &&
+                        Boolean(
+                          d.errors[
+                            `repositories.${rowIndex.length + k}.${field}`
+                          ],
+                        )
+                      );
+                    }}
+                  />
                   {rows.some((r) => !blankRow(r)) && rows.length < 20 && (
                     <div>
                       <Button

@@ -6,6 +6,7 @@ import {
   readinessSchema,
 } from "../../src/operator/readiness.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
+import type { GitLabSeams } from "../../src/standalone/gitlab-credentials.js";
 import type { BrowserJourney } from "./browser-diagnostics.js";
 import {
   ClaudeShapedFixtureRuntime,
@@ -28,6 +29,9 @@ export async function setupJourney(
     truncated?: boolean;
     /** A fake `gh` executable; without one the service finds no gh. */
     ghExecutable?: string;
+    /** A fake `glab` executable and GitLab reader factory; without them the service finds no glab. */
+    glabExecutable?: string;
+    gitlab?: GitLabSeams["gitlab"];
     /** The GitHub source reader, for a setup that imports from its linked Project. */
     readerFactory?: GitHubReaderFactory;
     /** Enable the Claude runtime beside Codex, with a Claude-shaped fake. */
@@ -38,6 +42,9 @@ export async function setupJourney(
   journey.cleanup(() => home.close(), "setup-home.close");
   // The service resolves source credentials with the same gh the setup reads use.
   const gh = options.ghExecutable ? { ghExecutable: options.ghExecutable } : {};
+  const glab = options.glabExecutable
+    ? { glabExecutable: options.glabExecutable }
+    : {};
   const f = await journey.start("fixture.create", () =>
     options.claude
       ? createOperatorFixture(
@@ -49,7 +56,7 @@ export async function setupJourney(
             harness === "claude"
               ? new ClaudeShapedFixtureRuntime()
               : new OperatorFixtureRuntime(),
-          { runtimeHarnesses: ["codex", "claude"], ...gh },
+          { runtimeHarnesses: ["codex", "claude"], ...gh, ...glab },
         )
       : createOperatorFixture(
           null,
@@ -57,7 +64,7 @@ export async function setupJourney(
           undefined,
           journey.fixtureOptions,
           undefined,
-          gh,
+          { ...gh, ...glab },
         ),
   );
   let browser: Browser | undefined;
@@ -106,6 +113,8 @@ export async function setupJourney(
       home: home.home,
       discovery: fakeDiscovery(discoveryState),
       ...gh,
+      ...glab,
+      ...(options.gitlab ? { gitlab: options.gitlab } : {}),
     }),
   );
   browser = await journey.start("browser.launch", () =>

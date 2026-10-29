@@ -57,6 +57,12 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
       result.commandType === "discovery.configure" &&
       result.configured === (c.credentialRef !== null)
     );
+  if (c.type === "code-host-credential.configure")
+    return (
+      result.commandType === "code-host-credential.configure" &&
+      result.resourceId === `system:code-host-credential:gitlab:${c.host}` &&
+      result.configured === (c.credentialRef !== null)
+    );
   if (c.type === "claude-token.configure")
     return (
       result.commandType === "claude-token.configure" &&

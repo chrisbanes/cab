@@ -8,6 +8,7 @@ export const SETTINGS_SECTIONS = [
   { id: "profiles", label: "Profiles" },
   { id: "routing", label: "Routing" },
   { id: "github-discovery", label: "GitHub discovery" },
+  { id: "gitlab-credentials", label: "GitLab credentials" },
   { id: "cli-credentials", label: "CLI credentials" },
   { id: "notifications", label: "Notifications" },
   { id: "readiness", label: "Readiness" },
