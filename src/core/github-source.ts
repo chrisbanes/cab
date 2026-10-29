@@ -330,9 +330,19 @@ export class GitHubSourceStore {
       .prepare(
         `SELECT instance AS providerInstance, externalId AS nodeId, taskId, containerId AS repositoryId,
           containerName AS repositoryName, number AS issueNumber, observedTitle, observedBody,
-          observedState, labels, observedStatus FROM external_items WHERE ${itemIs()}`,
+          observedState, labels FROM external_items WHERE ${itemIs()}`,
       )
       .get(...this.key(nodeId)) as Row | undefined;
+  }
+
+  /** The tracker's own status of an issue as JSON `{id,name,categoryKey}`; null for GitHub. */
+  observedStatus(nodeId: string): string | null {
+    const row = this.db
+      .prepare(`SELECT observedStatus FROM external_items WHERE ${itemIs()}`)
+      .get(...this.key(nodeId)) as Row | undefined;
+    return row?.observedStatus === undefined || row.observedStatus === null
+      ? null
+      : String(row.observedStatus);
   }
 
   memberships(nodeId: string): Row[] {
@@ -1361,7 +1371,10 @@ export class GitHubSourceStore {
   /** `deliveryClosure` marks the own-delivery closure flow, which sets its own hold. */
   updateReadiness(taskId: string, deliveryClosure = false): void {
     const owner = this.ownerOf(taskId);
-    if (owner !== this) return owner.updateReadiness(taskId, deliveryClosure);
+    if (owner !== this) {
+      owner.updateReadiness(taskId, deliveryClosure);
+      return;
+    }
     const external = this.db
       .prepare(
         "SELECT e.externalId AS nodeId, e.labels, e.observedState, t.projectId FROM external_items e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?",

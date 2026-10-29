@@ -2248,7 +2248,7 @@ export class OperatorApi {
   }
   /** What a source reports of its issue: the display name, key, link and Jira-only detail. */
   private issueFacts(
-    identity: { provider: string; tracker?: "jira" },
+    identity: { provider: string; tracker?: "jira"; nodeId?: string },
     issue: Row | undefined,
     excluded: readonly string[] | undefined,
     /** Whether a GitHub repository name must also pass the exclusions. */
@@ -2286,7 +2286,12 @@ export class OperatorApi {
     const status = z
       .object({ name: z.string(), categoryKey: z.string() })
       .passthrough()
-      .safeParse(JSON.parse(String(issue?.observedStatus ?? "null")));
+      .safeParse(
+        JSON.parse(
+          this.sourceStore(identity).observedStatus(identity.nodeId ?? "") ??
+            "null",
+        ),
+      );
     return {
       repositoryName: projectKey,
       number,

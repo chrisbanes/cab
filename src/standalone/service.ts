@@ -2480,6 +2480,9 @@ export class StandaloneService {
     }
 
     await attempt("GitHub synchronization stop", () => synchronizer?.stop());
+    await attempt("Jira synchronization stop", () =>
+      jiraSynchronizerStop?.stop(),
+    );
     await attempt("status mapping stop", () => statusMapping?.stop());
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
