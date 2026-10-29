@@ -58,11 +58,11 @@ async function run(data: string, release: string, fault?: Fault) {
   await service.stop();
 }
 
-/** Start and stop at `from`, then remove a table that a later startup recreates. */
+/** Start and stop at `from`, then remove tables that a later startup recreates. */
 async function olderDatabase(data: string, from = "0.0.1") {
   await run(data, from);
   const db = new DatabaseSync(join(data, "standalone.sqlite"));
-  db.exec("DROP TABLE status_mappings");
+  db.exec("DROP TABLE status_mappings; DROP TABLE project_repository_links");
   db.close();
 }
 
@@ -151,13 +151,14 @@ test("an older release's data is snapshotted and verified before it is migrated"
     assert.equal(
       snapshotDb
         .prepare(
-          "SELECT count(*) AS n FROM sqlite_master WHERE name = 'status_mappings'",
+          "SELECT count(*) AS n FROM sqlite_master WHERE name IN ('status_mappings', 'project_repository_links')",
         )
         .get()?.n,
       0,
     );
     snapshotDb.close();
     assert.match(schemaState(dirs.data), /status_mappings/);
+    assert.match(schemaState(dirs.data), /project_repository_links/);
     assert.deepEqual(readStartupState(dirs.data)?.snapshot?.path, path);
     assert.equal(readStartupState(dirs.data)?.release, "0.1.0");
   } finally {
