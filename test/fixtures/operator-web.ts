@@ -312,7 +312,9 @@ export async function createOperatorFixture<
         power: serviceOptions.power ?? { enabled: false },
         routingClient,
         ...(delivery ? { delivery } : {}),
-        ...(readerFactory ? { github: { readerFactory } } : {}),
+        ...(readerFactory
+          ? { issueTrackers: { readerFactories: { github: readerFactory } } }
+          : {}),
       },
     );
   let service = makeService();

@@ -562,21 +562,26 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     restored = new StandaloneService(restoredData, () => runtime, undefined, {
       power: { enabled: false },
       routingClient: routing,
-      delivery: { providerFactories: { github: () => f.scripted.provider } },
-      github: {
-        readerFactory: () => ({
-          async readSelection() {
-            entered = true;
-            await gate;
-            throw Error("Synthetic source unavailable");
-          },
-          async readBlockers() {
-            return { complete: false, blockers: [], reason: "unavailable" };
-          },
-          async readIssueStatus() {
-            return { status: "unknown" };
-          },
-        }),
+      delivery: {
+        providerFactories: { github: () => f.scripted.provider },
+        issueTrackerFactories: { github: () => f.scripted.provider },
+      },
+      issueTrackers: {
+        readerFactories: {
+          github: () => ({
+            async readSelection() {
+              entered = true;
+              await gate;
+              throw Error("Synthetic source unavailable");
+            },
+            async readBlockers() {
+              return { complete: false, blockers: [], reason: "unavailable" };
+            },
+            async readIssueStatus() {
+              return { status: "unknown" };
+            },
+          }),
+        },
       },
       workspaceManager: { beforePathAccess: (path) => accesses.push(path) },
     });
@@ -675,7 +680,10 @@ test("final candidate CLI snapshot preserves whole schema and immutable history 
     restored = new StandaloneService(restoredData, () => runtime2, undefined, {
       power: { enabled: false },
       routingClient: null,
-      delivery: { providerFactories: { github: () => f.scripted.provider } },
+      delivery: {
+        providerFactories: { github: () => f.scripted.provider },
+        issueTrackerFactories: { github: () => f.scripted.provider },
+      },
     });
     await restored.start();
     assert.equal(runtime2.turns, 0);

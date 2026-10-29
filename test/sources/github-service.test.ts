@@ -82,7 +82,10 @@ test("startup invalidates prior clear source/dependency evidence before the firs
     },
   });
   const options = {
-    github: { readerFactory: () => reader, intervalMs: 60_000 },
+    issueTrackers: {
+      readerFactories: { github: () => reader },
+      intervalMs: 60_000,
+    },
     power: { enabled: false },
   };
   let service = new StandaloneService(data, runtime, undefined, options);
@@ -250,7 +253,10 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
     runtime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 60_000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 60_000,
+      },
       power: { enabled: false },
     },
   );
@@ -497,7 +503,10 @@ test("a held canonical lead receives one source-hold notice without changing ass
     runtime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 60_000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 60_000,
+      },
       power: { enabled: false },
     },
   );
@@ -641,7 +650,10 @@ test("an unassigned routing-enabled source hold does not invent a lead assignmen
     runtime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 60_000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 60_000,
+      },
       power: { enabled: false },
       routingClient: {
         async choose(request) {
@@ -871,7 +883,10 @@ test("explicit and timer refresh converge, and stop settles an in-flight read be
     runtime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 1000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 1000,
+      },
       power: { enabled: false },
     },
   );
@@ -1163,7 +1178,10 @@ test("a rate-limited read pauses manual refreshes until the reset without implyi
     idleRuntime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 3_600_000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 3_600_000,
+      },
       power: { enabled: false },
     },
   );
@@ -1372,7 +1390,10 @@ test("timer refreshes also wait out a rate limit", async () => {
     idleRuntime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 1000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 1000,
+      },
       power: { enabled: false },
     },
   );
@@ -1529,22 +1550,24 @@ async function closedIssueService(closedIssues: "skip" | "done") {
     }),
     undefined,
     {
-      github: {
-        readerFactory: (): GitHubSourceReader => ({
-          async readSelection() {
-            return {
-              complete: true,
-              issues: [{ ...issue, state: reader.state }],
-              reason: null,
-            };
-          },
-          async readBlockers() {
-            return { complete: true, blockers: [], reason: null };
-          },
-          async readIssueStatus() {
-            return { status: reader.state };
-          },
-        }),
+      issueTrackers: {
+        readerFactories: {
+          github: (): GitHubSourceReader => ({
+            async readSelection() {
+              return {
+                complete: true,
+                issues: [{ ...issue, state: reader.state }],
+                reason: null,
+              };
+            },
+            async readBlockers() {
+              return { complete: true, blockers: [], reason: null };
+            },
+            async readIssueStatus() {
+              return { status: reader.state };
+            },
+          }),
+        },
         intervalMs: 60_000,
       },
       power: { enabled: false },
@@ -1806,24 +1829,26 @@ async function importedWorkspaceService(options: {
     }),
     undefined,
     {
-      github: {
-        readerFactory: () => ({
-          async readSelection() {
-            return {
-              complete: true,
-              issues: [issue, unready, unlinked, ...(options.extra ?? [])],
-              reason: null,
-            };
-          },
-          async readBlockers() {
-            return blockersFail
-              ? { complete: false, blockers: [], reason: "http-403" }
-              : { complete: true, blockers: [], reason: null };
-          },
-          async readIssueStatus() {
-            return { status: "open" as const };
-          },
-        }),
+      issueTrackers: {
+        readerFactories: {
+          github: () => ({
+            async readSelection() {
+              return {
+                complete: true,
+                issues: [issue, unready, unlinked, ...(options.extra ?? [])],
+                reason: null,
+              };
+            },
+            async readBlockers() {
+              return blockersFail
+                ? { complete: false, blockers: [], reason: "http-403" }
+                : { complete: true, blockers: [], reason: null };
+            },
+            async readIssueStatus() {
+              return { status: "open" as const };
+            },
+          }),
+        },
         intervalMs: 60_000,
       },
       power: { enabled: false },
@@ -2248,5 +2273,96 @@ test("one refresh pass looks a repository up once across selection and blocker r
   } finally {
     await sync.stop();
     db.close();
+  }
+});
+
+test("the service builds preview and sync readers from the injected issue-tracker reader factory", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-reader-seam-")));
+  const projectId = randomUUID();
+  const references: string[] = [];
+  const reader: GitHubSourceReader = {
+    async readSelection() {
+      return { complete: true, issues: [issue], reason: null };
+    },
+    async readBlockers() {
+      return { complete: true, blockers: [], reason: null };
+    },
+    async readIssueStatus() {
+      return { status: "open" };
+    },
+  };
+  const service = new StandaloneService(
+    join(root, "data"),
+    () => {
+      throw new Error("no runtime");
+    },
+    undefined,
+    {
+      issueTrackers: {
+        readerFactories: {
+          github: (reference) => {
+            references.push(reference);
+            return reader;
+          },
+        },
+        intervalMs: 60_000,
+      },
+      power: { enabled: false },
+    },
+  );
+  try {
+    await service.start();
+    const domain = service.domain();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [
+        {
+          id: "repo",
+          kind: "repository",
+          repositoryId: "R_1",
+          owner: "org",
+          name: "repo",
+        },
+      ],
+      readiness: {
+        mode: "any",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+    });
+    domain.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      selectionId: "repo",
+      expectedVersion: 2,
+    });
+    await service.gitHubSourceReader("env:PREVIEW").readSelection({
+      id: "repo",
+      kind: "repository",
+      repositoryId: "R_1",
+      owner: "org",
+      name: "repo",
+    });
+    assert.deepEqual(references, ["env:PREVIEW"]);
+    await service.refreshGitHub();
+    assert.deepEqual(references, ["env:PREVIEW", "env:TEST_GITHUB"]);
+    assert.ok(service.githubSources().issue("I_1"));
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
   }
 });

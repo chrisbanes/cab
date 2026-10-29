@@ -16,6 +16,7 @@ import {
 import { desktop, phone } from "../fixtures/operator-settings.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { until } from "../fixtures/operator-work.js";
+import { githubFake } from "../fixtures/delivery-fixture.js";
 
 const test = browserSuite("ui-issue-improve");
 
@@ -84,39 +85,37 @@ async function launch(
         },
       }),
       {
-        providerFactories: {
-          github: () => ({
-            async preflight() {
-              if (hooks.changed) throw new IssueChangedRefusal();
-              return { nodeId: "I_1" };
-            },
-            async performAction(record) {
-              effects.push(record.request.action);
-              if (options.outcome === "uncertain")
-                return {
-                  state: "uncertain",
-                  reason: "response-lost",
-                  receipt: null,
-                };
-              if (record.request.action.kind === "issue.edit")
-                current = {
-                  title: record.request.action.fields.title ?? current.title,
-                  body: record.request.action.fields.body ?? current.body,
-                };
+        ...githubFake(() => ({
+          async preflight() {
+            if (hooks.changed) throw new IssueChangedRefusal();
+            return { nodeId: "I_1" };
+          },
+          async performAction(record) {
+            effects.push(record.request.action);
+            if (options.outcome === "uncertain")
               return {
-                state: "confirmed-success",
-                reason: null,
-                receipt: { nodeId: "C1" },
+                state: "uncertain",
+                reason: "response-lost",
+                receipt: null,
               };
-            },
-            async inspectAction() {
-              return { state: "uncertain", reason: "unproved", receipt: null };
-            },
-            async inspectPr() {
-              throw Error("No PR in fixture");
-            },
-          }),
-        },
+            if (record.request.action.kind === "issue.edit")
+              current = {
+                title: record.request.action.fields.title ?? current.title,
+                body: record.request.action.fields.body ?? current.body,
+              };
+            return {
+              state: "confirmed-success",
+              reason: null,
+              receipt: { nodeId: "C1" },
+            };
+          },
+          async inspectAction() {
+            return { state: "uncertain", reason: "unproved", receipt: null };
+          },
+          async inspectPr() {
+            throw Error("No PR in fixture");
+          },
+        })),
       },
       j.fixtureOptions,
     ),

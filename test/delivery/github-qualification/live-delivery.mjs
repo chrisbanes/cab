@@ -307,7 +307,10 @@ async function start() {
     {
       routingClient: null,
       delivery: { fetcher: guard.fetcher() },
-      github: { readerFactory: sourceReader, intervalMs: 1000000 },
+      issueTrackers: {
+        readerFactories: { github: sourceReader },
+        intervalMs: 1000000,
+      },
       power: { enabled: false },
       conversationHistoryExclusions: () => [
         password,

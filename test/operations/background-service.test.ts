@@ -283,7 +283,7 @@ test("unattended GitHub polling failures close admission and emit one fixed diag
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const runtime = new FixtureRuntime();
     const service = makeService(root, runtime, diagnostics, {
-      github: { intervalMs: 1000 },
+      issueTrackers: { intervalMs: 1000 },
     });
     const failure = new Error("private token and /Users/person/workspace");
     try {
@@ -383,7 +383,7 @@ test("domain wake failures use the generation latch", async () => {
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const runtime = new FixtureRuntime();
     const service = makeService(data, runtime, diagnostics, {
-      github: { intervalMs: 1000 },
+      issueTrackers: { intervalMs: 1000 },
     });
     try {
       await service.start();
@@ -426,7 +426,7 @@ test("admission closes across a gated process-identity await for queued and dire
     runtime.identity = () => identity.promise;
     runtime.onIdentity = () => identityEntered.resolve();
     const service = makeService(data, runtime, diagnostics, {
-      github: { intervalMs: 1000 },
+      issueTrackers: { intervalMs: 1000 },
     });
     try {
       await service.start();
@@ -614,7 +614,10 @@ test("GitHub reader failures remain durable incomplete-source evidence and direc
       },
     });
     const service = makeService(data, new FixtureRuntime(), diagnostics, {
-      github: { intervalMs: 1000, readerFactory },
+      issueTrackers: {
+        intervalMs: 1000,
+        readerFactories: { github: readerFactory },
+      },
     });
     try {
       await service.start();
@@ -673,7 +676,7 @@ test("diagnostic sink throw, rejection, and hang use one bounded redacted stderr
         roots.push(root);
         const diagnostics: BackgroundFailureDiagnostic[] = [];
         const service = makeService(root, new FixtureRuntime(), diagnostics, {
-          github: { intervalMs: 1000 },
+          issueTrackers: { intervalMs: 1000 },
           backgroundDiagnosticSink: (event) => {
             diagnostics.push(event);
             if (mode === "throws") throw new Error("secret sink exception");
@@ -733,7 +736,7 @@ test("the default sink writes the sanitised failure to stderr without credential
       () => new FixtureRuntime(),
       undefined,
       {
-        github: { intervalMs: 1000 },
+        issueTrackers: { intervalMs: 1000 },
       },
     );
     try {
@@ -779,7 +782,7 @@ test("a failed fatal shutdown retains the SQLite owner, records shutdown failure
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const runtime = new FixtureRuntime();
     const service = makeService(data, runtime, diagnostics, {
-      github: { intervalMs: 1000 },
+      issueTrackers: { intervalMs: 1000 },
     });
     let db: DatabaseSync | undefined;
     let originalClose: (() => void) | undefined;
@@ -867,7 +870,7 @@ test("repeated synthetic timer-clear failures keep a late callback fatal signal 
     const runtime = new FixtureRuntime();
     const poll = deferred<void>();
     const service = makeService(data, runtime, diagnostics, {
-      github: { intervalMs: 1000 },
+      issueTrackers: { intervalMs: 1000 },
     });
     const priorExitCode = process.exitCode;
     const originalClearInterval = Object.getOwnPropertyDescriptor(
@@ -974,7 +977,7 @@ test("serve-style signal wait succeeds normally and a fatal notification already
     const root = mkdtempSync(join(tmpdir(), "cab-background-serve-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const service = makeService(root, new FixtureRuntime(), diagnostics, {
-      github: { intervalMs: 1000 },
+      issueTrackers: { intervalMs: 1000 },
     });
     try {
       process.exitCode = 0;
@@ -1018,7 +1021,7 @@ test("a late timer callback from a stopped generation cannot affect a restarted 
     const root = mkdtempSync(join(tmpdir(), "cab-background-old-callback-"));
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const service = makeService(root, new FixtureRuntime(), diagnostics, {
-      github: { intervalMs: 1000 },
+      issueTrackers: { intervalMs: 1000 },
     });
     try {
       await service.start();
@@ -1291,7 +1294,7 @@ test("production operator CLI joins an already-fatal service and closes the live
           new FixtureRuntime(),
           diagnostics,
           {
-            github: { intervalMs: 1000 },
+            issueTrackers: { intervalMs: 1000 },
           },
         );
         const access = serviceAccess(service);
@@ -1437,7 +1440,7 @@ test("operator CLI consumes fatal failures before first accessor and across bund
           (directory) => {
             runtime = new FixtureRuntime();
             service = makeService(directory, runtime, diagnostics, {
-              github: { intervalMs: 1000 },
+              issueTrackers: { intervalMs: 1000 },
             });
             const actualStart = service.start.bind(service);
             service.start = async () => {
@@ -1680,7 +1683,7 @@ test("production operator CLI handles SIGTERM first, then joins fatal shutdown a
           new FixtureRuntime(),
           diagnostics,
           {
-            github: { intervalMs: 1000 },
+            issueTrackers: { intervalMs: 1000 },
           },
         );
         const access = serviceAccess(service);
@@ -1753,7 +1756,7 @@ test("production serve CLI sees a fatal service signal that predates its wait", 
         ["serve", root],
         (directory) => {
           service = makeService(directory, runtime, diagnostics, {
-            github: { intervalMs: 1000 },
+            issueTrackers: { intervalMs: 1000 },
           });
           const access = serviceAccess(service);
           access.refreshGitHub = () => {
@@ -1958,7 +1961,7 @@ test("production serve CLI joins a fatal failure that arrives after SIGTERM wins
       const signalBaseline = process.listenerCount("SIGTERM");
       const command = main(["serve", root], (directory) => {
         service = makeService(directory, new FixtureRuntime(), diagnostics, {
-          github: { intervalMs: 1000 },
+          issueTrackers: { intervalMs: 1000 },
         });
         const access = serviceAccess(service);
         access.refreshGitHub = () => poll.promise;
@@ -2001,7 +2004,7 @@ test("operator signal-first shutdown joins a later fatal failure and closes its 
     const authFile = join(root, "operator-auth.json");
     const diagnostics: BackgroundFailureDiagnostic[] = [];
     const service = makeService(data, new FixtureRuntime(), diagnostics, {
-      github: { intervalMs: 1000 },
+      issueTrackers: { intervalMs: 1000 },
     });
     const poll = deferred<void>();
     let auth: OperatorAuth | undefined;

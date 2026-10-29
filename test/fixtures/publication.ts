@@ -272,6 +272,7 @@ export function publicationWorld(
     });
     return new DeliveryCoordinator(store, {
       providerFactories: { github: () => provider },
+      issueTrackerFactories: { github: () => provider },
       authorize: () => {},
       approved: () => approved,
       taskWorkspace: async () => ({

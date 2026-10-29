@@ -1,6 +1,7 @@
 import { credentialFreeEnvironment } from "../core/child-environment.js";
 import {
   absentBranchHead,
+  isIssueTrackerAction,
   isOperatorAction,
   isRecoveryAction,
   isOperatorDeliveryCaller,
@@ -43,6 +44,11 @@ import type {
   CodeHostDeliveryProvider,
   CodeHostProviderFactories,
 } from "./code-host.js";
+import type {
+  IssueTracker,
+  IssueTrackerWriter,
+  IssueTrackerWriterFactories,
+} from "./issue-tracker.js";
 
 /** The unresolved review threads a lead can reply to or resolve, capped with an omitted count. */
 export function unresolvedThreadSummary(
@@ -72,6 +78,11 @@ class DeliveryReadUnavailable extends Error {
 export interface DeliveryCoordinatorOptions {
   fetcher?: typeof fetch;
   providerFactories?: CodeHostProviderFactories;
+  issueTrackerFactories?: IssueTrackerWriterFactories;
+  /** The issue tracker the project's task source names, or null when the project has no task source. */
+  issueTrackerOf?: (
+    projectId: string,
+  ) => { issueTracker: IssueTracker; instance: string } | null;
   /** The code host the project's repository link names, or null when the repository is not linked. */
   codeHostOf?: (
     projectId: string,
@@ -143,7 +154,7 @@ export class DeliveryCoordinator {
     projectId: string,
     repositoryId: string,
   ): { codeHost: CodeHost; host: string } {
-    // shortcut: unlinked targets default to GitHub on github.com, replace when the issue-tracker seam (#1317) routes issue writes and GitLab delivery (#1313) refuses unlinked code-host targets
+    // shortcut: unlinked code-host targets default to GitHub on github.com, replace when GitLab delivery (#1313) refuses them
     return (
       this.options.codeHostOf?.(projectId, repositoryId) ?? {
         codeHost: "github",
@@ -162,6 +173,9 @@ export class DeliveryCoordinator {
     if (factory) return factory(projectId, policy, host);
     if (codeHost !== "github")
       throw new Error("Code host delivery unavailable");
+    return this.githubProvider(policy, host);
+  }
+  private githubProvider(policy: DeliveryPolicy, host: string) {
     const credential = policy.credentialRef
       ? process.env[policy.credentialRef.slice(4)]
       : undefined;
@@ -172,6 +186,37 @@ export class DeliveryCoordinator {
       this.options.adopt,
       host,
     );
+  }
+  private issueTrackerFor(projectId: string): {
+    issueTracker: IssueTracker;
+    instance: string;
+  } {
+    // shortcut: a project without a task source resolves to GitHub on github.com, revisit when #1318 adds a second issue tracker
+    return (
+      this.options.issueTrackerOf?.(projectId) ?? {
+        issueTracker: "github",
+        instance: "github.com",
+      }
+    );
+  }
+  /** Whether the project's issue tracker has a writer: GitHub has a built-in one, any other needs a factory. */
+  private issueTrackerAvailable(projectId: string): boolean {
+    const { issueTracker } = this.issueTrackerFor(projectId);
+    return (
+      issueTracker === "github" ||
+      !!this.options.issueTrackerFactories?.[issueTracker]
+    );
+  }
+  private issueTracker(
+    projectId: string,
+    policy = this.store.configuration(projectId),
+  ): IssueTrackerWriter {
+    const { issueTracker, instance } = this.issueTrackerFor(projectId);
+    const factory = this.options.issueTrackerFactories?.[issueTracker];
+    if (factory) return factory(projectId, policy, instance);
+    if (issueTracker !== "github")
+      throw new Error("Issue tracker delivery unavailable");
+    return this.githubProvider(policy, instance);
   }
   /**
    * A status-mapping write's provider call gives up after a time; other callers wait as before. The
@@ -309,10 +354,10 @@ export class DeliveryCoordinator {
     operationId: string,
   ) {
     return this.serialize([`task:${projectId}:${operationId}`], async () => {
-      const provider = this.provider(projectId, target.repositoryId);
-      if (!provider.inspectPublishedIssue)
-        throw new Error("Published issue inspection unavailable");
-      return provider.inspectPublishedIssue(target, operationId);
+      return this.issueTracker(projectId).inspectPublishedIssue(
+        target,
+        operationId,
+      );
     });
   }
   private async attempt(
@@ -320,21 +365,32 @@ export class DeliveryCoordinator {
   ): Promise<DeliveryActionRecord> {
     const caller = record.binding,
       policy = this.store.configuration(caller.projectId);
-    const target = record.request.action.target.repositoryId,
-      resolved = this.codeHost(caller.projectId, target);
-    // Refused before any provider, preflight or Git transport runs for the target.
-    // GitHub has a built-in provider; any other code host needs an injected factory.
-    if (
-      resolved.codeHost !== "github" &&
-      !this.options.providerFactories?.[resolved.codeHost]
-    )
-      return this.store.recordObservation(record.operationId, {
-        state: "confirmed-failure",
-        reason: "code-host-delivery-unavailable",
-        receipt: null,
-      });
-    const provider = this.provider(caller.projectId, target, policy, resolved);
     const action = record.request.action;
+    const target = action.target.repositoryId;
+    // Refused before any provider, preflight or Git transport runs for the target.
+    // GitHub has a built-in provider; any other host or tracker needs an injected factory.
+    let provider: CodeHostDeliveryProvider | IssueTrackerWriter;
+    if (isIssueTrackerAction(action.kind)) {
+      if (!this.issueTrackerAvailable(caller.projectId))
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "issue-tracker-delivery-unavailable",
+          receipt: null,
+        });
+      provider = this.issueTracker(caller.projectId, policy);
+    } else {
+      const resolved = this.codeHost(caller.projectId, target);
+      if (
+        resolved.codeHost !== "github" &&
+        !this.options.providerFactories?.[resolved.codeHost]
+      )
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "code-host-delivery-unavailable",
+          receipt: null,
+        });
+      provider = this.provider(caller.projectId, target, policy, resolved);
+    }
     let publication: PublicationContext | undefined;
     let adoption: AdoptionContext | undefined;
     const assigned = action.kind.startsWith("branch.")
@@ -639,12 +695,7 @@ export class DeliveryCoordinator {
     return this.serialize(
       [`task:${taskId}`, `target:${target.repositoryId}:${target.number}`],
       async () => {
-        const provider = this.provider(
-          record.binding.projectId,
-          target.repositoryId,
-        );
-        if (!provider.inspectClosedIssue)
-          throw new Error("Fresh closure inspection unavailable");
+        const provider = this.issueTracker(record.binding.projectId);
         const closerPrNodeId =
           record.request.action.kind === "pr.merge"
             ? record.request.action.target.nodeId
@@ -855,9 +906,12 @@ export class DeliveryCoordinator {
         try {
           observation = await this.bounded(
             current.binding,
-            this.provider(
-              current.binding.projectId,
-              current.request.action.target.repositoryId,
+            (isIssueTrackerAction(current.request.action.kind)
+              ? this.issueTracker(current.binding.projectId)
+              : this.provider(
+                  current.binding.projectId,
+                  current.request.action.target.repositoryId,
+                )
             ).inspectAction(current),
           );
         } catch {

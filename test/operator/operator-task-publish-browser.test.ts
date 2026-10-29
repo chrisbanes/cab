@@ -45,7 +45,10 @@ async function launch(
     createOperatorFixture(
       null,
       gh.readerFactory(),
-      { providerFactories: { github: () => gh.provider() } },
+      {
+        providerFactories: { github: () => gh.provider() },
+        issueTrackerFactories: { github: () => gh.provider() },
+      },
       j.fixtureOptions,
     ),
   );

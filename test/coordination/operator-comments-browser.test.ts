@@ -16,6 +16,7 @@ import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { seedTaskResult } from "../fixtures/task-review.js";
 import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import { openSearchFromSidebar } from "../fixtures/shell-search.js";
+import { githubFake } from "../fixtures/delivery-fixture.js";
 
 const test = browserSuite("operator-comments-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
@@ -77,33 +78,31 @@ test("approval-mode exact operator review and unknown remote comment retain orig
         },
       }),
       {
-        providerFactories: {
-          github: () => ({
-            async preflight() {
-              return { nodeId: "I1" };
-            },
-            async performAction() {
-              effects++;
-              return {
-                state: "uncertain",
-                reason: "response-lost",
-                receipt: null,
-              };
-            },
-            async inspectAction() {
-              return settled
-                ? {
-                    state: "confirmed-success",
-                    reason: null,
-                    receipt: { nodeId: "C1" },
-                  }
-                : { state: "uncertain", reason: "unproved", receipt: null };
-            },
-            async inspectPr() {
-              throw Error("No PR in fixture");
-            },
-          }),
-        },
+        ...githubFake(() => ({
+          async preflight() {
+            return { nodeId: "I1" };
+          },
+          async performAction() {
+            effects++;
+            return {
+              state: "uncertain",
+              reason: "response-lost",
+              receipt: null,
+            };
+          },
+          async inspectAction() {
+            return settled
+              ? {
+                  state: "confirmed-success",
+                  reason: null,
+                  receipt: { nodeId: "C1" },
+                }
+              : { state: "uncertain", reason: "unproved", receipt: null };
+          },
+          async inspectPr() {
+            throw Error("No PR in fixture");
+          },
+        })),
       },
       j.fixtureOptions,
     ),

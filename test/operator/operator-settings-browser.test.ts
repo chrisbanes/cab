@@ -1546,19 +1546,21 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
     providerCalls++;
     throw Error("Unexpected fixture provider call");
   };
+  const unexpectedProvider = () => ({
+    inspectAction: unexpectedProviderCall,
+    preflight: unexpectedProviderCall,
+    performAction: unexpectedProviderCall,
+    inspectPr: unexpectedProviderCall,
+    inspectPublishedIssue: unexpectedProviderCall,
+    inspectClosedIssue: unexpectedProviderCall,
+  });
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(
       null,
       undefined,
       {
-        providerFactories: {
-          github: () => ({
-            inspectAction: unexpectedProviderCall,
-            preflight: unexpectedProviderCall,
-            performAction: unexpectedProviderCall,
-            inspectPr: unexpectedProviderCall,
-          }),
-        },
+        providerFactories: { github: unexpectedProvider },
+        issueTrackerFactories: { github: unexpectedProvider },
       },
       journey.fixtureOptions,
     ),

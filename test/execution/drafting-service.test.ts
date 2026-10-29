@@ -361,22 +361,24 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
           : {}),
         ...(options.issue
           ? {
-              github: {
-                readerFactory: () => ({
-                  async readSelection() {
-                    return {
-                      complete: true,
-                      issues: [thinIssue],
-                      reason: null,
-                    };
-                  },
-                  async readBlockers() {
-                    return { complete: true, blockers: [], reason: null };
-                  },
-                  async readIssueStatus() {
-                    return { status: "open" as const };
-                  },
-                }),
+              issueTrackers: {
+                readerFactories: {
+                  github: () => ({
+                    async readSelection() {
+                      return {
+                        complete: true,
+                        issues: [thinIssue],
+                        reason: null,
+                      };
+                    },
+                    async readBlockers() {
+                      return { complete: true, blockers: [], reason: null };
+                    },
+                    async readIssueStatus() {
+                      return { status: "open" as const };
+                    },
+                  }),
+                },
               },
             }
           : {}),

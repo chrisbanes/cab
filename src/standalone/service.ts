@@ -178,7 +178,13 @@ import {
   CredentialGitHubSourceReader,
   gitHubSourceCredentialStatus,
 } from "./github-source-credential.js";
-import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
+import { projectIssueTracker } from "../core/source-storage.js";
+import { GitHubSynchronizer } from "./github-sync.js";
+import type {
+  IssueTracker,
+  IssueTrackerReaderFactories,
+  IssueTrackerWriterFactories,
+} from "./issue-tracker.js";
 import { resolveOnPath } from "./executable-path.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
 import {
@@ -480,10 +486,14 @@ export interface StandaloneServiceOptions {
   delivery?: {
     fetcher?: typeof fetch;
     providerFactories?: CodeHostProviderFactories;
+    issueTrackerFactories?: IssueTrackerWriterFactories;
     /** Test-only: how long a status-mapping write's provider call may take. */
     statusWriteTimeoutMs?: number;
   };
-  github?: { readerFactory?: GitHubReaderFactory; intervalMs?: number };
+  issueTrackers?: {
+    readerFactories?: IssueTrackerReaderFactories;
+    intervalMs?: number;
+  };
   routingClient?: RoutingChoiceClient | null;
   /** The `gh` executable for a `gh:github.com` discovery reference; defaults to `gh`. */
   ghExecutable?: string;
@@ -1063,6 +1073,22 @@ export class StandaloneService {
         ...(this.options.delivery?.providerFactories
           ? { providerFactories: this.options.delivery.providerFactories }
           : {}),
+        ...(this.options.delivery?.issueTrackerFactories
+          ? {
+              issueTrackerFactories:
+                this.options.delivery.issueTrackerFactories,
+            }
+          : {}),
+        issueTrackerOf: (projectId) => {
+          const source = projectIssueTracker(db, projectId);
+          // Only GitHub rows exist today; the coordinator refuses a tracker without a writer.
+          return source
+            ? {
+                issueTracker: source.provider as IssueTracker,
+                instance: source.instance,
+              }
+            : null;
+        },
         codeHostOf: (projectId, repositoryId) =>
           domain
             .repositoryLinks(projectId)
@@ -1471,7 +1497,7 @@ export class StandaloneService {
           }, pollIntervalMs).unref(),
         );
       }
-      const githubInterval = this.options.github?.intervalMs ?? 300_000;
+      const githubInterval = this.options.issueTrackers?.intervalMs ?? 300_000;
       if (
         !Number.isSafeInteger(githubInterval) ||
         githubInterval < 1000 ||
@@ -3171,7 +3197,7 @@ export class StandaloneService {
 
   private sourceReader(domain: () => DomainStore, reference: string) {
     return (
-      this.options.github?.readerFactory?.(reference) ??
+      this.options.issueTrackers?.readerFactories?.github?.(reference) ??
       new CredentialGitHubSourceReader(reference, {
         gh: () => ({
           executable: this.options.ghExecutable,

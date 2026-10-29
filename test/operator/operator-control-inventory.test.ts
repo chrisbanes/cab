@@ -14,15 +14,17 @@ test("retained rendered form actions, fields and mounted route controls match do
     providerCalls++;
     throw Error("Unexpected fixture provider call");
   };
+  const unexpectedProvider = () => ({
+    inspectAction: unexpectedProviderCall,
+    preflight: unexpectedProviderCall,
+    performAction: unexpectedProviderCall,
+    inspectPr: unexpectedProviderCall,
+    inspectPublishedIssue: unexpectedProviderCall,
+    inspectClosedIssue: unexpectedProviderCall,
+  });
   const f = await createOperatorFixture(null, undefined, {
-    providerFactories: {
-      github: () => ({
-        inspectAction: unexpectedProviderCall,
-        preflight: unexpectedProviderCall,
-        performAction: unexpectedProviderCall,
-        inspectPr: unexpectedProviderCall,
-      }),
-    },
+    providerFactories: { github: unexpectedProvider },
+    issueTrackerFactories: { github: unexpectedProvider },
   });
   t.after(() => f.close());
   const d = f.service.domain();

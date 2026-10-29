@@ -1901,6 +1901,10 @@ from the Codex spawn environment, including nonempty exact-value aliases. Adding
 credential already inherited by a running runtime holds activation until restart.
 Host-permitted reads and the existing login boundary remain accepted limitations.
 
+Issue actions (`issue.*` and `project.*`) go to the project's issue tracker and their grants are
+scoped to its container, a GitHub repository today; they need no repository link. Pull request
+and branch actions go to the code host of the target's repository link.
+
 Each project chooses reviewable PR (default) or through-merge delivery. Reviewable-PR handback waits for settlement; feedback/CI failures wake the
 task-scoped project lead, while merge remains operator-owned. Through-merge requires granted authority,
 project instructions and actual GitHub requirements. No universal review count is

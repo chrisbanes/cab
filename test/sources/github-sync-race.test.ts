@@ -76,7 +76,10 @@ test("a selection response from the previous configuration cannot commit after s
     runtime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 60_000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 60_000,
+      },
       power: { enabled: false },
     },
   );
@@ -180,7 +183,10 @@ test("a native blocker response from the previous configuration cannot clear the
     runtime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 60_000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 60_000,
+      },
       power: { enabled: false },
     },
   );
@@ -288,7 +294,10 @@ test("a retained status response cannot release a local dependent after credenti
     runtime,
     undefined,
     {
-      github: { readerFactory: () => reader, intervalMs: 60_000 },
+      issueTrackers: {
+        readerFactories: { github: () => reader },
+        intervalMs: 60_000,
+      },
       power: { enabled: false },
     },
   );

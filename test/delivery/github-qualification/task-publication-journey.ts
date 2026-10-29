@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readiness } from "../../../src/core/github-source-contracts.js";
 import type { CodeHostProviderFactories } from "../../../src/standalone/code-host.js";
+import type { IssueTrackerWriterFactories } from "../../../src/standalone/issue-tracker.js";
 import { GitHubHttpSourceReader } from "../../../src/standalone/github-source.js";
 import type { GitHubReaderFactory } from "../../../src/standalone/github-sync.js";
 import { StandaloneService } from "../../../src/standalone/service.js";
@@ -30,6 +31,7 @@ export interface TaskPublicationJourneyOptions {
   fetcher?: typeof fetch;
   /** Test seams for the service's delivery provider and source reader. */
   providerFactories?: CodeHostProviderFactories;
+  issueTrackerFactories?: IssueTrackerWriterFactories;
   readerFactory?: GitHubReaderFactory;
   /** Milliseconds between tries of a `gh` command that hit a transient GitHub error; tests pass 0. */
   ghRetryMs?: number;
@@ -240,8 +242,11 @@ export async function runTaskPublicationJourney(
           ...(options.providerFactories
             ? { providerFactories: options.providerFactories }
             : {}),
+          ...(options.issueTrackerFactories
+            ? { issueTrackerFactories: options.issueTrackerFactories }
+            : {}),
         },
-        github: { readerFactory },
+        issueTrackers: { readerFactories: { github: readerFactory } },
         ghExecutable: join(root, "no-gh", "gh"),
         power: { enabled: false },
       },

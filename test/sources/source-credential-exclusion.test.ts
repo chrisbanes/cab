@@ -91,7 +91,7 @@ async function fixture(t: TestContext) {
       power: { enabled: false },
       routingClient: null,
       ghExecutable: gh.executable,
-      github: { intervalMs: 60_000 },
+      issueTrackers: { intervalMs: 60_000 },
     },
   );
   t.after(async () => {

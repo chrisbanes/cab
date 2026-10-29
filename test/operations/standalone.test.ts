@@ -918,7 +918,7 @@ test("shutdown preserves ordered failures, settles active work, and retains dura
   const runtime = new FakeRuntime();
   const service = new StandaloneService(data, () => runtime, undefined, {
     power: shutdownPowerOptions(calls),
-    github: { intervalMs: 1000 },
+    issueTrackers: { intervalMs: 1000 },
   });
   let releaseTurn!: () => void;
   let enteredTurn!: () => void;
