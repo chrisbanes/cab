@@ -14,3 +14,19 @@ export const sourceCredentialReference = z.union([
   envCredentialReference,
   ghCredentialReference,
 ]);
+/**
+ * The GitLab CLI login for one host, resolved by running `glab` on each use. The host pattern
+ * matches `gitLabHostSchema`, which lives in a module that imports this one.
+ */
+export const glabCredentialReference = z
+  .string()
+  .regex(
+    /^glab:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/,
+  )
+  .max(5 + 253)
+  .refine((ref) => ref !== "glab:github.com");
+/** An installation GitLab credential reference; never its value. */
+export const gitLabCredentialReference = z.union([
+  envCredentialReference,
+  glabCredentialReference,
+]);
