@@ -164,20 +164,9 @@ test("the Jira site, email and token reach no runtime, Claude turn, helper child
     );
   }
 
-  // The site address is the task's link, not a secret: text that links to it stays readable.
-  const linked = randomUUID();
-  execute({
-    type: "task.create",
-    projectId,
-    taskId: linked,
-    title: "Links https://jx-canary.atlassian.net/browse/ABC-1 plainly",
-    outcome: "Exclusion",
-    ready: false,
-  });
-  assert.equal(
-    JSON.stringify(
-      await api.readSearch(new URLSearchParams({ query: "plainly" })),
-    ).includes("https://jx-canary.atlassian.net/browse/ABC-1"),
-    true,
-  );
+  // The site address is the task's link, not a secret: it leaves child environments but is
+  // not a redaction, so imported text that links to its own site stays readable.
+  const exclusions = service.providerCredentialExclusions();
+  assert.ok(exclusions.values.includes(env.FIXTURE_JX_SITE));
+  assert.equal(exclusions.redactions.includes(env.FIXTURE_JX_SITE), false);
 });

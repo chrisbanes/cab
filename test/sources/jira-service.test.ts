@@ -204,7 +204,7 @@ test("JQL preview lists matches without saving, and bad JQL is refused with noth
       new URLSearchParams({ instance: site, jql: "BAD =" }),
     ),
     (error: { status: number; publicMessage?: string }) =>
-      error.status === 409 && /BAD/.test(error.publicMessage ?? ""),
+      error.status === 400 && /BAD/.test(error.publicMessage ?? ""),
   );
   const before = f.service.domain().jiraConfiguration(f.projectId);
   assert.equal(before, null);
