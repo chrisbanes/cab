@@ -902,6 +902,18 @@ export class DomainStore {
       index,
       ...resolvedLink(link, saved, index),
     }));
+    const seen = new Set<string>();
+    for (const { link, index, projectPath } of rows) {
+      if (link.codeHost !== "gitlab" || projectPath === undefined) continue;
+      const key = `${link.host}/${projectPath.toLowerCase()}`;
+      if (seen.has(key))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "GitLab repositories must be unique",
+          [`repositories.${index}.projectPath`],
+        );
+      seen.add(key);
+    }
     let verified: LinkedRepository[];
     try {
       const settled = await Promise.allSettled(
@@ -929,11 +941,11 @@ export class DomainStore {
           }
         }),
       );
-      const failed = settled.find((item) => item.status === "rejected");
-      if (failed) throw failed.reason;
-      verified = settled.map((item) =>
-        item.status === "fulfilled" ? item.value : (undefined as never),
-      );
+      // The first failing row in row order is the one reported.
+      verified = settled.map((item) => {
+        if (item.status === "rejected") throw item.reason;
+        return item.value;
+      });
     } catch (error) {
       if (
         error instanceof CommandResultValidationError ||
@@ -2554,22 +2566,23 @@ export class DomainStore {
       }
       case "repositories.configure": {
         this.operator(command);
-        const { version } = this.repositoryLinks(command.projectId);
+        const { version, links: saved } = this.repositoryLinks(
+          command.projectId,
+        );
         this.version({ version }, command.expectedVersion);
         const repositories = verifiedRepositories ?? [];
         if (command.repositories.length !== repositories.length)
           throw new Error(
             "Linked repositories require asynchronous verification",
           );
-        const { links: saved } = this.repositoryLinks(command.projectId);
-        const links = repositories.map((repository, index) =>
-          storedLink(
-            command.repositories[index] as LinkRow,
+        const links = repositories.map((repository, index) => {
+          const row = command.repositories[index] as LinkRow;
+          return storedLink(
+            row,
             repository,
-            resolvedLink(command.repositories[index] as LinkRow, saved, index)
-              .projectPath,
-          ),
-        );
+            resolvedLink(row, saved, index).projectPath,
+          );
+        });
         this.db
           .prepare(
             "UPDATE project_repository_links SET version = version + 1, links = ? WHERE projectId = ?",

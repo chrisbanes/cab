@@ -813,8 +813,9 @@ verifies every checkout before anything is recorded. A GitLab link must also hav
 `origin` remote on its host whose full project path matches, case-insensitively, and
 a refusal names the link and reason without echoing a path or remote. Delivery
 actions that name a GitLab link are refused with `code-host-delivery-unavailable`,
-before any provider or Git transport runs, until GitLab delivery exists. Saving the GitHub source neither changes nor needs repository links, and
-saving links neither deactivates a selection nor changes the source version.
+before any provider or Git transport runs, until GitLab delivery exists. Saving the
+GitHub source neither changes nor needs repository links, and saving links neither
+deactivates a selection nor changes the source version.
 
 An agent profile has a name, an optional short summary, private instructions and
 capabilities. Settings and routing candidate lists show the name with its summary

@@ -151,12 +151,6 @@ export class DeliveryCoordinator {
       }
     );
   }
-  /** GitHub has a built-in provider; any other code host needs an injected factory. */
-  private deliverable(codeHost: CodeHost): boolean {
-    return (
-      codeHost === "github" || !!this.options.providerFactories?.[codeHost]
-    );
-  }
   private provider(
     projectId: string,
     repositoryId: string,
@@ -329,7 +323,11 @@ export class DeliveryCoordinator {
     const target = record.request.action.target.repositoryId,
       resolved = this.codeHost(caller.projectId, target);
     // Refused before any provider, preflight or Git transport runs for the target.
-    if (!this.deliverable(resolved.codeHost))
+    // GitHub has a built-in provider; any other code host needs an injected factory.
+    if (
+      resolved.codeHost !== "github" &&
+      !this.options.providerFactories?.[resolved.codeHost]
+    )
       return this.store.recordObservation(record.operationId, {
         state: "confirmed-failure",
         reason: "code-host-delivery-unavailable",

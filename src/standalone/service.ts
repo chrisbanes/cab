@@ -6970,10 +6970,10 @@ export class StandaloneService {
   }
 
   /**
-   * A task's first workspace. An imported task's holds only its source repository, at the
-   * project's link. A local task's holds every repository the project links, verified now.
-   * Either is provisioned only once the turn would otherwise be admitted, so a held or
-   * not-Ready task gets no checkout. A stale assignment waits here for its explicit apply,
+   * A task's first workspace. A local task's holds every repository the project links,
+   * verified now. An imported task's holds only its source repository, at the project's link,
+   * and is provisioned only once the turn would otherwise be admitted, so a held or not-Ready
+   * imported task gets no checkout. A stale assignment waits here for its explicit apply,
    * after which the scheduler wake re-captures the request.
    */
   private async firstWorkspaceRepositories(

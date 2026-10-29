@@ -517,8 +517,8 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
      (ids), `setRefs` (`{"REPOSITORY_ID":"REF"}`) and `confirmUnlinkAll`. A kept link
      is sent with its saved code host and host but without its path, so the saved
      path is kept, and applying verifies every checkout, and a GitLab checkout's
-     origin, before anything is recorded. Unlinking discards the path, and unlinking every link needs
-     `confirmUnlinkAll`. A link change does not touch the GitHub source or its
+     origin, before anything is recorded. Unlinking discards the path, and unlinking
+     every link needs `confirmUnlinkAll`. A link change does not touch the GitHub source or its
      selections.
    - `project preview-source PROJECT_ID --selection ID --expected-version N`
      activates one selection after a complete provider read (an incomplete read

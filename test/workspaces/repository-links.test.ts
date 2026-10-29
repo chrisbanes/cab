@@ -417,6 +417,11 @@ test("GitLab links are recorded with their host and project path, and refused wi
         gitlab("1", lab, "Group/Sub/Atlas"),
         gitlab("2", lab, "group/sub/atlas"),
       ],
+      // ...including against a kept link, which carries no project path.
+      [
+        gitlab("4242", undefined, undefined),
+        gitlab("77", lab, "group/sub/atlas"),
+      ],
     ]) {
       const key = randomUUID();
       await assert.rejects(
