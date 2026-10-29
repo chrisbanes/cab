@@ -1106,8 +1106,9 @@ from local to imported; its title and description are source-owned from then on.
   would match cannot be predicted. A target is also disabled without an `issue.create` grant on
   the repository, a `project.item.add` grant for the Project, or the `project.field` grants its
   readiness writes need; when a Ready task's rule needs a Project field the target cannot set
-  (`readiness-unsatisfiable`, including a `not-in` condition under `all`); and for a Draft task where the project has no readiness rule,
-  since a new issue would then make it Ready (`would-become-ready`). Every enabled target predicts
+  (`readiness-unsatisfiable`, including a `not-in` condition under `all`); and for a Draft task where a new issue with no labels or field values would already meet the
+  readiness rule (no rule, or a `lacks` condition that satisfies it), since it would then be Ready
+  (`would-become-ready`). Every enabled target predicts
   that the new issue matches the selection and that the task stays as Ready as it is.
 - **Ready.** A Draft task never receives readiness labels or fields. A Ready task gets what its
   rule needs on the new issue: under `all`, every `has` label and the first option of every `in`

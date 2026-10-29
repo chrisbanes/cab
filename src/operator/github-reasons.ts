@@ -148,5 +148,5 @@ export const publicationTargetReasonSentences: Record<
   "readiness-unsatisfiable":
     "The readiness rule needs a Project field that publishing here can't set. Choose a Project target or a Draft task.",
   "would-become-ready":
-    "With no readiness rule, a new issue here would make a Draft task Ready. Mark the task Ready or add a readiness rule.",
+    "A new issue here would already meet the readiness rule, so it would make a Draft task Ready. Mark the task Ready or change the readiness rule.",
 };
