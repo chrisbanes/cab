@@ -247,7 +247,10 @@ export function JiraSourceTab(
       [p.client],
     ),
   );
-  const loadedJql = (known?.jql ?? []).map((s) => s.jql).join("\n");
+  // One query per line: a saved query that spans lines reads as one with its breaks as spaces.
+  const loadedJql = (known?.jql ?? [])
+    .map((s) => s.jql.replace(/\s*\n\s*/g, " "))
+    .join("\n");
   useLoadedDraft(
     d,
     saved && !known

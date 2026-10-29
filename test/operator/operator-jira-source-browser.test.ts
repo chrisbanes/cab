@@ -106,6 +106,25 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     await page.getByLabel("JQL queries, one per line").inputValue(),
     "project = ABC",
   );
+  // A query saved elsewhere across lines stays one selection in the editor.
+  f.service.domain().execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion:
+      f.service.domain().jiraConfiguration(projectId)?.version ?? 0,
+    instance: site,
+    selections: [
+      { id: "S-1", kind: "jql", jql: "project = ABC\nAND status != Done" },
+    ],
+  });
+  await page.reload();
+  await page.getByLabel("JQL queries, one per line").waitFor();
+  assert.equal(
+    await page.getByLabel("JQL queries, one per line").inputValue(),
+    "project = ABC AND status != Done",
+  );
   await page.getByRole("button", { name: "Refresh now" }).click();
   await page.getByText(/S-1 · last synced/).waitFor();
   await captureBrowserEvidence(page, "1366-jira-source");
