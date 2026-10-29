@@ -77,31 +77,33 @@ test("approval-mode exact operator review and unknown remote comment retain orig
         },
       }),
       {
-        providerFactory: () => ({
-          async preflight() {
-            return { nodeId: "I1" };
-          },
-          async performAction() {
-            effects++;
-            return {
-              state: "uncertain",
-              reason: "response-lost",
-              receipt: null,
-            };
-          },
-          async inspectAction() {
-            return settled
-              ? {
-                  state: "confirmed-success",
-                  reason: null,
-                  receipt: { nodeId: "C1" },
-                }
-              : { state: "uncertain", reason: "unproved", receipt: null };
-          },
-          async inspectPr() {
-            throw Error("No PR in fixture");
-          },
-        }),
+        providerFactories: {
+          github: () => ({
+            async preflight() {
+              return { nodeId: "I1" };
+            },
+            async performAction() {
+              effects++;
+              return {
+                state: "uncertain",
+                reason: "response-lost",
+                receipt: null,
+              };
+            },
+            async inspectAction() {
+              return settled
+                ? {
+                    state: "confirmed-success",
+                    reason: null,
+                    receipt: { nodeId: "C1" },
+                  }
+                : { state: "uncertain", reason: "unproved", receipt: null };
+            },
+            async inspectPr() {
+              throw Error("No PR in fixture");
+            },
+          }),
+        },
       },
       j.fixtureOptions,
     ),

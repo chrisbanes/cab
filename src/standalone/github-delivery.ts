@@ -26,6 +26,7 @@ import {
   adoptOutsideHead,
 } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
+import type { CodeHostDeliveryProvider } from "./code-host.js";
 import {
   actionObservationSchema,
   prObservationSchema,
@@ -134,33 +135,6 @@ export interface PublishedIssueInspection {
   byCredentialUser: boolean;
   hasMarker: boolean;
 }
-export interface GitHubDeliveryProvider {
-  inspectPublishedIssue?(
-    target: { repositoryId: string; number: number },
-    operationId: string,
-  ): Promise<PublishedIssueInspection>;
-  inspectClosedIssue?(target: {
-    repositoryId: string;
-    nodeId: string;
-    number: number;
-  }): Promise<ClosedIssueInspection>;
-  inspectAction(
-    record: DeliveryActionRecord,
-  ): Promise<ProviderActionObservation>;
-  preflight(
-    action: ExternalAction,
-    policy: DeliveryPolicy,
-    publication?: PublicationContext,
-    adoption?: AdoptionContext,
-  ): Promise<Record<string, z.output<ReturnType<typeof z.json>>>>;
-  performAction(
-    record: DeliveryActionRecord,
-  ): Promise<ProviderActionObservation>;
-  inspectPr(
-    identity: PrIdentity,
-    policy: DeliveryPolicy,
-  ): Promise<PrDeliveryObservation>;
-}
 export const deliveryDocuments = {
   CabDeliveryPr: `query CabDeliveryPr($id:ID!,$after:String){node(id:$id){... on PullRequest{id number repository{id nameWithOwner} baseRefName headRefName headRefOid baseRefOid state isDraft merged mergeable mergeStateStatus reviewDecision isMergeQueueEnabled closingIssuesReferences(first:100){nodes{id state repository{id}} pageInfo{hasNextPage endCursor}} baseRef{target{oid} branchProtectionRule{requiresDeployments requiredDeploymentEnvironments requiresStrictStatusChecks}} reviewThreads(first:100,after:$after){nodes{id isResolved firstComment:comments(first:1){nodes{id}} latestComment:comments(last:1){nodes{id}}} pageInfo{hasNextPage endCursor}}}}}`,
   CabDeliveryRepository: `query CabDeliveryRepository($id:ID!){node(id:$id){... on Repository{id nameWithOwner}}}`,
@@ -257,12 +231,13 @@ export function mergeGateReasons(g: {
 }
 
 /** Narrow GitHub.com transport; every effect is settled by an independent read. */
-export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
+export class GitHubHttpDeliveryProvider implements CodeHostDeliveryProvider {
   constructor(
     private readonly credential: string,
     private readonly fetcher: typeof fetch = fetch,
     private readonly push: PushFunction = pushTaskCommit,
     private readonly adopt: AdoptFunction = adoptOutsideHead,
+    private readonly host = "github.com",
   ) {}
   private async request(
     path: string,
@@ -1573,6 +1548,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       if (before.beforeHead !== a.commitSha) {
         const outcome = await this.push({
           workspacePath: before.workspacePath,
+          host: this.host,
           nameWithOwner: before.repositoryPath
             .slice("/repos/".length)
             .split("/")
@@ -1663,6 +1639,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       const outcome = await this.adopt({
         workspacePath: before.workspacePath,
         baseCommit: before.baseCommit,
+        host: this.host,
         nameWithOwner: before.repositoryPath
           .slice("/repos/".length)
           .split("/")

@@ -12,10 +12,8 @@ import type {
 import type { IssueSnapshot } from "../../src/core/github-source.js";
 import type { Readiness } from "../../src/core/github-source-contracts.js";
 import type { Runtime } from "../../src/standalone/codex.js";
-import type {
-  GitHubDeliveryProvider,
-  PublishedIssueInspection,
-} from "../../src/standalone/github-delivery.js";
+import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
+import type { PublishedIssueInspection } from "../../src/standalone/github-delivery.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 
@@ -140,7 +138,7 @@ export class FakeGitHub {
       readIssueStatus: async () => ({ status: "open" }),
     });
   }
-  provider(): GitHubDeliveryProvider {
+  provider(): CodeHostDeliveryProvider {
     const gh = this;
     const find = (action: ExternalAction) =>
       "number" in action.target
@@ -549,10 +547,19 @@ export async function publicationFixture(
   options: PublicationFixtureOptions = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-publication-"))),
-    gh = new FakeGitHub();
+    gh = new FakeGitHub(),
+    /** The host each provider was built for, as the repository link names it. */
+    hosts: string[] = [];
   const build = () =>
     new StandaloneService(join(root, "data"), () => noRuntime, undefined, {
-      delivery: { providerFactory: () => gh.provider() },
+      delivery: {
+        providerFactories: {
+          github: (_project, _policy, host) => {
+            hosts.push(host);
+            return gh.provider();
+          },
+        },
+      },
       github: { readerFactory: gh.readerFactory() },
       power: { enabled: false },
     });
@@ -563,6 +570,7 @@ export async function publicationFixture(
     ...seeded,
     root,
     gh,
+    hosts,
     get service() {
       return service;
     },

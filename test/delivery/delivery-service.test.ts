@@ -9,7 +9,7 @@ import { DeliveryStore, type DeliveryCaller } from "../../src/core/delivery.js";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
-import type { GitHubDeliveryProvider } from "../../src/standalone/github-delivery.js";
+import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 
 test("persisted intent is visible before write and uncertain create is never replayed after restart", async () => {
   const directory = mkdtempSync(join(tmpdir(), "cab-delivery-")),
@@ -53,7 +53,7 @@ test("persisted intent is visible before write and uncertain create is never rep
   let writes = 0,
     confirmed = false,
     valid = true;
-  const provider: GitHubDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider = {
     async preflight() {
       return { nodeId: "I1" };
     },
@@ -86,7 +86,7 @@ test("persisted intent is visible before write and uncertain create is never rep
     conversationRevision: 1,
   };
   const options = {
-    providerFactory: () => provider,
+    providerFactories: { github: () => provider },
     authorize: () => {
       if (!valid) throw new Error("stale caller");
     },
@@ -427,7 +427,7 @@ test("positively confirmed transient failures retry only twice, one attempt per 
   let effects = 0;
   const request = f.request(),
     caller = f.caller(0);
-  const provider: GitHubDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider = {
     async preflight() {
       return {};
     },
@@ -448,7 +448,7 @@ test("positively confirmed transient failures retry only twice, one attempt per 
     },
   };
   const options = {
-    providerFactory: () => provider,
+    providerFactories: { github: () => provider },
     authorize: () => {},
     approved: () => false,
   };
@@ -490,7 +490,7 @@ test("a rate-limited failure is not retried before its resume time and is retrie
   let effects = 0;
   const request = f.request(),
     caller = f.caller(0);
-  const provider: GitHubDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider = {
     async preflight() {
       return {};
     },
@@ -512,7 +512,7 @@ test("a rate-limited failure is not retried before its resume time and is retrie
     },
   };
   const coordinator = new DeliveryCoordinator(f.store(), {
-    providerFactory: () => provider,
+    providerFactories: { github: () => provider },
     authorize: () => {},
     approved: () => false,
   });
@@ -552,7 +552,7 @@ test("reconciliation serializes the exact target against other task writes while
       release = resolve;
     });
   const effects: number[] = [];
-  const provider: GitHubDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider = {
     async preflight() {
       return {};
     },
@@ -582,7 +582,7 @@ test("reconciliation serializes the exact target against other task writes while
     },
   };
   const coordinator = new DeliveryCoordinator(f.store(), {
-    providerFactory: () => provider,
+    providerFactories: { github: () => provider },
     authorize: () => {},
     approved: () => false,
   });
@@ -786,5 +786,124 @@ test("failed startup releases delivery state before a clean retry", async () => 
   } finally {
     await service.stop();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("delivery resolves the code-host factory from the target's repository link", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "cab-delivery-")),
+    db = new DatabaseSync(join(directory, "db.sqlite"));
+  const projectId = randomUUID(),
+    taskId = randomUUID();
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  domain.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "P",
+    leadProfileId: null,
+  });
+  domain.execute({
+    type: "task.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    taskId,
+    title: "T",
+    outcome: "O",
+  });
+  domain.execute({
+    type: "delivery.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: 1,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: ["R1", "R2"].map((repositoryId) => ({
+      action: "issue.comment" as const,
+      repositoryId,
+      mode: "allow" as const,
+    })),
+    requiredChecks: [],
+  });
+  const store = new DeliveryStore(db);
+  store.migrate();
+  const hosts: string[] = [];
+  const provider: CodeHostDeliveryProvider = {
+    async preflight() {
+      return { nodeId: "I1" };
+    },
+    async performAction() {
+      return {
+        state: "confirmed-success",
+        reason: null,
+        receipt: { nodeId: "C1" },
+      };
+    },
+    async inspectAction() {
+      throw new Error("unused");
+    },
+    async inspectPr() {
+      throw new Error("unused");
+    },
+  };
+  const requested: Array<[string, string]> = [];
+  const coordinator = new DeliveryCoordinator(store, {
+    providerFactories: {
+      github: (_project, _policy, host) => {
+        hosts.push(host);
+        return provider;
+      },
+    },
+    codeHostOf: (_project, repositoryId) => {
+      requested.push([projectId, repositoryId]);
+      return repositoryId === "R1"
+        ? { codeHost: "github", host: "github.com" }
+        : null;
+    },
+    authorize: () => {},
+    approved: () => false,
+  });
+  const caller: DeliveryCaller = {
+    projectId,
+    taskId,
+    assignmentId: randomUUID(),
+    taskVersion: 1,
+    assignmentVersion: 1,
+    workId: "w",
+    workRevision: 1,
+    conversationRevision: 1,
+  };
+  try {
+    for (const repositoryId of ["R1", "R2"])
+      assert.equal(
+        (
+          await coordinator.submit(
+            {
+              operationId: randomUUID(),
+              action: {
+                kind: "issue.comment" as const,
+                target: { repositoryId, number: 1, nodeId: "I1" },
+                body: "B",
+              },
+            },
+            caller,
+          )
+        ).state,
+        "confirmed-success",
+      );
+    // The linked repository and the unlinked default both reach the GitHub factory on github.com.
+    assert.deepEqual(hosts, ["github.com", "github.com"]);
+    assert.deepEqual(requested, [
+      [projectId, "R1"],
+      [projectId, "R2"],
+    ]);
+    await coordinator.stop();
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
   }
 });

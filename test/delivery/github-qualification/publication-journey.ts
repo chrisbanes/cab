@@ -261,7 +261,7 @@ export async function runPublicationJourney(
       ? Object.assign(Object.create(real), { inspectPr: options.inspectPr })
       : real;
     const coordinator = new DeliveryCoordinator(store, {
-      providerFactory: () => provider,
+      providerFactories: { github: () => provider },
       authorize: () => {},
       // The harness stands in for the operator's approval of a recovery, and of nothing else.
       approved: (request) => isRecoveryAction(request.action),

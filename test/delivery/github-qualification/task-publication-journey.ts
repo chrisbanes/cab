@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readiness } from "../../../src/core/github-source-contracts.js";
-import type { GitHubDeliveryProvider } from "../../../src/standalone/github-delivery.js";
+import type { CodeHostProviderFactories } from "../../../src/standalone/code-host.js";
 import { GitHubHttpSourceReader } from "../../../src/standalone/github-source.js";
 import type { GitHubReaderFactory } from "../../../src/standalone/github-sync.js";
 import { StandaloneService } from "../../../src/standalone/service.js";
@@ -29,7 +29,7 @@ export interface TaskPublicationJourneyOptions {
   /** The raw HTTP transport the guard wraps; tests pass a fake GitHub. */
   fetcher?: typeof fetch;
   /** Test seams for the service's delivery provider and source reader. */
-  providerFactory?: () => GitHubDeliveryProvider;
+  providerFactories?: CodeHostProviderFactories;
   readerFactory?: GitHubReaderFactory;
   /** Milliseconds between tries of a `gh` command that hit a transient GitHub error; tests pass 0. */
   ghRetryMs?: number;
@@ -237,8 +237,8 @@ export async function runTaskPublicationJourney(
       {
         delivery: {
           fetcher: guardedFetch,
-          ...(options.providerFactory
-            ? { providerFactory: options.providerFactory }
+          ...(options.providerFactories
+            ? { providerFactories: options.providerFactories }
             : {}),
         },
         github: { readerFactory },

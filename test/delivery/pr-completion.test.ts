@@ -10,7 +10,7 @@ import {
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
-import type { GitHubDeliveryProvider } from "../../src/standalone/github-delivery.js";
+import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 
 test("handback settlement inspects provider-only head changes and rechecks local revisions after await", async () => {
   const db = new DatabaseSync(":memory:");
@@ -67,7 +67,7 @@ test("handback settlement inspects provider-only head changes and rechecks local
     allowedMethods: ["squash"],
   };
   let mutate: (() => void) | undefined;
-  const provider: GitHubDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider = {
     async inspectPr() {
       mutate?.();
       return observation;
@@ -84,7 +84,7 @@ test("handback settlement inspects provider-only head changes and rechecks local
   };
   const feedback: string[] = [];
   const coordinator = new DeliveryCoordinator(store, {
-    providerFactory: () => provider,
+    providerFactories: { github: () => provider },
     authorize: () => {},
     approved: () => false,
     taskVersion: () => Number(domain.task(taskId).version),

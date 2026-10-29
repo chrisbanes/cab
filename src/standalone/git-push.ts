@@ -5,10 +5,11 @@ import { safeBranchName } from "../core/delivery.js";
 import { runGit } from "./git-process.js";
 
 /**
- * Answers Git's credential request only for the exact repository over HTTPS on github.com, with
- * the token from the child's environment; any other host, protocol or path gets no answer.
+ * Answers Git's credential request only for the verified repository over HTTPS on the request's
+ * host (`CAB_PUSH_HOST`), with the token from the child's environment; any other host, protocol or
+ * path, and an empty host, gets no answer.
  */
-export const pushCredentialHelper = `!f() { test "$1" = get || exit 0; while IFS== read -r k v; do case "$k" in protocol) p=$v;; host) h=$v;; path) q=$v;; esac; done; test "$p" = https && test "$h" = github.com && test "$q" = "$CAB_PUSH_PATH" || exit 0; echo username=x-access-token; echo "password=$CAB_PUSH_TOKEN"; }; f`;
+export const pushCredentialHelper = `!f() { test "$1" = get || exit 0; while IFS== read -r k v; do case "$k" in protocol) p=$v;; host) h=$v;; path) q=$v;; esac; done; test "$p" = https && test -n "$CAB_PUSH_HOST" && test "$h" = "$CAB_PUSH_HOST" && test "$q" = "$CAB_PUSH_PATH" || exit 0; echo username=x-access-token; echo "password=$CAB_PUSH_TOKEN"; }; f`;
 
 export type PushOutcome =
   /** Nothing reached the network (setup failed or the child never started). */
@@ -25,7 +26,9 @@ export type PushOutcome =
 export interface PushRequest {
   /** The task worktree; only its object store is read. */
   workspacePath: string;
-  /** `owner/name` of the verified github.com repository. */
+  /** The code host's lowercase DNS name, from the repository link. */
+  host: string;
+  /** `owner/name` of the verified repository on `host`. */
   nameWithOwner: string;
   commitSha: string;
   branch: string;
@@ -41,6 +44,9 @@ export interface PushRequest {
 }
 
 const repositoryPath = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+// shortcut: no port in host, upgrade if a self-managed host needs one
+export const hostName =
+  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const bounds = {
   timeoutMs: 120_000,
   terminationGraceMs: 5_000,
@@ -59,10 +65,18 @@ const bounds = {
 export async function pushTaskCommit(
   request: PushRequest,
 ): Promise<PushOutcome> {
-  const { workspacePath, nameWithOwner, commitSha, branch, lease, token } =
-    request;
+  const {
+    workspacePath,
+    host,
+    nameWithOwner,
+    commitSha,
+    branch,
+    lease,
+    token,
+  } = request;
   if (
     !token ||
+    !hostName.test(host) ||
     !repositoryPath.test(nameWithOwner) ||
     !/^[0-9a-f]{40}$/.test(commitSha) ||
     (lease !== null && !/^[0-9a-f]{40}$/.test(lease)) ||
@@ -112,7 +126,7 @@ export async function pushTaskCommit(
         "--no-verify",
         // An empty expectation is Git's form for "the branch must not exist".
         `--force-with-lease=refs/heads/${branch}:${lease ?? ""}`,
-        `https://github.com/${nameWithOwner}.git`,
+        `https://${host}/${nameWithOwner}.git`,
         `${commitSha}:refs/heads/${branch}`,
       ],
       cwd: scratch,
@@ -125,6 +139,7 @@ export async function pushTaskCommit(
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_ALLOW_PROTOCOL: "https",
         HOME: scratch,
+        CAB_PUSH_HOST: host,
         CAB_PUSH_PATH: `${nameWithOwner}.git`,
         CAB_PUSH_TOKEN: token,
       },

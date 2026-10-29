@@ -457,7 +457,7 @@ export async function createReleaseDeliveryFixture(
   const f = await createOperatorFixture(
     routingClient,
     readerFactory,
-    { providerFactory: () => scripted.provider },
+    { providerFactories: { github: () => scripted.provider } },
     lifecycleOptions,
     () => new ReleaseRuntime(),
   );

@@ -16,7 +16,7 @@ import {
   DeliveryCoordinator,
   unresolvedThreadSummary,
 } from "../../src/standalone/delivery.js";
-import type { GitHubDeliveryProvider } from "../../src/standalone/github-delivery.js";
+import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 
 test("unchanged feedback is deduplicated and cached settlement never qualifies a changed provider head", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-feedback-restart-"));
@@ -76,7 +76,7 @@ test("unchanged feedback is deduplicated and cached settlement never qualifies a
   let fail = false;
   let feedbackFailure = false;
   const events: string[] = [];
-  const provider: GitHubDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider = {
     async inspectPr() {
       if (fail) throw new Error("raw provider detail");
       return p;
@@ -92,7 +92,7 @@ test("unchanged feedback is deduplicated and cached settlement never qualifies a
     },
   };
   const options = {
-    providerFactory: () => provider,
+    providerFactories: { github: () => provider },
     authorize: () => {},
     approved: () => false,
     taskVersion: () => 1,

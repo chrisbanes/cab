@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeBranchName } from "../core/delivery.js";
-import { pushCredentialHelper } from "./git-push.js";
+import { hostName, pushCredentialHelper } from "./git-push.js";
 import { runGit } from "./git-process.js";
 import { type Git, provedAncestor } from "./push-verification.js";
 
@@ -35,7 +35,9 @@ export interface AdoptRequest {
   workspacePath: string;
   /** The commit the worktree was provisioned at; the outside head must descend from it. */
   baseCommit: string | null;
-  /** `owner/name` of the verified github.com repository. */
+  /** The code host's lowercase DNS name, from the repository link. */
+  host: string;
+  /** `owner/name` of the verified repository on `host`. */
   nameWithOwner: string;
   commitSha: string;
   branch: string;
@@ -84,7 +86,7 @@ async function storedBytes(dir: string): Promise<number> {
 }
 
 /**
- * Fetches one commit by its sha from the verified github.com repository over HTTPS, proves it descends
+ * Fetches one commit by its sha from the verified repository on the requested host over HTTPS, proves it descends
  * from the task's base, and imports its objects into the task worktree under
  * `refs/cab/adopted/<branch>`, and nothing else.
  *
@@ -101,12 +103,20 @@ async function storedBytes(dir: string): Promise<number> {
 export async function adoptOutsideHead(
   request: AdoptRequest,
 ): Promise<AdoptOutcome> {
-  const { workspacePath, baseCommit, nameWithOwner, commitSha, branch, token } =
-    request;
+  const {
+    workspacePath,
+    baseCommit,
+    host,
+    nameWithOwner,
+    commitSha,
+    branch,
+    token,
+  } = request;
   if (
     !token ||
     !baseCommit ||
     !oid.test(baseCommit) ||
+    !hostName.test(host) ||
     !repositoryPath.test(nameWithOwner) ||
     !oid.test(commitSha) ||
     !safeBranchName(branch)
@@ -204,13 +214,14 @@ export async function adoptOutsideHead(
         "--no-tags",
         "--no-write-fetch-head",
         "--no-recurse-submodules",
-        `https://github.com/${nameWithOwner}.git`,
+        `https://${host}/${nameWithOwner}.git`,
         `+${commitSha}:refs/cab/adopt`,
       ],
       cwd: dir,
       environmentOverrides: {
         ...scratchEnvironment,
         GIT_ALLOW_PROTOCOL: "https",
+        CAB_PUSH_HOST: host,
         CAB_PUSH_PATH: `${nameWithOwner}.git`,
         CAB_PUSH_TOKEN: token,
       },

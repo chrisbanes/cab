@@ -32,6 +32,8 @@ test("a Draft task published to a repository becomes the issue's imported task a
   const before = f.taskCount();
   const { review, sent } = await f.publish(taskId);
   assert.equal(sent.state, "converted");
+  // The provider was built for the host of the repository's link.
+  assert.deepEqual([...new Set(f.hosts)], ["github.com"]);
   // One create, with no readiness label: a Draft task is not made Ready.
   assert.equal(f.gh.posts, 1);
   const created = f.gh.byMarker(review.publicationId);
