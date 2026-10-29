@@ -67,7 +67,7 @@ test("the packed package holds the service, UI and cab executable, and installs 
   const { version } = JSON.parse(
     readFileSync(join(root, "package.json"), "utf8"),
   );
-  // npm marks the bin executable on install; the empty PATH finds no checkout's node_modules.
+  // npm marks the bin executable on install; the bin runs from the prefix, not a checkout.
   assert.ok(statSync(join(prefix, "bin", "cab")).mode & 0o111);
   assert.equal(
     (
