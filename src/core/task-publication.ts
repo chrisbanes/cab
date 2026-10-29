@@ -666,11 +666,13 @@ export class TaskPublicationStore {
 
 /**
  * The labels and Project fields a Ready task needs on a new issue so that the project's rule holds
- * on import, and whether that is possible from this target. A new issue has no labels, so `lacks`
- * holds without a write. `all` writes every `has` label and the first option of every `in`
- * condition; a `not-in` condition, or an `in` on another Project, cannot be satisfied by a write.
- * `any` writes the cheapest one: nothing for `lacks`, else the first `has` label, else the first
- * `in` on the target Project.
+ * on import, and whether that is possible from this target. A new issue has no labels or field
+ * values, so `lacks` holds without a write. The writes are the `has` labels and the first option of
+ * each `in` condition on the target Project (one write per field, since a field holds one value);
+ * they are possible only if the rule evaluates as satisfied with exactly those facts, so a write
+ * that contradicts another condition, a `not-in` nothing satisfies, or an `in` on another Project
+ * disables the target. `all` plans every write. `any` plans the cheapest one that satisfies it:
+ * nothing, else the first `has` label, else the first `in` on the Project.
  */
 function readinessWrites(
   rule: Readiness | null,
@@ -684,29 +686,47 @@ function readinessWrites(
   const labels = rule.conditions.flatMap((c) =>
     c.kind === "label" && c.operator === "has" ? [c.name] : [],
   );
-  const fields = rule.conditions.flatMap((c) =>
-    c.kind === "project-field" && c.operator === "in"
-      ? c.optionNodeIds.slice(0, 1).map((optionNodeId) => ({
-          projectNodeId: c.projectNodeId,
-          fieldNodeId: c.fieldNodeId,
-          optionNodeId,
-        }))
-      : [],
+  const written = new Map<
+    string,
+    z.output<typeof publicationProjectFieldSchema>
+  >();
+  for (const c of rule.conditions) {
+    const key =
+      c.kind === "project-field" && `${c.projectNodeId}\0${c.fieldNodeId}`;
+    if (
+      c.kind === "project-field" &&
+      c.operator === "in" &&
+      c.projectNodeId === projectNodeId &&
+      key &&
+      !written.has(key)
+    )
+      written.set(key, {
+        projectNodeId: c.projectNodeId,
+        fieldNodeId: c.fieldNodeId,
+        optionNodeId: c.optionNodeIds[0] as string,
+      });
+  }
+  const fields = [...written.values()];
+  const plans = (
+    rule.mode === "all"
+      ? [{ labels, projectFields: fields }]
+      : [
+          { labels: [], projectFields: [] },
+          { labels: labels.slice(0, 1), projectFields: [] },
+          { labels: [], projectFields: fields.slice(0, 1) },
+        ]
+  ).map((plan) => ({
+    ...plan,
+    satisfiable: evaluateReadiness(rule, {
+      labels: plan.labels,
+      fields: plan.projectFields,
+    }).satisfied,
+  }));
+  return (
+    plans.find((plan) => plan.satisfiable) ?? {
+      labels: [],
+      projectFields: [],
+      satisfiable: false,
+    }
   );
-  const here = fields.filter((f) => f.projectNodeId === projectNodeId);
-  if (rule.mode === "all")
-    return {
-      labels,
-      projectFields: here,
-      satisfiable:
-        here.length === fields.length &&
-        rule.conditions.every((c) => c.kind === "label" || c.operator === "in"),
-    };
-  if (rule.conditions.some((c) => c.kind === "label" && c.operator === "lacks"))
-    return { labels: [], projectFields: [], satisfiable: true };
-  if (labels[0] !== undefined)
-    return { labels: [labels[0]], projectFields: [], satisfiable: true };
-  return here[0]
-    ? { labels: [], projectFields: [here[0]], satisfiable: true }
-    : { labels: [], projectFields: [], satisfiable: false };
 }

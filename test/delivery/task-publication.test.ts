@@ -310,6 +310,39 @@ test("publication writes the first option of an in condition, nothing for lacks,
     (await writes({ mode: "any", conditions: [notIn] }))[0],
     "readiness-unsatisfiable",
   );
+  // The planned writes are checked against every condition, so a write that contradicts one
+  // (label match is case-insensitive; a field holds one value) disables the target.
+  const clash = { ...lacks, name: "READY" };
+  assert.equal(
+    (await writes({ mode: "all", conditions: [has, clash] }))[0],
+    "readiness-unsatisfiable",
+  );
+  assert.deepEqual(await writes({ mode: "any", conditions: [has, clash] }), [
+    null,
+    [],
+    [],
+  ]);
+  const other = { ...inOptions, optionNodeIds: [publicationProject.other] };
+  assert.equal(
+    (await writes({ mode: "all", conditions: [inOptions, other] }))[0],
+    "readiness-unsatisfiable",
+  );
+  assert.equal(
+    (await writes({ mode: "all", conditions: [inOptions, notIn] }))[0],
+    null,
+  );
+  assert.equal(
+    (
+      await writes({
+        mode: "all",
+        conditions: [
+          inOptions,
+          { ...notIn, optionNodeIds: [publicationProject.ready] },
+        ],
+      })
+    )[0],
+    "readiness-unsatisfiable",
+  );
 });
 
 test("a Draft task is refused where a bare new issue would satisfy the rule through a lacks condition", async (t) => {

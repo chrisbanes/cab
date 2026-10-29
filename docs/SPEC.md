@@ -1112,11 +1112,12 @@ from local to imported; its title and description are source-owned from then on.
   that the new issue matches the selection and that the task stays as Ready as it is.
 - **Ready.** A Draft task never receives readiness labels or fields. A Ready task gets what its
   rule needs on the new issue: under `all`, every `has` label and the first option of every `in`
-  condition on the target Project, with `lacks` writing nothing; under `any`, a `lacks`
+  condition on the target Project (one write per field), with `lacks` writing nothing; under `any`, a `lacks`
   condition first (a new issue has no labels, so it needs no write), else the first `has` label,
-  else the first `in` condition on the Project. A `not-in` condition, or an `in` condition on
-  another Project, cannot be satisfied by a write, so under `all` the target is
-  `readiness-unsatisfiable`. The task keeps its Ready flag through conversion and the next sync recomputes it from
+  else the first `in` condition on the Project. The planned writes must satisfy the whole
+  rule: a `not-in` condition nothing satisfies, an `in` condition on another Project, or a write
+  that contradicts another condition (a `has` label a `lacks` condition names, case-insensitively,
+  or two `in` sets on one field that share no option) makes the target `readiness-unsatisfiable`. The task keeps its Ready flag through conversion and the next sync recomputes it from
   GitHub; a write that did not land leaves the ordinary readiness-lost or withdrawn hold
   ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 - **Review, confirm, send.** Review freezes the exact issue (title, body, labels), the target and
