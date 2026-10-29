@@ -1,7 +1,6 @@
 import {
   closeSync,
   existsSync,
-  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -18,6 +17,7 @@ import type { StandaloneDataDirectory } from "./data-directory.js";
 import {
   MAX_SUPPORTED_SCHEMA_VERSION,
   type OperationsFaultStage,
+  fsyncPath,
   snapshotOwnedDirectory,
   verifySnapshot,
 } from "./operations.js";
@@ -159,15 +159,6 @@ export function readStartupState(dataRoot: string): StartupState | undefined {
   }
 }
 
-function fsyncPath(path: string): void {
-  const descriptor = openSync(path, "r");
-  try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
 function writeStartupState(dataRoot: string, state: StartupState): void {
   const temporary = join(dataRoot, STATE_TEMP_NAME);
   writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, {
@@ -219,7 +210,9 @@ function inspectDatabase(path: string): { version: number; fresh: boolean } {
     );
   const version = header.readUInt32BE(60);
   // A table needs a page beyond the first, which holds only the schema table.
-  return { version, fresh: version === 0 && header.readUInt32BE(28) <= 1 };
+  const pageSize =
+    header.readUInt16BE(16) === 1 ? 65_536 : header.readUInt16BE(16);
+  return { version, fresh: version === 0 && lstatSync(path).size <= pageSize };
 }
 
 /** Created 0700 when missing; a directory the service account does not exclusively own is refused. */
@@ -257,7 +250,7 @@ export async function protectBeforeMigration(
   parseRelease(release);
   const state = readStartupState(dataDirectory.root);
   const recorded = state?.release ?? null;
-  const unprotected: StartupState = {
+  const current: StartupState = {
     format: STATE_FORMAT,
     release: recorded,
     ...(state?.snapshot ? { snapshot: state.snapshot } : {}),
@@ -273,7 +266,7 @@ export async function protectBeforeMigration(
       "startup-release-newer",
       `Database was last started by cab ${recorded}, newer than ${release}`,
     );
-  if (database.fresh || recorded === release) return unprotected;
+  if (database.fresh || recorded === release) return current;
 
   const kept = state?.snapshot;
   if (
@@ -285,7 +278,7 @@ export async function protectBeforeMigration(
       () => false,
     ))
   )
-    return unprotected;
+    return current;
 
   const directory =
     options.directory ?? join(dirname(dataDirectory.root), "snapshots");
@@ -321,11 +314,22 @@ export async function protectBeforeMigration(
   return protectedState;
 }
 
-/** Records a completed startup; the verified snapshot for this release change stays recorded. */
+/**
+ * Records a completed startup. The verified snapshot stays recorded for the release change it
+ * protected; a completed start at the recorded release drops it, so a later upgrade that
+ * finds the database moved on takes a fresh one.
+ */
 export function recordStartedRelease(
   dataDirectory: StandaloneDataDirectory,
   state: StartupState,
   release: string,
 ): void {
-  writeStartupState(dataDirectory.root, { ...state, release });
+  if (state.release === release && !state.snapshot) return;
+  writeStartupState(dataDirectory.root, {
+    format: STATE_FORMAT,
+    release,
+    ...(state.release !== release && state.snapshot
+      ? { snapshot: state.snapshot }
+      : {}),
+  });
 }

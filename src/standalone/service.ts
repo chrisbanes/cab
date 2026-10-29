@@ -840,9 +840,10 @@ export class StandaloneService {
     try {
       // Before the database is opened for writing: an older release's data is
       // snapshotted and verified under the held owner lock, or startup is refused.
+      const release = this.options.startupSnapshot?.release ?? releaseVersion();
       const startupState = await protectBeforeMigration(dataDirectory, {
         ...this.options.startupSnapshot,
-        release: this.options.startupSnapshot?.release ?? releaseVersion(),
+        release,
       });
       const rawDb = new DatabaseSync(database);
       this.db = rawDb;
@@ -1516,11 +1517,7 @@ export class StandaloneService {
           ).unref(),
         );
       }
-      recordStartedRelease(
-        dataDirectory,
-        startupState,
-        this.options.startupSnapshot?.release ?? releaseVersion(),
-      );
+      recordStartedRelease(dataDirectory, startupState, release);
     } catch (error) {
       generation.accepting = false;
       this.abortRuntimeRestarts();

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -90,6 +91,11 @@ function schemaState(data: string) {
     db.close();
   }
 }
+
+const refusal = (code: string) => (error: Error & { code?: string }) => {
+  assert.equal(error.code, code);
+  return true;
+};
 
 const startupSnapshots = (snapshots: string) =>
   existsSync(snapshots) ? readdirSync(snapshots).sort() : [];
@@ -274,6 +280,123 @@ test("an older binary or a newer schema is refused without writing", async () =>
     assert.deepEqual(readFileSync(database), newerSchema);
     assert.deepEqual(readFileSync(dirs.statePath), state);
     assert.equal(existsSync(`${database}-wal`), false);
+    assert.deepEqual(startupSnapshots(dirs.snapshots), []);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("a snapshot is not reused once a start has completed at the recorded release", async () => {
+  const dirs = layout();
+  try {
+    await olderDatabase(dirs.data);
+    await assert.rejects(
+      run(dirs.data, "0.1.0", (stage) => {
+        if (stage === "after-startup-snapshot-record")
+          throw new Error("failed");
+      }),
+      /failed/,
+    );
+    const [first] = startupSnapshots(dirs.snapshots);
+    // The database moves on under the old release, which then completes a start.
+    await run(dirs.data, "0.0.1");
+    assert.equal(readStartupState(dirs.data)?.snapshot, undefined);
+    await run(dirs.data, "0.1.0");
+    const names = startupSnapshots(dirs.snapshots);
+    assert.equal(names.length, 2);
+    assert.notEqual(
+      readStartupState(dirs.data)?.snapshot?.path,
+      join(dirs.snapshots, first as string),
+    );
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("a retained snapshot for another release change or that no longer verifies is not reused", async () => {
+  const dirs = layout();
+  try {
+    await olderDatabase(dirs.data);
+    const interrupted: Fault = (stage) => {
+      if (stage === "after-startup-snapshot-record") throw new Error("failed");
+    };
+    await assert.rejects(run(dirs.data, "0.1.0", interrupted), /failed/);
+    // Another target release: the retained 0.0.1-to-0.1.0 snapshot does not apply.
+    await assert.rejects(run(dirs.data, "0.2.0", interrupted), /failed/);
+    assert.equal(startupSnapshots(dirs.snapshots).length, 2);
+    assert.equal(readStartupState(dirs.data)?.snapshot?.to, "0.2.0");
+
+    // The retained snapshot fails verification: a new one is taken.
+    const retained = readStartupState(dirs.data)?.snapshot?.path as string;
+    writeFileSync(join(retained, "manifest.json"), "{}");
+    await run(dirs.data, "0.2.0");
+    assert.equal(startupSnapshots(dirs.snapshots).length, 3);
+    await verifySnapshot(readStartupState(dirs.data)?.snapshot?.path as string);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("an invalid state file or a database that is not SQLite refuses startup without writing", async () => {
+  const dirs = layout();
+  try {
+    await olderDatabase(dirs.data);
+    const database = join(dirs.data, "standalone.sqlite");
+    const bytes = readFileSync(database);
+    writeFileSync(dirs.statePath, "not json");
+    await assert.rejects(
+      run(dirs.data, "0.1.0"),
+      refusal("startup-state-invalid"),
+    );
+    writeFileSync(
+      dirs.statePath,
+      JSON.stringify({
+        format: "cab-startup-state-v1",
+        release: "0.0.1",
+        extra: 1,
+      }),
+    );
+    await assert.rejects(
+      run(dirs.data, "0.1.0"),
+      refusal("startup-state-invalid"),
+    );
+    assert.deepEqual(readFileSync(database), bytes);
+
+    writeFileSync(
+      dirs.statePath,
+      JSON.stringify({ format: "cab-startup-state-v1", release: "0.0.1" }),
+    );
+    writeFileSync(database, "x".repeat(200));
+    await assert.rejects(
+      run(dirs.data, "0.1.0"),
+      refusal("startup-database-invalid"),
+    );
+    assert.deepEqual(startupSnapshots(dirs.snapshots), []);
+  } finally {
+    dirs.cleanup();
+  }
+});
+
+test("a schema version only a crash-left WAL records still refuses startup", async () => {
+  const dirs = layout();
+  try {
+    await run(dirs.data, "0.2.0");
+    const database = join(dirs.data, "standalone.sqlite");
+    const live = new DatabaseSync(database);
+    live.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0");
+    live.exec("PRAGMA user_version = 7");
+    // What a crash leaves: the main file at version 6 and the committed change in the WAL.
+    copyFileSync(database, `${database}.copy`);
+    copyFileSync(`${database}-wal`, `${database}.copy-wal`);
+    live.close();
+    for (const suffix of ["", "-wal", "-shm"])
+      rmSync(`${database}${suffix}`, { force: true });
+    copyFileSync(`${database}.copy`, database);
+    copyFileSync(`${database}.copy-wal`, `${database}-wal`);
+    await assert.rejects(
+      run(dirs.data, "0.3.0"),
+      refusal("startup-schema-newer"),
+    );
     assert.deepEqual(startupSnapshots(dirs.snapshots), []);
   } finally {
     dirs.cleanup();

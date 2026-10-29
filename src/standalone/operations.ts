@@ -262,7 +262,7 @@ function requireRegularFile(path: string, label: string, mode?: number): void {
     throw new Error(`${label} has unexpected permissions`);
 }
 
-function fsyncPath(path: string): void {
+export function fsyncPath(path: string): void {
   const descriptor = openSync(path, fsConstants.O_RDONLY);
   try {
     fsyncSync(descriptor);
