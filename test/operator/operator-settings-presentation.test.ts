@@ -35,6 +35,7 @@ import {
   projectStateSummary,
   recoveryRecordRuns,
   readinessNextStep,
+  repositoryLines,
   joinNames,
   draftSourceName,
   observationLabel,
@@ -475,7 +476,14 @@ test("repository rows, change lines and command keep a saved path unless it is e
   const rows = repositoryRowsFrom(c.repositories);
   assert.equal(rows.incomplete, false);
   assert.deepEqual(rows.repositories, [
-    { repositoryId: "acme/atlas", ref: "main", savedRef: "main", keep: true },
+    {
+      codeHost: "github",
+      host: "github.com",
+      repositoryId: "acme/atlas",
+      ref: "main",
+      savedRef: "main",
+      keep: true,
+    },
   ]);
   const known = {
     links: [{ repositoryId: "acme/atlas", path: "/PRIVATE/PATH" }],
@@ -594,6 +602,38 @@ test("repository rows, change lines and command keep a saved path unless it is e
     adoptRepositoryRows({ ...c.repositories, links: [] }, edited).dropped,
     ["acme/atlas"],
   );
+});
+
+test("a saved GitLab link keeps its code host through the form and is shown with its host", () => {
+  const c = config();
+  const saved = {
+    ...c.repositories,
+    links: [
+      ...c.repositories.links,
+      {
+        repositoryId: "4242",
+        codeHost: "gitlab" as const,
+        host: "gitlab.example.com",
+        ref: "main",
+      },
+    ],
+  };
+  const rows = repositoryRowsFrom(saved);
+  const command = repositoryCommand(projectId, {
+    key: "k",
+    expectedVersion: "2",
+    repositories: JSON.stringify(rows.repositories),
+  });
+  assert.deepEqual(command.repositories[1], {
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    repositoryId: "4242",
+    ref: "main",
+  });
+  assert.deepEqual(repositoryLines({ ...c, repositories: saved }), [
+    "acme/atlas · main · checkout configured · GitHub github.com",
+    "4242 · main · checkout configured · GitLab gitlab.example.com",
+  ]);
 });
 
 test("no readiness rule loads no condition, saves null and never clears an unavailable rule silently", () => {

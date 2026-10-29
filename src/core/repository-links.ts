@@ -6,7 +6,7 @@ import {
 import { repositoryLinkInputSchema } from "./github-source-contracts.js";
 
 /** A DNS hostname without port or userinfo. `github.com` belongs to GitHub links only. */
-const gitLabHostSchema = z
+export const gitLabHostSchema = z
   .string()
   .trim()
   .toLowerCase()
@@ -15,9 +15,9 @@ const gitLabHostSchema = z
     /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/,
   )
   .refine((host) => host !== "github.com");
-const gitLabProjectPathSchema = z.string().refine(isGitLabProjectPath);
+export const gitLabProjectPathSchema = z.string().refine(isGitLabProjectPath);
 /** A GitLab numeric project ID, operator-supplied until discovery verifies it. */
-const gitLabRepositoryId = z.string().regex(/^[1-9][0-9]{0,18}$/);
+export const gitLabRepositoryId = z.string().regex(/^[1-9][0-9]{0,18}$/);
 
 /**
  * A project's linked repository as stored: the verified checkout plus the code host

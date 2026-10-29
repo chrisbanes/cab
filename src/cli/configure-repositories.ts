@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { repositoryLinkSchema } from "../core/github-source-contracts.js";
+import {
+  gitLabHostSchema,
+  gitLabProjectPathSchema,
+  gitLabRepositoryId,
+} from "../core/repository-links.js";
 import { uuidArg } from "./browse.js";
 import {
   type Change,
@@ -13,9 +18,27 @@ import { CliError } from "./connections.js";
 import { readEditFile } from "./source.js";
 import type { WriteCommand } from "./write.js";
 
+/** A new link: GitHub unless it names `codeHost: "gitlab"` with its host and project path. */
+const linkRowSchema = z.union([
+  repositoryLinkSchema
+    .extend({
+      codeHost: z.literal("github").optional(),
+      host: z.literal("github.com").optional(),
+    })
+    .strict(),
+  repositoryLinkSchema
+    .extend({
+      codeHost: z.literal("gitlab"),
+      host: gitLabHostSchema,
+      projectPath: gitLabProjectPathSchema,
+      repositoryId: gitLabRepositoryId,
+    })
+    .strict(),
+]);
+
 const editSchema = z
   .object({
-    linkRepositories: z.array(repositoryLinkSchema).max(20).optional(),
+    linkRepositories: z.array(linkRowSchema).max(20).optional(),
     unlinkRepositories: z.array(z.string().min(1).max(512)).max(20).optional(),
     setRefs: z.record(z.string(), z.string().trim().min(1).max(512)).optional(),
     confirmUnlinkAll: z.literal(true).optional(),
@@ -62,22 +85,34 @@ function repositoriesEditCommand(
     if (!linked.includes(id) || unlink.includes(id))
       throw bad(`setRefs: ${id} is not a kept linked repository.`);
 
-  // Only GitHub on github.com is supported; a kept link is sent without its private path.
-  const host = { codeHost: "github", host: "github.com" } as const;
+  // A kept link is sent with its saved code host but without its private path.
   const repositories = [
     ...saved.links
       .filter((r) => !unlink.includes(String(r.repositoryId)))
       .map((r) => ({
-        ...host,
+        codeHost: r.codeHost,
+        host: r.host,
         repositoryId: String(r.repositoryId),
         ref: refs[String(r.repositoryId)] ?? String(r.ref),
       })),
-    ...links.map((l) => ({
-      ...host,
-      repositoryId: l.repositoryId,
-      path: l.path,
-      ref: l.ref,
-    })),
+    ...links.map((l) =>
+      l.codeHost === "gitlab"
+        ? {
+            codeHost: l.codeHost,
+            host: l.host,
+            projectPath: l.projectPath,
+            repositoryId: l.repositoryId,
+            path: l.path,
+            ref: l.ref,
+          }
+        : {
+            codeHost: "github",
+            host: "github.com",
+            repositoryId: l.repositoryId,
+            path: l.path,
+            ref: l.ref,
+          },
+    ),
   ];
   if (
     saved.links.length > 0 &&
@@ -98,7 +133,11 @@ function repositoriesEditCommand(
   const diff: string[] = [];
   for (const id of unlink) diff.push(`− Repository access: ${id}`);
   for (const l of links)
-    diff.push(`+ Repository access: ${l.repositoryId} · ${l.ref}`);
+    diff.push(
+      `+ Repository access: ${l.repositoryId} · ${l.ref}${
+        l.codeHost === "gitlab" ? ` · GitLab ${l.host}` : ""
+      }`,
+    );
   const changes: Change[] = [];
   if (unlink.length || links.length)
     changes.push({
