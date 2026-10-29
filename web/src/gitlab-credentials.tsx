@@ -220,11 +220,11 @@ export function GitLabCredentialsSection(p: SettingsProps) {
           <p className="metadata muted">
             cab uses this credential to list projects, show the account, and
             push and fetch task branches on the linked projects (it needs
-            write_repository for pushes), and removes it from agent and helper
-            environments. It grants no repository access or delivery authority:
-            links and delivery grants decide those. If agents can reach this
-            Mac's glab login they could run glab themselves; cab does not
-            prevent that.
+            read_api and write_repository for pushes), and removes it from agent
+            and helper environments. It grants no repository access or delivery
+            authority: links and delivery grants decide those. If agents can
+            reach this Mac's glab login they could run glab themselves; cab does
+            not prevent that.
           </p>
           <DraftOutcome
             draft={d}
