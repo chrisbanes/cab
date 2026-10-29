@@ -99,6 +99,13 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     { id: "S-1", kind: "jql", jql: "project = ABC" },
   ]);
   await savedOutcome(page);
+  // Reopening the editor loads the saved query through the private read.
+  await page.reload();
+  await page.getByLabel("JQL queries, one per line").waitFor();
+  assert.equal(
+    await page.getByLabel("JQL queries, one per line").inputValue(),
+    "project = ABC",
+  );
   await page.getByRole("button", { name: "Refresh now" }).click();
   await page.getByText(/S-1 · last synced/).waitFor();
   await captureBrowserEvidence(page, "1366-jira-source");

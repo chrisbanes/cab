@@ -5745,7 +5745,7 @@ export class OperatorApi {
           searches: g.selections.flatMap((s) =>
             s.kind === "search" ? [{ id: s.id, query: s.query }] : [],
           ),
-          jql: jira?.selections ?? [],
+          jql: (jira?.selections ?? []).map((s) => ({ id: s.id, jql: s.jql })),
         },
         repositories: {
           version: links.version,
