@@ -4071,7 +4071,10 @@ test("upgrade --node re-binds an npm release at the same version", async (t) => 
     implicit: true,
   });
   assert.equal(stale.code, 1);
-  assert.match(stale.report.error, /pass --node PATH/);
+  assert.match(
+    stale.report.error,
+    /cab service upgrade STATE\/versions\/V --node PATH/,
+  );
   assert.equal(stale.report.jobStopped, null);
   assert.deepEqual(second.launchd.events, []);
 });

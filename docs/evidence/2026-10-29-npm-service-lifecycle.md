@@ -1,6 +1,6 @@
 # npm service lifecycle, bounded live run (#1327)
 
-Date: 2026-10-29. Source commit: `d6503084a6cc79f6c4046adbe85737675694de8c` on branch
+Date: 2026-10-29. Source commit: `235e860feabc8c3692f5f79b32b1b048ed217df4` on branch
 `cb/issue-1327-npm-package`. Harness:
 `node test/operations/service-lifecycle-qualification/live-service-lifecycle.mjs --npm`.
 Result: pass, exit 0, about 65 s.
@@ -9,8 +9,8 @@ Result: pass, exit 0, about 65 s.
 
 - One Mac (Apple silicon, macOS), Node `v24.22.1`, npm `11.19.1` for the installs.
 - Two local tarballs packed from the built checkout with `npm pack`; nothing was published:
-  - `0.1.0`: `sha512-Ghjl19vJhDtiq5FwP2tGwKpsQPHabKPFTJ/wypHDjHvv75+NFLh+rtZvAaVp2pHN1J/rI1xPGO4rE1YhlJsOww==`
-  - `0.1.1-live.1327`: `sha512-skkdsrM4meLTDVzv/sp02AG1U7AUE0z9aeTYJzhTaWjsMQjEfTOYhqNobRuBUKk4jfQiPIVwTQpNhB5RtlRM1w==`
+  - `0.1.0`: `sha512-fAlT4G7Uc9jOSI3Eq2fnzIi9Wv9FMAB4sCx7Mhw2y8ZM4/awfs6EzMj8gwEfNI4zyBaptsIjuKWad1wwcZoSPg==`
+  - `0.1.1-live.1327`: `sha512-mWBBCC+hwMAhWTJsYszEv3VJ+2+epoM7+vMsWuHPFeJTc8hRBu2gI8+t+ITrpl0AZl/B+FP6ncPzY2aRM62JRg==`
 - A throwaway label (`local.cab.validation-<random>`) and a fresh private root for the
   state, logs, LaunchAgents directory, CLI config, `HOME` and the npm prefix. The default
   label, the real `~/Library` folders, the login Keychain and the browser were not used

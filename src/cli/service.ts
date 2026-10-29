@@ -687,7 +687,7 @@ class Service {
       if (!statSync(real).isFile()) throw new Error("not a file");
     } catch {
       throw refuse(
-        `${candidate} is not an executable file; pass --node PATH to bind another Node.js`,
+        `${candidate} is not an executable file; bind another Node.js with "cab service upgrade STATE/versions/V --node PATH" (or pass --node PATH to install)`,
       );
     }
     const minimum = /^>=\s*(\d+)/.exec(
