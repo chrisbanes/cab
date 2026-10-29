@@ -4,7 +4,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Runtime } from "../../src/standalone/codex.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
+import {
+  deliveryRepositoryLabel,
+  OperatorApi,
+} from "../../src/standalone/operator-api.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import {
   adfParagraph,
@@ -419,4 +422,19 @@ test("a Jira issue matched in two projects on one site offers a placement choice
       [f.projectId, second].sort(),
     );
   }
+});
+
+test("a Jira project ID that equals a linked repository ID never names the delivery branch's repository", () => {
+  const jira = {
+    identity: { repositoryId: "10000", tracker: "jira" as const },
+    repositoryName: "ABC",
+  };
+  assert.equal(deliveryRepositoryLabel(jira, "10000"), "10000");
+  const github = {
+    identity: { repositoryId: "R_1" },
+    repositoryName: "org/repo",
+  };
+  assert.equal(deliveryRepositoryLabel(github, "R_1"), "org/repo");
+  assert.equal(deliveryRepositoryLabel(github, "R_2"), "R_2");
+  assert.equal(deliveryRepositoryLabel(null, "R_2"), "R_2");
 });

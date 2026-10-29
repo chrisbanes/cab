@@ -315,14 +315,7 @@ export function JiraSourceTab(
   );
   const blocked = !instance || lines.length === 0 || lines.length > 30;
   // The saved queries are private text: the editor opens only once they are read.
-  if (saved && !known)
-    return (
-      <p className="metadata" role="status">
-        {priv.state.error
-          ? "Saved queries unavailable"
-          : "Loading saved queries…"}
-      </p>
-    );
+  const editorReady = !saved || known !== undefined;
   return (
     <div className="settings-split settings-split-even">
       <div className="settings-column">
@@ -338,100 +331,121 @@ export function JiraSourceTab(
           title="Jira source"
           description="Each line is one JQL query. cab imports the issues each query matches; titles and descriptions stay read-only here."
         >
-          <form
-            onSubmit={(e) =>
-              void submitDraft(
-                e,
-                d,
-                p.client,
-                p.session,
-                {
-                  type: "jira.configure",
-                  key: String(d.values.key),
-                  projectId,
-                  expectedVersion: data.source.version,
-                  instance,
-                  selections: lines.map((jql, i) => ({
-                    id: `S-${i + 1}`,
-                    kind: "jql",
-                    jql,
-                  })),
-                },
-                p.refreshConfiguration,
-                blocked ? { jql: "Enter a site and at least one query." } : {},
-              )
-            }
-          >
-            <label className="field body" htmlFor={siteId}>
-              Jira site
-              <NativeSelect
-                id={siteId}
-                aria-label="Jira site"
-                className="control"
-                disabled={locked(d) || saved}
-                value={instance}
-                onChange={(e) => d.set("instance", e.target.value)}
-              >
-                <option value="">Choose a site</option>
-                {(saved && !usable.some((c) => c.instance === instance)
-                  ? [...usable.map((c) => c.instance), instance]
-                  : usable.map((c) => c.instance)
-                ).map((site) => (
-                  <option key={site} value={site}>
-                    {site}
-                  </option>
-                ))}
-              </NativeSelect>
-            </label>
-            {usable.length === 0 && !saved && (
-              <p className="metadata muted">
-                Add a Jira site credential below first.
-              </p>
-            )}
-            <DraftField
-              draft={d}
-              field="jql"
-              errorField={errorKey ?? "jql"}
-              label="JQL queries, one per line"
-              multiline
-            />
-            <div className="settings-actions">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={previewing || blocked || locked(d)}
-                onClick={() => void preview()}
-              >
-                {previewing ? "Previewing…" : "Preview matches"}
-              </Button>
-            </div>
-            {previews?.map((r) => (
-              <div key={r.jql} className="metadata">
-                <p data-private>{r.jql}</p>
-                {"error" in r ? (
-                  <p role="alert">{r.error}</p>
-                ) : (
-                  <ul>
-                    {r.matches.map((m) => (
-                      <li key={m}>{m}</li>
-                    ))}
-                    {r.more && <li>More matches not shown</li>}
-                    {r.matches.length === 0 && <li>No matches</li>}
-                  </ul>
-                )}
+          {editorReady ? (
+            <form
+              onSubmit={(e) =>
+                void submitDraft(
+                  e,
+                  d,
+                  p.client,
+                  p.session,
+                  {
+                    type: "jira.configure",
+                    key: String(d.values.key),
+                    projectId,
+                    expectedVersion: data.source.version,
+                    instance,
+                    selections: lines.map((jql, i) => ({
+                      id: `S-${i + 1}`,
+                      kind: "jql",
+                      jql,
+                    })),
+                  },
+                  p.refreshConfiguration,
+                  blocked
+                    ? { jql: "Enter a site and at least one query." }
+                    : {},
+                )
+              }
+            >
+              <label className="field body" htmlFor={siteId}>
+                Jira site
+                <NativeSelect
+                  id={siteId}
+                  aria-label="Jira site"
+                  className="control"
+                  disabled={locked(d) || saved}
+                  value={instance}
+                  onChange={(e) => d.set("instance", e.target.value)}
+                >
+                  <option value="">Choose a site</option>
+                  {(saved && !usable.some((c) => c.instance === instance)
+                    ? [...usable.map((c) => c.instance), instance]
+                    : usable.map((c) => c.instance)
+                  ).map((site) => (
+                    <option key={site} value={site}>
+                      {site}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </label>
+              {usable.length === 0 && !saved && (
+                <p className="metadata muted">
+                  Add a Jira site credential below first.
+                </p>
+              )}
+              <DraftField
+                draft={d}
+                field="jql"
+                errorField={errorKey ?? "jql"}
+                label="JQL queries, one per line"
+                multiline
+              />
+              <div className="settings-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={previewing || blocked || locked(d)}
+                  onClick={() => void preview()}
+                >
+                  {previewing ? "Previewing…" : "Preview matches"}
+                </Button>
               </div>
-            ))}
-            <DraftOutcome
-              draft={d}
-              client={p.client}
-              session={p.session}
-              label="Save Jira source"
-              saveDisabled={blocked}
-              refresh={p.refreshConfiguration}
-              success={null}
-              caveat="Saving replaces the selections and activates them all. Jira checks each new or changed query first; a rejected query saves nothing."
-            />
-          </form>
+              {previews?.map((r) => (
+                <div key={r.jql} className="metadata">
+                  <p data-private>{r.jql}</p>
+                  {"error" in r ? (
+                    <p role="alert">{r.error}</p>
+                  ) : (
+                    <ul>
+                      {r.matches.map((m) => (
+                        <li key={m}>{m}</li>
+                      ))}
+                      {r.more && <li>More matches not shown</li>}
+                      {r.matches.length === 0 && <li>No matches</li>}
+                    </ul>
+                  )}
+                </div>
+              ))}
+              <DraftOutcome
+                draft={d}
+                client={p.client}
+                session={p.session}
+                label="Save Jira source"
+                saveDisabled={blocked}
+                refresh={p.refreshConfiguration}
+                success={null}
+                caveat="Saving replaces the selections and activates them all. Jira checks each new or changed query first; a rejected query saves nothing."
+              />
+            </form>
+          ) : (
+            <div role="status">
+              <p className="metadata">
+                {priv.state.error
+                  ? "Saved queries unavailable."
+                  : "Loading saved queries…"}
+              </p>
+              {priv.state.error && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => priv.refresh()}
+                >
+                  Retry
+                </Button>
+              )}
+            </div>
+          )}
         </Panel>
         {saved && (
           <Panel

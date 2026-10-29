@@ -515,6 +515,26 @@ type LocalReviewCommand = Extract<
       | "review.send.reconcile";
   }
 >;
+/**
+ * A delivery branch's repository: the GitHub source's name when the branch is in the source
+ * repository, else the repository ID. A Jira project ID is never a repository, even when it
+ * equals a linked repository's ID.
+ */
+export function deliveryRepositoryLabel(
+  source:
+    | {
+        identity: { repositoryId: string; tracker?: "jira" };
+        repositoryName: string | null;
+      }
+    | null
+    | undefined,
+  repositoryId: string,
+) {
+  return source?.identity.repositoryId === repositoryId &&
+    !source.identity.tracker
+    ? (source.repositoryName ?? repositoryId)
+    : repositoryId;
+}
 function githubIssueUrl(repositoryName: string | null, number: number | null) {
   return repositoryName && number
     ? `https://github.com/${repositoryName}/issues/${number}`
@@ -5226,11 +5246,7 @@ export class OperatorApi {
       omittedBlockerCount: Math.max(0, v.blockers.length - 128),
       omittedActionCount: Math.max(0, v.actions.length - 128),
       branches: v.branches.slice(0, 20).map((r) => ({
-        repositoryName:
-          source?.identity.repositoryId === r.repositoryId &&
-          !source.identity.tracker
-            ? (source.repositoryName ?? r.repositoryId)
-            : r.repositoryId,
+        repositoryName: deliveryRepositoryLabel(source, r.repositoryId),
         branch: this.safe(r.branch, excluded),
         lastPushedSha: r.lastPushedSha,
         outsideHeadSha: r.outsideHeadSha,

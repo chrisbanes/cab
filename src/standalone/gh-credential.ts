@@ -225,7 +225,7 @@ export function ghEnvironment(
     (domain.codeHostCredentials?.() ?? []).map((c) => c.credentialRef),
     environment,
   );
-  // Jira credentials never reach gh: the site, email and token variables and their values.
+  // Jira credentials never reach gh: the site, email and token variable names, and the email and token values.
   const jira = jiraCredentialExclusions(
     domain.issueTrackerCredentials?.() ?? [],
     environment,

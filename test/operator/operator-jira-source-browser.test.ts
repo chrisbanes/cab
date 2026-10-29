@@ -125,6 +125,23 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     await page.getByLabel("JQL queries, one per line").inputValue(),
     "project = ABC AND status != Done",
   );
+  // A failed private read leaves the credentials, sync and refresh in place, and Retry loads it.
+  let failed = false;
+  await page.route("**/api/operator/projects/*/private-values", (route) => {
+    if (failed) return route.continue();
+    failed = true;
+    return route.fulfill({ status: 503, body: "{}" });
+  });
+  await page.reload();
+  await page.getByText("Saved queries unavailable.").waitFor();
+  await page.getByRole("region", { name: "Jira credentials" }).waitFor();
+  await page.getByRole("button", { name: "Refresh now" }).waitFor();
+  await page.getByRole("button", { name: "Retry" }).click();
+  await page.getByLabel("JQL queries, one per line").waitFor();
+  assert.equal(
+    await page.getByLabel("JQL queries, one per line").inputValue(),
+    "project = ABC AND status != Done",
+  );
   await page.getByRole("button", { name: "Refresh now" }).click();
   await page.getByText(/S-1 · last synced/).waitFor();
   await captureBrowserEvidence(page, "1366-jira-source");
