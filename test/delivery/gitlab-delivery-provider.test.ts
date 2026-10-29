@@ -987,7 +987,12 @@ test("text GitLab would run as a quick action is held before any write", async (
   const w = mergeRequestWorld();
   w.state.head = commit;
   w.state.discussions.push(gitLabDiscussion("abc", [{}]));
-  for (const text of ["/merge", "Done\n/ready", "ok\n  /approve now"]) {
+  for (const text of [
+    "/merge",
+    "Done\n/ready",
+    "ok\n  /approve now",
+    "\u00a0/merge",
+  ]) {
     for (const action of [
       created({ body: text }),
       {
@@ -1045,6 +1050,13 @@ test("a redirect on a write or the GraphQL route is refused and never followed",
         : undefined;
     const done = await w.provider.performAction(record(action, before));
     assert.equal(done.state, "uncertain", kind);
+    assert.ok(
+      w.requests.some(
+        (r) =>
+          r.init.method !== "GET" && r.url.includes(path.replace(/^\//, "")),
+      ),
+      `${kind} was attempted`,
+    );
     for (const { url } of w.requests)
       assert.equal(new URL(url).origin, `https://${host}`);
   }

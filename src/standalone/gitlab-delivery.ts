@@ -92,7 +92,7 @@ type MergeRequest = z.output<typeof mergeRequestSchema>;
 
 /** GitLab has no draft field to write: a draft is a title that starts with `Draft:` (or its variants). */
 const draftPrefix = /^\s*(\[draft\]|\(draft\)|draft:)/i;
-const quickAction = /^[ \t]*\/[A-Za-z]/m;
+const quickAction = /^\s*\/[A-Za-z]/m;
 const draftTitle = (title: string, draft: boolean) =>
   draft ? `Draft: ${title}` : title;
 const pipelineStatus = (status: string) =>
