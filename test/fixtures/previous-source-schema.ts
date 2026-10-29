@@ -126,8 +126,8 @@ const neutralSourceTables = [
 ];
 
 /**
- * Turns a migrated database into one from the previous schema: the neutral tables, which must
- * be empty, give way to the GitHub-named ones.
+ * Turns a migrated database into one from the previous schema: the neutral tables
+ * (and any rows they hold) give way to the GitHub-named ones.
  */
 export function restorePreviousSourceSchema(db: DatabaseSync): void {
   for (const table of neutralSourceTables) db.exec(`DROP TABLE ${table}`);
