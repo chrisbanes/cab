@@ -194,7 +194,7 @@ function exportTraces(root) {
   }
 }
 
-async function cleanup(root) {
+export async function cleanup(root) {
   assertCleanupRoot(root);
   const recorder = createRecorder(root, "cleanup", null);
   let survivors = 0;

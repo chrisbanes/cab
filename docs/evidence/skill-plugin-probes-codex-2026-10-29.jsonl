@@ -1,0 +1,10 @@
+{"event": "versions", "codex": "codex-cli 0.164.0"}
+{"event": "login-status", "exit": 1, "status": "Not logged in"}
+{"event": "account", "account_null": true, "requires_openai_auth": true, "codex_home": "<disposable-root>/home"}
+{"event": "server-exit", "pid": 3359, "exit": -9, "gone": true}
+{"facet": "C4.1", "disposition": "demonstrated", "observation": {"homeSkillsDir": true, "extraRoot": true, "pluginSkill": true, "systemSkillsBundled": ["imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer"], "pluginInstallDir": ["plugins/cache/probemk/probeplug/0.0.1"], "marketplaces": ["probemk"], "installError": null}}
+{"event": "server-exit", "pid": 3492, "exit": -9, "gone": true}
+{"event": "home-leak-control", "skills_outside_probe": 9, "roots": ["user:<user-home>/.agents/skills"]}
+{"facet": "C4.2", "disposition": "untested surface", "reason": "no login method was invoked: copying or creating a credential is outside the probe's authority", "observation": {"cliLoginMethods": ["--device-auth", "--with-access-token", "--with-api-key"], "appServerLoginTypes": ["amazonBedrock", "amazonBedrockAccessKeys", "apiKey", "chatgpt", "chatgptAuthTokens", "chatgptDeviceCode"], "isolatedHomeLoginStatus": "Not logged in"}}
+{"facet": "C4.3", "disposition": "untested surface", "reason": "subagent existence is read from the binary; sandbox and Stop coverage need a model-backed turn, which needs a login", "observation": {"multiAgentFeatures": {"multi_agent": {"stage": "stable", "enabled": "true"}, "multi_agent_mode": {"stage": "removed", "enabled": "false"}, "multi_agent_v2": {"stage": "stable", "enabled": "false"}, "multi_agent_v2_dynamic_tools": {"stage": "under development", "enabled": "false"}}, "protocolHasCollabAgentToolCall": true}}
+{"event": "cleanup", "directory_removed": true}

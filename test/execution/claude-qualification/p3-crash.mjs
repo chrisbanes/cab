@@ -49,10 +49,17 @@ async function waitFor(check, ms) {
 }
 
 /** Runs the parent, kills it at the trigger, observes orphans, then terminates survivors. */
-async function crash(root, recorder, mode, counter, nonce) {
+export async function crash(
+  root,
+  recorder,
+  mode,
+  counter,
+  nonce,
+  parent = PARENT,
+) {
   const state = join(root, "traces", `p3-${mode}-state.json`);
   rmSync(state, { force: true });
-  const child = spawn(process.execPath, [PARENT, root, mode, counter, nonce], {
+  const child = spawn(process.execPath, [parent, root, mode, counter, nonce], {
     stdio: ["ignore", "ignore", "inherit"],
   });
   const exited = new Promise((done) => child.once("exit", done));
