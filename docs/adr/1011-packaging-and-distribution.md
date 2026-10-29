@@ -2,26 +2,32 @@
 status: accepted
 ---
 
-# Distribute cab as a self-contained versioned release
+# Distribute cab through one npm package
 
 cab runs from a reviewed checkout built in place, which ties the LaunchAgent and
-the cutover packet to a development tree and the host's nvm-managed Node. Ship it as
-one self-contained release instead, first for the operator's own Macs, without
-blocking a later public release.
+the cutover packet to a development tree and the host's nvm-managed Node. npm is
+the primary first-release channel: one package installs the server, web UI and
+`cab` executable. The Mac desktop app is deferred and does not gate this release.
 
 ## Artifact
 
-- One package with one `cab` executable. The service, offline operations,
-  operator auth and the operator CLI are its subcommands; the operator CLI remains an
-  HTTP client of the service (ADR-1010), so a separate CLI package can follow later.
-- A release is a `darwin-arm64` tarball containing the built service and operator UI,
-  production dependencies and the exact Node runtime from `.nvmrc`, verified
-  against its published checksum at build time. Other platforms stay deferred
-  (ADR-1004); the platform is part of the artifact name.
-- A tag push builds the release in CI and attaches it with `SHA256SUMS` and a
-  manifest of commit, Node version and tree digest to a GitHub Release. The same
-  script produces local development builds. Versions are semver `0.x` from
-  `package.json`; pre-1.0 releases promise no CLI or API compatibility.
+- Publish `@chrisbanes/cab` with one `cab` executable. The service, offline
+  operations, operator auth and operator commands are subcommands of the same
+  product. Operator commands remain HTTP clients of the service (ADR-1010),
+  including when connecting to another machine; they need no separate CLI package.
+- The npm package contains the compiled service and built operator UI, with
+  production dependencies declared for installation. Users install a supported
+  Node.js LTS runtime separately; installation needs no checkout or local build.
+  macOS Apple Silicon remains the first qualified service platform (ADR-1004).
+  npm distribution does not establish support for other platforms or Node versions.
+- A tag push validates and builds the package in CI, publishes that exact tested
+  package to npm, and records the package version, integrity and source commit in
+  the GitHub Release. Versions are semver `0.x` from `package.json`; pre-1.0
+  releases promise no CLI or API compatibility.
+- The existing self-contained `darwin-arm64` tarball remains an optional channel
+  for installations that want the exact Node runtime from `.nvmrc` bundled. It
+  includes production dependencies, `SHA256SUMS` and a release manifest. It is
+  not a prerequisite for publishing or qualifying the npm release.
 - The release does not redistribute Anthropic's `claude` binary. Like `codex`,
   `claude` resolves from the LaunchAgent's fixed `PATH` and is passed to the Claude
   Agent SDK. cab does not gate the CLI version: readiness reports the version
@@ -36,25 +42,45 @@ blocking a later public release.
   Settings → Runtime or restarting the service, enables it.
   A `claude` that resolves but whose runtime fails is unavailable instead. The
   operator turns each runtime on or off in Settings → Runtime (ADR-1012).
-- An npm package is a later channel for the same build. A Mac app installed through
-  a Homebrew tap is another, registering the same service through SMAppService
-  ([ADR-1019](1019-mac-app-channel.md)).
+- A Mac app installed through a Homebrew tap is a deferred channel for the same
+  build ([ADR-1019](1019-mac-app-channel.md)). Desktop feasibility, signing,
+  notarization and Homebrew upgrades are not npm release gates.
 
 ## Install and upgrade
 
-Each release unpacks into its own immutable
-`~/Library/Application Support/cab/versions/<version>/` directory. Data, auth and
-snapshots live beside `versions/`, logs in `~/Library/Logs/cab/`, separate from
-development builds. The LaunchAgent binds the exact versioned executable, never a
-`current` symlink, so the plist states the running version.
+The target first-install flow is:
+
+```sh
+npm install -g @chrisbanes/cab
+cab service install
+```
+
+Installing the npm package makes `cab` available; starting a local service is an
+explicit action. A remote operator uses the same package without installing a
+local service. npm install/update/remove must not implicitly start a scheduler,
+migrate a database or delete operator data.
+
+The service must run from stable versioned files, with an explicit supported
+Node runtime binding. A global npm update or uninstall must not replace or remove
+files used by the running service. Service installation and upgrade own that
+binding; package replacement alone is not a completed service upgrade. The npm
+staging mechanism, runtime requirements and exact upgrade commands need
+implementation and qualification before being documented as supported operations.
+
+Data, auth and snapshots stay under `~/Library/Application Support/cab/`, logs
+under `~/Library/Logs/cab/`, separate from the npm installation and development
+builds. `cab service uninstall` stops and removes the service while keeping that
+state; package removal is a separate step. Reinstallation must find retained data.
 
 `cab service install | upgrade | uninstall` owns the LaunchAgent (and, in daemon mode, its record). The
-plist is rendered from the owner-only service configuration file the Mac app also
-uses (ADR-1019). Upgrade stops the exact job, renders the plist for the new version
+plist binds the selected runtime and service version. Upgrade stops the exact job,
+confirms shutdown before changing that binding, renders the plist for the new version
 and starts it, then runs the readiness checks. The service takes and verifies the
 offline pre-migration snapshot itself on start, before migrating, and refuses to
 start if either fails. Uninstall removes the job and
 keeps data, auth, snapshots and version directories. There is no self-update.
+Active work follows the existing shutdown/recovery contract: unresolved outcomes
+retain their holds, with no duplicate dispatch or external effects.
 
 `service install --mode daemon` is the opt-in alternative that starts the service at
 boot, before any login. cab never runs as root: the command runs as the service
@@ -79,9 +105,12 @@ upgrade. The snapshot is for disaster recovery through `restore` into a new data
 directory, not a way back to an older version. This does not change the cutover's
 return path to the Haze prototype controller.
 
-## Name
+## Implementation state
 
-The product stays cab for private `0.x` releases. The `cab` npm name is
-taken, and the binary name, data marker, keychain item, config directory and
-LaunchAgent label become persisted compatibility surface once installed. Settle the
-name before any public or npm release; renaming afterwards needs migrations for each.
+The package is named `@chrisbanes/cab` and remains marked private. The current
+release builder and tagged workflow produce the bundled-Node tarball; npm
+publishing and npm-based service installation/upgrade are not implemented or
+qualified. Current `service upgrade` takes the snapshot before starting the new
+service; moving it into service startup is part of the release work, not current
+behaviour. Shared app configuration is deferred with ADR-1019. Delivery scope and
+qualification are owned by [#1267](https://github.com/chrisbanes/cab/issues/1267).

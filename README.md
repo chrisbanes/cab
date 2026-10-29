@@ -215,8 +215,14 @@ each acceptance scenario to its evidence and disposition.
 - **Packaging.** `scripts/package-release.mjs` builds a self-contained `darwin-arm64`
   release tarball with bundled Node, and a tag-triggered workflow attaches it to a
   GitHub Release ([standalone operations](docs/operations/standalone-macos.md#release-build));
-  no release has been published
-  ([ADR-1011](docs/adr/1011-packaging-and-distribution.md)).
+  this channel is not yet release-qualified. The primary first-release target is
+  `npm install -g @chrisbanes/cab`: one package containing the server, web UI and
+  `cab` commands, with Node installed separately. npm publishing and its service
+  install/upgrade lifecycle are not implemented or qualified
+  ([ADR-1011](docs/adr/1011-packaging-and-distribution.md),
+  [#1267](https://github.com/chrisbanes/cab/issues/1267)). The tarball is optional;
+  the desktop app and Homebrew channel are deferred under
+  [#1265](https://github.com/chrisbanes/cab/issues/1265).
 - **Isolation.** cab relies on the execution runtime and host for isolation.
   Broad host-permitted reads remain enabled, command network access is off unless the
   operator enables it per project, and Stop is best-effort: unresolved work

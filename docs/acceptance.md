@@ -41,6 +41,32 @@ runs the complete journey; there is no incremental operator testing handoff. A
 harness that successfully detects an unsafe effect still records a failed
 capability.
 
+## npm distribution evidence
+
+The primary release channel is the single `@chrisbanes/cab` npm package
+([ADR-1011](adr/1011-packaging-and-distribution.md)). This evidence is unproved;
+[#1267](https://github.com/chrisbanes/cab/issues/1267) owns delivery and completion.
+The optional tarball and deferred desktop/Homebrew channel do not gate it.
+
+- Install the exact CI-built package on an isolated macOS Apple Silicon
+  installation with a supported Node runtime, without a checkout or build tools.
+  Verify the server, built UI and `cab` commands are included, package installation
+  starts no service, and remote operator use needs no local server.
+- Install the service explicitly and prove readiness and authenticated UI/CLI
+  access. Qualify the published npm package and upgrade to a second published
+  version, recording package integrity, source commits and runtime versions.
+- Update/remove the global npm package while a test service is installed. Prove
+  that its running files remain intact and package operations do not implicitly
+  migrate data. Upgrade through the documented service lifecycle with active test
+  work: confirm old-service shutdown, a single writer, verified snapshot before
+  migration, no duplicate dispatch/effects and retained uncertainty holds.
+- Cover snapshot creation/verification failure, interrupted/repeated startup,
+  incompatible older binaries and failed upgrades. Refuse unsafe startup and leave
+  actionable diagnostics; do not claim rollback across forward-only migrations.
+- Uninstall the service, remove the package and reinstall with retained data,
+  auth and snapshots. Record automated fault coverage, bounded live results,
+  cleanup and limits. Preserve the Haze prototype and separate cutover authority.
+
 ## Product scenarios
 
 ### Service and runtime scenarios
