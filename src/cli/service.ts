@@ -589,7 +589,9 @@ class Service {
       version = undefined;
     }
     if (version === undefined)
-      throw refuse(`${real} does not hold a valid @chrisbanes/cab package`);
+      throw refuse(
+        `${real} does not hold a valid package named @chrisbanes/cab`,
+      );
     // A project-local or npx install keeps its dependencies beside the package, not under it.
     const dependencies = Object.keys(
       JSON.parse(readFileSync(join(real, "package.json"), "utf8"))
