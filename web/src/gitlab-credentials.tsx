@@ -60,7 +60,6 @@ export function GitLabCredentialsSection(p: SettingsProps) {
   const status = useOperatorResource(p.session.csrfToken, loader);
   useHeaderRefresh(p.refreshNonce, status.refresh);
   const d = useDraft(p.drafts, "code-host-credential.configure");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: initialize once per draft.
   useEffect(() => d.initialize(blank()), [d]);
   // The host being edited; "" is a new host and null closes the form.
   const [editing, setEditing] = useState<string | null>(null);

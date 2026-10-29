@@ -45,11 +45,10 @@ const blank = (r: GitLabRow) => !r.repositoryId && !r.path.trim();
 
 /**
  * The create command with the GitLab rows appended after its GitHub rows, so
- * `repositories.k` for k at or past `githubCount` names GitLab row `k - githubCount`.
+ * the GitHub row count (`rowIndex.length` in setup) offsets the GitLab rows' error paths.
  */
 export function withGitLabRepositories(
   command: OperatorCommand,
-  githubCount: number,
   rows: GitLabRow[],
 ): { command: OperatorCommand; rowIndex: number[] } {
   const included = rows.flatMap((r, i) => (blank(r) ? [] : [i]));
@@ -95,10 +94,11 @@ const Labelled = ({
   label: string;
   children: ReactNode;
 }) => (
-  <label className="field body">
+  // Each control carries the same text as its aria-label.
+  <div className="field body">
     {label}
     {children}
-  </label>
+  </div>
 );
 
 const unavailableCopy = (reason: string) =>

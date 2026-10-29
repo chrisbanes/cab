@@ -407,11 +407,7 @@ export function ProjectSetup(
     sourceGh,
   );
   const { rowIndex } = github;
-  const gitlab = withGitLabRepositories(
-    github.command,
-    rowIndex.length,
-    gitlabRows,
-  );
+  const gitlab = withGitLabRepositories(github.command, gitlabRows);
   const { command } = gitlab;
   const fieldError = (i: number, ...fields: string[]) => {
     const k = rowIndex.indexOf(i);
