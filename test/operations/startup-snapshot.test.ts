@@ -220,6 +220,7 @@ test("a start after an interrupted snapshot takes a new one and leaves the parti
     assert.equal(names.length, 2);
     // The completed upgrade's snapshot stays recorded across later restarts.
     const completed = readStartupState(dirs.data)?.snapshot;
+    assert.ok(completed);
     await run(dirs.data, "0.1.0");
     assert.deepEqual(readStartupState(dirs.data)?.snapshot, completed);
     assert.deepEqual(readdirSync(join(dirs.snapshots, partial as string)), [
