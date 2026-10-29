@@ -10,7 +10,12 @@ import {
   type Workspace,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, ProjectName, ResourceStatus } from "./components.js";
+import {
+  ActionLink,
+  ProjectName,
+  ReasonText,
+  ResourceStatus,
+} from "./components.js";
 import { ApprovalFacts, InboxQuestion, useInboxTask } from "./inbox-detail.js";
 import { ageLabel, holdNotices } from "./inbox-presentation.js";
 import { clockLabel } from "./presentation.js";
@@ -321,8 +326,8 @@ function RequestCard({
             <div className="overview-evidence">
               <p className="metadata">{evidence.lead}</p>
               {evidence.reasons.map((r) => (
-                <p key={r} className="metadata muted">
-                  {r}
+                <p key={r.text} className="metadata muted">
+                  <ReasonText reason={r} />
                 </p>
               ))}
               {evidence.ownershipHeld && (

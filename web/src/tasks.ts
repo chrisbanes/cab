@@ -184,10 +184,32 @@ export const reasonLabels = {
   "source-held": "Source requires review",
   "admission-blocked": "Waiting to start",
 } satisfies Record<string, string>;
-export function taskReasons(task: TaskListSummary) {
+/** A reason line, linked to the cab task it names when there is one. */
+export interface TaskReason {
+  text: string;
+  href?: string;
+}
+/** A blocker imported as a cab task is named by its title and links to it; any other keeps the generic wording. */
+function blockerReasons(task: TaskListSummary): TaskReason[] {
+  const generic = { text: reasonLabels["imported-blockers-blocked"] };
+  const blockers = task.source?.openBlockers ?? [];
+  return blockers.length
+    ? blockers.map((b) =>
+        b.task?.title
+          ? {
+              text: `Waiting on ${b.task.title} (${b.label})`,
+              href: taskDetailHref(b.task),
+            }
+          : generic,
+      )
+    : [generic];
+}
+export function taskReasonItems(task: TaskListSummary): TaskReason[] {
   const terminal = task.state === "done" || task.state === "cancelled";
-  const reasons: string[] = [
-    ...task.attention.codes.map((code) => attentionNext[code].reason),
+  const reasons: TaskReason[] = [
+    ...task.attention.codes.map((code) => ({
+      text: attentionNext[code].reason,
+    })),
     ...(terminal ? [] : task.admission.reasons)
       // A closure-held task is Paused, never Draft.
       .filter(
@@ -198,27 +220,34 @@ export function taskReasons(task: TaskListSummary) {
               task.source?.closure === "unattributed")
           ),
       )
-      .map((r) =>
-        r === "task-unready"
-          ? (unmetReason(task.source?.readiness) ?? reasonLabels[r])
-          : (reasonLabels[r] ?? "Waiting to start"),
+      .flatMap((r) =>
+        r === "imported-blockers-blocked"
+          ? blockerReasons(task)
+          : {
+              text:
+                r === "task-unready"
+                  ? (unmetReason(task.source?.readiness) ?? reasonLabels[r])
+                  : (reasonLabels[r] ?? "Waiting to start"),
+            },
       ),
   ];
-  if (task.source?.closure === "held")
-    reasons.unshift("Held · closed on GitHub");
+  const first = (text: string) => reasons.unshift({ text });
+  if (task.source?.closure === "held") first("Held · closed on GitHub");
   if (task.source?.closure === "completed")
-    reasons.unshift("Closed on GitHub, not delivered by cab");
+    first("Closed on GitHub, not delivered by cab");
   if (task.source?.closure === "unattributed")
-    reasons.unshift("Held · closure not attributed to cab");
-  if (task.execution.holds.stop)
-    reasons.unshift("Stop requested; effects may continue");
+    first("Held · closure not attributed to cab");
+  if (task.execution.holds.stop) first("Stop requested; effects may continue");
   if (
     task.execution.holds.uncertainty ||
     task.execution.reasonCodes.includes("runtime-unconfirmed")
   )
-    reasons.unshift(attentionNext["execution-uncertain"].reason);
-  return [...new Set(reasons)];
+    first(attentionNext["execution-uncertain"].reason);
+  const seen = new Set<string>();
+  return reasons.filter((r) => !seen.has(r.text) && seen.add(r.text));
 }
+export const taskReasons = (task: TaskListSummary) =>
+  taskReasonItems(task).map((r) => r.text);
 /**
  * Capacity is stated once for the visible work, not on every task it holds: a sentence when an open
  * task waits on the global limit, or else on a project's, otherwise null.

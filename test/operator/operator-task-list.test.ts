@@ -786,3 +786,80 @@ test("shared task reasons retain all current interventions and deduplicate uncer
     );
   }
 });
+
+test("task summaries name an open GitHub blocker by its imported task's title", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const { projectId } = await projectFixture(f),
+    d = f.service.domain(),
+    sources = f.service.githubSources();
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: null,
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R-1",
+        owner: "acme",
+        name: "atlas",
+      },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+  });
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    selectionId: "repo",
+    expectedVersion: 2,
+  });
+  const issue = (nodeId: string, number: number, title: string) => ({
+    providerInstance: "github.com" as const,
+    nodeId,
+    repositoryId: "R-1",
+    repositoryName: "acme/atlas",
+    number,
+    title,
+    body: "Scope",
+    state: "open" as const,
+    labels: ["ready"],
+    projectFields: [],
+  });
+  const blocked = issue("I-BLOCKED", 1, "Blocked work"),
+    imported = issue("I-BLOCKER", 2, "Ship the API"),
+    outside = { ...issue("I-OUTSIDE", 9, "Not imported"), repositoryId: "R-2" };
+  sources.reconcileSelection(projectId, "repo", {
+    complete: true,
+    issues: [blocked, imported],
+    reason: null,
+  });
+  sources.reconcileBlockers("I-BLOCKED", {
+    complete: true,
+    blockers: [imported, outside],
+    reason: null,
+  });
+  const api = new OperatorApi(f.service, [f.directory]);
+  const tasks = (await api.readTaskListPage()).data.tasks;
+  const task = tasks.find((t) => t.title === "Blocked work");
+  assert.deepEqual(task?.source?.openBlockers, [
+    {
+      label: "acme/atlas#2",
+      task: {
+        id: tasks.find((t) => t.title === "Ship the API")?.id,
+        title: "Ship the API",
+      },
+      url: "https://github.com/acme/atlas/issues/2",
+    },
+    {
+      label: "acme/atlas#9",
+      task: null,
+      url: "https://github.com/acme/atlas/issues/9",
+    },
+  ]);
+});

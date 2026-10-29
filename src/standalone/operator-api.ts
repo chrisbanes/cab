@@ -2515,13 +2515,7 @@ export class OperatorApi {
     const d = this.domain(),
       taskId = String(t.id),
       projectId = String(t.projectId),
-      identity = this.identity(taskId),
-      // As the source summary discloses it: a valid name that passes the exclusions.
-      repository = (value: unknown) =>
-        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(value)) &&
-        this.disclosable(value, excluded)
-          ? String(value)
-          : null,
+      source = this.sourceSummary(taskId, excluded),
       waiting = ["idle", "queued", "selected", "waiting"].includes(
         execution.state,
       ),
@@ -2536,20 +2530,8 @@ export class OperatorApi {
         id,
         label: this.safe(d.task(id).title, excluded) ?? "Unavailable task",
       })),
-      nativeBlockers: identity
-        ? this.service
-            .githubSources()
-            .nativeBlockers(identity.nodeId)
-            .filter((b) => b.status === "open")
-            .map((b) => {
-              const name = repository(b.repositoryName);
-              return {
-                url: githubIssueUrl(name, Number(b.issueNumber) || null),
-                label: `${name ?? "GitHub"}#${Number(b.issueNumber)}`,
-              };
-            })
-        : [],
-      sourceUrl: this.sourceSummary(taskId, excluded)?.url ?? null,
+      nativeBlockers: source?.openBlockers ?? [],
+      sourceUrl: source?.url ?? null,
       approvals: approvals
         .filter((a) => a.status === "open")
         .map((a) => ({
@@ -2602,6 +2584,40 @@ export class OperatorApi {
     } catch {}
     return { profileId: String(project.leadProfileId), name };
   }
+  /** A valid `owner/name` that passes the exclusions, as source summaries disclose it; otherwise null. */
+  private repositoryName(
+    value: unknown,
+    excluded: readonly string[] | undefined,
+  ) {
+    return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(value)) &&
+      this.disclosable(value, excluded)
+      ? String(value)
+      : null;
+  }
+  /** Open GitHub blockers; one imported into cab is named by its task's title. */
+  private openBlockers(
+    nodeId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    return this.service
+      .githubSources()
+      .nativeBlockers(nodeId)
+      .filter((b) => b.status === "open")
+      .slice(0, 100)
+      .map((b) => {
+        const name = this.repositoryName(b.repositoryName, excluded);
+        return {
+          label: `${name ?? "GitHub"}#${Number(b.issueNumber)}`,
+          task: b.taskId
+            ? {
+                id: String(b.taskId),
+                title: this.safe(b.taskTitle, excluded),
+              }
+            : null,
+          url: githubIssueUrl(name, Number(b.issueNumber) || null),
+        };
+      });
+  }
   /** Collection reads pass `readiness` preloaded for all their tasks. */
   private sourceSummary(
     taskId: string,
@@ -2611,13 +2627,9 @@ export class OperatorApi {
     const identity = this.identity(taskId);
     if (!identity) return null;
     const issue = this.service.githubSources().issue(identity.nodeId);
-    const rawName = issue?.repositoryName;
-    const repositoryName =
-      rawName &&
-      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(rawName)) &&
-      this.disclosable(rawName, excluded)
-        ? String(rawName)
-        : null;
+    const repositoryName = issue?.repositoryName
+      ? this.repositoryName(issue.repositoryName, excluded)
+      : null;
     const number =
       issue &&
       Number.isSafeInteger(Number(issue.issueNumber)) &&
@@ -2637,6 +2649,7 @@ export class OperatorApi {
         excluded,
         readiness,
       ),
+      openBlockers: this.openBlockers(identity.nodeId, excluded),
     };
   }
   /** A stored null rule is `none`; a rule the exclusions withhold is `unavailable`. */

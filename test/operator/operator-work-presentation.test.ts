@@ -18,6 +18,7 @@ import {
   parseTaskFilters,
   readyButBlocked,
   taskColumn,
+  taskReasonItems,
   taskReasons,
   taskRouteSubtitle,
   visibleColumns,
@@ -252,6 +253,39 @@ test("only Ready work that admission holds keeps its Ready label in Waiting", ()
     assert.equal(readyButBlocked(other), false, taskColumn(other));
 });
 
+test("a GitHub blocker imported as a cab task is named by its title and links to it", () => {
+  const blockerId = randomUUID();
+  const task = summary({
+    closure: null,
+    readiness: { rule: { kind: "none" }, outcome: "not-evaluated", unmet: [] },
+    reasons: ["imported-blockers-blocked"],
+    openBlockers: [
+      {
+        label: "acme/atlas#7",
+        task: { id: blockerId, title: "Ship the API" },
+        url: "https://github.com/acme/atlas/issues/7",
+      },
+      {
+        label: "acme/other#9",
+        task: null,
+        url: "https://github.com/acme/other/issues/9",
+      },
+    ],
+  });
+  assert.deepEqual(taskReasonItems(task), [
+    {
+      text: "Waiting on Ship the API (acme/atlas#7)",
+      href: `/app/tasks/${blockerId}`,
+    },
+    { text: "Waiting on a GitHub dependency" },
+  ]);
+  // No recorded blockers keeps the generic wording.
+  assert.deepEqual(
+    taskReasons(summary({ reasons: ["imported-blockers-blocked"] })),
+    ["Waiting on a GitHub dependency"],
+  );
+});
+
 test("the operator is next only while an attention code names them", () => {
   assert.equal(operatorNext(summary({ codes: ["question"] })), true);
   assert.equal(operatorNext(summary({ codes: ["approval"] })), true);
@@ -272,6 +306,7 @@ test("source summaries only accept https links", () => {
         outcome: "not-evaluated",
         unmet: [],
       },
+      openBlockers: [],
     }).success;
   assert.equal(source("https://github.com/a/b/issues/1"), true);
   assert.equal(source(null), true);
