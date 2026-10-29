@@ -3,7 +3,6 @@ import {
   projectFieldChangedReason,
 } from "../operator/github-reasons.js";
 import {
-  absentBranchHead,
   isOperatorAction,
   isOperatorDeliveryCaller,
   isOperatorPublicationCaller,
@@ -20,14 +19,19 @@ import {
   githubRateLimitResumeAt,
   nextPageLink,
 } from "./github-http.js";
-import {
-  type AdoptFunction,
-  type AdoptOutcome,
-  adoptOutsideHead,
-} from "./git-fetch.js";
+import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import type { CodeHostDeliveryProvider } from "./code-host.js";
 import type { IssueTrackerWriter } from "./issue-tracker.js";
+import {
+  type BranchRemote,
+  type BranchRemotes,
+  PublicationRefusal,
+  adoptBranchHead,
+  branchPreflight,
+  inspectBranchHead,
+  publishBranch,
+} from "./branch-delivery.js";
 import {
   actionObservationSchema,
   prObservationSchema,
@@ -84,33 +88,11 @@ export interface AdoptionContext {
   workspacePath: string;
   baseCommit: string;
 }
-/** Every adopt outcome but success has its own reason, so a new outcome cannot reach the success path. */
-const adoptFailures: Record<Exclude<AdoptOutcome, "adopted">, string> = {
-  "not-attempted": "branch-adopt-workspace-unavailable",
-  "fetch-failed": "branch-adopt-fetch-failed",
-  "too-large": "branch-adopt-too-large",
-  "not-on-base": "branch-adopt-not-on-base",
-  unproved: "branch-adopt-unproved",
-};
-
+export { PublicationRefusal };
 export type { AdoptFunction } from "./git-fetch.js";
 export type PushFunction = (
   request: Parameters<typeof pushTaskCommit>[0],
 ) => Promise<PushOutcome>;
-/** A publication refused at preflight; `outsideHeadSha` names a remote head cab did not push. */
-export class PublicationRefusal extends Error {
-  constructor(
-    readonly reason:
-      | "branch-outside-change"
-      /** The remote is back at cab's last push: nothing outside remains to recover from. */
-      | "branch-outside-cleared"
-      | "branch-not-fast-forward"
-      | "branch-force-push-needs-lease",
-    readonly outsideHeadSha: string | null = null,
-  ) {
-    super(reason);
-  }
-}
 /** An operator edit whose expected text is no longer what the issue shows on GitHub. */
 export class IssueChangedRefusal extends Error {
   readonly reason = issueChangedReason;
@@ -1165,65 +1147,20 @@ export class GitHubHttpDeliveryProvider
   ) {
     const repo = await this.repository(action.target.repositoryId);
     if (action.kind === "issue.create") return { repositoryPath: repo.path };
-    if (action.kind === "branch.adopt") {
-      if (!adoption) throw new Error("provider-adoption-unverified");
-      const remote = await this.optionalRef(repo.path, adoption.branch);
-      // The approved head must still be the remote's; a branch back at cab's push has nothing to adopt.
-      if (remote !== action.outsideHeadSha) {
-        if (remote === adoption.lastPushedSha)
-          throw new PublicationRefusal("branch-outside-cleared");
-        throw new PublicationRefusal("branch-outside-change", remote);
-      }
-      // Everything the effect needs survives a restart here, because adopt's only remote act is a read.
+    if (
+      action.kind === "branch.adopt" ||
+      action.kind === "branch.push" ||
+      action.kind === "branch.force-push"
+    )
       return {
         repositoryPath: repo.path,
-        repositoryId: action.target.repositoryId,
-        branch: adoption.branch,
-        beforeHead: remote,
-        outsideHeadSha: action.outsideHeadSha,
-        lastPushedSha: adoption.lastPushedSha,
-        workspacePath: adoption.workspacePath,
-        baseCommit: adoption.baseCommit,
+        ...(await branchPreflight(
+          action,
+          this.remoteAt(repo.path),
+          publication,
+          adoption,
+        )),
       };
-    }
-    if (action.kind === "branch.push" || action.kind === "branch.force-push") {
-      if (!publication) throw new Error("provider-publication-unverified");
-      const remote = await this.optionalRef(repo.path, publication.branch);
-      // An overwrite expects the approved outside head; any other publication needs the remote exactly
-      // where cab left it. Only a retry may find it already at the commit: its earlier push could
-      // have landed after the readback.
-      const outside = publication.outsideHeadSha;
-      const recovery = outside !== undefined;
-      const expected = !recovery
-        ? publication.lastPushedSha
-        : outside === absentBranchHead
-          ? null
-          : outside;
-      if (
-        remote !== expected &&
-        !(publication.retry && remote === action.commitSha)
-      ) {
-        if (recovery && remote === publication.lastPushedSha)
-          throw new PublicationRefusal("branch-outside-cleared");
-        throw new PublicationRefusal("branch-outside-change", remote);
-      }
-      if (action.kind === "branch.force-push") {
-        // An overwrite's lease is the approved outside head, so it needs no earlier push.
-        if (!recovery && publication.lastPushedSha === null)
-          throw new PublicationRefusal("branch-force-push-needs-lease");
-      } else if (publication.descendsFromLastPushed === false)
-        throw new PublicationRefusal("branch-not-fast-forward");
-      return {
-        repositoryPath: repo.path,
-        repositoryId: action.target.repositoryId,
-        branch: publication.branch,
-        beforeHead: remote,
-        lastPushedSha: publication.lastPushedSha,
-        workspacePath: publication.workspacePath,
-        uncommittedEntries: publication.uncommittedEntries,
-        retry: publication.retry,
-      };
-    }
     if (action.kind === "pr.create") {
       const head = await this.ref(repo.path, action.target.headRef);
       await this.ref(repo.path, action.target.baseRef);
@@ -1340,8 +1277,9 @@ export class GitHubHttpDeliveryProvider
         "Publication delivery only permits its own issue.create, project.item.add and project.field",
       );
     if (a.kind === "branch.push" || a.kind === "branch.force-push")
-      return this.publish(record, a);
-    if (a.kind === "branch.adopt") return this.adoptOutsideHead(record, a);
+      return publishBranch(record, a, this.branchRemotes);
+    if (a.kind === "branch.adopt")
+      return adoptBranchHead(record, a, this.branchRemotes);
     try {
       const repo = {
         path: z
@@ -1476,279 +1414,43 @@ export class GitHubHttpDeliveryProvider
       };
     }
   }
-  /** Pushes the named commit unless the branch already has it, then settles by reading the ref. */
-  private async publish(
-    record: DeliveryActionRecord,
-    a: Extract<ExternalAction, { kind: "branch.push" | "branch.force-push" }>,
-  ): Promise<ProviderActionObservation> {
-    // Once Git reports the push done, the outcome stays unproved (never "not applied") until a read shows it.
-    let pushed = false;
-    const unsettled = (): ProviderActionObservation => ({
-      state: "uncertain",
-      reason: "provider-effect-unproved",
-      receipt: null,
-      ...(pushed ? { pushed: true } : {}),
-    });
-    const failure = (
-      reason: string,
-      extra: Partial<ProviderActionObservation> = {},
-    ): ProviderActionObservation => ({
-      state: "confirmed-failure",
-      reason,
-      receipt: null,
-      ...extra,
-    });
-    try {
-      const before = z
-        .object({
-          repositoryPath: z.string().regex(/^\/repos\/[^/]+\/[^/]+$/),
-          branch: name,
-          beforeHead: sha.nullable(),
-          lastPushedSha: sha.nullable(),
-          workspacePath: name,
-          retry: z.boolean(),
-        })
-        .parse(record.beforeState);
-      // Rejected by Git: unproved only in what the readback shows, never as a push that may have landed.
-      const rejectedUnsettled = (): ProviderActionObservation => ({
-        ...unsettled(),
-        rejected: true,
-      });
-      const outside = (head: string | null) =>
-        failure("branch-outside-change", {
-          receipt: head
-            ? {
-                nodeId: a.target.repositoryId,
-                ref: before.branch,
-                headSha: head,
-              }
-            : null,
-        });
-      // A rejected update leaves the head it found: another writer's, unless an earlier attempt of
-      // this operation may have landed that same commit.
-      const afterRejection = async (
-        outcomeFailure: ProviderActionObservation | null,
-      ): Promise<ProviderActionObservation> => {
-        let head: string | null;
-        try {
-          head = await this.optionalRef(before.repositoryPath, before.branch);
-        } catch {
-          return outcomeFailure ?? rejectedUnsettled();
-        }
-        if (head === before.beforeHead)
-          return outcomeFailure ?? rejectedUnsettled();
-        // An overwrite whose lease failed because the branch is back at cab's own push.
-        if (
-          a.kind === "branch.force-push" &&
-          a.outsideHeadSha !== undefined &&
-          head === before.lastPushedSha
-        )
-          return failure("branch-outside-cleared");
-        if (head === a.commitSha)
-          return before.retry ? unsettled() : outside(head);
-        return outside(head);
-      };
-      if (before.beforeHead !== a.commitSha) {
-        const outcome = await this.push({
-          workspacePath: before.workspacePath,
+  /** A branch remote for the repository at `path` (`/repos/owner/name`). */
+  private remoteAt(path: string): BranchRemote {
+    const nameWithOwner = path
+      .slice("/repos/".length)
+      .split("/")
+      .map(decodeURIComponent)
+      .join("/");
+    return {
+      readRef: (branch) => this.optionalRef(path, branch),
+      push: (request) =>
+        this.push({
+          ...request,
           host: this.host,
-          nameWithOwner: before.repositoryPath
-            .slice("/repos/".length)
-            .split("/")
-            .map(decodeURIComponent)
-            .join("/"),
-          commitSha: a.commitSha,
-          branch: before.branch,
-          // Every update is leased against the head preflight observed, so a branch another writer
-          // created or advanced since then rejects the push instead of being recorded as ours.
-          lease: before.beforeHead,
+          nameWithOwner,
           token: this.credential,
-        });
-        if (outcome === "uncertain") return unsettled();
-        if (outcome === "not-attempted")
-          return failure("push-not-attempted", {
-            retryable: true,
-            resumeAt: Date.now() + 60_000,
-          });
-        if (outcome === "rejected-non-fast-forward")
-          return failure("branch-not-fast-forward");
-        if (outcome === "rejected-remote")
-          return afterRejection(failure("branch-push-rejected"));
-        // Nothing was sent: an equal head is another writer's unless an earlier attempt may have landed.
-        if (outcome === "rejected-lease" || outcome === "up-to-date")
-          return afterRejection(null);
-        pushed = true;
-      }
-      return await this.inspectBranch(record, a, pushed);
-    } catch {
-      return unsettled();
-    }
-  }
-  /**
-   * Adopts the approved outside head: reads the ref, fetches exactly that commit, then reads the ref
-   * again. The only remote act is a read, so any failure is a confirmed no-effect failure that leaves
-   * the hold in place, and a restart simply runs the sequence again from the recorded context.
-   */
-  private async adoptOutsideHead(
-    record: DeliveryActionRecord,
-    a: Extract<ExternalAction, { kind: "branch.adopt" }>,
-  ): Promise<ProviderActionObservation> {
-    const failure = (reason: string): ProviderActionObservation => ({
-      state: "confirmed-failure",
-      reason,
-      receipt: null,
-    });
-    const at = (branch: string, headSha: string) => ({
-      nodeId: a.target.repositoryId,
-      ref: branch,
-      headSha,
-    });
-    let before: {
-      repositoryPath: string;
-      branch: string;
-      workspacePath: string;
-      baseCommit: string;
-      lastPushedSha: string | null;
+        }),
+      adopt: (request) =>
+        this.adopt({
+          ...request,
+          host: this.host,
+          nameWithOwner,
+          token: this.credential,
+        }),
     };
-    try {
-      before = z
-        .object({
-          repositoryPath: z.string().regex(/^\/repos\/[^/]+\/[^/]+$/),
-          branch: name,
-          workspacePath: name,
-          baseCommit: sha,
-          lastPushedSha: sha.nullable(),
-        })
-        .parse(record.beforeState);
-    } catch {
-      return failure("branch-adopt-workspace-unavailable");
-    }
-    // A moved ref is another outside change: it is recorded and the approval is not reused.
-    // A branch back at cab's own last push is not an outside change: nothing remains to recover from.
-    const moved = (head: string | null): ProviderActionObservation =>
-      head !== null && head === before.lastPushedSha
-        ? failure("branch-outside-cleared")
-        : {
-            state: "confirmed-failure",
-            reason: "branch-outside-change",
-            receipt: head ? at(before.branch, head) : null,
-          };
-    try {
-      const first = await this.optionalRef(
-        before.repositoryPath,
-        before.branch,
-      );
-      if (first !== a.outsideHeadSha) return moved(first);
-      const outcome = await this.adopt({
-        workspacePath: before.workspacePath,
-        baseCommit: before.baseCommit,
-        host: this.host,
-        nameWithOwner: before.repositoryPath
-          .slice("/repos/".length)
-          .split("/")
-          .map(decodeURIComponent)
-          .join("/"),
-        commitSha: a.outsideHeadSha,
-        branch: before.branch,
-        token: this.credential,
-      });
-      if (outcome !== "adopted") return failure(adoptFailures[outcome]);
-      const last = await this.optionalRef(before.repositoryPath, before.branch);
-      if (last !== a.outsideHeadSha) return moved(last);
-      return {
-        state: "confirmed-success",
-        reason: null,
-        receipt: at(before.branch, a.outsideHeadSha),
-      };
-    } catch {
-      return failure("branch-adopt-fetch-failed");
-    }
   }
-  /** Settles a branch action from the remote ref alone. */
-  private async inspectBranch(
-    record: DeliveryActionRecord,
-    a: Extract<ExternalAction, { kind: "branch.push" | "branch.force-push" }>,
-    pushed: boolean,
-  ): Promise<ProviderActionObservation> {
-    const repo = await this.repository(a.target.repositoryId);
-    const before = z
-      .object({
-        branch: name,
-        beforeHead: sha.nullable(),
-        lastPushedSha: sha.nullable().optional(),
-        uncommittedEntries: z.number().int().nonnegative(),
-      })
-      .parse(record.beforeState);
-    const remote = await this.optionalRef(repo.path, before.branch);
-    const at = (headSha: string) => ({
-      nodeId: a.target.repositoryId,
-      ref: before.branch,
-      headSha,
-    });
-    const success = (extra: Partial<ProviderActionObservation> = {}) =>
-      ({
-        state: "confirmed-success",
-        reason: null,
-        receipt: {
-          ...at(a.commitSha),
-          uncommittedEntries: before.uncommittedEntries,
-        },
-        ...extra,
-      }) as ProviderActionObservation;
-    // An update Git rejected cannot own an equal head: that is another writer's.
-    const rejected = record.observation?.rejected === true;
-    if (remote === a.commitSha && !rejected) return success();
-    if (remote === before.beforeHead && rejected)
-      return {
-        state: "confirmed-failure",
-        reason: "branch-push-rejected",
-        receipt: null,
-      };
-    if (remote === before.beforeHead)
-      // Git said done but the read does not show it yet: unproved, never "not applied".
-      return pushed
-        ? {
-            state: "uncertain",
-            reason: "provider-effect-unproved",
-            receipt: null,
-            pushed: true,
-          }
-        : {
-            state: "confirmed-failure",
-            reason: "branch-push-not-applied",
-            receipt: null,
-            retryable: true,
-          };
-    // A third head: after a Git-confirmed push it is a later outside move; otherwise someone else moved
-    // it, and an ambiguous attempt keeps its possible ownership of the commit it may have landed.
-    const ambiguous =
-      !pushed &&
-      (record.state === "attempting" ||
-        (record.observation?.state === "uncertain" && !rejected) ||
-        record.observation?.ambiguous === true);
-    // An overwrite that found the branch back at cab's own push has nothing left to replace.
-    if (
-      !pushed &&
-      a.kind === "branch.force-push" &&
-      a.outsideHeadSha !== undefined &&
-      remote !== null &&
-      remote === before.lastPushedSha
-    )
-      return {
-        state: "confirmed-failure",
-        reason: "branch-outside-cleared",
-        receipt: null,
-        ...(ambiguous ? { ambiguous: true } : {}),
-      };
-    return pushed
-      ? success(remote ? { outsideHeadSha: remote } : { outsideDeleted: true })
-      : {
-          state: "confirmed-failure",
-          reason: "branch-outside-change",
-          receipt: remote ? at(remote) : null,
-          ...(ambiguous ? { ambiguous: true } : {}),
-        };
-  }
+  private readonly branchRemotes: BranchRemotes = {
+    recorded: (beforeState) =>
+      this.remoteAt(
+        z
+          .object({
+            repositoryPath: z.string().regex(/^\/repos\/[^/]+\/[^/]+$/),
+          })
+          .parse(beforeState).repositoryPath,
+      ),
+    verified: async (repositoryId) =>
+      this.remoteAt((await this.repository(repositoryId)).path),
+  };
   async inspectAction(
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation> {
@@ -1757,14 +1459,15 @@ export class GitHubHttpDeliveryProvider
       // An adoption left unsettled by a restart runs again from its recorded context; it needs no
       // repository read of its own, so an outage here can never leave it unproved.
       if (a.kind === "branch.adopt")
-        return await this.adoptOutsideHead(record, a);
+        return await adoptBranchHead(record, a, this.branchRemotes);
       const repo = await this.repository(a.target.repositoryId),
         marker = `<!-- cab-operation:${record.operationId} -->`;
       if (a.kind === "branch.push" || a.kind === "branch.force-push")
-        return await this.inspectBranch(
+        return await inspectBranchHead(
           record,
           a,
           record.observation?.pushed === true,
+          this.branchRemotes,
         );
       const user = z
         .object({ node_id: name, login: name.optional() })
