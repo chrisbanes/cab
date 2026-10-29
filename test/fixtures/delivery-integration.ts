@@ -877,7 +877,8 @@ export async function publicationWorld(
     const interaction = f.service
       .coordinationView()
       .readTask(f.taskId)
-      .approvals.at(-1);
+      .approvals.filter((a) => a.status === "open")
+      .at(-1);
     assert.ok(interaction);
     await f.terminal(turn);
     await f.service.coordinationView().decideApproval({

@@ -177,7 +177,7 @@ test("overwrite and adoption of a GitLab outside head need the exact approval an
     // The approval shows GitLab's comparison on the link's host.
     const shown = (
       await new OperatorApi(w.f.service, [w.f.directory]).readTask(w.f.taskId)
-    ).data.approvals.at(-1);
+    ).data.approvals.find((a) => a.interactionId === second.interactionId);
     assert.equal(
       shown?.compareUrl,
       `https://${host}/${projectPath}/-/compare/${first}...${moved}`,
