@@ -16,6 +16,7 @@ import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { treeDigest as serviceTreeDigest } from "../../src/cli/release-tree.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const release = (await import(
@@ -126,6 +127,8 @@ test("treeDigest is order independent and covers content, modes, names and links
   };
   const base = await release.treeDigest(make("x"));
   assert.equal(await release.treeDigest(make("y", true)), base);
+  // The service computes the same digest for an npm stage as the script does for a tarball.
+  assert.equal(await serviceTreeDigest(make("service")), base);
 
   const changed = async (name: string, change: (root: string) => void) => {
     const root = make(name);
