@@ -366,7 +366,7 @@ test("a check settles as refused only on a definite refusal, and a new session s
     assert.equal(
       commands.length,
       before + 1,
-      `check before the ${status} response sent one request`,
+      `the ${status} check sent exactly one request`,
     );
     // The check button stays while a send is in flight; the outcome's code shows it settled.
     await assignment
