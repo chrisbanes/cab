@@ -27,6 +27,7 @@ import {
   gitLabProjectPathSchema,
   gitLabRepositoryId,
   repositoriesConfigurationCommandSchema,
+  setupRepositoriesSchema,
 } from "../core/repository-links.js";
 import {
   closedIssuesSchema,
@@ -34,7 +35,6 @@ import {
   githubConfigurationCommandSchema,
   readinessConditionSchema,
   readinessSchema,
-  setupRepositoriesSchema,
   setupRepositorySchema,
 } from "../core/github-source-contracts.js";
 import {
@@ -3912,9 +3912,22 @@ export const repositoryVerificationReasons = [
 export const checkoutVerifyRequestSchema = z
   .object({
     path: z.string().trim().min(1).max(4096),
-    repository: z
-      .object({ owner: githubSegment, name: githubSegment })
-      .strict(),
+    repository: z.discriminatedUnion("codeHost", [
+      z
+        .object({
+          codeHost: z.undefined().optional(),
+          owner: githubSegment,
+          name: githubSegment,
+        })
+        .strict(),
+      z
+        .object({
+          codeHost: z.literal("gitlab"),
+          host: gitLabHostSchema,
+          projectPath: gitLabProjectPathSchema,
+        })
+        .strict(),
+    ]),
     ref: setupRepositorySchema.shape.ref,
   })
   .strict();

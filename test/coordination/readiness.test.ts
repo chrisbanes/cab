@@ -982,7 +982,11 @@ test("failing profiles are counted, never named, and stay inside the schema", as
     const harness = checks.find((c) => c.id === "runtime-harness");
     assert.equal(harness?.status, "fail");
     assert.equal(harness?.reason, REJECTED(count));
-    assert.equal(checks.length, 9, "the other checks are unaffected");
+    assert.equal(
+      checks.length,
+      readinessCheckIds.length,
+      "the other checks are unaffected",
+    );
   }
 });
 
@@ -991,7 +995,7 @@ test("an invalid check result degrades to that check's failure, not a failed rea
   const { data } = await new Readiness(
     deps(f, { codexLogin: async () => "weird" as never }),
   ).read();
-  assert.equal(data.checks.length, 9);
+  assert.equal(data.checks.length, readinessCheckIds.length);
   assert.equal(
     data.checks.filter((c) => c.status === "pass").length >= 3,
     true,

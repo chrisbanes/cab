@@ -153,15 +153,24 @@ export async function listHomeFolders(
   };
 }
 
-/** Check a chosen checkout against the expected `github.com` repository and ref. */
+/** Check a chosen checkout against the expected repository (GitHub or GitLab) and ref. */
 export async function verifyCheckout(
   home: string,
   input: {
     path: string;
-    repository: { owner: string; name: string };
+    repository:
+      | { owner: string; name: string }
+      | { codeHost: "gitlab"; host: string; projectPath: string };
     ref: string;
   },
 ): Promise<CheckoutVerification["data"]> {
+  const origin =
+    "owner" in input.repository
+      ? `${input.repository.owner}/${input.repository.name}`
+      : `${input.repository.host}/${input.repository.projectPath}`.slice(
+          0,
+          201,
+        );
   try {
     const verified = await verifiedRepository(
       {
@@ -173,7 +182,7 @@ export async function verifyCheckout(
     );
     return {
       state: "verified",
-      origin: `${input.repository.owner}/${input.repository.name}`,
+      origin,
       branch: await currentBranch(verified.path, probeTimeout),
     };
   } catch (error) {

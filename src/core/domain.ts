@@ -49,12 +49,12 @@ import {
 import {
   closedIssuesSchema,
   githubIssueTracker,
-  setupRepositoriesSchema,
 } from "./github-source-contracts.js";
 import {
   gitLabHostSchema,
   repositoriesConfigurationCommandSchema,
   repositoryLinkListSchema,
+  setupRepositoriesSchema,
   type StoredRepositoryLink,
 } from "./repository-links.js";
 import { extractLegacyRepositoryLinks } from "./github-source-migration.js";
@@ -987,7 +987,13 @@ export class DomainStore {
                 path: link.path,
                 ref: link.ref,
               },
-              { owner: link.owner, name: link.name },
+              link.codeHost === "gitlab"
+                ? {
+                    codeHost: "gitlab",
+                    host: link.host,
+                    projectPath: link.projectPath,
+                  }
+                : { owner: link.owner, name: link.name },
             ),
           );
           verified.push({
@@ -2238,7 +2244,22 @@ export class DomainStore {
           .prepare(
             "INSERT INTO project_repository_links (projectId, version, links) VALUES (?, 1, ?)",
           )
-          .run(command.projectId, JSON.stringify(asGitHubLinks(repositories)));
+          .run(
+            command.projectId,
+            JSON.stringify(
+              repositories.map((repository, index): StoredRepositoryLink => {
+                const row = command.repositories?.[index];
+                return row?.codeHost === "gitlab"
+                  ? {
+                      ...repository,
+                      codeHost: "gitlab",
+                      host: row.host,
+                      projectPath: row.projectPath,
+                    }
+                  : { ...repository, codeHost: "github", host: "github.com" };
+              }),
+            ),
+          );
         return this.project(command.projectId);
       }
       case "project.configure": {
