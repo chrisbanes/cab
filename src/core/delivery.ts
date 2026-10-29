@@ -7,6 +7,7 @@ import {
 import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { itemIs, itemKey, sameItem } from "./source-storage.js";
 import { transaction, type Database } from "./store.js";
 import { StatusMappingStore } from "./status-mapping.js";
 import {
@@ -828,9 +829,9 @@ export class DeliveryStore {
             (
               this.db
                 .prepare(
-                  "SELECT issueNumber FROM github_external_issues WHERE nodeId=?",
+                  `SELECT number AS issueNumber FROM external_items WHERE ${itemIs()}`,
                 )
-                .get(binding.sourceNodeId) as
+                .get(...itemKey(binding.sourceNodeId)) as
                 | { issueNumber: number }
                 | undefined
             )?.issueNumber,
@@ -955,7 +956,7 @@ export class DeliveryStore {
         throw new Error("Review thread is not on the task's bound PR");
     }
     const source = this.db
-      .prepare("SELECT readiness FROM project_github_sources WHERE projectId=?")
+      .prepare("SELECT readiness FROM project_task_sources WHERE projectId=?")
       .get(binding.projectId) as { readiness: string } | undefined;
     if (source) {
       const readiness = readinessSchema
@@ -1055,7 +1056,7 @@ export class DeliveryStore {
       throw refusal("Publication names another repository");
     const task = this.db
       .prepare(
-        "SELECT t.projectId,t.state,t.outcome,b.title,(SELECT 1 FROM github_imported_tasks i WHERE i.taskId=t.id) AS imported FROM domain_tasks t JOIN tasks b ON b.id=t.id WHERE t.id=?",
+        "SELECT t.projectId,t.state,t.outcome,b.title,(SELECT 1 FROM imported_tasks i WHERE i.taskId=t.id) AS imported FROM domain_tasks t JOIN tasks b ON b.id=t.id WHERE t.id=?",
       )
       .get(caller.taskId) as
       | {
@@ -1137,8 +1138,8 @@ export class DeliveryStore {
       throw refusal();
     const task = this.db
       .prepare(
-        `SELECT t.projectId, t.ready, t.state, e.nodeId, e.repositoryId, e.issueNumber, e.labels, e.observedState
-        FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
+        `SELECT t.projectId, t.ready, t.state, e.externalId AS nodeId, e.containerId AS repositoryId, e.number AS issueNumber, e.labels, e.observedState
+        FROM domain_tasks t JOIN external_items e ON e.taskId = t.id WHERE t.id = ?`,
       )
       .get(caller.taskId) as
       | {
@@ -1155,9 +1156,9 @@ export class DeliveryStore {
     const membership = task
       ? this.db
           .prepare(
-            "SELECT selectionId, itemNodeId, projectFields FROM github_memberships WHERE projectId = ? AND nodeId = ?",
+            `SELECT selectionId, itemId AS itemNodeId, fields AS projectFields FROM source_memberships WHERE projectId = ? AND ${itemIs()}`,
           )
-          .all(task.projectId, task.nodeId)
+          .all(task.projectId, ...itemKey(task.nodeId))
       : [];
     const items = z
       .array(
@@ -1181,7 +1182,7 @@ export class DeliveryStore {
     )
       throw refusal();
     const row = this.db
-      .prepare("SELECT readiness FROM project_github_sources WHERE projectId=?")
+      .prepare("SELECT readiness FROM project_task_sources WHERE projectId=?")
       .get(caller.projectId) as { readiness: string };
     const fields = items
       .flatMap((m) => projectFieldsSchema.parse(JSON.parse(m.projectFields)))
@@ -1237,7 +1238,7 @@ export class DeliveryStore {
       source = new TaskReviewStore(this.db).sources(caller.taskId).at(-1),
       row = this.db
         .prepare(
-          `SELECT task.projectId,task.version,imported.nodeId,imported.repositoryId,review.observedDigest FROM domain_tasks task JOIN github_imported_tasks imported ON imported.taskId=task.id JOIN github_source_reviews review ON review.nodeId=imported.nodeId WHERE task.id=?`,
+          `SELECT task.projectId,task.version,imported.externalId AS nodeId,imported.containerId AS repositoryId,review.observedDigest FROM domain_tasks task JOIN imported_tasks imported ON imported.taskId=task.id JOIN source_reviews review ON ${sameItem("review", "imported")} WHERE task.id=?`,
         )
         .get(caller.taskId) as
         | {
@@ -1316,9 +1317,9 @@ export class DeliveryStore {
       (edit) => {
         const synced = this.db
           .prepare(
-            "SELECT observedTitle, observedBody FROM github_external_issues WHERE nodeId=?",
+            `SELECT observedTitle, observedBody FROM external_items WHERE ${itemIs()}`,
           )
-          .get(caller.sourceNodeId) as
+          .get(...itemKey(caller.sourceNodeId)) as
           | { observedTitle: string; observedBody: string }
           | undefined;
         if (
@@ -1364,9 +1365,11 @@ export class DeliveryStore {
           (
             this.db
               .prepare(
-                "SELECT issueNumber FROM github_external_issues WHERE nodeId=?",
+                `SELECT number AS issueNumber FROM external_items WHERE ${itemIs()}`,
               )
-              .get(caller.sourceNodeId) as { issueNumber: number } | undefined
+              .get(...itemKey(caller.sourceNodeId)) as
+              | { issueNumber: number }
+              | undefined
           )?.issueNumber,
         ) ||
       caller.taskVersion !== command.expectedTaskVersion ||
@@ -2192,7 +2195,7 @@ export class DeliveryStore {
     const configuration = this.publicConfiguration(task.projectId);
     const sourceRow = this.db
       .prepare(
-        "SELECT nodeId,repositoryId,issueNumber,observedState,labels FROM github_external_issues WHERE taskId=?",
+        "SELECT externalId AS nodeId,containerId AS repositoryId,number AS issueNumber,observedState,labels FROM external_items WHERE taskId=?",
       )
       .get(taskId);
     const issue = sourceRow
@@ -2209,9 +2212,9 @@ export class DeliveryStore {
     const projectFields = issue
       ? this.db
           .prepare(
-            "SELECT projectFields FROM github_memberships WHERE projectId=? AND nodeId=?",
+            `SELECT fields AS projectFields FROM source_memberships WHERE projectId=? AND ${itemIs()}`,
           )
-          .all(task.projectId, issue.nodeId)
+          .all(task.projectId, ...itemKey(issue.nodeId))
           .flatMap((row) =>
             z
               .array(
@@ -2273,19 +2276,13 @@ export class DeliveryStore {
     nodeId: string,
   ): DeliveryActionRecord | undefined {
     const superseded = new Set(
-      this.db
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='github_delivery_closure_supersessions'",
-        )
-        .get()
-        ? (
-            this.db
-              .prepare(
-                "SELECT operationId FROM github_delivery_closure_supersessions WHERE nodeId=?",
-              )
-              .all(nodeId) as { operationId: string }[]
-          ).map((row) => row.operationId)
-        : [],
+      (
+        this.db
+          .prepare(
+            `SELECT operationId FROM source_closure_supersessions WHERE ${itemIs()}`,
+          )
+          .all(...itemKey(nodeId)) as { operationId: string }[]
+      ).map((row) => row.operationId),
     );
     const binding = this.delivery(taskId);
     // Any recorded observation counts: a reopened issue leaves the merged PR's closed list.

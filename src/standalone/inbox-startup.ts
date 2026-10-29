@@ -38,13 +38,15 @@ export class InboxStartupReconciliation {
         )
         .all(request.projectId, request.taskId, request.taskId),
       routing: one("SELECT * FROM project_routing WHERE projectId=?"),
-      source: one("SELECT * FROM project_github_sources WHERE projectId=?"),
+      source: one(
+        "SELECT projectId, version, credentialRef, selections, readiness, closedIssues FROM project_task_sources WHERE projectId=?",
+      ),
       repositories: one(
         "SELECT * FROM project_repository_links WHERE projectId=?",
       ),
       selections: this.db
         .prepare(
-          "SELECT * FROM project_github_active WHERE projectId=? ORDER BY selectionId",
+          "SELECT projectId, selectionId, configVersion FROM project_active_selections WHERE projectId=? ORDER BY selectionId",
         )
         .all(request.projectId),
       delivery: one("SELECT * FROM delivery_policies WHERE projectId=?"),

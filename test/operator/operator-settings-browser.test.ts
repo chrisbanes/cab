@@ -1306,11 +1306,11 @@ test("mounted reference and placement fields have unique associated controls", a
   d.markImportedTask(second, "I_SECOND", "R_SECOND");
   f.seedPersistedState((db) => {
     db.prepare(
-      "INSERT INTO github_external_issues VALUES ('github.com','I_SECOND',?,'R_SECOND','owner/repo',2,'Second','Body','open','[]')",
+      "INSERT INTO external_items VALUES ('github','github.com','I_SECOND',?,'R_SECOND','owner/repo',2,'Second','Body','open','[]')",
     ).run(second);
     for (const projectId of [ids.projectId, target])
       db.prepare(
-        "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?,'selection','I_SECOND','[]')",
+        "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'selection','github','github.com','I_SECOND','[]')",
       ).run(projectId);
   });
   const web = await journey.start("fixture.web", () => f.startWeb());

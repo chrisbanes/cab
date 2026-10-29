@@ -2502,19 +2502,16 @@ test("a task read reports source review, hold and unknown source as source-held"
   );
   f.seedPersistedState((db) => {
     db.prepare(
-      "INSERT INTO github_external_issues VALUES ('github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]')",
+      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]')",
     ).run(taskId);
     db.prepare(
-      "INSERT INTO github_memberships (projectId, selectionId, nodeId, projectFields) VALUES (?,'repo','I1','[]')",
+      "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'repo','github','github.com','I1','[]')",
     ).run(projectId);
-    db.prepare("INSERT INTO github_source_reviews VALUES (?,?,?,?,NULL)").run(
-      "I1",
-      "a".repeat(64),
-      "b".repeat(64),
-      "accept-revised-scope",
-    );
     db.prepare(
-      "INSERT INTO github_source_holds VALUES ('I1',1,'source hold',1)",
+      "INSERT INTO source_reviews VALUES ('github','github.com',?,?,?,?,NULL)",
+    ).run("I1", "a".repeat(64), "b".repeat(64), "accept-revised-scope");
+    db.prepare(
+      "INSERT INTO source_holds VALUES ('github','github.com','I1',1,'source hold',1)",
     ).run();
   });
   assert.ok(d.admission(taskId).reasons.includes("source-hold"));

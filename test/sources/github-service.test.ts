@@ -749,7 +749,7 @@ test("an unassigned routing-enabled source hold does not invent a lead assignmen
       (
         reviewDb
           .prepare(
-            "SELECT observedDigest FROM github_source_reviews WHERE nodeId = 'I_1'",
+            "SELECT observedDigest FROM source_reviews WHERE externalId = 'I_1'",
           )
           .get() as { observedDigest: string }
       ).observedDigest,
@@ -792,7 +792,7 @@ test("an unassigned routing-enabled source hold does not invent a lead assignmen
       (
         secondDb
           .prepare(
-            "SELECT observedDigest FROM github_source_reviews WHERE nodeId = 'I_1'",
+            "SELECT observedDigest FROM source_reviews WHERE externalId = 'I_1'",
           )
           .get() as { observedDigest: string }
       ).observedDigest,
@@ -1265,7 +1265,7 @@ test("a rate-limit pause records a closed blocker as unknown so its local depend
       await synchronizer.refresh();
       const status = db
         .prepare(
-          "SELECT status, reason FROM github_issue_status WHERE nodeId = ?",
+          "SELECT status, reason FROM external_item_status WHERE externalId = ?",
         )
         .get("I_1");
       assert.deepEqual(
@@ -2145,7 +2145,9 @@ function credentialSync(
 
 const statusRow = (db: DatabaseSync, nodeId: string) => ({
   ...db
-    .prepare("SELECT status, reason FROM github_issue_status WHERE nodeId = ?")
+    .prepare(
+      "SELECT status, reason FROM external_item_status WHERE externalId = ?",
+    )
     .get(nodeId),
 });
 

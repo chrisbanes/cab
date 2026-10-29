@@ -168,7 +168,7 @@ test("discovery reads list through the injected reader, fail closed and store no
   const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
   t.after(() => db.close());
   const counts = () =>
-    ["command_receipts", "project_github_sources", "domain_projects"].map(
+    ["command_receipts", "project_task_sources", "domain_projects"].map(
       (table) =>
         Number(
           (
@@ -273,7 +273,7 @@ test("project field reads use only the discovery credential, fail closed and sto
   const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
   t.after(() => db.close());
   const counts = () =>
-    ["command_receipts", "project_github_sources", "domain_projects"].map(
+    ["command_receipts", "project_task_sources", "domain_projects"].map(
       (table) =>
         Number(
           (

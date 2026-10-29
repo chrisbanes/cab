@@ -290,7 +290,7 @@ test("a valid configuration at its maximum size never breaks the task read", asy
   }));
   const db = databaseOf(f.service);
   db.prepare(
-    "UPDATE project_github_sources SET selections=? WHERE projectId=?",
+    "UPDATE project_task_sources SET selections=? WHERE projectId=?",
   ).run(JSON.stringify(selections), f.projectId);
   db.prepare(
     "UPDATE project_repository_links SET links=? WHERE projectId=?",

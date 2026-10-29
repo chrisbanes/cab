@@ -658,14 +658,14 @@ export async function runPreparedLive(manifest, consumedRecord) {
           Number(
             db
               .prepare(
-                "SELECT count(*) n FROM github_external_issues e JOIN domain_tasks t ON t.id=e.taskId WHERE t.projectId=?",
+                "SELECT count(*) n FROM external_items e JOIN domain_tasks t ON t.id=e.taskId WHERE t.projectId=?",
               )
               .get(id).n,
           ),
         imported: async (nodeId) => {
           const row = db
             .prepare(
-              "SELECT e.*,t.projectId,t.ready FROM github_external_issues e JOIN domain_tasks t ON t.id=e.taskId WHERE e.nodeId=?",
+              "SELECT e.containerId AS repositoryId,e.number AS issueNumber,t.projectId,t.ready FROM external_items e JOIN domain_tasks t ON t.id=e.taskId WHERE e.externalId=?",
             )
             .get(nodeId);
           return (

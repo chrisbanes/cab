@@ -48,11 +48,6 @@ export class TaskReviewStore {
   }
   // CoordinationStore owns the surrounding migration transaction after all input schemas exist.
   populateMissingWithinTransaction() {
-    const externalAvailable = !!this.db
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='github_external_issues'",
-      )
-      .get();
     // One discovery for the whole pass: it writes only task_review_* tables, which exclusions() never reads.
     let shared: ReturnType<TaskReviewStore["snapshot"]> | undefined;
     const snapshot = () => (shared ??= this.snapshot());
@@ -71,7 +66,7 @@ export class TaskReviewStore {
             .get(taskId)
         ) {
           const imported = this.db
-            .prepare("SELECT 1 FROM github_imported_tasks WHERE taskId=?")
+            .prepare("SELECT 1 FROM imported_tasks WHERE taskId=?")
             .get(taskId);
           if (!imported)
             this.captureSourceWithSnapshot(
@@ -80,10 +75,10 @@ export class TaskReviewStore {
               undefined,
               snapshot(),
             );
-          else if (externalAvailable) {
+          else {
             const observed = this.db
               .prepare(
-                "SELECT observedTitle,observedBody FROM github_external_issues WHERE taskId=?",
+                "SELECT observedTitle,observedBody FROM external_items WHERE taskId=?",
               )
               .get(taskId) as Row | undefined;
             if (observed)
@@ -218,7 +213,7 @@ export class TaskReviewStore {
     const excluded = rows.map((r) => String(r.instructions)).filter(Boolean);
     const refs = this.db
       .prepare(
-        `SELECT credentialRef FROM project_routing UNION ALL SELECT credentialRef FROM project_github_sources LIMIT ${cap + 1}`,
+        `SELECT credentialRef FROM project_routing UNION ALL SELECT credentialRef FROM project_task_sources LIMIT ${cap + 1}`,
       )
       .all() as Row[];
     if (refs.length > cap) throw new RedactionLimitError();

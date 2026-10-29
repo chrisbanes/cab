@@ -762,10 +762,12 @@ test("credential failure invalidation is atomic, idempotent, scoped and keeps ob
     task: d.task(s.taskId),
     sync: sources.syncState(s.projectId, "S-1"),
     dependency: db
-      .prepare("SELECT * FROM github_dependency_observations WHERE nodeId = ?")
+      .prepare(
+        "SELECT * FROM source_dependency_observations WHERE externalId = ?",
+      )
       .get(s.issue.nodeId),
     status: db
-      .prepare("SELECT * FROM github_issue_status WHERE nodeId = ?")
+      .prepare("SELECT * FROM external_item_status WHERE externalId = ?")
       .get(s.issue.nodeId),
     native: sources.nativeBlockers(s.issue.nodeId),
   });

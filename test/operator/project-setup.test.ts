@@ -138,7 +138,7 @@ test("guided create records instructions, verified repositories and one inactive
       (
         db
           .prepare(
-            "SELECT COUNT(*) AS n FROM project_github_active WHERE projectId = ?",
+            "SELECT COUNT(*) AS n FROM project_active_selections WHERE projectId = ?",
           )
           .get(String(command.projectId)) as { n: number }
       ).n,
@@ -182,7 +182,7 @@ test("guided create records the setup source credential at version 1 and replays
       (
         db
           .prepare(
-            "SELECT COUNT(*) AS n FROM project_github_active WHERE projectId = ?",
+            "SELECT COUNT(*) AS n FROM project_active_selections WHERE projectId = ?",
           )
           .get(id) as { n: number }
       ).n,
@@ -283,7 +283,7 @@ test("origin and ref checks report one field, keep nothing and never echo creden
     assert.equal(JSON.stringify(receipt).includes("SECRETPASS"), false);
   }
   const stored =
-    JSON.stringify(db.prepare("SELECT * FROM project_github_sources").all()) +
+    JSON.stringify(db.prepare("SELECT * FROM project_task_sources").all()) +
     JSON.stringify(db.prepare("SELECT * FROM command_receipts").all());
   assert.equal(stored.includes("SECRETPASS"), false);
   await checkout(join(src, "none"));

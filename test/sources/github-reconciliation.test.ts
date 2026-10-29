@@ -13,6 +13,10 @@ import {
 } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
+import {
+  previousSchemaDatabase,
+  seedPreviousIssue,
+} from "../fixtures/previous-source-schema.js";
 import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import type { IssueSnapshot } from "../../src/standalone/github-source.js";
 
@@ -724,14 +728,14 @@ test("provider-closure completion requires done mode, complete membership, settl
     w.observe({ state: "closed" });
     w.db
       .prepare(
-        "INSERT INTO github_delivery_closures (nodeId, operationId, closerPrNodeId, snapshotJson) VALUES ('I_1', 'op', NULL, '{}')",
+        "INSERT INTO source_closures (provider, instance, externalId, operationId, closerChangeRequestId, snapshotJson) VALUES ('github', 'github.com', 'I_1', 'op', NULL, '{}')",
       )
       .run();
     assert.equal(
       w.sources.completeFromProviderClosure(taskId, () => true),
       false,
     );
-    w.db.prepare("DELETE FROM github_delivery_closures").run();
+    w.db.prepare("DELETE FROM source_closures").run();
     w.configure("skip");
     w.observe({ state: "closed" });
     assert.equal(
@@ -1294,25 +1298,26 @@ test("re-listing releases no changed-text hold, and leaves a project pause alone
 });
 
 test("migration adds the skipped closed issues to existing sync state rows", () => {
-  const db = new DatabaseSync(":memory:");
+  const { db, domain, projectId } = previousSchemaDatabase();
   try {
-    new Store(db).ensureHost("test");
-    new DomainStore(db).migrate();
-    db.exec(`CREATE TABLE github_sync_state (
+    db.exec(`DROP TABLE github_sync_state;
+      CREATE TABLE github_sync_state (
       projectId TEXT NOT NULL, selectionId TEXT NOT NULL,
       complete INTEGER NOT NULL, reason TEXT, refreshedAt TEXT NOT NULL,
-      PRIMARY KEY(projectId, selectionId));
-      INSERT INTO github_sync_state VALUES ('p', 's', 1, NULL, 'then');`);
-    new GitHubSourceStore(db).migrate();
+      PRIMARY KEY(projectId, selectionId))`);
+    db.prepare(
+      "INSERT INTO github_sync_state VALUES (?, 's', 1, NULL, 'then')",
+    ).run(projectId);
+    domain.migrate();
     assert.deepEqual(
-      { ...db.prepare("SELECT * FROM github_sync_state").get() },
+      { ...db.prepare("SELECT * FROM source_sync_state").get() },
       {
-        projectId: "p",
+        projectId,
         selectionId: "s",
         complete: 1,
         reason: null,
         refreshedAt: "then",
-        skippedClosedNodeIds: "[]",
+        skippedClosedIds: "[]",
       },
     );
   } finally {
@@ -1681,7 +1686,7 @@ test("upgrading initialises each imported task's readiness rule identity without
       assert.deepEqual(snapshot(), before);
       const rule = f.db
         .prepare(
-          "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+          "SELECT readiness FROM project_task_sources WHERE projectId = ?",
         )
         .get(f.projectId)?.readiness;
       for (const nodeId of ["I_1", "I_2"])
@@ -1847,9 +1852,7 @@ for (const mode of ["done", "skip"] as const)
       assert.equal(w.sources.deliveryClosure("I_1")?.operationId, operationId);
       assert.equal(
         w.db
-          .prepare(
-            "SELECT COUNT(*) AS n FROM github_delivery_closure_supersessions",
-          )
+          .prepare("SELECT COUNT(*) AS n FROM source_closure_supersessions")
           .get()?.n,
         1,
       );
@@ -1964,9 +1967,7 @@ test("a later cab closure after supersession is own again", () => {
     });
     assert.deepEqual(
       w.db
-        .prepare(
-          "SELECT operationId FROM github_delivery_closure_supersessions",
-        )
+        .prepare("SELECT operationId FROM source_closure_supersessions")
         .all()
         .map((row) => row.operationId),
       [first],
@@ -2017,26 +2018,24 @@ test("supersession keeps unrelated holds", () => {
 });
 
 test("migration adds supersession storage and keeps delivery closures", () => {
-  const root = mkdtempSync(join(tmpdir(), "cab-closure-migration-"));
-  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const { db, domain } = previousSchemaDatabase();
   try {
-    new Store(db).ensureHost("test");
-    new DomainStore(db).migrate();
-    db.exec(
-      "CREATE TABLE github_delivery_closures (nodeId TEXT PRIMARY KEY, operationId TEXT NOT NULL, closerPrNodeId TEXT, snapshotJson TEXT NOT NULL)",
-    );
+    db.exec(`DROP TABLE github_delivery_closures;
+      CREATE TABLE github_delivery_closures (nodeId TEXT PRIMARY KEY, operationId TEXT NOT NULL, closerPrNodeId TEXT, snapshotJson TEXT NOT NULL)`);
     db.prepare(
       "INSERT INTO github_delivery_closures VALUES ('I_1', 'op', 'P_7', '{}')",
     ).run();
+    domain.migrate();
     const sources = new GitHubSourceStore(db);
     sources.migrate();
-    sources.migrate();
     assert.deepEqual(
-      { ...db.prepare("SELECT * FROM github_delivery_closures").get() },
+      { ...db.prepare("SELECT * FROM source_closures").get() },
       {
-        nodeId: "I_1",
+        provider: "github",
+        instance: "github.com",
+        externalId: "I_1",
         operationId: "op",
-        closerPrNodeId: "P_7",
+        closerChangeRequestId: "P_7",
         snapshotJson: "{}",
         closedEventId: null,
       },
@@ -2046,16 +2045,12 @@ test("migration adds supersession storage and keeps delivery closures", () => {
       closedEventId: null,
     });
     assert.equal(
-      db
-        .prepare(
-          "SELECT COUNT(*) AS n FROM github_delivery_closure_supersessions",
-        )
-        .get()?.n,
+      db.prepare("SELECT COUNT(*) AS n FROM source_closure_supersessions").get()
+        ?.n,
       0,
     );
   } finally {
     db.close();
-    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -2166,22 +2161,22 @@ test("a Project selection keeps its item id apart from the readiness facts, and 
     );
 
     // A database created before the column existed gains it, keeping its rows.
-    const old = new DatabaseSync(":memory:");
-    old.exec(
-      "CREATE TABLE github_memberships (projectId TEXT NOT NULL, selectionId TEXT NOT NULL, nodeId TEXT NOT NULL, projectFields TEXT NOT NULL, PRIMARY KEY(projectId, selectionId, nodeId))",
-    );
-    old
-      .prepare("INSERT INTO github_memberships VALUES ('p', 's', 'n', '[]')")
-      .run();
-    new GitHubSourceStore(old).migrate();
+    const old = previousSchemaDatabase();
+    old.db.exec(`DROP TABLE github_memberships;
+      CREATE TABLE github_memberships (projectId TEXT NOT NULL, selectionId TEXT NOT NULL, nodeId TEXT NOT NULL, projectFields TEXT NOT NULL, PRIMARY KEY(projectId, selectionId, nodeId))`);
+    seedPreviousIssue(old.db, old.projectId, "n");
+    old.db
+      .prepare("INSERT INTO github_memberships VALUES (?, 's', 'n', '[]')")
+      .run(old.projectId);
+    old.domain.migrate();
     assert.deepEqual(
-      old
-        .prepare("SELECT nodeId, itemNodeId FROM github_memberships")
+      old.db
+        .prepare("SELECT externalId, itemId FROM source_memberships")
         .all()
         .map((row) => ({ ...row })),
-      [{ nodeId: "n", itemNodeId: null }],
+      [{ externalId: "n", itemId: null }],
     );
-    old.close();
+    old.db.close();
   } finally {
     db.close();
   }

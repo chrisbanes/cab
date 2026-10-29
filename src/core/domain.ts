@@ -44,6 +44,7 @@ import {
 } from "./github-source.js";
 import {
   closedIssuesSchema,
+  githubIssueTracker,
   setupRepositoriesSchema,
 } from "./github-source-contracts.js";
 import {
@@ -51,6 +52,13 @@ import {
   repositoryLinkListSchema,
   type StoredRepositoryLink,
 } from "./repository-links.js";
+import { extractLegacyRepositoryLinks } from "./github-source-migration.js";
+import {
+  itemIs,
+  itemParams,
+  migrateSourceStorage,
+  sameItem,
+} from "./source-storage.js";
 import { type Database, transaction } from "./store.js";
 import { TaskReviewStore } from "./task-review.js";
 
@@ -397,8 +405,14 @@ function present(row: Row, key: string): string | number | null {
 }
 
 /** A blocker task `b` with its import and source status, and when it still blocks. */
-const blockerStatus = `LEFT JOIN github_imported_tasks i ON i.taskId = b.id
-      LEFT JOIN github_issue_status s ON s.nodeId = i.nodeId`;
+const blockerStatus = `LEFT JOIN imported_tasks i ON i.taskId = b.id
+      LEFT JOIN external_item_status s ON ${sameItem("s", "i")}`;
+/** The key parameters of an item row carrying `provider`, `instance` and `nodeId`. */
+const itemOf = (row: Row): [string, string, string] => [
+  String(row.provider),
+  String(row.instance),
+  String(row.nodeId),
+];
 const blocks = `((i.taskId IS NULL AND b.state != 'done')
         OR (i.taskId IS NOT NULL AND COALESCE(s.status, 'unknown') != 'closed'))`;
 
@@ -576,28 +590,9 @@ export class DomainStore {
           enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), guidance TEXT NOT NULL,
           credentialRef TEXT, candidateProfileIds TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS project_github_sources (
-          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
-          credentialRef TEXT, selections TEXT NOT NULL, readiness TEXT NOT NULL,
-          closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))
-        );
         CREATE TABLE IF NOT EXISTS project_repository_links (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
           links TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS project_github_active (
-          projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
-          configVersion INTEGER NOT NULL, PRIMARY KEY(projectId, selectionId)
-        );
-        CREATE TABLE IF NOT EXISTS github_imported_tasks (
-          taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id),
-          providerInstance TEXT NOT NULL CHECK(providerInstance = 'github.com'),
-          nodeId TEXT NOT NULL, repositoryId TEXT NOT NULL,
-          UNIQUE(providerInstance, nodeId)
-        );
-        CREATE TABLE IF NOT EXISTS github_issue_status (
-          nodeId TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('open','closed','unknown')),
-          reason TEXT, refreshedAt TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS domain_assignments (
           id TEXT PRIMARY KEY, taskId TEXT NOT NULL REFERENCES domain_tasks(id),
@@ -709,45 +704,10 @@ export class DomainStore {
           this.db.exec(
             `ALTER TABLE ${table} ADD COLUMN runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'`,
           );
-      if (
-        !(
-          this.db
-            .prepare("PRAGMA table_info(project_github_sources)")
-            .all() as Row[]
-        ).some((column) => column.name === "closedIssues")
-      )
-        this.db.exec(
-          "ALTER TABLE project_github_sources ADD COLUMN closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))",
-        );
-      // Repository links moved from the GitHub source to the project: existing links are
-      // GitHub on github.com. One-way: an older build cannot read the dropped column.
-      if (
-        (
-          this.db
-            .prepare("PRAGMA table_info(project_github_sources)")
-            .all() as Row[]
-        ).some((column) => column.name === "repositories")
-      ) {
-        const insert = this.db.prepare(
-          "INSERT OR IGNORE INTO project_repository_links (projectId, version, links) VALUES (?, 1, ?)",
-        );
-        for (const row of this.db
-          .prepare("SELECT projectId, repositories FROM project_github_sources")
-          .all() as Row[])
-          insert.run(
-            String(row.projectId),
-            JSON.stringify(
-              asGitHubLinks(
-                z
-                  .array(linkedRepositorySchema)
-                  .parse(JSON.parse(String(row.repositories))),
-              ),
-            ),
-          );
-        this.db.exec(
-          "ALTER TABLE project_github_sources DROP COLUMN repositories",
-        );
-      }
+      extractLegacyRepositoryLinks(this.db, (json) =>
+        asGitHubLinks(z.array(linkedRepositorySchema).parse(json)),
+      );
+      migrateSourceStorage(this.db);
       if (!routingColumns.some((column) => column.name === "brief"))
         this.db.exec(
           "ALTER TABLE routing_operations ADD COLUMN brief TEXT NOT NULL DEFAULT ''",
@@ -821,10 +781,14 @@ export class DomainStore {
         .run();
       this.db
         .prepare(
-          "INSERT OR IGNORE INTO project_github_sources (projectId, version, credentialRef, selections, readiness) SELECT id, 1, NULL, '[]', ? FROM domain_projects",
+          "INSERT OR IGNORE INTO project_task_sources (projectId, provider, instance, version, credentialRef, selections, readiness) SELECT id, ?, ?, 1, NULL, '[]', ? FROM domain_projects",
         )
         // No readiness rule: a backfilled source filters nothing.
-        .run(JSON.stringify(null));
+        .run(
+          githubIssueTracker.provider,
+          githubIssueTracker.instance,
+          JSON.stringify(null),
+        );
       this.db.exec(
         "INSERT OR IGNORE INTO project_repository_links (projectId, version, links) SELECT id, 1, '[]' FROM domain_projects",
       );
@@ -837,9 +801,9 @@ export class DomainStore {
       ) {
         this.db.exec("ALTER TABLE domain_tasks ADD COLUMN readinessRule TEXT");
         this.db.exec(`UPDATE domain_tasks
-          SET readinessRule = (SELECT c.readiness FROM project_github_sources c
+          SET readinessRule = (SELECT c.readiness FROM project_task_sources c
             WHERE c.projectId = domain_tasks.projectId)
-          WHERE id IN (SELECT taskId FROM github_imported_tasks)`);
+          WHERE id IN (SELECT taskId FROM imported_tasks)`);
       }
     });
   }
@@ -1238,7 +1202,7 @@ export class DomainStore {
   } {
     this.project(projectId);
     const row = this.required(
-      "SELECT version, credentialRef, selections, readiness, closedIssues FROM project_github_sources WHERE projectId = ?",
+      "SELECT version, credentialRef, selections, readiness, closedIssues FROM project_task_sources WHERE projectId = ?",
       id.parse(projectId),
     );
     return {
@@ -1275,9 +1239,15 @@ export class DomainStore {
     this.task(taskId);
     this.db
       .prepare(
-        "INSERT INTO github_imported_tasks (taskId, providerInstance, nodeId, repositoryId) VALUES (?, 'github.com', ?, ?)",
+        "INSERT INTO imported_tasks (taskId, provider, instance, externalId, containerId) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(id.parse(taskId), label.parse(nodeId), label.parse(repositoryId));
+      .run(
+        id.parse(taskId),
+        githubIssueTracker.provider,
+        githubIssueTracker.instance,
+        label.parse(nodeId),
+        label.parse(repositoryId),
+      );
   }
 
   /**
@@ -1359,7 +1329,7 @@ export class DomainStore {
 
   importedTask(taskId: string): Row | undefined {
     return this.one(
-      "SELECT taskId, providerInstance, nodeId, repositoryId FROM github_imported_tasks WHERE taskId = ?",
+      "SELECT taskId, provider, instance, instance AS providerInstance, externalId AS nodeId, containerId AS repositoryId FROM imported_tasks WHERE taskId = ?",
       id.parse(taskId),
     );
   }
@@ -1369,7 +1339,7 @@ export class DomainStore {
     return (
       this.db
         .prepare(
-          "SELECT selectionId FROM project_github_active WHERE projectId = ? AND configVersion = ? ORDER BY selectionId",
+          "SELECT selectionId FROM project_active_selections WHERE projectId = ? AND configVersion = ? ORDER BY selectionId",
         )
         .all(id.parse(projectId), config.version) as Row[]
     ).map((row) => String(row.selectionId));
@@ -1830,22 +1800,16 @@ export class DomainStore {
   }
 
   hasOwnDeliveryClosure(taskId: string): boolean {
-    if (
-      !this.one(
-        "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='github_external_issues'",
-      )
-    )
-      return false;
     const external = this.one(
-      "SELECT nodeId,observedState FROM github_external_issues WHERE taskId=?",
+      "SELECT provider, instance, externalId AS nodeId, observedState FROM external_items WHERE taskId=?",
       taskId,
     );
     return (
       external?.observedState === "closed" &&
       Number(
         this.one(
-          `SELECT ${effectiveOwnClosure("?")} AS present`,
-          String(external.nodeId),
+          `SELECT ${effectiveOwnClosure(itemParams)} AS present`,
+          ...itemOf(external),
         )?.present,
       ) === 1 &&
       new DeliveryStore(this.db).ownsConfirmedClosure(
@@ -1858,20 +1822,14 @@ export class DomainStore {
   providerClosure(
     taskId: string,
   ): "held" | "completed" | "unattributed" | null {
-    if (
-      !this.one(
-        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
-      )
-    )
-      return null;
     const row = this.one(
-      `SELECT t.state, e.nodeId, e.observedState,
-        EXISTS (SELECT 1 FROM github_provider_completions p WHERE p.taskId = t.id) AS completed,
-        EXISTS (SELECT 1 FROM github_source_holds h WHERE h.nodeId = e.nodeId
+      `SELECT t.state, e.externalId AS nodeId, e.observedState,
+        EXISTS (SELECT 1 FROM source_completions p WHERE p.taskId = t.id) AS completed,
+        EXISTS (SELECT 1 FROM source_holds h WHERE ${sameItem("h", "e")}
           AND h.active = 1 AND h.reason = 'closure-read-unavailable') AS ownProofPending,
-        EXISTS (SELECT 1 FROM github_source_holds h WHERE h.nodeId = e.nodeId
+        EXISTS (SELECT 1 FROM source_holds h WHERE ${sameItem("h", "e")}
           AND h.active = 1 AND h.reason = 'closure-attribution-unproved') AS unattributed
-      FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
+      FROM domain_tasks t JOIN external_items e ON e.taskId = t.id WHERE t.id = ?`,
       taskId,
     );
     if (row?.state === "done" && Number(row.completed) === 1)
@@ -1917,82 +1875,75 @@ export class DomainStore {
       reasons.push(`imported-blockers-${task.importedBlockers}`);
     const imported = this.importedTask(taskId);
     if (imported) {
-      const sourceTables = this.one(
-        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_external_issues'",
+      const external = this.one(
+        "SELECT provider, instance, externalId AS nodeId FROM external_items WHERE taskId = ?",
+        taskId,
       );
-      if (!sourceTables) reasons.push("source-unknown");
+      if (!external) reasons.push("source-unknown");
       else {
-        const external = this.one(
-          "SELECT nodeId FROM github_external_issues WHERE taskId = ?",
-          taskId,
+        const key = itemOf(external);
+        const review = this.one(
+          `SELECT observedDigest, acceptedDigest FROM source_reviews WHERE ${itemIs()}`,
+          ...key,
         );
-        if (!external) reasons.push("source-unknown");
-        else {
-          const review = this.one(
-            "SELECT observedDigest, acceptedDigest FROM github_source_reviews WHERE nodeId = ?",
-            String(external.nodeId),
-          );
-          if (review && review.observedDigest !== review.acceptedDigest)
-            reasons.push("source-review-required");
-          if (
+        if (review && review.observedDigest !== review.acceptedDigest)
+          reasons.push("source-review-required");
+        if (
+          this.one(
+            `SELECT 1 AS active FROM source_holds WHERE ${itemIs()} AND active = 1 AND (?=0 OR reason<>'closed')`,
+            ...key,
+            Number(ownClosure),
+          )
+        )
+          reasons.push("source-hold");
+        const memberships = this.db
+          .prepare(`SELECT CASE WHEN a.configVersion = c.version THEN s.complete ELSE 0 END AS complete FROM source_memberships m
+            LEFT JOIN source_sync_state s ON s.projectId = m.projectId AND s.selectionId = m.selectionId
+            LEFT JOIN project_active_selections a ON a.projectId = m.projectId AND a.selectionId = m.selectionId
+            JOIN project_task_sources c ON c.projectId = m.projectId
+            WHERE ${itemIs("m")} AND m.projectId = ?`)
+          .all(...key, String(task.projectId)) as Row[];
+        if (memberships.length === 0) {
+          const closureOnlyHold =
+            ownClosure &&
             this.one(
-              "SELECT 1 AS active FROM github_source_holds WHERE nodeId = ? AND active = 1 AND (?=0 OR reason<>'closed')",
-              String(external.nodeId),
-              Number(ownClosure),
-            )
+              `SELECT 1 AS present FROM source_holds WHERE ${itemIs()} AND active=1 AND reason='closed'`,
+              ...key,
+            );
+          const config = this.githubConfiguration(String(task.projectId));
+          const closureSelection =
+            closureOnlyHold &&
+            config.selections.some(
+              (selection) =>
+                selection.kind === "repository" &&
+                selection.repositoryId === imported.repositoryId &&
+                this.one(
+                  "SELECT 1 AS present FROM project_active_selections a JOIN source_sync_state s ON s.projectId=a.projectId AND s.selectionId=a.selectionId WHERE a.projectId=? AND a.selectionId=? AND a.configVersion=? AND s.complete=1",
+                  String(task.projectId),
+                  selection.id,
+                  config.version,
+                ),
+            );
+          if (!closureSelection) reasons.push("source-withdrawn");
+        } else if (memberships.some((membership) => membership.complete !== 1))
+          reasons.push("source-unknown");
+        const projects = this.db
+          .prepare(
+            `SELECT DISTINCT projectId FROM source_memberships WHERE ${itemIs()}`,
           )
-            reasons.push("source-hold");
-          const memberships = this.db
-            .prepare(`SELECT CASE WHEN a.configVersion = c.version THEN s.complete ELSE 0 END AS complete FROM github_memberships m
-            LEFT JOIN github_sync_state s ON s.projectId = m.projectId AND s.selectionId = m.selectionId
-            LEFT JOIN project_github_active a ON a.projectId = m.projectId AND a.selectionId = m.selectionId
-            JOIN project_github_sources c ON c.projectId = m.projectId
-            WHERE m.nodeId = ? AND m.projectId = ?`)
-            .all(String(external.nodeId), String(task.projectId)) as Row[];
-          if (memberships.length === 0) {
-            const closureOnlyHold =
-              ownClosure &&
-              this.one(
-                "SELECT 1 AS present FROM github_source_holds WHERE nodeId=? AND active=1 AND reason='closed'",
-                String(external.nodeId),
-              );
-            const config = this.githubConfiguration(String(task.projectId));
-            const closureSelection =
-              closureOnlyHold &&
-              config.selections.some(
-                (selection) =>
-                  selection.kind === "repository" &&
-                  selection.repositoryId === imported.repositoryId &&
-                  this.one(
-                    "SELECT 1 AS present FROM project_github_active a JOIN github_sync_state s ON s.projectId=a.projectId AND s.selectionId=a.selectionId WHERE a.projectId=? AND a.selectionId=? AND a.configVersion=? AND s.complete=1",
-                    String(task.projectId),
-                    selection.id,
-                    config.version,
-                  ),
-              );
-            if (!closureSelection) reasons.push("source-withdrawn");
-          } else if (
-            memberships.some((membership) => membership.complete !== 1)
+          .all(...key) as Row[];
+        if (
+          projects.length > 1 &&
+          !this.one(
+            `SELECT 1 AS present FROM source_placement_decisions WHERE ${itemIs()}`,
+            ...key,
+          ) &&
+          !this.one(
+            "SELECT 1 AS present FROM domain_assignments WHERE taskId = ? LIMIT 1",
+            taskId,
           )
-            reasons.push("source-unknown");
-          const projects = this.db
-            .prepare(
-              "SELECT DISTINCT projectId FROM github_memberships WHERE nodeId = ?",
-            )
-            .all(String(external.nodeId)) as Row[];
-          if (
-            projects.length > 1 &&
-            !this.one(
-              "SELECT 1 AS present FROM github_placement_decisions WHERE nodeId = ?",
-              String(external.nodeId),
-            ) &&
-            !this.one(
-              "SELECT 1 AS present FROM domain_assignments WHERE taskId = ? LIMIT 1",
-              taskId,
-            )
-          )
-            reasons.push("source-placement-conflict");
-        }
+        )
+          reasons.push("source-placement-conflict");
       }
     }
     if (this.blockingDependencies(taskId).length)
@@ -2221,10 +2172,12 @@ export class DomainStore {
           .run(command.projectId);
         this.db
           .prepare(
-            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness) VALUES (?, 1, ?, ?, ?)",
+            "INSERT INTO project_task_sources (projectId, provider, instance, version, credentialRef, selections, readiness) VALUES (?, ?, ?, 1, ?, ?, ?)",
           )
           .run(
             command.projectId,
+            githubIssueTracker.provider,
+            githubIssueTracker.instance,
             command.sourceCredentialRef ?? null,
             // A linked GitHub Project is an inactive source: nothing is active until preview.
             JSON.stringify(
@@ -2362,15 +2315,9 @@ export class DomainStore {
             command.taskId,
           );
         // A manual state change replaces any provider-closure completion.
-        if (
-          command.state !== undefined &&
-          command.state !== current.state &&
-          this.one(
-            "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
-          )
-        )
+        if (command.state !== undefined && command.state !== current.state)
           this.db
-            .prepare("DELETE FROM github_provider_completions WHERE taskId = ?")
+            .prepare("DELETE FROM source_completions WHERE taskId = ?")
             .run(command.taskId);
         return this.task(command.taskId);
       }
@@ -2483,7 +2430,7 @@ export class DomainStore {
         });
         this.db
           .prepare(
-            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, closedIssues = ? WHERE projectId = ?",
+            "UPDATE project_task_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, closedIssues = ? WHERE projectId = ?",
           )
           .run(
             command.credentialRef === undefined
@@ -2494,74 +2441,65 @@ export class DomainStore {
             command.closedIssues ?? current.closedIssues,
             command.projectId,
           );
-        if (
-          this.one(
-            "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_sync_state'",
-          )
-        ) {
-          const selectionIds = JSON.stringify(
-            selections.map((selection) => selection.id),
-          );
-          const members = this.db
-            .prepare(`SELECT DISTINCT e.taskId FROM github_memberships m
-            JOIN github_external_issues e ON e.nodeId = m.nodeId
+        const selectionIds = JSON.stringify(
+          selections.map((selection) => selection.id),
+        );
+        const members = this.db
+          .prepare(`SELECT DISTINCT e.taskId FROM source_memberships m
+            JOIN external_items e ON ${sameItem("e", "m")}
             WHERE m.projectId = ? AND m.selectionId NOT IN (SELECT value FROM json_each(?))`)
-            .all(command.projectId, selectionIds) as Row[];
-          const affectedTasks = members.map((member) => String(member.taskId));
-          for (const table of [
-            "github_memberships",
-            "github_sync_state",
-            "project_github_active",
-          ])
-            this.db
-              .prepare(
-                `DELETE FROM ${table} WHERE projectId = ? AND selectionId NOT IN (SELECT value FROM json_each(?))`,
-              )
-              .run(command.projectId, selectionIds);
-          const sources = new GitHubSourceStore(this.db);
-          for (const taskId of affectedTasks) sources.updateReadiness(taskId);
-          // Skip never leaves a provider closure as Done: reopen those tasks under their
-          // closure hold now, since retained selections stay inactive until previewed.
-          if (
-            current.closedIssues === "done" &&
-            command.closedIssues === "skip"
-          )
-            for (const row of this.db
-              .prepare(`SELECT p.taskId FROM github_provider_completions p
+          .all(command.projectId, selectionIds) as Row[];
+        const affectedTasks = members.map((member) => String(member.taskId));
+        for (const table of [
+          "source_memberships",
+          "source_sync_state",
+          "project_active_selections",
+        ])
+          this.db
+            .prepare(
+              `DELETE FROM ${table} WHERE projectId = ? AND selectionId NOT IN (SELECT value FROM json_each(?))`,
+            )
+            .run(command.projectId, selectionIds);
+        const sources = new GitHubSourceStore(this.db);
+        for (const taskId of affectedTasks) sources.updateReadiness(taskId);
+        // Skip never leaves a provider closure as Done: reopen those tasks under their
+        // closure hold now, since retained selections stay inactive until previewed.
+        if (current.closedIssues === "done" && command.closedIssues === "skip")
+          for (const row of this.db
+            .prepare(`SELECT p.taskId FROM source_completions p
               JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
-              .all(command.projectId) as Row[])
-              sources.updateReadiness(String(row.taskId));
-          this.db
-            .prepare(
-              "UPDATE github_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",
-            )
-            .run(command.projectId);
-          this.db
-            .prepare(`UPDATE domain_tasks SET importedBlockers = 'unknown'
-            WHERE projectId = ? AND id IN (SELECT taskId FROM github_imported_tasks)`)
-            .run(command.projectId);
-          this.db
-            .prepare(`UPDATE github_dependency_observations SET complete = 0, reason = 'configuration-changed'
-            WHERE nodeId IN (SELECT nodeId FROM github_imported_tasks WHERE taskId IN
+            .all(command.projectId) as Row[])
+            sources.updateReadiness(String(row.taskId));
+        this.db
+          .prepare(
+            "UPDATE source_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",
+          )
+          .run(command.projectId);
+        this.db
+          .prepare(`UPDATE domain_tasks SET importedBlockers = 'unknown'
+            WHERE projectId = ? AND id IN (SELECT taskId FROM imported_tasks)`)
+          .run(command.projectId);
+        this.db
+          .prepare(`UPDATE source_dependency_observations SET complete = 0, reason = 'configuration-changed'
+            WHERE (provider, instance, externalId) IN (SELECT provider, instance, externalId FROM imported_tasks WHERE taskId IN
               (SELECT id FROM domain_tasks WHERE projectId = ?))`)
-            .run(command.projectId);
-          this.db
-            .prepare(`UPDATE domain_tasks SET version = version + 1 WHERE id IN (
-            SELECT d.taskId FROM local_dependencies d JOIN github_imported_tasks i ON i.taskId = d.blockerTaskId
-            JOIN domain_tasks b ON b.id = i.taskId JOIN github_issue_status s ON s.nodeId = i.nodeId
+          .run(command.projectId);
+        this.db
+          .prepare(`UPDATE domain_tasks SET version = version + 1 WHERE id IN (
+            SELECT d.taskId FROM local_dependencies d JOIN imported_tasks i ON i.taskId = d.blockerTaskId
+            JOIN domain_tasks b ON b.id = i.taskId JOIN external_item_status s ON ${sameItem("s", "i")}
             WHERE b.projectId = ? AND s.status = 'closed')`)
-            .run(command.projectId);
-          this.db
-            .prepare(`UPDATE github_issue_status SET status = 'unknown', reason = 'configuration-changed'
-            WHERE nodeId IN (SELECT i.nodeId FROM github_imported_tasks i
+          .run(command.projectId);
+        this.db
+          .prepare(`UPDATE external_item_status SET status = 'unknown', reason = 'configuration-changed'
+            WHERE (provider, instance, externalId) IN (SELECT i.provider, i.instance, i.externalId FROM imported_tasks i
               JOIN domain_tasks t ON t.id = i.taskId WHERE t.projectId = ?)`)
-            .run(command.projectId);
-          this.db
-            .prepare(
-              "UPDATE domain_tasks SET version = version + 1 WHERE projectId = ? AND id IN (SELECT taskId FROM github_imported_tasks)",
-            )
-            .run(command.projectId);
-        }
+          .run(command.projectId);
+        this.db
+          .prepare(
+            "UPDATE domain_tasks SET version = version + 1 WHERE projectId = ? AND id IN (SELECT taskId FROM imported_tasks)",
+          )
+          .run(command.projectId);
         return this.githubConfiguration(command.projectId);
       }
       case "repositories.configure": {
@@ -2608,7 +2546,7 @@ export class DomainStore {
         // Same transaction as the upsert, so concurrent activations see one first.
         const alreadyActive = Boolean(
           this.one(
-            "SELECT 1 AS present FROM project_github_active WHERE projectId = ? AND selectionId = ? AND configVersion = ?",
+            "SELECT 1 AS present FROM project_active_selections WHERE projectId = ? AND selectionId = ? AND configVersion = ?",
             command.projectId,
             command.selectionId,
             config.version,
@@ -2616,7 +2554,7 @@ export class DomainStore {
         );
         this.db
           .prepare(
-            "INSERT INTO project_github_active (projectId, selectionId, configVersion) VALUES (?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET configVersion = excluded.configVersion",
+            "INSERT INTO project_active_selections (projectId, selectionId, configVersion) VALUES (?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET configVersion = excluded.configVersion",
           )
           .run(command.projectId, command.selectionId, config.version);
         return {
@@ -2635,8 +2573,8 @@ export class DomainStore {
         const imported = this.importedTask(command.taskId);
         if (!imported) throw new DomainConflictError("Task is not imported");
         const membership = this.one(
-          "SELECT 1 AS present FROM github_memberships WHERE nodeId = ? AND projectId = ?",
-          String(imported.nodeId),
+          `SELECT 1 AS present FROM source_memberships WHERE ${itemIs()} AND projectId = ?`,
+          ...itemOf(imported),
           command.chosenProjectId,
         );
         if (!membership)
@@ -2675,9 +2613,9 @@ export class DomainStore {
         }
         this.db
           .prepare(
-            "INSERT INTO github_placement_decisions (nodeId, projectId) VALUES (?, ?) ON CONFLICT(nodeId) DO UPDATE SET projectId = excluded.projectId",
+            "INSERT INTO source_placement_decisions (provider, instance, externalId, projectId) VALUES (?, ?, ?, ?) ON CONFLICT(provider, instance, externalId) DO UPDATE SET projectId = excluded.projectId",
           )
-          .run(String(imported.nodeId), command.chosenProjectId);
+          .run(...itemOf(imported), command.chosenProjectId);
         new GitHubSourceStore(this.db).updateReadiness(command.taskId);
         this.db
           .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
@@ -2691,17 +2629,18 @@ export class DomainStore {
         this.version(task, command.expectedVersion);
         const imported = this.importedTask(command.taskId);
         if (!imported) throw new DomainConflictError("Task is not imported");
+        const key = itemOf(imported);
         const external = this.one(
-          "SELECT observedTitle, observedBody, observedState FROM github_external_issues WHERE nodeId = ?",
-          String(imported.nodeId),
+          `SELECT observedTitle, observedBody, observedState FROM external_items WHERE ${itemIs()}`,
+          ...key,
         );
         const review = this.one(
-          "SELECT observedDigest, acceptedDigest FROM github_source_reviews WHERE nodeId = ?",
-          String(imported.nodeId),
+          `SELECT observedDigest, acceptedDigest FROM source_reviews WHERE ${itemIs()}`,
+          ...key,
         );
         const hold = this.one(
-          "SELECT active FROM github_source_holds WHERE nodeId = ?",
-          String(imported.nodeId),
+          `SELECT active FROM source_holds WHERE ${itemIs()}`,
+          ...key,
         );
         if (
           !external ||
@@ -2738,16 +2677,12 @@ export class DomainStore {
           );
         this.db
           .prepare(
-            "UPDATE github_source_reviews SET acceptedDigest = observedDigest, decision = ?, decidedAt = ? WHERE nodeId = ?",
+            `UPDATE source_reviews SET acceptedDigest = observedDigest, decision = ?, decidedAt = ? WHERE ${itemIs()}`,
           )
-          .run(
-            command.decision,
-            new Date().toISOString(),
-            String(imported.nodeId),
-          );
+          .run(command.decision, new Date().toISOString(), ...key);
         this.db
-          .prepare("UPDATE github_source_holds SET active = 0 WHERE nodeId = ?")
-          .run(String(imported.nodeId));
+          .prepare(`UPDATE source_holds SET active = 0 WHERE ${itemIs()}`)
+          .run(...key);
         this.db
           .prepare("UPDATE tasks SET title = ? WHERE id = ?")
           .run(String(external.observedTitle), command.taskId);

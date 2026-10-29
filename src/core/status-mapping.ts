@@ -76,9 +76,7 @@ export class StatusMappingStore {
   /** The project's `project` selections: what a mapping can bind to. */
   projectSelections(projectId: string) {
     const row = this.db
-      .prepare(
-        "SELECT selections FROM project_github_sources WHERE projectId=?",
-      )
+      .prepare("SELECT selections FROM project_task_sources WHERE projectId=?")
       .get(projectId) as { selections: string } | undefined;
     return z
       .array(selectionSchema)
@@ -144,7 +142,7 @@ export class StatusMappingStore {
     )
       throw new StatusMappingRefusal("no-selection", null, null);
     const row = this.db
-      .prepare("SELECT readiness FROM project_github_sources WHERE projectId=?")
+      .prepare("SELECT readiness FROM project_task_sources WHERE projectId=?")
       .get(projectId) as { readiness: string };
     const rule = readinessSchema.nullable().parse(JSON.parse(row.readiness));
     for (const event of statusMappingEvents) {
