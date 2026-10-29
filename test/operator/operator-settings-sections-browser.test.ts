@@ -291,7 +291,8 @@ test("a first-run flip while Settings is open reorders the sections and keeps fo
   // The focused control moved with its section; the page follows it into view.
   await page.waitForFunction(() => {
     const box = document.activeElement?.getBoundingClientRect();
-    return Boolean(box && box.top >= 0 && box.bottom <= innerHeight);
+    // A pixel of tolerance: scrolling rounds to whole pixels, section heights do not.
+    return Boolean(box && box.top >= 0 && box.bottom <= innerHeight + 1);
   });
 });
 
