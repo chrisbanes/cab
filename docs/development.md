@@ -34,6 +34,11 @@ startup and imports; new files use the selected profile's median fallback. The r
 `check` context aggregates static checks and all applicable test jobs, including
 their failure evidence uploads. Superseded PR runs are cancelled.
 
+Pull requests that change only Markdown at the repository root or under `docs/`
+skip the build and tests, and `check` passes on the skipped jobs. Changes to
+`docs/design/`, `docs/evidence/` and `docs/operations/`, which tests read, run all
+checks.
+
 Daily CI at 05:00 UTC skips the build and tests only when the previous scheduled
 run on the same branch completed successfully on the same commit. Changed commits,
 first nights and failed, cancelled or unfinished previous runs execute all checks;

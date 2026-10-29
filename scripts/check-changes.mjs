@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -22,6 +23,21 @@ export function nightlyChanged(sha, previous) {
     previous.head_sha !== sha ||
     previous.status !== "completed" ||
     previous.conclusion !== "success"
+  );
+}
+
+// Tests read these documents, so changing them still runs the checks.
+const testedDocs = ["docs/design/", "docs/evidence/", "docs/operations/"];
+
+export function docsOnly(paths) {
+  return (
+    paths.length > 0 &&
+    paths.every(
+      (path) =>
+        path.endsWith(".md") &&
+        (!path.includes("/") || path.startsWith("docs/")) &&
+        !testedDocs.some((dir) => path.startsWith(dir)),
+    )
   );
 }
 
@@ -72,10 +88,23 @@ if (
         : "No previous nightly run",
     );
   }
+  if (process.env.GITHUB_EVENT_NAME === "pull_request") {
+    // The checkout is the PR merge commit; its first parent is the base branch.
+    const paths = execFileSync(
+      "git",
+      ["diff", "--name-only", "--no-renames", "HEAD^1", "HEAD"],
+      { encoding: "utf8" },
+    )
+      .split("\n")
+      .filter(Boolean);
+    run = !docsOnly(paths);
+  }
   appendFileSync(process.env.GITHUB_OUTPUT, `run=${run}\n`);
   console.log(
     run
       ? "Run CI checks"
-      : "Commit unchanged after successful previous nightly; skip checks",
+      : process.env.GITHUB_EVENT_NAME === "pull_request"
+        ? "Documentation-only change; skip checks"
+        : "Commit unchanged after successful previous nightly; skip checks",
   );
 }

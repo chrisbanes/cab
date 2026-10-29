@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
@@ -8,9 +9,10 @@ const { ciFailures } = (await import(
 )) as {
   ciFailures(jobs: unknown, full: boolean, run?: boolean): string[];
 };
-const { previousNightlyRun, nightlyChanged } = (await import(
-  pathToFileURL(resolve("scripts/check-nightly-changes.mjs")).href
+const { previousNightlyRun, nightlyChanged, docsOnly } = (await import(
+  pathToFileURL(resolve("scripts/check-changes.mjs")).href
 )) as {
+  docsOnly(paths: string[]): boolean;
   previousNightlyRun(
     id: string,
     fetchPage: (page: number) => Promise<{
@@ -142,6 +144,36 @@ test("nightly history pagination finds the previous run and lookup errors cannot
     /no commit SHA/,
   );
 });
+test("pull requests skip checks only when every change is untested documentation", () => {
+  assert.equal(docsOnly(["README.md", "docs/adr/1021-profile.md"]), true);
+  for (const paths of [
+    [],
+    ["README.md", "src/index.ts"],
+    ["docs/adr/diagram.png"],
+    ["test/fixtures/notes.md"],
+    ["design/DESIGN.md"],
+  ])
+    assert.equal(docsOnly(paths), false, paths.join());
+  // Documents read by tests (quoted paths, not comments) must not be skippable.
+  const docs = readdirSync("test", { recursive: true, encoding: "utf8" })
+    .filter(
+      (path) =>
+        /\.(ts|mjs)$/.test(path) && !path.endsWith("ci-workflow.test.ts"),
+    )
+    .flatMap(
+      (path) =>
+        readFileSync(join("test", path), "utf8").match(
+          /(?<=["'`](?:\.\.\/)*)docs\/[\w./-]+/g,
+        ) ?? [],
+    );
+  assert.ok(docs.length);
+  for (const doc of docs.filter((d) => d.endsWith(".md") || !d.includes(".")))
+    assert.equal(
+      docsOnly([doc.endsWith(".md") ? doc : `${doc}/any.md`]),
+      false,
+      doc,
+    );
+});
 function successful(full: boolean) {
   return {
     changes: { result: "success" },
@@ -155,7 +187,7 @@ test("aggregate check accepts complete PR and compatibility runs", () => {
   assert.deepEqual(ciFailures(successful(false), false), []);
   assert.deepEqual(ciFailures(successful(true), true), []);
 });
-test("unchanged nightly skips require a successful change gate and every test job skipped", () => {
+test("unchanged nightly and documentation-only skips require a successful change gate and every test job skipped", () => {
   const skipped = Object.fromEntries(
     Object.keys(successful(true)).map((name) => [
       name,
@@ -163,15 +195,20 @@ test("unchanged nightly skips require a successful change gate and every test jo
     ]),
   );
   assert.deepEqual(ciFailures(skipped, true, false), []);
-  assert.ok(ciFailures(skipped, false, false).length);
+  assert.deepEqual(ciFailures(skipped, false, false), []);
   for (const name of Object.keys(skipped)) {
     assert.ok(
       ciFailures({ ...skipped, [name]: { result: "failure" } }, true, false)
         .length,
     );
+    assert.ok(
+      ciFailures({ ...skipped, [name]: { result: "failure" } }, false, false)
+        .length,
+    );
     const missing = { ...skipped };
     delete missing[name];
     assert.ok(ciFailures(missing, true, false).length);
+    assert.ok(ciFailures(missing, false, false).length);
   }
 });
 test("failed, cancelled, missing and unexpectedly skipped applicable jobs cannot pass check", () => {
