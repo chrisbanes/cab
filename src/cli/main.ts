@@ -737,7 +737,7 @@ async function run(
 }
 
 /** The upgrade's readiness reads through the operator's own CLI connection. */
-function operatorConnection(
+export function operatorConnection(
   deps: CliDeps,
   name: string | undefined,
 ): OperatorConnection {

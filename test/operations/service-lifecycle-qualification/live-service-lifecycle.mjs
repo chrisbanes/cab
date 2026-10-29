@@ -6,6 +6,11 @@
 // used outside the commands under test, and only after its plist path matches the
 // throwaway plist. It never touches the default label, the real Library folders, the
 // login Keychain (the token goes to a file) or the browser (--no-open).
+//
+// `--npm` proves #1327 instead: it packs two local versions of the npm package, installs
+// them with `npm install -g --prefix` into the private root, and drives the same lifecycle
+// through that prefix's `cab` (install, package update and removal, upgrade, uninstall,
+// reinstall). Local tarballs only; nothing is published.
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -22,7 +27,8 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const LAUNCHCTL = "/bin/launchctl";
 const repo = process.cwd();
@@ -488,12 +494,279 @@ async function main() {
   evidence.rootRemoved = true;
 }
 
-if (!process.argv.includes("--live")) {
+/** The #1327 proof: the same throwaway label and private root, with the service installed from an npm prefix. */
+async function npmMain() {
+  assert.equal(process.platform, "darwin", "requires macOS");
+  const { packCab, installGlobal, uninstallGlobal } = await import(
+    pathToFileURL(join(repo, "dist/test/fixtures/npm-package.js")).href
+  );
+  const { treeDigest } = await import(
+    pathToFileURL(join(repo, "dist/src/cli/release-tree.js")).href
+  );
+  root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), "cab-1327-")));
+  chmodSync(root, 0o700);
+  const label = `local.cab.validation-${randomBytes(4).toString("hex")}`;
+  target = `gui/${process.getuid()}/${label}`;
+  const state = join(root, "state");
+  const logs = join(root, "logs");
+  const agents = join(root, "agents");
+  const cli = join(root, "cli");
+  const home = join(root, "home");
+  const prefix = join(root, "prefix");
+  for (const dir of [state, logs, agents, cli, home])
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  activation = join(agents, `${label}.plist`);
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${port}`;
+  evidence.label = label;
+  evidence.headCommit = git("rev-parse", "HEAD");
+  evidence.node = process.version;
+  evidence.npm = run("npm", ["--version"]).out.trim();
+  assert.equal(print(), null, "throwaway label must start unloaded");
+  step("1-preflight", { labelAbsent: true });
+
+  const packages = join(root, "packages");
+  mkdirSync(packages);
+  const a = await packCab(packages, "0.1.0");
+  const b = await packCab(packages, "0.1.1-live.1327");
+  evidence.packages = {
+    a: { version: a.version, integrity: a.integrity },
+    b: { version: b.version, integrity: b.integrity },
+  };
+  const installedRoot = await installGlobal(prefix, a.tarball, home);
+  const cab = (args) =>
+    run(join(prefix, "bin", "cab"), args, {
+      env: {
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        HOME: home,
+        CAB_CLI_CONFIG_DIR: join(cli, "config"),
+      },
+    });
+  assert.equal(cab(["--version"]).out, `cab ${a.version}\n`);
+  assert.equal(
+    existsSync(join(home, "Library")),
+    false,
+    "install touched no HOME state",
+  );
+  assert.equal(
+    existsSync(state) && readdirSync(state).length,
+    0,
+    "install created no STATE",
+  );
+  step("2-package-install", {
+    version: a.version,
+    startedNothing: print() === null,
+  });
+
+  before = baseline();
+  const authFile = join(state, "auth", "operator-auth.json");
+  const password = randomBytes(24).toString("hex");
+  const options = [
+    "--label",
+    label,
+    "--state-dir",
+    state,
+    "--log-dir",
+    logs,
+    "--launch-agents-dir",
+    agents,
+  ];
+  const env = {
+    PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+    HOME: home,
+    CAB_CLI_CONFIG_DIR: join(cli, "config"),
+  };
+  const install = async (tokenName, prompt) => {
+    const out = await runOnPty(
+      join(prefix, "bin", "cab"),
+      [
+        "service",
+        "install",
+        "--connection",
+        "live",
+        "--token-file",
+        join(cli, tokenName),
+        "--no-open",
+        ...options,
+        "--port",
+        String(port),
+      ],
+      { env, prompt, password },
+    );
+    assert.ok(out.typed, `${prompt} appeared`);
+    assert.equal(out.code, 0, "install failed (output withheld)");
+    assert.ok(
+      !out.output.includes(password) && !out.output.includes("ens_"),
+      "no password or token on the terminal",
+    );
+    return JSON.parse(
+      out.output
+        .split(/\r?\n/)
+        .find((line) => line.startsWith('{"ok":true,"operation":"install"')),
+    );
+  };
+  const stageDir = (version) => join(state, "versions", version);
+  const programArgument = (index) =>
+    run("/usr/bin/plutil", [
+      "-extract",
+      `ProgramArguments.${index}`,
+      "raw",
+      activation,
+    ]).out.trim();
+
+  const first = await install("token-1", "New operator password: ");
+  assert.equal(first.version, a.version);
+  assert.equal(programArgument(0), realpathSync(process.execPath));
+  assert.equal(
+    programArgument(1),
+    join(stageDir(a.version), "dist", "src", "standalone", "cli.js"),
+  );
+  assert.equal(
+    JSON.parse(readFileSync(join(stageDir(a.version), "manifest.json"), "utf8"))
+      .schema,
+    "cab.npm-stage/v1",
+  );
+  const jobA = await until(() => print()?.pid && print(), 60_000, "job A pid");
+  assert.equal(jobA.path, activation);
+  pids.add(jobA.pid);
+  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  const auth = cab([
+    "auth",
+    "status",
+    "--connection",
+    "live",
+    "--output",
+    "json",
+  ]);
+  assert.equal(auth.code, 0, `auth status failed: ${auth.err}`);
+  assert.equal(JSON.parse(auth.out).data.credential.scope, "read");
+  step("3-service-install", {
+    output: first,
+    programArguments: [
+      "bound Node.js (real path of the CLI's node)",
+      `versions/${a.version}/dist/src/standalone/cli.js`,
+    ],
+    stageManifestSchema: "cab.npm-stage/v1",
+    appStatus: 200,
+    authenticatedCliRead: true,
+  });
+
+  const digestA = await treeDigest(stageDir(a.version));
+  await installGlobal(prefix, b.tarball, home);
+  await uninstallGlobal(prefix, home);
+  assert.equal(existsSync(installedRoot), false, "the package is removed");
+  assert.equal(
+    await treeDigest(stageDir(a.version)),
+    digestA,
+    "the stage is unchanged",
+  );
+  assert.equal(print()?.pid, jobA.pid, "the same process still runs");
+  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  assert.ok(
+    processCommand(jobA.pid).includes(stageDir(a.version)),
+    "the process runs from the stage",
+  );
+  step("4-package-update-and-removal", {
+    stageDigestUnchanged: true,
+    pidUnchanged: jobA.pid > 0,
+    appStatus: 200,
+  });
+
+  await installGlobal(prefix, b.tarball, home);
+  const upgrade = cab([
+    "service",
+    "upgrade",
+    "--connection",
+    "live",
+    ...options,
+  ]);
+  evidence.upgradeExit = upgrade.code;
+  assert.equal(upgrade.code, 0, `upgrade failed: ${upgrade.err}`);
+  const report = JSON.parse(upgrade.out);
+  assert.equal(report.version, b.version);
+  assert.ok(processGone(jobA.pid), "release A process exited");
+  const jobB = await until(() => print()?.pid && print(), 60_000, "job B pid");
+  pids.add(jobB.pid);
+  assert.ok(
+    processCommand(jobB.pid).includes(stageDir(b.version)),
+    "the new process runs from the new stage",
+  );
+  assert.ok(
+    report.snapshot?.startsWith(
+      join(state, "snapshots", `startup.${a.version}-to-${b.version}.`),
+    ),
+    `service-taken snapshot, got ${report.snapshot}`,
+  );
+  const verify = cab(["snapshot", "verify", report.snapshot]);
+  assert.equal(verify.code, 0, "snapshot verify");
+  assert.ok(existsSync(stageDir(a.version)), "the old stage stays");
+  step("5-upgrade", {
+    output: report,
+    oldPidExited: true,
+    newPidRunsStageB: true,
+    snapshotVerify: JSON.parse(verify.out),
+  });
+
+  const authBytes = readFileSync(authFile);
+  const uninstall = cab(["service", "uninstall", ...options]);
+  assert.equal(uninstall.code, 0, `uninstall failed: ${uninstall.err}`);
+  assert.equal(print(), null);
+  await until(() => [...pids].every(processGone), 30_000, "process exit");
+  for (const kept of [
+    join(state, "data"),
+    authFile,
+    report.snapshot,
+    stageDir(a.version),
+    stageDir(b.version),
+    ...report.logs,
+  ])
+    assert.ok(existsSync(kept), `${kept} kept`);
+  step("6-uninstall", {
+    output: JSON.parse(uninstall.out),
+    printExit: 113,
+    kept: ["data", "auth", "snapshot", "both stages", "logs"],
+  });
+
+  const again = await install("token-2", "Operator password: ");
+  assert.equal(again.version, b.version);
+  assert.deepEqual(
+    readFileSync(authFile),
+    authBytes,
+    "the existing auth was kept",
+  );
+  const jobC = await until(() => print()?.pid && print(), 60_000, "job C pid");
+  pids.add(jobC.pid);
+  assert.equal((await fetch(`${origin}/app`)).status, 200);
+  step("7-reinstall", {
+    output: again,
+    authFileUnchanged: true,
+    appStatus: 200,
+  });
+
+  const final = cab(["service", "uninstall", ...options]);
+  assert.equal(final.code, 0, `final uninstall failed: ${final.err}`);
+  assert.equal(print(), null);
+  await until(() => [...pids].every(processGone), 30_000, "process exit");
+  assert.equal(existsSync(activation), false);
+
+  const changes = diff(before, baseline());
+  evidence.baseline = { changes };
+  assert.ok(
+    Object.values(changes).every((c) => !c.added.length && !c.removed.length),
+    "real folders and launchd labels unchanged",
+  );
+  step("8-postflight", { unchanged: true });
+  rmSync(root, { recursive: true });
+  evidence.rootRemoved = true;
+}
+
+const npmMode = process.argv.includes("--npm");
+if (!npmMode && !process.argv.includes("--live")) {
   process.stderr.write("Refusing the live launchctl proof without --live.\n");
   process.exit(2);
 }
 try {
-  await main();
+  await (npmMode ? npmMain() : main());
   evidence.result = "pass";
 } catch (error) {
   evidence.result = "fail";

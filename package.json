@@ -1,9 +1,12 @@
 {
   "name": "@chrisbanes/cab",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chrisbanes/cab.git"
+  },
   "engines": {
     "node": ">=24"
   },

@@ -9,15 +9,16 @@ LaunchAgent stays the default.
 
 ## Install, upgrade and uninstall
 
-The commands below describe the implemented bundled-Node tarball channel.
-The primary first-release target is one npm package, `@chrisbanes/cab`, with
-Node installed separately ([ADR-1011](../adr/1011-packaging-and-distribution.md)).
-Its service install/upgrade path is not implemented or qualified yet; installing
-the current packed CLI is not evidence of npm-based service installation.
-Desktop and Homebrew distribution are deferred.
+The primary first-release channel is one npm package, `@chrisbanes/cab`, with
+Node.js installed separately ([ADR-1011](../adr/1011-packaging-and-distribution.md)).
+`cab service install` and `cab service upgrade` support it
+([from npm](#install-and-upgrade-from-npm)) and automated tests cover it. No version has
+been published and the sequence is not qualified on a published package.
+The bundled-Node tarball channel stays supported and is described first. Desktop and
+Homebrew distribution are deferred.
 
-The service runs from an unpacked [release](#release-build) under the state
-directory. The defaults are:
+The service runs from an unpacked [release](#release-build) or a staged copy of the
+npm package under the state directory. The defaults are:
 
 | Path | Default |
 | --- | --- |
@@ -128,6 +129,66 @@ already holds the auth file and the data directory. It is listed, rotatable and
 revocable in Settings → CLI credentials like any other. Upgrade never signs in or
 issues a credential; it reads readiness through this connection, so an expired or
 revoked credential stops upgrade with the existing message until you log in again.
+
+### Install and upgrade from npm
+
+`npm install -g @chrisbanes/cab` puts the `cab` CLI on your `PATH` and starts nothing:
+the package has no install scripts, and neither installing, updating nor removing it
+touches `STATE`, the logs or the LaunchAgents. It needs Node.js 24 or a later
+even-numbered (LTS) release; an odd-numbered release is refused. Then run:
+
+```sh
+cab service install [--node PATH]
+```
+
+`service install` run from a global npm installation (a package root ending in
+`node_modules/@chrisbanes/cab`) copies that package, with its production
+`node_modules`, `dist/src` and `dist/operator`, into `STATE/versions/<version>` through
+the same staging directory as a tarball and writes a `manifest.json` with schema
+`cab.npm-stage/v1` and the copy's `cab-tree-sha256/v1` digest. The Claude Agent SDK's
+platform packages are left out, as in the tarball; `claude` comes from the service
+`PATH`. An existing version with the same manifest is reused, and one with a different
+manifest, or a tarball release of that version, is refused. The service then
+runs from that copy, so a later `npm install -g` or `npm uninstall -g` does not change
+the files it runs. Everything after staging is as for a tarball: the same preflight
+refusals, plist, start, health check and sign-in. A checkout is not an npm
+installation and is still refused.
+
+The plist names a Node.js, not a bundled one. Install binds the one running the CLI, or
+`--node PATH`, which must be an absolute path to an executable even-numbered release at
+or above the package's `engines.node`. It is checked, by running `--version`, before
+anything is staged or stopped, and recorded as its real path in the install record; it is
+never looked up on `PATH` again. If that Node.js is removed (for example an nvm version or
+a Homebrew cellar the next upgrade deletes) the service fails to start until you re-bind
+it with `cab service upgrade "$STATE/versions/<version>" --node PATH`, which re-binds the
+staged copy without staging again. `--node` is refused with a TARBALL or any
+other tarball release.
+
+To update, install the new version, then upgrade:
+
+```sh
+npm install -g @chrisbanes/cab@0.2.0
+cab service upgrade --connection local
+```
+
+`service upgrade` with no `VERSION_DIR` must run from a global npm installation. After
+the usual checks and the readiness read, and before it stops the job, it stages the
+running package as `STATE/versions/<version>`. A staging or Node.js failure therefore
+leaves the old job running. The stages and failure handling are those of
+[Upgrade](#upgrade). The binding recorded at install is kept unless `--node PATH` changes
+it. To re-bind without a version change, pass the staged copy as `VERSION_DIR` with
+`--node`; running the package's upgrade again re-stages it, which is refused when a reinstall
+resolved other dependency versions for the same package version. A package that does not
+hold its dependencies under it (a project-local or `npx` install) is refused. An explicit
+`VERSION_DIR` also takes a staged npm version. Uninstall is unchanged and keeps every staged version. The
+sequence is automated in `test/operations/npm-service-lifecycle.test.ts` (a launchd
+stand-in that runs the rendered plist as a real process) and had one bounded live run
+on local tarballs under a throwaway label
+([evidence](../evidence/2026-10-29-npm-service-lifecycle.md)).
+
+A LaunchDaemon install from npm uses the same staging and binding. The verify command it
+prints runs `NODE STATE/versions/<version>/dist/src/cli/main.js service install ...`,
+because an npm stage has no `bin/cab`.
 
 ### Upgrade
 
@@ -1038,6 +1099,27 @@ release job finishes a draft release that the failed run left behind; it refuses
 replace a published release. Manual runs and pull requests that change the packaging
 files build and verify the same tarball and upload it only as a workflow artifact. No
 release has been published yet.
+
+The same workflow packs the npm package once on the macOS runner
+(`package-release.mjs pack-npm --out DIR`: a clean `npm ci` and build of the commit, one
+`npm pack`, and `npm-package.json` with the name, version, `integrity`, `shasum`, file
+name and commit), installs that `.tgz` into a temporary prefix and `HOME`, and serves
+the operator UI from it (`verify-npm`). Pull requests and manual runs stop there and
+upload the `.tgz` and record as an artifact. For a pushed `v*` tag, after CI and the
+package job, the `npm` job runs in the `npm` GitHub environment with `id-token: write`,
+re-checks the record against the downloaded `.tgz` (`check-npm`) and publishes exactly
+that file with `npm publish FILE --access public`, using npm trusted publishing (OIDC)
+with provenance and no stored token. A rerun publishes nothing when `npm view` shows the
+same `integrity` and fails on a version that holds other content. The GitHub Release job
+then attaches `npm-package.json`.
+
+The npmjs.com side is configured by the maintainer, not by the workflow: a trusted
+publisher for `@chrisbanes/cab` (repository `chrisbanes/cab`, workflow `release.yml`,
+environment `npm`), optionally with required reviewers on the `npm` environment. If npm
+needs the package to exist before a trusted publisher can be added, the first version is a
+one-time maintainer bootstrap. No version has been published, and a tag push is the
+publication. Rerun a failed publish with "Re-run failed jobs": a full rerun packs again,
+and the publish check passes only if the registry's integrity matches the new bytes.
 
 ## Checkout and low-level procedure
 

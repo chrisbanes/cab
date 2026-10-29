@@ -14,6 +14,8 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -107,6 +109,8 @@ class FakeLaunchd {
   onApi: (path: string) => void = () => {};
   opened: string[] = [];
   onBootstrap: () => void | Promise<void> = () => {};
+  /** What a bound Node.js reports, by real path; any other path reports the current LTS. */
+  nodeVersions = new Map<string, string>();
   overrides: Partial<ServiceHost> = {};
 
   constructor(
@@ -207,6 +211,7 @@ class FakeLaunchd {
           });
         renameSync(from, to);
       },
+      nodeVersion: async (path) => this.nodeVersions.get(path) ?? "v24.22.1",
       extract: async (tarball, dir) => {
         execFileSync("tar", [
           "-xzf",
@@ -762,14 +767,72 @@ function environment(plist: string): Record<string, string> {
 const RETENTION = "CAB_DIAGNOSTIC_RETENTION_DAYS";
 const STORAGE = "CAB_DIAGNOSTIC_STORAGE_MIB";
 
+/** A global npm installation of the package, as `npm install -g` leaves it; `publish` replaces it in place. */
+function npmPackage(t: { after(fn: () => void): void }, version = "0.1.0") {
+  const prefix = mkdtempSync(join(tmpdir(), "cab-npm-"));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const root = join(prefix, "lib", "node_modules", "@chrisbanes", "cab");
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  };
+  const publish = (next: string) => {
+    rmSync(root, { recursive: true, force: true });
+    write(
+      "package.json",
+      JSON.stringify({
+        name: "@chrisbanes/cab",
+        version: next,
+        engines: { node: ">=24" },
+        dependencies: { zod: "*" },
+      }),
+    );
+    write("dist/src/standalone/cli.js", `// ${next}\n`);
+    write("dist/src/cli/main.js", "\n");
+    write("dist/operator/index.html", "<html></html>\n");
+    write("LICENSE", "license\n");
+    write("node_modules/zod/index.js", "\n");
+    write("node_modules/zod/package.json", '{"name":"zod"}');
+    symlinkSync("../zod/index.js", join(root, "node_modules", ".bin-zod"));
+    write("node_modules/@anthropic-ai/claude-agent-sdk/index.js", "\n");
+    // The platform binary the stage leaves out.
+    write(
+      "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude",
+      "\n",
+    );
+  };
+  publish(version);
+  return { root, publish };
+}
+
+/** `service install` from the package at `root`. */
+async function installNpm(
+  f: Awaited<ReturnType<typeof setup>>,
+  root: string,
+  first: Partial<FirstRun> = {},
+) {
+  const { out, io } = capture();
+  const code = await installService(f.options, root, f.launchd.host(), io, {
+    connection: "local",
+    open: false,
+    ...first,
+  });
+  return { code, ...out };
+}
+
 /** Installs 0.1.0 over marked data and adds release 0.2.0. */
 async function installed(
   t: { after(fn: () => void): void },
   diagnostic?: ServiceOptions["diagnostic"],
+  /** Installs from this global npm package instead of an unpacked release; 0.2.0 is published over it. */
+  npm?: ReturnType<typeof npmPackage>,
 ) {
-  const f = await setup(t, true);
-  assert.equal((await f.install(diagnostic)).code, 0);
-  const releaseB = release(f.stateDir, "0.2.0");
+  const f = await setup(t, true, { unpacked: !npm });
+  if (npm) {
+    assert.equal((await installNpm(f, npm.root)).code, 0);
+    npm.publish("0.2.0");
+  } else assert.equal((await f.install(diagnostic)).code, 0);
+  const releaseB = npm ? npm.root : release(f.stateDir, "0.2.0");
   let checks = [
     { id: "codex-login", status: "pass" },
     { id: "claude-token", status: "not-configured" },
@@ -791,6 +854,7 @@ async function installed(
     target = releaseB,
     signal?: AbortSignal,
     diagnostic?: ServiceOptions["diagnostic"],
+    change?: Parameters<typeof upgradeService>[5],
   ) => {
     const { out, io } = capture();
     const code = await upgradeService(
@@ -800,6 +864,7 @@ async function installed(
       connection,
       f.launchd.host(),
       { ...io, signal },
+      change,
     );
     return {
       code,
@@ -3809,4 +3874,324 @@ test("daemon mode verify re-reads the full identity after the last wait and neve
   const verified = await ok.installDaemon();
   assert.equal(verified.code, 0, verified.stderr);
   assert.equal(JSON.parse(verified.stdout).started, true);
+});
+
+const NODE = realpathSync(process.execPath);
+
+test("install from a global npm package stages it and binds the running Node.js", async (t) => {
+  const npm = npmPackage(t);
+  const f = await setup(t, false, { unpacked: false });
+  const result = await installNpm(f, npm.root);
+  assert.equal(result.code, 0, result.stderr);
+  const stage = join(f.stateDir, "versions", "0.1.0");
+  const manifest = JSON.parse(
+    readFileSync(join(stage, "manifest.json"), "utf8"),
+  );
+  assert.equal(manifest.schema, "cab.npm-stage/v1");
+  assert.equal(manifest.name, "@chrisbanes/cab");
+  assert.equal(manifest.tree.algorithm, "cab-tree-sha256/v1");
+  assert.deepEqual(programArguments(f.activation).slice(0, 2), [
+    NODE,
+    join(stage, "dist", "src", "standalone", "cli.js"),
+  ]);
+  assert.equal(f.record().configuration.nodePath, NODE);
+  assert.deepEqual(f.launchd.mutations(), [
+    ["bootstrap", `gui/${UID}`, f.activation],
+  ]);
+  // Production files only, symlinks kept as they are, and not the SDK's platform binary.
+  assert.ok(existsSync(join(stage, "node_modules", "zod", "index.js")));
+  assert.ok(existsSync(join(stage, "dist", "operator", "index.html")));
+  assert.equal(
+    readlinkSync(join(stage, "node_modules", ".bin-zod")),
+    "../zod/index.js",
+  );
+  assert.ok(
+    existsSync(join(stage, "node_modules/@anthropic-ai/claude-agent-sdk")),
+  );
+  assert.equal(
+    existsSync(
+      join(stage, "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"),
+    ),
+    false,
+  );
+  // The service runs from its copy: removing the package changes nothing it uses.
+  rmSync(npm.root, { recursive: true });
+  assert.ok(existsSync(join(stage, "dist", "src", "standalone", "cli.js")));
+});
+
+test("an npm install refuses an unusable --node before staging or touching launchd", async (t) => {
+  const npm = npmPackage(t);
+  const f = await setup(t, false, { unpacked: false });
+  const plain = join(f.home, "not-executable");
+  writeFileSync(plain, "#!/bin/sh\n", { mode: 0o644 });
+  const odd = join(f.home, "odd-node");
+  const old = join(f.home, "old-node");
+  for (const path of [odd, old])
+    writeFileSync(path, "#!/bin/sh\n", { mode: 0o755 });
+  f.launchd.nodeVersions.set(realpathSync(odd), "v25.1.0");
+  f.launchd.nodeVersions.set(realpathSync(old), "v22.9.0");
+  for (const [node, message] of [
+    [join(f.home, "missing"), /not an executable file/],
+    ["relative/node", /must be an absolute path/],
+    [plain, /not an executable file/],
+    [
+      odd,
+      /even-numbered Node\.js release of at least 24; it reports v25\.1\.0/,
+    ],
+    [old, /at least 24; it reports v22\.9\.0/],
+  ] as const) {
+    const result = await installNpm(f, npm.root, { node });
+    assert.equal(result.code, 1, node);
+    assert.match(JSON.parse(result.stderr).error, message, node);
+  }
+  assert.equal(existsSync(join(f.stateDir, "versions")), false);
+  assert.deepEqual(f.launchd.calls, []);
+  assert.equal(existsSync(f.recordPath), false);
+
+  // An explicit, valid runtime is bound as its real path.
+  const link = join(f.home, "linked-node");
+  symlinkSync(NODE, link);
+  assert.equal((await installNpm(f, npm.root, { node: link })).code, 0);
+  assert.equal(f.record().configuration.nodePath, NODE);
+});
+
+test("a root that is neither a release nor a global npm package is still refused", async (t) => {
+  const f = await setup(t, false, { unpacked: false });
+  const checkout = join(f.home, "checkout");
+  mkdirSync(join(checkout, "dist", "src", "standalone"), { recursive: true });
+  writeFileSync(
+    join(checkout, "package.json"),
+    JSON.stringify({ name: "@chrisbanes/cab", version: "0.1.0" }),
+  );
+  const result = await installNpm(f, checkout);
+  assert.equal(result.code, 1);
+  assert.match(
+    JSON.parse(result.stderr).error,
+    /must be an unpacked directory/,
+  );
+  assert.equal(
+    existsSync(join(f.stateDir, "versions", "0.1.0", "manifest.json")),
+    false,
+  );
+  assert.deepEqual(f.launchd.calls, []);
+});
+
+test("a staged npm version is reused when identical, refused when different and replaced when incomplete", async (t) => {
+  const npm = npmPackage(t);
+  const f = await setup(t, false, { unpacked: false });
+  const manifestPath = join(f.stateDir, "versions", "0.1.0", "manifest.json");
+  assert.equal((await installNpm(f, npm.root)).code, 0);
+  const first = statSync(manifestPath).ino;
+  assert.equal((await f.uninstall()).code, 0);
+  assert.equal((await installNpm(f, npm.root)).code, 0);
+  assert.equal(statSync(manifestPath).ino, first, "the same stage is reused");
+
+  assert.equal((await f.uninstall()).code, 0);
+  writeFileSync(join(npm.root, "dist", "src", "extra.js"), "// changed\n");
+  const different = await installNpm(f, npm.root);
+  assert.equal(different.code, 1);
+  assert.match(
+    JSON.parse(different.stderr).error,
+    /already holds a different release/,
+  );
+
+  rmSync(
+    join(
+      f.stateDir,
+      "versions",
+      "0.1.0",
+      "dist",
+      "src",
+      "standalone",
+      "cli.js",
+    ),
+  );
+  assert.equal((await installNpm(f, npm.root)).code, 0);
+  assert.ok(
+    existsSync(
+      join(f.stateDir, "versions", "0.1.0", "dist", "src", "extra.js"),
+    ),
+  );
+});
+
+test("upgrade with no VERSION_DIR stages the running npm package, keeps the binding and runs the lifecycle in order", async (t) => {
+  const f = await installed(t, undefined, npmPackage(t));
+  const bound = f.record().configuration.nodePath;
+  const result = await f.upgrade(f.releaseB, undefined, undefined, {
+    implicit: true,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(f.launchd.events, [
+    "readiness",
+    "bootout",
+    "exited",
+    "bootstrap snapshots=0",
+    "readiness",
+  ]);
+  const stage = join(f.stateDir, "versions", "0.2.0");
+  assert.equal(result.report.version, "0.2.0");
+  assert.equal(f.record().configuration.nodePath, bound);
+  assert.equal(
+    f.record().configuration.cliPath,
+    join(stage, "dist", "src", "standalone", "cli.js"),
+  );
+  assert.ok(
+    existsSync(join(f.stateDir, "versions", "0.1.0")),
+    "the old stage stays",
+  );
+});
+
+test("upgrade --node re-binds an npm release at the same version", async (t) => {
+  const npm = npmPackage(t);
+  const f = await installed(t, undefined, npm);
+  const other = join(f.home, "other-node");
+  symlinkSync(NODE, other);
+  const result = await f.upgrade(f.releaseB, undefined, undefined, {
+    implicit: true,
+    node: other,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(f.record().configuration.nodePath, NODE);
+  // The staged copy re-binds without staging again.
+  const staged = join(f.stateDir, "versions", "0.2.0");
+  const rebound = await f.upgrade(staged, undefined, undefined, { node: NODE });
+  assert.equal(rebound.code, 0, rebound.stderr);
+  // A recorded Node.js that has gone is reported, and --node is the way out.
+  const gone = join(f.home, "gone-node");
+  const second = await installed(t, undefined, npmPackage(t));
+  const record = second.record();
+  writeFileSync(
+    second.recordPath,
+    JSON.stringify({
+      ...record,
+      configuration: { ...record.configuration, nodePath: gone },
+    }),
+  );
+  const stale = await second.upgrade(second.releaseB, undefined, undefined, {
+    implicit: true,
+  });
+  assert.equal(stale.code, 1);
+  assert.match(
+    stale.report.error,
+    /cab service upgrade STATE\/versions\/V --node PATH/,
+  );
+  assert.equal(stale.report.jobStopped, null);
+  assert.deepEqual(second.launchd.events, []);
+});
+
+test("a package whose dependencies are not under it is not a global installation", async (t) => {
+  const npm = npmPackage(t);
+  const f = await setup(t, false, { unpacked: false });
+  // A project-local or npx install: the dependencies sit beside the package.
+  rmSync(join(npm.root, "node_modules", "zod"), { recursive: true });
+  const result = await installNpm(f, npm.root);
+  assert.equal(result.code, 1);
+  assert.match(
+    JSON.parse(result.stderr).error,
+    /not a global npm installation/,
+  );
+  assert.deepEqual(f.launchd.calls, []);
+  assert.equal(existsSync(join(f.stateDir, "versions")), false);
+});
+
+test("an npm upgrade that cannot stage leaves the old job running", async (t) => {
+  const npm = npmPackage(t);
+  const f = await installed(t, undefined, npm);
+  rmSync(join(npm.root, "dist", "src", "standalone", "cli.js"));
+  const result = await f.upgrade(f.releaseB, undefined, undefined, {
+    implicit: true,
+  });
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "preflight");
+  assert.equal(result.report.jobStopped, null);
+  assert.equal(f.launchd.jobs.size, 1);
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.equal(
+    existsSync(join(f.stateDir, "versions", "0.2.0")),
+    false,
+    "no half-published stage",
+  );
+});
+
+test("upgrade without VERSION_DIR refuses before stopping when it does not run from a global npm package", async (t) => {
+  const f = await installed(t);
+  const result = await f.upgrade(f.releaseA, undefined, undefined, {
+    implicit: true,
+  });
+  assert.equal(result.code, 1);
+  assert.match(result.report.error, /global npm installation/);
+  assert.equal(result.report.jobStopped, null);
+  assert.deepEqual(f.launchd.mutations(), []);
+});
+
+test("--node is refused for tarball releases", async (t) => {
+  const f = await installed(t);
+  const { io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const unused = (): OperatorConnection => {
+    throw new Error("unused");
+  };
+  // A TARBALL always runs its bundled Node.js.
+  assert.equal(
+    await serviceCommand(
+      ["install", join(f.home, "cab.tar.gz"), "--node", NODE],
+      deps,
+      unused,
+      () => f.launchd.host(),
+    ),
+    2,
+  );
+  assert.equal(
+    await serviceCommand(["uninstall", "--node", NODE], deps, unused, () =>
+      f.launchd.host(),
+    ),
+    2,
+  );
+  const upgrade = await f.upgrade(f.releaseB, undefined, undefined, {
+    node: NODE,
+  });
+  assert.equal(upgrade.code, 1);
+  assert.match(upgrade.report.error, /--node applies only to an npm release/);
+  assert.equal(upgrade.report.jobStopped, null);
+  const other = await setup(t);
+  const install = await installNpm(other, release(other.stateDir, "0.3.0"), {
+    node: NODE,
+  });
+  assert.equal(install.code, 1);
+  assert.match(
+    JSON.parse(install.stderr).error,
+    /applies only to an npm installation/,
+  );
+});
+
+test("a daemon install from npm records the bound Node.js and prints a verify command that runs under it", async (t) => {
+  const npm = npmPackage(t);
+  const f = await setup(t, false, { unpacked: false });
+  const result = await installNpm(f, npm.root, { mode: "daemon" });
+  assert.equal(result.code, 0, result.stderr);
+  const stage = join(f.stateDir, "versions", "0.1.0");
+  assert.equal(f.record().configuration.nodePath, NODE);
+  const command = result.stderr
+    .split("\n")
+    .find((line) => line.includes("to verify:"));
+  const [node, main, ...rest] = shellSplit(
+    (command ?? "").replace(/^.*to verify: /, ""),
+  );
+  assert.deepEqual(
+    [node, main, rest[0], rest[1]],
+    [NODE, join(stage, "dist", "src", "cli", "main.js"), "service", "install"],
+  );
+});
+
+test("a staged npm package never replaces a complete tarball release of the same version", async (t) => {
+  const npm = npmPackage(t);
+  const f = await setup(t);
+  const bundled = join(f.releaseA, "node", "bin", "node");
+  const result = await installNpm(f, npm.root);
+  assert.equal(result.code, 1);
+  assert.match(
+    JSON.parse(result.stderr).error,
+    /already holds a different release/,
+  );
+  assert.ok(existsSync(bundled));
 });

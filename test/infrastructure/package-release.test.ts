@@ -16,6 +16,7 @@ import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { treeDigest as serviceTreeDigest } from "../../src/cli/release-tree.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const release = (await import(
@@ -30,6 +31,7 @@ const release = (await import(
   }): Promise<{ nodeDirectory: string; sha256: string }>;
   treeDigest(root: string): Promise<string>;
   checkTag(tag: string, version: string): void;
+  checkNpmRecord(tarball: string): Promise<{ name: string; version: string }>;
   checkOperatorUi(
     origin: string,
     child: { exitCode: number | null; signalCode: string | null },
@@ -126,6 +128,8 @@ test("treeDigest is order independent and covers content, modes, names and links
   };
   const base = await release.treeDigest(make("x"));
   assert.equal(await release.treeDigest(make("y", true)), base);
+  // The service computes the same digest for an npm stage as the script does for a tarball.
+  assert.equal(await serviceTreeDigest(make("service")), base);
 
   const changed = async (name: string, change: (root: string) => void) => {
     const root = make(name);
@@ -255,4 +259,74 @@ test("checkOperatorUi requires the push worker at /app/ with the right headers",
     worker = served;
     await assert.rejects(check(), message);
   }
+});
+
+test("the npm package is published only from a tag push, after ci and the package job, as the exact tested file", () => {
+  const workflow = readFileSync(".github/workflows/release.yml", "utf8");
+  const job = (name: string) =>
+    new RegExp(`\\n  ${name}:\\n([\\s\\S]*?)(?=\\n  [a-z-]+:\\n|$)`).exec(
+      workflow,
+    )?.[1] as string;
+  const publish = job("npm");
+  assert.ok(publish, "an npm job exists");
+  assert.match(
+    publish,
+    /if: github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/v'\)/,
+  );
+  assert.match(publish, /needs: \[ci, package\]/);
+  assert.match(publish, /environment: npm\n/);
+  assert.match(
+    publish,
+    /permissions:\n {6}contents: read\n {6}id-token: write\n/,
+  );
+  // Trusted publishing: no registry token, and only the downloaded file is published.
+  assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN|NPM_TOKEN|secrets\./);
+  const publishes = publish.match(/npm publish .*/g);
+  assert.deepEqual(publishes, ['npm publish "$tgz" --access public']);
+  assert.match(
+    publish,
+    /download-artifact[\s\S]*cab-npm-\$\{\{ github\.sha \}\}/,
+  );
+  assert.match(job("release"), /needs: \[ci, package, npm\]/);
+  // The only publish step is in the npm job, which a pull request or manual run skips.
+  assert.equal(workflow.match(/npm publish/g)?.length, 1);
+  assert.match(workflow, /workflow_dispatch:/);
+  const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+  assert.equal(manifest.name, "@chrisbanes/cab");
+  assert.equal("private" in manifest, false);
+  assert.match(manifest.repository.url, /chrisbanes\/cab\.git$/);
+});
+
+test("checkNpmRecord accepts only the file npm-package.json describes", async (t) => {
+  const dir = temp(t);
+  const source = join(dir, "package");
+  mkdirSync(source);
+  writeFileSync(
+    join(source, "package.json"),
+    JSON.stringify({ name: "@chrisbanes/cab", version: "1.2.3" }),
+  );
+  const tarball = join(dir, "chrisbanes-cab-1.2.3.tgz");
+  execFileSync("tar", ["-czf", tarball, "-C", dir, "package"], {
+    env: { ...process.env, COPYFILE_DISABLE: "1" },
+  });
+  const bytes = readFileSync(tarball);
+  const record = {
+    name: "@chrisbanes/cab",
+    version: "1.2.3",
+    integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+    shasum: createHash("sha1").update(bytes).digest("hex"),
+    filename: "chrisbanes-cab-1.2.3.tgz",
+    commit: "0".repeat(40),
+  };
+  const write = (value: object) =>
+    writeFileSync(join(dir, "npm-package.json"), JSON.stringify(value));
+  write(record);
+  assert.equal((await release.checkNpmRecord(tarball)).version, "1.2.3");
+  for (const field of ["integrity", "shasum", "filename", "name", "version"]) {
+    write({ ...record, [field]: "different" });
+    await assert.rejects(release.checkNpmRecord(tarball), new RegExp(field));
+  }
+  write(record);
+  writeFileSync(tarball, Buffer.concat([bytes, Buffer.from([0])]));
+  await assert.rejects(release.checkNpmRecord(tarball), /integrity/);
 });

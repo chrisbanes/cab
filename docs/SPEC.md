@@ -70,9 +70,11 @@ Migrations remain forward-only with the fix-forward recovery boundary in
 [ADR-1011](adr/1011-packaging-and-distribution.md).
 
 Service startup takes and verifies the offline snapshot before migrating (see
-[ADR-1011](adr/1011-packaging-and-distribution.md)). These are target requirements:
-npm publishing and the npm service lifecycle are not yet implemented or qualified. The existing bundled-Node
-tarball is an optional channel. The desktop app and Homebrew channel are deferred
+[ADR-1011](adr/1011-packaging-and-distribution.md)). The npm service lifecycle (staging,
+Node.js binding, upgrade, uninstall) is implemented and covered by automated tests; the tag-gated
+publish job is implemented and its gating checked structurally, but its publish step has
+never run, no version is published and the lifecycle is not
+qualified on a published package. The existing bundled-Node tarball is an optional channel. The desktop app and Homebrew channel are deferred
 ([ADR-1019](adr/1019-mac-app-channel.md)) and do not gate the npm release.
 
 ## Operator CLI

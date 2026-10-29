@@ -19,6 +19,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { cp } from "node:fs/promises";
 import { createServer } from "node:net";
 import { hostname, userInfo } from "node:os";
 import {
@@ -28,6 +29,7 @@ import {
   join,
   relative,
   resolve,
+  sep,
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -56,13 +58,14 @@ import {
   type Seen,
   parseLsofListeners,
 } from "./daemon-ownership.js";
+import { treeDigest } from "./release-tree.js";
 import { DEFAULT_FIX, fixLine, shellWord } from "./remedy.js";
 import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
 
-const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--connection NAME] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
-  service upgrade VERSION_DIR [--connection NAME] [SERVICE_OPTIONS]
+const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--node PATH] [--connection NAME] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
+  service upgrade [VERSION_DIR] [--node PATH] [--connection NAME] [SERVICE_OPTIONS]
   service uninstall [SERVICE_OPTIONS]
   service init-auth [AUTH_FILE] [--state-dir DIR]
   service serve|operator|run|list ABSOLUTE_DATA_DIR [ARGS...]
@@ -90,6 +93,11 @@ to TARBALL unpacked into STATE/versions. It asks once for the operator password
 credential (90 days, kept in the Keychain or --token-file), runs doctor and opens
 the app. Those steps never undo a started service; if one fails, install prints
 the manual login line. --connection defaults to local; --no-open skips the browser.
+Run from a global npm installation (npm install -g @chrisbanes/cab), install copies
+that package into STATE/versions/V and binds the service to the Node.js that runs it,
+or to --node PATH: an absolute path to an even-numbered release at or above the
+package's engines.node. The binding is kept until upgrade STATE/versions/V --node PATH changes it; a
+removed Node.js stops the service from starting.
 install --mode daemon prepares a LaunchDaemon that starts at boot, before anyone logs
 in. It runs as you, never as root: it renders and records the plist, then prints the
 sudo commands that install and start it; run them, then run the same install command
@@ -98,10 +106,11 @@ job's own process serves the port. It does not sign in or run doctor. The two mo
 never both installed; uninstall prints the matching sudo commands for a daemon and clears
 its record only once every service process it saw has exited. upgrade
 refuses a daemon install; see the macOS operations guide for the switch-back procedure.
-upgrade stops the job, starts VERSION_DIR and checks readiness through a logged-in CLI
-connection with a read credential. The service takes and verifies its own snapshot
-before it migrates older data, and refuses to start without one. A failed
-upgrade leaves the job stopped and reports the snapshot and logs; recover with
+upgrade stops the job, starts VERSION_DIR (or, with no VERSION_DIR, the global npm
+installation it runs from, copied into STATE/versions/V first) and checks readiness
+through a logged-in CLI connection with a read credential. The service takes and
+verifies its own snapshot before it migrates older data, and refuses to start without
+one. A failed upgrade leaves the job stopped and reports the snapshot and logs; recover with
 a fixed release and another upgrade, or snapshot restore. uninstall removes the
 job and keeps data, auth, snapshots, versions and logs.
 `;
@@ -140,6 +149,8 @@ export const serviceHelp = (area: LocalArea) =>
 
 const STATE_DIR = "Library/Application Support/cab";
 const RECORD_SCHEMA = "cab.service/v1";
+const NPM_STAGE_SCHEMA = "cab.npm-stage/v1";
+const SDK_PLATFORM_PACKAGE = /^claude-agent-sdk-/;
 const NOT_LOADED = 113;
 const STOP_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 120_000;
@@ -176,6 +187,8 @@ export type ServiceHost = {
   rename(from: string, to: string): void;
   /** A signal that aborts after `ms`; tests shorten it. */
   timeout(ms: number): AbortSignal;
+  /** What `node --version` prints for the executable at `path`; null when it cannot be run. */
+  nodeVersion(path: string, signal?: AbortSignal): Promise<string | null>;
   /** Unpacks a release tarball into `dir`, dropping its top directory; false on failure. */
   extract(tarball: string, dir: string, signal?: AbortSignal): Promise<boolean>;
   /** Opens a URL in the default browser. */
@@ -210,9 +223,11 @@ export type InstallCli = {
   doctor(connection: string, signal: AbortSignal): Promise<void>;
 };
 
-/** What install adds beyond the LaunchAgent: unpack, password, login, doctor, open. */
+/** What install adds beyond the LaunchAgent: unpack or stage, password, login, doctor, open. */
 export type FirstRun = {
   tarball?: string | undefined;
+  /** The Node.js an npm installation binds; defaults to the one running the CLI. */
+  node?: string | undefined;
   cli?: InstallCli | undefined;
   connection: string;
   tokenFile?: string | undefined;
@@ -319,18 +334,37 @@ const recordSchema = z
   );
 type InstallRecord = z.infer<typeof recordSchema>;
 
-const manifestSchema = z.object({
-  schema: z.literal("cab.release/v1"),
-  platform: z.literal("darwin-arm64"),
-  version: z.string().regex(/^[0-9A-Za-z][0-9A-Za-z.+-]*$/),
-});
+/** The Node.js a record binds when it runs an npm release; a tarball release bundles its own. */
+const boundNode = ({ configuration: { nodePath, cliPath } }: InstallRecord) =>
+  nodePath ===
+  join(resolve(dirname(cliPath), "../../.."), "node", "bin", "node")
+    ? undefined
+    : nodePath;
+
+const releaseVersionSchema = z.string().regex(/^[0-9A-Za-z][0-9A-Za-z.+-]*$/);
+
+/** A tarball release (bundled Node.js) or the copy of a global npm package a service runs from. */
+const manifestSchema = z.discriminatedUnion("schema", [
+  z.object({
+    schema: z.literal("cab.release/v1"),
+    platform: z.literal("darwin-arm64"),
+    version: releaseVersionSchema,
+  }),
+  z.object({
+    schema: z.literal(NPM_STAGE_SCHEMA),
+    version: releaseVersionSchema,
+  }),
+]);
 
 /** The first file a release needs to run that is missing from `root`, if any. */
-const missingReleaseFile = (root: string) =>
+const missingReleaseFile = (root: string, npm: boolean) =>
   [
-    join(root, "node", "bin", "node"),
+    npm ? join(root, "package.json") : join(root, "node", "bin", "node"),
     join(root, "dist", "src", "standalone", "cli.js"),
   ].find((file) => !lstatSync(file, { throwIfNoEntry: false })?.isFile());
+
+/** An npm package root; the package name is scoped, so this suffix cannot be a stage. */
+const NPM_PACKAGE_SUFFIX = ["node_modules", "@chrisbanes", "cab"].join(sep);
 
 const processAlive = (pid: number) => {
   try {
@@ -413,8 +447,8 @@ class Service {
       );
   }
 
-  /** The unpacked release directory's version, from its validated manifest. */
-  releaseVersion(root: string): string {
+  /** The unpacked release directory's version and kind, from its validated manifest. */
+  release(root: string): { version: string; npm: boolean } {
     this.requireDirectory(this.options.stateDir, "State directory", false);
     const versions = join(this.options.stateDir, "versions");
     let canonical = false;
@@ -428,31 +462,35 @@ class Service {
     }
     if (!canonical)
       throw refuse(`The release must be an unpacked directory in ${versions}`);
-    let version: string | undefined;
+    let manifest: z.infer<typeof manifestSchema> | undefined;
     try {
-      version = manifestSchema.parse(
+      manifest = manifestSchema.parse(
         JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")),
-      ).version;
+      );
     } catch {
-      version = undefined;
+      manifest = undefined;
     }
-    if (version !== basename(root))
+    if (manifest?.version !== basename(root))
       throw refuse(
         "The release's manifest.json does not describe its version directory",
       );
-    const missing = missingReleaseFile(root);
+    const npm = manifest.schema === NPM_STAGE_SCHEMA;
+    const missing = missingReleaseFile(root, npm);
     if (missing)
       throw refuse(`The release is incomplete: ${missing} is missing`);
-    return version;
+    return { version: manifest.version, npm };
   }
 
   /**
-   * Unpack `tarball` into STATE/versions/<manifest version> through a staging directory,
-   * publishing it only once complete. An existing complete version with the same manifest
-   * is reused and a complete one with a different manifest is refused; an incomplete one
-   * cannot be a running release, so it is replaced.
+   * Publish a release into STATE/versions/<manifest version> through a staging directory,
+   * once `fill` has written it and it is complete. An existing complete version with the same
+   * manifest is reused and a complete one with a different manifest is refused; an incomplete
+   * one cannot be a running release, so it is replaced.
    */
-  async unpack(tarball: string): Promise<string> {
+  private async publish(
+    source: string,
+    fill: (staging: string) => Promise<void>,
+  ): Promise<string> {
     const { stateDir } = this.options;
     this.requireDirectory(stateDir, "State directory", false);
     const versions = join(stateDir, "versions");
@@ -468,41 +506,38 @@ class Service {
     const staging = mkdtempSync(join(versions, `.staging-${process.pid}-`));
     const aside = `${staging}-old`;
     try {
-      const unpacked = await this.host.extract(
-        tarball,
-        staging,
-        this.io.signal,
-      );
-      // An interrupt kills the extraction; report it as such, not as a bad tarball.
+      await fill(staging);
+      // An interrupt kills the extraction or copy; report it as such, not as a bad release.
       this.checkInterrupt();
-      if (!unpacked)
-        throw new ServiceFailure("The tarball could not be unpacked");
       let manifest: Buffer;
-      let version: string;
+      let parsed: z.infer<typeof manifestSchema>;
       try {
         manifest = readFileSync(join(staging, "manifest.json"));
-        version = manifestSchema.parse(
-          JSON.parse(manifest.toString("utf8")),
-        ).version;
+        parsed = manifestSchema.parse(JSON.parse(manifest.toString("utf8")));
       } catch {
-        throw refuse("The tarball holds no valid release manifest.json");
+        throw refuse(`The ${source} holds no valid release manifest.json`);
       }
-      const missing = missingReleaseFile(staging);
+      const npm = parsed.schema === NPM_STAGE_SCHEMA;
+      const missing = missingReleaseFile(staging, npm);
       if (missing)
         throw refuse(
-          `The tarball's release is incomplete: ${relative(staging, missing)} is missing`,
+          `The ${source}'s release is incomplete: ${relative(staging, missing)} is missing`,
         );
-      const target = join(versions, version);
+      const target = join(versions, parsed.version);
       const existing = lstatSync(target, { throwIfNoEntry: false });
       if (existing) {
-        let same = false;
+        let current: Buffer | undefined;
+        let currentNpm = false;
         try {
-          same = readFileSync(join(target, "manifest.json")).equals(manifest);
+          current = readFileSync(join(target, "manifest.json"));
+          currentNpm =
+            manifestSchema.parse(JSON.parse(current.toString("utf8")))
+              .schema === NPM_STAGE_SCHEMA;
         } catch {
-          same = false;
+          // Judged as a tarball release, as before the npm kind existed.
         }
-        if (existing.isDirectory() && !missingReleaseFile(target)) {
-          if (same) return target;
+        if (existing.isDirectory() && !missingReleaseFile(target, currentNpm)) {
+          if (current?.equals(manifest)) return target;
           throw refuse(`${target} already holds a different release`);
         }
         renameSync(target, aside);
@@ -513,6 +548,162 @@ class Service {
       rmSync(staging, { recursive: true, force: true });
       rmSync(aside, { recursive: true, force: true });
     }
+  }
+
+  /** Unpack `tarball` into STATE/versions/<manifest version>. */
+  unpack(tarball: string): Promise<string> {
+    return this.publish("tarball", async (staging) => {
+      const unpacked = await this.host.extract(
+        tarball,
+        staging,
+        this.io.signal,
+      );
+      this.checkInterrupt();
+      if (!unpacked)
+        throw new ServiceFailure("The tarball could not be unpacked");
+    });
+  }
+
+  /**
+   * The version of the global npm installation at `root`, or null when `root` is not one (a
+   * checkout, which holds devDependencies, is never staged).
+   */
+  npmPackage(root: string): { version: string; root: string } | null {
+    let real: string;
+    try {
+      real = realpathSync(root);
+    } catch {
+      return null;
+    }
+    if (!real.endsWith(`${sep}${NPM_PACKAGE_SUFFIX}`)) return null;
+    let version: string | undefined;
+    try {
+      const manifest = JSON.parse(
+        readFileSync(join(real, "package.json"), "utf8"),
+      );
+      version =
+        manifest.name === "@chrisbanes/cab"
+          ? releaseVersionSchema.parse(manifest.version)
+          : undefined;
+    } catch {
+      version = undefined;
+    }
+    if (version === undefined)
+      throw refuse(
+        `${real} does not hold a valid package named @chrisbanes/cab`,
+      );
+    // A project-local or npx install keeps its dependencies beside the package, not under it.
+    const dependencies = Object.keys(
+      JSON.parse(readFileSync(join(real, "package.json"), "utf8"))
+        .dependencies ?? {},
+    );
+    const absent = dependencies.find(
+      (name) => !existsSync(join(real, "node_modules", name, "package.json")),
+    );
+    if (absent !== undefined)
+      throw refuse(
+        `${real} is not a global npm installation: its dependency ${absent} is not installed under it; run npm install -g @chrisbanes/cab`,
+      );
+    return { version, root: real };
+  }
+
+  /** What `root` is: a global npm installation to stage, a staged npm release or a tarball release. */
+  source(root: string): { version: string; npm: boolean; stageFrom?: string } {
+    const installation = this.npmPackage(root);
+    return installation
+      ? {
+          version: installation.version,
+          npm: true,
+          stageFrom: installation.root,
+        }
+      : this.release(root);
+  }
+
+  /**
+   * Copy the package at `packageRoot` into STATE/versions/<version> with its production
+   * dependencies and a manifest of the copy's tree digest. The copy is the service's own: a
+   * later npm update or removal of the package does not change it.
+   */
+  stageNpm(packageRoot: string): Promise<string> {
+    return this.publish("package", async (staging) => {
+      const sdkScope = join(packageRoot, "node_modules", "@anthropic-ai");
+      for (const path of [
+        "package.json",
+        "dist/src",
+        "dist/operator",
+        "node_modules",
+        "LICENSE",
+        "README.md",
+      ])
+        if (lstatSync(join(packageRoot, path), { throwIfNoEntry: false }))
+          await cp(join(packageRoot, path), join(staging, path), {
+            recursive: true,
+            verbatimSymlinks: true,
+            // The SDK's platform binary is not redistributed; `claude` comes from PATH (ADR-1011).
+            filter: (from) =>
+              !(
+                dirname(from) === sdkScope &&
+                SDK_PLATFORM_PACKAGE.test(basename(from))
+              ),
+          });
+      const { name, version } = JSON.parse(
+        readFileSync(join(staging, "package.json"), "utf8"),
+      );
+      writeFileSync(
+        join(staging, "manifest.json"),
+        `${JSON.stringify(
+          {
+            schema: NPM_STAGE_SCHEMA,
+            name,
+            version,
+            tree: {
+              algorithm: "cab-tree-sha256/v1",
+              digest: await treeDigest(staging),
+            },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    });
+  }
+
+  /**
+   * The Node.js an npm-sourced service runs on: `requested`, else `fallback`, resolved to its
+   * real path and checked once, here, before anything stops. It must be an executable file of an
+   * even-numbered (LTS) release at or above the release's engines.node minimum; it is
+   * never looked up on PATH again.
+   */
+  async bindNode(
+    requested: string | undefined,
+    fallback: string,
+    releaseRoot: string,
+  ): Promise<string> {
+    const candidate = requested ?? fallback;
+    if (!isAbsolute(candidate))
+      throw refuse(`--node ${candidate} must be an absolute path`);
+    let real: string;
+    try {
+      real = realpathSync(candidate);
+      accessSync(real, constants.X_OK);
+      if (!statSync(real).isFile()) throw new Error("not a file");
+    } catch {
+      throw refuse(
+        `${candidate} is not an executable file; bind another Node.js with "cab service upgrade STATE/versions/V --node PATH" (or pass --node PATH to install)`,
+      );
+    }
+    const minimum = /^>=\s*(\d+)/.exec(
+      JSON.parse(readFileSync(join(releaseRoot, "package.json"), "utf8"))
+        .engines?.node ?? "",
+    )?.[1];
+    const reported = await this.host.nodeVersion(real, this.io.signal);
+    this.checkInterrupt();
+    const major = Number(/^v(\d+)\.\d+\.\d+/.exec(reported ?? "")?.[1]);
+    if (!minimum || !(major >= Number(minimum)) || major % 2 !== 0)
+      throw refuse(
+        `${candidate} must be an even-numbered Node.js release of at least ${minimum ?? "the package's engines.node"}; it reports ${reported ?? "no version"}`,
+      );
+    return real;
   }
 
   readRecord(): InstallRecord | null {
@@ -684,6 +875,8 @@ class Service {
       | "diagnosticStorageMib"
     >,
     daemon = false,
+    /** The bound Node.js of an npm release; a tarball release runs its bundled one. */
+    nodePath = join(root, "node", "bin", "node"),
   ): Promise<{ record: InstallRecord; logs: string[] }> {
     const { label, logDir, diagnostic } = this.options;
     const resolved = (override: number | null | undefined, kept?: number) =>
@@ -698,7 +891,7 @@ class Service {
     const destination = daemon ? this.stagedDaemon : this.activation;
     const configuration: Configuration = {
       label,
-      nodePath: join(root, "node", "bin", "node"),
+      nodePath,
       cliPath: join(root, "dist", "src", "standalone", "cli.js"),
       dataDirectory: base.dataDirectory,
       authFile: base.authFile,
@@ -1322,7 +1515,18 @@ async function installServiceLocked(
   let logs: string[] = [];
   try {
     let root = releaseRoot;
-    let version = tarball ? undefined : service.releaseVersion(root);
+    const found = tarball ? undefined : service.source(root);
+    let version = found?.version;
+    if (first.node !== undefined && !found?.npm)
+      throw refuse("--node applies only to an npm installation");
+    // An npm release is bound to a Node.js, checked before anything else happens.
+    const nodePath = found?.npm
+      ? await service.bindNode(
+          first.node,
+          process.execPath,
+          found.stageFrom ?? root,
+        )
+      : undefined;
     if (tarball) {
       try {
         accessSync(tarball, constants.R_OK);
@@ -1392,10 +1596,12 @@ async function installServiceLocked(
     service.checkInterrupt();
     if (authMissing && password === undefined)
       throw refuse("An operator password is required to create the auth file");
-    if (tarball) {
+    if (tarball || found?.stageFrom) {
       stage = "unpack";
-      root = await service.unpack(tarball);
-      version = service.releaseVersion(root);
+      root = await (tarball
+        ? service.unpack(tarball)
+        : service.stageNpm(found?.stageFrom as string));
+      version = service.release(root).version;
     }
     service.checkInterrupt();
     if (authMissing && password !== undefined) {
@@ -1421,6 +1627,7 @@ async function installServiceLocked(
         port: options.port,
       },
       daemon,
+      nodePath,
     ));
     if (daemon) {
       // Nothing reaches launchd: the operator runs the printed steps with sudo.
@@ -1559,7 +1766,7 @@ async function finishDaemonInstall(
   line("Run these commands to install and start the service at boot:");
   for (const step of steps) line(step);
   line(
-    `Then run the same install command again, with the same options and no TARBALL, to verify: ${daemonVerifyCommand(service.options, first, version)}`,
+    `Then run the same install command again, with the same options and no TARBALL, to verify: ${daemonVerifyCommand(service.options, first, version, boundNode(record))}`,
   );
 }
 
@@ -1761,11 +1968,13 @@ export async function upgradeService(
   connection: OperatorConnection,
   host: ServiceHost,
   io: ServiceIo,
+  /** `node` re-binds an npm release; `implicit` marks a `target` the CLI took from where it runs. */
+  change: { node?: string | undefined; implicit?: boolean } = {},
 ): Promise<number> {
   const refused = await refusedAsRoot(host, io, "upgrade");
   if (refused !== null) return refused;
   return withLock(options, host, io, "upgrade", () =>
-    upgradeServiceLocked(options, target, connection, host, io),
+    upgradeServiceLocked(options, target, connection, host, io, change),
   );
 }
 
@@ -1775,11 +1984,13 @@ async function upgradeServiceLocked(
   connection: OperatorConnection,
   host: ServiceHost,
   io: ServiceIo,
+  change: { node?: string | undefined; implicit?: boolean },
 ): Promise<number> {
   const service = new Service(options, host, io);
   let stage = "preflight";
   let record: InstallRecord | null = null;
   let logs: string[] = [];
+  let root = target;
   let startupSnapshot: () => Promise<string | null> = async () => null;
   try {
     record = service.readRecord();
@@ -1792,7 +2003,12 @@ async function upgradeServiceLocked(
         "service upgrade does not support a LaunchDaemon install; switch back first: run `cab service uninstall` (and the sudo steps it prints), `cab service install`, upgrade, then uninstall and `cab service install --mode daemon` again (see the macOS operations guide)",
       );
     const from = record.version;
-    const version = service.releaseVersion(target);
+    if (change.implicit && !service.npmPackage(target))
+      throw refuse(
+        "service upgrade without VERSION_DIR must run from a global npm installation (npm install -g @chrisbanes/cab); otherwise pass the release directory",
+      );
+    const found = service.source(target);
+    const { version } = found;
     const { compareReleaseVersions, readStartupState } = await import(
       "../standalone/startup-snapshot.js"
     );
@@ -1801,6 +2017,16 @@ async function upgradeServiceLocked(
       throw refuse(
         `${options.label} runs ${from}, newer than ${version}; upgrade never goes back: restore a snapshot into a new data directory instead`,
       );
+    if (change.node !== undefined && !found.npm)
+      throw refuse("--node applies only to an npm release");
+    // The recorded binding stays unless --node changes it; checked before anything stops.
+    const nodePath = found.npm
+      ? await service.bindNode(
+          change.node,
+          boundNode(record) ?? process.execPath,
+          found.stageFrom ?? target,
+        )
+      : undefined;
     const dataDirectory = record.configuration.dataDirectory;
     const readState = () => {
       try {
@@ -1838,6 +2064,9 @@ async function upgradeServiceLocked(
     // healthy new release stopped after the readiness deadline.
     await service.requireReadable(connection);
     service.checkInterrupt();
+    // Staged while the old job still runs, so a failed copy leaves it untouched.
+    if (found.stageFrom) root = await service.stageNpm(found.stageFrom);
+    service.checkInterrupt();
     stage = "stop";
     await service.stopOwned(record);
     // Nothing starts the old version at login from here on, and a torn render cannot leave
@@ -1850,8 +2079,10 @@ async function upgradeServiceLocked(
     service.prepareDirectories();
     ({ record, logs } = await service.activate(
       version,
-      target,
+      root,
       record.configuration,
+      false,
+      nodePath,
     ));
     // The render awaits a dynamic import and plutil; nothing starts after an interrupt.
     service.checkInterrupt();
@@ -2209,6 +2440,10 @@ export function defaultServiceHost(): ServiceHost {
       return { name: username, home: homedir };
     },
     ghTokenStorage: (env) => ghTokenStorage(env),
+    nodeVersion: async (path, signal) => {
+      const result = await run(path, ["--version"], 10_000, signal);
+      return result.status === 0 ? result.stdout.trim() : null;
+    },
   };
 }
 
@@ -2235,6 +2470,7 @@ export const LIFECYCLE_OPTIONS = {
   "diagnostic-retention-days": { type: "string" },
   "diagnostic-storage-mib": { type: "string" },
   mode: { type: "string" },
+  node: { type: "string" },
 } as const;
 
 /**
@@ -2256,15 +2492,21 @@ export const VERIFY_OPTIONS: Record<
   mode: "carried",
   "token-file": "rejected",
   "no-open": "irrelevant",
+  // A re-run takes the installed release and its recorded binding.
+  node: "irrelevant",
   "diagnostic-retention-days": "irrelevant",
   "diagnostic-storage-mib": "irrelevant",
 };
 
-/** The command that verifies a daemon install: the installed release's CLI with every carried option. */
+/**
+ * The command that verifies a daemon install: the installed release's CLI with every carried
+ * option. An npm release has no launcher, so it runs under its bound `node`.
+ */
 export function daemonVerifyCommand(
   options: ServiceOptions,
   first: FirstRun,
   version: string,
+  node?: string,
 ): string {
   const carried: Record<string, string | number> = {
     "state-dir": options.stateDir,
@@ -2275,9 +2517,14 @@ export function daemonVerifyCommand(
     connection: first.connection,
     mode: "daemon",
   };
-  const cli = join(options.stateDir, "versions", version, "bin", "cab");
+  const release = join(options.stateDir, "versions", version);
   return [
-    shellWord(cli),
+    ...(node
+      ? [
+          shellWord(node),
+          shellWord(join(release, "dist", "src", "cli", "main.js")),
+        ]
+      : [shellWord(join(release, "bin", "cab"))]),
     "service",
     "install",
     ...Object.entries(carried).flatMap(([name, value]) => [
@@ -2374,11 +2621,16 @@ export function lifecycleOptions(
     positionals,
     connection: values.connection,
     tokenFile: values["token-file"],
+    node: values.node,
     noOpen: values["no-open"] === true,
     mode: mode as ServiceMode,
     modeGiven: values.mode !== undefined,
   };
 }
+
+/** dist/src/cli/service.js → the root of the release or package it belongs to. */
+const releaseRoot = () =>
+  resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 
 /** `cab service …`: argv starts after `service`. */
 export async function serviceCommand(
@@ -2400,8 +2652,11 @@ export async function serviceCommand(
     if (
       !parsed ||
       parsed.positionals.length > (command === "uninstall" ? 0 : 1) ||
-      parsed.positionals.length < (command === "upgrade" ? 1 : 0) ||
-      (command === "uninstall" && parsed.connection !== undefined) ||
+      (command === "uninstall" &&
+        (parsed.connection !== undefined || parsed.node !== undefined)) ||
+      (command === "install" &&
+        parsed.node !== undefined &&
+        parsed.positionals.length > 0) ||
       (command !== "install" &&
         (parsed.tokenFile !== undefined ||
           parsed.noOpen ||
@@ -2416,29 +2671,25 @@ export async function serviceCommand(
       return usage(deps, "service");
     const { options } = parsed;
     if (command === "install")
-      return installService(
-        options,
-        // dist/src/cli/service.js → the release root.
-        resolve(fileURLToPath(new URL("../../..", import.meta.url))),
-        serviceHost,
-        deps,
-        {
-          tarball: parsed.positionals[0] && resolve(parsed.positionals[0]),
-          cli,
-          connection: parsed.connection ?? "local",
-          tokenFile: parsed.tokenFile && resolve(parsed.tokenFile),
-          open: !parsed.noOpen,
-          mode: parsed.mode,
-        },
-      );
+      return installService(options, releaseRoot(), serviceHost, deps, {
+        tarball: parsed.positionals[0] && resolve(parsed.positionals[0]),
+        node: parsed.node,
+        cli,
+        connection: parsed.connection ?? "local",
+        tokenFile: parsed.tokenFile && resolve(parsed.tokenFile),
+        open: !parsed.noOpen,
+        mode: parsed.mode,
+      });
     if (command === "uninstall")
       return uninstallService(options, serviceHost, deps);
+    const [versionDir] = parsed.positionals;
     return upgradeService(
       options,
-      resolve(parsed.positionals[0] as string),
+      versionDir ? resolve(versionDir) : releaseRoot(),
       operatorConnection(parsed.connection),
       serviceHost,
       deps,
+      { node: parsed.node, implicit: !versionDir },
     );
   }
   if (
