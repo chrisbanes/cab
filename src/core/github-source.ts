@@ -3,6 +3,7 @@ import { TaskReviewStore } from "./task-review.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { githubIssueTracker } from "./github-source-contracts.js";
 import {
   itemColumns,
   itemIs,
@@ -96,7 +97,6 @@ export interface GitHubObservationBinding {
 }
 
 import {
-  githubIssueTracker,
   nonempty,
   projectFieldsSchema,
   repositoryLinkSchema,

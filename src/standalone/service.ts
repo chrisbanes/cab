@@ -3196,6 +3196,7 @@ export class StandaloneService {
   }
 
   private sourceReader(domain: () => DomainStore, reference: string) {
+    // shortcut: every project reads through the GitHub reader, revisit when #1318 adds a second issue tracker
     return (
       this.options.issueTrackers?.readerFactories?.github?.(reference) ??
       new CredentialGitHubSourceReader(reference, {

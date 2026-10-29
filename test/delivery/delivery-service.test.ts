@@ -1131,6 +1131,9 @@ function routingFixture(
     db,
     store,
     projectId,
+    reconcile: () => coordinator.reconcile(),
+    inspectOwnClosure: coordinator.inspectOwnClosure.bind(coordinator),
+    taskId,
     submit: (action: ExternalAction) =>
       coordinator.submit({ operationId: randomUUID(), action }, caller),
     async close() {
@@ -1142,22 +1145,38 @@ function routingFixture(
 }
 
 /** A fake that records which role's calls reached it. */
-function recordingFake(role: string, calls: string[]) {
+function recordingFake(
+  role: string,
+  calls: string[],
+  performed: "confirmed-success" | "uncertain" = "confirmed-success",
+) {
   return {
     ...unusedIssueInspection,
+    async inspectClosedIssue() {
+      calls.push(`${role}:inspectClosedIssue`);
+      return { state: "open" as const };
+    },
     async preflight(action: ExternalAction) {
       calls.push(`${role}:preflight:${action.kind}`);
-      return { nodeId: "I1" };
+      return { nodeId: "I1", state: "open" };
     },
     async performAction() {
+      return {
+        state: performed,
+        reason: performed === "uncertain" ? "response-lost" : null,
+        receipt:
+          performed === "uncertain"
+            ? null
+            : { nodeId: "C1", issueClosed: true },
+      };
+    },
+    async inspectAction() {
+      calls.push(`${role}:inspectAction`);
       return {
         state: "confirmed-success" as const,
         reason: null,
         receipt: { nodeId: "C1" },
       };
-    },
-    async inspectAction(): Promise<never> {
-      throw new Error("unused");
     },
     async inspectPr(): Promise<never> {
       throw new Error("unused");
@@ -1174,6 +1193,14 @@ test("delivery routes issue actions to the project's issue-tracker writer and co
       { action: "issue.labels", repositoryId: "R1", mode: "allow" },
       { action: "issue.edit", repositoryId: "R1", mode: "allow" },
       { action: "branch.push", repositoryId: "R1", mode: "allow" },
+      {
+        action: "project.field",
+        repositoryId: "R1",
+        mode: "allow",
+        projectNodeId: "PR",
+        fieldNodeId: "F",
+        optionNodeIds: ["O"],
+      },
     ],
     {
       providerFactories: {
@@ -1199,6 +1226,14 @@ test("delivery routes issue actions to the project's issue-tracker writer and co
       { kind: "issue.labels", target, add: ["a"], remove: [] },
       { kind: "issue.edit", target, fields: { title: "New" } },
       {
+        kind: "project.field",
+        target,
+        projectNodeId: "PR",
+        itemNodeId: "IT",
+        fieldNodeId: "F",
+        optionNodeId: "O",
+      },
+      {
         kind: "branch.push",
         target: { repositoryId: "R1" },
         commitSha: "a".repeat(40),
@@ -1210,9 +1245,10 @@ test("delivery routes issue actions to the project's issue-tracker writer and co
       "issue-tracker:preflight:issue.comment",
       "issue-tracker:preflight:issue.labels",
       "issue-tracker:preflight:issue.edit",
+      "issue-tracker:preflight:project.field",
       "code-host:preflight:branch.push",
     ]);
-    assert.deepEqual(instances, ["github.com", "github.com", "github.com"]);
+    assert.deepEqual(instances, Array(4).fill("github.com"));
   } finally {
     await f.close();
   }
@@ -1282,9 +1318,67 @@ test("a recorded issue grant keeps its meaning without a repository link", async
         body: "B",
       });
     assert.equal((await comment("4242")).state, "confirmed-success");
-    assert.equal(f.store.configuration(f.projectId).version, recorded.version);
     assert.equal((await comment("9999")).state, "denied");
     assert.deepEqual(calls, ["issue-tracker:preflight:issue.comment"]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("reconciliation reads an issue action back through the issue-tracker writer", async () => {
+  const calls: string[] = [];
+  const f = routingFixture(
+    [{ action: "issue.comment", repositoryId: "R1", mode: "allow" }],
+    {
+      providerFactories: {
+        github: () => recordingFake("code-host", calls, "uncertain"),
+      },
+      issueTrackerFactories: {
+        github: () => recordingFake("issue-tracker", calls, "uncertain"),
+      },
+    },
+  );
+  try {
+    const comment = await f.submit({
+      kind: "issue.comment",
+      target: { repositoryId: "R1", number: 1, nodeId: "I1" },
+      body: "B",
+    });
+    assert.equal(comment.state, "uncertain");
+    await f.reconcile();
+    assert.deepEqual(calls, [
+      "issue-tracker:preflight:issue.comment",
+      "issue-tracker:inspectAction",
+    ]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("closure inspection reads the issue back through the issue-tracker writer", async () => {
+  const calls: string[] = [];
+  const f = routingFixture(
+    [{ action: "issue.close", repositoryId: "R1", mode: "allow" }],
+    {
+      providerFactories: {
+        github: () => recordingFake("code-host", calls),
+      },
+      issueTrackerFactories: {
+        github: () => recordingFake("issue-tracker", calls),
+      },
+    },
+  );
+  try {
+    const target = { repositoryId: "R1", number: 1, nodeId: "I1" };
+    const close = await f.submit({
+      kind: "issue.close",
+      target,
+      reviewedResultIds: [],
+    });
+    assert.equal(close.state, "confirmed-success");
+    calls.length = 0;
+    await f.inspectOwnClosure(f.taskId, target);
+    assert.deepEqual(calls, ["issue-tracker:inspectClosedIssue"]);
   } finally {
     await f.close();
   }

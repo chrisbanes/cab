@@ -64,7 +64,7 @@ test("the GitHub adapter's sweeps leave another provider's items alone", () => {
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({

@@ -2339,7 +2339,7 @@ test("the service builds preview and sync readers from the injected issue-tracke
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({

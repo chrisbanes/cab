@@ -199,19 +199,12 @@ export class DeliveryCoordinator {
       }
     );
   }
-  /** Whether the project's issue tracker has a writer: GitHub has a built-in one, any other needs a factory. */
-  private issueTrackerAvailable(projectId: string): boolean {
-    const { issueTracker } = this.issueTrackerFor(projectId);
-    return (
-      issueTracker === "github" ||
-      !!this.options.issueTrackerFactories?.[issueTracker]
-    );
-  }
   private issueTracker(
     projectId: string,
     policy = this.store.configuration(projectId),
+    resolved = this.issueTrackerFor(projectId),
   ): IssueTrackerWriter {
-    const { issueTracker, instance } = this.issueTrackerFor(projectId);
+    const { issueTracker, instance } = resolved;
     const factory = this.options.issueTrackerFactories?.[issueTracker];
     if (factory) return factory(projectId, policy, instance);
     if (issueTracker !== "github")
@@ -371,13 +364,17 @@ export class DeliveryCoordinator {
     // GitHub has a built-in provider; any other host or tracker needs an injected factory.
     let provider: CodeHostDeliveryProvider | IssueTrackerWriter;
     if (isIssueTrackerAction(action.kind)) {
-      if (!this.issueTrackerAvailable(caller.projectId))
+      const resolved = this.issueTrackerFor(caller.projectId);
+      if (
+        resolved.issueTracker !== "github" &&
+        !this.options.issueTrackerFactories?.[resolved.issueTracker]
+      )
         return this.store.recordObservation(record.operationId, {
           state: "confirmed-failure",
           reason: "issue-tracker-delivery-unavailable",
           receipt: null,
         });
-      provider = this.issueTracker(caller.projectId, policy);
+      provider = this.issueTracker(caller.projectId, policy, resolved);
     } else {
       const resolved = this.codeHost(caller.projectId, target);
       if (

@@ -837,8 +837,8 @@ GitLab on a configured host with the project's full path and numeric ID), and li
 change through one versioned, receipted `repositories.configure` command that
 verifies every checkout before anything is recorded. A GitLab link must also have an
 `origin` remote on its host whose full project path matches, case-insensitively, and
-a refusal names the link and reason without echoing a path or remote. Delivery
-actions that name a GitLab link are refused with `code-host-delivery-unavailable`,
+a refusal names the link and reason without echoing a path or remote. Code-host
+delivery actions that name a GitLab link are refused with `code-host-delivery-unavailable`,
 before any provider or Git transport runs, until GitLab delivery exists. Saving the
 GitHub source neither changes nor needs repository links, and saving links neither
 deactivates a selection nor changes the source version.
@@ -1934,8 +1934,8 @@ supported, and the operator comment path is unchanged.
 
 The operator publishes a local task through three more actions on the same lifecycle,
 sent by the **operator publication caller** and never by an agent or the service
-([ADR-1017](adr/1017-non-agent-readiness-writes.md)): `issue.create` (granted per repository),
-`project.item.add` (per repository and Project, using `addProjectV2ItemById`, which adds nothing a
+([ADR-1017](adr/1017-non-agent-readiness-writes.md)): `issue.create` (granted per issue-tracker container),
+`project.item.add` (per container and Project, using `addProjectV2ItemById`, which adds nothing a
 second time) and the existing `project.field` for the readiness fields. The confirmed publication
 review is the approval in either grant mode, and each step must be exactly one the review froze,
 on the repository it recorded and, after the create, only on the issue it created. The create posts
