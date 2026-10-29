@@ -13,6 +13,7 @@ import type { IssueSnapshot } from "../../src/core/github-source.js";
 import type { Readiness } from "../../src/core/github-source-contracts.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
+import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
 import type { PublishedIssueInspection } from "../../src/standalone/github-delivery.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { StandaloneService } from "../../src/standalone/service.js";
@@ -122,7 +123,7 @@ export class FakeGitHub {
           : {}),
       }));
   }
-  /** The source reader over this GitHub, for a service's `github.readerFactory`. */
+  /** The source reader over this GitHub, for a service's `issueTrackers.readerFactories.github`. */
   readerFactory(): GitHubReaderFactory {
     return () => ({
       readSelection: async (selection) => ({
@@ -138,7 +139,7 @@ export class FakeGitHub {
       readIssueStatus: async () => ({ status: "open" }),
     });
   }
-  provider(): CodeHostDeliveryProvider {
+  provider(): CodeHostDeliveryProvider & IssueTrackerWriter {
     const gh = this;
     const find = (action: ExternalAction) =>
       "number" in action.target
@@ -269,6 +270,9 @@ export class FakeGitHub {
       },
       async inspectPr() {
         throw new Error("no pull requests here");
+      },
+      async inspectClosedIssue() {
+        throw new Error("no closed issues here");
       },
       async inspectPublishedIssue(
         target,
@@ -549,7 +553,7 @@ export async function publicationFixture(
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-publication-"))),
     gh = new FakeGitHub(),
-    /** The host each provider was built for, as the repository link names it. */
+    /** The host each provider or writer was built for, as the repository link or task source names it. */
     hosts: string[] = [];
   const build = () =>
     new StandaloneService(join(root, "data"), () => noRuntime, undefined, {
@@ -560,8 +564,14 @@ export async function publicationFixture(
             return gh.provider();
           },
         },
+        issueTrackerFactories: {
+          github: (_project, _policy, instance) => {
+            hosts.push(instance);
+            return gh.provider();
+          },
+        },
       },
-      github: { readerFactory: gh.readerFactory() },
+      issueTrackers: { readerFactories: { github: gh.readerFactory() } },
       power: { enabled: false },
     });
   let service = build();

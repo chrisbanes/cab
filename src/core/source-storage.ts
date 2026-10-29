@@ -128,3 +128,18 @@ export function migrateSourceStorage(db: Database): void {
     );`);
   moveLegacyGitHubSourceStorage(db);
 }
+
+/** The issue tracker a project's task source names, or null when the project has none. */
+export function projectIssueTracker(
+  db: Database,
+  projectId: string,
+): { provider: string; instance: string } | null {
+  return (
+    (db
+      .prepare(
+        "SELECT provider, instance FROM project_task_sources WHERE projectId = ?",
+      )
+      .get(projectId) as { provider: string; instance: string } | undefined) ??
+    null
+  );
+}

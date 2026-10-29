@@ -262,6 +262,7 @@ export async function runPublicationJourney(
       : real;
     const coordinator = new DeliveryCoordinator(store, {
       providerFactories: { github: () => provider },
+      issueTrackerFactories: { github: () => provider },
       authorize: () => {},
       // The harness stands in for the operator's approval of a recovery, and of nothing else.
       approved: (request) => isRecoveryAction(request.action),

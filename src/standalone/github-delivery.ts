@@ -27,6 +27,7 @@ import {
 } from "./git-fetch.js";
 import { type PushOutcome, pushTaskCommit } from "./git-push.js";
 import type { CodeHostDeliveryProvider } from "./code-host.js";
+import type { IssueTrackerWriter } from "./issue-tracker.js";
 import {
   actionObservationSchema,
   prObservationSchema,
@@ -231,7 +232,9 @@ export function mergeGateReasons(g: {
 }
 
 /** Narrow GitHub.com transport; every effect is settled by an independent read. */
-export class GitHubHttpDeliveryProvider implements CodeHostDeliveryProvider {
+export class GitHubHttpDeliveryProvider
+  implements CodeHostDeliveryProvider, IssueTrackerWriter
+{
   constructor(
     private readonly credential: string,
     private readonly fetcher: typeof fetch = fetch,

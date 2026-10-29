@@ -3,6 +3,7 @@ import { TaskReviewStore } from "./task-review.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { githubIssueTracker } from "./github-source-contracts.js";
 import {
   itemColumns,
   itemIs,
@@ -19,6 +20,12 @@ import {
   replaceProjectFieldNames,
   withProjectFieldNames,
 } from "./project-field-names.js";
+
+/** Binds the provider and instance of the items this store's sweeps own. */
+const adapter = [
+  githubIssueTracker.provider,
+  githubIssueTracker.instance,
+] as const;
 
 const parseRule = (json: unknown) =>
   readinessSchema.nullable().parse(JSON.parse(String(json)) as unknown);
@@ -424,10 +431,11 @@ export class GitHubSourceStore {
     const rows = this.db
       .prepare(`SELECT e.externalId AS nodeId, e.taskId, m.projectId
       FROM external_items e JOIN source_memberships m ON ${sameItem("m", "e")}
-      WHERE NOT EXISTS (SELECT 1 FROM source_placement_decisions d WHERE ${sameItem("d", "e")})
+      WHERE e.provider = ? AND e.instance = ?
+        AND NOT EXISTS (SELECT 1 FROM source_placement_decisions d WHERE ${sameItem("d", "e")})
         AND NOT EXISTS (SELECT 1 FROM domain_assignments a WHERE a.taskId = e.taskId)
       ORDER BY e.externalId, m.projectId`)
-      .all() as Row[];
+      .all(...adapter) as Row[];
     const grouped = new Map<
       string,
       { nodeId: string; taskId: string; projectIds: Set<string> }
@@ -478,8 +486,8 @@ export class GitHubSourceStore {
     const rows = this.db
       .prepare(`SELECT h.externalId AS nodeId, e.taskId, h.reason, h.generation
       FROM source_holds h JOIN external_items e ON ${sameItem("e", "h")}
-      WHERE h.active = 1 ORDER BY h.externalId`)
-      .all() as Row[];
+      WHERE h.active = 1 AND h.provider = ? AND h.instance = ? ORDER BY h.externalId`)
+      .all(...adapter) as Row[];
     return rows.map((row) => ({
       nodeId: String(row.nodeId),
       taskId: String(row.taskId),
@@ -560,24 +568,26 @@ export class GitHubSourceStore {
     transaction(this.db, () => {
       this.db
         .prepare(`UPDATE domain_tasks SET importedBlockers = 'unknown', version = version + 1
-        WHERE id IN (SELECT taskId FROM external_items) AND importedBlockers != 'unknown'`)
-        .run();
+        WHERE id IN (SELECT taskId FROM external_items WHERE provider = ? AND instance = ?)
+          AND importedBlockers != 'unknown'`)
+        .run(...adapter);
       this.db
         .prepare(`UPDATE domain_tasks SET version = version + 1
         WHERE id IN (SELECT d.taskId FROM local_dependencies d
           JOIN external_items e ON e.taskId = d.blockerTaskId
-          JOIN external_item_status s ON ${sameItem("s", "e")} WHERE s.status = 'closed')`)
-        .run();
+          JOIN external_item_status s ON ${sameItem("s", "e")}
+          WHERE s.status = 'closed' AND e.provider = ? AND e.instance = ?)`)
+        .run(...adapter);
       this.db
         .prepare(
-          "UPDATE external_item_status SET status = 'unknown', reason = 'startup-refresh-required'",
+          "UPDATE external_item_status SET status = 'unknown', reason = 'startup-refresh-required' WHERE provider = ? AND instance = ?",
         )
-        .run();
+        .run(...adapter);
       this.db
         .prepare(
-          "UPDATE source_dependency_observations SET complete = 0, reason = 'startup-refresh-required'",
+          "UPDATE source_dependency_observations SET complete = 0, reason = 'startup-refresh-required' WHERE provider = ? AND instance = ?",
         )
-        .run();
+        .run(...adapter);
       this.db
         .prepare(
           "UPDATE source_sync_state SET complete = 0, reason = 'startup-refresh-required'",

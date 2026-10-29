@@ -39,6 +39,9 @@ export const actionKinds = [
   "branch.force-push",
   "branch.adopt",
 ] as const;
+/** Whether an action writes to the project's issue tracker; every other kind writes to its code host. */
+export const isIssueTrackerAction = (kind: (typeof actionKinds)[number]) =>
+  kind.startsWith("issue.") || kind.startsWith("project.");
 export const defaultBranchPrefix = "cab/";
 /** Git's all-zero id, recorded as the outside head when the remote branch is absent. */
 export const absentBranchHead = "0".repeat(40);
@@ -85,6 +88,7 @@ export const deliveryPolicySchema = z
         z
           .object({
             action: z.enum(actionKinds),
+            // The issue-tracker container for an issue-tracker action (a GitHub repository node ID), else the repository.
             repositoryId: identity,
             mode: z.enum(["allow", "approval"]),
             projectNodeId: identity.optional(),

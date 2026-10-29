@@ -370,6 +370,9 @@ export async function runStatusMappingJourney(
       providerFactories: {
         github: () => new GitHubHttpDeliveryProvider(token, guardedFetch),
       },
+      issueTrackerFactories: {
+        github: () => new GitHubHttpDeliveryProvider(token, guardedFetch),
+      },
       // The service's own check: the event the write was minted for is still the task's.
       authorize: (caller) => {
         if (

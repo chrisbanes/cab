@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { unusedIssueInspection } from "../fixtures/delivery-fixture.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { DatabaseSync } from "node:sqlite";
 import { DomainStore } from "../../src/core/domain.js";
@@ -17,6 +18,7 @@ import {
   unresolvedThreadSummary,
 } from "../../src/standalone/delivery.js";
 import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
+import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
 
 test("unchanged feedback is deduplicated and cached settlement never qualifies a changed provider head", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-feedback-restart-"));
@@ -76,7 +78,8 @@ test("unchanged feedback is deduplicated and cached settlement never qualifies a
   let fail = false;
   let feedbackFailure = false;
   const events: string[] = [];
-  const provider: CodeHostDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider & IssueTrackerWriter = {
+    ...unusedIssueInspection,
     async inspectPr() {
       if (fail) throw new Error("raw provider detail");
       return p;
@@ -93,6 +96,7 @@ test("unchanged feedback is deduplicated and cached settlement never qualifies a
   };
   const options = {
     providerFactories: { github: () => provider },
+    issueTrackerFactories: { github: () => provider },
     authorize: () => {},
     approved: () => false,
     taskVersion: () => 1,

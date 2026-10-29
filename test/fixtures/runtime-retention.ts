@@ -180,7 +180,7 @@ export function fixture(root: string, currentGeneration = generation) {
       return runtime;
     },
     undefined,
-    { power: { enabled: false }, github: { intervalMs: 60_000 } },
+    { power: { enabled: false }, issueTrackers: { intervalMs: 60_000 } },
   );
   return {
     service,

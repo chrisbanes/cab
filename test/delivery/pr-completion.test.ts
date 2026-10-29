@@ -11,6 +11,7 @@ import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
 import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
+import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
 
 test("handback settlement inspects provider-only head changes and rechecks local revisions after await", async () => {
   const db = new DatabaseSync(":memory:");
@@ -67,7 +68,8 @@ test("handback settlement inspects provider-only head changes and rechecks local
     allowedMethods: ["squash"],
   };
   let mutate: (() => void) | undefined;
-  const provider: CodeHostDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider & IssueTrackerWriter = {
+    ...unusedIssueInspection,
     async inspectPr() {
       mutate?.();
       return observation;
@@ -85,6 +87,7 @@ test("handback settlement inspects provider-only head changes and rechecks local
   const feedback: string[] = [];
   const coordinator = new DeliveryCoordinator(store, {
     providerFactories: { github: () => provider },
+    issueTrackerFactories: { github: () => provider },
     authorize: () => {},
     approved: () => false,
     taskVersion: () => Number(domain.task(taskId).version),
@@ -147,7 +150,10 @@ test("handback settlement inspects provider-only head changes and rechecks local
   }
 });
 
-import { deliveryFixture } from "../fixtures/delivery-fixture.js";
+import {
+  deliveryFixture,
+  unusedIssueInspection,
+} from "../fixtures/delivery-fixture.js";
 for (const mode of ["reviewable-pr", "through-merge"] as const)
   test(`${mode} issue close cannot bypass the configured PR delivery boundary`, async () => {
     const f = await deliveryFixture(mode, true);

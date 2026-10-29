@@ -8,6 +8,7 @@ import {
   SourceRateLimitPauses,
 } from "./github-source-credential.js";
 import { ghEnvironment } from "./gh-credential.js";
+import type { IssueTrackerReaderFactory } from "./issue-tracker.js";
 import type {
   BlockerSnapshot,
   GitHubSourceReader,
@@ -17,7 +18,7 @@ import type {
   SelectionSnapshot,
 } from "./github-source.js";
 
-export type GitHubReaderFactory = (credentialRef: string) => GitHubSourceReader;
+export type GitHubReaderFactory = IssueTrackerReaderFactory;
 
 /** Serializes provider reads and commits each selection before the scheduler observes it. */
 export class GitHubSynchronizer {

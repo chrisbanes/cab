@@ -14,6 +14,7 @@ import {
   FakeGitHub,
   publicationProject,
 } from "../fixtures/task-publication.js";
+import { githubFake } from "../fixtures/delivery-fixture.js";
 
 const fullName = "chrisbanes/ensemble-s07a-fixture";
 const repositoryNode = "R1";
@@ -476,6 +477,7 @@ test("a run publishes two Ready tasks through the real service, matches them on 
     gh: fake.gh,
     fetcher: fixtureFetch(),
     providerFactories: { github: () => github.provider() },
+    issueTrackerFactories: { github: () => github.provider() },
     readerFactory: github.readerFactory(),
     ghRetryMs: 0,
     readRetryMs: 0,
@@ -530,6 +532,7 @@ test("a run that fails after creating the Project still deletes it and proves th
     gh: fake.gh,
     fetcher: fixtureFetch(),
     providerFactories: { github: () => github.provider() },
+    issueTrackerFactories: { github: () => github.provider() },
     readerFactory: github.readerFactory(),
     ghRetryMs: 0,
     readRetryMs: 0,
@@ -555,6 +558,7 @@ test("a login without the project scope stops before anything is created", async
         : fake.gh(args),
     fetcher: fixtureFetch(),
     providerFactories: { github: () => github.provider() },
+    issueTrackerFactories: { github: () => github.provider() },
     readerFactory: github.readerFactory(),
   });
   assert.equal(evidence.qualification, "failed");
@@ -574,6 +578,7 @@ test("a fixture whose visibility differs from the grant stops before anything is
     gh: fake.gh,
     fetcher: fixtureFetch(true),
     providerFactories: { github: () => github.provider() },
+    issueTrackerFactories: { github: () => github.provider() },
     readerFactory: github.readerFactory(),
   });
   assert.equal(evidence.qualification, "failed");
@@ -595,15 +600,13 @@ test("a create GitHub's list does not show at first is proved by a later refresh
     gh: fake.gh,
     fetcher: fixtureFetch(),
     // The list catches up by the first read-back.
-    providerFactories: {
-      github: () => ({
-        ...provider,
-        inspectAction: async (record) => {
-          for (const issue of github.issues.values()) issue.hidden = false;
-          return provider.inspectAction(record);
-        },
-      }),
-    },
+    ...githubFake(() => ({
+      ...provider,
+      inspectAction: async (record) => {
+        for (const issue of github.issues.values()) issue.hidden = false;
+        return provider.inspectAction(record);
+      },
+    })),
     readerFactory: github.readerFactory(),
     ghRetryMs: 0,
     readRetryMs: 0,

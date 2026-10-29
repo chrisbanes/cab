@@ -123,18 +123,20 @@ try {
     undefined,
     issueMode
       ? {
-          github: {
-            readerFactory: () => ({
-              async readSelection() {
-                return { complete: true, issues: [thinIssue], reason: null };
-              },
-              async readBlockers() {
-                return { complete: true, blockers: [], reason: null };
-              },
-              async readIssueStatus() {
-                return { status: "open" };
-              },
-            }),
+          issueTrackers: {
+            readerFactories: {
+              github: () => ({
+                async readSelection() {
+                  return { complete: true, issues: [thinIssue], reason: null };
+                },
+                async readBlockers() {
+                  return { complete: true, blockers: [], reason: null };
+                },
+                async readIssueStatus() {
+                  return { status: "open" };
+                },
+              }),
+            },
           },
         }
       : {},

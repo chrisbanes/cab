@@ -302,7 +302,10 @@ for (const revoke of [false, true])
         runtime,
         undefined,
         {
-          github: { readerFactory: () => reader, intervalMs: 60_000 },
+          issueTrackers: {
+            readerFactories: { github: () => reader },
+            intervalMs: 60_000,
+          },
           power: { enabled: false },
         },
       );

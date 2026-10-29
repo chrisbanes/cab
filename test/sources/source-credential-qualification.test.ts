@@ -148,7 +148,7 @@ async function fixture(t: TestContext, missing = false) {
       power: { enabled: false },
       routingClient: null,
       ghExecutable: missing ? gh.missing : gh.executable,
-      github: { intervalMs: 60_000 },
+      issueTrackers: { intervalMs: 60_000 },
     },
   );
   t.after(async () => {

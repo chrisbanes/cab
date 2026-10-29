@@ -129,7 +129,10 @@ const runtime = () => ({
   },
 });
 const service = new StandaloneService(join(temp, "data"), runtime, undefined, {
-  github: { readerFactory: () => reader, intervalMs: 60_000 },
+  issueTrackers: {
+    readerFactories: { github: () => reader },
+    intervalMs: 60_000,
+  },
   power: { enabled: false },
 });
 try {

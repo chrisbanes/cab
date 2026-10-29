@@ -16,7 +16,11 @@ import {
   type ClosedIssueInspection,
   ProjectFieldChangedRefusal,
 } from "../../src/standalone/github-delivery.js";
-import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
+import type {
+  CodeHostDeliveryProvider,
+  CodeHostProviderFactory,
+} from "../../src/standalone/code-host.js";
+import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
 import type {
   ExternalAction,
   PrDeliveryObservation,
@@ -136,7 +140,8 @@ export async function deliveryFixture(
   let movedAfterWrite: string | undefined;
   let statusHold: Promise<void> | undefined;
   let closedIssueReads = 0;
-  const provider: CodeHostDeliveryProvider = {
+  const provider: CodeHostDeliveryProvider & IssueTrackerWriter = {
+    inspectPublishedIssue: unusedIssueInspection.inspectPublishedIssue,
     async inspectClosedIssue() {
       closedIssueReads += 1;
       if (closedIssue instanceof Error) throw closedIssue;
@@ -247,55 +252,58 @@ export async function deliveryFixture(
     {
       delivery: {
         providerFactories: { github: () => provider },
+        issueTrackerFactories: { github: () => provider },
         ...(statusWriteTimeoutMs ? { statusWriteTimeoutMs } : {}),
       },
-      github: {
-        readerFactory: () => ({
-          async readSelection() {
-            return {
-              complete: true,
-              // Open-only discovery unless a test sets the issue state explicitly.
-              issues:
-                issueOpen === undefined && pr.merged
-                  ? []
-                  : [
-                      {
-                        providerInstance: "github.com",
-                        nodeId: "I1",
-                        repositoryId: "R1",
-                        repositoryName: "org/repo",
-                        number: 1,
-                        title: sourceTitle,
-                        body: sourceBody,
-                        state: issueOpen === false ? "closed" : "open",
-                        labels: sourceLabels,
-                        projectFields:
-                          projectStatus && status
-                            ? [
-                                {
-                                  projectNodeId: fixtureProject.projectNodeId,
-                                  fieldNodeId: fixtureProject.fieldNodeId,
-                                  optionNodeId: status,
-                                },
-                              ]
-                            : [],
-                        ...(projectStatus
-                          ? { projectItemNodeId: fixtureProject.itemNodeId }
-                          : {}),
-                      },
-                    ],
-              reason: null,
-            };
-          },
-          async readBlockers() {
-            return { complete: true, blockers: [], reason: null };
-          },
-          async readIssueStatus() {
-            return {
-              status: (issueOpen ?? !pr.merged) ? "open" : "closed",
-            };
-          },
-        }),
+      issueTrackers: {
+        readerFactories: {
+          github: () => ({
+            async readSelection() {
+              return {
+                complete: true,
+                // Open-only discovery unless a test sets the issue state explicitly.
+                issues:
+                  issueOpen === undefined && pr.merged
+                    ? []
+                    : [
+                        {
+                          providerInstance: "github.com",
+                          nodeId: "I1",
+                          repositoryId: "R1",
+                          repositoryName: "org/repo",
+                          number: 1,
+                          title: sourceTitle,
+                          body: sourceBody,
+                          state: issueOpen === false ? "closed" : "open",
+                          labels: sourceLabels,
+                          projectFields:
+                            projectStatus && status
+                              ? [
+                                  {
+                                    projectNodeId: fixtureProject.projectNodeId,
+                                    fieldNodeId: fixtureProject.fieldNodeId,
+                                    optionNodeId: status,
+                                  },
+                                ]
+                              : [],
+                          ...(projectStatus
+                            ? { projectItemNodeId: fixtureProject.itemNodeId }
+                            : {}),
+                        },
+                      ],
+                reason: null,
+              };
+            },
+            async readBlockers() {
+              return { complete: true, blockers: [], reason: null };
+            },
+            async readIssueStatus() {
+              return {
+                status: (issueOpen ?? !pr.merged) ? "open" : "closed",
+              };
+            },
+          }),
+        },
       },
       power: { enabled: false },
     },
@@ -540,6 +548,29 @@ export async function deliveryFixture(
       waiter?.();
       await service.stop();
       rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+/** The issue inspections of a fake that registers as both code-host provider and issue-tracker writer. */
+export const unusedIssueInspection = {
+  async inspectPublishedIssue(): Promise<never> {
+    throw new Error("unused");
+  },
+  async inspectClosedIssue(): Promise<never> {
+    throw new Error("unused");
+  },
+};
+
+/** Registers one fake as GitHub's code-host provider and issue-tracker writer. */
+export function githubFake(factory: CodeHostProviderFactory) {
+  return {
+    providerFactories: { github: factory },
+    issueTrackerFactories: {
+      github: ((...args) => ({
+        ...unusedIssueInspection,
+        ...factory(...args),
+      })) satisfies CodeHostProviderFactory,
     },
   };
 }
