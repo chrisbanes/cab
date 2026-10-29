@@ -2,14 +2,16 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { safeBranchName } from "../core/delivery.js";
+import { isGitLabProjectPath } from "../core/github-source.js";
 import { runGit } from "./git-process.js";
 
 /**
  * Answers Git's credential request only for the verified repository over HTTPS on the request's
  * host (`CAB_PUSH_HOST`), with the token from the child's environment; any other host, protocol or
- * path, and an empty host, gets no answer.
+ * path, and an empty host, gets no answer. The username is `CAB_PUSH_USERNAME`, which defaults to
+ * GitHub's `x-access-token`.
  */
-export const pushCredentialHelper = `!f() { test "$1" = get || exit 0; while IFS== read -r k v; do case "$k" in protocol) p=$v;; host) h=$v;; path) q=$v;; esac; done; test "$p" = https && test -n "$CAB_PUSH_HOST" && test "$h" = "$CAB_PUSH_HOST" && test "$q" = "$CAB_PUSH_PATH" || exit 0; echo username=x-access-token; echo "password=$CAB_PUSH_TOKEN"; }; f`;
+export const pushCredentialHelper = `!f() { test "$1" = get || exit 0; while IFS== read -r k v; do case "$k" in protocol) p=$v;; host) h=$v;; path) q=$v;; esac; done; test "$p" = https && test -n "$CAB_PUSH_HOST" && test "$h" = "$CAB_PUSH_HOST" && test "$q" = "$CAB_PUSH_PATH" || exit 0; echo "username=\${CAB_PUSH_USERNAME:-x-access-token}"; echo "password=$CAB_PUSH_TOKEN"; }; f`;
 
 export type PushOutcome =
   /** Nothing reached the network (setup failed or the child never started). */
@@ -28,7 +30,9 @@ export interface PushRequest {
   workspacePath: string;
   /** The code host's lowercase DNS name, from the repository link. */
   host: string;
-  /** `owner/name` of the verified repository on `host`. */
+  /** The code host of `host`; GitHub when omitted. */
+  codeHost?: TransportCodeHost;
+  /** `owner/name` of the verified repository on `host`; the full project path on GitLab. */
   nameWithOwner: string;
   commitSha: string;
   branch: string;
@@ -44,9 +48,22 @@ export interface PushRequest {
 }
 
 const repositoryPath = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-// shortcut: no port in host, upgrade if a self-managed host needs one
+export type TransportCodeHost = "github" | "gitlab";
+/**
+ * The credential username for a verified repository path on a code host, or null when the path is
+ * invalid there. `oauth2` takes both GitLab OAuth tokens and personal access tokens.
+ */
+export function transportUsername(
+  codeHost: TransportCodeHost | undefined,
+  nameWithOwner: string,
+): string | null {
+  if (codeHost === "gitlab")
+    return isGitLabProjectPath(nameWithOwner) ? "oauth2" : null;
+  return repositoryPath.test(nameWithOwner) ? "x-access-token" : null;
+}
+// shortcut: no port in host, upgrade if a self-managed host needs one. One label is allowed, as in gitLabHostSchema.
 export const hostName =
-  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const bounds = {
   timeoutMs: 120_000,
   terminationGraceMs: 5_000,
@@ -74,10 +91,11 @@ export async function pushTaskCommit(
     lease,
     token,
   } = request;
+  const username = transportUsername(request.codeHost, nameWithOwner);
   if (
     !token ||
     !hostName.test(host) ||
-    !repositoryPath.test(nameWithOwner) ||
+    !username ||
     !/^[0-9a-f]{40}$/.test(commitSha) ||
     (lease !== null && !/^[0-9a-f]{40}$/.test(lease)) ||
     !safeBranchName(branch)
@@ -141,6 +159,7 @@ export async function pushTaskCommit(
         HOME: scratch,
         CAB_PUSH_HOST: host,
         CAB_PUSH_PATH: `${nameWithOwner}.git`,
+        CAB_PUSH_USERNAME: username,
         CAB_PUSH_TOKEN: token,
       },
     });

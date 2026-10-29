@@ -41,11 +41,11 @@ const reasonCopy: Record<
 const line = (c: Credential) =>
   `${c.kind === "glab" ? "GitLab CLI" : "Environment variable"} · ${
     c.state === "usable"
-      ? `@${c.account} · read-only use`
+      ? `@${c.account} · used for project lists and branch delivery`
       : reasonCopy[c.reason]
   }`;
 
-/** The installation's read-only GitLab credential per host. */
+/** The installation's GitLab credential per host. */
 export function GitLabCredentialsSection(p: SettingsProps) {
   const loader = useCallback(
     (signal: AbortSignal) =>
@@ -218,10 +218,13 @@ export function GitLabCredentialsSection(p: SettingsProps) {
             </>
           )}
           <p className="metadata muted">
-            cab only reads GitLab with this credential, to list projects and
-            show the account, and removes it from agent and helper environments.
-            It grants no repository access. If agents can reach this Mac's glab
-            login they could run glab themselves; cab does not prevent that.
+            cab uses this credential to list projects, show the account, and
+            push and fetch task branches on the linked projects (it needs
+            read_api and write_repository for pushes), and removes it from agent
+            and helper environments. It grants no repository access or delivery
+            authority: links and delivery grants decide those. If agents can
+            reach this Mac's glab login they could run glab themselves; cab does
+            not prevent that.
           </p>
           <DraftOutcome
             draft={d}

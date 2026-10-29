@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import {
+  mkdtempSync as makeTemp,
+  writeFileSync as writeFile,
+  realpathSync,
+} from "node:fs";
+import { tmpdir as osTmp } from "node:os";
+import { canonicalMaterial } from "../../src/core/delivery.js";
+import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
+import { git as runGit } from "./publication.js";
 import { GitHubHttpDeliveryProvider } from "../../src/standalone/github-delivery.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import type { RuntimeConversationEvent } from "../../src/standalone/codex.js";
@@ -413,6 +422,16 @@ export function scriptedDeliveryProvider() {
   };
 }
 
+/** The GitLab project a delivery fixture links its repository to, and the seams that stand in for GitLab. */
+export interface GitLabLink {
+  host: string;
+  repositoryId: string;
+  projectPath: string;
+  /** The checkout's `origin` remote. */
+  origin: string;
+  delivery: StandaloneServiceOptions["delivery"];
+}
+
 export async function createReleaseDeliveryFixture(
   mode: "reviewable-pr" | "through-merge" = "reviewable-pr",
   lifecycleOptions: FixtureLifecycleOptions = {},
@@ -420,6 +439,8 @@ export async function createReleaseDeliveryFixture(
   routingClient: RoutingChoiceClient | null = null,
   /** A local Git repository to provision as repository R1 (local tasks only). */
   repositoryPath?: string,
+  /** Links `repositoryPath` as this GitLab project instead of R1, with these delivery seams. */
+  gitlab?: GitLabLink,
 ) {
   const scripted = scriptedDeliveryProvider();
   const readerFactory: GitHubReaderFactory = () => ({
@@ -460,6 +481,7 @@ export async function createReleaseDeliveryFixture(
     {
       providerFactories: { github: () => scripted.provider },
       issueTrackerFactories: { github: () => scripted.provider },
+      ...gitlab?.delivery,
     },
     lifecycleOptions,
     () => new ReleaseRuntime(),
@@ -521,6 +543,24 @@ export async function createReleaseDeliveryFixture(
     selectionId: "repo",
     expectedVersion: 2,
   });
+  if (gitlab && repositoryPath)
+    await d.configureRepositories({
+      type: "repositories.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: d.repositoryLinks(projectId).version,
+      repositories: [
+        {
+          codeHost: "gitlab",
+          host: gitlab.host,
+          repositoryId: gitlab.repositoryId,
+          projectPath: gitlab.projectPath,
+          path: repositoryPath,
+          ref: "main",
+        },
+      ],
+    } as never);
   let taskId: string;
   if (localTask) {
     taskId = randomUUID();
@@ -551,7 +591,15 @@ export async function createReleaseDeliveryFixture(
   });
   await f.service.provisionTask(
     taskId,
-    repositoryPath ? [{ repositoryId: "R1", path: repositoryPath }] : [],
+    repositoryPath
+      ? [
+          {
+            repositoryId: gitlab?.repositoryId ?? "R1",
+            path: repositoryPath,
+            ...(gitlab ? { ref: "main" } : {}),
+          },
+        ]
+      : [],
   );
   d.execute({
     type: "project.configure",
@@ -634,7 +682,10 @@ export async function createReleaseDeliveryFixture(
         expectedVersion: f.service.delivery().configuration(projectId).version,
         mode,
         credentialRef: null,
-        grants: grants.map((g) => ({ ...g, repositoryId: "R1" })) as never,
+        grants: grants.map((g) => ({
+          ...g,
+          repositoryId: gitlab?.repositoryId ?? "R1",
+        })) as never,
         requiredChecks: [{ name: "build", appId: 17 }],
       });
     },
@@ -725,4 +776,123 @@ export async function until(predicate: () => boolean, label: string) {
     if (Date.now() >= deadline) throw Error(`Timed out: ${label}`);
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+}
+
+/** A repository with one commit, provisioned for the task as R1, or as the GitLab project when given. */
+export async function publicationWorld(
+  mode: "allow" | "approval",
+  gitlab?: GitLabLink,
+) {
+  const repositoryId = gitlab?.repositoryId ?? "R1";
+  const source = realpathSync(makeTemp(join(osTmp(), "cab-publish-src-")));
+  runGit(source, "init", "-q", "-b", "main");
+  writeFile(join(source, "a.txt"), "a\n");
+  runGit(source, "add", ".");
+  runGit(source, "commit", "-q", "-m", "base");
+  if (gitlab) runGit(source, "remote", "add", "origin", gitlab.origin);
+  const f = await createReleaseDeliveryFixture(
+    "reviewable-pr",
+    {},
+    true,
+    null,
+    source,
+    gitlab,
+  );
+  f.grant(
+    { action: "branch.push", mode },
+    // Recovery is approval-gated whatever the grant: an overwrite is granted as allow on purpose.
+    { action: "branch.force-push", mode: "allow" },
+    { action: "branch.adopt", mode: "approval" },
+    { action: "pr.create", mode: "allow" },
+  );
+  const binding = await f.service.taskWorkspace(f.taskId);
+  const workspace = binding?.repositories[0]?.workspacePath;
+  assert.ok(workspace);
+  const commit = (name: string) => {
+    writeFile(join(workspace, name), `${name}\n`);
+    runGit(workspace, "add", ".");
+    runGit(workspace, "commit", "-q", "-m", name);
+    return runGit(workspace, "rev-parse", "HEAD");
+  };
+  const push = (commitSha: string, index?: number, approval?: object) =>
+    f.call(
+      "cab_external_action",
+      {
+        operationId: randomUUID(),
+        action: {
+          kind: "branch.push",
+          target: { repositoryId },
+          commitSha,
+        },
+        ...(approval ? { approval } : {}),
+      },
+      index,
+    );
+  const createPr = (headRef: string, expectedHeadSha: string) =>
+    f.call("cab_external_action", {
+      operationId: randomUUID(),
+      action: {
+        kind: "pr.create",
+        target: {
+          repositoryId,
+          baseRef: "main",
+          headRef,
+          expectedHeadSha,
+        },
+        title: "Change",
+        body: "Body",
+        draft: true,
+      },
+    });
+  const action = (
+    kind: "branch.force-push" | "branch.adopt",
+    material: Record<string, unknown>,
+  ) => ({ kind, target: { repositoryId }, ...material });
+  const recover = (
+    recovery: Record<string, unknown>,
+    index: number,
+    approval?: object,
+  ) =>
+    f.call(
+      "cab_external_action",
+      {
+        operationId: randomUUID(),
+        action: recovery,
+        ...(approval ? { approval } : {}),
+      },
+      index,
+    );
+  /** The lead requests approval of exact recovery material and the operator approves it. */
+  const approve = async (recovery: Record<string, unknown>, turn: number) => {
+    const requested = await f.call(
+      "cab_request_approval",
+      {
+        action: recovery.kind,
+        target: canonicalMaterial(recovery.target),
+        material: recovery,
+      },
+      turn,
+    );
+    assert.equal(requested.success, true, requested.text);
+    const interaction = f.service
+      .coordinationView()
+      .readTask(f.taskId)
+      .approvals.filter((a) => a.status === "open")
+      .at(-1);
+    assert.ok(interaction);
+    await f.terminal(turn);
+    await f.service.coordinationView().decideApproval({
+      taskId: f.taskId,
+      key: randomUUID(),
+      interactionId: interaction.interactionId,
+      expectedRevision: 1,
+      decision: "approved",
+      action: String(recovery.kind),
+      target: canonicalMaterial(recovery.target),
+      material: recovery,
+    });
+    await f.waitTurn(turn + 1);
+    return { interactionId: interaction.interactionId, expectedRevision: 2 };
+  };
+  return { f, commit, push, createPr, action, recover, approve };
 }

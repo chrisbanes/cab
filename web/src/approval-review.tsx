@@ -9,7 +9,7 @@ import type { OperatorClient } from "./api.js";
 import { useCommandSend } from "./command-send.js";
 import { SendFeedback } from "./coordination-actions.js";
 import { ActionLink, Button, ShortId, StatusBadge } from "./components.js";
-import { safePullRequestUrl } from "./delivery-presentation.js";
+import { safeCompareUrl } from "./delivery-presentation.js";
 import { failureCause } from "./outcome-copy.js";
 
 type Approval = TaskRead["data"]["approvals"][number];
@@ -61,7 +61,12 @@ export function ApprovalReview({
       if (kind === "recorded" || kind === "conflict") onChanged();
     },
   );
-  const open = approval.status === "open",
+  const compareUrl = safeCompareUrl(
+      approval.compareUrl,
+      approval.compareCodeHost,
+    ),
+    codeHostName = approval.compareCodeHost === "gitlab" ? "GitLab" : "GitHub",
+    open = approval.status === "open",
     // Deny never needs the disclosed fields: the server binds it to the retained originals.
     decidable =
       open && outcome?.kind !== "recorded" && outcome?.kind !== "conflict",
@@ -132,15 +137,11 @@ export function ApprovalReview({
           )}
         </dd>
       </dl>
-      {safePullRequestUrl(approval.compareUrl) && (
+      {compareUrl && (
         <p className="body">
-          <a
-            href={approval.compareUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Compare on GitHub
-            <span className="sr-only"> (opens GitHub)</span>
+          <a href={compareUrl} target="_blank" rel="noopener noreferrer">
+            Compare on {codeHostName}
+            <span className="sr-only"> (opens {codeHostName})</span>
           </a>
           {" · the outside change on the task branch"}
         </p>

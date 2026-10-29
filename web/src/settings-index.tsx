@@ -443,7 +443,7 @@ export function SettingsWorkspace(
       <Panel
         id="gitlab-credentials"
         title="GitLab credentials"
-        description="Read-only credential for each GitLab host, used to list projects and show the account. It grants no repository access."
+        description="The credential for each GitLab host: lists projects, shows the account and pushes task branches. Links and delivery grants decide what it may reach."
       >
         <GitLabCredentialsSection {...p} />
       </Panel>

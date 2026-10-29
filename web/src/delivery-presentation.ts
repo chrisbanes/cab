@@ -58,6 +58,20 @@ export function safePullRequestUrl(url: string | undefined) {
   }
 }
 
+/** A compare link on the code host that produced it: github.com for GitHub, any https URL for GitLab. */
+export function safeCompareUrl(
+  url: string | undefined,
+  codeHost: "github" | "gitlab" | undefined,
+) {
+  if (codeHost === "github") return safePullRequestUrl(url);
+  if (codeHost !== "gitlab" || !url) return null;
+  try {
+    return new URL(url).protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 type PullRequestBinding = {
   number: number;
   repositoryName: string;

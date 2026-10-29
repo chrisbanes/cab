@@ -178,8 +178,8 @@ a service environment variable; `file:/absolute/path` an owner-only file (Claude
 token only); `gh:github.com` the GitHub CLI's login for github.com (discovery or
 an explicitly configured project source), read per use without caching;
 `glab:<host>` the GitLab CLI's login for that host (an installation GitLab
-credential), likewise read per use. Delivery
-and routing references remain env-only. Reads report whether a reference is configured
+credential, which is also the identity GitLab branch delivery acts as), likewise read per use. GitHub
+delivery and routing references remain env-only. Reads report whether a reference is configured
 and usable and its kind, never its variable name, path or value.
 _Avoid_: Token or secret when referring to the stored reference
 
