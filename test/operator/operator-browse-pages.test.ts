@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { setImmediate } from "node:timers/promises";
 import { cliCapabilities } from "../../src/operator/contracts.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -172,7 +171,7 @@ test("browse pages filter, page and reject stale cursors without changing UI def
   // the server then resets (ECONNRESET).
   for (let i = 1; i < 120; i++) {
     review.result(`Result ${i} PRIVATE REVIEW INSTRUCTIONS`);
-    await setImmediate();
+    await new Promise((resolve) => setImmediate(resolve));
   }
   const task = await api.readTask(review.taskId);
   assert.equal(task.data.results.length, 120);
