@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { ChildProcess } from "node:child_process";
 import {
   chmodSync,
   existsSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -144,5 +146,71 @@ test("a missing executable resolves as a failure that never spawned", async () =
       childExitObserved: false,
       childExitSignal: null,
     },
+  );
+});
+
+const busyWait = (ms: number) => {
+  const until = Date.now() + ms;
+  while (Date.now() < until);
+};
+
+test("an exit queued behind an event-loop stall after SIGKILL is still observed", async (t) => {
+  const { executable, marker } = script(
+    t,
+    'trap \'\' TERM; touch "$(dirname "$0")/started"; exec sleep 30',
+  );
+  const controller = new AbortController();
+  const running = run({
+    executable,
+    signal: controller.signal,
+    terminationGraceMs: 20,
+    observationMs: 40,
+  });
+  await until(() => existsSync(marker));
+  controller.abort();
+  // Same duration as the grace timer, so it runs right after SIGKILL; the check-phase stall
+  // outlasts the observation window before the loop next polls for the child's exit.
+  setTimeout(() => setImmediate(() => busyWait(300)), 20);
+  assert.deepEqual(await running, {
+    status: "interrupted",
+    kind: "cancelled",
+    spawned: true,
+    childExitObserved: true,
+    childExitSignal: "SIGKILL",
+  });
+});
+
+test("a child whose exit is never observed still settles unobserved within the window", async (t) => {
+  const { executable, marker } = script(
+    t,
+    'echo $$ > "$(dirname "$0")/started"; exec sleep 30',
+  );
+  const kill = ChildProcess.prototype.kill;
+  ChildProcess.prototype.kill = () => true;
+  let pid = 0;
+  t.after(() => {
+    ChildProcess.prototype.kill = kill;
+    if (pid > 0) process.kill(pid, "SIGKILL");
+  });
+  const controller = new AbortController();
+  const options = { terminationGraceMs: 20, observationMs: 40 };
+  const running = run({ executable, signal: controller.signal, ...options });
+  await until(
+    () => existsSync(marker) && readFileSync(marker, "utf8").trim() !== "",
+  );
+  pid = Number(readFileSync(marker, "utf8"));
+  const abortedAt = Date.now();
+  controller.abort();
+  assert.deepEqual(await running, {
+    status: "interrupted",
+    kind: "cancelled",
+    spawned: true,
+    childExitObserved: false,
+    childExitSignal: null,
+  });
+  // 500 ms of slack absorbs loop scheduling on a loaded runner; the window itself is 60 ms.
+  assert.ok(
+    Date.now() - abortedAt <
+      options.terminationGraceMs + options.observationMs + 500,
   );
 });
