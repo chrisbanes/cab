@@ -19,6 +19,10 @@ export function conditionText(c: Condition) {
     return c.operator === "has"
       ? `label \`${c.name}\``
       : `no label \`${c.name}\``;
+  if (c.kind === "status")
+    return `Jira status is ${c.operator === "in" ? "one of" : "not one of"} ${c.statusIds.map((id) => c.statusNames?.[id] ?? id).join(", ")}`;
+  if (c.kind === "select-field")
+    return `${c.fieldId} is ${c.operator === "in" ? "one of" : "not one of"} ${c.optionIds.map((id) => c.optionNames?.[id] ?? id).join(", ")}`;
   const [only, ...rest] = c.optionNodeIds;
   const name = (id: string) => c.optionNames?.[id] ?? id;
   if (c.operator === "in" && only !== undefined && !rest.length)

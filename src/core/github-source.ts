@@ -25,6 +25,28 @@ import {
 const parseRule = (json: unknown) =>
   readinessSchema.nullable().parse(JSON.parse(String(json)) as unknown);
 
+/** An issue's labels, tracker status ID and select values as stored on its `external_items` row. */
+const observedFacts = (row: Row) => ({
+  labels: z.array(z.string()).parse(JSON.parse(String(row.labels)) as unknown),
+  status:
+    row.observedStatus == null
+      ? null
+      : z
+          .object({ id: z.string() })
+          .passthrough()
+          .parse(JSON.parse(String(row.observedStatus)) as unknown).id,
+  selectFields:
+    row.observedFields == null
+      ? []
+      : z
+          .array(
+            z
+              .object({ fieldId: z.string(), optionId: z.string() })
+              .passthrough(),
+          )
+          .parse(JSON.parse(String(row.observedFields)) as unknown),
+});
+
 /** Why an imported task is or is not Draft, with its project's rule. */
 export interface TaskReadiness {
   rule: Readiness | null;
@@ -45,6 +67,8 @@ export interface IssueSnapshot {
   labels: string[];
   /** The tracker's own status, stored for Jira; GitHub has none. */
   status?: { id: string; name: string; categoryKey: string };
+  /** The tracker's single-select field values, stored for Jira; GitHub has none. */
+  selectFields?: Array<{ fieldId: string; optionId: string; name: string }>;
   projectFields: Array<{
     projectNodeId: string;
     fieldNodeId: string;
@@ -894,7 +918,7 @@ export class GitHubSourceStore {
             .run(taskId, ...this.key(issue.nodeId), issue.repositoryId);
           this.db
             .prepare(
-              "INSERT INTO external_items (provider, instance, externalId, taskId, containerId, containerName, number, observedTitle, observedBody, observedState, labels, observedStatus) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              "INSERT INTO external_items (provider, instance, externalId, taskId, containerId, containerName, number, observedTitle, observedBody, observedState, labels, observedStatus, observedFields) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .run(
               ...this.key(issue.nodeId),
@@ -907,6 +931,7 @@ export class GitHubSourceStore {
               issue.state,
               JSON.stringify(issue.labels),
               issue.status ? JSON.stringify(issue.status) : null,
+              issue.selectFields ? JSON.stringify(issue.selectFields) : null,
             );
           const digest = sourceTextDigest(issue.title, issue.body);
           this.db
@@ -951,7 +976,7 @@ export class GitHubSourceStore {
           }
           this.db
             .prepare(
-              `UPDATE external_items SET containerId = ?, containerName = ?, number = ?, observedTitle = ?, observedBody = ?, observedState = ?, labels = ?, observedStatus = ? WHERE ${itemIs()}`,
+              `UPDATE external_items SET containerId = ?, containerName = ?, number = ?, observedTitle = ?, observedBody = ?, observedState = ?, labels = ?, observedStatus = ?, observedFields = ? WHERE ${itemIs()}`,
             )
             .run(
               issue.repositoryId,
@@ -962,6 +987,7 @@ export class GitHubSourceStore {
               issue.state,
               JSON.stringify(issue.labels),
               issue.status ? JSON.stringify(issue.status) : null,
+              issue.selectFields ? JSON.stringify(issue.selectFields) : null,
               ...this.key(issue.nodeId),
             );
         }
@@ -1391,7 +1417,7 @@ export class GitHubSourceStore {
     }
     const external = this.db
       .prepare(
-        "SELECT e.externalId AS nodeId, e.labels, e.observedState, t.projectId FROM external_items e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?",
+        "SELECT e.externalId AS nodeId, e.labels, e.observedStatus, e.observedFields, e.observedState, t.projectId FROM external_items e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?",
       )
       .get(taskId) as Row;
     const config = this.db
@@ -1513,9 +1539,7 @@ export class GitHubSourceStore {
       ) as Row[];
     return {
       memberships: rows.length,
-      labels: z
-        .array(z.string())
-        .parse(JSON.parse(String(external.labels)) as unknown),
+      ...observedFacts(external),
       fields: rows.flatMap((row) =>
         projectFieldsSchema.parse(JSON.parse(String(row.projectFields))),
       ),
@@ -1544,7 +1568,7 @@ export class GitHubSourceStore {
       .all(projectId) as Row[];
     const rows = this.db
       .prepare(`SELECT m.selectionId, m.externalId AS nodeId, m.fields AS projectFields, e.observedState, e.labels,
-        t.ready, t.readinessRule, t.projectId AS taskProjectId
+        e.observedStatus, e.observedFields, t.ready, t.readinessRule, t.projectId AS taskProjectId
         FROM source_memberships m JOIN external_items e ON ${sameItem("e", "m")}
         JOIN domain_tasks t ON t.id = e.taskId
         WHERE m.projectId = ?`)
@@ -1565,9 +1589,7 @@ export class GitHubSourceStore {
         matches.set(
           nodeId,
           evaluateReadiness(rule, {
-            labels: z
-              .array(z.string())
-              .parse(JSON.parse(String(r.labels)) as unknown),
+            ...observedFacts(r),
             fields: fields.get(nodeId) ?? [],
           }).satisfied,
         );
@@ -1691,7 +1713,7 @@ export class GitHubSourceStore {
   readinessByTask(taskIds: readonly string[]): Map<string, TaskReadiness> {
     const ids = JSON.stringify(taskIds);
     const externals = this.db
-      .prepare(`SELECT e.taskId, e.externalId AS nodeId, e.labels, e.observedState, t.projectId, t.ready,
+      .prepare(`SELECT e.taskId, e.externalId AS nodeId, e.labels, e.observedStatus, e.observedFields, e.observedState, t.projectId, t.ready,
         t.readinessRule
         FROM external_items e JOIN domain_tasks t ON t.id = e.taskId
         WHERE e.taskId IN (SELECT value FROM json_each(?))`)
@@ -1736,9 +1758,7 @@ export class GitHubSourceStore {
         )
           return [String(external.taskId), notEvaluated];
         const result = evaluateReadiness(rule, {
-          labels: z
-            .array(z.string())
-            .parse(JSON.parse(String(external.labels)) as unknown),
+          ...observedFacts(external),
           fields: own.flatMap((m) =>
             projectFieldsSchema.parse(JSON.parse(String(m.projectFields))),
           ),

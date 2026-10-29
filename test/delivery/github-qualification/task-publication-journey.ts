@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Readiness } from "../../../src/core/github-source-contracts.js";
+import type { GitHubReadiness } from "../../../src/core/github-source-contracts.js";
 import type { CodeHostProviderFactories } from "../../../src/standalone/code-host.js";
 import type { IssueTrackerWriterFactories } from "../../../src/standalone/issue-tracker.js";
 import { GitHubHttpSourceReader } from "../../../src/standalone/github-source.js";
@@ -291,7 +291,7 @@ export async function runTaskPublicationJourney(
       operator: "has" as const,
       name: label,
     };
-    const configure = async (readiness: Readiness) => {
+    const configure = async (readiness: GitHubReadiness) => {
       await domain.configureRepositories({
         type: "repositories.configure",
         actor: "operator",

@@ -960,13 +960,24 @@ const fieldNameShape = {
   fieldName: text.optional(),
   optionName: text.optional(),
 };
-const [labelCondition, projectFieldCondition] =
-  readinessConditionSchema.options;
+const [
+  labelCondition,
+  projectFieldCondition,
+  statusCondition,
+  selectCondition,
+] = readinessConditionSchema.options;
 const readinessConditionViewSchema = z.discriminatedUnion("kind", [
   labelCondition,
   // A condition names its options by node ID; the read lists the names it knows.
   projectFieldCondition.extend({
     fieldName: fieldNameShape.fieldName,
+    optionNames: z.record(z.string().max(512), text).optional(),
+  }),
+  // Jira names come from the last complete read of the project's imported issues.
+  statusCondition.extend({
+    statusNames: z.record(z.string().max(512), text).optional(),
+  }),
+  selectCondition.extend({
     optionNames: z.record(z.string().max(512), text).optional(),
   }),
 ]);
@@ -994,6 +1005,14 @@ export function readinessCommandValue(
     mode: rule.mode,
     conditions: rule.conditions.map((c) => {
       if (c.kind === "label") return c;
+      if (c.kind === "status") {
+        const { statusNames: _statuses, ...ids } = c;
+        return ids;
+      }
+      if (c.kind === "select-field") {
+        const { optionNames: _options, ...ids } = c;
+        return ids;
+      }
       const { fieldName: _field, optionNames: _options, ...ids } = c;
       return ids;
     }),

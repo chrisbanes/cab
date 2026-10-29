@@ -9,7 +9,7 @@ import { DeliveryStore } from "../../src/core/delivery.js";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import {
   evaluateReadiness,
-  type Readiness,
+  type GitHubReadiness,
   type ReadinessCondition,
 } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
@@ -449,7 +449,7 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
 
 function closedIssueWorld(
   closedIssues: "skip" | "done",
-  readiness: Readiness = {
+  readiness: GitHubReadiness = {
     mode: "all",
     conditions: [{ kind: "label", operator: "has", name: "ready" }],
   },
@@ -799,7 +799,7 @@ test("manual state changes never carry a provider-completion record", () => {
 });
 
 function readinessFixture(
-  readiness: Parameters<typeof evaluateReadiness>[0],
+  readiness: GitHubReadiness | null,
   selectionIds = ["repo"],
 ) {
   const db = new DatabaseSync(":memory:");
@@ -1255,7 +1255,7 @@ test("without a readiness rule, Ready tasks still wait on incomplete reads, bloc
 
 test("adding a readiness rule filters again; removing it stops filtering and a complete read releases the readiness-lost hold", () => {
   const f = readinessFixture(null);
-  const configure = (readiness: Parameters<typeof evaluateReadiness>[0]) => {
+  const configure = (readiness: GitHubReadiness | null) => {
     f.domain.execute({
       type: "github.configure",
       actor: "operator",

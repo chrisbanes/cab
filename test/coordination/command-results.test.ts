@@ -131,6 +131,7 @@ const cases = {
     version: 2,
     instance: "example.atlassian.net",
     selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
+    readiness: null,
   },
   "github.place": task,
   "source.review": task,
