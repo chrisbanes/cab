@@ -245,7 +245,6 @@ test("qualification separates preview activation/import and retains replay/Clear
       mode: "all",
       conditions: [{ kind: "label", name: "ready-for-agent" }],
     },
-    repositories: [],
   });
   await f.api.readSourceObservations();
   assert.equal(f.domain.task(taskId).importedBlockers, "unknown");
@@ -269,7 +268,6 @@ test("qualification separates preview activation/import and retains replay/Clear
       mode: "all",
       conditions: [{ kind: "label", name: "ready-for-agent" }],
     },
-    repositories: [],
   });
   await assert.rejects(
     f.api.execute({ ...result.preview, key: randomUUID() }),
@@ -294,7 +292,6 @@ test("qualification separates preview activation/import and retains replay/Clear
         mode: "all",
         conditions: [{ kind: "label", name: "ready-for-agent" }],
       },
-      repositories: [],
     }),
   );
   assert.equal(
@@ -359,7 +356,6 @@ for (const failure of [
         mode: "all",
         conditions: [{ kind: "label", name: "ready-for-agent" }],
       },
-      repositories: [],
     });
     await assert.rejects(
       f.api.execute({
@@ -594,7 +590,6 @@ test("qualification missing source reference refuses preview without fallback or
       mode: "all",
       conditions: [{ kind: "label", name: "ready-for-agent" }],
     },
-    repositories: [],
   });
   await assert.rejects(
     f.api.execute({

@@ -117,8 +117,11 @@ test("guided create records instructions, verified repositories and one inactive
   assert.equal(project.instructionsRevision, 1);
   const real = await realpath(join(home.home, "src", "atlas"));
   const github = d.githubConfiguration(String(command.projectId));
-  assert.deepEqual(github.repositories, [
+  assert.equal(d.repositoryLinks(String(command.projectId)).version, 1);
+  assert.deepEqual(d.repositoryLinks(String(command.projectId)).links, [
     {
+      codeHost: "github",
+      host: "github.com",
       repositoryId: "R_atlas",
       path: real,
       ref: "main",
@@ -219,7 +222,6 @@ test("creates without the setup credential, and existing sources, are never re-d
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
   const cleared = create({ sourceCredentialRef: "gh:github.com" });
   await api.execute(cleared);
@@ -488,6 +490,29 @@ test("verification Git never inherits a credential the command selects before it
     [],
   );
   await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId: id,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R_atlas",
+        ref: "main",
+      },
+    ],
+  });
+  const configuring = await seenBy();
+  assert.ok(configuring.includes("run"));
+  // The new source reference is unrelated until the next command selects it.
+  assert.deepEqual(
+    configuring.filter(
+      (line) => line !== "run" && line !== "FIXTURE_PENDING_SOURCE",
+    ),
+    [],
+  );
+  await api.execute({
     type: "github.configure",
     key: randomUUID(),
     projectId: id,
@@ -495,14 +520,7 @@ test("verification Git never inherits a credential the command selects before it
     credentialRef: "env:FIXTURE_PENDING_SOURCE",
     selections: [],
     readiness: f.service.domain().githubConfiguration(id).readiness,
-    repositories: [{ repositoryId: "R_atlas", ref: "main" }],
   });
-  const configuring = await seenBy();
-  assert.ok(configuring.includes("run"));
-  assert.deepEqual(
-    configuring.filter((line) => line !== "run"),
-    [],
-  );
   assert.equal(
     f.service.domain().githubConfiguration(id).credentialRef,
     "env:FIXTURE_PENDING_SOURCE",

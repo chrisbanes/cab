@@ -210,7 +210,6 @@ export async function seedCatalog(
       },
     ],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   const importedTitle =
     "Imported task with a deliberately long source title for narrow operator list and board layouts";

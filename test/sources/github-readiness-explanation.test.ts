@@ -107,7 +107,6 @@ test("readiness counts and unmet reasons come from stored observations without p
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     execute({
       type: "github.activate",

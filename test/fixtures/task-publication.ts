@@ -404,7 +404,23 @@ export async function seedPublication(
     search: { id: "search", kind: "search" as const, query: "repo:org/repo" },
   };
   const chosen = options.selections ?? ["repo", "project"];
-  await domain().configureGitHub({
+  await domain().configureRepositories({
+    type: "repositories.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R1",
+        path,
+        ref: "main",
+      },
+    ],
+  });
+  domain().execute({
     type: "github.configure",
     actor: "operator",
     key: randomUUID(),
@@ -413,7 +429,6 @@ export async function seedPublication(
     credentialRef: "env:FIXTURE_SOURCE",
     selections: chosen.map((s) => defs[s]),
     readiness: options.readiness === undefined ? labelReady : options.readiness,
-    repositories: [{ repositoryId: "R1", path, ref: "main" }],
   });
   for (const s of chosen)
     domain().execute({

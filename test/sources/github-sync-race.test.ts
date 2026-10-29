@@ -103,7 +103,6 @@ test("a selection response from the previous configuration cannot commit after s
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -128,7 +127,6 @@ test("a selection response from the previous configuration cannot commit after s
         mode: "any",
         conditions: [{ kind: "label", name: "different" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -209,7 +207,6 @@ test("a native blocker response from the previous configuration cannot clear the
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -237,7 +234,6 @@ test("a native blocker response from the previous configuration cannot clear the
         mode: "any",
         conditions: [{ kind: "label", name: "different" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -319,7 +315,6 @@ test("a retained status response cannot release a local dependent after credenti
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -367,7 +362,6 @@ test("a retained status response cannot release a local dependent after credenti
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     release();
     await refresh;

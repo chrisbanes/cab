@@ -112,7 +112,6 @@ test("service and advanced HTML source status use only the configured fake gh ex
         keep: true,
       })),
       readiness: ruleOf(source.readiness),
-      repositories: source.repositories,
     },
   );
   assert.equal(configure.status, 200);
@@ -152,7 +151,6 @@ test("preview reports each unusable GitHub CLI credential with actionable safe g
           keep: true,
         })),
         readiness: ruleOf(source.readiness),
-        repositories: source.repositories,
       });
       assert.equal(configured.status, 200);
       const current = (await w.config()).source;
@@ -267,7 +265,6 @@ test("preview-source activates after a complete read and reports the live state"
     expectedVersion: (await w.config(noCredential)).source.version,
     selections: [{ id: "S-1", kind: "search", query: "q" }],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   assert.equal(configured.status, 200);
   const unconfigured = await w.cli("rw", [
@@ -295,7 +292,6 @@ test("preview-source activates after a complete read and reports the live state"
     credentialRef: "gh:github.com",
     selections: [{ id: "S-1", keep: true }],
     readiness: ruleOf(noCredentialSource.readiness),
-    repositories: [],
   });
   assert.equal(ghConfigured.status, 200);
   const ghVersion = (await w.config(noCredential)).source.version;
@@ -340,7 +336,6 @@ test("preview-source activates after a complete read and reports the live state"
     expectedVersion: version,
     selections: ["S-1", "S-2", "S-3"].map((id) => ({ id, keep: true })),
     readiness: ruleOf((await w.config()).source.readiness),
-    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   assert.equal(saved.status, 200);
   const replay = await w.ok("rw", preview("S-1"));
@@ -371,7 +366,6 @@ test("preview-source activates after a complete read and reports the live state"
       keep: true,
     })),
     readiness: ruleOf(current.source.readiness),
-    repositories: current.source.repositories,
   });
   assert.equal(clear.status, 200);
   const beforeReplayReads = w.reader.reads;
@@ -606,7 +600,6 @@ test("a setup-recorded GitHub CLI source credential reads back the same in JSON,
     credentialRef: null,
     selections: [],
     readiness: ruleOf(defaulted.source.readiness),
-    repositories: [],
   });
   assert.equal(cleared.status, 200);
   const after = await readBack();

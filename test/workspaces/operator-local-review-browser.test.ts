@@ -78,7 +78,23 @@ async function startReview(
   );
   // Production binds repositories only from the project's linked repositories.
   const domain = fixture.service.domain();
-  await domain.configureGitHub({
+  await domain.configureRepositories({
+    type: "repositories.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: task.projectId,
+    expectedVersion: domain.repositoryLinks(task.projectId).version,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "repo-alpha",
+        path: source,
+        ref: "main",
+      },
+    ],
+  });
+  domain.execute({
     type: "github.configure",
     actor: "operator",
     key: randomUUID(),
@@ -94,7 +110,6 @@ async function startReview(
         name: "repo",
       },
     ],
-    repositories: [{ repositoryId: "repo-alpha", path: source, ref: "main" }],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   });
   const binding = await fixture.service.taskWorkspace(task.taskId);

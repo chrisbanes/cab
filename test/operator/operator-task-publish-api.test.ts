@@ -241,16 +241,20 @@ test("a valid configuration at its maximum size never breaks the task read", asy
     filter: "",
   }));
   const repositories = Array.from({ length: 20 }, (_, i) => ({
+    codeHost: "github",
+    host: "github.com",
     repositoryId: `R${i}`,
     path: `/checkouts/r${i}`,
     ref: "main",
     gitCommonDirectory: `/checkouts/r${i}/.git`,
   }));
-  databaseOf(f.service)
-    .prepare(
-      "UPDATE project_github_sources SET selections=?, repositories=? WHERE projectId=?",
-    )
-    .run(JSON.stringify(selections), JSON.stringify(repositories), f.projectId);
+  const db = databaseOf(f.service);
+  db.prepare(
+    "UPDATE project_github_sources SET selections=? WHERE projectId=?",
+  ).run(JSON.stringify(selections), f.projectId);
+  db.prepare(
+    "UPDATE project_repository_links SET links=? WHERE projectId=?",
+  ).run(JSON.stringify(repositories), f.projectId);
   const read = (await api.readTask(taskId)).data.publication;
   assert.equal(read?.targets.length, 600);
 });

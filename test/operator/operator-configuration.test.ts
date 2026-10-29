@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,6 +8,7 @@ import { type TestContext, test } from "node:test";
 import { promisify } from "node:util";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import { githubConfigurationCommandSchema } from "../../src/core/github-source-contracts.js";
+import { repositoriesConfigurationCommandSchema } from "../../src/core/repository-links.js";
 import { readinessRuleViewSchema } from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
@@ -108,7 +109,6 @@ test("the project read shows no readiness rule, a rule, and no rule again after 
       expectedVersion,
       selections: [],
       readiness,
-      repositories: [],
     } as never);
   await configure(rule);
   assert.deepEqual(await read(), { kind: "rule", ...rule });
@@ -185,7 +185,6 @@ test("GitHub omitted reference is preserved at apply and its original receipt re
     type: "github.configure" as const,
     projectId,
     selections: [],
-    repositories: [],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   };
   await api.execute({
@@ -217,16 +216,24 @@ test("GitHub omitted reference is preserved at apply and its original receipt re
   assert.equal(f.service.domain().githubConfiguration(projectId).version, 4);
   await assert.rejects(
     reopened.execute({
-      ...base,
+      type: "repositories.configure",
       key: randomUUID(),
-      expectedVersion: 4,
+      projectId,
+      expectedVersion: 1,
       repositories: [
-        { repositoryId: "repo", path: "relative-private-path", ref: "main" },
+        {
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: "repo",
+          path: "relative-private-path",
+          ref: "main",
+        },
       ],
     }),
     { status: 400, code: "invalid-input", fieldPaths: ["repositories"] },
   );
   assert.equal(f.service.domain().githubConfiguration(projectId).version, 4);
+  assert.equal(f.service.domain().repositoryLinks(projectId).version, 1);
 });
 
 test("preview original activation receipt replays without provider access after configuration changes", async (t) => {
@@ -265,7 +272,6 @@ test("preview original activation receipt replays without provider access after 
     selections: [
       { id: "search", kind: "search", query: "repo:example/private" },
     ],
-    repositories: [],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
     credentialRef: "env:FIXTURE_PREVIEW",
   };
@@ -329,7 +335,6 @@ async function previewFixture(
     selections: [
       { id: "search", kind: "search", query: "repo:example/private" },
     ],
-    repositories: [],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
     credentialRef: "env:FIXTURE_PREVIEW",
     key: randomUUID(),
@@ -765,7 +770,6 @@ test("delivery and source credential reference, key and value are excluded from 
       expectedVersion: 1,
       credentialRef: null,
       selections: [],
-      repositories: [],
       readiness: {
         mode: "all",
         conditions: [{ kind: "label", name: privateText }],
@@ -1033,11 +1037,29 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
     credentialRef: "env:FIXTURE_REF",
     selections: [s1, s2],
     readiness,
+  });
+  const linked = await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
     repositories: [
-      { repositoryId: "repo-1", path: repositoryPath, ref: "HEAD" },
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "repo-1",
+        path: repositoryPath,
+        ref: "HEAD",
+      },
     ],
   });
-  const savedPath = d.githubConfiguration(projectId).repositories[0]?.path;
+  assert.deepEqual(linked.kind === "configuration" && linked.result, {
+    commandType: "repositories.configure",
+    resourceId: projectId,
+    version: 2,
+    repositoryCount: 1,
+  });
+  const savedPath = d.repositoryLinks(projectId).links[0]?.path;
   assert.equal(savedPath, await realpath(repositoryPath));
   const version = d.githubConfiguration(projectId).version;
   for (const selectionId of ["S-1", "S-2"])
@@ -1059,7 +1081,6 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
       { id: "S-4", kind: "search", query: "PRIVATE NEW" },
     ],
     readiness,
-    repositories: [{ repositoryId: "repo-1", ref: "HEAD" }],
   };
   const receipt = await api.execute(edit);
   const saved = d.githubConfiguration(projectId);
@@ -1067,7 +1088,9 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
     s1,
     { id: "S-4", kind: "search", query: "PRIVATE NEW" },
   ]);
-  assert.equal(saved.repositories[0]?.path, savedPath);
+  // Saving the source leaves the repository links and their version alone.
+  assert.equal(d.repositoryLinks(projectId).links[0]?.path, savedPath);
+  assert.equal(d.repositoryLinks(projectId).version, 2);
   assert.equal(saved.credentialRef, "env:FIXTURE_REF");
   const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
   t.after(() => db.close());
@@ -1104,6 +1127,12 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
     expectedVersion: saved.version,
     selections: [{ id: "S-1", keep: true }],
     readiness,
+  });
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
     repositories: [],
   });
   await f.service.stop();
@@ -1122,17 +1151,24 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
       key: randomUUID(),
       expectedVersion: current.version,
       selections: [{ id: "S-9", keep: true }],
-      repositories: [],
     }),
     { status: 409 },
   );
+  const links = f.service.domain().repositoryLinks(projectId);
   const failure = await reopened
     .execute({
-      ...edit,
+      type: "repositories.configure",
       key: randomUUID(),
-      expectedVersion: current.version,
-      selections: [{ id: "S-1", keep: true }],
-      repositories: [{ repositoryId: "repo-1", ref: "HEAD" }],
+      projectId,
+      expectedVersion: links.version,
+      repositories: [
+        {
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: "repo-1",
+          ref: "HEAD",
+        },
+      ],
     })
     .then(
       () => assert.fail("expected rejection"),
@@ -1147,8 +1183,8 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
     false,
   );
   assert.equal(
-    f.service.domain().githubConfiguration(projectId).version,
-    current.version,
+    f.service.domain().repositoryLinks(projectId).version,
+    links.version,
   );
   // A failing new link followed by an unsaved pathless link rejects as one 400; the
   // earlier verification's rejection is handled, so the service keeps running.
@@ -1158,13 +1194,24 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
   try {
     await assert.rejects(
       reopened.execute({
-        ...edit,
+        type: "repositories.configure",
         key: randomUUID(),
-        expectedVersion: current.version,
-        selections: [{ id: "S-1", keep: true }],
+        projectId,
+        expectedVersion: links.version,
         repositories: [
-          { repositoryId: "new", path: "relative-path", ref: "main" },
-          { repositoryId: "unsaved", ref: "main" },
+          {
+            codeHost: "github",
+            host: "github.com",
+            repositoryId: "new",
+            path: "relative-path",
+            ref: "main",
+          },
+          {
+            codeHost: "github",
+            host: "github.com",
+            repositoryId: "unsaved",
+            ref: "main",
+          },
         ],
       }),
       { status: 400 },
@@ -1175,16 +1222,105 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
   }
   assert.deepEqual(unhandled, []);
   assert.equal(
+    f.service.domain().repositoryLinks(projectId).version,
+    links.version,
+  );
+  // A github.configure that carries links is refused and records nothing.
+  await assert.rejects(
+    reopened.execute({
+      ...edit,
+      key: randomUUID(),
+      expectedVersion: current.version,
+      selections: [{ id: "S-1", keep: true }],
+      repositories: [{ repositoryId: "repo-1", ref: "HEAD" }],
+    }),
+    (error: unknown) =>
+      (error as OperatorApiError).status === 400 &&
+      (error as OperatorApiError).fieldPaths?.[0] === "repositories",
+  );
+  assert.equal(
     f.service.domain().githubConfiguration(projectId).version,
     current.version,
   );
+});
+
+test("a github.configure command recorded with links replays its receipt through the operator API", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const projectId = randomUUID();
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Replay",
+    leadProfileId: null,
+  });
+  // The command and result as recorded before repository links moved to the project.
+  const key = randomUUID();
+  const command = {
+    type: "github.configure" as const,
+    actor: "operator" as const,
+    key,
+    projectId,
+    expectedVersion: 1,
+    credentialRef: null,
+    selections: [],
+    readiness: null,
+    repositories: [{ repositoryId: "repo-1", path: "/old/path", ref: "main" }],
+  };
+  const canonical = (value: unknown): string =>
+    Array.isArray(value)
+      ? `[${value.map(canonical).join(",")}]`
+      : value && typeof value === "object"
+        ? `{${Object.entries(value)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
+            .join(",")}}`
+        : JSON.stringify(value);
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  t.after(() => db.close());
+  db.prepare(
+    "INSERT INTO command_receipts (scope, key, payloadHash, result) VALUES (?, ?, ?, ?)",
+  ).run(
+    projectId,
+    key,
+    createHash("sha256").update(canonical(command)).digest("hex"),
+    JSON.stringify({
+      version: 2,
+      credentialRef: null,
+      selections: [],
+      readiness: null,
+      closedIssues: "skip",
+      repositories: [
+        {
+          repositoryId: "repo-1",
+          path: "/old/path",
+          ref: "main",
+          gitCommonDirectory: "/old/path/.git",
+        },
+      ],
+    }),
+  );
+  const { actor: _actor, ...input } = command;
+  const receipt = await api.execute(input as never);
+  assert.deepEqual(receipt.kind === "configuration" && receipt.result, {
+    commandType: "github.configure",
+    resourceId: projectId,
+    version: 2,
+    credentialConfigured: false,
+    selectionCount: 0,
+    repositoryCount: 1,
+  });
+  // The links were never applied to the project, and the source version did not move.
+  assert.deepEqual(f.service.domain().repositoryLinks(projectId).links, []);
+  assert.equal(f.service.domain().githubConfiguration(projectId).version, 1);
 });
 
 test("GitHub configuration command contract accepts only exact keep markers and unique ids", () => {
   const base = {
     credentialRef: null,
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   };
   const parse = (selections: unknown[]) =>
     githubConfigurationCommandSchema.safeParse({ ...base, selections }).success;
@@ -1216,15 +1352,20 @@ test("GitHub configuration command contract accepts only exact keep markers and 
     ]),
     false,
   );
+  const link = { codeHost: "github", host: "github.com", ref: "main" };
+  const links = (repositories: unknown[]) =>
+    repositoriesConfigurationCommandSchema.safeParse({ repositories }).success;
+  assert.equal(links([{ ...link, repositoryId: "r" }]), true);
   assert.equal(
-    githubConfigurationCommandSchema.safeParse({
-      ...base,
-      selections: [],
-      repositories: [
-        { repositoryId: "r", ref: "main" },
-        { repositoryId: "r", path: "/x", ref: "main" },
-      ],
-    }).success,
+    links([
+      { ...link, repositoryId: "r" },
+      { ...link, repositoryId: "r", path: "/x" },
+    ]),
+    false,
+  );
+  assert.equal(links([{ repositoryId: "r", ref: "main" }]), false);
+  assert.equal(
+    links([{ ...link, host: "gitlab.com", repositoryId: "r" }]),
     false,
   );
 });
@@ -1313,7 +1454,6 @@ setTimeout(() => {
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
   }
   const events = async () =>
@@ -1374,7 +1514,6 @@ setTimeout(() => {
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
   };
   const fenced = await api.readSourceObservations();

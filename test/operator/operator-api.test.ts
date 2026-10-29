@@ -1488,7 +1488,6 @@ test("imported projections validate provider fields and distinguish attempted sy
       },
     ],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   d.execute({
     type: "github.activate",
@@ -1921,7 +1920,6 @@ test("history supplements captured privacy with external auth and GitHub values 
     credentialRef: reference,
     selections: [],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   const a = d.assignments(ids.taskId)[0],
     request = f.service.turnRequests().find((r) => r.assignmentId === a?.id),
@@ -3965,7 +3963,6 @@ test("the status mapping is read with its Project selections and granted options
         },
       ],
     },
-    repositories: [],
   });
   const grant = (options: string[]) =>
     domain.execute({

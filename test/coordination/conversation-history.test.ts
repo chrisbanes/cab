@@ -1096,7 +1096,6 @@ test("history capture and reads exclude every project's source and routing refer
       expectedVersion: 1,
       credentialRef: `env:${keys[index * 2]}`,
       selections: [],
-      repositories: [],
       readiness: {
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],

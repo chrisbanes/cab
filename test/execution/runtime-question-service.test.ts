@@ -698,7 +698,6 @@ for (const dependency of [
             mode: "any",
             conditions: [{ kind: "label", name: "ready" }],
           },
-          repositories: [],
         });
         command(f.service, {
           type: "github.activate",

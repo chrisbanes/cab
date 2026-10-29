@@ -418,7 +418,7 @@ advertise fails with `unsupported-service` before any other read.
 receipt `POST /api/operator/commands` returned, or `not-recorded`. It accepts only
 the scopes `project:<id>`, `profile:<id>`, `system:capacity` and
 `system:runtime:<harness>` (with `runtime.configure`) with the configuration and
-adoption types and, for a project, `github.configure` and
+adoption types and, for a project, `github.configure`, `repositories.configure` and
 `github.preview` (a preview whose selection ID is now excluded text reads
 `503 unavailable`), and `assignment:<id>` with the five recovery types (a key reads
 `recorded` only under its own type and for that assignment's work), rebuilds the receipt from the stored result with
@@ -457,14 +457,16 @@ the same command with its key and checked with `task get`, `question get` or
 applied before paging; a cursor from other parameters is `409`. A `runtime` item is
 derived on each read and carries `harness` and `since` instead of task fields.
 
-Sources and delivery drive the existing operator commands; no route, command or
-receipt is added. `project prepare-source` writes a `github.configure` change
-document from a strict edit file: kept selections are sent as `{id, keep: true}` and
-kept links as `{repositoryId, ref}`, so no private query, filter or path is sent
-again, new selections take the next free `S-n`, and preview lines follow the web UI
-and never show a query, filter, path or reference name. Any save bumps the source
-version, so every selection is inactive until previewed again, and marks
-observations incomplete; removing a selection discards its definition.
+Sources, repository links and delivery drive the operator commands; the CLI adds no
+route of its own. `project prepare-source` writes a `github.configure`
+change document from a strict edit file: kept selections are sent as `{id, keep: true}`,
+so no private query or filter is sent again, new selections take the next free `S-n`,
+and preview lines follow the web UI and never show a query, filter, path or reference
+name. Any save bumps the source version, so every selection is inactive until
+previewed again, and marks observations incomplete; removing a selection discards its
+definition. `project prepare-repositories` writes a `repositories.configure` change
+document the same way: kept links are sent as `{codeHost, host, repositoryId, ref}`
+without their path, and a link change leaves the source version and selections alone.
 `project preview-source` records `github.preview` after a complete provider read;
 its receipt is the original activation, so the CLI also reports the live state.
 `project place-task` records `github.place`; its receipt is not readable through

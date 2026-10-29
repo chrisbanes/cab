@@ -263,7 +263,6 @@ test("ordinary GitHub observation identity survives changed redaction exclusions
       },
     ],
     readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   d.execute({
     type: "github.activate",

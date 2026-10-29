@@ -64,7 +64,6 @@ function configuration(
     credentialRef: "env:TEST_GITHUB",
     selections,
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   };
 }
 
@@ -133,14 +132,14 @@ test("persisted GitHub repository bindings and Project field arrays are validate
   const { db, domain, sources, projectId } = fixture();
   try {
     db.prepare(
-      "UPDATE project_github_sources SET repositories = ? WHERE projectId = ?",
+      "UPDATE project_repository_links SET links = ? WHERE projectId = ?",
     ).run(
       '[{"repositoryId":7,"path":false,"ref":null,"gitCommonDirectory":[]}]',
       projectId,
     );
-    assert.throws(() => domain.githubConfiguration(projectId), /Invalid input/);
+    assert.throws(() => domain.repositoryLinks(projectId), /Invalid input/);
     db.prepare(
-      "UPDATE project_github_sources SET repositories = '[]' WHERE projectId = ?",
+      "UPDATE project_repository_links SET links = '[]' WHERE projectId = ?",
     ).run(projectId);
     domain.execute({
       ...configuration(domain, projectId, [repo]),
@@ -304,10 +303,23 @@ for (const revoke of [false, true])
         await service.start();
         const domain = service.domain();
         const { projectId, profileId } = project(domain);
-        await domain.configureGitHub({
-          ...configuration(domain, projectId, [repo]),
-          repositories: [{ repositoryId: "R_1", path, ref: "main" }],
+        await domain.configureRepositories({
+          type: "repositories.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId,
+          expectedVersion: domain.repositoryLinks(projectId).version,
+          repositories: [
+            {
+              codeHost: "github",
+              host: "github.com",
+              repositoryId: "R_1",
+              path,
+              ref: "main",
+            },
+          ],
         });
+        domain.execute(configuration(domain, projectId, [repo]));
         activate(domain, projectId, repo.id);
         await service.refreshGitHub();
         const taskId = String(
@@ -317,7 +329,14 @@ for (const revoke of [false, true])
           { repositoryId: "R_1", path, ref: "main" },
         ]);
         if (revoke) {
-          domain.execute(configuration(domain, projectId, [repo]));
+          domain.execute({
+            type: "repositories.configure",
+            actor: "operator",
+            key: randomUUID(),
+            projectId,
+            expectedVersion: domain.repositoryLinks(projectId).version,
+            repositories: [],
+          });
           activate(domain, projectId, repo.id);
           await service.refreshGitHub();
         }
@@ -364,7 +383,7 @@ for (const revoke of [false, true])
               ),
           );
         assert.equal(
-          domain.githubConfiguration(projectId).repositories.length,
+          domain.repositoryLinks(projectId).links.length,
           revoke ? 0 : 1,
         );
         // The task read explains the same rejection from the shared predicate.

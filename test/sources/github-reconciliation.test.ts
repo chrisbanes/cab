@@ -85,7 +85,6 @@ test("overlapping complete selections converge on one imported task; partial rea
           },
         ],
       },
-      repositories: [],
     });
     for (const selectionId of ["repo", "search", "project"])
       domain.execute({
@@ -251,7 +250,6 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
             },
           ],
         },
-        repositories: [],
       });
       domain.execute({
         type: "github.activate",
@@ -390,7 +388,6 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -491,7 +488,6 @@ function closedIssueWorld(
         : [],
       readiness,
       closedIssues: mode,
-      repositories: [],
     });
     if (!activate) return;
     domain.execute({
@@ -827,7 +823,6 @@ function readinessFixture(
       query: `repo:org/${id}`,
     })),
     readiness,
-    repositories: [],
   });
   for (const selectionId of selectionIds)
     domain.execute({
@@ -1137,7 +1132,6 @@ test("adding a readiness rule filters again; removing it stops filtering and a c
       credentialRef: "env:TEST_GITHUB",
       selections: [{ id: "repo", keep: true }],
       readiness,
-      repositories: [],
     });
     f.domain.execute({
       type: "github.activate",
@@ -1388,7 +1382,6 @@ test("a complete Project read names its fields for conditions and per-option cou
       { id: "board", kind: "project", projectNodeId: "P_1", filter: "" },
     ],
     readiness: null,
-    repositories: [],
   });
   domain.execute({
     type: "github.activate",
@@ -1541,7 +1534,6 @@ test("after a rule change and before the next read, explanations never disagree 
       credentialRef: "env:TEST_GITHUB",
       selections: [{ id: "repo", keep: true }],
       readiness: { mode: "all", conditions: [{ kind: "label", name: "next" }] },
-      repositories: [],
     });
     // Ready still reflects the old rule: I_1 Ready, I_2 Draft.
     assert.equal(Number(f.domain.task(f.task("I_1")).ready), 1);
@@ -1605,7 +1597,6 @@ test("a same-result rule change reports not-evaluated until the next read", () =
         mode: "all",
         conditions: [{ kind: "label", name: "approved" }],
       },
-      repositories: [],
     });
     // Both tasks keep their Ready flag and would keep it on re-evaluation.
     assert.equal(Number(f.domain.task(f.task("I_1")).ready), 0);
@@ -2127,7 +2118,6 @@ test("a Project selection keeps its item id apart from the readiness facts, and 
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     for (const selectionId of ["repo", "project"])
       domain.execute({

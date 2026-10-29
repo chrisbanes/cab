@@ -11,7 +11,6 @@ import {
   closedIssuesSchema,
   type Readiness,
   readinessSchema,
-  repositoryLinkSchema,
   selectionSchema,
 } from "../core/github-source-contracts.js";
 import {
@@ -95,8 +94,7 @@ const requireWriteScope = (session: Session) => {
 
 /** Saved rows this read cannot name; a CLI edit could not keep them. */
 const unnamed = (source: Source) =>
-  source.selections.some((s) => s.id === null) ||
-  source.repositories.some((r) => r.repositoryId === null || r.ref === null);
+  source.selections.some((s) => s.id === null);
 
 const sourcesCommand: BrowseCommand = {
   usage: "project sources PROJECT_ID",
@@ -232,16 +230,6 @@ const sourcesCommand: BrowseCommand = {
               ),
             ]
           : []),
-        "",
-        source.repositories.length
-          ? table(
-              ["Repository", "Ref"],
-              source.repositories.map((r) => [
-                unavailable(r.repositoryId),
-                unavailable(r.ref),
-              ]),
-            )
-          : "No linked repositories.",
         ...(placements.length
           ? [
               "",
@@ -277,17 +265,18 @@ const editSchema = z
     /** A rule replaces, `null` removes the rule, omitted keeps the saved one. */
     readiness: readinessSchema.nullable().optional(),
     closedIssues: closedIssuesSchema.optional(),
-    linkRepositories: z.array(repositoryLinkSchema).max(20).optional(),
-    unlinkRepositories: z.array(z.string().min(1).max(512)).max(20).optional(),
-    setRefs: z.record(z.string(), z.string().trim().min(1).max(512)).optional(),
     credentialRef: sourceCredentialReference.nullable().optional(),
-    confirmUnlinkAll: z.literal(true).optional(),
   })
   .strict();
 export type SourceEdit = z.infer<typeof editSchema>;
 
 /** Reads the edit file: owner's regular file, no symlink, at most 64 KiB of strict JSON. */
-async function readEdit(path: string | undefined): Promise<SourceEdit> {
+export async function readEditFile<T>(
+  path: string | undefined,
+  schema: z.ZodType<T>,
+  what: string,
+  rejectKeys: { keys: string[]; why: string; fix: string } | null = null,
+): Promise<T> {
   if (!path) throw new CliError("usage", "--edit-file FILE is required.");
   const invalid = (why: string, fix?: string) =>
     new CliError("invalid-input", `--edit-file ${why}.`, {
@@ -329,13 +318,34 @@ async function readEdit(path: string | undefined): Promise<SourceEdit> {
   } catch {
     throw invalid("is not JSON", "Write the edit as one JSON object.");
   }
-  const parsed = editSchema.safeParse(value);
+  if (
+    rejectKeys &&
+    typeof value === "object" &&
+    value !== null &&
+    rejectKeys.keys.some((key) => key in value)
+  )
+    throw invalid(rejectKeys.why, rejectKeys.fix);
+  const parsed = schema.safeParse(value);
   if (!parsed.success)
     throw invalid(
-      `is not a valid source edit: ${[...new Set(parsed.error.issues.map((i) => i.path.join(".") || i.message))].join(", ")}`,
+      `is not a valid ${what} edit: ${[...new Set(parsed.error.issues.map((i) => i.path.join(".") || i.message))].join(", ")}`,
     );
   return parsed.data;
 }
+
+/** The source edit keys that moved to the project's repository links. */
+const repositoryEditKeys = [
+  "linkRepositories",
+  "unlinkRepositories",
+  "setRefs",
+  "confirmUnlinkAll",
+];
+const readEdit = (path: string | undefined) =>
+  readEditFile(path, editSchema, "source", {
+    keys: repositoryEditKeys,
+    why: "carries repository link keys; repository links are project configuration, so edit them with 'cab project prepare-repositories PROJECT_ID --edit-file FILE'",
+    fix: "Edit repository links with 'cab project prepare-repositories PROJECT_ID --edit-file FILE'.",
+  });
 
 const duplicates = (values: string[]) =>
   values.filter((v, i) => values.indexOf(v) !== i);
@@ -350,7 +360,7 @@ export function sourceEditCommand(
   if (unnamed(source))
     throw new CliError(
       "conflict",
-      "A saved selection or repository link cannot be named in this read, so the CLI cannot keep it. Nothing was prepared.",
+      "A saved selection cannot be named in this read, so the CLI cannot keep it. Nothing was prepared.",
       {
         fix: `Review the saved source with 'cab project sources ${projectId}'.`,
       },
@@ -366,31 +376,13 @@ export function sourceEditCommand(
     );
   const saved = source.selections.map((s) => ({ ...s, id: String(s.id) }));
   const remove = edit.removeSelections ?? [];
-  const unlink = edit.unlinkRepositories ?? [];
-  const links = edit.linkRepositories ?? [];
-  const refs = edit.setRefs ?? {};
-  const linked = source.repositories.map((r) => String(r.repositoryId));
-  for (const [what, list] of [
-    ["removeSelections", remove],
-    ["unlinkRepositories", unlink],
-    ["linkRepositories", links.map((l) => l.repositoryId)],
-  ] as const)
-    if (duplicates(list).length)
-      throw bad(`${what} lists ${duplicates(list).join(", ")} more than once.`);
+  if (duplicates(remove).length)
+    throw bad(
+      `removeSelections lists ${duplicates(remove).join(", ")} more than once.`,
+    );
   for (const id of remove)
     if (!saved.some((s) => s.id === id))
       throw bad(`removeSelections: ${id} is not a saved selection.`);
-  for (const id of unlink)
-    if (!linked.includes(id))
-      throw bad(`unlinkRepositories: ${id} is not linked.`);
-  for (const { repositoryId } of links)
-    if (linked.includes(repositoryId))
-      throw bad(
-        `linkRepositories: ${repositoryId} is already linked; use setRefs to change its ref.`,
-      );
-  for (const id of Object.keys(refs))
-    if (!linked.includes(id) || unlink.includes(id))
-      throw bad(`setRefs: ${id} is not a kept linked repository.`);
 
   let next = Math.max(
     0,
@@ -411,27 +403,6 @@ export function sourceEditCommand(
       );
     return parsed.data;
   });
-  const repositories = [
-    ...source.repositories
-      .filter((r) => !unlink.includes(String(r.repositoryId)))
-      .map((r) => ({
-        repositoryId: String(r.repositoryId),
-        ref: refs[String(r.repositoryId)] ?? String(r.ref),
-      })),
-    ...links.map((l) => ({
-      repositoryId: l.repositoryId,
-      path: l.path,
-      ref: l.ref,
-    })),
-  ];
-  if (
-    source.repositories.length > 0 &&
-    repositories.length === 0 &&
-    !edit.confirmUnlinkAll
-  )
-    throw bad(
-      'This edit removes every repository link, so no task can be checked out. Add "confirmUnlinkAll": true to confirm.',
-    );
   const savedRule = readinessCommandValue(source.readiness);
   const readiness = edit.readiness !== undefined ? edit.readiness : savedRule;
   const command: Record<string, unknown> = {
@@ -446,7 +417,6 @@ export function sourceEditCommand(
     ],
     readiness,
     closedIssues: edit.closedIssues ?? source.closedIssues,
-    repositories,
     ...(edit.credentialRef === undefined
       ? {}
       : { credentialRef: edit.credentialRef }),
@@ -478,14 +448,6 @@ export function sourceEditCommand(
     diff.push(
       `Closed issues: ${closedIssueLabels[edit.closedIssues ?? "skip"]}`,
     );
-  for (const id of unlink) diff.push(`− Repository access: ${id}`);
-  for (const l of links)
-    diff.push(`+ Repository access: ${l.repositoryId} · ${l.ref}`);
-  for (const r of source.repositories) {
-    const ref = refs[String(r.repositoryId)];
-    if (ref !== undefined && ref !== r.ref)
-      diff.push(`Ref for ${r.repositoryId}: ${r.ref} → ${ref}`);
-  }
   if (edit.credentialRef !== undefined)
     diff.push(
       edit.credentialRef === null
@@ -515,17 +477,6 @@ export function sourceEditCommand(
       from: source.closedIssues,
       to: edit.closedIssues ?? source.closedIssues,
     });
-  if (unlink.length || links.length)
-    changes.push({
-      field: "repositories",
-      from: linked.join(",") || "none",
-      to: repositories.map((r) => r.repositoryId).join(",") || "none",
-    });
-  for (const r of source.repositories) {
-    const ref = refs[String(r.repositoryId)];
-    if (ref !== undefined && ref !== r.ref)
-      changes.push({ field: `ref ${r.repositoryId}`, from: r.ref, to: ref });
-  }
   if (edit.credentialRef !== undefined)
     changes.push({
       field: "credentialRef",
@@ -538,11 +489,6 @@ export function sourceEditCommand(
     ...(remove.length
       ? [
           "Removing a selection discards its saved definition (query, filter or repository); the CLI cannot restore it, and re-adding needs the original text.",
-        ]
-      : []),
-    ...(unlink.length
-      ? [
-          "Unlinking discards the saved local path; linking again needs the path.",
         ]
       : []),
   ];

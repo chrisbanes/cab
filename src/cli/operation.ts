@@ -63,7 +63,10 @@ export const operationCommands = new Map<string, WriteCommand>([
         const session = await ctx.connect([
           "cli.identity",
           "operation.read",
-          ...(type.data.startsWith("github.") ? ["source.write"] : []),
+          ...(type.data.startsWith("github.") ||
+          type.data === "repositories.configure"
+            ? ["source.write"]
+            : []),
           ...(type.data.startsWith("recovery.") ? ["recovery.read"] : []),
         ]);
         const request = {

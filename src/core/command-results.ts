@@ -4,6 +4,7 @@ import type { DomainCommand } from "./domain.js";
 import { executionHarnessSchema } from "./execution-runtime.js";
 import { linkedRepositorySchema } from "./github-source.js";
 import { githubConfigurationSchema } from "./github-source-contracts.js";
+import { repositoriesConfigurationCommandResultSchema } from "./repository-links.js";
 import { statusMappingSchema } from "./status-mapping-contracts.js";
 
 const id = z.string().uuid();
@@ -129,25 +130,25 @@ export const statusMappingCommandResultSchema = z
   .strict();
 
 export const githubConfigurationCommandResultSchema = githubConfigurationSchema
-  .extend({
-    version: positiveInteger,
-    repositories: z
-      .array(linkedRepositorySchema)
-      .max(20)
-      .refine(
-        (values) =>
-          new Set(values.map((value) => value.repositoryId)).size ===
-          values.length,
-        "Repository IDs must be unique",
-      ),
-  })
+  .extend({ version: positiveInteger })
   .strict();
-// Receipts recorded before the closed-issue mode omit it.
+// Receipts recorded before the closed-issue mode omit it, and those recorded before
+// repository links moved to the project carry the links.
 const legacyGithubConfigurationCommandResultSchema =
   githubConfigurationCommandResultSchema
     .extend({
       closedIssues:
         githubConfigurationCommandResultSchema.shape.closedIssues.optional(),
+      repositories: z
+        .array(linkedRepositorySchema)
+        .max(20)
+        .refine(
+          (values) =>
+            new Set(values.map((value) => value.repositoryId)).size ===
+            values.length,
+          "Repository IDs must be unique",
+        )
+        .optional(),
     })
     .strict();
 
@@ -202,6 +203,9 @@ export interface DomainCommandResultMap {
   "profile.create": z.output<typeof legacyProfileCommandResultSchema>;
   "profile.configure": z.output<typeof legacyProfileCommandResultSchema>;
   "routing.configure": z.output<typeof routingCommandResultSchema>;
+  "repositories.configure": z.output<
+    typeof repositoriesConfigurationCommandResultSchema
+  >;
   "github.configure": z.output<
     typeof legacyGithubConfigurationCommandResultSchema
   >;
@@ -336,10 +340,18 @@ function parseCommandOutcome(
         type,
         result: parseUnchanged(routingCommandResultSchema, value),
       };
-    case "github.configure":
+    case "repositories.configure":
       return {
         type,
         result: parseUnchanged(
+          repositoriesConfigurationCommandResultSchema,
+          value,
+        ),
+      };
+    case "github.configure":
+      return {
+        type,
+        result: parseUnchanged<DomainCommandResultMap["github.configure"]>(
           fresh
             ? githubConfigurationCommandResultSchema
             : legacyGithubConfigurationCommandResultSchema,

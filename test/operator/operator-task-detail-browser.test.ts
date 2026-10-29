@@ -1493,7 +1493,7 @@ test("Task detail explains a held assignment, revoked repository access and unre
       .nth(0)
       .getByRole("link", { name: "Fix: Open repositories" })
       .getAttribute("href"),
-    `/app/projects/${projectId}/settings?tab=github`,
+    `/app/projects/${projectId}/settings?tab=repositories`,
   );
   const recovery = list.nth(2);
   assert.equal(

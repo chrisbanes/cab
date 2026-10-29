@@ -241,7 +241,7 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
     title: "Path draft",
     outcome: `Look in ${grantPath}`,
   });
-  await domain.configureGitHub({
+  await domain.execute({
     type: "github.configure",
     actor: "operator",
     key: randomUUID(),
@@ -257,7 +257,6 @@ test("drafting commands are receipted, readable, stoppable and settle without cr
         name: "atlas",
       },
     ],
-    repositories: [],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
   });
   f.runtime.complete(4);

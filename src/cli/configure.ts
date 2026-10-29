@@ -54,6 +54,7 @@ const AREA: Record<ChangeKind, string> = {
   "routing.configure": "project",
   "capacity.configure": "capacity",
   "github.configure": "project",
+  "repositories.configure": "project",
 };
 /**
  * Per change kind, the command that prepares it and the one that reads its target.
@@ -90,6 +91,10 @@ export const CHANGE_COMMANDS: Record<
   "github.configure": {
     prepare: "cab project prepare-source",
     read: (id) => `cab project sources ${id}`,
+  },
+  "repositories.configure": {
+    prepare: "cab project prepare-repositories",
+    read: (id) => `cab project get ${id}`,
   },
 };
 export const isCreation = (kind: ChangeKind) => kind.endsWith(".create");
@@ -450,6 +455,11 @@ function effectNote(document: ChangeDocument): string[] {
       "Source configuration saved; nothing was imported, dispatched or started.",
       "Every selection is now inactive until previewed again at the new version with 'cab project preview-source'; observations are incomplete until the next sync refresh.",
     ];
+  if (c.type === "repositories.configure")
+    return [
+      "Repository links saved; nothing was dispatched, started, stopped or cancelled.",
+      "Workspaces, delivery and setup read the saved links from now on; the GitHub source is unchanged.",
+    ];
   return [
     "Configuration saved; nothing was dispatched, started, stopped or cancelled.",
     ...(c.type === "profile.configure" ||
@@ -548,7 +558,10 @@ export async function applyFile(
     "cli.identity",
     "configuration.write",
     ...(creation ? ["workspace.read"] : []),
-    ...(document.kind === "github.configure" ? ["source.write"] : []),
+    ...(document.kind === "github.configure" ||
+    document.kind === "repositories.configure"
+      ? ["source.write"]
+      : []),
   ]);
   if (
     session.identity.service.installationId !== document.service.installationId

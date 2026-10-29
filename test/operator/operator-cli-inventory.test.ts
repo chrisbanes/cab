@@ -52,6 +52,7 @@ const documentedWrites = [
   "project prepare",
   "project prepare-create",
   "project prepare-routing",
+  "project prepare-repositories",
   "project apply",
   "capacity prepare",
   "capacity apply",

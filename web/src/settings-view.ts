@@ -35,6 +35,7 @@ export interface SettingsHeader {
 export const projectTabs = [
   { id: "general", label: "General" },
   { id: "routing", label: "Routing" },
+  { id: "repositories", label: "Repositories" },
   { id: "github", label: "GitHub source" },
   { id: "sync", label: "Sync & placement" },
 ] as const;
@@ -263,8 +264,8 @@ export function routingLine(r: ProjectConfigurationData["routing"]) {
 }
 
 export function repositoryLines(c: ProjectConfigurationData) {
-  return c.source.repositories.length
-    ? c.source.repositories.map(
+  return c.repositories.links.length
+    ? c.repositories.links.map(
         (r) =>
           `${r.repositoryId ?? "Repository unavailable"} · ${r.ref ?? "ref unavailable"} · checkout configured`,
       )
@@ -300,8 +301,8 @@ export function projectStateSummary(
   const lead =
     c.profiles.find((p) => p.id === c.project.leadProfileId)?.name ??
     "Unconfigured";
-  const access = c.source.repositories.length
-    ? c.source.repositories
+  const access = c.repositories.links.length
+    ? c.repositories.links
         .map((r) => r.repositoryId ?? "unavailable")
         .join(", ")
     : "none";

@@ -282,7 +282,23 @@ export async function runTaskPublicationJourney(
     };
     const labelCondition = { kind: "label" as const, name: label };
     const configure = async (readiness: Readiness) => {
-      await domain.configureGitHub({
+      await domain.configureRepositories({
+        type: "repositories.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: domain.repositoryLinks(projectId).version,
+        repositories: [
+          {
+            codeHost: "github",
+            host: "github.com",
+            repositoryId,
+            path: checkoutPath,
+            ref: "main",
+          },
+        ],
+      });
+      domain.execute({
         type: "github.configure",
         actor: "operator",
         key: randomUUID(),
@@ -291,7 +307,6 @@ export async function runTaskPublicationJourney(
         credentialRef: `env:${credentialName}`,
         selections,
         readiness,
-        repositories: [{ repositoryId, path: checkoutPath, ref: "main" }],
       });
       for (const selection of selections)
         domain.execute({

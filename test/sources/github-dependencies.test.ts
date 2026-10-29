@@ -92,7 +92,6 @@ test("initial and later incomplete native blocker reads hold imported admission"
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -138,7 +137,6 @@ test("initial and later incomplete native blocker reads hold imported admission"
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     assert.ok(domain.admission(taskId).reasons.includes("source-unknown"));
     assert.ok(Number(domain.task(taskId).version) > beforeReconfigureVersion);
@@ -430,7 +428,6 @@ test("synchronization reads native blockers only for issues whose task admission
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",

@@ -15,7 +15,8 @@ import {
   readinessSchema,
   selectionSchema,
 } from "./github-source-contracts.js";
-import { GitHubSourceStore, linkedRepositorySchema } from "./github-source.js";
+import { GitHubSourceStore } from "./github-source.js";
+import { storedRepositoryLinkSchema } from "./repository-links.js";
 import { transaction, type Database } from "./store.js";
 import {
   type PublicationReasonCode,
@@ -176,7 +177,7 @@ export class TaskPublicationStore {
     const projectId = String(task.projectId),
       source = this.db
         .prepare(
-          "SELECT selections,readiness,repositories FROM project_github_sources WHERE projectId=?",
+          "SELECT selections,readiness FROM project_github_sources WHERE projectId=?",
         )
         .get(projectId) as Row | undefined,
       selections = source
@@ -185,11 +186,17 @@ export class TaskPublicationStore {
       readiness = source
         ? readinessSchema.nullable().parse(JSON.parse(String(source.readiness)))
         : null,
-      linked = source
-        ? z
-            .array(linkedRepositorySchema)
-            .parse(JSON.parse(String(source.repositories)))
-        : [],
+      linked = (
+        this.db
+          .prepare(
+            "SELECT links FROM project_repository_links WHERE projectId=?",
+          )
+          .all(projectId) as Row[]
+      ).flatMap((row) =>
+        z
+          .array(storedRepositoryLinkSchema)
+          .parse(JSON.parse(String(row.links))),
+      ),
       policy = new DeliveryStore(this.db).configuration(projectId),
       ready = Number(task.ready) === 1;
     const sending = this.db

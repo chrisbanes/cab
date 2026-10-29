@@ -520,11 +520,13 @@ test("task titles stay readable with about 40 projects and repeated profile edit
     f.seedPersistedState((db) =>
       db
         .prepare(
-          "UPDATE project_github_sources SET version=version+1, repositories=? WHERE projectId=?",
+          "UPDATE project_repository_links SET version=version+1, links=? WHERE projectId=?",
         )
         .run(
           JSON.stringify([
             {
+              codeHost: "github",
+              host: "github.com",
               repositoryId: `R-${n}`,
               path: `/fixture/linked-${n}`,
               ref: "main",

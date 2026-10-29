@@ -103,6 +103,20 @@ export function commandReceipt(
             version: outcome.result.version,
             credentialConfigured: outcome.result.credentialRef !== null,
             selectionCount: outcome.result.selections.length,
+            ...(outcome.result.repositories === undefined
+              ? {}
+              : { repositoryCount: outcome.result.repositories.length }),
+          },
+        };
+      case "repositories.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId,
+            version: outcome.result.version,
             repositoryCount: outcome.result.repositories.length,
           },
         };

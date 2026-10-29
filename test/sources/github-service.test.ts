@@ -126,7 +126,6 @@ test("startup invalidates prior clear source/dependency evidence before the firs
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -312,7 +311,6 @@ test("a runnable imported assignment starts on complete evidence, then a failed 
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -543,7 +541,6 @@ test("a held canonical lead receives one source-hold notice without changing ass
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -722,7 +719,6 @@ test("an unassigned routing-enabled source hold does not invent a lead assignmen
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -919,7 +915,6 @@ test("explicit and timer refresh converge, and stop settles an in-flight read be
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
     domain.execute({
       type: "github.activate",
@@ -1006,7 +1001,6 @@ function addGitHubProject(
     credentialRef: "env:TEST_GITHUB",
     selections: [selection],
     readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   execute({
     type: "github.activate",
@@ -1598,7 +1592,6 @@ async function closedIssueService(closedIssues: "skip" | "done") {
     ],
     readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
     closedIssues,
-    repositories: [],
   });
   domain.execute({
     type: "github.activate",
@@ -1865,7 +1858,19 @@ async function importedWorkspaceService(options: {
   const link = async (
     repositories: { repositoryId: string; path: string; ref: string }[],
   ) => {
-    await domain.configureGitHub({
+    await domain.configureRepositories({
+      type: "repositories.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: domain.repositoryLinks(projectId).version,
+      repositories: repositories.map((r) => ({
+        codeHost: "github",
+        host: "github.com",
+        ...r,
+      })),
+    });
+    domain.execute({
       type: "github.configure",
       actor: "operator",
       key: randomUUID(),
@@ -1892,7 +1897,6 @@ async function importedWorkspaceService(options: {
         mode: "any",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories,
     });
     for (const selectionId of ["repo", "other"])
       domain.execute({

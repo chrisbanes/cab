@@ -57,7 +57,6 @@ async function saveElsewhere(s: Started, extra: object[] = []) {
       ...extra,
     ],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   } as never);
 }
 
@@ -142,16 +141,15 @@ const row = (page: Page, text: string | RegExp) =>
 
 // ---- T2: the GitHub source tab ------------------------------------------------------------
 
-test("GitHub source sections read 1, 2, 3 in DOM order", async (_t, journey) => {
+test("GitHub source sections read 1, 2 in DOM order", async (_t, journey) => {
   const { page } = await start(journey);
   await page.getByRole("heading", { name: "1 · Discovery sources" }).waitFor();
   const titles = await page
     .locator("form h2")
     .evaluateAll((es) => es.map((e) => e.textContent));
-  assert.deepEqual(titles.slice(0, 4), [
+  assert.deepEqual(titles.slice(0, 3), [
     "1 · Discovery sources",
     "2 · Readiness matching",
-    "3 · Repository access",
     "GitHub source credential",
   ]);
   // Reading order is source order: nothing is moved by CSS `order`.
@@ -182,7 +180,7 @@ test("GitHub source sections read 1, 2, 3 in DOM order", async (_t, journey) => 
     );
   }
   const second = visited.indexOf("2 · Readiness matching"),
-    third = visited.indexOf("3 · Repository access");
+    third = visited.indexOf("GitHub source credential");
   assert.ok(second >= 0 && third > second, `tab order ${visited.join("|")}`);
 });
 

@@ -141,7 +141,7 @@ test("Setup creates a paused project from discovered repositories and Projects",
   assert.equal(project.instructions, "PRIVATE SETUP SENTINEL");
   const github = d.githubConfiguration(body.projectId);
   assert.deepEqual(
-    github.repositories.map((r) => r.path),
+    d.repositoryLinks(body.projectId).links.map((r) => r.path),
     [await realpath(join(home.home, "src", "atlas"))],
   );
   assert.deepEqual(
@@ -399,8 +399,7 @@ test("Setup falls back to typed entry without discovery and on first run", async
   assert.equal(body.repositories[0]?.repositoryId, "github.com/acme/atlas");
   await savedOutcome(page, /^Created Atlas\. It's paused\./);
   assert.equal(
-    f.service.domain().githubConfiguration(body.projectId).repositories[0]
-      ?.repositoryId,
+    f.service.domain().repositoryLinks(body.projectId).links[0]?.repositoryId,
     "github.com/acme/atlas",
   );
   // A failed read shows its reason and recovers on Retry without losing typed values.
@@ -1659,7 +1658,6 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
     credentialRef: "gh:github.com",
     selections: [],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   await ready.getByRole("button", { name: "Check again" }).click();
   await ready
@@ -1853,7 +1851,6 @@ test("Setup's ready check offers Refresh again for an unconfirmed refresh withou
 test("Setup's ready check reviews a source saved elsewhere before importing again", async (_t, journey) => {
   const t = await linkedReadyCheck(journey);
   await t.importButton.waitFor();
-  const d = t.f.service.domain();
   await new OperatorApi(t.f.service, [t.f.directory]).execute({
     type: "github.configure",
     key: randomUUID(),
@@ -1861,9 +1858,6 @@ test("Setup's ready check reviews a source saved elsewhere before importing agai
     expectedVersion: 1,
     selections: [{ id: "S-1", keep: true }],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: d
-      .githubConfiguration(t.projectId)
-      .repositories.map(({ repositoryId, ref }) => ({ repositoryId, ref })),
   } as never);
   await t.importButton.click();
   const warning = outcomeMessages(t.ready).filter({

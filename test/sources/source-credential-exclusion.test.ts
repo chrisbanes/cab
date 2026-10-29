@@ -118,7 +118,6 @@ async function fixture(t: TestContext) {
       credentialRef,
       selections: [selection],
       readiness,
-      repositories: [],
     });
   const api = new OperatorApi(service);
   const ui = new LocalOperatorUi(
@@ -517,7 +516,6 @@ test("source-only production factory previews, imports, fails closed and recover
     credentialRef: null,
     selections: [{ id: "S-1", keep: true as const }],
     readiness,
-    repositories: [],
     key: clearKey,
   };
   const cleared = await f.api.execute(clear);
@@ -604,7 +602,6 @@ test("JSON and advanced HTML expose the same actionable source credential refusa
       credentialRef: ref,
       selections: [selection],
       readiness,
-      repositories: [],
     });
   configure(null);
   for (const state of [
@@ -694,7 +691,6 @@ test("credential failure invalidation is atomic, idempotent, scoped and keeps ob
       credentialRef: "gh:github.com",
       selections: [selected],
       readiness,
-      repositories: [],
     });
     const binding = {
       projectId,
@@ -809,7 +805,6 @@ test("credential failure invalidation is atomic, idempotent, scoped and keeps ob
     credentialRef: "env:NEW_SOURCE",
     selections: [{ id: "S-1", keep: true }],
     readiness,
-    repositories: [],
   });
   execute({
     type: "github.activate",
@@ -1280,7 +1275,6 @@ test("a readiness rule naming a withheld value is unavailable, never none, and i
       mode: "all",
       conditions: [{ kind: "label", name: "label-secret-value" }],
     },
-    repositories: [],
   });
   f.execute({
     type: "github.activate",

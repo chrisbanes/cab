@@ -423,9 +423,9 @@ test("the CLI Fix is the command or Settings path", () => {
     `Settings → Profiles → ${profileId}`,
   ]);
   assert.deepEqual(cliFix({ kind: "open-repositories", projectId }), [
-    `cab project sources ${projectId}`,
-    `cab project prepare-source ${projectId} --out source.json --edit-file EDIT_FILE`,
-    "cab project apply --file source.json",
+    `cab project get ${projectId}`,
+    `cab project prepare-repositories ${projectId} --out repositories.json --edit-file EDIT_FILE`,
+    "cab project apply --file repositories.json",
   ]);
 });
 
@@ -455,9 +455,9 @@ test("revoked repository access discloses no repository and a recovery link send
     waitLines(one({ repositoryAccessRevoked: true }), projectId),
     [
       "Waiting: Repository access revoked",
-      `  Fix: cab project sources ${projectId}`,
-      `  Fix: cab project prepare-source ${projectId} --out source.json --edit-file EDIT_FILE`,
-      "  Fix: cab project apply --file source.json",
+      `  Fix: cab project get ${projectId}`,
+      `  Fix: cab project prepare-repositories ${projectId} --out repositories.json --edit-file EDIT_FILE`,
+      "  Fix: cab project apply --file repositories.json",
     ],
   );
 });

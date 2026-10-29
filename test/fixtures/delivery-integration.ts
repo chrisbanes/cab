@@ -506,7 +506,6 @@ export async function createReleaseDeliveryFixture(
       },
     ],
     readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   d.execute({
     type: "github.activate",

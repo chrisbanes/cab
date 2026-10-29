@@ -370,9 +370,9 @@ export function cliFix(fix: WaitFix): string[] {
       return [`Settings → Profiles → ${fix.profileId}`];
     case "open-repositories":
       return [
-        `cab project sources ${fix.projectId}`,
-        `cab project prepare-source ${fix.projectId} --out source.json --edit-file EDIT_FILE`,
-        "cab project apply --file source.json",
+        `cab project get ${fix.projectId}`,
+        `cab project prepare-repositories ${fix.projectId} --out repositories.json --edit-file EDIT_FILE`,
+        "cab project apply --file repositories.json",
       ];
   }
 }

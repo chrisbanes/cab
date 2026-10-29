@@ -11,7 +11,8 @@ import {
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  removesAllAccess,
+  repositoryCommand,
+  repositoryRowsFrom,
   sourceCommand,
   sourceRowsFrom,
 } from "../../web/src/settings-changes.js";
@@ -91,7 +92,6 @@ test("project sources reads selections, links and observations without private t
     ["never", "never", "never"],
   );
   assert.match(human.out, /S-2 +Search +\(query private\)/);
-  assert.match(human.out, /acme\/atlas +main/);
   assert.match(human.out, /Closed issues:? +Skip closed issues/);
   assert.equal(databaseDigest(w.s.f), before);
   // A partial provider read is an evidence gap, not a complete observation.
@@ -224,7 +224,6 @@ test("project sources and prepare-source show and round-trip no readiness rule, 
       mode: "all",
       conditions: [{ kind: "label", name: "FIXTURE_GITHUB" }],
     },
-    repositories: [],
   });
   assert.equal(r.status, 200);
   const hidden = await w.ok("ro", ["project", "sources", w.ids.relay]);
@@ -262,7 +261,6 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
         { kind: "label", name: "go" },
       ],
     },
-    setRefs: { "acme/atlas": "dev" },
   };
   const out = join(w.h.dir, "source.json");
   const before = databaseDigest(w.s.f);
@@ -296,14 +294,12 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
     ],
     readiness: edit.readiness,
     closedIssues: "skip",
-    repositories: [{ repositoryId: "acme/atlas", ref: "dev" }],
   });
   assert.deepEqual(document.preview.diff.lines, [
     "− S-2 · Search",
     "+ S-4 · Repository acme/x · added inactive",
     "+ S-5 · Search (query private) · added inactive",
     "Readiness: any of 2 conditions",
-    "Ref for acme/atlas: main → dev",
   ]);
   const shown =
     JSON.stringify(document.preview) +
@@ -357,25 +353,12 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
       },
       { id: "S-5", kind: "search", query: "NEW PRIVATE QUERY" },
     ]),
-    repositories: JSON.stringify(
-      rows.repositories.map((r) => ({
-        repositoryId: r.repositoryId,
-        ref: "dev",
-        keep: true,
-      })),
-    ),
     conditions: JSON.stringify(edit.readiness.conditions),
     mode: "any",
     closedIssues: rows.closedIssues,
   });
   const { key: _key, ...uiCommand } = ui;
   assert.deepEqual(uiCommand, document.command);
-  assert.equal(
-    removesAllAccess(source, {
-      repositories: JSON.stringify([{ removed: true }]),
-    }),
-    true,
-  );
 
   // Rejected edits write nothing.
   const reject = async (code: number, body: unknown, extra: string[] = []) => {
@@ -425,7 +408,6 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
     expectedVersion: (await w.config(fieldnotes)).source.version,
     selections: [{ id: secret, kind: "search", query: "q" }],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [],
   });
   assert.equal(r.status, 200);
   const hidden = await w.ok("ro", ["project", "sources", fieldnotes]);
@@ -466,10 +448,7 @@ test("source credential edits accept the shared env/gh contract and keep omissio
     ]);
     return { out: JSON.parse(readFileSync(out, "utf8")), result };
   };
-  const omitted = await prepare(
-    { setRefs: { "acme/atlas": "dev" } },
-    "omitted.json",
-  );
+  const omitted = await prepare({ closedIssues: "done" }, "omitted.json");
   assert.equal("credentialRef" in omitted.out.command, false);
   const env = await prepare({ credentialRef: "env:SOURCE_TOKEN" }, "env.json");
   assert.equal(env.out.command.credentialRef, "env:SOURCE_TOKEN");
@@ -534,14 +513,13 @@ test("project apply sends the prepared source change once, deactivating selectio
     version: v + 1,
     credentialConfigured: true,
     selectionCount: 2,
-    repositoryCount: 1,
   });
   assert.equal(applied.data.replayed, true);
   assert.equal(await version(), v + 1, "replay applies once");
   assert.ok((await w.config()).source.selections.every((s: Json) => !s.active));
 
   // A change saved elsewhere after preparation is a conflict with no change.
-  const stale = await prepare({ setRefs: { "acme/atlas": "dev" } });
+  const stale = await prepare({ closedIssues: "done" });
   const r = await w.s.sessionPost("/api/operator/commands", {
     type: "github.configure",
     key: randomUUID(),
@@ -552,7 +530,6 @@ test("project apply sends the prepared source change once, deactivating selectio
       { id: "S-2", keep: true },
     ],
     readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
-    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   assert.equal(r.status, 200);
   const at = await version();
@@ -562,41 +539,6 @@ test("project apply sends the prepared source change once, deactivating selectio
   );
   assert.equal(await version(), at);
 
-  // Links: a real checkout applies; a missing path is a field error with no change.
-  const checkout = await createCheckout(w.s.f.directory, "second");
-  await w.ok("rw", [
-    "project",
-    "apply",
-    "--file",
-    await prepare({
-      linkRepositories: [
-        { repositoryId: "acme/second", path: checkout, ref: "main" },
-      ],
-      credentialRef: null,
-    }),
-  ]);
-  const linked = await w.ok("ro", ["project", "sources", atlas]);
-  assert.deepEqual(linked.data.source.repositories, [
-    { repositoryId: "acme/atlas", ref: "main" },
-    { repositoryId: "acme/second", ref: "main" },
-  ]);
-  assert.equal(linked.data.source.credentialConfigured, false);
-  const missing = await w.cli("rw", [
-    "project",
-    "apply",
-    "--file",
-    await prepare({
-      linkRepositories: [
-        {
-          repositoryId: "acme/none",
-          path: join(w.h.dir, "absent"),
-          ref: "main",
-        },
-      ],
-    }),
-  ]);
-  assert.equal(missing.code, 2, missing.out);
-  assert.match(missing.json().error.message, /Fields: repositories/);
   const set = await w.ok("rw", [
     "project",
     "apply",
@@ -647,6 +589,249 @@ test("project apply sends the prepared source change once, deactivating selectio
     afterClear.selections.every((s: Json) => !s.active),
     true,
   );
+});
+
+test("prepare-repositories writes the exact UI command and project get lists the links", async (t) => {
+  const w = await world(t);
+  const checkout = await createCheckout(w.s.f.directory, "second");
+  const edit = {
+    linkRepositories: [
+      { repositoryId: "acme/second", path: checkout, ref: "main" },
+    ],
+    setRefs: { "acme/atlas": "HEAD" },
+  };
+  const out = join(w.h.dir, "repositories.json");
+  const before = databaseDigest(w.s.f);
+  const prepared = await w.ok("ro", [
+    "project",
+    "prepare-repositories",
+    w.ids.atlas,
+    "--out",
+    out,
+    "--edit-file",
+    w.file("repositories-edit.json", JSON.stringify(edit)),
+  ]);
+  assert.equal(statSync(out).mode & 0o777, 0o600);
+  const document = JSON.parse(readFileSync(out, "utf8"));
+  const links = (await w.config()).repositories;
+  assert.equal(document.kind, "repositories.configure");
+  assert.deepEqual(document.command, {
+    type: "repositories.configure",
+    projectId: w.ids.atlas,
+    expectedVersion: links.version,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "acme/atlas",
+        ref: "HEAD",
+      },
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "acme/second",
+        path: checkout,
+        ref: "main",
+      },
+    ],
+  });
+  assert.deepEqual(document.preview.diff.lines, [
+    "+ Repository access: acme/second · main",
+    "Ref for acme/atlas: main → HEAD",
+  ]);
+  // No path appears in the preview or the output of the prepare command.
+  const shown =
+    JSON.stringify(document.preview) +
+    JSON.stringify(prepared.data.document.preview);
+  for (const secret of [checkout, w.ids.checkout])
+    assert.ok(!shown.includes(secret), secret);
+  assert.equal(databaseDigest(w.s.f), before);
+  assert.equal(existsSync(w.journal), false);
+
+  // Parity: the operator UI builds the same command for the same edit.
+  const rows = repositoryRowsFrom(links);
+  const { key: _key, ...ui } = repositoryCommand(w.ids.atlas, {
+    key: "k",
+    expectedVersion: String(links.version),
+    repositories: JSON.stringify([
+      ...rows.repositories.map((r) => ({ ...r, ref: "HEAD" })),
+      { repositoryId: "acme/second", path: checkout, ref: "main" },
+    ]),
+  });
+  assert.deepEqual(ui, document.command);
+
+  const denied = await w.cli("ro", ["project", "apply", "--file", out]);
+  assert.equal(denied.code, 3, denied.out);
+  assert.equal(databaseDigest(w.s.f), before);
+  const applied = await w.ok("rw", ["project", "apply", "--file", out]);
+  assert.deepEqual(applied.data.receipt.result, {
+    commandType: "repositories.configure",
+    resourceId: w.ids.atlas,
+    version: links.version + 1,
+    repositoryCount: 2,
+  });
+  const read = await w.config();
+  assert.deepEqual(
+    read.repositories.links.map((l: Json) => [l.repositoryId, l.ref]),
+    [
+      ["acme/atlas", "HEAD"],
+      ["acme/second", "main"],
+    ],
+  );
+  // Links never touch the GitHub source version.
+  assert.equal(read.source.version, (await w.config()).source.version);
+  const get = await w.ok("ro", ["project", "get", w.ids.atlas]);
+  assert.deepEqual(get.data.repositories, read.repositories);
+  const human = await w.h.run([
+    "project",
+    "get",
+    w.ids.atlas,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /Repositories: +2 linked/);
+  assert.match(human.out, /acme\/second +github +github.com +main/);
+  assert.ok(!human.out.includes(checkout));
+  const sources = await w.h.run([
+    "project",
+    "sources",
+    w.ids.atlas,
+    "--connection",
+    "ro",
+  ]);
+  assert.ok(!sources.out.includes("acme/second"));
+});
+
+test("prepare-repositories refuses bad edits and unlinking everything needs confirmation", async (t) => {
+  const w = await world(t);
+  const atlas = w.ids.atlas;
+  const reject = async (code: number, body: unknown, extra: string[] = []) => {
+    const target = join(w.h.dir, `${randomUUID()}.json`);
+    const r = await w.cli("ro", [
+      "project",
+      "prepare-repositories",
+      atlas,
+      "--out",
+      target,
+      "--edit-file",
+      w.file(`${randomUUID()}.json`, JSON.stringify(body)),
+      ...extra,
+    ]);
+    assert.equal(r.code, code, `${JSON.stringify(body)}: ${r.out}`);
+    assert.equal(existsSync(target), false);
+    return r;
+  };
+  await reject(2, {});
+  await reject(2, { unlinkRepositories: ["acme/none"] });
+  await reject(2, { setRefs: { "acme/none": "HEAD" } });
+  await reject(2, {
+    linkRepositories: [{ repositoryId: "acme/atlas", path: "/x", ref: "main" }],
+  });
+  await reject(2, { surprise: true });
+  await reject(4, { setRefs: { "acme/atlas": "HEAD" } }, [
+    "--expected-version",
+    "99",
+  ]);
+  const everything = await reject(2, { unlinkRepositories: ["acme/atlas"] });
+  assert.match(everything.out, /confirmUnlinkAll/);
+  const out = join(w.h.dir, "unlink.json");
+  await w.ok("ro", [
+    "project",
+    "prepare-repositories",
+    atlas,
+    "--out",
+    out,
+    "--edit-file",
+    w.file(
+      "unlink-edit.json",
+      JSON.stringify({
+        unlinkRepositories: ["acme/atlas"],
+        confirmUnlinkAll: true,
+      }),
+    ),
+  ]);
+  await w.ok("rw", ["project", "apply", "--file", out]);
+  assert.deepEqual((await w.config()).repositories.links, []);
+
+  // A missing path is a field error with no change.
+  const links = (await w.config()).repositories;
+  const missing = join(w.h.dir, "missing.json");
+  await w.ok("ro", [
+    "project",
+    "prepare-repositories",
+    atlas,
+    "--out",
+    missing,
+    "--edit-file",
+    w.file(
+      "missing-edit.json",
+      JSON.stringify({
+        linkRepositories: [
+          {
+            repositoryId: "acme/none",
+            path: join(w.h.dir, "absent"),
+            ref: "main",
+          },
+        ],
+      }),
+    ),
+  ]);
+  const failed = await w.cli("rw", ["project", "apply", "--file", missing]);
+  assert.equal(failed.code, 2, failed.out);
+  assert.match(failed.json().error.message, /Fields: repositories/);
+  assert.equal((await w.config()).repositories.version, links.version);
+});
+
+test("prepare-source points repository link keys to prepare-repositories", async (t) => {
+  const w = await world(t);
+  const target = join(w.h.dir, "refused.json");
+  for (const edit of [
+    { unlinkRepositories: ["acme/atlas"] },
+    { setRefs: { "acme/atlas": "dev" } },
+    { confirmUnlinkAll: true },
+    { linkRepositories: [{ repositoryId: "x", path: "/x", ref: "main" }] },
+  ]) {
+    const r = await w.cli("ro", [
+      "project",
+      "prepare-source",
+      w.ids.atlas,
+      "--out",
+      target,
+      "--edit-file",
+      w.file(`${randomUUID()}.json`, JSON.stringify(edit)),
+    ]);
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /cab project prepare-repositories/);
+    assert.equal(existsSync(target), false);
+  }
+});
+
+test("a github.configure change document that still carries links is refused and changes nothing", async (t) => {
+  const w = await world(t);
+  const out = join(w.h.dir, "old.json");
+  await w.ok("ro", [
+    "project",
+    "prepare-source",
+    w.ids.atlas,
+    "--out",
+    out,
+    "--edit-file",
+    w.file("old-edit.json", JSON.stringify({ closedIssues: "done" })),
+  ]);
+  // A document prepared before the move carried the links the source then held.
+  const document = JSON.parse(readFileSync(out, "utf8"));
+  const old = {
+    ...document,
+    command: {
+      ...document.command,
+      repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+    },
+  };
+  const oldFile = w.file("old-document.json", JSON.stringify(old));
+  const before = databaseDigest(w.s.f);
+  const refused = await w.cli("rw", ["project", "apply", "--file", oldFile]);
+  assert.equal(refused.code, 2, refused.out);
+  assert.equal(databaseDigest(w.s.f), before);
 });
 
 test("a lost source apply reply is reconciled and retried under the same key", async (t) => {
@@ -727,7 +912,6 @@ test("CLI source readback offers the same environment-precedence account before 
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
-      repositories: [],
     });
   configure(null);
   const before = o.d.githubConfiguration(projectId);

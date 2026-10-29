@@ -52,6 +52,7 @@ import {
   usePrivateValues,
   type SettingsProps,
 } from "./settings.js";
+import { RepositoryTab } from "./repository-config.js";
 import { SourceTab } from "./source-config.js";
 import { readinessAnchor } from "./observation-counts.js";
 import { SyncTab } from "./sync-placement.js";
@@ -154,6 +155,13 @@ export function ProjectConfiguration(
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
             />
+          ) : tab === "repositories" ? (
+            <RepositoryTab
+              {...p}
+              data={data}
+              loadedAt={resource.state.fetchedAt}
+              refreshConfiguration={refreshConfiguration}
+            />
           ) : tab === "github" ? (
             <SourceTab
               {...p}
@@ -203,6 +211,11 @@ function statusLine(
         ? `Paused: new tasks wait to start. Routing changes do not resume ${data.project.name ?? "this project"}.`
         : admission,
       saved("routing.configure", data.routing.version),
+    );
+  if (tab === "repositories")
+    return withSaved(
+      "Repository links are the checkouts workspaces and delivery use.",
+      saved("repositories.configure", data.repositories.version),
     );
   if (tab === "github")
     return [

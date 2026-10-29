@@ -545,7 +545,6 @@ for (const readiness of [
           },
         ],
         readiness,
-        repositories: [],
       });
       execute({
         type: "github.activate",
@@ -797,7 +796,6 @@ async function treatClosureAs(f: Fixture, closedIssues: "done" | "skip") {
     selections: [{ id: "repo", keep: true }],
     readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
     closedIssues,
-    repositories: [],
   });
   f.domain.execute({
     type: "github.activate",

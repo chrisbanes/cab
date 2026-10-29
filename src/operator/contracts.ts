@@ -18,6 +18,7 @@ import {
   statusMappingEvents,
   statusMappingSchema,
 } from "../core/status-mapping-contracts.js";
+import { repositoriesConfigurationCommandSchema } from "../core/repository-links.js";
 import {
   closedIssuesSchema,
   githubConfigurationSchema,
@@ -2253,6 +2254,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...domainBase,
+      type: z.literal("repositories.configure"),
+      expectedVersion: revision,
+      ...repositoriesConfigurationCommandSchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...domainBase,
       type: z.literal("github.configure"),
       expectedVersion: revision,
       ...githubConfigurationCommandSchema.shape,
@@ -2635,6 +2644,15 @@ export const configurationReceiptSchema = z
           version: revision,
           credentialConfigured: z.boolean(),
           selectionCount: time,
+          /** Only receipts recorded before repository links moved to the project report it. */
+          repositoryCount: time.optional(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("repositories.configure"),
+          resourceId: uuid,
+          version: revision,
           repositoryCount: time,
         })
         .strict(),
@@ -3065,6 +3083,21 @@ export const projectConfigurationSchema = envelope(
       ),
       /** Optional so older services still parse; absent means not reported. */
       statusMapping: statusMappingViewSchema.optional(),
+      repositories: z
+        .object({
+          version: revision,
+          links: z.array(
+            z
+              .object({
+                repositoryId: safeText,
+                codeHost: z.literal("github"),
+                host: z.literal("github.com"),
+                ref: safeText,
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
       source: z
         .object({
           version: revision,
@@ -3082,9 +3115,6 @@ export const projectConfigurationSchema = envelope(
           ),
           readiness: readinessRuleViewSchema,
           closedIssues: closedIssuesSchema,
-          repositories: z.array(
-            z.object({ repositoryId: safeText, ref: safeText }).strict(),
-          ),
         })
         .strict(),
     })
@@ -3109,9 +3139,12 @@ export const projectPrivateValuesSchema = envelope(
         .object({
           version: revision,
           searches: z.array(z.object({ id: text, query: text }).strict()),
-          repositories: z.array(
-            z.object({ repositoryId: text, path: text }).strict(),
-          ),
+        })
+        .strict(),
+      repositories: z
+        .object({
+          version: revision,
+          links: z.array(z.object({ repositoryId: text, path: text }).strict()),
         })
         .strict(),
     })
@@ -3997,6 +4030,7 @@ export const operationTypeSchema = z.enum([
   "runtime.configure",
   "assignment.apply",
   "github.configure",
+  "repositories.configure",
   "status-mapping.configure",
   "github.preview",
   "recovery.pre-turn.adopt",

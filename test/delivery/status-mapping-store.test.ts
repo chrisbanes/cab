@@ -91,7 +91,6 @@ function setup(
         optionNodeId,
       })),
     },
-    repositories: [],
   });
   const selectionId = options.selection === false ? "repo" : "project";
   domain.execute({
@@ -196,7 +195,6 @@ function reconfigureReadiness(
       { id: "project", kind: "project", projectNodeId: P, filter: "" },
     ],
     readiness,
-    repositories: [],
   });
   f.domain.execute({
     type: "github.activate",
