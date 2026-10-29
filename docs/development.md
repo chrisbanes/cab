@@ -152,6 +152,12 @@ The packaged `cab` executable (`package.json` `bin`, built to
 a checkout with `npm run build && npm pack`, then `npm install -g ./cab-*.tgz`,
 or run `node dist/src/cli/main.js` directly.
 
+This packed install exercises the existing command surface. The primary release
+target is the same `@chrisbanes/cab` package published to npm, containing both the
+server and operator commands; there is no separate CLI product. npm publishing
+and npm-based service install/upgrade remain unimplemented and unqualified
+([ADR-1011](adr/1011-packaging-and-distribution.md)).
+
 `cab` (bare, which exits 2 with the `Fix:` line on stderr) and `cab --help`
 print a short start-here block: `auth login`, `doctor`, `project list`, `task list`,
 `task get`, `task create` and `inbox list`, the area names and these forms.

@@ -401,8 +401,10 @@ reviewed cutover; never run competing writers against the same task workspace.
   from representative evidence; see the routing design.
 - Final schema qualification and old-work retirement/cutover; backup/restore is
   bounded to the currently supported standalone database schema.
-- Mac app signing and notarization
-  ([ADR-1019](../adr/1019-mac-app-channel.md)), settled after the rename.
+- npm service staging, supported Node runtime binding and upgrade lifecycle
+  ([ADR-1011](../adr/1011-packaging-and-distribution.md)), qualified before the
+  primary npm release. Desktop feasibility, signing and notarization are deferred
+  with [ADR-1019](../adr/1019-mac-app-channel.md), not first-release gates.
 
 Codex on macOS is the selected first combination. Additional platforms are separate
 qualification work, not an assumed first-release matrix. Resolve these through

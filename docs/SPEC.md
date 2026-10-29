@@ -52,6 +52,27 @@ a plugin marketplace, multiple execution machines, team/RBAC administration and
 migration of old live runs are outside the first release. Source interfaces follow
 concrete integrations.
 
+## Distribution
+
+The first release uses one npm package, `@chrisbanes/cab`, containing the server,
+built web UI and one `cab` executable for service management, offline operations
+and authenticated operator commands. Users provide a supported Node.js LTS runtime;
+no checkout or local build is required. Installing the package does not start a
+service. The same package supports connecting to a remote service without a local
+server installation. macOS Apple Silicon remains the first qualified service target.
+
+Service upgrades must preserve data and recovery holds, stop the old service
+before changing its runtime/files, and take and verify an offline snapshot before
+migration. Package replacement must not mutate files used by a running service.
+Service uninstall keeps data, auth and snapshots; reinstall finds retained state.
+Migrations remain forward-only with the fix-forward recovery boundary in
+[ADR-1011](adr/1011-packaging-and-distribution.md).
+
+These are target requirements: npm publishing, the npm service lifecycle and
+startup snapshots are not yet implemented or qualified. The existing bundled-Node
+tarball is an optional channel. The desktop app and Homebrew channel are deferred
+([ADR-1019](adr/1019-mac-app-channel.md)) and do not gate the npm release.
+
 ## Operator CLI
 
 The accepted [operator CLI design](design/operator-cli.md) and

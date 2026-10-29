@@ -9,6 +9,13 @@ LaunchAgent stays the default.
 
 ## Install, upgrade and uninstall
 
+The commands below describe the implemented bundled-Node tarball channel.
+The primary first-release target is one npm package, `@chrisbanes/cab`, with
+Node installed separately ([ADR-1011](../adr/1011-packaging-and-distribution.md)).
+Its service install/upgrade path is not implemented or qualified yet; installing
+the current packed CLI is not evidence of npm-based service installation.
+Desktop and Homebrew distribution are deferred.
+
 The service runs from an unpacked [release](#release-build) under the state
 directory. The defaults are:
 
