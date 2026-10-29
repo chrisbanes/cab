@@ -40,7 +40,8 @@ test("Settings adds a glab credential, warns on an override, switches to a varia
   await section.getByLabel("GitLab host").fill("github.com");
   await section.getByRole("button", { name: "Use this login" }).click();
   await section.getByText("Enter the GitLab host", { exact: false }).waitFor();
-  await section.getByLabel("GitLab host").fill(host);
+  // A mixed-case host is sent normalised, so the saved receipt matches.
+  await section.getByLabel("GitLab host").fill("GitLab.Example.com");
   const added = commandRequest(page);
   await section.getByRole("button", { name: "Use this login" }).click();
   const { key: _key, ...sent } = (await added).postDataJSON();

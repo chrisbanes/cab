@@ -78,11 +78,14 @@ export function GitLabCredentialsSection(p: SettingsProps) {
     d.startOperation(blank(), true);
   };
   const reread = () => (d.phase === "recorded" ? settled() : status.refresh());
-  const host = String(d.values.host ?? "").trim();
+  // The service stores the normalised host; send and match on that one.
+  const typedHost = String(d.values.host ?? "");
+  const parsedHost = gitLabHostSchema.safeParse(typedHost);
+  const host = parsedHost.success ? parsedHost.data : typedHost.trim();
   const source = d.values.source === "env" ? "env" : "glab";
   const name = String(d.values.name ?? "").trim();
   const errors = {
-    ...(editing === "" && !gitLabHostSchema.safeParse(host).success
+    ...(editing === "" && !parsedHost.success
       ? { host: "Enter the GitLab host, such as gitlab.example.com." }
       : {}),
     ...(source === "env" && !envName.test(name)
