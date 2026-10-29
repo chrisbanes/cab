@@ -592,9 +592,9 @@
 }
 
 .task-state[data-column="Running"] {
-  --state: var(--accent-text);
-  --state-soft: #6366f11f;
-  --state-border: #6366f159;
+  --state: var(--run);
+  --state-soft: var(--run-soft);
+  --state-border: var(--run-border);
 }
 
 .task-state[data-column="Uncertain"] {
@@ -605,8 +605,8 @@
 
 .task-state[data-column="Not started"] {
   --state: var(--accent-text);
-  --state-soft: #6366f11f;
-  --state-border: #6366f159;
+  --state-soft: #e4e4e71f;
+  --state-border: #e4e4e759;
 }
 
 .task-state[data-column="Done"] {
@@ -706,7 +706,7 @@
 
 .board-column:not([data-empty]) .board-column-name[data-column="Running"],
 .board-column:not([data-empty]) .board-column-name[data-column="Running"] svg {
-  color: var(--accent-text);
+  color: var(--run);
 }
 
 .board-column:not([data-empty]) .board-column-name[data-column="Uncertain"],

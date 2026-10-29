@@ -1451,17 +1451,17 @@ test("three panes: a grouped queue under its filters, with the overlay and indig
   await page.locator(selected).waitFor();
   assert.equal(
     await computed(page, selected, "background-color"),
-    "rgb(30, 34, 53)",
+    "rgb(32, 32, 36)",
   );
   assert.equal(await computed(page, selected, "border-left-width"), "2px");
   assert.equal(
     await computed(page, selected, "border-left-color"),
-    "rgb(99, 102, 241)",
+    "rgb(228, 228, 231)",
   );
   assert.equal((await page.locator(".inbox-queue").boundingBox())!.width, 340);
   assert.equal(
     await computed(page, ".inbox-queue", "background-color"),
-    "rgb(13, 15, 23)",
+    "rgb(15, 15, 17)",
   );
   assert.equal(
     (await page.locator(".inbox-context").boundingBox())!.width,
