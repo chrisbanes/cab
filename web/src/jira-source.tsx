@@ -48,8 +48,11 @@ function JiraCredentials({
   session,
   drafts,
   refreshNonce,
+  onChange,
 }: Pick<TabProps, "client" | "session" | "drafts"> & {
   refreshNonce?: number | undefined;
+  /** A credential was saved or cleared, so the site choices changed. */
+  onChange: () => void;
 }) {
   const loader = useCallback(
     (signal: AbortSignal) =>
@@ -85,6 +88,7 @@ function JiraCredentials({
   );
   const settled = () => {
     status.refresh();
+    onChange();
     setOpen(false);
     d.startOperation(blank(), true);
   };
@@ -450,6 +454,7 @@ export function JiraSourceTab(
           session={p.session}
           drafts={p.drafts}
           refreshNonce={p.refreshNonce}
+          onChange={sites.refresh}
         />
       </div>
     </div>
