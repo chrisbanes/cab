@@ -161,7 +161,7 @@ test("a Jira credential reports its account, never its references or values", as
   for (const secret of [...Object.values(values), ...Object.values(names)])
     assert.equal(text.includes(secret), false);
   // The site variable changing after configure fails closed.
-  process.env[names.site] = "https://other.example.test";
+  process.env[names.site] = "https://other.atlassian.net";
   assert.equal(
     (await f.api.readIssueTrackerCredentials()).data.credentials[0]?.reason,
     "site-mismatch",

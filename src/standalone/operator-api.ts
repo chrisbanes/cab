@@ -5810,9 +5810,20 @@ export class OperatorApi {
         instructionPresent: Boolean(p.instructions),
         diagnosticCapture: d.diagnosticCaptureMode(projectId),
         commandNetworkAccess: d.commandNetworkAccess(projectId),
-        placements: this.service
-          .githubSources()
-          .conflicts()
+        placements: [
+          this.service.githubSources(),
+          ...d
+            .projects()
+            .flatMap((x) => d.jiraConfiguration(String(x.id)) ?? [])
+            .map((j) => j.instance)
+            .filter((v, i, all) => all.indexOf(v) === i)
+            .map((instance) =>
+              this.service
+                .githubSources()
+                .forTracker({ provider: "jira", instance }),
+            ),
+        ]
+          .flatMap((store) => store.conflicts())
           .filter((c) => c.projectIds.includes(projectId))
           .map((c) => {
             const task = d.task(c.taskId);
@@ -6540,7 +6551,7 @@ export class OperatorApi {
         undefined,
         site.reason === "missing-credential"
           ? "The Jira site variable is not set."
-          : "The Jira site variable must be an https:// address with no path, port or credentials.",
+          : "The Jira site variable must be an https:// address of a <site>.atlassian.net or <site>.jira.com site, with no path, port or credentials.",
       );
     return site.instance;
   }
@@ -6649,7 +6660,13 @@ export class OperatorApi {
       "",
     );
     if (problem)
-      throw new OperatorApiError(409, "conflict", ["jql"], undefined, problem);
+      throw new OperatorApiError(
+        400,
+        "invalid-input",
+        ["jql"],
+        undefined,
+        problem,
+      );
     let preview: Awaited<ReturnType<StandaloneService["jiraPreview"]>>;
     try {
       preview = await this.service.jiraPreview(

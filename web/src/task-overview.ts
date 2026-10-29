@@ -160,6 +160,12 @@ export function taskIdentity(data: Pick<Data, "source">) {
     : { label: "Local task", url: null };
 }
 
+/** What only a Jira source reports: its site and the issue's status in Jira. */
+export const jiraFacts = (source: NonNullable<Data["source"]>) => ({
+  status: source.status?.name ?? null,
+  site: source.identity.tracker === "jira" ? source.identity.provider : null,
+});
+
 /** The issue tracker a task was imported from, as the operator reads it. */
 export const trackerName = (source: Data["source"]) =>
   source?.identity.tracker === "jira" ? "Jira" : "GitHub";
@@ -189,13 +195,7 @@ export function sourceFacts(source: NonNullable<Data["source"]>) {
           source.memberships.some((m) => m.sync.complete !== true)
         ? "sync incomplete"
         : null;
-  return {
-    state: source.state,
-    synced,
-    problem,
-    status: source.status?.name ?? null,
-    site: source.identity.tracker === "jira" ? source.identity.provider : null,
-  };
+  return { state: source.state, synced, problem };
 }
 
 const deliveryModes = {

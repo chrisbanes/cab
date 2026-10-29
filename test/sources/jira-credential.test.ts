@@ -62,7 +62,7 @@ test("a credential resolves on every use and fails closed when the site changes"
   assert.deepEqual(
     resolveJiraAccess(refs, {
       ...env,
-      FIXTURE_JIRA_SITE: "https://evil.example.test",
+      FIXTURE_JIRA_SITE: "https://evil.atlassian.net",
     }),
     { reason: "site-mismatch" },
   );

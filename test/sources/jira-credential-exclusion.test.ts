@@ -123,7 +123,11 @@ test("the Jira site, email and token reach no runtime, Claude turn, helper child
 
   const redactions = service.providerCredentialExclusions().redactions;
   for (const name of ["FIXTURE_JX_SITE", "FIXTURE_JX_EMAIL", "FIXTURE_JX_KEY"])
-    for (const secret of [`env:${name}`, name, process.env[name] ?? ""])
+    for (const secret of [
+      `env:${name}`,
+      name,
+      name === "FIXTURE_JX_SITE" ? name : (process.env[name] ?? ""),
+    ])
       assert.ok(redactions.includes(secret), `redaction ${secret}`);
 
   // A task that mentions the token is withheld from every read; the site host alone is not secret.
@@ -159,4 +163,21 @@ test("the Jira site, email and token reach no runtime, Claude turn, helper child
       `task read ${text}`,
     );
   }
+
+  // The site address is the task's link, not a secret: text that links to it stays readable.
+  const linked = randomUUID();
+  execute({
+    type: "task.create",
+    projectId,
+    taskId: linked,
+    title: "Links https://jx-canary.atlassian.net/browse/ABC-1 plainly",
+    outcome: "Exclusion",
+    ready: false,
+  });
+  assert.equal(
+    JSON.stringify(
+      await api.readSearch(new URLSearchParams({ query: "plainly" })),
+    ).includes("https://jx-canary.atlassian.net/browse/ABC-1"),
+    true,
+  );
 });

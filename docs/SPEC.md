@@ -776,11 +776,13 @@ access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).
 
 A Jira Cloud site's credential is installation-wide and uses three `env:` references:
-the site address (an `https://` origin with no path, port or credentials), the account
-email and an API token. cab resolves them on every use, fails closed with
+the site address (an `https://` origin of a `<site>.atlassian.net` or `<site>.jira.com`
+Jira Cloud site, with no path, port or credentials; credentials are never sent to
+another host), the account email and an API token. cab resolves them on every use, fails closed with
 `site-mismatch` when the site variable later names another host, and removes all
-three variables and their values from agent and helper environments and from
-receipts, logs and errors. A Jira project's source is its site and up to 30 JQL
+three variables from agent and helper environments and the email and token values
+from receipts, logs, errors and captured text (the site address is not secret: it is
+the task's link). A Jira project's source is its site and up to 30 JQL
 selections, saved and activated together; Jira's strict JQL parse must accept every
 new or changed query before anything is saved, and the preview reads at most 20
 matches without saving. An issue is closed when Jira's status category is Done. A

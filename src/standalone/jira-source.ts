@@ -5,7 +5,7 @@ import type {
   SelectionSnapshot,
 } from "../core/github-source.js";
 import type { JiraSelection } from "../core/github-source-contracts.js";
-import type { JiraCredentialReason } from "./jira-credential.js";
+import type { resolveJiraAccess } from "./jira-credential.js";
 import {
   type JiraAccess,
   JiraFailure,
@@ -58,22 +58,13 @@ const parseSchema = z
 /** A Jira Cloud site's JQL reads; the credential is resolved on every call. */
 export class JiraSourceReader {
   constructor(
-    private readonly access: () =>
-      | JiraAccess
-      | { reason: JiraCredentialReason },
+    private readonly access: () => ReturnType<typeof resolveJiraAccess>,
     private readonly fetcher: typeof fetch = fetch,
   ) {}
 
   private resolved(): JiraAccess {
     const access = this.access();
-    if ("reason" in access)
-      throw new JiraFailure(
-        access.reason === "site-unreachable" ||
-          access.reason === "not-jira" ||
-          access.reason === "unauthorized"
-          ? "site-unreachable"
-          : access.reason,
-      );
+    if ("reason" in access) throw new JiraFailure(access.reason);
     return access;
   }
 

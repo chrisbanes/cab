@@ -4011,7 +4011,16 @@ export class StandaloneService {
           String(binding.assignmentId),
         ]),
     );
-    for (const hold of sources.activeHolds()) {
+    const holds = [
+      sources,
+      ...domain
+        .projects()
+        .flatMap((p) => domain.jiraConfiguration(String(p.id)) ?? [])
+        .map((j) => j.instance)
+        .filter((v, i, all) => all.indexOf(v) === i)
+        .map((instance) => sources.forTracker({ provider: "jira", instance })),
+    ].flatMap((store) => store.activeHolds());
+    for (const hold of holds) {
       const recipients = new Set(
         domain
           .assignments(hold.taskId)

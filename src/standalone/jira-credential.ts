@@ -56,7 +56,9 @@ export function jiraSiteHost(
 export function resolveJiraAccess(
   refs: JiraRefs | undefined,
   env: NodeJS.ProcessEnv = process.env,
-): JiraAccess | { reason: JiraCredentialReason } {
+):
+  | JiraAccess
+  | { reason: "missing-credential" | "site-invalid" | "site-mismatch" } {
   if (!refs) return { reason: "missing-credential" };
   const site = jiraSiteHost(envValue(refs.siteRef, env));
   if ("reason" in site) return site;
@@ -122,8 +124,9 @@ export async function jiraCredentialStatus(
 
 /**
  * What children and public output must exclude for Jira credentials: variable names to drop,
- * values to drop wherever they appear, and every string to redact. The email and site are
- * excluded with the token.
+ * values to drop wherever they appear, and every string to redact. The email and token
+ * values are redacted; the site address is not secret (it is the task link), so only its
+ * variable name is, and its value leaves child environments only.
  */
 export function jiraCredentialExclusions(
   credentials: readonly JiraRefs[],
@@ -132,5 +135,10 @@ export function jiraCredentialExclusions(
   const refs = credentials.flatMap((c) => [c.siteRef, c.emailRef, c.tokenRef]);
   const names = [...new Set(refs.map((ref) => ref.slice(4)))];
   const values = names.flatMap((name) => env[name] || []);
-  return { names, values, redactions: [...refs, ...names, ...values] };
+  const sites = new Set(credentials.map((c) => env[c.siteRef.slice(4)]));
+  return {
+    names,
+    values,
+    redactions: [...refs, ...names, ...values.filter((v) => !sites.has(v))],
+  };
 }

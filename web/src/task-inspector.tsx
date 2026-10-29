@@ -12,6 +12,7 @@ import {
 import {
   deliveryApplies,
   executionFacts,
+  jiraFacts,
   sourceFacts,
   taskColumnOf,
   taskIdentity,
@@ -65,7 +66,8 @@ export function TaskInspector({
           <Group label={`${trackerName(source)} source · read-only`}>
             {(() => {
               const identity = taskIdentity(data),
-                { state, synced, problem, status, site } = sourceFacts(source);
+                { state, synced, problem } = sourceFacts(source),
+                { status, site } = jiraFacts(source);
               return (
                 <>
                   {identity.url ? (

@@ -259,12 +259,14 @@ export class TaskReviewStore {
         .prepare(
           "SELECT siteRef, emailRef, tokenRef FROM installation_issue_tracker_credentials",
         )
-        .all() as Row[])
+        .all() as Row[]) {
+        // The site address is not secret and appears in imported text; only its names are excluded.
+        excluded.push(String(row.siteRef), String(row.siteRef).slice(4));
         refs.push(
-          { credentialRef: row.siteRef ?? null },
           { credentialRef: row.emailRef ?? null },
           { credentialRef: row.tokenRef ?? null },
         );
+      }
     for (const ref of refs) {
       // A `gh:` or `glab:` reference has no variable; its token values come from the exclusions below.
       if (/^(?:gh|glab):/.test(String(ref.credentialRef)))
