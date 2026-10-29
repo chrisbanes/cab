@@ -52,7 +52,9 @@ test("Settings adds a glab credential, warns on an override, switches to a varia
     credentialRef: `glab:${host}`,
   });
   await section
-    .getByText(`GitLab ${host} · GitLab CLI · @fake-user · read-only use`)
+    .getByText(
+      `GitLab ${host} · GitLab CLI · @fake-user · used for project lists and branch delivery`,
+    )
     .waitFor();
   await savedOutcome(page);
   assert.equal(await section.getByText(/GITLAB_TOKEN/).count(), 0);

@@ -3484,7 +3484,7 @@ export class OperatorApi {
         name ? String(name) : null,
         recovery.lastPushedSha,
         recovery.outsideHeadSha,
-        this.linkHost(taskId, repositoryId),
+        link?.host ?? "github.com",
       );
     }
     return url && this.disclosable(url, excluded)

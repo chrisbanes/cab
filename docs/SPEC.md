@@ -46,7 +46,7 @@ select permitted profiles but cannot create profiles or expand project authority
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
 items; readiness is separate. Jira Cloud as an issue tracker and GitLab merge
-requests on self-managed instances are planned and not implemented; a
+requests (gitlab.com and self-managed) are planned and not implemented; a
 project can link a GitLab checkout and deliver its branches
 ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
 a plugin marketplace, multiple execution machines, team/RBAC administration and

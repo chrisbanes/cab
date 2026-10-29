@@ -1258,7 +1258,7 @@ const result = z
     createdAt: time,
   })
   .strict();
-const interaction = z
+export const interactionSchema = z
   .object({
     interactionId: uuid,
     taskId: uuid,
@@ -1691,8 +1691,8 @@ export const taskSchema = envelope(
       messages: z.array(message),
       results: z.array(result),
       unresolvedResults: z.array(unresolvedResultSchema),
-      questions: z.array(interaction),
-      approvals: z.array(interaction),
+      questions: z.array(interactionSchema),
+      approvals: z.array(interactionSchema),
       completionRequests: z.array(completion),
       attention: z
         .object({

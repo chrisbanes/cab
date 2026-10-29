@@ -28,6 +28,9 @@ const outside = "3".repeat(40);
 const policy = {} as DeliveryPolicy;
 
 function world(options: { token?: string | null } = {}) {
+  const credential = {
+    value: options.token === undefined ? token : options.token,
+  };
   const remote = scriptedGitLabRemote({ repositoryId });
   const { state, requests } = remote;
   state.head = old;
@@ -45,19 +48,31 @@ function world(options: { token?: string | null } = {}) {
   const provider = new GitLabHttpDeliveryProvider({
     host,
     link: (id) => (id === repositoryId ? { projectPath } : null),
-    token: async () => (options.token === undefined ? token : options.token),
+    token: async () => credential.value,
     fetcher: remote.fetcher,
     push: async (request) => {
+      // The real transport starts nothing without a token.
+      if (!request.token) return "not-attempted";
       pushes.push({ ...request });
       if (outcomes.push === "pushed") outcomes.onPush();
       return outcomes.push;
     },
     adopt: async (request) => {
+      if (!request.token) return "not-attempted";
       adopts.push({ ...request });
       return outcomes.adopt;
     },
   });
-  return { state, requests, pushes, adopts, outcomes, provider };
+  return {
+    state,
+    requests,
+    pushes,
+    adopts,
+    outcomes,
+    provider,
+    credential,
+    fetchThrough: remote.fetcher,
+  };
 }
 
 const publication = (
@@ -414,4 +429,97 @@ test("the provider delivers only branch actions", async () => {
     (error) => error instanceof DomainPolicyError,
   );
   assert.equal(w.requests.length, 0);
+});
+
+test("the credential is resolved on every use, and one that vanished after preflight means nothing was attempted", async () => {
+  const w = world();
+  const action = push();
+  const before = await w.provider.preflight(action, policy, publication());
+  // Rotated after preflight: the push and the readback use the new value.
+  w.credential.value = `${token}-rotated`;
+  const seen = w.requests.length;
+  const done = await w.provider.performAction(record(action, before));
+  assert.equal(done.state, "confirmed-success");
+  assert.equal(w.pushes[0]?.token, `${token}-rotated`);
+  assert.ok(
+    w.requests
+      .slice(seen)
+      .every(
+        (r) =>
+          (r.init.headers as Record<string, string>).authorization ===
+          `Bearer ${token}-rotated`,
+      ),
+  );
+
+  const gone = world();
+  const planned = await gone.provider.preflight(action, policy, publication());
+  gone.credential.value = null;
+  const failed = await gone.provider.performAction(record(action, planned));
+  assert.equal(failed.state, "confirmed-failure");
+  assert.equal(failed.reason, "push-not-attempted");
+  assert.equal(failed.retryable, true);
+  assert.equal(gone.pushes.length, 0);
+
+  const adopting = world();
+  adopting.state.head = outside;
+  const adoption = {
+    kind: "branch.adopt",
+    target: { repositoryId },
+    outsideHeadSha: outside,
+  } as ExternalAction;
+  const adoptState = await adopting.provider.preflight(
+    adoption,
+    policy,
+    undefined,
+    {
+      branch,
+      lastPushedSha: old,
+      workspacePath: "/work/tree",
+      baseCommit: "4".repeat(40),
+    },
+  );
+  adopting.credential.value = null;
+  // The ref read needs the credential too, so the adoption fails without fetching.
+  const refused = await adopting.provider.performAction(
+    record(adoption, adoptState),
+  );
+  assert.equal(refused.state, "confirmed-failure");
+  assert.equal(adopting.adopts.length, 0);
+});
+
+test("a token that is not printable ASCII is unusable and never reaches a request or an error", async () => {
+  for (const bad of ["glpat-a\r\nX-Evil: 1", "glpat-\0", "glpat-é", ""]) {
+    const w = world({ token: bad });
+    await assert.rejects(
+      w.provider.preflight(push(), policy, publication()),
+      (error: Error) =>
+        error.message === "provider-credential-unavailable" &&
+        !error.message.includes("glpat"),
+    );
+    assert.equal(w.requests.length, 0);
+  }
+});
+
+test("a response that was redirected or came from another origin is refused", async () => {
+  for (const tamper of [
+    (r: Response) => Object.defineProperty(r, "redirected", { value: true }),
+    (r: Response) =>
+      Object.defineProperty(r, "url", { value: "https://evil.example/x" }),
+  ]) {
+    const w = world();
+    const provider = new GitLabHttpDeliveryProvider({
+      host,
+      link: () => ({ projectPath }),
+      token: async () => token,
+      fetcher: (async (url: string, init: RequestInit) => {
+        const response = await w.fetchThrough(url, init);
+        tamper(response);
+        return response;
+      }) as typeof fetch,
+    });
+    await assert.rejects(
+      provider.preflight(push(), policy, publication()),
+      /provider-origin-mismatch/,
+    );
+  }
 });

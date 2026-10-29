@@ -59,6 +59,19 @@ export interface BranchRemotes {
   verified(repositoryId: string): Promise<BranchRemote>;
 }
 
+/** The actions this module delivers. */
+export type BranchAction = Extract<
+  ExternalAction,
+  { kind: "branch.push" | "branch.force-push" | "branch.adopt" }
+>;
+export const isBranchKind = (kind: ExternalAction["kind"]) =>
+  kind === "branch.push" ||
+  kind === "branch.force-push" ||
+  kind === "branch.adopt";
+export const isBranchAction = (
+  action: ExternalAction,
+): action is BranchAction => isBranchKind(action.kind);
+
 type PushAction = Extract<
   ExternalAction,
   { kind: "branch.push" | "branch.force-push" }
@@ -76,10 +89,7 @@ const adoptFailures: Record<Exclude<AdoptOutcome, "adopted">, string> = {
 
 /** The branch-specific part of a preflight; the caller adds the code host's repository location. */
 export async function branchPreflight(
-  action: Extract<
-    ExternalAction,
-    { kind: "branch.push" | "branch.force-push" | "branch.adopt" }
-  >,
+  action: BranchAction,
   remote: BranchRemote,
   publication?: PublicationContext,
   adoption?: AdoptionContext,

@@ -14,6 +14,8 @@ import {
   type BranchRemotes,
   adoptBranchHead,
   branchPreflight,
+  isBranchAction,
+  isBranchKind,
   inspectBranchHead,
   publishBranch,
 } from "./branch-delivery.js";
@@ -30,16 +32,6 @@ import type {
   PushFunction,
 } from "./github-delivery.js";
 import { type GitLabSeams, codeHostToken } from "./gitlab-credentials.js";
-
-type BranchAction = Extract<
-  ExternalAction,
-  { kind: "branch.push" | "branch.force-push" | "branch.adopt" }
->;
-/** The only actions GitLab delivers until merge requests land. */
-const isBranchAction = (action: ExternalAction): action is BranchAction =>
-  action.kind === "branch.push" ||
-  action.kind === "branch.force-push" ||
-  action.kind === "branch.adopt";
 
 /** A non-2xx response. Only the status is kept: never a body or a header. */
 class GitLabFailure extends Error {
@@ -72,12 +64,18 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     this.origin = `https://${options.host}`;
   }
   supportsAction(kind: ExternalAction["kind"]): boolean {
-    return kind.startsWith("branch.");
+    return isBranchKind(kind);
   }
   private async token(): Promise<string> {
     const token = await this.options.token();
-    if (!token) throw new Error("provider-credential-unavailable");
+    // Printable ASCII only: anything else cannot be a token, and an invalid header value would be echoed in the error.
+    if (!token || !/^[\x21-\x7e]+$/.test(token))
+      throw new Error("provider-credential-unavailable");
     return token;
+  }
+  /** For Git: a credential that vanished after preflight is an empty token, which the transport reports as not attempted. */
+  private transportToken(): Promise<string> {
+    return this.token().catch(() => "");
   }
   private async get(path: string): Promise<unknown> {
     const token = await this.token();
@@ -150,7 +148,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           host: this.options.host,
           codeHost: "gitlab",
           nameWithOwner: projectPath,
-          token: await this.token(),
+          token: await this.transportToken(),
         }),
       adopt: async (request) =>
         (this.options.adopt ?? adoptOutsideHead)({
@@ -158,7 +156,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           host: this.options.host,
           codeHost: "gitlab",
           nameWithOwner: projectPath,
-          token: await this.token(),
+          token: await this.transportToken(),
         }),
     };
   }

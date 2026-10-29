@@ -4,6 +4,7 @@ import { executionIntentStateSchema } from "../../src/core/execution-runtime.js"
 import {
   assignmentRecoverySchema,
   commandReceiptSchema,
+  interactionSchema,
   localReviewOperationReadSchema,
   operatorCommandSchema,
   operationScopeSchema,
@@ -768,4 +769,59 @@ test("readiness rule views and selection counts are strict", () => {
     selectionCountsSchema.safeParse({ ...counts, total: 2 }).success,
     false,
   );
+});
+
+test("an approval's compare link comes with its code host, and a GitHub link stays on github.com", () => {
+  const approval = {
+    interactionId: key,
+    taskId: key,
+    requestingAssignmentId: key,
+    requestingWorkId: "w",
+    requestingWorkRevision: 1,
+    requestingAssignmentVersion: 1,
+    conversationRevision: 1,
+    kind: "approval",
+    status: "open",
+    prompt: null,
+    action: null,
+    target: null,
+    materialHash: null,
+    material: null,
+    approvable: false,
+    materialUnavailable: true,
+    response: null,
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const ok = (extra: Record<string, unknown>) =>
+    interactionSchema.safeParse({ ...approval, ...extra }).success;
+  assert.equal(ok({}), true);
+  assert.equal(
+    ok({
+      compareUrl: "https://github.com/acme/app/commit/abc",
+      compareCodeHost: "github",
+    }),
+    true,
+  );
+  assert.equal(
+    ok({
+      compareUrl: "https://gitlab.example.com/g/app/-/commit/abc",
+      compareCodeHost: "gitlab",
+    }),
+    true,
+  );
+  for (const bad of [
+    { compareUrl: "https://github.com/acme/app/commit/abc" },
+    { compareCodeHost: "gitlab" },
+    {
+      compareUrl: "https://gitlab.example.com/g/app/-/commit/abc",
+      compareCodeHost: "github",
+    },
+    {
+      compareUrl: "http://gitlab.example.com/g/app/-/commit/abc",
+      compareCodeHost: "gitlab",
+    },
+  ])
+    assert.equal(ok(bad), false, JSON.stringify(bad));
 });
