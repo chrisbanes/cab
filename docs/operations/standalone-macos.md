@@ -1094,6 +1094,26 @@ replace a published release. Manual runs and pull requests that change the packa
 files build and verify the same tarball and upload it only as a workflow artifact. No
 release has been published yet.
 
+The same workflow packs the npm package once on the macOS runner
+(`package-release.mjs pack-npm --out DIR`: a clean `npm ci` and build of the commit, one
+`npm pack`, and `npm-package.json` with the name, version, `integrity`, `shasum`, file
+name and commit), installs that `.tgz` into a temporary prefix and `HOME`, and serves
+the operator UI from it (`verify-npm`). Pull requests and manual runs stop there and
+upload the `.tgz` and record as an artifact. For a pushed `v*` tag, after CI and the
+package job, the `npm` job runs in the `npm` GitHub environment with `id-token: write`,
+re-checks the record against the downloaded `.tgz` (`check-npm`) and publishes exactly
+that file with `npm publish FILE --access public`, using npm trusted publishing (OIDC)
+with provenance and no stored token. A rerun publishes nothing when `npm view` shows the
+same `integrity` and fails on a version that holds other content. The GitHub Release job
+then attaches `npm-package.json`.
+
+The npmjs.com side is configured by the maintainer, not by the workflow: a trusted
+publisher for `@chrisbanes/cab` (repository `chrisbanes/cab`, workflow `release.yml`,
+environment `npm`), optionally with required reviewers on the `npm` environment. If npm
+needs the package to exist before a trusted publisher can be added, the first version is a
+one-time maintainer bootstrap. No version has been published, and a tag push is the
+publication.
+
 ## Checkout and low-level procedure
 
 `cab service` is the supported route. From a checkout, or to inspect each

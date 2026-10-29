@@ -44,7 +44,13 @@ capability.
 ## npm distribution evidence
 
 The primary release channel is the single `@chrisbanes/cab` npm package
-([ADR-1011](adr/1011-packaging-and-distribution.md)). This evidence is unproved;
+([ADR-1011](adr/1011-packaging-and-distribution.md)). The packed-package contents, the
+no-side-effect install, the staged service lifecycle, package update and removal,
+upgrade, uninstall with reinstall, remote CLI use and the gated publish job have
+automated evidence on local tarballs
+(`test/infrastructure/npm-package.test.ts`, `test/operations/npm-service-lifecycle.test.ts`,
+`test/operations/service-lifecycle.test.ts`, `test/infrastructure/package-release.test.ts`)
+and a bounded live run. The published-package items below stay unproved;
 [#1267](https://github.com/chrisbanes/cab/issues/1267) owns delivery and completion.
 The optional tarball and deferred desktop/Homebrew channel do not gate it.
 

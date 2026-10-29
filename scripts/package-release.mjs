@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Builds and verifies the darwin-arm64 release tarball (ADR-1011); see "Release
-// build" in docs/operations/standalone-macos.md.
+// Builds and verifies the darwin-arm64 release tarball and packs and verifies the npm
+// package (ADR-1011); see "Release build" and "Tagged releases" in
+// docs/operations/standalone-macos.md.
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
@@ -335,7 +336,7 @@ async function freePort() {
   return port;
 }
 
-const fakeCodex = [
+export const fakeCodex = [
   "import { createInterface } from 'node:readline';",
   "const write = (message) => process.stdout.write(JSON.stringify(message) + '\\n');",
   "for await (const line of createInterface({ input: process.stdin })) {",
@@ -421,7 +422,6 @@ async function verify(tarballPath) {
   await checkSums(dirname(tarball), basename(tarball));
   // The space exercises the quoted paths that the install location needs.
   const temp = await mkdtemp(join(realpathSync(tmpdir()), "cab verify-"));
-  let child;
   try {
     const unpacked = join(temp, "release");
     await mkdir(unpacked);
@@ -461,22 +461,45 @@ async function verify(tarballPath) {
     )
       throw new Error("Bundled Node does not match manifest.node.version");
 
-    const home = join(temp, "home");
-    const codexDir = join(temp, "codex-bin");
-    const data = join(temp, "data");
-    const authFile = join(temp, "auth/operator-auth.json");
-    for (const dir of [home, codexDir, dirname(authFile)])
-      await mkdir(dir, { mode: 0o700 });
-    await writeFile(join(codexDir, "fake-codex.mjs"), fakeCodex);
-    await writeFile(
-      join(codexDir, "codex"),
-      `#!/bin/sh\nexec "${node}" "${join(codexDir, "fake-codex.mjs")}" "$@"\n`,
-      { mode: 0o755 },
+    const { origin, asset } = await serveAndCheck({
+      temp,
+      node,
+      root: release,
+      cab: join(release, "bin/cab"),
+      version: manifest.version,
+      isolatedPath: true,
+    });
+    process.stdout.write(
+      `Verified ${name} (${manifest.commit})\nTree digest: ${digest}\nServed ${origin}/app and ${asset}\n`,
     );
-    const env = {
-      PATH: `${codexDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
-      HOME: home,
-    };
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Run the service from `root` on `node` with a generated fake `codex`, check its operator
+ * UI and `cab --version`, and stop it. `isolatedPath` also requires that no `node` is on
+ * the PATH, as for a release that bundles its own.
+ */
+async function serveAndCheck({ temp, node, root, cab, version, isolatedPath }) {
+  const home = join(temp, "home");
+  const codexDir = join(temp, "codex-bin");
+  const data = join(temp, "data");
+  const authFile = join(temp, "auth/operator-auth.json");
+  for (const dir of [home, codexDir, dirname(authFile)])
+    await mkdir(dir, { mode: 0o700 });
+  await writeFile(join(codexDir, "fake-codex.mjs"), fakeCodex);
+  await writeFile(
+    join(codexDir, "codex"),
+    `#!/bin/sh\nexec "${node}" "${join(codexDir, "fake-codex.mjs")}" "$@"\n`,
+    { mode: 0o755 },
+  );
+  const env = {
+    PATH: `${codexDir}${isolatedPath ? "" : `:${dirname(node)}`}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    HOME: home,
+  };
+  if (isolatedPath) {
     const nodeOnPath = await run("/bin/sh", ["-c", "command -v node"], {
       env,
     }).then(
@@ -485,56 +508,193 @@ async function verify(tarballPath) {
     );
     if (nodeOnPath)
       throw new Error("node must not be on the verification PATH");
-    const versionLine = (
-      await run(join(release, "bin/cab"), ["--version"], { env })
-    ).stdout;
-    if (versionLine !== `cab ${manifest.version}\n`)
-      throw new Error(
-        `bin/cab --version printed ${JSON.stringify(versionLine)}`,
-      );
+  }
+  const versionLine = (await run(cab, ["--version"], { env })).stdout;
+  if (versionLine !== `cab ${version}\n`)
+    throw new Error(`cab --version printed ${JSON.stringify(versionLine)}`);
 
-    const password = randomBytes(24).toString("hex");
-    await run(
-      node,
-      [
-        "--input-type=module",
-        "-e",
-        `const { OperatorAuth } = await import(${JSON.stringify(pathToFileURL(join(release, "dist/src/standalone/operator-auth.js")).href)});
+  const password = randomBytes(24).toString("hex");
+  await run(
+    node,
+    [
+      "--input-type=module",
+      "-e",
+      `const { OperatorAuth } = await import(${JSON.stringify(pathToFileURL(join(root, "dist/src/standalone/operator-auth.js")).href)});
 await OperatorAuth.initialize(process.env.AUTH_FILE, process.env.PASSWORD);`,
-      ],
-      { env: { ...env, AUTH_FILE: authFile, PASSWORD: password } },
-    );
-    const port = await freePort();
-    const origin = `http://127.0.0.1:${port}`;
-    child = spawn(
-      node,
-      [
-        join(release, "dist/src/standalone/cli.js"),
-        "operator",
-        data,
-        String(port),
-      ],
-      {
-        env: {
-          ...env,
-          CAB_OPERATOR_AUTH_FILE: authFile,
-          CAB_OPERATOR_ORIGIN: origin,
-        },
-        stdio: ["ignore", "inherit", "inherit"],
+    ],
+    { env: { ...env, AUTH_FILE: authFile, PASSWORD: password } },
+  );
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${port}`;
+  const child = spawn(
+    node,
+    [join(root, "dist/src/standalone/cli.js"), "operator", data, String(port)],
+    {
+      env: {
+        ...env,
+        CAB_OPERATOR_AUTH_FILE: authFile,
+        CAB_OPERATOR_ORIGIN: origin,
       },
-    );
+      stdio: ["ignore", "inherit", "inherit"],
+    },
+  );
+  try {
     const asset = await checkOperatorUi(origin, child, Date.now() + 120_000);
-    process.stdout.write(
-      `Verified ${name} (${manifest.commit})\nTree digest: ${digest}\nServed ${origin}/app and ${asset}\n`,
-    );
+    return { origin, asset };
   } finally {
-    if (child && child.exitCode === null && child.signalCode === null) {
+    if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, "exit");
       child.kill("SIGTERM");
       const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
       await exited;
       clearTimeout(timer);
     }
+  }
+}
+
+const sri = (bytes) =>
+  `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+
+/**
+ * Pack `HEAD` as the npm package: a clean `npm ci` and build of the archived commit, one
+ * `npm pack`, and `npm-package.json`, which records the exact bytes later published.
+ */
+async function packNpm(out) {
+  const sha = await git("rev-parse", "--verify", "HEAD^{commit}");
+  const pkg = JSON.parse(await git("show", `${sha}:package.json`));
+  const output = resolve(out);
+  const work = await mkdtemp(join(realpathSync(tmpdir()), "cab-pack-npm-"));
+  try {
+    const source = join(work, "source");
+    await mkdir(source);
+    await run("git", ["archive", "-o", join(work, "source.tar"), sha]);
+    await run("tar", ["-xf", join(work, "source.tar"), "-C", source]);
+    await mkdir(output, { recursive: true });
+    // Ignore ~/.npmrc like CI (see build).
+    const env = { ...process.env, NPM_CONFIG_USERCONFIG: "/dev/null" };
+    const npm = (script) => [
+      "--yes",
+      "--package",
+      pkg.packageManager,
+      "-c",
+      script,
+    ];
+    await runInherited("npx", npm("npm --version && npm ci && npm run build"), {
+      cwd: source,
+      env,
+    });
+    const packed = await run(
+      "npx",
+      npm(`npm pack --ignore-scripts --json --pack-destination "${output}"`),
+      { cwd: source, env },
+    );
+    // npm 11 prints an array of pack results; npm 12 keys them by package name.
+    const results = JSON.parse(packed.stdout);
+    const [result, ...extra] = Array.isArray(results)
+      ? results
+      : Object.values(results);
+    if (!result || extra.length)
+      throw new Error("npm pack did not report exactly one package");
+    const tarball = join(output, result.filename);
+    const record = {
+      name: result.name,
+      version: result.version,
+      integrity: sri(await readFile(tarball)),
+      shasum: result.shasum,
+      filename: result.filename,
+      commit: sha,
+    };
+    if (record.name !== pkg.name || record.integrity !== result.integrity)
+      throw new Error("npm pack output does not describe the packed file");
+    await writeFile(
+      join(output, "npm-package.json"),
+      `${JSON.stringify(record, null, 2)}\n`,
+    );
+    process.stdout.write(
+      `Packed ${record.name}@${record.version} (${sha})\nPackage: ${tarball}\nIntegrity: ${record.integrity}\n`,
+    );
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Check that `tarball` is the file `npm-package.json` beside it describes, and fail closed
+ * on any difference. Returns the record.
+ */
+export async function checkNpmRecord(tarball) {
+  const path = resolve(tarball);
+  const bytes = await readFile(path);
+  const record = JSON.parse(
+    await readFile(join(dirname(path), "npm-package.json"), "utf8"),
+  );
+  const unpacked = await mkdtemp(
+    join(realpathSync(tmpdir()), "cab-npm-record-"),
+  );
+  try {
+    await run("tar", ["-xzf", path, "-C", unpacked, "package/package.json"]);
+    const pkg = JSON.parse(
+      await readFile(join(unpacked, "package/package.json"), "utf8"),
+    );
+    const problems = [
+      ["integrity", record.integrity, sri(bytes)],
+      ["shasum", record.shasum, createHash("sha1").update(bytes).digest("hex")],
+      ["filename", record.filename, basename(path)],
+      ["name", record.name, pkg.name],
+      ["version", record.version, pkg.version],
+    ].filter(([, recorded, actual]) => recorded !== actual);
+    if (problems.length)
+      throw new Error(
+        `npm-package.json does not describe ${basename(path)}: ${problems.map(([field]) => field).join(", ")}`,
+      );
+    return record;
+  } finally {
+    await rm(unpacked, { recursive: true, force: true });
+  }
+}
+
+/** Install the packed package globally into a temporary prefix and HOME, then serve its UI. */
+async function verifyNpm(tarballPath) {
+  const tarball = resolve(tarballPath);
+  const record = await checkNpmRecord(tarball);
+  const temp = await mkdtemp(join(realpathSync(tmpdir()), "cab verify-npm-"));
+  try {
+    const prefix = join(temp, "prefix");
+    const home = join(temp, "home");
+    await mkdir(home, { mode: 0o700 });
+    await run(
+      "npm",
+      [
+        "install",
+        "--global",
+        "--prefix",
+        prefix,
+        "--prefer-offline",
+        "--no-audit",
+        "--no-fund",
+        tarball,
+      ],
+      {
+        env: { ...process.env, HOME: home, NPM_CONFIG_USERCONFIG: "/dev/null" },
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    const root = join(prefix, "lib/node_modules", record.name);
+    // The install must not have started anything or created service state.
+    if (existsSync(join(home, "Library")))
+      throw new Error("Installing the package created service state");
+    const { origin, asset } = await serveAndCheck({
+      temp,
+      node: realpathSync(process.execPath),
+      root,
+      cab: join(prefix, "bin/cab"),
+      version: record.version,
+      isolatedPath: false,
+    });
+    process.stdout.write(
+      `Verified ${record.name}@${record.version} (${record.commit})\nIntegrity: ${record.integrity}\nServed ${origin}/app and ${asset}\n`,
+    );
+  } finally {
     await rm(temp, { recursive: true, force: true });
   }
 }
@@ -547,12 +707,18 @@ async function cli([command, arg, ...rest]) {
   )
     return build(arg, rest[1]);
   if (command === "verify" && arg && rest.length === 0) return verify(arg);
+  if (command === "pack-npm" && arg === "--out" && rest.length === 1)
+    return packNpm(rest[0]);
+  if (command === "check-npm" && arg && rest.length === 0)
+    return void (await checkNpmRecord(arg));
+  if (command === "verify-npm" && arg && rest.length === 0)
+    return verifyNpm(arg);
   if (command === "check-tag" && arg && rest.length === 0) {
     const pkg = JSON.parse(await readFile("package.json", "utf8"));
     return checkTag(arg, pkg.version);
   }
   throw new Error(
-    "Usage: package-release.mjs build COMMIT [--out DIR] | verify TARBALL | check-tag TAG",
+    "Usage: package-release.mjs build COMMIT [--out DIR] | verify TARBALL | pack-npm --out DIR | verify-npm TGZ | check-npm TGZ | check-tag TAG",
   );
 }
 

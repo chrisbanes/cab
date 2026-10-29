@@ -37,6 +37,18 @@ jobs:
         run: node scripts/package-release.mjs check-tag "$GITHUB_REF_NAME"
       - run: node scripts/package-release.mjs build HEAD --out "$RUNNER_TEMP/release"
       - run: node scripts/package-release.mjs verify "$RUNNER_TEMP"/release/*.tar.gz
+      # The npm package is packed once; the npm job publishes exactly these bytes.
+      - run: node scripts/package-release.mjs pack-npm --out "$RUNNER_TEMP/npm"
+      - run: node scripts/package-release.mjs verify-npm "$RUNNER_TEMP"/npm/*.tgz
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: cab-npm-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/npm/*.tgz
+            ${{ runner.temp }}/npm/npm-package.json
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: cab-release-${{ github.sha }}
@@ -48,8 +60,54 @@ jobs:
           # A re-run of a failed release job uploads the same name again.
           overwrite: true
           if-no-files-found: error
-  release:
+  # Publishes to npm only for a pushed v* tag, after ci and the package job, with npm
+  # trusted publishing (OIDC): no registry token exists in the repository.
+  npm:
     needs: [ci, package]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install --global "$(node -p 'require("./package.json").packageManager')"
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: cab-npm-${{ github.sha }}
+          path: npm
+      - run: |
+          set -euo pipefail
+          tgz=npm/$(node -p 'require("./npm/npm-package.json").filename')
+          node scripts/package-release.mjs check-npm "$tgz"
+          name=$(node -p 'require("./npm/npm-package.json").name')
+          version=$(node -p 'require("./npm/npm-package.json").version')
+          integrity=$(node -p 'require("./npm/npm-package.json").integrity')
+          # A rerun publishes nothing when the registry already holds these exact bytes,
+          # and fails on a version that holds anything else.
+          if published=$(npm view "$name@$version" dist.integrity 2>&1); then
+            if [ "$published" = "$integrity" ]; then
+              echo "$name@$version is already published with this integrity"
+              exit 0
+            fi
+            echo "$name@$version is already published with different content" >&2
+            exit 1
+          elif [[ $published != *E404* ]]; then
+            echo "$published" >&2
+            exit 1
+          fi
+          npm publish "$tgz" --access public
+  release:
+    needs: [ci, package, npm]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -60,6 +118,10 @@ jobs:
         with:
           name: cab-release-${{ github.sha }}
           path: release
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: cab-npm-${{ github.sha }}
+          path: npm
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -67,7 +129,7 @@ jobs:
           set -euo pipefail
           # gh creates a draft, uploads and then publishes, so a failed run can leave a
           # draft behind; a rerun completes that draft but never replaces a published release.
-          files=(release/*.tar.gz release/SHA256SUMS release/manifest.json)
+          files=(release/*.tar.gz release/SHA256SUMS release/manifest.json npm/npm-package.json)
           if out=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>&1); then
             if [ "$out" != true ]; then
               echo "Release $GITHUB_REF_NAME is already published" >&2

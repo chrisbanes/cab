@@ -63,9 +63,20 @@ migrate a database or delete operator data.
 The service must run from stable versioned files, with an explicit supported
 Node runtime binding. A global npm update or uninstall must not replace or remove
 files used by the running service. Service installation and upgrade own that
-binding; package replacement alone is not a completed service upgrade. The npm
-staging mechanism, runtime requirements and exact upgrade commands need
-implementation and qualification before being documented as supported operations.
+binding; package replacement alone is not a completed service upgrade.
+
+`cab service install`, run from a global npm installation, copies the package (production
+`node_modules`, `dist/src`, `dist/operator`, `package.json`, without the Claude Agent
+SDK's platform packages) into `STATE/versions/<version>` through the tarball's staging
+directory and records its `cab-tree-sha256/v1` digest in a `cab.npm-stage/v1`
+manifest. The install record binds an explicit Node.js: the one running the CLI or
+`--node PATH`, resolved to its real path and required to be an even-numbered
+(LTS) release at or above `engines.node`, validated before anything stops, and never
+looked up on `PATH` again. A removed Node.js (an nvm version, a Homebrew cellar) stops the
+service from starting until `cab service upgrade --node PATH` re-binds it. The upgrade
+sequence is `npm install -g @chrisbanes/cab@<version>` then
+`cab service upgrade [--connection NAME]`, which stages the running package before it
+stops the job. The tarball's bundled-Node channel is unchanged.
 
 Data, auth and snapshots stay under `~/Library/Application Support/cab/`, logs
 under `~/Library/Logs/cab/`, separate from the npm installation and development
@@ -110,10 +121,14 @@ return path to the Haze prototype controller.
 
 ## Implementation state
 
-The package is named `@chrisbanes/cab` and remains marked private. The current
-release builder and tagged workflow produce the bundled-Node tarball; npm
-publishing and npm-based service installation/upgrade are not implemented or
-qualified. The service takes and verifies the pre-migration snapshot
+The package is named `@chrisbanes/cab`. The tagged workflow produces the bundled-Node
+tarball and, in an `npm` job that runs only for a pushed `v*` tag after CI and the package
+job, publishes the exact packed `.tgz` through npm trusted publishing (OIDC, no stored
+token), recording its integrity in `npm-package.json`. npm-based service
+installation and upgrade, and that job, are implemented and automatically tested. No
+version has been published: that needs the npm-side trusted-publisher configuration
+and a tag push owned by [#1328](https://github.com/chrisbanes/cab/issues/1328), and
+the lifecycle is not qualified on a published package. The service takes and verifies the pre-migration snapshot
 on start, in either service mode, and `service upgrade` takes none of its own.
 The package version is the release identity: a database whose recorded release
 (`startup-state.json` in the data directory) is older than the running release, or

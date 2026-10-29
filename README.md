@@ -218,9 +218,11 @@ each acceptance scenario to its evidence and disposition.
   GitHub Release ([standalone operations](docs/operations/standalone-macos.md#release-build));
   this channel is not yet release-qualified. The primary first-release target is
   `npm install -g @chrisbanes/cab`: one package containing the server, web UI and
-  `cab` commands, with Node installed separately. npm publishing and its service
-  install/upgrade lifecycle are not implemented or qualified
-  ([ADR-1011](docs/adr/1011-packaging-and-distribution.md),
+  `cab` commands, with Node installed separately. `cab service install` and
+  `cab service upgrade` stage the installed package and bind a Node.js, and a
+  tag-gated workflow job publishes the package; both are implemented and tested
+  locally, but no version is published and the lifecycle is not qualified on a
+  published package ([ADR-1011](docs/adr/1011-packaging-and-distribution.md),
   [#1267](https://github.com/chrisbanes/cab/issues/1267)). The tarball is optional;
   the desktop app and Homebrew channel are deferred under
   [#1265](https://github.com/chrisbanes/cab/issues/1265).
