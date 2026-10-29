@@ -187,7 +187,11 @@ export async function verifyCheckout(
     };
   } catch (error) {
     return error instanceof RepositoryVerificationError
-      ? { state: "rejected", reason: error.reason, origin: error.actual }
+      ? {
+          state: "rejected",
+          reason: error.reason,
+          origin: error.actual?.slice(0, 201) ?? null,
+        }
       : { state: "rejected", reason: "unreadable", origin: null };
   }
 }

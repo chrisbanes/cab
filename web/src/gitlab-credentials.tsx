@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { z } from "zod";
+import { gitLabHostSchema } from "../../src/core/repository-links.js";
 import { codeHostCredentialsSchema } from "../../src/operator/contracts.js";
 import { Button } from "./components.js";
 import { useOperatorResource } from "./resource.js";
@@ -20,8 +21,6 @@ type Credential = z.infer<
 >["data"]["credentials"][number];
 
 const envName = /^[A-Z][A-Z0-9_]*$/;
-const hostName =
-  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const blank = (host = "") => ({ host, source: "glab", name: "", key: key() });
 
 const reasonCopy: Record<
@@ -83,7 +82,7 @@ export function GitLabCredentialsSection(p: SettingsProps) {
   const source = d.values.source === "env" ? "env" : "glab";
   const name = String(d.values.name ?? "").trim();
   const errors = {
-    ...(editing === "" && (!hostName.test(host) || host === "github.com")
+    ...(editing === "" && !gitLabHostSchema.safeParse(host).success
       ? { host: "Enter the GitLab host, such as gitlab.example.com." }
       : {}),
     ...(source === "env" && !envName.test(name)

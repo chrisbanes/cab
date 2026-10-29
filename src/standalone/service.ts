@@ -1228,14 +1228,19 @@ export class StandaloneService {
           environment: ghEnvironment(domain, { reference: "gh:github.com" }),
         });
       // Likewise each configured glab host, so its value is excluded from the spawn snapshot.
-      for (const { host, credentialRef } of domain.codeHostCredentials())
-        if (credentialRef === `glab:${host}`)
-          await glabToken(host, {
-            executable: this.options.glabExecutable,
-            environment: glabEnvironment(domain),
-          });
+      await Promise.all(
+        domain
+          .codeHostCredentials()
+          .filter(({ host, credentialRef }) => credentialRef === `glab:${host}`)
+          .map(({ host }) =>
+            glabToken(host, {
+              executable: this.options.glabExecutable,
+              environment: glabEnvironment(domain),
+            }),
+          ),
+      );
       const githubExcluded = () => providerCredentialExclusions(domain);
-      // Helper children exclude configured delivery, Claude and GitHub credentials.
+      // Helper children exclude configured delivery, Claude, GitHub and GitLab credentials.
       setChildCredentialExclusions(() => {
         const claude = claudeTokenExcluded(),
           github = githubExcluded();

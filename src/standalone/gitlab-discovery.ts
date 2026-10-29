@@ -20,13 +20,13 @@ export class GitLabDiscoveryFailure extends Error {
 
 const maxPages = 10;
 const userSchema = z.object({ username: z.string().min(1).max(255) });
-const projectPage = z.array(
-  z.object({
-    id: z.number().int().positive(),
-    path_with_namespace: z.string().refine(isGitLabProjectPath),
-    default_branch: z.string().min(1).max(255).nullish(),
-  }),
-);
+// Items are validated one by one, so a single odd project is skipped, not the whole page.
+const projectPage = z.array(z.unknown()).max(100);
+const projectItem = z.object({
+  id: z.number().int().positive(),
+  path_with_namespace: z.string().refine(isGitLabProjectPath),
+  default_branch: z.string().min(1).max(255),
+});
 
 /** Read-only GitLab account and project reads for one host. Nothing it returns is stored. */
 export class GitLabDiscoveryReader {
@@ -112,13 +112,15 @@ export class GitLabDiscoveryReader {
         `/projects?membership=true&simple=true&archived=false&order_by=path&sort=asc&per_page=100&page=${page}`,
         projectPage,
       );
-      for (const p of result.value) {
-        const repositoryId = gitLabRepositoryId.safeParse(String(p.id));
-        if (!p.default_branch || !repositoryId.success) continue;
+      for (const item of result.value) {
+        // A project with no default branch (empty repository) can't be linked.
+        const p = projectItem.safeParse(item);
+        const repositoryId = gitLabRepositoryId.safeParse(String(p.data?.id));
+        if (!p.success || !repositoryId.success) continue;
         projects.push({
           repositoryId: repositoryId.data,
-          projectPath: p.path_with_namespace,
-          defaultBranch: p.default_branch,
+          projectPath: p.data.path_with_namespace,
+          defaultBranch: p.data.default_branch,
         });
       }
       page = result.next;

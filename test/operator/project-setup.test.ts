@@ -226,7 +226,7 @@ test("guided create records GitLab and GitHub links together atomically", async 
         ],
       }),
     ),
-    (e) => e instanceof Error,
+    (e) => e instanceof Error && /Repositor/.test(JSON.stringify(e)),
   );
   assert.deepEqual(counts(), before);
   // A GitLab-only project records no GitHub source credential.

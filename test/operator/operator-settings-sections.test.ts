@@ -15,6 +15,7 @@ const designed = [
   "profiles",
   "routing",
   "github-discovery",
+  "gitlab-credentials",
   "cli-credentials",
   "notifications",
   "readiness",
@@ -28,6 +29,7 @@ test("first run orders Readiness first and established installs keep the designe
     "profiles",
     "routing",
     "github-discovery",
+    "gitlab-credentials",
     "cli-credentials",
     "notifications",
   ]);

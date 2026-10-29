@@ -35,13 +35,12 @@ const reasonOf = (error: unknown): GitLabCredentialReason =>
 async function resolve(
   domain: Domain,
   seams: GitLabSeams,
-  ref: string,
+  { host, credentialRef: ref }: { host: string; credentialRef: string },
 ): Promise<{ token: string } | { reason: GitLabCredentialReason }> {
   if (ref.startsWith("env:")) {
     const token = process.env[ref.slice(4)];
     return token ? { token } : { reason: "missing-credential" };
   }
-  const host = ref.slice("glab:".length);
   const result = await glabToken(host, {
     executable: seams.glabExecutable,
     environment: glabEnvironment(domain),
@@ -56,7 +55,7 @@ const overridden = (domain: Domain, ref: string) =>
 
 /**
  * Whether the configured GitLab credentials resolve and whether a `glab` login is shadowed by
- * a token variable. Local only: no GitLab request, so an unreachable host cannot stall it.
+ * a token variable. No cab request to GitLab; glab itself may contact the host, within its time limit.
  */
 export async function gitLabCredentialLocalState(
   domain: Domain,
@@ -64,7 +63,7 @@ export async function gitLabCredentialLocalState(
 ): Promise<{ configured: boolean; unusable: boolean; overridden: boolean }> {
   const credentials = domain.codeHostCredentials();
   const resolved = await Promise.all(
-    credentials.map((c) => resolve(domain, seams, c.credentialRef)),
+    credentials.map((c) => resolve(domain, seams, c)),
   );
   return {
     configured: credentials.length > 0,
@@ -88,7 +87,7 @@ export async function readCodeHostCredentials(
           : ("env" as const),
         glabOverridden: overridden(domain, c.credentialRef),
       };
-      const resolved = await resolve(domain, seams, c.credentialRef);
+      const resolved = await resolve(domain, seams, c);
       if ("reason" in resolved)
         return {
           ...base,
@@ -154,7 +153,10 @@ export async function readGitLabProjects(
     let current: Read;
     if (!ref) current = unavailable("unconfigured");
     else {
-      const resolved = await resolve(domain, seams, ref);
+      const resolved = await resolve(domain, seams, {
+        host,
+        credentialRef: ref,
+      });
       if ("reason" in resolved) current = unavailable(resolved.reason);
       else
         try {

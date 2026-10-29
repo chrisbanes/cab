@@ -51,7 +51,7 @@ export type ReadinessDeps = {
   /** Re-runs the running App Server's authentication initialization; no model turn. */
   codexLogin: () => Promise<"verified" | "policy" | "failed" | "unavailable">;
   discovery: () => Promise<Discovery>;
-  /** Local state of the configured GitLab credentials; makes no GitLab request. */
+  /** Local state of the configured GitLab credentials; cab makes no GitLab request (glab may, within its time limit). */
   gitLabCredentials: () => Promise<{
     configured: boolean;
     unusable: boolean;
@@ -172,8 +172,8 @@ function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
 const versionToken = /^\d{1,4}\.\d{1,4}\.\d{1,6}[0-9A-Za-z.+-]{0,32}$/;
 
 /**
- * Nine read-only readiness checks. Nothing here writes, spawns a model turn or caches; each
- * `read()` runs fresh, and the only spawn is the bounded `claude --version` probe. Reasons and
+ * Read-only readiness checks. Nothing here writes, spawns a model turn or caches; each
+ * `read()` runs fresh, and the only spawns are the bounded `claude --version` probe and `glab` for a `glab:` credential. Reasons and
  * fixes are literals, never a caught error or a path; the one dynamic string is the version
  * that probe printed, which is shown and never compared.
  */

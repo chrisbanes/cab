@@ -22,6 +22,7 @@ const sections = [
   ["Profiles", "profiles", "Profiles"],
   ["Routing", "routing", "Routing"],
   ["GitHub discovery", "github-discovery", "GitHub discovery"],
+  ["GitLab credentials", "gitlab-credentials", "GitLab credentials"],
   ["CLI credentials", "cli-credentials", "CLI credentials"],
   ["Notifications", "notifications", "Notifications"],
   ["Readiness", "readiness", "Readiness"],
