@@ -106,6 +106,8 @@ was corrected to `/probe` only. Details quoted from the CLI, such as the
 `Agent is disabled` error and the sandbox's `operation not permitted` and network
 denial text, come from the session transcripts in the disposable config directory.
 The trace holds message shapes, exit codes and facet observations, not tool output.
+The facet conditions for F1.1 and F3.2 were tightened after the run; the recorded
+observations meet the tightened conditions, so no disposition changed.
 
 Harness findings during the run:
 

@@ -502,8 +502,14 @@ async function q3(ctx) {
     strayRequests: strays,
   };
   const subBashCalls = sub.filter((item) => item.tool_name === "Bash").length;
-  const f32 =
-    !netObservation.bashInsideExists || subBashCalls < 4
+  const f32 = netObservation.sandboxEscapeExists
+    ? verdict(
+        "F3.2",
+        FAILURE,
+        netObservation,
+        "the subagent's Bash escaped the sandbox",
+      )
+    : !netObservation.bashInsideExists || subBashCalls < 4
       ? untested(
           "F3.2",
           "the subagent's control Bash write or one of its four Bash commands did not run",
@@ -516,8 +522,7 @@ async function q3(ctx) {
             "the subagent did not run both curl commands",
             netObservation,
           )
-        : netObservation.sandboxEscapeExists ||
-            hits > 0 ||
+        : hits > 0 ||
             netObservation.loopbackCurlExit === "0" ||
             netObservation.externalCurlExit === "0"
           ? verdict(
