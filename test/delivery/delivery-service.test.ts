@@ -964,7 +964,7 @@ test("a delivery action naming a GitLab link is refused and nothing is pushed", 
     mode: "reviewable-pr",
     credentialRef: null,
     grants: ["R1", "4242"].flatMap((repositoryId) =>
-      (["issue.comment", "branch.push"] as const).map((action) => ({
+      (["issue.comment", "branch.push", "pr.ready"] as const).map((action) => ({
         action,
         repositoryId,
         mode: "allow" as const,
@@ -1082,18 +1082,27 @@ test("a delivery action naming a GitLab link is refused and nothing is pushed", 
       authorize: () => {},
       approved: () => true,
     });
-    const comment = await branchOnly.submit(
+    const refusedPr = await branchOnly.submit(
       {
         operationId: randomUUID(),
         action: {
-          kind: "issue.comment",
-          target: { repositoryId: "4242", number: 1, nodeId: "I1" },
-          body: "B",
+          kind: "pr.ready",
+          target: {
+            repositoryId: "4242",
+            nodeId: "P1",
+            number: 7,
+            baseRef: "main",
+            headRef: "cab/branch",
+            expectedHeadSha: "a".repeat(40),
+          },
         },
       },
       caller,
     );
-    assert.equal(comment.observation?.reason, "code-host-delivery-unavailable");
+    assert.equal(
+      refusedPr.observation?.reason,
+      "code-host-delivery-unavailable",
+    );
     assert.deepEqual(seen, []);
     const branch = await branchOnly.submit(
       {
