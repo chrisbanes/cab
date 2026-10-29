@@ -53,8 +53,8 @@ export type GitRunResult =
 /**
  * Run one Git child with the hardened environment and bounded time and output. Only the
  * spawned child is signalled (SIGTERM, then SIGKILL after the grace); a child whose exit is
- * not observed within the window is reported with `childExitObserved: false`, never as
- * settled. Never rejects.
+ * not observed within the window and one further event-loop pass is reported with
+ * `childExitObserved: false`, never as settled. Never rejects.
  */
 export function runGit(options: GitRunOptions): Promise<GitRunResult> {
   const { signal } = options;
@@ -163,7 +163,11 @@ export function runGit(options: GitRunOptions): Promise<GitRunResult> {
 
     const beginObservation = () => {
       if (observationTimer || settled) return;
-      observationTimer = setTimeout(finishFailure, options.observationMs);
+      // One more loop pass lets the poll phase deliver an exit already queued behind a stall.
+      observationTimer = setTimeout(
+        () => setImmediate(finishFailure),
+        options.observationMs,
+      );
     };
 
     const sendTerm = () => {

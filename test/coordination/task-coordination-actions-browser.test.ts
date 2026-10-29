@@ -351,15 +351,28 @@ test("a check settles as refused only on a definite refusal, and a new session s
       route.fulfill({
         status,
         contentType: "application/json",
-        body: JSON.stringify({ error: { code } }),
+        // A valid API error, so the outcome's Details carry this code rather than a parse failure's.
+        body: JSON.stringify({ error: { code, message: code } }),
       }),
     );
-    await check(assignment).click();
-    await page.waitForResponse(
-      (r) =>
-        r.url().endsWith("/api/operator/commands") && r.status() === status,
+    const before = commands.length;
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.url().endsWith("/api/operator/commands") && r.status() === status,
+      ),
+      check(assignment).click(),
+    ]);
+    assert.equal(
+      commands.length,
+      before + 1,
+      `the ${status} check sent exactly one request`,
     );
-    await check(assignment).waitFor();
+    // The check button stays while a send is in flight; the outcome's code shows it settled.
+    await assignment
+      .locator(".action-outcome-fields dd")
+      .filter({ hasText: new RegExp(`^${code}$`) })
+      .waitFor({ state: "attached" });
   }
   assert.deepEqual(
     new Set(commands.map((c) => c.key)).size,

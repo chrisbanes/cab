@@ -202,7 +202,8 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   // 5. That address selects the request.
   await page.goto(web.origin + link);
   const detail = page.getByRole("region", { name: "Selected request" });
-  await detail.waitFor();
+  // The selected-request shell mounts while its question read is still pending.
+  await detail.getByRole("heading", { name: "Explain", exact: true }).waitFor();
   assert.ok(
     (await detail.innerText()).includes("Explain"),
     "the question's form is shown",
@@ -218,13 +219,9 @@ test("notifications: turn on, test, deep links through sign-in, turn off and rev
   await page.getByLabel("Password").waitFor();
   assert.equal(page.url(), web.origin + link);
   await signInAgain(page, web.password);
-  await page.getByRole("region", { name: "Selected request" }).waitFor();
+  await detail.getByRole("heading", { name: "Explain", exact: true }).waitFor();
   assert.equal(page.url(), web.origin + link);
-  assert.ok(
-    (
-      await page.getByRole("region", { name: "Selected request" }).innerText()
-    ).includes("Explain"),
-  );
+  assert.ok((await detail.innerText()).includes("Explain"));
 
   // 7. An exhausted runtime is one push to its own link, opened after sign-in.
   await exhaustion.exhaust(f.runtime);

@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { controlledGit } from "../fixtures/controlled-git.js";
@@ -452,20 +453,39 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
       );
     assert.ok(readyEvent?.atMs !== undefined);
 
+    const loopDelay = monitorEventLoopDelay({ resolution: 10 });
+    loopDelay.enable();
     const stopStartedAt = Date.now();
     await service.stop();
-    const stopElapsedMs = Date.now() - (readyEvent.atMs ?? stopStartedAt);
-    assert.ok(
-      stopElapsedMs < 20 + 40 + 700,
-      `stop settled in ${stopElapsedMs}ms`,
+    const stopSettledAt = Date.now();
+    loopDelay.disable();
+    const readyAt = readyEvent.atMs ?? stopStartedAt;
+    const stopElapsedMs = stopSettledAt - readyAt;
+    const cancelled = failures.filter(
+      ({ operation, kind }) =>
+        operation === "repository-identity" && kind === "cancelled",
     );
+    const termEvent = controlled
+      .events()
+      .find(({ event, pid }) => event === "term" && pid === readyEvent.pid);
+    // Emitted before any assertion, so a failing run still prints its timing.
     t.diagnostic(
       `bounded-git-stop-evidence ${JSON.stringify({
         readyToStopSettledMs: stopElapsedMs,
+        readyToStopStartMs: stopStartedAt - readyAt,
+        stopDurationMs: stopSettledAt - stopStartedAt,
+        readyToTermMs:
+          termEvent?.atMs === undefined ? null : termEvent.atMs - readyAt,
+        maxLoopDelayMs: Math.round(loopDelay.max / 1e6),
+        failureCount: failures.length,
         termGraceMs: 20,
         observationMs: 40,
-        childExitSignal: failures.at(-1)?.childExitSignal,
+        childExitSignal: cancelled[0]?.childExitSignal,
       })}`,
+    );
+    assert.ok(
+      stopElapsedMs < 20 + 40 + 700,
+      `stop settled in ${stopElapsedMs}ms`,
     );
     const submission = await pendingSubmission;
     assert.equal(submission.outcome, "rejected");
@@ -474,12 +494,14 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
         String(submission.error),
         /Turn request is queued until its task workspace is ready/,
       );
-    assert.deepEqual(failures.at(-1), {
-      operation: "repository-identity",
-      kind: "cancelled",
-      childExitObserved: true,
-      childExitSignal: "SIGKILL",
-    });
+    assert.deepEqual(cancelled, [
+      {
+        operation: "repository-identity",
+        kind: "cancelled",
+        childExitObserved: true,
+        childExitSignal: "SIGKILL",
+      },
+    ]);
 
     const database = new DatabaseSync(join(root, "data", "standalone.sqlite"));
     const stored = database
