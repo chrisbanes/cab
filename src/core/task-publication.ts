@@ -178,12 +178,16 @@ export class TaskPublicationStore {
     const projectId = String(task.projectId),
       source = this.db
         .prepare(
-          "SELECT selections,readiness FROM project_task_sources WHERE projectId=?",
+          "SELECT provider,selections,readiness FROM project_task_sources WHERE projectId=?",
         )
         .get(projectId) as Row | undefined,
-      selections = source
-        ? z.array(selectionSchema).parse(JSON.parse(String(source.selections)))
-        : [],
+      jira = source !== undefined && source.provider !== "github",
+      selections =
+        source && !jira
+          ? z
+              .array(selectionSchema)
+              .parse(JSON.parse(String(source.selections)))
+          : [],
       readiness = source
         ? readinessSchema.nullable().parse(JSON.parse(String(source.readiness)))
         : null,
@@ -207,11 +211,7 @@ export class TaskPublicationStore {
         "SELECT 1 FROM task_publications WHERE taskId=? AND state='sending'",
       )
       .get(taskId);
-    const reasonCode: PublicationReasonCode | null = this.db
-      .prepare(
-        "SELECT 1 FROM project_task_sources WHERE projectId=? AND provider<>'github'",
-      )
-      .get(projectId)
+    const reasonCode: PublicationReasonCode | null = jira
       ? "issue-tracker-unsupported"
       : task.imported
         ? "task-imported"
