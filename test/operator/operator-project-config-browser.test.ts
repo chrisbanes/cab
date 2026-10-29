@@ -2932,6 +2932,27 @@ test("a readiness Project-field condition is picked by name and saves the same n
   );
 });
 
+test("saving a Project-field condition with no option checked focuses its first option", async (_t, journey) => {
+  const { page } = await startDiscovery(journey, { calls: [] });
+  await addProjectFieldCondition(page);
+  await page
+    .getByLabel("Readiness Project", { exact: true })
+    .selectOption({ label: "Atlas roadmap" });
+  await page
+    .getByLabel("Readiness field", { exact: true })
+    .selectOption({ label: "Status" });
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  const first = page.getByRole("checkbox", { name: "Todo", exact: true });
+  await first.waitFor();
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("aria-invalid") === "true" &&
+      document.activeElement.getAttribute("aria-describedby") ===
+        "source-conditions-error",
+  );
+  assert.equal(await first.evaluate((e) => e === document.activeElement), true);
+});
+
 test("a Project source lists each option's open items without add buttons, and a saved set reads by name with an unlisted option kept", async (t, journey) => {
   const previous = process.env.FIXTURE_GITHUB;
   process.env.FIXTURE_GITHUB = "offline-readiness-source-value";

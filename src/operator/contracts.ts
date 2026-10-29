@@ -937,13 +937,16 @@ const sourceClosure = z.enum(["held", "completed", "unattributed"]).nullable();
 const fieldNameShape = {
   fieldName: text.optional(),
   optionName: text.optional(),
-  optionNames: z.record(z.string().max(512), text).optional(),
 };
 const [labelCondition, projectFieldCondition] =
   readinessConditionSchema.options;
 const readinessConditionViewSchema = z.discriminatedUnion("kind", [
   labelCondition,
-  projectFieldCondition.extend(fieldNameShape),
+  // A condition names its options by node ID; the read lists the names it knows.
+  projectFieldCondition.extend({
+    fieldName: fieldNameShape.fieldName,
+    optionNames: z.record(z.string().max(512), text).optional(),
+  }),
 ]);
 /**
  * A project's readiness rule as a read may show it: `none` only for a stored null rule
@@ -969,12 +972,7 @@ export function readinessCommandValue(
     mode: rule.mode,
     conditions: rule.conditions.map((c) => {
       if (c.kind === "label") return c;
-      const {
-        fieldName: _field,
-        optionName: _option,
-        optionNames: _options,
-        ...ids
-      } = c;
+      const { fieldName: _field, optionNames: _options, ...ids } = c;
       return ids;
     }),
   };

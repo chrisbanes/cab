@@ -312,6 +312,34 @@ test("publication writes the first option of an in condition, nothing for lacks,
   );
 });
 
+test("a Draft task is refused where a bare new issue would satisfy the rule through a lacks condition", async (t) => {
+  const lacks = {
+    kind: "label" as const,
+    operator: "lacks" as const,
+    name: "blocked",
+  };
+  const has = { ...lacks, operator: "has" as const, name: "ready" };
+  const reason = async (readiness: Readiness, ready: boolean) => {
+    const f = await publicationFixture({ readiness });
+    t.after(() => f.close());
+    return f.target(f.task(ready), "repo").reasonCode;
+  };
+  assert.equal(
+    await reason({ mode: "all", conditions: [lacks] }, false),
+    "would-become-ready",
+  );
+  assert.equal(
+    await reason({ mode: "any", conditions: [has, lacks] }, false),
+    "would-become-ready",
+  );
+  assert.equal(
+    await reason({ mode: "all", conditions: [has, lacks] }, false),
+    null,
+  );
+  // A Ready task is not made Ready by publication, so the same rule is fine for it.
+  assert.equal(await reason({ mode: "all", conditions: [lacks] }, true), null);
+});
+
 test("an unknown create outcome holds the task, never resends, and a racing sync imports no duplicate", async (t) => {
   const f = await publicationFixture();
   t.after(() => f.close());

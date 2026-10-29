@@ -452,10 +452,7 @@ export function ProjectFieldPicker(p: {
       )}
       {operator}
       {field && (
-        <fieldset
-          className="settings-rows"
-          aria-invalid={p.invalid("optionNodeIds")}
-        >
+        <fieldset className="settings-rows">
           <legend className="body">Readiness options</legend>
           {[
             ...(field.options ?? []),
@@ -473,6 +470,13 @@ export function ProjectFieldPicker(p: {
                 id={`source-conditions-${p.index}-option-${n}`}
                 type="checkbox"
                 className="native-check size-5 shrink-0 p-0 accent-foreground"
+                // A fieldset cannot take focus, so the first option carries the row's error.
+                aria-invalid={n === 0 && p.invalid("optionNodeIds")}
+                aria-describedby={
+                  n === 0 && p.invalid("optionNodeIds")
+                    ? "source-conditions-error"
+                    : undefined
+                }
                 checked={optionNodeIds.includes(o.optionNodeId)}
                 onChange={(e) =>
                   p.onChange({

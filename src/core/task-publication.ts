@@ -11,6 +11,7 @@ import {
 } from "./delivery.js";
 import { DomainConflictError } from "./domain-errors.js";
 import {
+  evaluateReadiness,
   type Readiness,
   readinessSchema,
   selectionSchema,
@@ -280,8 +281,11 @@ export class TaskPublicationStore {
           ) &&
           "no-field-grant",
         ready && !satisfiable && "readiness-unsatisfiable",
-        // A null rule is satisfied by any member, so a Draft task would be Ready on import.
-        !ready && readiness === null && "would-become-ready",
+        // A new issue has no labels and a new item no field values: a rule that holds for it (no
+        // rule, or one a `lacks` condition satisfies) would make a Draft task Ready on import.
+        !ready &&
+          evaluateReadiness(readiness, { labels: [], fields: [] }).satisfied &&
+          "would-become-ready",
       ];
       const reasonCodeOfTarget = reasons.find((r) => r !== false) ?? null;
       targets.push(
