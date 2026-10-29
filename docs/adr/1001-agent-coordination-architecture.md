@@ -1,6 +1,6 @@
 ---
 status: accepted
-partially_superseded_by: [ADR-1003, ADR-1004, ADR-1005]
+partially_superseded_by: [ADR-1003, ADR-1004, ADR-1005, ADR-1020]
 ---
 
 # Build cab around agent coordination
@@ -69,7 +69,7 @@ projects must not create competing execution owners or combine permissions.
 Provide a GitHub task-source integration supporting repository issues from linked
 repositories and issues selected through GitHub Projects. Initially exclude pull requests and
 draft items from task discovery. Task discovery does not grant access to additional
-repositories. Jira and Linear integrations are deferred. Relevant events wake
+repositories. Linear integration is deferred; Jira Cloud is accepted in ADR-1020. Relevant events wake
 agents, with periodic reconciliation to catch missed changes.
 
 GitHub discovery imports the selected backlog, with readiness evaluated separately

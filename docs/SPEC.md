@@ -45,9 +45,12 @@ select permitted profiles but cannot create profiles or expand project authority
 
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
-items; readiness is separate. Jira, Linear, GitHub Enterprise, a plugin marketplace,
-multiple execution machines, team/RBAC administration and migration of old live
-runs are outside the first release. Source interfaces follow concrete integrations.
+items; readiness is separate. Jira Cloud as an issue tracker and GitLab, including
+self-managed instances, as a code host are planned and not implemented
+([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
+a plugin marketplace, multiple execution machines, team/RBAC administration and
+migration of old live runs are outside the first release. Source interfaces follow
+concrete integrations.
 
 ## Operator CLI
 

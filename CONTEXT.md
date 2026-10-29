@@ -68,6 +68,27 @@ _Avoid_: Paused when referring to an externally closed task
 A project-scoped origin of tasks: built-in local creation or a configured external source supplied by a plugin.
 _Avoid_: Project when referring to a source such as a GitHub Project
 
+**Issue tracker**:
+An external system that holds work items a task source imports and cab
+writes progress, status and closure back to, such as GitHub Issues or Jira.
+_Avoid_: Source when referring to the external system rather than the project's task source
+
+**Code host**:
+An external system that hosts a linked repository's remote, receives task
+branches and reviews change requests, such as GitHub or a GitLab instance.
+_Avoid_: Forge, Git provider
+
+**Repository link**:
+A project's binding of a local checkout and base ref to one repository on a code
+host. It belongs to the project, independently of any task source, and grants
+access only to that repository.
+_Avoid_: Source repository when referring to a project's linked repository
+
+**Change request**:
+A code host's request to merge a task branch into its base: a GitHub pull request
+or a GitLab merge request.
+_Avoid_: PR or MR when not referring to a specific code host
+
 **External reference**:
 The stable identity of a task's corresponding item in an external system, independent of which sources discover it.
 _Avoid_: Source configuration when referring to external task identity
@@ -166,13 +187,13 @@ _Avoid_: Conversation when referring to a task's working files
 
 **Task branch**:
 The one branch cab assigns a task in each repository and pushes its commits
-to; agents cannot choose or push it. A PR created for the task uses it as its head.
+to; agents cannot choose or push it. A change request for the task uses it as its head.
 A remote head on it that cab did not push is an outside change.
 _Avoid_: Head branch when meaning the assigned, cab-published branch
 
 **Outside change**:
 A task branch head that cab did not push, or a deleted branch, seen at a push or
-on the task's PR. Plain pushes are refused and completion held until the lead recovers
+on the task's change request. Plain pushes are refused and completion held until the lead recovers
 the branch, with the operator's approval, by overwriting the outside head or adopting it.
 _Avoid_: Outside push
 
@@ -195,7 +216,7 @@ _Avoid_: Workspace snapshot when referring only to result-linked evidence
 
 **Code review**:
 A batch of operator line comments and an optional summary sent together to a
-task's accountable project lead. It is local feedback, not a GitHub review or
+task's accountable project lead. It is local feedback, not a code host review or
 an approval or completion decision.
 _Avoid_: Approval when referring to submitted review feedback
 
@@ -205,9 +226,9 @@ that a review comment addresses. Later file changes do not move the anchor.
 _Avoid_: Current line number when referring to historical reviewed content
 
 **Local review**:
-A code review composed and sent inside cab, with no GitHub involvement.
+A code review composed and sent inside cab, with no code host involvement.
 It is delivered to the accountable project lead as one operator message.
-_Avoid_: Pull request review
+_Avoid_: Change request review
 
 **Review draft**:
 The unsent summary, comments and anchor groups an operator session is composing
