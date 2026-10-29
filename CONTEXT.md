@@ -33,6 +33,11 @@ _Avoid_: Board or GitHub Project when referring to the cab container
 A piece of work belonging to one project, created locally or linked to an external item.
 _Avoid_: Issue when referring to work independently of its external provider
 
+**Readiness condition**:
+One test of a project's readiness rule: a label the issue has or lacks, or a Project field whose
+value is in or not in a set of options. A rule is a flat all/any list of them.
+_Avoid_: Readiness filter
+
 **Task dependency**:
 A directed relationship in which a task's work depends on another task or an
 external work item. It is distinct from readiness, source membership, and

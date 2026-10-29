@@ -129,7 +129,10 @@ export async function seedSettingsWorld(f: Fixture) {
         filter: "PRIVATE FILTER",
       },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   await run({
     type: "repositories.configure",

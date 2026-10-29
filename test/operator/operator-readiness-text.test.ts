@@ -6,19 +6,25 @@ import {
   zeroMatchWarning,
 } from "../../src/operator/readiness-text.js";
 
-const label = (name: string) => ({ kind: "label" as const, name });
+const label = (name: string, operator: "has" | "lacks" = "has") => ({
+  kind: "label" as const,
+  operator,
+  name,
+});
 const field: {
   kind: "project-field";
   projectNodeId: string;
   fieldNodeId: string;
-  optionNodeId: string;
+  operator: "in" | "not-in";
+  optionNodeIds: string[];
   fieldName?: string;
-  optionName?: string;
+  optionNames?: Record<string, string>;
 } = {
   kind: "project-field",
   projectNodeId: "P_1",
   fieldNodeId: "F_1",
-  optionNodeId: "O_1",
+  operator: "in",
+  optionNodeIds: ["O_1"],
 };
 const rule = (
   mode: "all" | "any",
@@ -107,7 +113,7 @@ test("unmet reasons name the missing conditions and stay silent otherwise", () =
       outcome: "unmet",
       unmet: [label("ready")],
     }),
-    "Not Ready: missing label `ready`",
+    "Not Ready: needs label `ready`",
   );
   assert.equal(
     unmetReason({
@@ -130,10 +136,14 @@ test("unmet reasons name the missing conditions and stay silent otherwise", () =
 });
 
 test("a Project field condition reads by its names, falling back to the node ID each lacks", () => {
-  const named = { ...field, fieldName: "Status", optionName: "Ready" };
+  const named = {
+    ...field,
+    fieldName: "Status",
+    optionNames: { O_1: "Ready" },
+  };
   assert.equal(
     unmetReason({ rule: rule("all", named), outcome: "unmet", unmet: [named] }),
-    "Not Ready: missing Status = Ready",
+    "Not Ready: needs Status = Ready",
   );
   assert.equal(
     selectionCountsText(
@@ -141,5 +151,33 @@ test("a Project field condition reads by its names, falling back to the node ID 
       rule("all", { ...field, fieldName: "Status" }),
     ),
     "149 observed · 9 open · 0 match Status = O_1",
+  );
+});
+
+test("every operator reads by its names, and a multi-option set lists them", () => {
+  const status = { ...field, fieldName: "Status" };
+  const names = { O_1: "Todo", O_2: "In Progress" };
+  const text = (c: Parameters<typeof rule>[1]) =>
+    unmetReason({ rule: rule("all", c), outcome: "unmet", unmet: [c] });
+  assert.equal(
+    text(label("blocked", "lacks")),
+    "Not Ready: needs no label `blocked`",
+  );
+  assert.equal(
+    text({
+      ...status,
+      optionNodeIds: ["O_1", "O_2"],
+      optionNames: names,
+    }),
+    "Not Ready: needs Status is one of Todo, In Progress",
+  );
+  assert.equal(
+    text({
+      ...status,
+      operator: "not-in",
+      optionNodeIds: ["O_1", "O_3"],
+      optionNames: names,
+    }),
+    "Not Ready: needs Status is not one of Todo, O_3",
   );
 });

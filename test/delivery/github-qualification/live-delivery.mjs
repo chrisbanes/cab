@@ -578,7 +578,9 @@ try {
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: m.readinessLabel }],
+        conditions: [
+          { kind: "label", operator: "has", name: m.readinessLabel },
+        ],
       },
     });
     command(domain, {

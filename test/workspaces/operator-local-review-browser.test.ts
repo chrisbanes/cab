@@ -110,7 +110,10 @@ async function startReview(
         name: "repo",
       },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   const binding = await fixture.service.taskWorkspace(task.taskId);
   const alpha = binding?.repositories[0]?.workspacePath;

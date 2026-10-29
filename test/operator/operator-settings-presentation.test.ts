@@ -101,7 +101,7 @@ const config = (): ProjectConfigurationData =>
       readiness: {
         kind: "rule",
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
       closedIssues: "skip",
     },
@@ -644,7 +644,7 @@ test("no readiness rule loads no condition, saves null and never clears an unava
     readiness: { kind: "unavailable" as const },
   };
   const label = JSON.stringify([
-    { kind: "label", name: "ready-for-agent", rowKey: "r" },
+    { kind: "label", operator: "has", name: "ready-for-agent", rowKey: "r" },
   ]);
   for (const source of [none, unavailable]) {
     assert.deepEqual(sourceRowsFrom(source).conditions, []);
@@ -671,7 +671,7 @@ test("no readiness rule loads no condition, saves null and never clears an unava
     sourceCommand(projectId, { ...base, conditions: label }).readiness,
     {
       mode: "all",
-      conditions: [{ kind: "label", name: "ready-for-agent" }],
+      conditions: [{ kind: "label", operator: "has", name: "ready-for-agent" }],
     },
   );
   // Removing the last condition of a saved rule removes the rule.
@@ -1061,7 +1061,9 @@ test("the phone summary appends stored counts and points to readiness when nothi
         readiness: {
           kind: "rule" as const,
           mode: "all" as const,
-          conditions: [{ kind: "label" as const, name: "ready" }],
+          conditions: [
+            { kind: "label" as const, operator: "has" as const, name: "ready" },
+          ],
         },
         selections: [
           {
@@ -1240,7 +1242,9 @@ test("source status lines are sentences with the clock label", () => {
   const rule = {
     kind: "rule" as const,
     mode: "all" as const,
-    conditions: [{ kind: "label" as const, name: "ready" }],
+    conditions: [
+      { kind: "label" as const, operator: "has" as const, name: "ready" },
+    ],
   };
   const counts = (observed: number, matching: number | null) => ({
     observed,

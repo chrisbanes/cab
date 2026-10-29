@@ -14,8 +14,21 @@ type RuleView = z.infer<typeof readinessRuleViewSchema>;
 type Counts = z.infer<typeof selectionCountsSchema>;
 type Condition = Extract<RuleView, { kind: "rule" }>["conditions"][number];
 
-export const conditionText = (c: Condition) =>
-  c.kind === "label" ? `label \`${c.name}\`` : projectFieldText(c);
+export function conditionText(c: Condition) {
+  if (c.kind === "label")
+    return c.operator === "has"
+      ? `label \`${c.name}\``
+      : `no label \`${c.name}\``;
+  const [only, ...rest] = c.optionNodeIds;
+  const name = (id: string) => c.optionNames?.[id] ?? id;
+  if (c.operator === "in" && only !== undefined && !rest.length)
+    return projectFieldText({
+      ...c,
+      optionNodeId: only,
+      optionName: c.optionNames?.[only],
+    });
+  return `${c.fieldName ?? `Project field ${c.fieldNodeId}`} is ${c.operator === "in" ? "one of" : "not one of"} ${c.optionNodeIds.map(name).join(", ")}`;
+}
 
 /** "Status = Ready", or the node ID of a field or option no complete read has named. */
 export const projectFieldText = (f: {
@@ -71,12 +84,12 @@ export function zeroMatchWarning(counts: Counts | null, rule: RuleView) {
     : null;
 }
 
-/** "missing label `ready`" or "needs any of …"; null unless the rule is known and unmet. */
+/** "needs label `ready`" or "needs any of …"; null unless the rule is known and unmet. */
 export function unmetText(r: z.infer<typeof taskReadinessSchema> | undefined) {
   if (r?.outcome !== "unmet" || r.rule.kind !== "rule" || !r.unmet.length)
     return null;
   const parts = r.unmet.map(conditionText).join(", ");
-  return r.rule.mode === "all" ? `missing ${parts}` : `needs any of ${parts}`;
+  return r.rule.mode === "all" ? `needs ${parts}` : `needs any of ${parts}`;
 }
 
 export function unmetReason(

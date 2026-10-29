@@ -339,7 +339,7 @@ export type PublicationFixtureOptions = {
 
 const labelReady: Readiness = {
   mode: "any",
-  conditions: [{ kind: "label", name: "ready" }],
+  conditions: [{ kind: "label", operator: "has", name: "ready" }],
 };
 export const fieldReady: Readiness = {
   mode: "any",
@@ -348,7 +348,8 @@ export const fieldReady: Readiness = {
       kind: "project-field",
       projectNodeId: publicationProject.projectNodeId,
       fieldNodeId: publicationProject.fieldNodeId,
-      optionNodeId: publicationProject.ready,
+      operator: "in",
+      optionNodeIds: [publicationProject.ready],
     },
   ],
 };

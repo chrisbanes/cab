@@ -460,7 +460,7 @@ function world(t: { after: (fn: () => Promise<void> | void) => void }) {
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     return { projectId, lead };

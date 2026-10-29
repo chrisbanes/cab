@@ -10,6 +10,7 @@ import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import {
   evaluateReadiness,
   type Readiness,
+  type ReadinessCondition,
 } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
@@ -80,12 +81,13 @@ test("overlapping complete selections converge on one imported task; partial rea
       readiness: {
         mode: "all",
         conditions: [
-          { kind: "label", name: "ready" },
+          { kind: "label", operator: "has", name: "ready" },
           {
             kind: "project-field",
             projectNodeId: "P_1",
             fieldNodeId: "F_1",
-            optionNodeId: "O_1",
+            operator: "in",
+            optionNodeIds: ["O_1"],
           },
         ],
       },
@@ -250,6 +252,7 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
           conditions: [
             {
               kind: "label",
+              operator: "has",
               name: projectId === first ? "ready" : "approved-for-second",
             },
           ],
@@ -390,7 +393,7 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -448,7 +451,7 @@ function closedIssueWorld(
   closedIssues: "skip" | "done",
   readiness: Readiness = {
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   },
 ) {
   const root = mkdtempSync(join(tmpdir(), "cab-github-closed-"));
@@ -863,7 +866,7 @@ function readinessFixture(
 test("selection counts come from stored observations, with skipped closed issues observed but not imported", () => {
   const f = readinessFixture({
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   });
   try {
     f.read("repo", [
@@ -908,7 +911,10 @@ test("selection counts come from stored observations, with skipped closed issues
 
 test("partial reads keep memberships and skipped issues; zero match and never-read selections", () => {
   const f = readinessFixture(
-    { mode: "all", conditions: [{ kind: "label", name: "nope" }] },
+    {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "nope" }],
+    },
     ["repo", "other"],
   );
   try {
@@ -943,15 +949,16 @@ test("task readiness names unmet conditions and agrees with the stored Ready fla
     kind: "project-field" as const,
     projectNodeId: "P_1",
     fieldNodeId: "F_1",
-    optionNodeId: "O_1",
+    operator: "in" as const,
+    optionNodeIds: ["O_1"],
   };
   const all = readinessFixture({
     mode: "all",
-    conditions: [{ kind: "label", name: "a" }, field],
+    conditions: [{ kind: "label", operator: "has", name: "a" }, field],
   });
   const any = readinessFixture({
     mode: "any",
-    conditions: [{ kind: "label", name: "a" }, field],
+    conditions: [{ kind: "label", operator: "has", name: "a" }, field],
   });
   const none = readinessFixture(null);
   try {
@@ -966,7 +973,7 @@ test("task readiness names unmet conditions and agrees with the stored Ready fla
     ]);
     assert.deepEqual(all.sources.taskReadiness(all.task("I_1")), {
       outcome: "unmet",
-      unmet: [{ kind: "label", name: "a" }],
+      unmet: [{ kind: "label", operator: "has", name: "a" }],
     });
     assert.deepEqual(all.sources.taskReadiness(all.task("I_2")), {
       outcome: "matched",
@@ -989,7 +996,7 @@ test("task readiness names unmet conditions and agrees with the stored Ready fla
     ]);
     assert.deepEqual(any.sources.taskReadiness(any.task("I_1")), {
       outcome: "unmet",
-      unmet: [{ kind: "label", name: "a" }, field],
+      unmet: [{ kind: "label", operator: "has", name: "a" }, field],
     });
     assert.equal(
       any.sources.taskReadiness(any.task("I_2"))?.outcome,
@@ -1023,7 +1030,11 @@ test("task readiness names unmet conditions and agrees with the stored Ready fla
 });
 
 test("the readiness predicate filters nothing without a rule and follows all/any modes", () => {
-  const label = (name: string) => ({ kind: "label" as const, name });
+  const label = (name: string) => ({
+    kind: "label" as const,
+    operator: "has" as const,
+    name,
+  });
   const facts = { labels: ["a"], fields: [] };
   assert.deepEqual(evaluateReadiness(null, facts), {
     satisfied: true,
@@ -1052,10 +1063,128 @@ test("the readiness predicate filters nothing without a rule and follows all/any
   );
 });
 
+const statusRule = (
+  operator: "in" | "not-in",
+  optionNodeIds: string[],
+  projectNodeId = "P_1",
+) => ({
+  kind: "project-field" as const,
+  projectNodeId,
+  fieldNodeId: "F_1",
+  operator,
+  optionNodeIds,
+});
+const statusFact = (optionNodeId: string, projectNodeId = "P_1") => ({
+  projectNodeId,
+  fieldNodeId: "F_1",
+  optionNodeId,
+});
+
+test("the readiness predicate applies each operator, and not-in needs a value", () => {
+  const unmetBy = (
+    condition: ReadinessCondition,
+    facts: Parameters<typeof evaluateReadiness>[1],
+  ) => evaluateReadiness({ mode: "all", conditions: [condition] }, facts).unmet;
+  const lacks = {
+    kind: "label" as const,
+    operator: "lacks" as const,
+    name: "blocked",
+  };
+  // in: any one of the options, on the named Project and field only.
+  const inSet = statusRule("in", ["O_1", "O_2"]);
+  assert.deepEqual(
+    unmetBy(inSet, { labels: [], fields: [statusFact("O_2")] }),
+    [],
+  );
+  assert.deepEqual(
+    unmetBy(inSet, { labels: [], fields: [statusFact("O_3")] }),
+    [inSet],
+  );
+  assert.deepEqual(
+    unmetBy(inSet, { labels: [], fields: [statusFact("O_1", "P_2")] }),
+    [inSet],
+  );
+  assert.deepEqual(unmetBy(inSet, { labels: [], fields: [] }), [inSet]);
+  // not-in: a value outside the set; no value, or an item outside the Project, is unmet.
+  const notIn = statusRule("not-in", ["O_1", "O_2"]);
+  assert.deepEqual(
+    unmetBy(notIn, { labels: [], fields: [statusFact("O_3")] }),
+    [],
+  );
+  assert.deepEqual(
+    unmetBy(notIn, { labels: [], fields: [statusFact("O_2")] }),
+    [notIn],
+  );
+  assert.deepEqual(unmetBy(notIn, { labels: [], fields: [] }), [notIn]);
+  assert.deepEqual(
+    unmetBy(notIn, { labels: [], fields: [statusFact("O_3", "P_2")] }),
+    [notIn],
+  );
+  // lacks: absence, compared case-insensitively.
+  assert.deepEqual(unmetBy(lacks, { labels: ["bug"], fields: [] }), []);
+  assert.deepEqual(unmetBy(lacks, { labels: ["Blocked"], fields: [] }), [
+    lacks,
+  ]);
+  // Any: one satisfied condition is enough; otherwise every condition is unmet.
+  const any = { mode: "any" as const, conditions: [inSet, lacks] };
+  assert.equal(
+    evaluateReadiness(any, { labels: ["blocked"], fields: [statusFact("O_1")] })
+      .satisfied,
+    true,
+  );
+  assert.deepEqual(
+    evaluateReadiness(any, { labels: ["blocked"], fields: [] }).unmet,
+    [inSet, lacks],
+  );
+});
+
+test("ready, unmet reasons and match counts agree under every operator", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [
+      statusRule("in", ["O_1", "O_2"]),
+      { kind: "label", operator: "lacks", name: "blocked" },
+    ],
+  });
+  try {
+    f.read("repo", [
+      f.at("I_1", { labels: [], projectFields: [statusFact("O_2")] }),
+      f.at("I_2", { labels: ["Blocked"], projectFields: [statusFact("O_1")] }),
+      f.at("I_3", { labels: [], projectFields: [statusFact("O_3")] }),
+      f.at("I_4", { labels: [] }),
+    ]);
+    for (const [id, ready] of [
+      ["I_1", true],
+      ["I_2", false],
+      ["I_3", false],
+      ["I_4", false],
+    ] as const) {
+      assert.equal(f.domain.task(f.task(id)).ready, ready ? 1 : 0, id);
+      assert.equal(
+        f.sources.taskReadiness(f.task(id))?.outcome,
+        ready ? "matched" : "unmet",
+        id,
+      );
+    }
+    assert.deepEqual(f.sources.taskReadiness(f.task("I_2"))?.unmet, [
+      { kind: "label", operator: "lacks", name: "blocked" },
+    ]);
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("repo")?.matching,
+      1,
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
 test("the readiness predicate matches label names case-insensitively, as GitHub does", () => {
   assert.equal(
     evaluateReadiness(
-      { mode: "all", conditions: [{ kind: "label", name: "Ready" }] },
+      {
+        mode: "all",
+        conditions: [{ kind: "label", operator: "has", name: "Ready" }],
+      },
       { labels: ["READY"], fields: [] },
     ).satisfied,
     true,
@@ -1150,7 +1279,10 @@ test("adding a readiness rule filters again; removing it stops filtering and a c
     f.read("repo", [f.at("I_1", { labels: ["next"] })]);
     const taskId = f.task("I_1");
     assert.equal(Number(f.domain.task(taskId).ready), 1);
-    configure({ mode: "all", conditions: [{ kind: "label", name: "ready" }] });
+    configure({
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    });
     f.read("repo", [f.at("I_1", { labels: ["next"] })]);
     assert.equal(Number(f.domain.task(taskId).ready), 0);
     assert.equal(f.sources.hold("I_1")?.reason, "readiness-lost");
@@ -1166,7 +1298,9 @@ test("adding a readiness rule filters again; removing it stops filtering and a c
 
 const readyLabel = {
   mode: "all" as const,
-  conditions: [{ kind: "label" as const, name: "ready" }],
+  conditions: [
+    { kind: "label" as const, operator: "has" as const, name: "ready" },
+  ],
 };
 
 test("a complete read that lists a withdrawn issue again releases the hold, and a real removal stays held", () => {
@@ -1334,7 +1468,8 @@ test("matching counts a Project field from another selection's membership, as Re
           kind: "project-field",
           projectNodeId: "P_1",
           fieldNodeId: "F_1",
-          optionNodeId: "O_1",
+          operator: "in",
+          optionNodeIds: ["O_1"],
         },
       ],
     },
@@ -1474,7 +1609,7 @@ test("a complete Project read names its fields for conditions and per-option cou
 test("an issue skipped closed and imported on a later partial read counts once", () => {
   const f = readinessFixture({
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   });
   try {
     f.read("repo", [f.at("I_1"), f.at("I_2", { state: "closed" })]);
@@ -1493,7 +1628,10 @@ test("an issue skipped closed and imported on a later partial read counts once",
 
 test("selection counts use a fixed number of queries however many items are stored", () => {
   const f = readinessFixture(
-    { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
     ["repo", "other"],
   );
   try {
@@ -1526,7 +1664,7 @@ test("selection counts use a fixed number of queries however many items are stor
 test("after a rule change and before the next read, explanations never disagree with Ready", () => {
   const f = readinessFixture({
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   });
   try {
     f.read("repo", [f.at("I_1"), f.at("I_2", { labels: ["next"] })]);
@@ -1538,7 +1676,10 @@ test("after a rule change and before the next read, explanations never disagree 
       expectedVersion: f.domain.githubConfiguration(f.projectId).version,
       credentialRef: "env:TEST_GITHUB",
       selections: [{ id: "repo", keep: true }],
-      readiness: { mode: "all", conditions: [{ kind: "label", name: "next" }] },
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", operator: "has", name: "next" }],
+      },
     });
     // Ready still reflects the old rule: I_1 Ready, I_2 Draft.
     assert.equal(Number(f.domain.task(f.task("I_1")).ready), 1);
@@ -1563,7 +1704,7 @@ test("after a rule change and before the next read, explanations never disagree 
     assert.equal(f.sources.taskReadiness(f.task("I_2"))?.outcome, "matched");
     assert.deepEqual(f.sources.taskReadiness(f.task("I_1")), {
       outcome: "unmet",
-      unmet: [{ kind: "label", name: "next" }],
+      unmet: [{ kind: "label", operator: "has", name: "next" }],
     });
     assert.equal(
       f.sources.selectionCounts(f.projectId).get("repo")?.matching,
@@ -1582,7 +1723,7 @@ test("after a rule change and before the next read, explanations never disagree 
 test("a same-result rule change reports not-evaluated until the next read", () => {
   const f = readinessFixture({
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   });
   try {
     const issues = () => [
@@ -1600,7 +1741,7 @@ test("a same-result rule change reports not-evaluated until the next read", () =
       selections: [{ id: "repo", keep: true }],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "approved" }],
+        conditions: [{ kind: "label", operator: "has", name: "approved" }],
       },
     });
     // Both tasks keep their Ready flag and would keep it on re-evaluation.
@@ -1629,7 +1770,7 @@ test("a same-result rule change reports not-evaluated until the next read", () =
     );
     assert.deepEqual(f.sources.taskReadiness(f.task("I_1")), {
       outcome: "unmet",
-      unmet: [{ kind: "label", name: "approved" }],
+      unmet: [{ kind: "label", operator: "has", name: "approved" }],
     });
     assert.equal(f.sources.taskReadiness(f.task("I_2"))?.outcome, "matched");
     assert.equal(
@@ -1649,7 +1790,7 @@ test("a same-result rule change reports not-evaluated until the next read", () =
 test("upgrading initialises each imported task's readiness rule identity without changing Ready", () => {
   const f = readinessFixture({
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   });
   try {
     f.read("repo", [
@@ -1718,7 +1859,7 @@ test("upgrading initialises each imported task's readiness rule identity without
 test("a partial read adds the closed issues it skips; a complete read replaces them", () => {
   const f = readinessFixture({
     mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
   });
   try {
     const counts = () => f.sources.selectionCounts(f.projectId).get("repo");
@@ -1865,12 +2006,13 @@ test("an own closure keeps a closure hold a sync recorded first, under a Project
   const w = closedIssueWorld("done", {
     mode: "all",
     conditions: [
-      { kind: "label", name: "ready" },
+      { kind: "label", operator: "has", name: "ready" },
       {
         kind: "project-field",
         projectNodeId: "P_1",
         fieldNodeId: "F_1",
-        optionNodeId: "O_1",
+        operator: "in",
+        optionNodeIds: ["O_1"],
       },
     ],
   });
@@ -1893,7 +2035,7 @@ test("an own closure keeps a closure hold a sync recorded first, under a Project
 test("an own closure with readiness held records a closure hold, whatever the label case", () => {
   const w = closedIssueWorld("done", {
     mode: "all",
-    conditions: [{ kind: "label", name: "Ready" }],
+    conditions: [{ kind: "label", operator: "has", name: "Ready" }],
   });
   try {
     const taskId = String(w.observe({ labels: ["Ready"] })?.id);
@@ -2111,7 +2253,7 @@ test("a Project selection keeps its item id apart from the readiness facts, and 
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     for (const selectionId of ["repo", "project"])

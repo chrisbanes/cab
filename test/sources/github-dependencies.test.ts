@@ -90,7 +90,7 @@ test("initial and later incomplete native blocker reads hold imported admission"
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -135,7 +135,7 @@ test("initial and later incomplete native blocker reads hold imported admission"
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     assert.ok(domain.admission(taskId).reasons.includes("source-unknown"));
@@ -426,7 +426,7 @@ test("synchronization reads native blockers only for issues whose task admission
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({

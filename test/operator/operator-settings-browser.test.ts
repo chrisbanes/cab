@@ -617,7 +617,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
     ],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: "ready" }],
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
     },
   });
   f.service.domain().execute({
@@ -1110,7 +1110,7 @@ function seedPlacement(f: Awaited<ReturnType<typeof createOperatorFixture>>) {
       selections: [],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
   seedImportedConflict(f, taskId, [ids.projectId, target, destination]);

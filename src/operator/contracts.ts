@@ -937,6 +937,7 @@ const sourceClosure = z.enum(["held", "completed", "unattributed"]).nullable();
 const fieldNameShape = {
   fieldName: text.optional(),
   optionName: text.optional(),
+  optionNames: z.record(z.string().max(512), text).optional(),
 };
 const [labelCondition, projectFieldCondition] =
   readinessConditionSchema.options;
@@ -968,7 +969,12 @@ export function readinessCommandValue(
     mode: rule.mode,
     conditions: rule.conditions.map((c) => {
       if (c.kind === "label") return c;
-      const { fieldName: _field, optionName: _option, ...ids } = c;
+      const {
+        fieldName: _field,
+        optionName: _option,
+        optionNames: _options,
+        ...ids
+      } = c;
       return ids;
     }),
   };

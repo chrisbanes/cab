@@ -1487,7 +1487,10 @@ test("imported projections validate provider fields and distinguish attempted sy
         name: "repo",
       },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   d.execute({
     type: "github.activate",
@@ -1919,7 +1922,10 @@ test("history supplements captured privacy with external auth and GitHub values 
     expectedVersion: 1,
     credentialRef: reference,
     selections: [],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   const a = d.assignments(ids.taskId)[0],
     request = f.service.turnRequests().find((r) => r.assignmentId === a?.id),
@@ -3956,7 +3962,8 @@ test("the status mapping is read with its Project selections and granted options
           kind: "project-field",
           projectNodeId: "PVT_1",
           fieldNodeId: "F_status",
-          optionNodeId: "O_todo",
+          operator: "in",
+          optionNodeIds: ["O_todo"],
         },
       ],
     },

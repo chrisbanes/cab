@@ -101,7 +101,7 @@ test("a selection response from the previous configuration cannot commit after s
       selections: [selection],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -125,7 +125,7 @@ test("a selection response from the previous configuration cannot commit after s
       selections: [selection],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "different" }],
+        conditions: [{ kind: "label", operator: "has", name: "different" }],
       },
     });
     domain.execute({
@@ -205,7 +205,7 @@ test("a native blocker response from the previous configuration cannot clear the
       selections: [selection],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -232,7 +232,7 @@ test("a native blocker response from the previous configuration cannot clear the
       selections: [selection],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "different" }],
+        conditions: [{ kind: "label", operator: "has", name: "different" }],
       },
     });
     domain.execute({
@@ -313,7 +313,7 @@ test("a retained status response cannot release a local dependent after credenti
       selections: [selection],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -360,7 +360,7 @@ test("a retained status response cannot release a local dependent after credenti
       selections: [selection],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     release();

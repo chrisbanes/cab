@@ -295,12 +295,13 @@ test("agents cannot change readiness labels or fields, and no readiness rule pro
       readiness: {
         mode: "any",
         conditions: [
-          { kind: "label", name: "ready" },
+          { kind: "label", operator: "has", name: "ready" },
           {
             kind: "project-field",
             projectNodeId: "P1",
             fieldNodeId: "F1",
-            optionNodeId: "O2",
+            operator: "in",
+            optionNodeIds: ["O2"],
           },
         ],
       },
@@ -310,6 +311,33 @@ test("agents cannot change readiness labels or fields, and no readiness rule pro
     assert.throws(() => labels(["Ready"]), /readiness labels/);
     assert.throws(() => labels([], ["READY"]), /readiness labels/);
     labels(["other"]);
+    assert.throws(field, /readiness fields/);
+    // Negated conditions protect their label and field the same way.
+    domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      credentialRef: null,
+      selections: [],
+      readiness: {
+        mode: "all",
+        conditions: [
+          { kind: "label", operator: "lacks", name: "blocked" },
+          {
+            kind: "project-field",
+            projectNodeId: "P1",
+            fieldNodeId: "F1",
+            operator: "not-in",
+            optionNodeIds: ["O9"],
+          },
+        ],
+      },
+    });
+    labels(["ready"]);
+    assert.throws(() => labels([], ["blocked"]), /readiness labels/);
+    assert.throws(() => labels(["Blocked"]), /readiness labels/);
     assert.throws(field, /readiness fields/);
   } finally {
     db.close();
@@ -553,12 +581,13 @@ function publicationWorld(options: { ready: boolean; grants?: boolean }) {
     readiness: {
       mode: "any",
       conditions: [
-        { kind: "label", name: "ready" },
+        { kind: "label", operator: "has", name: "ready" },
         {
           kind: "project-field",
           projectNodeId: PUB_P,
           fieldNodeId: PUB_F,
-          optionNodeId: PUB_READY,
+          operator: "in",
+          optionNodeIds: [PUB_READY],
         },
       ],
     },

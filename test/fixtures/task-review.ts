@@ -162,7 +162,10 @@ export async function seedImportedCommentTask(
         name: "source",
       },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   d.execute({
     type: "github.activate",

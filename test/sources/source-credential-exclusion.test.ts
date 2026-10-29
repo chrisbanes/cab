@@ -40,7 +40,9 @@ const selection = {
 };
 const readiness = {
   mode: "any" as const,
-  conditions: [{ kind: "label" as const, name: "ready" }],
+  conditions: [
+    { kind: "label" as const, operator: "has" as const, name: "ready" },
+  ],
 };
 const reference = {
   nodeId: "I_1",
@@ -1275,7 +1277,9 @@ test("a readiness rule naming a withheld value is unavailable, never none, and i
     selections: [selection],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: "label-secret-value" }],
+      conditions: [
+        { kind: "label", operator: "has", name: "label-secret-value" },
+      ],
     },
   });
   f.execute({

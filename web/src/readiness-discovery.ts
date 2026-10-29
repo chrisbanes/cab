@@ -25,12 +25,8 @@ export interface ProjectChoice {
 export type ConditionIds = {
   projectNodeId: string;
   fieldNodeId: string;
-  optionNodeId: string;
+  optionNodeIds: string[];
 };
-export const sameCondition = (a: ConditionIds, b: ConditionIds) =>
-  a.projectNodeId === b.projectNodeId &&
-  a.fieldNodeId === b.fieldNodeId &&
-  a.optionNodeId === b.optionNodeId;
 /** `loading` waits on a read; `typed` falls back to node-ID inputs with a note, if any. */
 export type PickerState =
   | { state: "loading"; projects?: ProjectChoice[] }
@@ -164,9 +160,10 @@ export function rowState(
   fieldReads: Record<string, FieldsRead | undefined>,
 ): PickerState {
   if (choices.state !== "ready") return choices;
-  const { projectNodeId, fieldNodeId, optionNodeId } = ids;
+  const { projectNodeId, fieldNodeId } = ids;
+  // A saved option the read does not list is kept by the checkboxes, so it never forces typing.
   if (!projectNodeId)
-    return fieldNodeId || optionNodeId
+    return fieldNodeId
       ? { state: "typed", note: unlistedNote }
       : { state: "picker", projects: choices.projects, fields: [] };
   if (!choices.projects.some((p) => p.projectNodeId === projectNodeId))
@@ -178,22 +175,36 @@ export function rowState(
     return { state: "typed", note: unavailableNote(read) };
   if (read.truncated) return { state: "typed", note: truncatedNote() };
   const field = read.fields.find((f) => f.fieldNodeId === fieldNodeId);
-  if (
-    (fieldNodeId && !field) ||
-    (optionNodeId &&
-      !field?.options.some((o) => o.optionNodeId === optionNodeId))
-  )
-    return { state: "typed", note: unlistedNote };
+  if (fieldNodeId && !field) return { state: "typed", note: unlistedNote };
   return { state: "picker", projects: choices.projects, fields: read.fields };
 }
 
-/** Choosing a Project clears field and option; choosing a field clears the option. */
+/** Choosing a Project clears field and options; choosing a field clears the options. */
 export const selectProject = (projectNodeId: string): ConditionIds => ({
   projectNodeId,
   fieldNodeId: "",
-  optionNodeId: "",
+  optionNodeIds: [],
 });
 export const selectField = (
   ids: ConditionIds,
   fieldNodeId: string,
-): ConditionIds => ({ ...ids, fieldNodeId, optionNodeId: "" });
+): ConditionIds => ({ ...ids, fieldNodeId, optionNodeIds: [] });
+
+/**
+ * The options after checking or unchecking one: the field's listed options that are checked, in
+ * board order, then any saved option the read does not list.
+ */
+export function toggleOption(
+  listed: readonly string[],
+  current: readonly string[],
+  optionNodeId: string,
+  checked: boolean,
+) {
+  const next = new Set(current);
+  if (checked) next.add(optionNodeId);
+  else next.delete(optionNodeId);
+  return [
+    ...listed.filter((id) => next.has(id)),
+    ...[...next].filter((id) => !listed.includes(id)),
+  ];
+}

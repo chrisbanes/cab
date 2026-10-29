@@ -261,7 +261,10 @@ function configureGitHubSource(service: StandaloneService): {
         name: "repository",
       },
     ],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   domain.execute({
     type: "github.activate",

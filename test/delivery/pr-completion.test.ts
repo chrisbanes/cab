@@ -492,7 +492,10 @@ import {
   type IssueSnapshot,
 } from "../../src/core/github-source.js";
 for (const readiness of [
-  { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+  {
+    mode: "any",
+    conditions: [{ kind: "label", operator: "has", name: "ready" }],
+  },
   null,
 ] as const)
   test(`only confirmed own closure continues a withdrawn open-issue selection while independent source gates remain (${readiness ? "label rule" : "no rule"})`, () => {
@@ -794,7 +797,10 @@ async function treatClosureAs(f: Fixture, closedIssues: "done" | "skip") {
     expectedVersion: version,
     credentialRef: "env:FIXTURE_SOURCE",
     selections: [{ id: "repo", keep: true }],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
     closedIssues,
   });
   f.domain.execute({

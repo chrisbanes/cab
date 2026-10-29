@@ -56,7 +56,10 @@ async function saveElsewhere(s: Started, extra: object[] = []) {
       { id: "S-3", keep: true },
       ...extra,
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   } as never);
 }
 

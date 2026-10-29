@@ -556,7 +556,7 @@ for (const [limitCase, sourceBody] of [
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     d.execute({

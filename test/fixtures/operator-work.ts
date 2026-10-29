@@ -209,7 +209,10 @@ export async function seedCatalog(
         name: "source",
       },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   const importedTitle =
     "Imported task with a deliberately long source title for narrow operator list and board layouts";

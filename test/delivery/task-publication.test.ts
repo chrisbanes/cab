@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
+import type { Readiness } from "../../src/core/github-source-contracts.js";
 import {
   fieldReady,
   labelAndFieldReady,
@@ -242,6 +243,72 @@ test("a Draft task is refused where the project has no readiness rule, and a fie
   assert.equal(
     fieldOnly.target(fieldOnly.task(false), "repo").reasonCode,
     null,
+  );
+});
+
+test("publication writes the first option of an in condition, nothing for lacks, and refuses not-in under all", async (t) => {
+  const field = {
+    kind: "project-field" as const,
+    projectNodeId: publicationProject.projectNodeId,
+    fieldNodeId: publicationProject.fieldNodeId,
+  };
+  const has = {
+    kind: "label" as const,
+    operator: "has" as const,
+    name: "ready",
+  };
+  const lacks = { ...has, operator: "lacks" as const, name: "blocked" };
+  const inOptions = {
+    ...field,
+    operator: "in" as const,
+    optionNodeIds: [publicationProject.ready, publicationProject.other],
+  };
+  const notIn = {
+    ...field,
+    operator: "not-in" as const,
+    optionNodeIds: [publicationProject.other],
+  };
+  const writes = async (readiness: Readiness) => {
+    const f = await publicationFixture({
+      selections: ["project"],
+      readiness,
+    });
+    t.after(() => f.close());
+    const target = f.target(f.task(true), "project");
+    return [target.reasonCode, target.labels, target.projectFields] as const;
+  };
+  const first = [
+    {
+      projectNodeId: field.projectNodeId,
+      fieldNodeId: field.fieldNodeId,
+      optionNodeId: publicationProject.ready,
+    },
+  ];
+  assert.deepEqual(
+    await writes({ mode: "all", conditions: [has, lacks, inOptions] }),
+    [null, ["ready"], first],
+  );
+  assert.deepEqual(await writes({ mode: "all", conditions: [lacks] }), [
+    null,
+    [],
+    [],
+  ]);
+  assert.equal(
+    (await writes({ mode: "all", conditions: [has, notIn] }))[0],
+    "readiness-unsatisfiable",
+  );
+  // Any: a lacks condition holds without a write, so it is chosen before a label or a field.
+  assert.deepEqual(
+    await writes({ mode: "any", conditions: [has, inOptions, lacks] }),
+    [null, [], []],
+  );
+  assert.deepEqual(
+    await writes({ mode: "any", conditions: [notIn, inOptions] }),
+    [null, [], first],
+  );
+  assert.equal(
+    (await writes({ mode: "any", conditions: [notIn] }))[0],
+    "readiness-unsatisfiable",
   );
 });
 

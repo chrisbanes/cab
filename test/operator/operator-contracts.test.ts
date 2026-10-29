@@ -739,7 +739,11 @@ test("readiness rule views and selection counts are strict", () => {
   for (const view of [
     { kind: "none" },
     { kind: "unavailable" },
-    { kind: "rule", mode: "any", conditions: [{ kind: "label", name: "a" }] },
+    {
+      kind: "rule",
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "a" }],
+    },
   ])
     assert.equal(readinessRuleViewSchema.safeParse(view).success, true);
   for (const view of [

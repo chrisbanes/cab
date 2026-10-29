@@ -41,13 +41,26 @@ export const selectionSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const readinessConditionSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("label"), name: nonempty }).strict(),
+  z
+    .object({
+      kind: z.literal("label"),
+      operator: z.enum(["has", "lacks"]),
+      name: nonempty,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("project-field"),
       projectNodeId: nonempty,
       fieldNodeId: nonempty,
-      optionNodeId: nonempty,
+      operator: z.enum(["in", "not-in"]),
+      optionNodeIds: z
+        .array(nonempty)
+        .min(1)
+        .max(256)
+        .refine((ids) => new Set(ids).size === ids.length, {
+          message: "optionNodeIds must be unique",
+        }),
     })
     .strict(),
 ]);
@@ -78,16 +91,19 @@ export function evaluateReadiness(
   facts: { labels: readonly string[]; fields: readonly ProjectField[] },
 ): { satisfied: boolean; unmet: ReadinessCondition[] } {
   if (!rule) return { satisfied: true, unmet: [] };
-  const unmet = rule.conditions.filter((c) =>
-    c.kind === "label"
-      ? !hasLabelName(facts.labels, c.name)
-      : !facts.fields.some(
-          (f) =>
-            f.projectNodeId === c.projectNodeId &&
-            f.fieldNodeId === c.fieldNodeId &&
-            f.optionNodeId === c.optionNodeId,
-        ),
-  );
+  const unmet = rule.conditions.filter((c) => {
+    if (c.kind === "label")
+      return hasLabelName(facts.labels, c.name) !== (c.operator === "has");
+    const held = facts.fields.filter(
+      (f) =>
+        f.projectNodeId === c.projectNodeId && f.fieldNodeId === c.fieldNodeId,
+    );
+    // `not-in` needs a value: an item with none, or outside the Project, is unmet.
+    return c.operator === "in"
+      ? !held.some((f) => c.optionNodeIds.includes(f.optionNodeId))
+      : !held.length ||
+          held.some((f) => c.optionNodeIds.includes(f.optionNodeId));
+  });
   const satisfied =
     rule.mode === "all"
       ? unmet.length === 0

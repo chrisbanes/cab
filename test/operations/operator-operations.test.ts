@@ -286,7 +286,10 @@ test("source configure and preview receipts read back exactly, without private t
     expectedVersion: version(),
     credentialRef: "env:FIXTURE_SOURCE",
     selections,
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   const configured = configure([
     { id: "S-1", kind: "search", query: "PRIVATEQ" },
@@ -405,7 +408,10 @@ test("read-only credentials cannot send source or delivery commands", async (t) 
       projectId: s.projectId,
       expectedVersion: 1,
       selections: [],
-      readiness: { mode: "all", conditions: [{ kind: "label", name: "x" }] },
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", operator: "has", name: "x" }],
+      },
     },
     {
       type: "github.preview",

@@ -42,7 +42,10 @@ function seedImported(o: Operator) {
         name: "repo",
       },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   d.execute({
     type: "github.activate",
@@ -1028,7 +1031,10 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
     expectedVersion: version,
     credentialRef: "env:CLI5_SYNTHETIC_REFERENCE",
     selections: [{ id: "repo", keep: true }],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
     closedIssues: "done",
   });
   d.execute({
@@ -1181,7 +1187,7 @@ test("task get names an imported Draft task's unmet readiness condition", async 
       },
     ],
   });
-  assert.match(await get(), /^Readiness: Not Ready: missing label `ready`$/m);
+  assert.match(await get(), /^Readiness: Not Ready: needs label `ready`$/m);
 });
 
 test("a missing outcome file says it is missing", async (t) => {

@@ -696,7 +696,7 @@ for (const dependency of [
           ],
           readiness: {
             mode: "any",
-            conditions: [{ kind: "label", name: "ready" }],
+            conditions: [{ kind: "label", operator: "has", name: "ready" }],
           },
         });
         command(f.service, {

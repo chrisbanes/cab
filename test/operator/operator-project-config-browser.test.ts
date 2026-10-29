@@ -833,7 +833,7 @@ test("the source tab reads again by itself when the first read settles older tha
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     } as Parameters<OperatorApi["execute"]>[0]);
   const { reads, release } = await scriptReads(
@@ -886,7 +886,10 @@ test("a read that fails after a refresh advanced the version is read again once"
       { id: "S-2", kind: "search", query: "AFTER THE REFRESH" },
       { id: "S-3", keep: true },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   } as Parameters<OperatorApi["execute"]>[0]);
   await refresh(page);
   release();
@@ -928,7 +931,7 @@ test("an older read is retried at most twice per version, and a failure waits fo
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     } as Parameters<OperatorApi["execute"]>[0]);
   await external("MOVED ON");
@@ -1172,7 +1175,7 @@ test("a query that another writer saved identically is dropped, and later reads 
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     } as Parameters<OperatorApi["execute"]>[0]);
   await writer("SAME QUERY");
@@ -1488,7 +1491,10 @@ test("a reverted source edit leaves the form clean and picks up a later read", a
         { id: "S-2", keep: true },
         { id: "S-3", keep: true },
       ],
-      readiness: { mode, conditions: [{ kind: "label", name: "ready" }] },
+      readiness: {
+        mode,
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
+      },
     } as Parameters<OperatorApi["execute"]>[0]);
   await external("any");
   await refresh(page);
@@ -2776,7 +2782,7 @@ test("GitHub source shows no readiness rule, saves an added rule, removes it, an
   await savedOutcome(page);
   assert.deepEqual(d.githubConfiguration(ids.relay).readiness, {
     mode: "all",
-    conditions: [{ kind: "label", name: "ready-for-agent" }],
+    conditions: [{ kind: "label", operator: "has", name: "ready-for-agent" }],
   });
   await page.getByRole("button", { name: "Remove condition 1" }).click();
   await noRule.waitFor();
@@ -2798,7 +2804,13 @@ test("GitHub source shows no readiness rule, saves an added rule, removes it, an
     selections: [],
     readiness: {
       mode: "all",
-      conditions: [{ kind: "label", name: "offline-readiness-rule-value" }],
+      conditions: [
+        {
+          kind: "label",
+          operator: "has",
+          name: "offline-readiness-rule-value",
+        },
+      ],
     },
   });
   await page.reload();
@@ -2872,24 +2884,35 @@ test("a readiness Project-field condition is picked by name and saves the same n
     "Status",
     "Priority",
   ]);
-  assert.deepEqual(await optionNames(page, "Readiness option"), [
-    "Choose an option",
-    "Todo",
-    "Ready",
+  assert.deepEqual(await optionNames(page, "Readiness operator"), [
+    "is one of",
+    "is not one of",
   ]);
-  await page
-    .getByLabel("Readiness option", { exact: true })
-    .selectOption({ label: "Ready" });
+  // One checkbox per option in board order, each reachable and toggled by keyboard.
+  const options = page
+    .getByRole("group", { name: "Readiness options" })
+    .getByRole("checkbox");
+  assert.deepEqual(
+    await options.evaluateAll((o) =>
+      o.map((x) => x.closest("label")?.textContent),
+    ),
+    ["Todo", "Ready"],
+  );
+  await page.getByRole("checkbox", { name: "Ready", exact: true }).check();
+  await page.getByRole("checkbox", { name: "Todo", exact: true }).focus();
+  await page.keyboard.press("Space");
   await captureBrowserEvidence(page, "readiness-picker");
   const body = commandBody(page);
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   const command = (await body) as { readiness: { conditions: unknown[] } };
   await savedOutcome(page);
+  // Checked in any order, saved in the field's board order.
   const picked = {
     kind: "project-field",
     projectNodeId: "PVT_atlas",
     fieldNodeId: "PVTSSF_status",
-    optionNodeId: "PVTSSO_ready",
+    operator: "in",
+    optionNodeIds: ["PVTSSO_todo", "PVTSSO_ready"],
   };
   assert.deepEqual(command.readiness.conditions.at(-1), picked);
   assert.deepEqual(
@@ -2909,7 +2932,7 @@ test("a readiness Project-field condition is picked by name and saves the same n
   );
 });
 
-test("a Project source lists each option's open items, and choosing one adds it as a readiness condition read by name", async (t, journey) => {
+test("a Project source lists each option's open items without add buttons, and a saved set reads by name with an unlisted option kept", async (t, journey) => {
   const previous = process.env.FIXTURE_GITHUB;
   process.env.FIXTURE_GITHUB = "offline-readiness-source-value";
   t.after(() => {
@@ -2986,54 +3009,69 @@ test("a Project source lists each option's open items, and choosing one adds it 
   });
   await f.service.refreshGitHub();
   await page.reload();
-  await page
-    .getByRole("button", { name: "Require Status = Todo for Ready (1 open)" })
-    .waitFor();
-  await page
-    .getByRole("button", { name: "Require Status = Ready for Ready (1 open)" })
-    .click();
-  const added = page.getByRole("button", {
-    name: "Status = Ready is a readiness condition",
-  });
-  assert.equal(await added.isDisabled(), true);
-  // The added condition reads by name in the same selects the picker offers.
-  await page
-    .getByLabel("Readiness option", { exact: true })
-    .last()
-    .locator("option:checked", { hasText: "Ready" })
-    .waitFor({ state: "attached" });
+  await page.getByText("Todo · 1", { exact: true }).waitFor();
+  await page.getByText("Ready · 1", { exact: true }).waitFor();
+  // The counts are read only: conditions are made in the condition editor.
   assert.equal(
-    await page
-      .getByLabel("Readiness field", { exact: true })
-      .last()
-      .locator("option:checked")
-      .textContent(),
-    "Status",
+    await page.getByRole("button", { name: /for Ready/ }).count(),
+    0,
   );
-  await captureBrowserEvidence(page, "readiness-project-field-options");
-  const body = commandBody(page);
-  await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  const command = (await body) as { readiness: { conditions: unknown[] } };
-  await savedOutcome(page);
-  const picked = {
-    kind: "project-field",
+  assert.equal(await page.getByLabel("Readiness field").count(), 0);
+  const saved = {
+    kind: "project-field" as const,
     projectNodeId: "PVT_atlas",
     fieldNodeId: "PVTSSF_status",
-    optionNodeId: "PVTSSO_ready",
+    operator: "not-in" as const,
+    optionNodeIds: ["PVTSSO_ready", "PVTSSO_gone"],
   };
-  // Names are only read: the command and the stored rule carry node IDs alone.
-  assert.deepEqual(command.readiness.conditions.at(-1), picked);
-  assert.deepEqual(
-    d.githubConfiguration(ids.atlas).readiness?.conditions.at(-1),
-    picked,
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    credentialRef: "env:FIXTURE_GITHUB",
+    selections: d.githubConfiguration(ids.atlas).selections,
+    readiness: { mode: "all", conditions: [saved] },
+  });
+  await page.reload();
+  // The saved set shows by name; an option the read does not list stays checked by its node ID.
+  await page.getByRole("checkbox", { name: "Ready", exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("checkbox", { name: "Ready", exact: true })
+      .isChecked(),
+    true,
   );
+  assert.equal(
+    await page.getByRole("checkbox", { name: "Todo", exact: true }).isChecked(),
+    false,
+  );
+  assert.equal(
+    await page
+      .getByRole("checkbox", { name: "PVTSSO_gone", exact: true })
+      .isChecked(),
+    true,
+  );
+  assert.equal(
+    await page
+      .getByLabel("Readiness operator", { exact: true })
+      .locator("option:checked")
+      .textContent(),
+    "is not one of",
+  );
+  await captureBrowserEvidence(page, "readiness-project-field-options");
   const observed = (await api.readSourceObservations()).data.projects.find(
     (p) => p.projectId === ids.atlas,
   );
   assert.equal(observed?.readiness.kind, "rule");
   assert.deepEqual(
     observed?.readiness.kind === "rule" && observed.readiness.conditions.at(-1),
-    { ...picked, fieldName: "Status", optionName: "Ready" },
+    {
+      ...saved,
+      fieldName: "Status",
+      optionNames: { PVTSSO_ready: "Ready" },
+    },
   );
 });
 
@@ -3054,7 +3092,14 @@ test("a readiness Project-field condition keeps typed node IDs when discovery fa
     );
     await page.getByLabel("Readiness Project node ID").fill("PVT_typed");
     await page.getByLabel("Readiness field node ID").fill("PVTSSF_typed");
-    await page.getByLabel("Readiness option node ID").fill("PVTSSO_typed");
+    // The list is comma or newline separated; the separator can be typed before the next ID.
+    const typedOptions = page.getByLabel("Readiness option node IDs");
+    await typedOptions.pressSequentially("PVTSSO_typed,");
+    assert.equal(await typedOptions.inputValue(), "PVTSSO_typed,");
+    await typedOptions.pressSequentially(" PVTSSO_second");
+    await page
+      .getByLabel("Readiness operator", { exact: true })
+      .selectOption({ label: "is not one of" });
     await captureBrowserEvidence(page, "readiness-picker-typed");
     await page
       .getByRole("button", { name: "Save changes", exact: true })
@@ -3069,7 +3114,8 @@ test("a readiness Project-field condition keeps typed node IDs when discovery fa
         kind: "project-field",
         projectNodeId: "PVT_typed",
         fieldNodeId: "PVTSSF_typed",
-        optionNodeId: "PVTSSO_typed",
+        operator: "not-in",
+        optionNodeIds: ["PVTSSO_typed", "PVTSSO_second"],
       },
     );
   }
@@ -3095,7 +3141,8 @@ test("a saved readiness condition that discovery does not list stays typed, edit
           kind: "project-field",
           projectNodeId: "PVT_gone",
           fieldNodeId: "PVTSSF_gone",
-          optionNodeId: "PVTSSO_gone",
+          operator: "in",
+          optionNodeIds: ["PVTSSO_gone"],
         },
       ],
     },
@@ -3108,10 +3155,10 @@ test("a saved readiness condition that discovery does not list stays typed, edit
     .waitFor();
   assert.equal(await project.inputValue(), "PVT_gone");
   assert.equal(
-    await page.getByLabel("Readiness option node ID").inputValue(),
+    await page.getByLabel("Readiness option node IDs").inputValue(),
     "PVTSSO_gone",
   );
-  await page.getByLabel("Readiness option node ID").fill("PVTSSO_other");
+  await page.getByLabel("Readiness option node IDs").fill("PVTSSO_other");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
   assert.deepEqual(d.githubConfiguration(ids.atlas).readiness?.conditions, [
@@ -3119,7 +3166,8 @@ test("a saved readiness condition that discovery does not list stays typed, edit
       kind: "project-field",
       projectNodeId: "PVT_gone",
       fieldNodeId: "PVTSSF_gone",
-      optionNodeId: "PVTSSO_other",
+      operator: "in",
+      optionNodeIds: ["PVTSSO_other"],
     },
   ]);
 });
@@ -3165,7 +3213,8 @@ async function startGhOffer(
           kind: "project-field",
           projectNodeId: "PVT_atlas",
           fieldNodeId: "PVTSSF_status",
-          optionNodeId: "PVTSSO_ready",
+          operator: "in",
+          optionNodeIds: ["PVTSSO_ready"],
         },
       ],
     },
@@ -3305,17 +3354,19 @@ test("the readiness picker offer is held by a Settings save that is not confirme
 
 const labelCalls = (state: { calls: string[] }) =>
   state.calls.filter((c) => c === "labels").length;
-const suggestedLabels = (page: Page, nth: number) =>
-  page
-    .locator(`datalist#source-conditions-${nth}-labels option`)
-    .evaluateAll((o) => o.map((x) => x.getAttribute("value")));
+const labelSelect = (page: Page, nth: number) =>
+  page.locator(`select[id^="source-conditions-${nth}-name"]`);
+const labelOptions = (page: Page, nth: number) =>
+  labelSelect(page, nth)
+    .locator("option")
+    .evaluateAll((o) => o.map((x) => x.textContent));
 
-test("a Ready label is suggested from the source's repository labels and read once per round, only while a label condition exists", async (_t, journey) => {
+test("a Ready label is chosen from the source's repository labels and read once per round, only while a label condition exists", async (_t, journey) => {
   const state: { calls: string[] } = { calls: [] };
   const { f, ids, page } = await startDiscovery(journey, state);
   // The initial saved label has its own discovery round. Finish it and leave before
   // reconfiguring, so none of that document's reads can enter the next round's count.
-  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  await labelSelect(page, 0).waitFor();
   const url = page.url();
   await page.goto("about:blank");
   const d = f.service.domain();
@@ -3323,7 +3374,8 @@ test("a Ready label is suggested from the source's repository labels and read on
     kind: "project-field",
     projectNodeId: "PVT_gone",
     fieldNodeId: "PVTSSF_gone",
-    optionNodeId: "PVTSSO_gone",
+    operator: "in",
+    optionNodeIds: ["PVTSSO_gone"],
   } as const;
   await new OperatorApi(f.service, [f.directory]).execute({
     type: "github.configure",
@@ -3342,30 +3394,25 @@ test("a Ready label is suggested from the source's repository labels and read on
   await page.getByLabel("Readiness Project node ID").waitFor();
   assert.equal(labelCalls(state), 0);
   await addLabelCondition(page);
-  const ready = page.getByLabel("Ready label");
-  await page.locator("input#source-conditions-1-name[list]").waitFor();
-  assert.equal(await ready.getAttribute("list"), "source-conditions-1-labels");
-  assert.deepEqual(await suggestedLabels(page, 1), [
-    "bug",
-    "ready",
-    "needs-review",
-  ]);
-  await ready.fill("ready");
+  await labelSelect(page, 1).waitFor();
+  const listed = ["Choose a label", "bug", "ready", "needs-review", "Other…"];
+  assert.deepEqual(await labelOptions(page, 1), listed);
+  await labelSelect(page, 1).selectOption("ready");
   await addLabelCondition(page);
-  await page.getByLabel("Ready label").last().fill("bug");
-  assert.deepEqual(await suggestedLabels(page, 2), [
-    "bug",
-    "ready",
-    "needs-review",
-  ]);
+  await labelSelect(page, 2).selectOption("bug");
+  await page
+    .getByLabel("Label operator", { exact: true })
+    .last()
+    .selectOption({ label: "does not have" });
+  assert.deepEqual(await labelOptions(page, 2), listed);
   assert.equal(labelCalls(state), 1);
   await captureBrowserEvidence(page, "readiness-label-picker");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
   assert.deepEqual(d.githubConfiguration(ids.atlas).readiness?.conditions, [
     projectField,
-    { kind: "label", name: "ready" },
-    { kind: "label", name: "bug" },
+    { kind: "label", operator: "has", name: "ready" },
+    { kind: "label", operator: "lacks", name: "bug" },
   ]);
 });
 
@@ -3374,7 +3421,7 @@ test("a label-only source without a Project makes no Project discovery reads", a
   const { f, ids, page } = await startDiscovery(journey, state);
   const d = f.service.domain(),
     url = page.url();
-  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  await labelSelect(page, 0).waitFor();
   // Leave the page so none of its reads land after the count is reset.
   await page.goto("about:blank");
   await new OperatorApi(f.service, [f.directory]).execute({
@@ -3386,35 +3433,32 @@ test("a label-only source without a Project makes no Project discovery reads", a
       { id: "S-1", keep: true },
       { id: "S-2", keep: true },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   state.calls = [];
   await page.goto(url);
-  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  await labelSelect(page, 0).waitFor();
   assert.equal(labelCalls(state), 1);
   assert.equal(state.calls.includes("projects"), false);
 });
 
 // Atlas's saved readiness already holds the label condition "ready".
-test("a Ready label that is not on the repositories can still be typed", async (_t, journey) => {
+test("a Ready label that is not on the repositories is named under Other", async (_t, journey) => {
   const { f, ids, page } = await startDiscovery(journey, { calls: [] });
-  const input = page.getByLabel("Ready label");
-  await page.locator("input#source-conditions-0-name[list]").waitFor();
-  const note = page.getByText(
-    "This label is not on the source's repositories",
-    {
-      exact: false,
-    },
-  );
-  assert.equal(await input.inputValue(), "ready");
-  assert.equal(await note.count(), 0);
-  await input.fill("ship-it");
-  await note.waitFor();
+  const select = labelSelect(page, 0);
+  await select.waitFor();
+  assert.equal(await select.inputValue(), "ready");
+  assert.equal(await page.getByLabel("Other label").count(), 0);
+  await select.selectOption({ label: "Other…" });
+  await page.getByLabel("Other label").fill("ship-it");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
   assert.deepEqual(
     f.service.domain().githubConfiguration(ids.atlas).readiness?.conditions,
-    [{ kind: "label", name: "ship-it" }],
+    [{ kind: "label", operator: "has", name: "ship-it" }],
   );
 });
 
@@ -3426,7 +3470,7 @@ test("a Ready label stays a typed field when discovery fails or is truncated", a
     const { f, ids, page } = await startDiscovery(journey, state);
     await page.getByText("Type the label.", { exact: false }).waitFor();
     const input = page.getByLabel("Ready label");
-    assert.equal(await input.getAttribute("list"), null);
+    assert.equal(await labelSelect(page, 0).count(), 0);
     await input.fill("ship-it");
     await page
       .getByRole("button", { name: "Save changes", exact: true })
@@ -3434,12 +3478,12 @@ test("a Ready label stays a typed field when discovery fails or is truncated", a
     await savedOutcome(page);
     assert.deepEqual(
       f.service.domain().githubConfiguration(ids.atlas).readiness?.conditions,
-      [{ kind: "label", name: "ship-it" }],
+      [{ kind: "label", operator: "has", name: "ship-it" }],
     );
   }
 });
 
-test("a saved Ready label that discovery does not list stays shown and savable", async (_t, journey) => {
+test("a saved Ready label that discovery does not list stays selected and savable", async (_t, journey) => {
   const { f, ids, page } = await startDiscovery(journey, { calls: [] });
   const d = f.service.domain();
   await new OperatorApi(f.service, [f.directory]).execute({
@@ -3452,21 +3496,27 @@ test("a saved Ready label that discovery does not list stays shown and savable",
       { id: "S-2", keep: true },
       { id: "S-3", keep: true },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "gone" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "gone" }],
+    },
   });
   await page.reload();
-  const input = page.getByLabel("Ready label");
-  await page.locator("input#source-conditions-0-name[list]").waitFor();
+  await labelSelect(page, 0).waitFor();
   await page
     .getByText("This label is not on the source's repositories", {
       exact: false,
     })
     .waitFor();
-  assert.equal(await input.inputValue(), "gone");
-  assert.deepEqual(await suggestedLabels(page, 0), [
+  // The saved label stays selected as an extra option, so opening the editor changes nothing.
+  assert.equal(await labelSelect(page, 0).inputValue(), "gone");
+  assert.deepEqual(await labelOptions(page, 0), [
+    "Choose a label",
     "bug",
     "ready",
     "needs-review",
+    "gone",
+    "Other…",
   ]);
   await page
     .getByLabel("Closed GitHub issues", { exact: true })
@@ -3474,7 +3524,7 @@ test("a saved Ready label that discovery does not list stays shown and savable",
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
   assert.deepEqual(d.githubConfiguration(ids.atlas).readiness?.conditions, [
-    { kind: "label", name: "gone" },
+    { kind: "label", operator: "has", name: "gone" },
   ]);
 });
 
@@ -3498,7 +3548,10 @@ test("GitHub source conflict keeps rows and an unknown save is checked once", as
       { id: "S-3", keep: true },
       { id: "S-5", kind: "search", query: "PRIVATE ELSEWHERE" },
     ],
-    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "any",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
@@ -3555,7 +3608,7 @@ test("an edited query survives adopting a newer source version unless the row wa
       selections,
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     } as Parameters<OperatorApi["execute"]>[0]);
   const query = page.getByLabel("Search query", { exact: true });
@@ -3693,7 +3746,7 @@ test("a reverted query is kept again, and an edit survives leaving the tab", asy
       ],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
       closedIssues: "skip",
     } as Parameters<OperatorApi["execute"]>[0]);
@@ -3862,7 +3915,10 @@ test("a query edit says so when the private read is older than the source versio
       { id: "S-2", kind: "search", query: "THEIR QUERY" },
       { id: "S-3", keep: true },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   } as Parameters<OperatorApi["execute"]>[0]);
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
@@ -3898,7 +3954,7 @@ test("Save waits for saved queries and paths to be read again, and an edit never
       selections: [{ id: "S-1", keep: true }, s2, { id: "S-3", keep: true }],
       readiness: {
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     } as Parameters<OperatorApi["execute"]>[0]);
 
@@ -3997,7 +4053,10 @@ test("Save waits for a query to be read again, and a same-kind replacement drops
       // The same id, redefined as another GitHub Project: the pending removal no longer fits.
       { id: "S-3", kind: "project", projectNodeId: "PVT_other", filter: "" },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   } as Parameters<OperatorApi["execute"]>[0]);
   const posts = watchPosts(page);
   const release = await holdReads(page);
@@ -4097,7 +4156,10 @@ test("a pending removal is dropped when the source was replaced under the same i
       { id: "S-2", kind: "project", projectNodeId: "PVT_new", filter: "" },
       { id: "S-3", keep: true },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   } as Parameters<OperatorApi["execute"]>[0]);
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
@@ -4134,7 +4196,10 @@ test("an unknown source save with rows removed elsewhere keeps its one action an
       { id: "S-1", keep: true },
       { id: "S-3", keep: true },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   await refresh(page);
   await page.getByText("S-2 is no longer saved", { exact: false }).waitFor();
@@ -4610,7 +4675,8 @@ test("an in-flight Status the readiness rule does not accept is refused naming t
           kind: "project-field",
           projectNodeId: "PVT_atlas",
           fieldNodeId: statusField,
-          optionNodeId: "PVTSSO_ready",
+          operator: "in",
+          optionNodeIds: ["PVTSSO_ready"],
         },
       ],
     },
@@ -4695,7 +4761,10 @@ test("choosing another Project starts from Nothing, cannot be saved until its St
       { id: "S-3", keep: true as const },
       { id: "S-4", kind: "project", projectNodeId: "PVT_other", filter: "" },
     ],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   } as Parameters<OperatorApi["execute"]>[0]);
   let release = () => {};
   const gate = new Promise<void>((resolve) => {

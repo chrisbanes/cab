@@ -88,7 +88,8 @@ function setup(
         kind: "project-field" as const,
         projectNodeId: P,
         fieldNodeId: F,
-        optionNodeId,
+        operator: "in" as const,
+        optionNodeIds: [optionNodeId],
       })),
     },
   });
@@ -268,12 +269,13 @@ test("a rule needing both a label and a Status accepts an in-flight option the S
     reconfigureReadiness(f, {
       mode: "all",
       conditions: [
-        { kind: "label", name: "ready" },
+        { kind: "label", operator: "has", name: "ready" },
         {
           kind: "project-field",
           projectNodeId: P,
           fieldNodeId: F,
-          optionNodeId: TODO,
+          operator: "in",
+          optionNodeIds: [TODO],
         },
       ],
     });
@@ -282,6 +284,59 @@ test("a rule needing both a label and a Status accepts an in-flight option the S
       StatusMappingRefusal,
     );
     f.save(mapping({ turnStarted: TODO, handedBack: null }));
+  } finally {
+    f.db.close();
+  }
+});
+
+const fieldRule = (operator: "in" | "not-in", optionNodeIds: string[]) => ({
+  mode: "all" as const,
+  conditions: [
+    {
+      kind: "project-field" as const,
+      projectNodeId: P,
+      fieldNodeId: F,
+      operator,
+      optionNodeIds,
+    },
+  ],
+});
+
+test("an in-flight option in the rule's in set is accepted at save and at write; one outside it is refused", () => {
+  const f = setup();
+  try {
+    reconfigureReadiness(f, fieldRule("in", [TODO, PROGRESS]));
+    f.save(mapping({ turnStarted: PROGRESS, handedBack: TODO }));
+    assert.throws(
+      () => f.save(mapping({ handedBack: REVIEW })),
+      (error: unknown) =>
+        error instanceof StatusMappingRefusal &&
+        error.reason === "readiness" &&
+        error.optionNodeId === REVIEW,
+    );
+    f.sources.reconcileSelection(f.projectId, f.selectionId, {
+      complete: true,
+      issues: [issue(TODO)],
+      reason: null,
+    });
+    const write = (option: string, event: "turnStarted" | "handedBack") =>
+      f.delivery.prepareAction(f.write(option), f.caller(event), false).state;
+    assert.equal(write(PROGRESS, "turnStarted"), "prepared");
+    assert.equal(write(REVIEW, "handedBack"), "denied");
+  } finally {
+    f.db.close();
+  }
+});
+
+test("an in-flight option is accepted under not-in unless the set names it", () => {
+  const f = setup();
+  try {
+    reconfigureReadiness(f, fieldRule("not-in", [DONE]));
+    f.save(mapping({ turnStarted: PROGRESS, handedBack: REVIEW }));
+    assert.throws(
+      () => f.save(mapping({ handedBack: DONE })),
+      StatusMappingRefusal,
+    );
   } finally {
     f.db.close();
   }
@@ -502,7 +557,8 @@ test("an in-flight write is checked against the readiness rule at write time", (
           kind: "project-field",
           projectNodeId: P,
           fieldNodeId: F,
-          optionNodeId: TODO,
+          operator: "in",
+          optionNodeIds: [TODO],
         },
       ],
     });
@@ -716,12 +772,13 @@ test("with an any rule that names the Status, an in-flight option must be one it
     reconfigureReadiness(f, {
       mode: "any",
       conditions: [
-        { kind: "label", name: "ready" },
+        { kind: "label", operator: "has", name: "ready" },
         {
           kind: "project-field",
           projectNodeId: P,
           fieldNodeId: F,
-          optionNodeId: TODO,
+          operator: "in",
+          optionNodeIds: [TODO],
         },
       ],
     });

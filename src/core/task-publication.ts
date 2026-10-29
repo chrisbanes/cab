@@ -662,8 +662,11 @@ export class TaskPublicationStore {
 
 /**
  * The labels and Project fields a Ready task needs on a new issue so that the project's rule holds
- * on import, and whether that is possible from this target. `all` writes every condition; `any`
- * writes the cheapest one: the first label, else the first field on the target Project.
+ * on import, and whether that is possible from this target. A new issue has no labels, so `lacks`
+ * holds without a write. `all` writes every `has` label and the first option of every `in`
+ * condition; a `not-in` condition, or an `in` on another Project, cannot be satisfied by a write.
+ * `any` writes the cheapest one: nothing for `lacks`, else the first `has` label, else the first
+ * `in` on the target Project.
  */
 function readinessWrites(
   rule: Readiness | null,
@@ -675,17 +678,15 @@ function readinessWrites(
 } {
   if (!rule) return { labels: [], projectFields: [], satisfiable: true };
   const labels = rule.conditions.flatMap((c) =>
-    c.kind === "label" ? [c.name] : [],
+    c.kind === "label" && c.operator === "has" ? [c.name] : [],
   );
   const fields = rule.conditions.flatMap((c) =>
-    c.kind === "project-field"
-      ? [
-          {
-            projectNodeId: c.projectNodeId,
-            fieldNodeId: c.fieldNodeId,
-            optionNodeId: c.optionNodeId,
-          },
-        ]
+    c.kind === "project-field" && c.operator === "in"
+      ? c.optionNodeIds.slice(0, 1).map((optionNodeId) => ({
+          projectNodeId: c.projectNodeId,
+          fieldNodeId: c.fieldNodeId,
+          optionNodeId,
+        }))
       : [],
   );
   const here = fields.filter((f) => f.projectNodeId === projectNodeId);
@@ -693,8 +694,12 @@ function readinessWrites(
     return {
       labels,
       projectFields: here,
-      satisfiable: here.length === fields.length,
+      satisfiable:
+        here.length === fields.length &&
+        rule.conditions.every((c) => c.kind === "label" || c.operator === "in"),
     };
+  if (rule.conditions.some((c) => c.kind === "label" && c.operator === "lacks"))
+    return { labels: [], projectFields: [], satisfiable: true };
   if (labels[0] !== undefined)
     return { labels: [labels[0]], projectFields: [], satisfiable: true };
   return here[0]

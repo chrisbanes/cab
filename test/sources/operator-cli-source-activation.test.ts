@@ -264,7 +264,10 @@ test("preview-source activates after a complete read and reports the live state"
     projectId: noCredential,
     expectedVersion: (await w.config(noCredential)).source.version,
     selections: [{ id: "S-1", kind: "search", query: "q" }],
-    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
   });
   assert.equal(configured.status, 200);
   const unconfigured = await w.cli("rw", [

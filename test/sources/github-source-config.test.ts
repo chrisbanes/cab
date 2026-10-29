@@ -86,12 +86,13 @@ test("operator-owned GitHub configuration survives restart and rejects stale or 
       readiness: {
         mode: "all" as const,
         conditions: [
-          { kind: "label" as const, name: "ready" },
+          { kind: "label" as const, operator: "has" as const, name: "ready" },
           {
             kind: "project-field" as const,
             projectNodeId: "P_1",
             fieldNodeId: "F_1",
-            optionNodeId: "O_1",
+            operator: "in" as const,
+            optionNodeIds: ["O_1"],
           },
         ],
       },
@@ -167,7 +168,7 @@ test("a version-matched successful source preview activates only that selection"
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     let previewComplete = true;
@@ -211,7 +212,7 @@ test("a version-matched successful source preview activates only that selection"
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
@@ -260,7 +261,7 @@ test("github.activate reports whether the selection was already active at the so
         })),
         readiness: {
           mode: "any",
-          conditions: [{ kind: "label", name: "ready" }],
+          conditions: [{ kind: "label", operator: "has", name: "ready" }],
         },
       });
     const activate = (
@@ -337,7 +338,7 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -512,7 +513,7 @@ browserTest(
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -569,7 +570,7 @@ browserTest(
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     domain.execute({
@@ -1116,9 +1117,9 @@ test("saved readiness rules, including label ready, are untouched by migration a
   let db = new DatabaseSync(file);
   const rules = {
     [randomUUID()]:
-      '{"mode":"all","conditions":[{"kind":"label","name":"ready"}]}',
+      '{"mode":"all","conditions":[{"kind":"label","operator":"has","name":"ready"}]}',
     [randomUUID()]:
-      '{"mode":"any","conditions":[{"kind":"label","name":"ready-for-agent"}]}',
+      '{"mode":"any","conditions":[{"kind":"label","operator":"has","name":"ready-for-agent"}]}',
   };
   const raw = () =>
     Object.keys(rules).map((id) =>
@@ -1186,7 +1187,9 @@ test("readiness rule is added, removed and re-added through keyed, versioned con
     });
     const rule = {
       mode: "all" as const,
-      conditions: [{ kind: "label" as const, name: "ready" }],
+      conditions: [
+        { kind: "label" as const, operator: "has" as const, name: "ready" },
+      ],
     };
     const configure = (
       expectedVersion: number,
@@ -1261,7 +1264,9 @@ test("the HTML project page names the readiness state and its form removes or se
     await submit(
       JSON.stringify({
         mode: "all",
-        conditions: [{ kind: "label", name: "ready-for-agent" }],
+        conditions: [
+          { kind: "label", operator: "has", name: "ready-for-agent" },
+        ],
       }),
     );
     assert.match(
@@ -1362,7 +1367,7 @@ test("closed-issue mode defaults to skip and changes only through keyed, version
         selections: [],
         readiness: {
           mode: "all",
-          conditions: [{ kind: "label", name: "ready" }],
+          conditions: [{ kind: "label", operator: "has", name: "ready" }],
         },
         ...(closedIssues ? { closedIssues } : {}),
       });
@@ -1406,7 +1411,7 @@ test("closed-issue mode defaults to skip and changes only through keyed, version
       selections: "[]",
       readiness: JSON.stringify({
         mode: "all",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       }),
     };
     await assert.rejects(
@@ -1527,7 +1532,7 @@ test("imported task provisioning requires the project's exact linked Git reposit
       ],
       readiness: {
         mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
     await domain.configureRepositories({

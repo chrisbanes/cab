@@ -1019,12 +1019,16 @@ export class DeliveryStore {
           c.kind === "project-field" &&
           c.projectNodeId === action.projectNodeId &&
           c.fieldNodeId === action.fieldNodeId &&
-          c.optionNodeId === action.optionNodeId,
+          c.operator === "in" &&
+          c.optionNodeIds[0] === action.optionNodeId,
       );
     if (action.kind === "issue.create")
       return action.labels.every((l) =>
         readiness.conditions.some(
-          (c) => c.kind === "label" && c.name.toLowerCase() === l.toLowerCase(),
+          (c) =>
+            c.kind === "label" &&
+            c.operator === "has" &&
+            c.name.toLowerCase() === l.toLowerCase(),
         ),
       );
     return false;

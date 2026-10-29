@@ -16,6 +16,7 @@ export interface ProjectFieldIds {
   projectNodeId?: string;
   fieldNodeId?: string;
   optionNodeId?: string;
+  optionNodeIds?: readonly string[];
 }
 
 const optionsSchema = z.array(
@@ -73,7 +74,11 @@ export function projectFieldNames(
   }));
 }
 
-type Named<T> = T & { fieldName?: string; optionName?: string };
+type Named<T> = T & {
+  fieldName?: string;
+  optionName?: string;
+  optionNames?: Record<string, string>;
+};
 
 /**
  * Conditions or field values with the field and option names the last complete read of
@@ -96,10 +101,18 @@ export function withProjectFieldNames<T extends ProjectFieldIds>(
     const option = field?.options.find(
       (o) => o.optionNodeId === item.optionNodeId,
     );
+    // A multi-option condition names each option the read lists, keyed by node ID.
+    const optionNames = Object.fromEntries(
+      (item.optionNodeIds ?? []).flatMap((id) => {
+        const named = field?.options.find((o) => o.optionNodeId === id);
+        return named && disclose(named.name) ? [[id, named.name]] : [];
+      }),
+    );
     return {
       ...item,
       ...(field && disclose(field.name) ? { fieldName: field.name } : {}),
       ...(option && disclose(option.name) ? { optionName: option.name } : {}),
+      ...(Object.keys(optionNames).length ? { optionNames } : {}),
     };
   });
 }
