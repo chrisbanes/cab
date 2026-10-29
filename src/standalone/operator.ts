@@ -1,3 +1,4 @@
+import { cabFaviconSvg, cabMarkSvg } from "../operator/brand.js";
 import {
   questionCommandRawLimit,
   runtimeSummary,
@@ -842,7 +843,7 @@ const COMMANDS = new Set([
 const RESPONSE_HEADERS = {
   "cache-control": "no-store",
   "content-security-policy":
-    "default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; form-action 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
   "referrer-policy": "same-origin",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
@@ -1173,18 +1174,18 @@ function document(
     ? `<form method="post" action="/logout">${hidden("csrfToken", session.csrfToken)}<button type="submit">Log out</button></form>`
     : "";
   const navigation = session.authenticated
-    ? `<nav>${webEnabled ? '<a href="/app">New interface</a> ' : ""}<a href="/">Existing operator controls</a> <a href="/runtime">Runtime</a></nav>${logout}`
+    ? `<nav><span class="brand-lockup">${cabMarkSvg.replace("<svg ", '<svg aria-hidden="true" ')}<span>cab</span></span> ${webEnabled ? '<a href="/app">New interface</a> ' : ""}<a href="/">Existing operator controls</a> <a href="/runtime">Runtime</a></nav>${logout}`
     : "";
   const styles = webEnabled
     ? stylesheets
         .map((href) => `<link rel="stylesheet" href="${href}">`)
         .join("")
     : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>cab</title>${styles}</head><body${webEnabled ? ' class="legacy-operator"' : ""}>${navigation}${body}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>cab</title><link rel="icon" type="image/svg+xml" href="/favicon.svg">${styles}</head><body${webEnabled ? ' class="legacy-operator"' : ""}>${navigation}${body}</body></html>`;
 }
 
 function loginContent(session: OperatorSession, message = "Sign in"): string {
-  return `<main><h1>cab</h1><p>${escapeHtml(message)}</p><form method="post" action="/login">${hidden("csrfToken", session.csrfToken)}${field("password", "", "password")}<button type="submit">Sign in</button></form></main>`;
+  return `<main><h1 class="brand-lockup">${cabMarkSvg.replace("<svg ", '<svg aria-hidden="true" ')}cab</h1><p>${escapeHtml(message)}</p><form method="post" action="/login">${hidden("csrfToken", session.csrfToken)}${field("password", "", "password")}<button type="submit">Sign in</button></form></main>`;
 }
 
 function isSafeRedirect(location: string): boolean {
@@ -1267,6 +1268,19 @@ export class LocalOperatorHttp {
         // Bearer requests never read or upgrade a cookie session.
         if (request.headers.authorization !== undefined) {
           await this.handleBearer(request, response, url);
+          return;
+        }
+        if (url.pathname === "/favicon.svg") {
+          request.resume();
+          const allowed = request.method === "GET" || request.method === "HEAD";
+          response.writeHead(allowed ? 200 : 405, {
+            ...RESPONSE_HEADERS,
+            "content-type": "image/svg+xml",
+            ...(!allowed ? { allow: "GET, HEAD" } : {}),
+          });
+          response.end(
+            allowed && request.method === "GET" ? cabFaviconSvg : undefined,
+          );
           return;
         }
         const id = cookieId(request);

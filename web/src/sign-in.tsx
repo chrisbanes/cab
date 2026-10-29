@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import type { Session } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { Button, TextField } from "./components.js";
+import { BrandMark, Button, TextField } from "./components.js";
 import { Alert } from "./ui/alert.js";
 
 /** Bootstrap states share the sign-in layout; neither is a designed screen. */
@@ -15,7 +15,10 @@ export function SignInBootstrap({
   return (
     <main className="login">
       <div className="login-content">
-        <h1 className="page-heading">cab</h1>
+        <h1 className="page-heading brand-lockup">
+          <BrandMark />
+          cab
+        </h1>
         {unavailable ? (
           <>
             <p role="alert" className="body">
@@ -72,7 +75,10 @@ export function Login({
   return (
     <main className="login">
       <div className="login-content">
-        <p className="wordmark">cab</p>
+        <p className="wordmark brand-lockup">
+          <BrandMark />
+          cab
+        </p>
         <div className="login-heading">
           <h1 className="page-heading">Sign in</h1>
           <p className="introduction muted">Your operator workspace.</p>

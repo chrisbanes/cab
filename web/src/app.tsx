@@ -42,6 +42,7 @@ import {
   StatusBadge,
   ResourceStatus,
   MobileNavigation,
+  BrandMark,
   NavigationRow,
   PageHeader,
   ProjectName,
@@ -1057,7 +1058,7 @@ export function App() {
       <div className="shell">
         <aside className="sidebar">
           <div className="workspace-header">
-            <span className="workspace-mark" aria-hidden="true" />
+            <BrandMark />
             <div>
               <p className="body">cab</p>
               <p className="metadata muted">Personal workspace</p>

@@ -6,7 +6,7 @@ import {
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 const test = browserSuite("operator-shell-browser");
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, webkit, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
   addProfile,
@@ -15,7 +15,11 @@ import {
   startFirstTurn,
 } from "../fixtures/operator-first-run.js";
 import { mixedForm } from "../fixtures/question-data.js";
-import { seedOwnQuestion } from "../fixtures/questions.js";
+import {
+  seedOwnApproval,
+  seedOwnIntervention,
+  seedOwnQuestion,
+} from "../fixtures/questions.js";
 
 async function signIn(
   page: Page,
@@ -967,3 +971,198 @@ for (const width of [1024, 390])
     );
     assert.equal(new URL(page.url()).origin, web.origin);
   });
+
+for (const engine of ["chromium", "webkit"] as const)
+  test(
+    `approved roof-sign identity stays legible beside attention across shell layouts (${engine})`,
+    { browserEngine: engine },
+    async (_t, journey) => {
+      const f = await journey.start("fixture.create", () =>
+        createOperatorFixture(
+          null,
+          undefined,
+          undefined,
+          journey.fixtureOptions,
+        ),
+      );
+      let browser: Browser | undefined;
+      journey.cleanup(
+        (primary) => f.close(browser, primary),
+        "fixture.close",
+        () => f.lifecycle.steps,
+      );
+      await seedOwnQuestion(f);
+      await seedOwnApproval(f);
+      await seedOwnIntervention(f);
+      const web = await journey.start("fixture.web", () => f.startWeb());
+      browser = await journey.start("browser.launch", () =>
+        (engine === "webkit" ? webkit : chromium).launch(),
+      );
+      const page = await browser.newPage({
+        viewport: { width: 1366, height: 900 },
+      });
+      journey.observe(page);
+      page.setDefaultTimeout(5000);
+      await page.goto(`${web.origin}/app/inbox`);
+      await page.getByLabel("Password", { exact: true }).waitFor();
+      await assertBrandMark(page.locator(".wordmark .workspace-mark"));
+      const favicon = page.locator('link[rel="icon"]');
+      assert.equal(await favicon.getAttribute("type"), "image/svg+xml");
+      const icon = await page.request.get(
+        new URL((await favicon.getAttribute("href"))!, page.url()).href,
+      );
+      assert.equal(icon.status(), 200);
+      assert.equal(icon.headers()["content-type"], "image/svg+xml");
+      assert.equal(icon.headers()["set-cookie"], undefined);
+      assert.match(await icon.text(), /viewBox="0 0 16 16"/);
+      const legacy = await page.request.get(`${web.origin}/runtime`);
+      const legacyHtml = await legacy.text();
+      assert.match(legacyHtml, /rel="icon"[^>]*href="\/favicon.svg"/);
+      assert.match(
+        legacyHtml,
+        /<svg aria-hidden="true"[^>]*width="20" height="20"/,
+      );
+      await page.getByLabel("Password", { exact: true }).fill(web.password);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await page.locator(".inbox-row").first().waitFor();
+      assert.equal(await page.locator(".inbox-row").count(), 3);
+      await page
+        .locator(".top-bar-connection", { hasText: "Connected" })
+        .waitFor();
+      for (const [width, height] of [
+        [390, 844],
+        [390, 480],
+        [800, 768],
+        [1024, 768],
+        [1120, 768],
+        [1121, 768],
+        [1366, 900],
+      ]) {
+        await page.setViewportSize({ width: width!, height: height! });
+        const desktop = width! > 1120;
+        if (desktop) {
+          await assertBrandMark(page.locator(".sidebar .workspace-mark"));
+          await assertBrandMark(page.locator(".top-bar .workspace-mark"));
+          const geometry = await page.evaluate(() => ({
+            sidebar: document.querySelector(".sidebar")!.getBoundingClientRect()
+              .width,
+            bar: document.querySelector(".top-bar")!.getBoundingClientRect()
+              .height,
+            lockup: document
+              .querySelector(".top-bar-brand")!
+              .getBoundingClientRect().width,
+            overflow:
+              document.querySelector(".top-bar")!.scrollWidth -
+              document.querySelector(".top-bar")!.clientWidth,
+          }));
+          assert.equal(geometry.sidebar, 232);
+          assert.equal(geometry.bar, 48);
+          assert.ok(
+            geometry.lockup >= 51 && geometry.overflow <= 0,
+            JSON.stringify(geometry),
+          );
+        } else {
+          const trigger = page.getByRole("button", {
+            name: "Projects and navigation",
+            exact: true,
+          });
+          await trigger.click();
+          const drawer = page.getByRole("dialog", {
+            name: "Projects and navigation",
+            exact: true,
+          });
+          await assertBrandMark(drawer.locator(".workspace-mark"));
+          const close = drawer.getByRole("button", {
+            name: "Close navigation",
+            exact: true,
+          });
+          const rect = await close.boundingBox();
+          assert.ok(rect && rect.y >= 0 && rect.y + rect.height <= height!);
+          if (width === 390 && height === 480)
+            await captureBrowserEvidence(
+              page,
+              `${engine}-390x480-brand-drawer`,
+            );
+          await page.keyboard.press("Escape");
+          await drawer.waitFor({ state: "detached" });
+          await page.waitForFunction(
+            () => document.activeElement?.closest(".phone-nav") !== null,
+          );
+        }
+        const overflow = await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
+        );
+        assert.ok(
+          overflow <= 0,
+          `${width}x${height} page overflow: ${overflow}`,
+        );
+      }
+      // A settled failed workspace refresh is a warning; Inbox's separately loaded requests remain.
+      await page.route("**/api/operator/workspace", (route) =>
+        route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: '{"error":"unavailable"}',
+        }),
+      );
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await page
+        .locator(".top-bar-connection", { hasText: "Updates delayed" })
+        .waitFor();
+      await page.locator(".inbox-row").first().waitFor();
+      assert.equal(await page.locator(".inbox-row").count(), 3);
+      const kinds = await page.locator(".inbox-row").allTextContents();
+      assert.ok(
+        kinds.some((text) => text.includes("Question")),
+        kinds.join("\n"),
+      );
+      assert.ok(
+        kinds.some((text) => text.includes("Approval")),
+        kinds.join("\n"),
+      );
+      assert.ok(
+        kinds.some((text) => text.includes("Intervention")),
+        kinds.join("\n"),
+      );
+      // The badge text changes before its colour transition finishes.
+      await page.waitForFunction(() => {
+        const badge = document.querySelector(".top-bar-connection");
+        return badge && getComputedStyle(badge).color === "rgb(251, 191, 36)";
+      });
+      for (const kind of ["question", "approval", "intervention"]) {
+        const row = page.locator(`.inbox-row[data-kind="${kind}"]`);
+        assert.equal(
+          await row.locator(".inbox-row-label svg[aria-hidden=true]").count(),
+          1,
+        );
+        assert.ok(
+          (await row.locator(".inbox-row-action").textContent())?.trim(),
+        );
+      }
+      const warning = await page
+        .locator(".top-bar-connection")
+        .evaluate((element) => ({
+          text: getComputedStyle(element).color,
+          symbols: element.querySelectorAll("svg").length,
+        }));
+      assert.equal(warning.text, "rgb(251, 191, 36)");
+      assert.equal(warning.symbols, 1);
+      await captureBrowserEvidence(page, `${engine}-1366-brand-and-attention`);
+    },
+  );
+
+async function assertBrandMark(mark: import("playwright").Locator) {
+  await mark.waitFor({ state: "visible" });
+  await mark.evaluate((element: HTMLImageElement) => element.decode());
+  assert.equal(await mark.getAttribute("alt"), "");
+  assert.equal(await mark.getAttribute("aria-hidden"), "true");
+  assert.deepEqual(
+    await mark.evaluate((element) => [
+      element.getBoundingClientRect().width,
+      element.getBoundingClientRect().height,
+    ]),
+    [20, 20],
+  );
+}
