@@ -177,8 +177,10 @@ leaves the old job running. The stages and failure handling are those of
 [Upgrade](#upgrade). The binding recorded at install is kept unless `--node PATH` changes
 it; running the same version again with `--node` re-binds it. An explicit `VERSION_DIR`
 also takes a staged npm version. Uninstall is unchanged and keeps every staged version. The
-sequence, run on local tarballs under a throwaway label, is automated in
-`test/operations/npm-service-lifecycle.test.ts`.
+sequence is automated in `test/operations/npm-service-lifecycle.test.ts` (a launchd
+stand-in that runs the rendered plist as a real process) and had one bounded live run
+on local tarballs under a throwaway label
+([evidence](../evidence/2026-10-29-npm-service-lifecycle.md)).
 
 A LaunchDaemon install from npm uses the same staging and binding. The verify command it
 prints runs `NODE STATE/versions/<version>/dist/src/cli/main.js service install ...`,

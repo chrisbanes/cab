@@ -50,7 +50,7 @@ upgrade, uninstall with reinstall, remote CLI use and the gated publish job have
 automated evidence on local tarballs
 (`test/infrastructure/npm-package.test.ts`, `test/operations/npm-service-lifecycle.test.ts`,
 `test/operations/service-lifecycle.test.ts`, `test/infrastructure/package-release.test.ts`)
-and a bounded live run. The published-package items below stay unproved;
+and a bounded live run ([evidence](evidence/2026-10-29-npm-service-lifecycle.md)). The published-package items below stay unproved;
 [#1267](https://github.com/chrisbanes/cab/issues/1267) owns delivery and completion.
 The optional tarball and deferred desktop/Homebrew channel do not gate it.
 
