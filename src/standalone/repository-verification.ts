@@ -1,8 +1,10 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import {
+  type ExpectedOrigin,
   type LinkedRepository,
   parseGitHubOrigin,
+  parseGitLabOrigin,
   RepositoryVerificationError,
   type RepositoryVerifier,
 } from "../core/github-source.js";
@@ -20,24 +22,47 @@ async function gitOutput(args: string[], timeoutMs: number) {
   return result.status === "ok" ? result.stdout.toString("utf8").trim() : null;
 }
 
-/** The `owner/name` of a checkout's origin, or the verification reason it fails with. */
-export async function checkoutOrigin(
-  path: string,
-  timeout = 5000,
-): Promise<{ owner: string; name: string }> {
+async function originUrl(path: string, timeout: number) {
   const url = await gitOutput(
     ["-C", path, "remote", "get-url", "origin"],
     timeout,
   );
   if (url === null) throw new RepositoryVerificationError("origin-missing");
-  const origin = parseGitHubOrigin(url);
+  return url;
+}
+
+/** The `owner/name` of a checkout's origin, or the verification reason it fails with. */
+export async function checkoutOrigin(
+  path: string,
+  timeout = 5000,
+): Promise<{ owner: string; name: string }> {
+  const origin = parseGitHubOrigin(await originUrl(path, timeout));
   if (!origin) throw new RepositoryVerificationError("origin-provider");
   return origin;
 }
 
+async function assertOrigin(path: string, expected: ExpectedOrigin) {
+  if ("owner" in expected) {
+    const actual = await checkoutOrigin(path);
+    if (
+      actual.owner.toLowerCase() !== expected.owner.toLowerCase() ||
+      actual.name.toLowerCase() !== expected.name.toLowerCase()
+    )
+      throw new RepositoryVerificationError(
+        "origin-mismatch",
+        `${actual.owner}/${actual.name}`,
+      );
+    return;
+  }
+  const actual = parseGitLabOrigin(await originUrl(path, 5000), expected.host);
+  if (actual === null) throw new RepositoryVerificationError("origin-provider");
+  if (actual.toLowerCase() !== expected.projectPath.toLowerCase())
+    throw new RepositoryVerificationError("origin-mismatch", actual);
+}
+
 /**
  * Verify a local checkout. With `expectedOrigin`, its `origin` remote must be that
- * `github.com` repository (case-insensitive). Failures are `RepositoryVerificationError`s.
+ * `github.com` repository, or that GitLab host and full project path (case-insensitive). Failures are `RepositoryVerificationError`s.
  */
 export const verifiedRepository: RepositoryVerifier = async (
   input,
@@ -56,17 +81,7 @@ export const verifiedRepository: RepositoryVerifier = async (
     5000,
   );
   if (common === null) throw new RepositoryVerificationError("not-checkout");
-  if (expectedOrigin) {
-    const actual = await checkoutOrigin(path);
-    if (
-      actual.owner.toLowerCase() !== expectedOrigin.owner.toLowerCase() ||
-      actual.name.toLowerCase() !== expectedOrigin.name.toLowerCase()
-    )
-      throw new RepositoryVerificationError(
-        "origin-mismatch",
-        `${actual.owner}/${actual.name}`,
-      );
-  }
+  if (expectedOrigin) await assertOrigin(path, expectedOrigin);
   const ref = await gitOutput(
     // Setup requires the ref to name a commit; configured links keep their check.
     [

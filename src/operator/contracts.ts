@@ -3087,14 +3087,24 @@ export const projectConfigurationSchema = envelope(
         .object({
           version: revision,
           links: z.array(
-            z
-              .object({
-                repositoryId: safeText,
-                codeHost: z.literal("github"),
-                host: z.literal("github.com"),
-                ref: safeText,
-              })
-              .strict(),
+            z.discriminatedUnion("codeHost", [
+              z
+                .object({
+                  repositoryId: safeText,
+                  codeHost: z.literal("github"),
+                  host: z.literal("github.com"),
+                  ref: safeText,
+                })
+                .strict(),
+              z
+                .object({
+                  repositoryId: safeText,
+                  codeHost: z.literal("gitlab"),
+                  host: z.string().min(1).max(253),
+                  ref: safeText,
+                })
+                .strict(),
+            ]),
           ),
         })
         .strict(),

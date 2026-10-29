@@ -10,7 +10,11 @@ import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import { githubConfigurationCommandSchema } from "../../src/core/github-source-contracts.js";
 import { repositoriesConfigurationCommandSchema } from "../../src/core/repository-links.js";
 import { readinessRuleViewSchema } from "../../src/operator/contracts.js";
-import { OperatorApi } from "../../src/standalone/operator-api.js";
+import {
+  OperatorApi,
+  OperatorApiError,
+} from "../../src/standalone/operator-api.js";
+import { checkout } from "../fixtures/setup-home.js";
 import {
   createOperatorFixture,
   seedOperatorRecovery,
@@ -856,7 +860,6 @@ test("unavailable delivery exclusions fail closed without replacing safe labels 
   assert.equal(f.runtime.turns, 0);
 });
 
-import { OperatorApiError } from "../../src/standalone/operator-api.js";
 import { OperatorClient } from "../../web/src/api.js";
 import { ConfigurationDraft } from "../../web/src/settings-state.js";
 
@@ -985,6 +988,68 @@ test("routing guidance is kept when omitted and cleared only by an explicit empt
     guidance: "",
   });
   assert.equal(d.routing(projectId).guidance, "");
+});
+
+test("a GitLab link saves with a matching origin and a mismatch is refused with its reason", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]),
+    projectId = randomUUID(),
+    lab = join(f.directory, "lab"),
+    wrong = join(f.directory, "wrong");
+  await checkout(lab, "https://gitlab.example.com/group/atlas.git");
+  await checkout(wrong, "https://gitlab.example.com/group/other.git");
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Lab",
+    leadProfileId: null,
+  });
+  const row = (path: string) => ({
+    codeHost: "gitlab" as const,
+    host: "gitlab.example.com",
+    repositoryId: "42",
+    projectPath: "group/atlas",
+    path,
+    ref: "main",
+  });
+  const refusal = await api
+    .execute({
+      type: "repositories.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      repositories: [row(wrong)],
+    })
+    .then(
+      () => assert.fail("expected rejection"),
+      (error: unknown) => error as OperatorApiError,
+    );
+  assert.equal(refusal.status, 400);
+  assert.equal(refusal.code, "invalid-input");
+  assert.deepEqual(refusal.fieldPaths, ["repositories.0.path"]);
+  assert.match(
+    refusal.publicMessage ?? "",
+    /^Repository 1: .*different project/,
+  );
+  assert.equal(refusal.publicMessage?.includes(wrong), false);
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [row(lab)],
+  });
+  const read = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(read.data.repositories.links, [
+    {
+      repositoryId: "42",
+      codeHost: "gitlab",
+      host: "gitlab.example.com",
+      ref: "main",
+    },
+  ]);
 });
 
 test("GitHub keep markers and pathless links resolve from the saved configuration and replay across restart", async (t) => {
@@ -1368,6 +1433,18 @@ test("GitHub configuration command contract accepts only exact keep markers and 
     links([{ ...link, host: "gitlab.com", repositoryId: "r" }]),
     false,
   );
+  const lab = {
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    repositoryId: "42",
+    ref: "main",
+  };
+  assert.equal(links([lab]), true);
+  assert.equal(links([{ ...lab, projectPath: "group/sub/atlas" }]), true);
+  assert.equal(links([{ ...lab, host: "github.com" }]), false);
+  assert.equal(links([{ ...lab, host: "gitlab.example.com:22" }]), false);
+  assert.equal(links([{ ...lab, repositoryId: "abc" }]), false);
+  assert.equal(links([{ ...lab, projectPath: "atlas" }]), false);
 });
 
 import { chmod, readFile } from "node:fs/promises";
