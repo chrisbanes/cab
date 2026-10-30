@@ -776,17 +776,18 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     // GitLab reports a request on a train as auto-merge set, so the car decides before that flag does.
     if (car !== null && trainPending.includes(car))
       return uncertain(trainPendingReason);
-    if (mr.merge_when_pipeline_succeeds)
-      return uncertain("provider-auto-merge-set");
-    if (!train) return uncertain("provider-effect-unproved");
-    // Dropped is concluded only for a merge the train was seen holding.
-    return record.observation?.reason === trainPendingReason
-      ? {
-          state: "confirmed-failure",
-          reason: "provider-merge-train-dropped",
-          receipt: null,
-        }
-      : uncertain("provider-effect-unproved");
+    // Dropped is concluded only for a merge the train was seen holding, whatever auto-merge says since.
+    if (train && record.observation?.reason === trainPendingReason)
+      return {
+        state: "confirmed-failure",
+        reason: "provider-merge-train-dropped",
+        receipt: null,
+      };
+    return uncertain(
+      mr.merge_when_pipeline_succeeds
+        ? "provider-auto-merge-set"
+        : "provider-effect-unproved",
+    );
   }
   async inspectPr(
     identity: PrIdentity,

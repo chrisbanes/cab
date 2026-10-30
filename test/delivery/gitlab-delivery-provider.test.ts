@@ -1379,6 +1379,15 @@ test("a merge train merge joins the train, stays pending, and ends merged or dro
     (await dropped.provider.inspectAction(seen)).reason,
     "provider-merge-train-dropped",
   );
+  // Someone queueing auto-merge after the car left does not erase that the train held the merge.
+  dropped.state.cars.delete(iid);
+  dropped.state.mergeRequests[0]!.state = "opened";
+  dropped.state.mergeRequests[0]!.merge_when_pipeline_succeeds = true;
+  assert.equal(
+    (await dropped.provider.inspectAction(seen)).reason,
+    "provider-merge-train-dropped",
+  );
+  dropped.state.mergeRequests[0]!.merge_when_pipeline_succeeds = false;
   // A push to the branch takes the request off the train: the moved head reads as dropped, not as an unreadable request.
   dropped.state.mergeRequests[0]!.state = "opened";
   dropped.state.mergeRequests[0]!.sha = old;
