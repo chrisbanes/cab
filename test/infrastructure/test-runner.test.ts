@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readdir,
@@ -482,6 +483,11 @@ test("the stale-root sweep removes only provably dead runs it owns", () =>
     await writeFile(join(victim, "file"), "keep");
     await writeFile(join(victim, "owner.pid"), String(dead.pid));
     await symlink(victim, join(base, "cab-run-eeeeee"));
+    await mkdir(join(base, "cab-run-gggggg"));
+    await symlink(
+      join(victim, "owner.pid"),
+      join(base, "cab-run-gggggg", "owner.pid"),
+    );
     await writeFile(join(base, "cab-run-ffffff"), String(dead.pid));
 
     runner.sweepStaleRunTempRoots(base, () => true);
@@ -494,9 +500,34 @@ test("the stale-root sweep removes only provably dead runs it owns", () =>
       "cab-run-dddddd",
       "cab-run-eeeeee",
       "cab-run-ffffff",
+      "cab-run-gggggg",
       "other-dir",
       "victim",
     ]);
     assert.equal(await readFile(join(victim, "file"), "utf8"), "keep");
     assert.ok((await stat(join(base, "other-dir"))).isDirectory());
   }));
+
+test(
+  "a partly removed run root keeps its pid file so a later sweep retries it",
+  { skip: process.getuid?.() === 0 },
+  () =>
+    withBase(async (base) => {
+      const dead = spawn(process.execPath, ["-e", ""]);
+      await once(dead, "close");
+      const root = join(base, "cab-run-hhhhhh");
+      const locked = join(root, "locked");
+      await mkdir(locked, { recursive: true });
+      await writeFile(join(locked, "file"), "x");
+      await writeFile(join(root, "owner.pid"), String(dead.pid));
+      await chmod(locked, 0o500);
+      try {
+        runner.sweepStaleRunTempRoots(base);
+        assert.ok((await readdir(root)).includes("owner.pid"));
+      } finally {
+        await chmod(locked, 0o700);
+      }
+      runner.sweepStaleRunTempRoots(base);
+      assert.deepEqual(await readdir(base), []);
+    }),
+);

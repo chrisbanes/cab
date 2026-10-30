@@ -1884,7 +1884,9 @@ test("polled task list, project and Inbox reads redact stored workspace paths wi
     projectId: ids.projectId,
     taskId: ids.taskId,
     expectedVersion: Number(d.task(ids.taskId).version),
-    title: `Safe title ${paths.join(" ")}`,
+    // The title is capped at 512 characters, so leave out paths that prefix a longer
+    // listed path; the final assertion still checks that every path is absent.
+    title: `Safe title ${paths.filter((p) => !paths.some((o) => o.startsWith(`${p}/`))).join(" ")}`,
   });
   const starts = () =>
     controlled.events().filter((e) => e.event === "start").length;

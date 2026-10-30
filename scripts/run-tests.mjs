@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import {
-  chmodSync,
   existsSync,
   globSync,
   lstatSync,
@@ -294,11 +293,18 @@ export function pidAlive(pid) {
 
 export function createRunTempRoot(base) {
   const root = mkdtempSync(join(base, "cab-run-"));
-  chmodSync(root, 0o700);
   // Rename so a concurrent sweep never reads a partial pid.
   writeFileSync(join(root, "owner.pid.tmp"), String(process.pid));
   renameSync(join(root, "owner.pid.tmp"), join(root, "owner.pid"));
   return root;
+}
+
+/** Removes the pid file last, so a partial removal stays recognisable and is retried by the next sweep. */
+function removeRunTempRoot(root) {
+  for (const name of readdirSync(root))
+    if (name !== "owner.pid")
+      rmSync(join(root, name), { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true });
 }
 
 /** Removes per-run roots whose recorded owner has exited; keeps anything it cannot prove stale. */
@@ -319,7 +325,7 @@ export function sweepStaleRunTempRoots(base, alive = pidAlive) {
       if (!lstatSync(file).isFile()) continue;
       const text = readFileSync(file, "utf8");
       if (!/^[1-9]\d*$/.test(text) || alive(Number(text))) continue;
-      rmSync(root, { recursive: true, force: true });
+      removeRunTempRoot(root);
     } catch (error) {
       // A root without an owner file is mid-creation or foreign: keep it quietly.
       if (error?.code !== "ENOENT")
@@ -338,7 +344,7 @@ export async function withRunTempRoot(base, body) {
     return await body(root);
   } finally {
     try {
-      rmSync(root, { recursive: true, force: true });
+      removeRunTempRoot(root);
     } catch (error) {
       process.stderr.write(`Test temp ${root} not removed: ${error.message}\n`);
     }
