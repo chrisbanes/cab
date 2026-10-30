@@ -56,14 +56,19 @@ export async function skillScopeConfig(input: {
       ? await enabledSkillFiles(input.plugins)
       : undefined;
   const disabled: string[] = [];
+  const found = new Set<string>();
   for (const skill of input.listed) {
     const file = await realpath(skill.path).catch(() => skill.path);
+    found.add(file);
     const underKnownRoot = [...input.knownRoots].some((root) =>
       file.startsWith(root + sep),
     );
     if (enabled ? !enabled.has(file) : underKnownRoot)
       disabled.push(skill.path);
   }
+  // Claude accepts a skill Codex may reject (for instance without frontmatter); never run without it.
+  if (enabled && [...enabled].some((file) => !found.has(file)))
+    throw new Error("A skill the profile enables was not loaded by Codex");
   return disabled.length === 0
     ? undefined
     : {

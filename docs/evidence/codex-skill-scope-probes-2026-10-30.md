@@ -14,7 +14,7 @@ python3 test/execution/skill-plugin-qualification/codex_skill_scope_probe.py --l
 
 ## Environment
 
-- Codex CLI 0.164.0, macOS, model `gpt-6-luna` at low effort, at most 12 model turns (10 ran).
+- Codex CLI 0.164.0, macOS, model `gpt-6-luna` at low effort, at most 12 model turns on each App Server.
 - Laid out as cab lays it out: a disposable `CODEX_HOME` whose `auth.json` is a symlink to
   the operator's own login, an empty `HOME`, `cli_auth_credentials_store=file`,
   `features.plugins=false`, `features.multi_agent=false`,
@@ -31,10 +31,12 @@ python3 test/execution/skill-plugin-qualification/codex_skill_scope_probe.py --l
 | --- | --- | --- |
 | S1 | `skills/extraRoots/set` with the fixture directory, then `skills/list` | Demonstrated. Both fixture skills are listed as user skills with plugins disabled. Five bundled `.system` skills are listed from cab's Codex home. |
 | S2 | Thread A started with `config.skills.config` disabling `other-skill` and every bundled skill; thread B with nothing disabled, on the same App Server | Demonstrated. A lists only `probe-skill`, runs it, and asked for `other-skill` answers that it has none (no marker). B lists all six and runs `other-skill`. |
-| S3 | A new App Server process (as after a cab restart) resumes A with the same config | Demonstrated. The resumed thread lists only `probe-skill` and cannot run `other-skill`. Resume without the config was not run: cab sends the config on every start and resume. |
+| S3 | A new App Server process (as after a cab restart) is told `thread/unsubscribe` for A (its status is `notLoaded`, not an error), then resumes A with the same config | Demonstrated. The resumed thread lists only `probe-skill` and cannot run `other-skill`. Resume without the config was not run: cab sends the config on every start and resume. |
 | S4 | A model-driven shell prints `$HOME`; `skills/list` loads nothing from the real home | Demonstrated. The command printed the real home, and no skill came from it. |
 | S5 | `lstat`/`stat` of the link after every turn group | Demonstrated. The link stayed a symlink to the same target, the target's inode is unchanged, and it is still a regular file. |
-| S6 | Information only: a separate App Server with `features.multi_agent=true` and a prompt to delegate an outside write, a network attempt and a sleep to a subagent | Subagent activity observed (a `subAgentActivity` item). The outside write did not land. The turn ended before the 40 s interrupt point, so interrupt behaviour and surviving processes are untested, and the network attempt's result was not captured. In an earlier run the model used no subagent tool (untested). Codex subagents stay disabled. |
+| S3b | A loaded thread started without scope gets a resume with the scope config: first a plain `thread/resume` with config, then `thread/unsubscribe` and a resume | Demonstrated. A resume alone changes nothing (the thread still lists every skill); after `thread/unsubscribe` the next resume applies the scope and the thread lists only `probe-skill`. A plain `thread/resume` without config does not reset a scoped thread. |
+| S3c | A second plugin root (`third-skill`) joins the process after thread A was scoped | Demonstrated. Thread A then lists `third-skill` as well as `probe-skill` (a loaded thread sees later roots), and after `thread/unsubscribe` plus a resume with a refreshed disable list it lists only `probe-skill`. |
+| S6 | Information only: a separate App Server with `features.multi_agent=true` and a prompt to delegate an outside write, a network attempt and a sleep to a subagent | Untested. The model used no subagent tool in the recorded run (item kinds: agent and user messages only), so no subagent sandbox, network or interrupt behaviour was observed. An earlier, unrecorded run did show subagent activity with the outside write not landing; its interrupt and survivor behaviour were not observed either. Codex subagents stay disabled. |
 
 ## Attempts
 

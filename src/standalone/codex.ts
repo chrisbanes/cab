@@ -799,6 +799,7 @@ export class CodexRuntime implements Runtime {
   private nativeGeneration: string | undefined;
   /** Plugin `skills/` roots set on this App Server process; it holds the union for all threads. */
   private skillRoots = new Set<string>();
+  private scopeQueue: Promise<void> = Promise.resolve();
   private nativeExecutable:
     | { codexVersion: string; executableHash: string }
     | undefined;
@@ -1977,6 +1978,16 @@ export class CodexRuntime implements Runtime {
    * set of extra roots per process, so the roots are the union of every profile's plugins
    * and each thread disables what its own profile does not enable, on start and on resume.
    */
+  /** Runs thread start/resume one at a time, so a scope is computed and applied against one root set. */
+  private exclusive<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.scopeQueue.then(work, work);
+    this.scopeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   private async skillConfig(
     workspace: string,
     settings: RuntimeTurnSettings | undefined,
@@ -1984,12 +1995,14 @@ export class CodexRuntime implements Runtime {
     const plugins = settings?.skills?.plugins ?? [];
     const wanted = await pluginSkillRoots(plugins);
     if (wanted.some((root) => !this.skillRoots.has(root))) {
-      for (const root of wanted) this.skillRoots.add(root);
+      const next = new Set([...this.skillRoots, ...wanted]);
       emptyResponseSchema.parse(
         await this.request("skills/extraRoots/set", {
-          extraRoots: [...this.skillRoots].sort(),
+          extraRoots: [...next].sort(),
         }),
       );
+      // Recorded only once App Server has them, so a failed call is retried.
+      this.skillRoots = next;
     }
     if (plugins.length === 0 && this.skillRoots.size === 0) return undefined;
     const listed = skillListSchema.parse(
@@ -2005,10 +2018,20 @@ export class CodexRuntime implements Runtime {
     });
   }
 
-  async startThread(
+  startThread(
     workspace: string,
     tools: readonly RuntimeToolDefinition[] = [],
     settings?: RuntimeTurnSettings,
+  ): Promise<string> {
+    return this.exclusive(() =>
+      this.startThreadScoped(workspace, tools, settings),
+    );
+  }
+
+  private async startThreadScoped(
+    workspace: string,
+    tools: readonly RuntimeToolDefinition[],
+    settings: RuntimeTurnSettings | undefined,
   ): Promise<string> {
     const definitions = registeredTools(tools);
     const skills = await this.skillConfig(workspace, settings);
@@ -2086,11 +2109,22 @@ export class CodexRuntime implements Runtime {
     }
   }
 
-  async resumeThread(
+  resumeThread(
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
     settings?: RuntimeTurnSettings,
     workspace?: string,
+  ): Promise<void> {
+    return this.exclusive(() =>
+      this.resumeThreadScoped(threadId, tools, settings, workspace),
+    );
+  }
+
+  private async resumeThreadScoped(
+    threadId: string,
+    tools: readonly RuntimeToolDefinition[] | undefined,
+    settings: RuntimeTurnSettings | undefined,
+    workspace: string | undefined,
   ): Promise<void> {
     if (this.startedUnderPreviousHome(threadId))
       throw new PreviousCodexHomeError();

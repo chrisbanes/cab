@@ -295,3 +295,21 @@ test("a thread resumed after another profile's plugin joined the process disable
     f.cleanup();
   }
 });
+
+test("an enabled skill that Codex does not list stops the thread instead of running without it", async () => {
+  const f = fixture();
+  const runtime = f.runtime();
+  try {
+    const plugin = f.plugin("plugin-a", ["probe-skill", "other-skill"]);
+    f.list(); // App Server loads none of the plugin's skills
+    await runtime.start();
+    await assert.rejects(
+      runtime.startThread(f.workspace, [], settings(plugin, ["probe-skill"])),
+      /was not loaded by Codex/,
+    );
+    assert.ok(!f.sent().some((r) => r.method === "thread/start"));
+  } finally {
+    await runtime.stop();
+    f.cleanup();
+  }
+});

@@ -26,8 +26,8 @@ skills and a Codex turn running its profile's skill.
 - Both harnesses receive the same skill set. Claude receives the plugins through the
   Agent SDK's local `plugins` option and the enabled names through its `skills`
   option. Codex receives each plugin's `skills/` directory as an extra skills root of its
-  App Server and runs every thread with only the profile's enabled skills (see Codex
-  skills below). The plugin directory needs a Claude plugin manifest for both, so one
+  App Server and scopes each thread to its profile's enabled skills (see Codex skills
+  below). The plugin directory needs a Claude plugin manifest for both, so one
   definition serves both runtimes.
 - Plugins contribute skills, their instructions and their scripts only. Hooks and
   MCP servers a plugin declares do not run, so repository and plugin content still
@@ -124,8 +124,8 @@ The [proof](../evidence/codex-skill-scope-probes-2026-10-30.md) on Codex 0.164.0
   the login link stays intact.
 
 Codex subagents stay disabled whatever the proof shows: with the feature on in a separate
-process, the model delegated to a subagent in one recorded run and did not in another, and
-interrupt and surviving-process behaviour were not observed.
+process, the recorded run showed no subagent use (an earlier unrecorded run showed some),
+and interrupt and surviving-process behaviour were not observed.
 
 ## Considered options
 

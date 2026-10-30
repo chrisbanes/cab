@@ -16,7 +16,7 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
     limits: [
       "Stricter isolation, exhaustive ambient access containment, and universal descendant containment are not proved.",
       "Codex runs in cab's own Codex home with the operator's login linked; it loads no user Codex settings or plugins and has subagents disabled. cab does not provide an independent execution sandbox.",
-      "Codex gets only the profile's enabled skills, as skill directories: a plugin's hooks and MCP servers are not loaded, and skills are instructions to the agent, not cab policy.",
+      "Codex gets plugin skills only from its profile, as skill directories: a plugin's hooks and MCP servers are not loaded, and skills are instructions to the agent, not cab policy.",
       commandNetworkDisclosure,
     ],
   };

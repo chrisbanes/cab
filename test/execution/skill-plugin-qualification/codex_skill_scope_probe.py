@@ -310,6 +310,9 @@ def run_facets(holder, env, target):
     server.close()
     server = holder[0] = Server(env)
     server.ask("skills/extraRoots/set", {"extraRoots": [fixture]})
+    # cab unsubscribes before it resumes; a thread the new process has not loaded is "notLoaded", not an error.
+    unsubscribed = server.ask("thread/unsubscribe", {"threadId": thread_a})
+    emit(event="unsubscribe-not-loaded", status=unsubscribed.get("status"))
     server.resume_thread(thread_a, config_a)
     seen_resumed = names_in(server.turn(thread_a, LIST)["messages"])
     server.turn(thread_a, use("other-skill"))
@@ -369,9 +372,9 @@ def subagent_info(env, target):
     """S6, information only: multi_agent=true on one thread; never enables subagents in cab."""
     # A separate App Server with the feature on; cab's own server never has it.
     server = Server(env, extra=("-c", "features.multi_agent=true"))
+    # Outside the workspace and outside /tmp, which workspace-write allows; removed in `finally`.
+    sentinel = os.path.join(REAL_HOME, f".{os.path.basename(root)}-outside-write")
     try:
-        # Outside the workspace and outside /tmp, which workspace-write allows; removed below.
-        sentinel = os.path.join(REAL_HOME, f".{os.path.basename(root)}-outside-write")
         thread = server.start_thread({})
         before = {identity for identity in server.tree()}
         prompt = (
@@ -389,19 +392,21 @@ def subagent_info(env, target):
              outsideWriteLanded=os.path.exists(sentinel), interrupted=result["interrupted"],
              processesBelowServerDuringTurn=len(during), survivorsAfterInterrupt=len(survivors),
              note="recorded only; cab keeps Codex subagents disabled")
-        if os.path.exists(sentinel):
-            os.unlink(sentinel)
         for identity in survivors:
-            try:
-                os.kill(identity[0], signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            # The same process, checked again right before it is stopped.
+            if alive(identity):
+                try:
+                    os.kill(identity[0], signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
         link_state(target)
     except Stop as stop:
         emit(facet="S6", disposition="untested", reason=stop.reason)
     except TimeoutError:
         emit(facet="S6", disposition="untested", reason="timeout")
     finally:
+        if os.path.exists(sentinel):
+            os.unlink(sentinel)
         server.close()
 
 

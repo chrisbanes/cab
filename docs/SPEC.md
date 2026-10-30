@@ -353,7 +353,7 @@ readiness reports a missing target or a replaced link without naming paths. Code
 refreshes the login through the link and keeps it
 ([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
-installation are disabled. Codex loads only the skills of its profile's plugins. A Codex conversation started under the previous home is not
+installation are disabled. Codex gets plugin skills only from its profile's plugins. A Codex conversation started under the previous home is not
 resumed: admission refuses the request, naming "Started under the previous Codex home; restart
 the task" in its revision refusal, before it holds a writer, capacity or recovery
 state, and the runtime refuses the resume before any App Server request.
@@ -937,7 +937,7 @@ levels of depth makes the work wait visibly with a reason that names no path, an
 runs without it. The same list serves a Codex profile: the digests are recorded the same
 way, Codex receives each plugin's `skills/` directory as a skills root, and each Codex
 thread runs with only its profile's enabled skills (other profiles' plugins, the plugin's
-other skills and the bundled skills are disabled for it). cab re-sends the scope before each later
+other skills, the bundled skills and repository skills are disabled for it; a profile that enables none sees no plugin skills). cab re-sends the scope before each later
 turn of a conversation, but a plugin directory that joins the process during a running
 turn can reach that turn; skills are instructions to the agent, not a boundary, and a
 disabled skill's file stays readable. Claude may start subagents with its `Agent` tool: their tool calls
