@@ -6,7 +6,11 @@ import {
 } from "../operator/diagnostic-retention.js";
 import type { RuntimeDiagnosticEvent } from "./codex.js";
 import { sanitizeConversationText } from "./conversation-history.js";
-import { keysetBelow, type TimelineKey, timelineRank } from "./timeline-key.js";
+import {
+  keysetBelow,
+  type TimelineKey,
+  timelineRank,
+} from "../operator/timeline-key.js";
 
 export type DiagnosticKind =
   | "input"

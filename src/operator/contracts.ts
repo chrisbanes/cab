@@ -1913,6 +1913,18 @@ export const assignmentHistorySchema = envelope(
 const timelineKey = z
   .string()
   .regex(/^[0-9]{1,16}\.[0-9]{1,2}\.[0-9]{1,16}\.[\w-]{1,96}$/);
+export const timelineGapReasons = [
+  "size-limit",
+  "item-limit",
+  "active-turn-limit",
+  "turn-ended",
+  "missing-text",
+  "redaction-unavailable",
+  "early-buffer-limit",
+  "tool-activity-expired",
+  "tool-activity-not-captured",
+  "tool-activity-incomplete",
+] as const;
 const timelineEntryBase = {
   entryId: z.string().regex(/^[\w-]{1,96}$/),
   key: timelineKey,
@@ -2014,18 +2026,7 @@ export const taskTimelineSchema = envelope(
               .object({
                 ...timelineEntryBase,
                 kind: z.literal("gap"),
-                reason: z.enum([
-                  "size-limit",
-                  "item-limit",
-                  "active-turn-limit",
-                  "turn-ended",
-                  "missing-text",
-                  "redaction-unavailable",
-                  "early-buffer-limit",
-                  "tool-activity-expired",
-                  "tool-activity-not-captured",
-                  "tool-activity-incomplete",
-                ]),
+                reason: z.enum(timelineGapReasons),
                 detail: z
                   .object({
                     workId: safeText,
