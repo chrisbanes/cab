@@ -519,7 +519,7 @@ is promised exactly-once effects.
 verification and restore. `cab service install|upgrade|uninstall` manages a
 per-user LaunchAgent bound to an unpacked release: upgrade stops the job, then starts
 the new release and checks readiness; the service takes and verifies a snapshot
-before it migrates data an older release wrote, and refuses to start if it cannot.
+before it applies pending migrations to existing data, and refuses to start if it cannot.
 Upgrade refuses a release older than the installed one. A failed
 upgrade leaves the job stopped with no automatic rollback. `service install --mode daemon`
 is the opt-in route to starting at boot before login: it prepares a LaunchDaemon that

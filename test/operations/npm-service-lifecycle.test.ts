@@ -1,10 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  type ChildProcess,
-  execFile,
-  spawn,
-  spawnSync,
-} from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -433,10 +428,8 @@ test("a service installed from a global npm package keeps running from its own c
       assert.equal(s.launchd.jobs.get(LABEL)?.child.pid, pid);
       assert.equal((await fetch(`${s.origin}/app`)).status, 200);
       assert.equal(await assetStatus(s.origin), 200);
-      const state = JSON.parse(
-        readFileSync(join(s.stateDir, "data", "startup-state.json"), "utf8"),
-      );
-      assert.equal(state.release, "0.1.0");
+      // A fresh directory has nothing to snapshot or record.
+      assert.ok(!existsSync(join(s.stateDir, "data", "startup-state.json")));
       // A restart of the recorded job, with the package gone, needs only the staged files.
       const target = `gui/${s.host.uid}/${LABEL}`;
       await s.host.launchctl(["bootout", target]);
@@ -451,7 +444,7 @@ test("a service installed from a global npm package keeps running from its own c
   );
 
   await t.test(
-    "upgrade from the new package reaches readiness on its version with a verified snapshot",
+    "upgrade from the new package reaches readiness on its version, with no pending migrations and so no snapshot",
     async () => {
       const reinstalled = await installGlobal(s.prefix, b.tarball, s.home);
       const upgraded = await s.upgrade(reinstalled);
@@ -463,17 +456,9 @@ test("a service installed from a global npm package keeps running from its own c
           (check: { status: string }) => check.status !== "fail",
         ),
       );
-      assert.equal(typeof report.snapshot, "string");
-      assert.equal(
-        spawnSync(
-          join(s.prefix, "bin", "cab"),
-          ["snapshot", "verify", report.snapshot],
-          {
-            env: { PATH: process.env.PATH ?? "", HOME: s.home },
-          },
-        ).status,
-        0,
-      );
+      // The same code at a new version applies no migration.
+      assert.equal(report.snapshot, null);
+      assert.deepEqual(readdirSync(join(s.stateDir, "snapshots")), []);
       assert.ok(existsSync(stageA), "the old stage stays");
       assert.equal(s.record().version, "0.2.0");
       assert.equal((await fetch(`${s.origin}/app`)).status, 200);
