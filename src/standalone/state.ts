@@ -39,6 +39,7 @@ import type {
   RuntimeThreadQualification,
   RuntimeThreadQualificationEvidence,
 } from "./runtime-retention.js";
+import { previousCodexHomeMessage } from "./codex-home.js";
 import { cabCodexHome } from "./runtime-retention.js";
 
 export type TaskControlReceipt = Extract<
@@ -2096,18 +2097,21 @@ export class ExecutionState {
     const refusal = row.refusalReason;
     const reasons = refusal.slice(refusedRevisionPrefix.length, -1).split(", ");
     // A refused draft turn is history on the same evidence; its stale task is the extra reason.
+    // One that only resumes a conversation from the previous Codex home gives its message back
+    // too, so a Draft task is not stranded; the Ready initial turn is refused the same way.
     if (row.draftTurn === 1)
       return (
-        reasons.some(
+        (reasons.length === 1 && reasons[0] === previousCodexHomeMessage) ||
+        (reasons.some(
           (reason) =>
             refusedAssignmentRevisionReasons.has(reason) ||
             reason === "task-revision-changed",
         ) &&
-        reasons.every(
-          (reason) =>
-            safeRefusedAssignmentRevisionReasons.has(reason) ||
-            reason === "task-revision-changed",
-        )
+          reasons.every(
+            (reason) =>
+              safeRefusedAssignmentRevisionReasons.has(reason) ||
+              reason === "task-revision-changed",
+          ))
       );
     if (
       reasons.length === 0 ||

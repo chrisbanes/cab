@@ -79,11 +79,13 @@ loaded ([probe record](../evidence/skill-plugin-probes-2026-10-29.md)).
   `features.skill_mcp_dependency_install=false`.
 - **Conversations started earlier.** A Codex conversation started under the previous
   home is not resumed. Admission refuses the request, naming "Started under the
-  previous Codex home; restart the task" in its revision refusal, before it holds a writer, capacity or recovery
-  state, so the operator can use Reset task; the runtime also refuses the resume before
-  any App Server request. There is no sessions link and no copy of rollouts. The thread's qualification row records the
-  home it was started under: rows that exist at upgrade have none, and a resumed
-  thread with no row is treated the same way. Captured history stays readable.
+  previous Codex home; restart the task" in its revision refusal, before it holds a
+  writer, capacity or recovery state, so the operator can use Reset task (Start again
+  keeps the conversation and is refused the same way). A refused draft turn gives its
+  message back. The runtime also refuses the resume before any App Server request.
+  There is no sessions link and no copy of rollouts. The thread's qualification row
+  records the home it was started under: rows that exist at upgrade have none, and a
+  resumed thread with no row is treated the same way. Captured history stays readable.
 
 ## Considered options
 

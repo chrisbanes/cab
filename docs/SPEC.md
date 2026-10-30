@@ -30,8 +30,8 @@ single operator. It owns tasks, scheduling, assignments, execution supervision,
 workspaces, durable conversations and an operator interface. Keep TypeScript,
 Node.js and SQLite. The first deployment runs on Chris's Mac and serves a web
 operator interface, using Codex with the existing operator login, linked into cab's
-own Codex home. Codex App Server qualification remains a runtime gate. No BB installation is required by
-the target product. Private remote access uses Tailscale plus a separate
+own Codex home. Codex App Server qualification remains a runtime gate. No BB
+installation is required by the target product. Private remote access uses Tailscale plus a separate
 cab operator login. The standalone installation starts with a fresh database;
 historical BB record import is outside the first release.
 
