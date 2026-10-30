@@ -69,6 +69,8 @@ export interface IssueSnapshot {
   status?: { id: string; name: string; categoryKey: string };
   /** The tracker's single-select field values, stored for Jira; GitHub has none. */
   selectFields?: Array<{ fieldId: string; optionId: string; name: string }>;
+  /** Jira: the issues this one "is blocked by", read with it. Not stored with the issue. */
+  blockedBy?: IssueSnapshot[];
   projectFields: Array<{
     projectNodeId: string;
     fieldNodeId: string;

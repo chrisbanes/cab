@@ -203,3 +203,131 @@ test("a 400 from Jira on parse is an answer about the JQL, not a failed read", a
   );
   assert.deepEqual(await r.parseJql("x"), ["bad query"]);
 });
+
+const blocks = (
+  type: { inward: string; outward?: string },
+  side: "inwardIssue" | "outwardIssue",
+  n: number,
+  done = false,
+) => ({
+  type: { name: "Blocks", outward: "blocks", ...type },
+  [side]: {
+    id: String(10000 + n),
+    key: `XYZ-${n}`,
+    fields: {
+      status: {
+        id: "3",
+        name: "Anything",
+        statusCategory: { key: done ? "done" : "indeterminate" },
+      },
+    },
+  },
+});
+
+test("a read requests links and the rule's select fields in the same search", async () => {
+  const { reader: r, requests } = reader(() => json({ issues: [] }));
+  await r.readSelection(selection, ["customfield_10010"]);
+  assert.deepEqual((requests[0]?.body as { fields: string[] }).fields, [
+    "summary",
+    "status",
+    "labels",
+    "description",
+    "project",
+    "issuelinks",
+    "customfield_10010",
+  ]);
+  await r.preview("project = ABC");
+  assert.ok(
+    !(requests[1]?.body as { fields: string[] }).fields.includes("issuelinks"),
+  );
+});
+
+test("only an inward 'is blocked by' link is a blocker, open until its status category is done", async () => {
+  const blockedBy = { inward: "is blocked by" };
+  const { reader: r } = reader(() =>
+    json({
+      issues: [
+        jiraIssue(1, {
+          issuelinks: [
+            blocks(blockedBy, "inwardIssue", 7),
+            blocks({ inward: " Is Blocked By " }, "inwardIssue", 8, true),
+            // The same type seen from the blocker's side, and other link types, are ignored.
+            blocks(blockedBy, "outwardIssue", 9),
+            blocks({ inward: "relates to" }, "inwardIssue", 10),
+            // A link type that carries a malformed linked issue is not read at all.
+            { type: { inward: "clones" }, inwardIssue: { nonsense: true } },
+          ],
+        }),
+        jiraIssue(2),
+      ],
+    }),
+  );
+  const snapshot = await r.readSelection(selection);
+  assert.equal(snapshot.complete, true);
+  assert.deepEqual(
+    snapshot.issues[0]?.blockedBy?.map((b) => [
+      b.nodeId,
+      b.repositoryId,
+      b.repositoryName,
+      b.number,
+      b.state,
+    ]),
+    [
+      ["10007", "XYZ", "XYZ", 7, "open"],
+      ["10008", "XYZ", "XYZ", 8, "closed"],
+    ],
+  );
+  assert.deepEqual(snapshot.issues[1]?.blockedBy, []);
+});
+
+test("a blocker link that cannot be read, or a missing link list, makes the read incomplete", async () => {
+  for (const issue of [
+    jiraIssue(1, {
+      issuelinks: [
+        { type: { inward: "is blocked by" }, inwardIssue: { id: "x" } },
+      ],
+    }),
+    jiraIssue(1, { issuelinks: [{ type: {} }] }),
+    {
+      ...jiraIssue(1),
+      fields: { ...jiraIssue(1).fields, issuelinks: undefined },
+    },
+  ]) {
+    const snapshot = await reader(() =>
+      json({ issues: [issue] }),
+    ).reader.readSelection(selection);
+    assert.deepEqual(
+      [snapshot.complete, snapshot.reason],
+      [false, "malformed"],
+    );
+  }
+});
+
+test("single-select values map by option ID; a null, list or other shape is no value", async () => {
+  const { reader: r } = reader(() =>
+    json({
+      issues: [
+        jiraIssue(1, {
+          fields: { customfield_10010: { id: "20", value: "High", self: "x" } },
+        }),
+        jiraIssue(2, { fields: { customfield_10010: null } }),
+        jiraIssue(3, {
+          fields: { customfield_10010: [{ id: "20", value: "High" }] },
+        }),
+        jiraIssue(4, { fields: { customfield_10010: "High" } }),
+        jiraIssue(5),
+      ],
+    }),
+  );
+  const snapshot = await r.readSelection(selection, ["customfield_10010"]);
+  assert.deepEqual(
+    snapshot.issues.map((i) => i.selectFields),
+    [
+      [{ fieldId: "customfield_10010", optionId: "20", name: "High" }],
+      [],
+      [],
+      [],
+      [],
+    ],
+  );
+});

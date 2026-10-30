@@ -1,5 +1,6 @@
 import type { DomainStore } from "../core/domain.js";
 import type {
+  BlockerSnapshot,
   GitHubSourceStore,
   SelectionSnapshot,
 } from "../core/github-source.js";
@@ -40,6 +41,13 @@ export class JiraSynchronizer {
       if (!config) continue;
       const active = new Set(this.domain.githubActiveSelectionIds(projectId));
       const reader = this.readerFactory(config.instance);
+      const fieldIds = [
+        ...new Set(
+          (config.readiness?.conditions ?? []).flatMap((c) =>
+            c.kind === "select-field" ? [c.fieldId] : [],
+          ),
+        ),
+      ];
       for (const selection of config.selections) {
         if (this.stopped) return;
         if (!active.has(selection.id)) continue;
@@ -47,7 +55,7 @@ export class JiraSynchronizer {
           (this.pausedUntil.get(config.instance) ?? 0) > Date.now();
         const snapshot: SelectionSnapshot = paused
           ? { complete: false, issues: [], reason: "rate-limited" }
-          : await reader.readSelection(selection).catch(() => ({
+          : await reader.readSelection(selection, fieldIds).catch(() => ({
               complete: false as const,
               issues: [],
               reason: "reader-error",
@@ -55,12 +63,37 @@ export class JiraSynchronizer {
         if (this.stopped) return;
         if (!snapshot.complete && snapshot.resumeAt !== undefined)
           this.pausedUntil.set(config.instance, snapshot.resumeAt);
-        this.storeFor(config.instance).reconcileSelection(
+        const store = this.storeFor(config.instance);
+        const binding = {
+          projectId,
+          configVersion: config.version,
+          credentialRef: null,
+        };
+        const committed = store.reconcileSelection(
           projectId,
           selection.id,
           snapshot,
-          { projectId, configVersion: config.version, credentialRef: null },
+          binding,
         );
+        // Links replace an issue's blockers only from a committed complete read; any other
+        // read leaves them, and reconcileSelection has already marked them unknown.
+        if (!committed || !snapshot.complete) continue;
+        for (const issue of snapshot.issues) {
+          if (!store.issue(issue.nodeId)) continue;
+          const blockers: BlockerSnapshot = issue.blockedBy
+            ? { complete: true, blockers: issue.blockedBy, reason: null }
+            : { complete: false, blockers: [], reason: "links-unread" };
+          store.reconcileBlockers(issue.nodeId, blockers, {
+            ...binding,
+            selectionId: selection.id,
+            reference: {
+              nodeId: issue.nodeId,
+              repositoryId: issue.repositoryId,
+              repositoryName: issue.repositoryName,
+              number: issue.number,
+            },
+          });
+        }
       }
     }
   }

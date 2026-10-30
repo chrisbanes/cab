@@ -2346,6 +2346,8 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("jira.configure"),
       expectedVersion: revision,
       ...jiraConfigurationSchema.shape,
+      /** Omitted keeps the saved rule; `null` removes it. */
+      readiness: jiraConfigurationSchema.shape.readiness.optional(),
     })
     .strict(),
   z

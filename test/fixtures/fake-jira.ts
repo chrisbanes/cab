@@ -41,7 +41,14 @@ export const adfParagraph = (text: string) => ({
 
 export const jiraIssue = (
   n: number,
-  over: { done?: boolean; summary?: string; description?: unknown } = {},
+  over: {
+    done?: boolean;
+    summary?: string;
+    description?: unknown;
+    issuelinks?: unknown[];
+    /** Extra fields, such as a custom field a readiness rule reads. */
+    fields?: Record<string, unknown>;
+  } = {},
 ) => ({
   id: String(10000 + n),
   key: `ABC-${n}`,
@@ -58,5 +65,7 @@ export const jiraIssue = (
         ? adfParagraph(`Body ${n}`)
         : over.description,
     project: { id: "10000", key: "ABC" },
+    issuelinks: over.issuelinks ?? [],
+    ...over.fields,
   },
 });
