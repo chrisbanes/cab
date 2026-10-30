@@ -26,11 +26,12 @@ import type {
 } from "./code-host.js";
 import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { pushTaskCommit } from "./git-push.js";
-import type {
-  AdoptionContext,
-  PrIdentity,
-  PublicationContext,
-  PushFunction,
+import {
+  type AdoptionContext,
+  type PrIdentity,
+  type PublicationContext,
+  type PushFunction,
+  mergeGateReasons,
 } from "./github-delivery.js";
 import { type GitLabSeams, codeHostToken } from "./gitlab-credentials.js";
 
@@ -60,6 +61,8 @@ const mergeRequestSchema = z.object({
   ...mergeRequestFields,
   state: z.enum(["opened", "locked", "merged", "closed"]),
   diff_refs: z.object({ base_sha: sha.nullable() }).nullable(),
+  detailed_merge_status: z.string().nullish(),
+  merge_when_pipeline_succeeds: z.boolean().nullish(),
   head_pipeline: z
     .object({
       id: z.number().int(),
@@ -88,6 +91,18 @@ const discussionSchema = z.object({
   individual_note: z.boolean(),
   notes: z.array(noteSchema).min(1),
 });
+/** The project settings that decide how a merge request may merge. */
+const projectSchema = z.object({
+  id: z.number().int(),
+  path_with_namespace: z.string(),
+  squash_option: z.string().nullish(),
+  merge_trains_enabled: z.boolean().nullish(),
+});
+/** A merge train car's status; only the status is read. */
+const trainCarSchema = z.object({ status: z.string() });
+/** A car still holding the merge request in the train. */
+const trainPending = ["idle", "fresh", "stale", "merging"];
+const trainPendingReason = "provider-merge-train-pending";
 type Discussion = z.output<typeof discussionSchema>;
 type MergeRequest = z.output<typeof mergeRequestSchema>;
 
@@ -130,6 +145,7 @@ type ChangeRequestAction = Extract<
       | "pr.create"
       | "pr.edit"
       | "pr.ready"
+      | "pr.merge"
       | "pr.thread.reply"
       | "pr.thread.resolve";
   }
@@ -138,6 +154,7 @@ const changeRequestKinds: readonly string[] = [
   "pr.create",
   "pr.edit",
   "pr.ready",
+  "pr.merge",
   "pr.thread.reply",
   "pr.thread.resolve",
 ];
@@ -247,11 +264,14 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
   }
   /** The project the link names, confirmed by the API; its path is the one Git uses. */
   private async project(repositoryId: string) {
+    return (await this.projectInfo(repositoryId)).path_with_namespace;
+  }
+  private async projectInfo(repositoryId: string) {
     const link = this.options.link(repositoryId);
     if (!link) throw new Error("provider-repository-mismatch");
-    const value = z
-      .object({ id: z.number().int(), path_with_namespace: z.string() })
-      .parse(await this.get(`/projects/${repositoryId}`));
+    const value = projectSchema.parse(
+      await this.get(`/projects/${repositoryId}`),
+    );
     if (
       String(value.id) !== repositoryId ||
       value.path_with_namespace.toLowerCase() !==
@@ -259,7 +279,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       !isGitLabProjectPath(value.path_with_namespace)
     )
       throw new Error("provider-repository-mismatch");
-    return value.path_with_namespace;
+    return value;
   }
   private remoteFor(repositoryId: string, projectPath: string): BranchRemote {
     return {
@@ -375,14 +395,15 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
   }
   async preflight(
     action: ExternalAction,
-    _policy: DeliveryPolicy,
+    policy: DeliveryPolicy,
     publication?: PublicationContext,
     adoption?: AdoptionContext,
   ): ReturnType<CodeHostDeliveryProvider["preflight"]> {
     if (!isBranchAction(action) && !isChangeRequestAction(action))
       throw new Error("provider-action-unsupported");
     const repositoryId = action.target.repositoryId;
-    const projectPath = await this.project(repositoryId);
+    const project = await this.projectInfo(repositoryId);
+    const projectPath = project.path_with_namespace;
     const recorded = {
       repositoryPath: `/projects/${repositoryId}`,
       projectPath,
@@ -443,6 +464,34 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         threadNodeId: thread.nodeId,
         latestCommentNodeId: thread.latestCommentNodeId,
         isResolved: thread.isResolved,
+      };
+    }
+    if (action.kind === "pr.merge") {
+      const observation = await this.observe(
+        project,
+        {
+          repositoryId,
+          prNumber: action.target.number,
+          expectedPrNodeId: action.target.nodeId,
+          expectedHeadSha: action.target.expectedHeadSha,
+        },
+        policy,
+      );
+      if (
+        observation.headSha !== action.target.expectedHeadSha ||
+        observation.baseRef !== action.target.baseRef ||
+        observation.headRef !== action.target.headRef
+      )
+        throw new Error("provider-head-changed");
+      if (
+        observation.mergeBlockers.length ||
+        !observation.allowedMethods.includes(action.method)
+      )
+        throw new Error("provider-merge-gates-held");
+      return {
+        ...recorded,
+        headSha: observation.headSha,
+        mergeTrain: project.merge_trains_enabled === true,
       };
     }
     const mr = await this.targetMergeRequest(action.target);
@@ -514,6 +563,22 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
             await response.body?.cancel().catch(() => {});
           }
           break;
+        case "pr.merge": {
+          const train = record.beforeState?.mergeTrain === true;
+          // The sha makes GitLab refuse a head that moved; auto_merge false keeps cab from queueing a merge.
+          await this.write(
+            train ? "POST" : "PUT",
+            train
+              ? `/projects/${id}/merge_trains/merge_requests/${a.target.number}`
+              : `${requests}/${a.target.number}/merge`,
+            {
+              sha: a.target.expectedHeadSha,
+              squash: a.method === "squash",
+              auto_merge: false,
+            },
+          );
+          break;
+        }
         case "pr.thread.reply":
           await this.write(
             "POST",
@@ -567,6 +632,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       throw new Error("provider-action-unsupported");
     try {
       const id = a.target.repositoryId;
+      if (a.kind === "pr.merge") return await this.inspectMerge(record, a);
       const marker = `<!-- cab-operation:${record.operationId} -->`;
       const user = userId.parse(await this.get("/user"));
       let receipt: ProviderActionObservation["receipt"] = null;
@@ -653,17 +719,92 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     } catch {
       return {
         state: "uncertain",
-        reason: "provider-readback-unavailable",
+        // A failed read must not forget that the train was seen holding the merge.
+        reason:
+          record.observation?.reason === trainPendingReason
+            ? trainPendingReason
+            : "provider-readback-unavailable",
         receipt: null,
       };
     }
   }
+  /** A merge's outcome: merged, held by the merge train, dropped from it, or unproved. */
+  private async inspectMerge(
+    record: DeliveryActionRecord,
+    a: Extract<ExternalAction, { kind: "pr.merge" }>,
+  ): Promise<ProviderActionObservation> {
+    const train = record.beforeState?.mergeTrain === true;
+    // The car is read before the merge request, so a car that merged in between shows as merged, never as dropped.
+    const car = train
+      ? await this.get(
+          `/projects/${a.target.repositoryId}/merge_trains/merge_requests/${a.target.number}`,
+        ).then(
+          (v) => trainCarSchema.parse(v).status,
+          (error) => {
+            if (error instanceof GitLabFailure && error.status === 404)
+              return null;
+            throw error;
+          },
+        )
+      : null;
+    // A head that moved is read, not refused: pushing to the branch is how GitLab drops a request from the train.
+    const mr = await this.boundMergeRequest(a.target);
+    if (
+      mr.source_branch !== a.target.headRef ||
+      mr.target_branch !== a.target.baseRef
+    )
+      throw new Error("provider-head-changed");
+    if (mr.state === "merged") {
+      if (mr.sha !== a.target.expectedHeadSha)
+        throw new Error("provider-head-changed");
+      return {
+        state: "confirmed-success",
+        reason: null,
+        receipt: {
+          nodeId: String(mr.id),
+          number: mr.iid,
+          headSha: mr.sha,
+          merged: true,
+        },
+      };
+    }
+    const uncertain = (reason: string) => ({
+      state: "uncertain" as const,
+      reason,
+      receipt: null,
+    });
+    // GitLab reports a request on a train as auto-merge set, so the car decides before that flag does.
+    if (car !== null && trainPending.includes(car))
+      return uncertain(trainPendingReason);
+    // Dropped is concluded only for a merge the train was seen holding, whatever auto-merge says since.
+    if (train && record.observation?.reason === trainPendingReason)
+      return {
+        state: "confirmed-failure",
+        reason: "provider-merge-train-dropped",
+        receipt: null,
+      };
+    return uncertain(
+      mr.merge_when_pipeline_succeeds
+        ? "provider-auto-merge-set"
+        : "provider-effect-unproved",
+    );
+  }
   async inspectPr(
     identity: PrIdentity,
-    _policy: DeliveryPolicy,
+    policy: DeliveryPolicy,
+  ): Promise<PrDeliveryObservation> {
+    return this.observe(
+      await this.projectInfo(identity.repositoryId),
+      identity,
+      policy,
+    );
+  }
+  private async observe(
+    project: z.output<typeof projectSchema>,
+    identity: PrIdentity,
+    policy: DeliveryPolicy,
   ): Promise<PrDeliveryObservation> {
     const id = identity.repositoryId;
-    await this.project(id);
     const mr = await this.boundMergeRequest({
       repositoryId: id,
       nodeId: identity.expectedPrNodeId,
@@ -699,6 +840,48 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         a.kind.localeCompare(b.kind) || a.nodeId.localeCompare(b.nodeId),
     );
     reviewThreads.sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+    const checks: PrDeliveryObservation["checks"] = pipeline
+      ? [
+          {
+            name: "pipeline",
+            appId: null,
+            sha: pipeline.sha,
+            status: pipelineStatus(pipeline.status),
+            nodeId: String(pipeline.id),
+            updatedAt:
+              pipeline.finished_at ?? pipeline.started_at ?? "unproved",
+          },
+        ]
+      : [];
+    // The project's merge method decides the commit shape; rebase is a separate API cab does not call.
+    const allowedMethods: PrDeliveryObservation["allowedMethods"] = [
+      ...(project.squash_option === "always" ? [] : (["merge"] as const)),
+      ...(project.squash_option === "never" ? [] : (["squash"] as const)),
+    ];
+    // GitLab's own verdict covers approvals, discussions and pipelines; cab's required checks still apply.
+    const mergeBlockers = mergeGateReasons({
+      draft: mr.draft,
+      merged: mr.state === "merged",
+      state: mr.state === "opened" ? "OPEN" : "CLOSED",
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      queue: false,
+      reviewDecision: null,
+      unresolvedThreads: false,
+      headSha: mr.sha,
+      baseSha: mr.diff_refs.base_sha,
+      strict: false,
+      deployments: [],
+      requiredEnvironments: [],
+      checks,
+      requiredChecks: policy.requiredChecks,
+      unsupportedRules: [],
+      allowedMethods,
+    });
+    if (mr.detailed_merge_status !== "mergeable")
+      mergeBlockers.push(
+        `merge-status-${mr.detailed_merge_status ?? "unproved"}`,
+      );
     return prObservationSchema.parse({
       repositoryId: id,
       nodeId: String(mr.id),
@@ -716,25 +899,12 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       draft: mr.draft,
       merged: mr.state === "merged",
       reviewDecision: null,
-      checks: pipeline
-        ? [
-            {
-              name: "pipeline",
-              appId: null,
-              sha: pipeline.sha,
-              status: pipelineStatus(pipeline.status),
-              nodeId: String(pipeline.id),
-              updatedAt:
-                pipeline.finished_at ?? pipeline.started_at ?? "unproved",
-            },
-          ]
-        : [],
+      checks,
       feedback,
       reviewThreads,
-      // Merging a merge request is not delivered yet (#1315).
-      mergeBlockers: ["merge-unsupported"],
+      mergeBlockers,
       closedIssueNodeIds: [],
-      allowedMethods: [],
+      allowedMethods,
     });
   }
 }

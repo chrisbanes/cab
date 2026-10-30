@@ -105,6 +105,25 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
     }),
     "Status mapping (PR handed back for review) · project.field: confirmed-failure · Skipped: Status changed on GitHub since cab last saw it. · operation op-1",
   );
+  // A GitLab merge train merge is described, not shown as a code.
+  assert.equal(
+    deliveryActionLine({
+      ...base,
+      kind: "pr.merge",
+      state: "uncertain",
+      reason: "provider-merge-train-pending",
+    }),
+    "pr.merge: uncertain · On the GitLab merge train; waits until it merges or drops out. · operation op-1",
+  );
+  assert.match(
+    deliveryActionLine({
+      ...base,
+      kind: "pr.merge",
+      state: "confirmed-failure",
+      reason: "provider-merge-train-dropped",
+    }),
+    /Dropped from the GitLab merge train; nothing was merged\./,
+  );
   // The same code on an agent action keeps its raw reason.
   assert.match(
     deliveryActionLine({ ...base, reason: "provider-http-404" }),
