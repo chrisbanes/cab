@@ -133,6 +133,7 @@ export function useTaskTimeline({
     );
   // Reads that are not tied to the task read (Load earlier, Retry) end with the task's view.
   const life = useRef(new AbortController());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new `read` is a new task or client, which starts a new lifetime.
   useEffect(() => {
     life.current = new AbortController();
     return () => life.current.abort();

@@ -9,7 +9,7 @@ import { desktop, phone, signIn } from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { finishOwnWork, startOwnWork } from "../fixtures/questions.js";
 import { stubReadiness } from "../fixtures/setup-browser.js";
-import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("task-conversation");
 
