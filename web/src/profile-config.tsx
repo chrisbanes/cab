@@ -208,9 +208,7 @@ export function RuntimeFields({
 function SkillFields({ draft }: { draft: ConfigurationDraft }) {
   if (draft.values.runtimeHarness !== "claude")
     return (
-      <p className="metadata muted">
-        Only Claude profiles load skill plugins.
-      </p>
+      <p className="metadata muted">Only Claude profiles load skill plugins.</p>
     );
   const messages = skillErrorMessages(draft.errors);
   return (
