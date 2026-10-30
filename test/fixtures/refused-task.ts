@@ -7,8 +7,15 @@ import { seedReviewTask } from "./task-review.js";
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 
 /** A Ready lead task whose first turn was refused at admission because the task changed. */
-export async function refusedTask(f: Fixture) {
-  const task = await seedReviewTask(f, "Refused project", "Refused task");
+export async function refusedTask(f: Fixture, taskId?: string) {
+  const task = await seedReviewTask(
+    f,
+    "Refused project",
+    "Refused task",
+    undefined,
+    undefined,
+    taskId,
+  );
   const d = f.service.domain();
   const edit = (patch: Record<string, unknown>) =>
     d.execute({

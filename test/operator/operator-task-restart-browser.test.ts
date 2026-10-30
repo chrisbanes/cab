@@ -498,13 +498,17 @@ test("Home counts a kept Start again card once in its N more total", async (_t, 
   await f.service.configureCapacity({ key: randomUUID(), globalLimit: 8 });
   await until(() => f.runtime.hasPending(1), "the restarted turn starts");
 
-  // Home lists equal interventions by task id: keep the last of three, then add one ahead of it.
-  const ids = [
-    (await refusedTask(f)).taskId,
-    (await refusedTask(f)).taskId,
-    (await refusedTask(f)).taskId,
+  // Home lists interventions, which carry no time, by task id. Fix the ids up front so the
+  // request added later sorts ahead of the kept (last) one without depending on random UUIDs.
+  const [aheadId, ...initial] = [
+    randomUUID(),
+    randomUUID(),
+    randomUUID(),
+    randomUUID(),
   ].sort((a, b) => a.localeCompare(b));
-  const kept = ids.at(-1)!;
+  const ids: string[] = [...initial];
+  for (const id of initial) await refusedTask(f, id);
+  const kept = initial.at(-1)!;
   const card = (taskId: string) =>
     page.locator(`.overview-card[data-request-id="intervention:${taskId}"]`);
   const overflow = page.locator(".overview-overflow");
@@ -518,13 +522,8 @@ test("Home counts a kept Start again card once in its N more total", async (_t, 
     .click();
   await checkButton(card(kept)).waitFor();
 
-  let ahead: string | undefined;
-  for (let tries = 0; !ahead && tries < 12; tries++) {
-    const added = (await refusedTask(f)).taskId;
-    ids.push(added);
-    if (added.localeCompare(kept) < 0) ahead = added;
-  }
-  assert.ok(ahead, "a new request sorts ahead of the kept one");
+  const ahead = (await refusedTask(f, aheadId)).taskId;
+  ids.push(ahead);
   await page
     .getByRole("button", { name: "Refresh tasks", exact: true })
     .click();

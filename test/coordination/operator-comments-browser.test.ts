@@ -7,7 +7,9 @@ import {
   type Route,
   chromium,
 } from "playwright";
+import type { TestContext } from "node:test";
 import {
+  type BrowserJourney,
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
@@ -34,7 +36,9 @@ const setViewingReference = (page: Page) =>
       .getByRole("button", { name: "Set viewing reference", exact: true })
       .click(),
   ]);
-test("approval-mode exact operator review and unknown remote comment retain original intent through viewing and provider read reconciliation", async (_t, j) => {
+/** The journey's current phase, named in a failure so a recurrence says where it stopped. */
+let phase = "fixture and sign-in";
+async function approvalModeJourney(_t: TestContext, j: BrowserJourney) {
   const previousSource = process.env.FIXTURE_SOURCE;
   process.env.FIXTURE_SOURCE = "offline-comment-source-value";
   _t.after(() => {
@@ -188,6 +192,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     expectedVersion: Number(d.project(projectId).version),
     paused: false,
   });
+  phase = "viewing reference";
   // A viewing reference needs a result to view.
   seedTaskResult(f, taskId, String(lead?.id), "Recorded fixture result", {
     sourceId: f.service.taskReview().sources(taskId).at(-1)!.sourceId,
@@ -294,11 +299,13 @@ test("approval-mode exact operator review and unknown remote comment retain orig
       .isEnabled(),
     false,
   );
+  phase = "draft refusal";
   // An earlier viewing-reference outcome must not hide the refusal of a draft that cannot be sent.
   await page
     .getByRole("button", { name: "Set viewing reference", exact: true })
     .click();
   await page.getByText("Viewing reference set.", { exact: true }).waitFor();
+  phase = "lost review and confirmation responses";
   // Lose actual committed review and confirmation responses, retaining normalized
   // immutable commands independently of the editable whitespace in the draft.
   await page.getByLabel("Editable reply").fill("x".repeat(16001));
@@ -364,6 +371,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   await page
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
+  phase = "frozen review warning";
   // One warning with one action; the review stays frozen and the code stays in Details.
   await outcome
     .getByText(
@@ -503,6 +511,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     "  Exact operator comment body  ",
   );
   await page.unroute("**/api/operator/commands");
+  phase = "send with normalized material";
   // Existing send journey uses the same exact normalized approved material.
   await page.getByRole("button", { name: "Post comment", exact: true }).click();
   await outcome
@@ -533,6 +542,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
       .isEnabled(),
   );
   settled = true;
+  phase = "delivery on Changes";
   // Delivery is observed on Changes; the reply and its check stay on Overview.
   await openTaskTab(page, "Changes");
   await page
@@ -626,6 +636,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   );
   issue.body = "Supplied GitHub brief";
   await f.service.refreshGitHub();
+  phase = "restored view source";
   // The viewing reference names the latest result's source, so the restored view needs a result on it.
   seedTaskResult(f, taskId, String(lead?.id), "Result on the restored source", {
     sourceId: f.service.taskReview().sources(taskId).at(-1)!.sourceId,
@@ -815,6 +826,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     releaseView();
     removeObservers();
   }, "source-segment.release");
+  phase = "source refresh routes";
   // Keeps a route registered while each `times: 1` route below expires. Otherwise
   // Playwright turns request interception off as the follow-up task GET starts, the
   // likely cause of a CI run where that GET never produced a request event.
@@ -999,6 +1011,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   await page
     .getByText(/source comparison unknown; current source state unavailable/)
     .waitFor({ state: "attached" });
+  phase = "failed refresh";
   // The failed refresh speaks even though an earlier viewing-reference outcome is still set.
   await page
     .getByText("Source refresh failed. Last successful source retained.", {
@@ -1052,6 +1065,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     .getByRole("button", { name: "Refresh source", exact: true })
     .evaluate((el) => (el as HTMLElement).click());
   await page.getByText(/source unchanged/).waitFor({ state: "attached" });
+  phase = "delayed task read";
   // A successful observation's delayed task read cannot settle a newer failure.
   let releaseRead!: () => void, enterRead!: () => void, settleRead!: () => void;
   const readBarrier = new Promise<void>((r) => (releaseRead = r)),
@@ -1099,6 +1113,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   await refreshSource();
   await page.getByText(/source unchanged/).waitFor({ state: "attached" });
 
+  phase = "delayed provider completion";
   // A delayed provider completion itself must also belong to the current attempt.
   let releaseProvider!: () => void,
     enterProvider!: () => void,
@@ -1155,4 +1170,13 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   await page.unroute("**/api/operator/source-refresh");
   assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
   assert.equal(await page.getByText(/source comparison pending/).count(), 0);
+}
+test("approval-mode exact operator review and unknown remote comment retain original intent through viewing and provider read reconciliation", async (t, j) => {
+  phase = "fixture and sign-in";
+  await approvalModeJourney(t, j).catch((error: unknown) => {
+    throw new Error(
+      `Stopped in phase "${phase}": ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  });
 });
