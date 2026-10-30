@@ -46,8 +46,9 @@ select permitted profiles but cannot create profiles or expand project authority
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
 items; readiness is separate. Jira Cloud imports issues by JQL: a project uses one
-tracker, and Jira comments, closing issues in
-Jira, status mapping and issue edit or publication are planned and not implemented.
+tracker. Comments, label changes and closing on Jira issues are delivered (see the Jira
+delivery paragraph below); Jira status mapping and issue edit or publication are planned and
+not implemented.
 GitLab merge request merging is planned and not implemented; a project can link a
 GitLab checkout and deliver its branches and open, edit, ready and discuss its merge
 requests ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
@@ -1982,6 +1983,30 @@ project; a thread resolves only when the credential user resolved it. GitLab run
 with `/command` in a description or note as the credential user, so a create, edit or reply whose
 text has one is held as `provider-preflight-held` before any write. Merging, approvals and
 GitLab merge gates are not implemented, so a merge request always reports `merge-unsupported`.
+
+On a Jira issue the issue actions use the same lifecycle, granted per Jira project: the target is the
+Jira project ID as the repository, the key's number and the issue ID as the node ID. Only
+`issue.comment`, `issue.labels` and `issue.close` are delivered; every other issue action on a Jira
+task is refused as `issue-tracker-delivery-unavailable`. A comment is sent as Atlassian Document Format
+converted from Markdown (paragraphs, hard breaks and code blocks; everything else, including `@name`
+and links, stays literal text, and no mention or media is ever emitted) with a hidden `cab-operation`
+comment property, and is confirmed only when exactly one comment by the credential account carries
+the operation's property and the same text. Labels change in one request and are confirmed by exact
+(case-sensitive) readback; a label containing whitespace is refused. The readiness-label refusal
+applies as for GitHub. Closing is a transition into the one available Done-category status, or is
+refused before any write when the issue is already done or no single such transition exists. It is
+confirmed only when the issue is Done and exactly one status entry in its changelog since preflight,
+made by the credential account, moves it to that status. A rejection of the single request (400, 401,
+403, 404 or 429) is a confirmed failure; any other failure after the request is sent is uncertain,
+kept across restart and never resent. A Done transition by anyone else, or by GitLab's Jira
+integration, is an external closure, which holds the task. A task imported from Jira has a task branch
+named `<prefix><KEY>-<task id>-<slug>`, assigned once like every task branch, and its change request
+title must start with the issue key. In a Jira project, change request titles and text with a closing
+keyword (close, fix, resolve or implement, in any form) followed by a Jira issue key on the same line
+are refused. Two limits remain: a Done transition made in the browser, or by GitLab's Jira integration
+under the same Jira account as cab's credential, cannot be told apart from cab's own; and closing
+keywords or smart commits (such as `#close`) in commit messages are written by the agent, not checked
+by cab, so a transition they cause is an external closure.
 
 The operator publishes a local task through three more actions on the same lifecycle,
 sent by the **operator publication caller** and never by an agent or the service

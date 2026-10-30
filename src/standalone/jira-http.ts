@@ -21,6 +21,8 @@ export class JiraFailure extends Error {
     readonly resumeAt?: number,
     /** Jira's own validation messages, for `jql-invalid` only. */
     readonly messages: readonly string[] = [],
+    /** The HTTP status of a definitive rejection (400, 401, 403, 404, 429); never a body. */
+    readonly status?: number,
   ) {
     super(`Jira request failed: ${reason}`);
     this.name = "JiraFailure";
@@ -53,13 +55,15 @@ function retryAfter(response: Response): number {
 /**
  * One request to `https://<instance>/rest/api/3<path>`. The origin is fixed by the site host
  * and a redirect is never followed, so the Authorization header cannot leave the site. Returns
- * the decoded JSON body; any other outcome is a `JiraFailure` carrying no response text.
+ * the decoded JSON body (`null` for an empty success); any other outcome is a `JiraFailure` carrying no response text.
  */
 export async function jiraRequest(
   fetcher: typeof fetch,
   access: JiraAccess,
   path: string,
-  init: { method: "GET" | "POST"; body?: unknown } = { method: "GET" },
+  init: { method: "GET" | "POST" | "PUT"; body?: unknown } = {
+    method: "GET",
+  },
 ): Promise<unknown> {
   let response: Response;
   try {
@@ -85,7 +89,7 @@ export async function jiraRequest(
   }
   if (response.status === 429) {
     await response.body?.cancel();
-    throw new JiraFailure("rate-limited", retryAfter(response));
+    throw new JiraFailure("rate-limited", retryAfter(response), undefined, 429);
   }
   let text: string;
   try {
@@ -94,9 +98,17 @@ export async function jiraRequest(
     throw new JiraFailure("site-unreachable");
   }
   if (response.status === 401 || response.status === 403)
-    throw new JiraFailure("unauthorized");
-  if (response.status === 404) throw new JiraFailure("not-found");
+    throw new JiraFailure(
+      "unauthorized",
+      undefined,
+      undefined,
+      response.status,
+    );
+  if (response.status === 404)
+    throw new JiraFailure("not-found", undefined, undefined, 404);
   if (response.status >= 500) throw new JiraFailure("unavailable");
+  // A 204 (a transition, a label update) carries no body.
+  if (response.ok && text === "") return null;
   let value: unknown;
   try {
     if (text.length > maxBodyBytes) throw new Error("too large");
@@ -113,6 +125,7 @@ export async function jiraRequest(
       "jql-invalid",
       undefined,
       jiraMessages(Array.isArray(messages) ? messages : []),
+      400,
     );
   }
   if (!response.ok) throw new JiraFailure("unavailable");

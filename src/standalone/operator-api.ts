@@ -4859,14 +4859,20 @@ export class OperatorApi {
         ? "no-comment-grant"
         : held
           ? "held"
-          : policy.credentialRef === null
+          : (
+                source.tracker === "jira"
+                  ? !this.domain()
+                      .issueTrackerCredentials()
+                      .some((c) => c.instance === source.provider)
+                  : policy.credentialRef === null
+              )
             ? "no-delivery-credential"
             : null;
     return {
       available: Boolean(source && grant && !held),
       mode: grant?.mode ?? null,
       reason: !source
-        ? "Task has no bound GitHub issue"
+        ? "Task has no bound issue"
         : !grant
           ? "No project grant for issue comments"
           : held

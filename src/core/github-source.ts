@@ -1237,7 +1237,7 @@ export class GitHubSourceStore {
   ): boolean {
     const snapshot = z
       .object({
-        providerInstance: z.literal("github.com"),
+        providerInstance: z.literal(this.tracker.instance),
         nodeId: nonempty,
         repositoryId: nonempty,
         repositoryName: nonempty,
@@ -1247,6 +1247,11 @@ export class GitHubSourceStore {
         state: z.literal("closed"),
         labels: z.array(nonempty),
         projectFields: projectFieldsSchema,
+        // Jira's own status; GitHub has none.
+        status: z
+          .object({ id: nonempty, name: z.string(), categoryKey: nonempty })
+          .strict()
+          .optional(),
       })
       .strict()
       .parse(input);
@@ -1285,17 +1290,18 @@ export class GitHubSourceStore {
       }
       this.db
         .prepare(
-          `UPDATE external_items SET observedState='closed',observedTitle=?,observedBody=?,labels=? WHERE ${itemIs()}`,
+          `UPDATE external_items SET observedState='closed',observedTitle=?,observedBody=?,labels=?,observedStatus=COALESCE(?,observedStatus) WHERE ${itemIs()}`,
         )
         .run(
           snapshot.title,
           snapshot.body,
           JSON.stringify(snapshot.labels),
+          snapshot.status ? JSON.stringify(snapshot.status) : null,
           ...this.key(snapshot.nodeId),
         );
       new TaskReviewStore(this.db).captureSource(
         String(issue.taskId),
-        "github",
+        this.tracker.provider === "jira" ? "jira" : "github",
         { title: snapshot.title, body: snapshot.body },
       );
       const priorHold = this.db

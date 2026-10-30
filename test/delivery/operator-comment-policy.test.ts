@@ -58,7 +58,7 @@ test("comment policy: a local task has no issue to comment on", async (t) => {
   assert.deepEqual(await policy(w), {
     available: false,
     mode: null,
-    reason: "Task has no bound GitHub issue",
+    reason: "Task has no bound issue",
     reasonCode: "no-source-issue",
   });
 });
@@ -155,11 +155,10 @@ test("comment policy: delivery get keeps its three policy fields and no reason c
 
 test("comment policy: every code has a sentence and an absent code falls back to the reason", () => {
   const sentences: Record<CommentReasonCode, string> = {
-    "no-source-issue": "This task has no GitHub issue to comment on.",
-    "no-comment-grant": "This project doesn't permit GitHub issue comments.",
+    "no-source-issue": "This task has no issue to comment on.",
+    "no-comment-grant": "This project doesn't permit issue comments.",
     held: "Comments wait while the task's admission or delivery is held.",
-    "no-delivery-credential":
-      "This project has no GitHub delivery credential set.",
+    "no-delivery-credential": "This project has no delivery credential set.",
   };
   assert.deepEqual(commentReasonSentences, sentences);
   for (const reasonCode of commentReasonCodes)
@@ -190,7 +189,7 @@ test("comment policy: every code has a sentence and an absent code falls back to
     }),
     { postable: false, sentence: "No project grant for issue comments." },
   );
-  const generic = "GitHub comments aren't available for this task.";
+  const generic = "Comments aren't available for this task.";
   assert.deepEqual(commentAvailability({ available: false, reason: null }), {
     postable: false,
     sentence: generic,

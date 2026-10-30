@@ -59,10 +59,7 @@ test("delivery get reports a local task without a bound issue", async (t) => {
   const json = await w.ok("ro", ["delivery", "get", w.f.taskId]);
   assert.equal(json.data.issue, null);
   assert.equal(json.data.commentPolicy.available, false);
-  assert.equal(
-    json.data.commentPolicy.reason,
-    "Task has no bound GitHub issue",
-  );
+  assert.equal(json.data.commentPolicy.reason, "Task has no bound issue");
 });
 
 test("delivery refresh is a receipted write that reports partial outcomes", async (t) => {

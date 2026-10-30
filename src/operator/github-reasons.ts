@@ -11,7 +11,7 @@ export {
 } from "../core/task-publication-contracts.js";
 
 /**
- * Why a task's GitHub comment cannot be posted, as the server decides it. Shared by the task
+ * Why a task's issue comment cannot be posted, as the server decides it. Shared by the task
  * read's schema and the web, like `wait-reasons.ts`. The state of a source's last read has its
  * own record below (`sourceStates`); it does not widen `CommentReasonCode`.
  */
@@ -24,11 +24,10 @@ export const commentReasonCodes = [
 export type CommentReasonCode = (typeof commentReasonCodes)[number];
 
 export const commentReasonSentences: Record<CommentReasonCode, string> = {
-  "no-source-issue": "This task has no GitHub issue to comment on.",
-  "no-comment-grant": "This project doesn't permit GitHub issue comments.",
+  "no-source-issue": "This task has no issue to comment on.",
+  "no-comment-grant": "This project doesn't permit issue comments.",
   held: "Comments wait while the task's admission or delivery is held.",
-  "no-delivery-credential":
-    "This project has no GitHub delivery credential set.",
+  "no-delivery-credential": "This project has no delivery credential set.",
 };
 
 /**
@@ -57,7 +56,7 @@ export function commentAvailability(
         : undefined) ??
       (policy?.reason
         ? `${policy.reason}.`
-        : "GitHub comments aren't available for this task."),
+        : "Comments aren't available for this task."),
   };
 }
 
