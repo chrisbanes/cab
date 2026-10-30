@@ -16,6 +16,8 @@ export type FakeGlabState =
   | "legacy-format"
   | "not-signed-in"
   | "unreadable"
+  /** A Go-style network failure: exit 1 with `dial tcp` text, as glab prints for an unreachable host. */
+  | "network-error"
   | "masked"
   | "hang";
 
@@ -51,6 +53,9 @@ if (state === "hang") setTimeout(() => {}, 600000);
 else if (process.argv.slice(2, 4).join(" ") !== "auth status") process.exitCode = 2;
 else if (state === "not-signed-in") {
   say("x " + host + " has not been authenticated with glab; run \`glab auth login --hostname " + host + "\` to authenticate");
+  process.exitCode = 1;
+} else if (state === "network-error") {
+  say("x " + host + ": API call failed: GET https://" + host + "/api/v4/user: dial tcp: lookup " + host + ": no such host");
   process.exitCode = 1;
 } else if (state === "unreadable") say(host + "\\n  keyring failed");
 else {

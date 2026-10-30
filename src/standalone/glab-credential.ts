@@ -5,16 +5,27 @@ import { claudeTokenExclusions } from "./claude-token.js";
 import { credentialReferenceExclusions } from "./gh-credential.js";
 import { jiraCredentialExclusions } from "./jira-credential.js";
 
-export type GlabFailureState = "not-installed" | "not-signed-in" | "unreadable";
+export type GlabFailureState =
+  | "not-installed"
+  | "not-signed-in"
+  | "unreachable"
+  | "unreadable";
 
 export interface GlabOptions {
   /** Defaults to `glab` on the service `PATH`. */
   executable?: string | undefined;
-  /** Defaults to 10 seconds. */
+  /** Defaults to `glabTimeoutMs`. */
   timeoutMs?: number;
   /** The environment `glab` runs with; see `glabEnvironment`. */
   environment?: NodeJS.ProcessEnv;
 }
+
+/** Below readiness's 10 second bound, so a stalled host is classified before that gives up. */
+export const glabTimeoutMs = 8_000;
+
+// Go's standard net error text, which glab prints when the host cannot be reached.
+const networkError =
+  /dial tcp|no such host|connection refused|i\/o timeout|network is unreachable|no route to host|TLS handshake timeout|connection reset by peer|context deadline exceeded|Client\.Timeout exceeded/i;
 
 /** glab's documented token variables; any of them overrides a stored login. */
 export const glabTokenVariables = [
@@ -49,7 +60,7 @@ export async function glabToken(
           GLAB_CHECK_UPDATE: "false",
           NO_COLOR: "1",
         },
-        timeout: options.timeoutMs ?? 10_000,
+        timeout: options.timeoutMs ?? glabTimeoutMs,
         killSignal: "SIGKILL",
         maxBuffer: 64 * 1024,
         encoding: "utf8",
@@ -57,13 +68,19 @@ export async function glabToken(
       (error, stdout, stderr) => {
         if (!error) return resolve({ output: `${stderr}\n${stdout}` });
         const e = error as NodeJS.ErrnoException & { killed?: boolean };
+        // Killed by the timeout (no exit code, unlike maxBuffer) means a host that did not
+        // answer. The output is only matched here, never kept.
         resolve({
           state:
             e.code === "ENOENT"
               ? "not-installed"
-              : typeof e.code === "number" && !e.killed
-                ? "not-signed-in"
-                : "unreadable",
+              : e.killed && e.code == null
+                ? "unreachable"
+                : typeof e.code === "number"
+                  ? networkError.test(`${stderr}\n${stdout}`)
+                    ? "unreachable"
+                    : "not-signed-in"
+                  : "unreadable",
         });
       },
     );

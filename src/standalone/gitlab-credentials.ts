@@ -16,6 +16,7 @@ export type GitLabCredentialReason =
   | "missing-credential"
   | "glab-not-installed"
   | "glab-not-signed-in"
+  | "glab-unreachable"
   | "glab-unreadable";
 
 /** Test seams: the `glab` executable and the GitLab reader factory. */
@@ -74,7 +75,12 @@ const overridden = (domain: Domain, ref: string) =>
 export async function gitLabCredentialLocalState(
   domain: Domain,
   seams: GitLabSeams,
-): Promise<{ configured: boolean; unusable: boolean; overridden: boolean }> {
+): Promise<{
+  configured: boolean;
+  unusable: boolean;
+  unreachable: boolean;
+  overridden: boolean;
+}> {
   const credentials = domain.codeHostCredentials();
   const resolved = await Promise.all(
     credentials.map((c) => resolve(domain, seams, c)),
@@ -82,6 +88,9 @@ export async function gitLabCredentialLocalState(
   return {
     configured: credentials.length > 0,
     unusable: resolved.some((r) => "reason" in r),
+    unreachable: resolved.some(
+      (r) => "reason" in r && r.reason === "glab-unreachable",
+    ),
     overridden: credentials.some((c) => overridden(domain, c.credentialRef)),
   };
 }

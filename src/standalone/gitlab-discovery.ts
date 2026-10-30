@@ -9,6 +9,7 @@ export type GitLabFailureReason =
   | "unauthorized"
   | "forbidden"
   | "rate-limited"
+  | "unreachable"
   | "unreadable";
 /** A failed GitLab read. The message is the reason code only, never a token or URL. */
 export class GitLabDiscoveryFailure extends Error {
@@ -52,10 +53,15 @@ export class GitLabDiscoveryReader {
         method: "GET",
         redirect: "manual",
         signal: AbortSignal.timeout(15_000),
-        headers: { "private-token": this.token, accept: "application/json" },
+        // Bearer takes OAuth tokens (a glab login) as well as personal access tokens.
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          accept: "application/json",
+        },
       });
     } catch {
-      throw new GitLabDiscoveryFailure("unreadable");
+      // A network error or the timeout; never the error text, which may carry the URL.
+      throw new GitLabDiscoveryFailure("unreachable");
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});

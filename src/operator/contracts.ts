@@ -4016,10 +4016,12 @@ export const gitLabCredentialReasons = [
   "missing-credential",
   "glab-not-installed",
   "glab-not-signed-in",
+  "glab-unreachable",
   "glab-unreadable",
   "unauthorized",
   "forbidden",
   "rate-limited",
+  "unreachable",
   "unreadable",
 ] as const;
 const gitLabCredentialBase = {
@@ -4034,6 +4036,8 @@ const gitLabCredentialBase = {
 export const codeHostCredentialsSchema = envelope(
   z
     .object({
+      /** A running runtime inherited a GitLab credential; a service restart drops it. */
+      restartRequired: z.boolean(),
       credentials: z
         .array(
           z.discriminatedUnion("state", [

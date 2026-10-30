@@ -5,6 +5,7 @@ import {
   gitLabCredentialExclusions,
   glabEnvironment,
   glabOverridden,
+  glabTimeoutMs,
   glabToken,
 } from "../../src/standalone/glab-credential.js";
 import {
@@ -24,7 +25,8 @@ test("glab token resolution maps every state without revealing the token", async
     ["not-signed-in", { state: "not-signed-in" }],
     ["unreadable", { state: "unreadable" }],
     ["masked", { state: "unreadable" }],
-    ["hang", { state: "unreadable" }],
+    ["network-error", { state: "unreachable" }],
+    ["hang", { state: "unreachable" }],
     ["missing", { state: "not-installed" }],
   ];
   for (const [state, expected] of cases) {
@@ -52,6 +54,10 @@ test("glab token resolution maps every state without revealing the token", async
     assert.equal(environment.NO_PROMPT, "1");
     assert.equal(environment.GLAB_CHECK_UPDATE, "false");
   }
+});
+
+test("the default glab timeout is inside readiness's 10 second bound", () => {
+  assert.equal(glabTimeoutMs, 8_000);
 });
 
 test("glab is run on every use and nothing is cached", async (t) => {

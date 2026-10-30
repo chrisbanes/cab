@@ -636,6 +636,8 @@ interface Started {
   diagnostics: ExecutionDiagnosticsStore | undefined;
   /** Status reads use it without spawning anything. */
   claude: RuntimeSpawnContext["claude"];
+  /** See `StandaloneService.gitLabCredentialRestartRequired`. */
+  gitLabRestartRequired: () => boolean;
 }
 
 /** Whether any work ever started on the task: a task that did is no longer a local draft to publish. */
@@ -1618,6 +1620,17 @@ export class StandaloneService {
         conversationHistory,
         diagnostics,
         claude,
+        gitLabRestartRequired: () => {
+          const { names, values } = gitLabCredentialExclusions(
+            domain.codeHostCredentials().map((c) => c.credentialRef),
+          );
+          const snapshot = runtimeSpawnSnapshot ?? {};
+          const held = Object.values(snapshot);
+          return (
+            names.some((name) => snapshot[name] !== undefined) ||
+            values.some((value) => held.includes(value))
+          );
+        },
       };
       // Boot-time failures begin their schedule only now that attempts can be admitted.
       for (const harness of [...this.runtimeUnavailableSince.keys()])
@@ -2846,6 +2859,14 @@ export class StandaloneService {
   /** The persisted harness of a bound work, or null before binding. */
   bindingHarness(workId: string): ExecutionHarness | null {
     return this.started().state.taskBinding(workId)?.harness ?? null;
+  }
+
+  /**
+   * Whether a configured GitLab credential's variable or value is in the environment the
+   * running runtimes inherited. A boolean only; they keep it until the service restarts.
+   */
+  gitLabCredentialRestartRequired(): boolean {
+    return this.started().gitLabRestartRequired();
   }
 
   /** Booleans and a closed state only; the token value never leaves this method. */

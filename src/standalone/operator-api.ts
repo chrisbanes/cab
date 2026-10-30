@@ -7037,6 +7037,7 @@ export class OperatorApi {
   async readCodeHostCredentials() {
     return codeHostCredentialsSchema.parse({
       data: {
+        restartRequired: this.service.gitLabCredentialRestartRequired(),
         credentials: await readCodeHostCredentials(this.domain(), this.setup),
       },
       observedAt: Date.now(),

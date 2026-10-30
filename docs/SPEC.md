@@ -863,11 +863,16 @@ there is no `file:` GitHub reference. See the
 Each GitLab host has one installation-level credential, set in Settings → GitLab
 credentials through the receipted `code-host-credential.configure` command: `env:NAME`,
 or `glab:<host>` for that same host, which runs
-`glab auth status --hostname <host> --show-token` on every use, with no stdin and a
-bounded time, and parses one token line from its combined output. Reads report the
+`glab auth status --hostname <host> --show-token` on every use, with no stdin and an
+8-second limit, and parses one token line from its combined output. Reads report the
 kind, whether the credential is usable, a fixed reason when it is not, and the account
 the token acts as (from `GET /api/v4/user`); never the variable name, token or glab
-output. A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
+output. A host that does not answer is reported as unreachable: for glab when it is
+killed at its 8-second limit or prints a network error, and for cab's own GitLab
+reads when the request fails or exceeds 15 seconds. Those reads, and GitLab branch
+delivery, authenticate with `Authorization: Bearer`, which GitLab accepts for
+personal access tokens and for OAuth tokens such as a glab web login. Fake-host tests
+prove the header; a live host's acceptance of both token kinds is not yet demonstrated. A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
 environment overrides a stored glab login; Settings and `cab doctor` (GitLab
 credentials) warn when it does, and the account shown is the token's. The credential
 lists GitLab projects for guided setup, shows the account, and is the identity GitLab
@@ -878,9 +883,15 @@ the project and its numeric ID from the discovered list, verifies the chosen che
 `origin` against the host and project path, and records the link in the same atomic
 `project.create`; a GitLab-only project records no GitHub source credential. GitLab
 credential names and values, including every value glab has resolved, are excluded
-like source credentials, with the same limits: a reference added after start needs a
-restart before running Codex spawns exclude it, and agents may still reach a glab
-login or config file on the host.
+like source credentials. Helper, `gh`, `glab` and Claude turn environments apply a
+changed credential at once. A running Codex runtime keeps the environment it was
+spawned with, so when it inherited a configured credential's variable or value,
+Settings (GitLab credentials and Readiness) and `cab doctor` report that the service
+needs a restart, and the notice clears after it. Agents may still reach a glab login
+or config file on the host. A configured GitLab credential that fails, or a `glab`
+login shadowed by `GITLAB_TOKEN`, fails the readiness check and so blocks
+`cab service upgrade`, as a failing configured GitHub discovery credential does; an
+unconfigured one does not.
 
 Settings present each project's repository links and GitHub discovery sources as
 separate sections. Repository links are project configuration, not part of any

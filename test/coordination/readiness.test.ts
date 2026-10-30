@@ -71,7 +71,9 @@ function deps(f: Fixture, over: Partial<ReadinessDeps> = {}): ReadinessDeps {
     gitLabCredentials: async () => ({
       configured: false,
       unusable: false,
+      unreachable: false,
       overridden: false,
+      restartRequired: false,
     }),
     claudeTokenReference: () => null,
     claudeTokenStatus: () => ({ state: "not-configured" }),
@@ -514,8 +516,16 @@ test("GitLab credentials check is not configured, passes, or fails with a fixed 
     configured: boolean,
     unusable = false,
     overridden = false,
+    unreachable = false,
+    restartRequired = false,
   ) => ({
-    gitLabCredentials: async () => ({ configured, unusable, overridden }),
+    gitLabCredentials: async () => ({
+      configured,
+      unusable,
+      unreachable,
+      overridden,
+      restartRequired,
+    }),
   });
   const none = await check(f, "gitlab-credentials", state(false));
   assert.equal(none.status, "not-configured");
@@ -539,6 +549,33 @@ test("GitLab credentials check is not configured, passes, or fails with a fixed 
   assert.match(
     overridden.fix ?? "",
     /^Unset GITLAB_TOKEN in the service environment/,
+  );
+  const unreachable = await check(
+    f,
+    "gitlab-credentials",
+    state(true, true, false, true),
+  );
+  assert.equal(unreachable.status, "fail");
+  assert.equal(unreachable.reason, "A GitLab host could not be reached");
+  assert.match(unreachable.fix ?? "", /network or VPN/);
+  const restart = await check(
+    f,
+    "gitlab-credentials",
+    state(true, false, false, false, true),
+  );
+  assert.equal(restart.status, "fail");
+  assert.match(restart.reason ?? "", /^Restart the service/);
+  assert.equal(restart.fix, "Restart the service");
+  // Another failure keeps its own reason while a restart is also due.
+  assert.equal(
+    (
+      await check(
+        f,
+        "gitlab-credentials",
+        state(true, true, false, false, true),
+      )
+    ).reason,
+    "A GitLab credential is not readable",
   );
   const stalled = await check(f, "gitlab-credentials", {
     gitLabCredentials: () => new Promise<never>(() => {}),

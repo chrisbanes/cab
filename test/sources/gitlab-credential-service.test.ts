@@ -162,6 +162,14 @@ test("glab states give specific reasons and a token variable is reported as an o
   assert.equal(await reason(), "glab-not-signed-in");
   f.glab.set("unreadable");
   assert.equal(await reason(), "glab-unreadable");
+  f.glab.set("network-error");
+  assert.equal(await reason(), "glab-unreachable");
+  assert.deepEqual(await f.api.codeHostCredentialLocalState(), {
+    configured: true,
+    unusable: true,
+    unreachable: true,
+    overridden: false,
+  });
   f.glab.set("signed-in");
   assert.equal(await reason(), "usable");
 
@@ -171,6 +179,7 @@ test("glab states give specific reasons and a token variable is reported as an o
   assert.deepEqual(await f.api.codeHostCredentialLocalState(), {
     configured: true,
     unusable: false,
+    unreachable: false,
     overridden: true,
   });
   delete process.env.GITLAB_TOKEN;
@@ -209,6 +218,7 @@ test("the GitLab credentials readiness input is local and names an override", as
   assert.deepEqual(await f.api.codeHostCredentialLocalState(), {
     configured: false,
     unusable: false,
+    unreachable: false,
     overridden: false,
   });
   await f.configure(`env:${ENV_NAME}`);

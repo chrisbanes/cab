@@ -66,7 +66,10 @@ export type ReadinessDeps = {
   gitLabCredentials: () => Promise<{
     configured: boolean;
     unusable: boolean;
+    unreachable: boolean;
     overridden: boolean;
+    /** A running runtime inherited a now-excluded GitLab credential; only a restart drops it. */
+    restartRequired: boolean;
   }>;
   claudeTokenReference: () => string | null;
   claudeTokenStatus: () => {
@@ -142,6 +145,8 @@ const fixes = {
     "Run `glab auth login --hostname <host>`, or set the credential in Settings → GitLab credentials",
   gitlabOverride:
     "Unset GITLAB_TOKEN in the service environment, or choose an environment variable reference",
+  gitlabUnreachable:
+    "Check the GitLab host's network or VPN access from the service, or the credential in Settings → GitLab credentials",
   claudeInstall:
     "Install Claude Code into the fixed PATH, then turn Claude off and on in Settings → Runtime",
   claudeVersion:
@@ -404,8 +409,27 @@ export class Readiness {
         "A glab login is overridden by GITLAB_TOKEN in the service environment",
         fixes.gitlabOverride,
       );
-    return state.unusable
-      ? outcome(id, "fail", "A GitLab credential is not readable", fixes.gitlab)
+    if (state.unreachable)
+      return outcome(
+        id,
+        "fail",
+        "A GitLab host could not be reached",
+        fixes.gitlabUnreachable,
+      );
+    if (state.unusable)
+      return outcome(
+        id,
+        "fail",
+        "A GitLab credential is not readable",
+        fixes.gitlab,
+      );
+    return state.restartRequired
+      ? outcome(
+          id,
+          "fail",
+          "Restart the service so running runtimes exclude this GitLab credential",
+          fixes.claudeRestart,
+        )
       : pass(id);
   }
 
@@ -715,7 +739,10 @@ export function serviceReadiness(
         available: ref !== null && Boolean(process.env[ref.slice(4)]),
       };
     },
-    gitLabCredentials: () => api.codeHostCredentialLocalState(),
+    gitLabCredentials: async () => ({
+      ...(await api.codeHostCredentialLocalState()),
+      restartRequired: service.gitLabCredentialRestartRequired(),
+    }),
     claudeTokenReference: () => service.domain().claudeTokenReference(),
     claudeTokenStatus: () => service.claudeTokenStatus(),
     harnessStatuses: () => service.harnessStatuses(),
