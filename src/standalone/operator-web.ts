@@ -415,6 +415,18 @@ export class OperatorWebBoundary {
       return instructions[1] === "projects"
         ? this.api.readProjectInstructions(instructions[2] ?? "", query)
         : this.api.readProfileInstructions(instructions[2] ?? "", query);
+    const timeline = path.match(
+      /^\/api\/operator\/tasks\/([^/]+)\/timeline(?:\/output\/([0-9]{1,16}))?$/,
+    );
+    if (timeline) {
+      if (timeline[2] === undefined)
+        return this.api.readTaskTimeline(timeline[1] ?? "", query);
+      if ([...query].length) throw new OperatorApiError(400, "invalid-input");
+      return this.api.readTaskToolOutput(
+        timeline[1] ?? "",
+        Number(timeline[2]),
+      );
+    }
     const records = path.match(
       /^\/api\/operator\/tasks\/([^/]+)\/(results|messages)$/,
     );

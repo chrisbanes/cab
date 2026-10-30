@@ -773,6 +773,51 @@ test("delegation derives same-task requester identity and replays exactly once",
   }
 });
 
+test("delegation records its millisecond time once and legacy delegations anchor to their work", () => {
+  const f = fixture();
+  try {
+    const call = {
+      threadId: "thread-child-a",
+      turnId: "turn-child-a",
+      callId: "call-delegate-time",
+      tool: "cab_delegate",
+      arguments: { profileId: workerProfile, brief: "Timed child work" },
+    };
+    const before = Date.now();
+    const assignmentId =
+      f.coordination.delegate(call).text.split(" ").at(-1) ?? "";
+    f.coordination.delegate(call);
+    f.coordination.migrate();
+    const rows = f.db
+      .prepare("SELECT * FROM coordination_delegations")
+      .all() as { assignmentId: string; delegatedAt: number }[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.assignmentId, assignmentId);
+    assert.ok((rows[0]?.delegatedAt ?? 0) >= before);
+    const times = f.coordination.delegationTimes(taskA);
+    // The nested assignment was made by a domain command, before the table existed.
+    assert.deepEqual(
+      times.map((t) => [
+        t.assignmentId === assignmentId,
+        t.delegatedAt !== null,
+      ]),
+      [
+        [false, false],
+        [true, true],
+      ],
+    );
+    f.db.exec("DELETE FROM coordination_delegations");
+    assert.deepEqual(
+      f.coordination
+        .delegationTimes(taskA)
+        .find((t) => t.assignmentId === assignmentId),
+      { assignmentId, delegatedAt: null, workId: "work-child-a" },
+    );
+  } finally {
+    f.close();
+  }
+});
+
 test("delegation rejects withdrawn domain admission without a child or receipt", () => {
   for (const withdrawal of ["pause", "unready", "dependency"] as const) {
     const f = fixture();

@@ -385,6 +385,10 @@ export class CoordinationView {
     return history;
   }
 
+  delegationTimes(taskId: string) {
+    return this.coordination.delegationTimes(uuid.parse(taskId));
+  }
+
   readTask(taskId: string): CoordinationTaskView {
     const task = this.domain.task(uuid.parse(taskId));
     const id = String(task.id);

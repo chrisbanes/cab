@@ -1908,6 +1908,151 @@ export const assignmentHistorySchema = envelope(
     })
     .strict(),
 );
+const timelineKey = z
+  .string()
+  .regex(/^[0-9]{1,16}\.[0-9]{1,2}\.[0-9]{1,16}\.[\w-]{1,96}$/);
+const timelineEntryBase = {
+  entryId: z.string().regex(/^[\w-]{1,96}$/),
+  key: timelineKey,
+  assignmentId: uuid,
+  /** Milliseconds; `precision: "s"` means the record only has whole-second time. */
+  at: time,
+  precision: z.enum(["ms", "s"]),
+};
+/** One page of a task's conversation, oldest first; `olderCursor` is the next `before`. */
+export const taskTimelineSchema = envelope(
+  z
+    .object({
+      visibilityRevision: hash,
+      olderCursor: timelineKey.nullable(),
+      entries: z
+        .array(
+          z.discriminatedUnion("kind", [
+            z
+              .object({
+                ...timelineEntryBase,
+                kind: z.literal("assistant"),
+                workId: z.string().min(1),
+                lifecycle: z.enum(["started", "streaming", "completed"]),
+                // Captured text is bounded at 64 KiB, as in the assignment history.
+                text: z.string().nullable(),
+              })
+              .strict(),
+            z
+              .object({
+                ...timelineEntryBase,
+                kind: z.literal("request"),
+                requestKind: z.enum(["question", "approval"]),
+                interactionId: uuid,
+                status: z.enum(["open", "answered", "approved", "denied"]),
+                prompt: safeText,
+                action: safeText,
+                target: safeText,
+              })
+              .strict(),
+            z
+              .object({
+                ...timelineEntryBase,
+                kind: z.literal("result"),
+                resultId: uuid,
+                summary: safeText,
+                recipientAssignmentId: uuid.nullable(),
+                destinationDisposition: z.enum(["delivered", "unresolved"]),
+              })
+              .strict(),
+            z
+              .object({
+                ...timelineEntryBase,
+                kind: z.literal("message"),
+                messageKind: z.enum([
+                  "operator-message",
+                  "follow-up",
+                  "answer",
+                  "decision",
+                ]),
+                requester: z.enum(["assignment", "operator"]).nullable(),
+                interactionId: uuid.nullable(),
+                decision: z.enum(["approved", "denied"]).nullable(),
+                text: safeText,
+                questionAnswers: questionAnswersSchema.nullable(),
+              })
+              .strict(),
+            z
+              .object({
+                ...timelineEntryBase,
+                kind: z.literal("delegation"),
+                requesterAssignmentId: uuid.nullable(),
+                profileId: uuid,
+                name: safeText,
+                runtime: profileRuntimeSchema,
+                state: z.enum([
+                  "pending",
+                  "running",
+                  "completed",
+                  "held",
+                  "cancelled",
+                ]),
+              })
+              .strict(),
+            z
+              .object({
+                ...timelineEntryBase,
+                kind: z.literal("tool"),
+                tool: z.enum(["command", "file-change", "other"]),
+                label: z.string().max(128).nullable(),
+                status: z.string().max(64).nullable(),
+                command: z.string().max(512).nullable(),
+                truncated: z.boolean(),
+                exitCode: z.number().int().nullable(),
+                /** Pass to the output read; null when no output is retained. */
+                outputSequence: revision.nullable(),
+              })
+              .strict(),
+            z
+              .object({
+                ...timelineEntryBase,
+                kind: z.literal("gap"),
+                reason: z.enum([
+                  "size-limit",
+                  "item-limit",
+                  "active-turn-limit",
+                  "turn-ended",
+                  "missing-text",
+                  "redaction-unavailable",
+                  "early-buffer-limit",
+                  "tool-activity-expired",
+                  "tool-activity-not-captured",
+                  "tool-activity-incomplete",
+                ]),
+                detail: z
+                  .object({
+                    workId: safeText,
+                    turnId: safeText,
+                    itemId: safeText,
+                  })
+                  .strict(),
+              })
+              .strict(),
+          ]),
+        )
+        .max(100),
+    })
+    .strict(),
+);
+/** The bounded, redacted output of one completed command in a task's timeline. */
+export const taskToolOutputSchema = envelope(
+  z
+    .object({
+      sequence: revision,
+      state: z.enum(["available", "omitted"]),
+      reason: z
+        .enum(["size-limit", "redaction-unavailable", "not-captured"])
+        .nullable(),
+      // Bounded by the 48 KiB capture limit rather than the 16,000-character field limit.
+      text: z.string().nullable(),
+    })
+    .strict(),
+);
 const base = { key: uuid };
 const domainBase = { ...base, projectId: uuid };
 const localReviewCommentSchema = z

@@ -140,6 +140,8 @@ import {
   taskRecordQuerySchema,
   taskResultPageSchema,
   taskSchema,
+  taskTimelineSchema,
+  taskToolOutputSchema,
   textMaxLength,
   unsupportedRuntimeField,
   uuid,
@@ -182,6 +184,20 @@ import type {
   CoordinationView,
 } from "./coordination-view.js";
 import { DraftTurnUnavailableError } from "./draft-turn.js";
+import {
+  identityToken,
+  mergeTimelinePage,
+  newestBelow,
+  projectTool,
+  type TimelineCandidate,
+  toolActivityGaps,
+  toolRowNames,
+} from "./task-timeline.js";
+import {
+  parseTimelineCursor,
+  serializeTimelineKey,
+  timelineRank,
+} from "./timeline-key.js";
 import {
   ResetUnavailableError,
   StartAgainUnavailableError,
@@ -4835,6 +4851,375 @@ export class OperatorApi {
         }),
       },
       observedAt: Date.now(),
+    });
+  }
+  /**
+   * One page of the task's conversation, newest `limit` entries below `before`, oldest
+   * first. It merges captured history, the `readTask` coordination projections and
+   * the curated tool projection under one key order; see `task-timeline.ts`.
+   */
+  async readTaskTimeline(taskId: string, query: URLSearchParams) {
+    this.exactQuery(query, ["before", "limit"]);
+    const limit = this.boundedInt(query.get("limit"), 1, 100) ?? 50;
+    const cursor = query.get("before");
+    const before = cursor === null ? undefined : parseTimelineCursor(cursor);
+    if (cursor !== null && !before)
+      throw new OperatorApiError(400, "invalid-input");
+    return this.readWithExclusionFence(async () => {
+      const visibility = this.visibilityToken();
+      const task = this.requireTask(taskId);
+      const projectId = String(task.projectId);
+      const workspaceVisibility = this.service.taskWorkspaceVisibility(taskId);
+      const { data: view } = await this.readTask(taskId);
+      const want = limit + 1;
+      const history = this.service
+        .conversationHistoryStore()
+        ?.readTaskBefore(taskId, before, want) ?? {
+        items: [],
+        turnOmissions: [],
+      };
+      const diagnostics = this.service.executionDiagnostics();
+      const executions = diagnostics?.executionsForTask(taskId) ?? [];
+      const tools =
+        diagnostics?.toolItemsBefore(taskId, before, want, toolRowNames) ?? [];
+      const excluded = await this.exclusions(projectId, taskId, [
+        ...history.items,
+        ...history.turnOmissions,
+      ]);
+      const detail = (workId: string, turnId?: string, itemId?: string) => ({
+        workId: this.safe(workId, excluded),
+        turnId: turnId === undefined ? null : this.safe(turnId, excluded),
+        itemId: itemId === undefined ? null : this.safe(itemId, excluded),
+      });
+      const assignmentOf = new Map(
+        executions.map((e) => [e.workId, e.assignmentId]),
+      );
+
+      const historySource: TimelineCandidate[] = [
+        ...history.items.map((item): TimelineCandidate => {
+          const text =
+            item.lifecycle === "completed"
+              ? excluded === undefined
+                ? undefined
+                : sanitizeConversationText(item.text ?? "", excluded)
+              : null;
+          const reason =
+            item.lifecycle === "omitted"
+              ? (item.omissionReason ?? "missing-text")
+              : text === undefined
+                ? "redaction-unavailable"
+                : undefined;
+          return {
+            key: {
+              timeMs: item.createdAt,
+              rank: timelineRank.history,
+              ordinal: item.sequence,
+              id: `item-${item.sequence}`,
+            },
+            assignmentId: item.assignmentId,
+            precision: "ms",
+            body: reason
+              ? {
+                  kind: "gap",
+                  reason,
+                  detail: detail(item.workId, item.turnId, item.itemId),
+                }
+              : {
+                  kind: "assistant",
+                  workId: item.workId,
+                  lifecycle: item.lifecycle,
+                  text: text ?? null,
+                },
+          };
+        }),
+        ...history.turnOmissions.map(
+          (omission): TimelineCandidate => ({
+            key: {
+              timeMs: omission.createdAt,
+              rank: timelineRank.turnOmission,
+              ordinal: omission.sequence,
+              id: `omit-${omission.sequence}`,
+            },
+            assignmentId: omission.assignmentId,
+            precision: "ms",
+            body: {
+              kind: "gap",
+              reason: omission.reason,
+              detail: detail(omission.workId, omission.turnId),
+            },
+          }),
+        ),
+      ];
+
+      const toolSource = tools.flatMap(({ first, last }) => {
+        const assignmentId = assignmentOf.get(first.workId);
+        if (assignmentId === undefined) return [];
+        const projection = projectTool(first, last, excluded);
+        const { kind, ...rest } = projection;
+        return [
+          {
+            key: {
+              timeMs: first.createdAt,
+              rank: timelineRank.tool,
+              ordinal: first.sequence,
+              id: `tool-${first.sequence}`,
+            },
+            assignmentId,
+            precision: "ms",
+            body:
+              kind === "gap"
+                ? {
+                    kind,
+                    ...rest,
+                    detail: detail(
+                      first.workId,
+                      undefined,
+                      first.itemId ?? undefined,
+                    ),
+                  }
+                : { kind, ...rest },
+          } satisfies TimelineCandidate,
+        ];
+      });
+
+      const gapSource: TimelineCandidate[] = [
+        ...executions.flatMap((e) =>
+          toolActivityGaps(e).map((reason) => ({
+            workId: e.workId,
+            assignmentId: e.assignmentId,
+            at: e.startedAt,
+            reason,
+          })),
+        ),
+        // Works with captured history but no diagnostic record predate capture.
+        ...(this.service.conversationHistoryStore()?.workStarts(taskId) ?? [])
+          .filter((w) => !assignmentOf.has(w.workId))
+          .map((w) => ({
+            workId: w.workId,
+            assignmentId: w.assignmentId,
+            at: w.createdAt,
+            reason: "tool-activity-not-captured" as const,
+          })),
+      ].map(
+        (g): TimelineCandidate => ({
+          key: {
+            timeMs: g.at,
+            rank: timelineRank.toolGap,
+            ordinal: 0,
+            id: `gap-${g.reason}-${identityToken(g.workId)}`,
+          },
+          assignmentId: g.assignmentId,
+          precision: "ms",
+          body: { kind: "gap", reason: g.reason, detail: detail(g.workId) },
+        }),
+      );
+
+      const delegated = new Map(
+        this.coordination()
+          .delegationTimes(taskId)
+          .map((d) => [d.assignmentId, d]),
+      );
+      const delegations = view.assignments.flatMap((a) => {
+        const record = delegated.get(a.assignmentId);
+        const at =
+          record?.delegatedAt ??
+          executions.find((e) => e.workId === record?.workId)?.startedAt;
+        return at === undefined
+          ? []
+          : [
+              {
+                key: {
+                  timeMs: at,
+                  rank: timelineRank.delegation,
+                  ordinal: 0,
+                  id: a.assignmentId,
+                },
+                assignmentId: a.assignmentId,
+                precision: "ms",
+                body: {
+                  kind: "delegation",
+                  requesterAssignmentId: a.requesterAssignmentId ?? null,
+                  profileId: a.profileId,
+                  name: a.name,
+                  runtime: a.runtime,
+                  state: a.state,
+                },
+              } satisfies TimelineCandidate,
+            ];
+      });
+
+      const seconds = (
+        at: number,
+        rank: number,
+        ordinal: number,
+        id: string,
+        assignmentId: string,
+        body: TimelineCandidate["body"],
+      ): TimelineCandidate => ({
+        key: { timeMs: at * 1000, rank, ordinal, id },
+        assignmentId,
+        precision: "s",
+        body,
+      });
+      const messageKinds: Record<string, string> = {
+        "operator-message": "operator-message",
+        "assignment-follow-up": "follow-up",
+        "question-answer": "answer",
+        "approval-decision": "decision",
+      };
+      const records: TimelineCandidate[] = [
+        ...[...view.questions, ...view.approvals].map((i) =>
+          seconds(
+            i.createdAt,
+            timelineRank.request,
+            0,
+            i.interactionId,
+            i.requestingAssignmentId,
+            {
+              kind: "request",
+              requestKind: i.kind,
+              interactionId: i.interactionId,
+              status: i.status,
+              prompt: i.prompt,
+              action: i.action,
+              target: i.target,
+            },
+          ),
+        ),
+        ...view.results.map((r) =>
+          seconds(
+            r.createdAt,
+            timelineRank.result,
+            0,
+            r.resultId,
+            r.assignmentId,
+            {
+              kind: "result",
+              resultId: r.resultId,
+              summary: r.summary,
+              recipientAssignmentId: r.recipientAssignmentId,
+              destinationDisposition: r.destinationDisposition,
+            },
+          ),
+        ),
+        // The position in the task's message order is the event's own sequence order.
+        ...view.messages.flatMap((m, index) => {
+          const messageKind = messageKinds[m.eventType];
+          return messageKind === undefined
+            ? []
+            : [
+                seconds(
+                  m.createdAt,
+                  timelineRank.message,
+                  index,
+                  m.eventId,
+                  m.recipientAssignmentId,
+                  {
+                    kind: "message",
+                    messageKind,
+                    requester: m.requester ?? null,
+                    interactionId: m.interactionId ?? null,
+                    decision: m.decision ?? null,
+                    text: m.text ?? null,
+                    questionAnswers: m.questionAnswers ?? null,
+                  },
+                ),
+              ];
+        }),
+      ];
+
+      if (
+        visibility !== this.visibilityToken() ||
+        workspaceVisibility !== this.service.taskWorkspaceVisibility(taskId) ||
+        this.requireTask(taskId).version !== task.version
+      )
+        throw new OperatorApiError(503, "unavailable");
+      const { page, olderCursor } = mergeTimelinePage(
+        [
+          historySource,
+          toolSource,
+          ...[gapSource, delegations, records].map((source) =>
+            newestBelow(source, before, want),
+          ),
+        ],
+        limit,
+      );
+      return taskTimelineSchema.parse({
+        data: {
+          visibilityRevision: createHash("sha256")
+            .update(`${visibility}:${task.version}:${workspaceVisibility}`)
+            .digest("hex"),
+          olderCursor,
+          entries: page.map((c) => ({
+            ...c.body,
+            entryId: c.key.id,
+            key: serializeTimelineKey(c.key),
+            assignmentId: c.assignmentId,
+            at: c.key.timeMs,
+            precision: c.precision,
+          })),
+        },
+        observedAt: Date.now(),
+      });
+    });
+  }
+  /** Bounded, re-redacted output of one completed command of the task's timeline. */
+  async readTaskToolOutput(taskId: string, sequence: number) {
+    if (!Number.isSafeInteger(sequence) || sequence < 1)
+      throw new OperatorApiError(400, "invalid-input");
+    return this.readWithExclusionFence(async () => {
+      const visibility = this.visibilityToken();
+      const task = this.requireTask(taskId);
+      const workspaceVisibility = this.service.taskWorkspaceVisibility(taskId);
+      const store = this.service.executionDiagnostics();
+      const item = store?.item(sequence);
+      if (
+        item?.kind !== "runtime" ||
+        item.name !== "commandExecution/completed" ||
+        store?.execution(item.workId)?.taskId !== taskId
+      )
+        throw new OperatorApiError(404, "not-found");
+      const excluded = await this.exclusions(String(task.projectId), taskId);
+      const output = z
+        .object({
+          aggregatedOutput: z
+            .union([z.string(), z.object({ omitted: z.literal("size-limit") })])
+            .nullable()
+            .optional(),
+        })
+        .loose()
+        .safeParse(boundDetail(item.payload, excluded));
+      const omitted = (
+        reason: "size-limit" | "redaction-unavailable" | "not-captured",
+      ) => ({ state: "omitted" as const, reason, text: null });
+      const result =
+        item.state === "omitted"
+          ? omitted(
+              item.reason === "redaction-unavailable"
+                ? "redaction-unavailable"
+                : "size-limit",
+            )
+          : !output.success
+            ? omitted("redaction-unavailable")
+            : typeof output.data.aggregatedOutput === "string"
+              ? {
+                  state: "available" as const,
+                  reason: null,
+                  text: output.data.aggregatedOutput,
+                }
+              : output.data.aggregatedOutput
+                ? omitted("size-limit")
+                : omitted("not-captured");
+      if (
+        visibility !== this.visibilityToken() ||
+        workspaceVisibility !== this.service.taskWorkspaceVisibility(taskId) ||
+        this.requireTask(taskId).version !== task.version
+      )
+        throw new OperatorApiError(503, "unavailable");
+      return taskToolOutputSchema.parse({
+        data: { sequence, ...result },
+        observedAt: Date.now(),
+      });
     });
   }
   private commentPolicy(taskId: string) {

@@ -8251,6 +8251,11 @@ export class StandaloneService {
     }
   }
 
+  /** Captured conversation history for operator reads; undefined until started. */
+  conversationHistoryStore(): ConversationHistoryStore | undefined {
+    return this.current?.conversationHistory;
+  }
+
   /** Diagnostic store for operator reads; undefined until started or when unavailable. */
   executionDiagnostics(): ExecutionDiagnosticsStore | undefined {
     return this.current?.diagnostics;

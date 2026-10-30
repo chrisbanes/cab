@@ -269,7 +269,7 @@ export function operatorRouteAuthority(
       path,
     ) ||
     /^\/api\/operator\/(?:projects|tasks)\/[^/]+$/.test(path) ||
-    /^\/api\/operator\/tasks\/[^/]+\/(?:review|files|preview|results|messages|artifacts\/[^/]+)$/.test(
+    /^\/api\/operator\/tasks\/[^/]+\/(?:review|files|preview|results|messages|timeline|timeline\/output\/[0-9]+|artifacts\/[^/]+)$/.test(
       path,
     ) ||
     /^\/api\/operator\/tasks\/[^/]+\/results\/[^/]+\/evidence(?:\/[^/]+)?$/.test(

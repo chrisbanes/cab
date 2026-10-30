@@ -6,6 +6,7 @@ import {
 } from "../operator/diagnostic-retention.js";
 import type { RuntimeDiagnosticEvent } from "./codex.js";
 import { sanitizeConversationText } from "./conversation-history.js";
+import { keysetBelow, type TimelineKey, timelineRank } from "./timeline-key.js";
 
 export type DiagnosticKind =
   | "input"
@@ -262,6 +263,10 @@ export class ExecutionDiagnosticsStore {
     CREATE INDEX IF NOT EXISTS diagnostic_items_work_sequence
       ON diagnostic_items(workId, sequence);
     CREATE INDEX IF NOT EXISTS diagnostic_items_created ON diagnostic_items(createdAt);
+    CREATE INDEX IF NOT EXISTS diagnostic_items_work_item
+      ON diagnostic_items(workId, itemId);
+    CREATE INDEX IF NOT EXISTS diagnostic_executions_task
+      ON diagnostic_executions(taskId);
     CREATE TABLE IF NOT EXISTS diagnostic_gaps (
       workId TEXT NOT NULL,
       code TEXT NOT NULL,
@@ -487,6 +492,60 @@ export class ExecutionDiagnosticsStore {
       .prepare("SELECT * FROM diagnostic_executions WHERE workId = ?")
       .get(workId) as Omit<DiagnosticExecution, "gaps"> | undefined;
     return row && { ...row, gaps: this.gaps(workId, 0) };
+  }
+
+  /** Every execution of the task with its coalesced gaps. */
+  executionsForTask(taskId: string): DiagnosticExecution[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM diagnostic_executions WHERE taskId = ?")
+        .all(taskId) as unknown as Omit<DiagnosticExecution, "gaps">[]
+    ).map((row) => ({ ...row, gaps: this.gaps(row.workId, 0) }));
+  }
+
+  /**
+   * The task's tool items strictly below `before`, newest first, at most `limit`.
+   * One entry per `(workId, itemId)`, keyed on its first retained row; `last` is the
+   * item's newest completed row. Only rows named in `names` qualify.
+   */
+  toolItemsBefore(
+    taskId: string,
+    before: TimelineKey | undefined,
+    limit: number,
+    names: readonly string[],
+  ): { first: DiagnosticItem; last: DiagnosticItem | undefined }[] {
+    const below = keysetBelow(
+      timelineRank.tool,
+      before,
+      "i.createdAt",
+      "i.sequence",
+    );
+    const rows = this.db
+      .prepare(`SELECT i.* FROM diagnostic_items i
+        JOIN diagnostic_executions e ON e.workId = i.workId
+        WHERE e.taskId = ? AND i.kind = 'runtime' AND i.itemId IS NOT NULL
+          AND i.name IN (${names.map(() => "?").join(",")}) AND ${below.sql}
+          AND NOT EXISTS (SELECT 1 FROM diagnostic_items j
+            WHERE j.workId = i.workId AND j.itemId = i.itemId
+              AND j.kind = 'runtime' AND j.sequence < i.sequence)
+        ORDER BY i.createdAt DESC, i.sequence DESC LIMIT ?`)
+      .all(taskId, ...names, ...below.params, limit) as unknown as ItemRow[];
+    const lastCompleted = this.db.prepare(`SELECT * FROM diagnostic_items
+      WHERE workId = ? AND itemId = ? AND kind = 'runtime' AND name LIKE '%/completed'
+      ORDER BY sequence DESC LIMIT 1`);
+    return rows.map((row) => {
+      const last = lastCompleted.get(row.workId, row.itemId) as
+        | ItemRow
+        | undefined;
+      return { first: toItem(row), last: last && toItem(last) };
+    });
+  }
+
+  item(sequence: number): DiagnosticItem | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM diagnostic_items WHERE sequence = ?")
+      .get(sequence) as ItemRow | undefined;
+    return row && toItem(row);
   }
 
   /** Ascending page by global sequence, at most 200 items or 1 MiB (at least one). */
