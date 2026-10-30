@@ -57,8 +57,9 @@ npm run test:built -- --profile=service
 browser-dependent cases while retaining service assertions in mixed test files.
 Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
 their engine. Missing compiled tests, unknown suites/options and empty shards
-fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence directory;
-CI uploads these with the synthetic evidence. Refresh a profile from a successful
+fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence
+directory (set `CAB_TEST_EVIDENCE_DIR` to keep it after the run); CI uploads these with
+the synthetic evidence. Refresh a profile from a successful
 complete run, or all its shards, using:
 
 ```sh
@@ -71,6 +72,18 @@ stale receipts and requires every current source test file. Its input digest
 covers runtime, test, web and runner inputs; changing these requires new receipts.
 Committed initial weights are measured locally; hosted CI receipts can refresh
 them as runner performance changes.
+
+`test:built` and `check` run the tests under a per-run `cab-run-*` directory in the
+OS temp root, passed to the test process tree as `TMPDIR`, so fixtures that call
+`os.tmpdir()` place their large sandboxes there. The runner removes the directory
+when the run ends, including after a failure, a timeout or a forwarded SIGTERM or
+SIGINT. At the next start it removes `cab-run-*` directories of the current user
+whose recorded owner process has exited, which covers a runner killed outright;
+directories with a live, missing or unreadable owner are kept. Test evidence
+outlives the run only when `CAB_TEST_EVIDENCE_DIR` is set, as in CI. Harnesses run
+directly (the `*:live` commands) and `node --test` invocations bypass the runner and
+manage their own temp directories. The per-run override applies to POSIX `TMPDIR`
+only.
 
 Real App Server
 qualification is separate and runs only when requested explicitly, for example

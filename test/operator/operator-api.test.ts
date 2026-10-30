@@ -1877,31 +1877,41 @@ test("polled task list, project and Inbox reads redact stored workspace paths wi
     [...new Set(paths)].sort(),
   );
   const d = f.service.domain();
-  d.execute({
-    type: "task.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: ids.projectId,
-    taskId: ids.taskId,
-    expectedVersion: Number(d.task(ids.taskId).version),
-    title: `Safe title ${paths.join(" ")}`,
-  });
   const starts = () =>
     controlled.events().filter((e) => e.event === "start").length;
-  const baseline = starts();
-  assert.ok(baseline > 0);
   const api = new OperatorApi(f.service, [f.directory]);
-  const reads = [
-    await api.readTaskListPage(),
-    await api.readProject(ids.projectId),
-    await api.readInbox(),
-  ].map((read) => JSON.stringify(read));
-  assert.equal(starts(), baseline);
-  for (const read of reads) {
-    assert.match(read, /Safe title/);
-    for (const path of paths) assert.ok(!read.includes(path), path);
+  // A title holds 512 characters and the paths grow with the temp root, so cover them in rounds.
+  const rounds: string[][] = [[]];
+  for (const path of paths) {
+    const round = rounds.at(-1) as string[];
+    if (round.length && [...round, path].join(" ").length > 400)
+      rounds.push([path]);
+    else round.push(path);
   }
-  assert.match(reads[2]!, new RegExp(ids.interactionId));
+  for (const round of rounds) {
+    d.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: ids.projectId,
+      taskId: ids.taskId,
+      expectedVersion: Number(d.task(ids.taskId).version),
+      title: `Safe title ${round.join(" ")}`,
+    });
+    const baseline = starts();
+    assert.ok(baseline > 0);
+    const reads = [
+      await api.readTaskListPage(),
+      await api.readProject(ids.projectId),
+      await api.readInbox(),
+    ].map((read) => JSON.stringify(read));
+    assert.equal(starts(), baseline);
+    for (const read of reads) {
+      assert.match(read, /Safe title/);
+      for (const path of paths) assert.ok(!read.includes(path), path);
+    }
+    assert.match(reads[2]!, new RegExp(ids.interactionId));
+  }
 });
 
 test("history supplements captured privacy with external auth and GitHub values while retaining omissions and revisions", async (t) => {

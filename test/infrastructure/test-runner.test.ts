@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "../fixtures/temp.js";
@@ -39,12 +49,19 @@ const runner = (await import(
     args: string[],
     options?: {
       cwd?: string;
+      env?: NodeJS.ProcessEnv;
       deadlineMs?: number;
       graceMs?: number;
       forceWaitMs?: number;
       ownedChild?: { child: ChildProcess; pid: number; ownsGroup: boolean };
     },
   ): Promise<RunnerResult>;
+  withRunTempRoot<T>(
+    base: string,
+    body: (root: string) => Promise<T>,
+  ): Promise<T>;
+  createRunTempRoot(base: string): string;
+  sweepStaleRunTempRoots(base: string, alive?: (pid: number) => boolean): void;
   runnerStatus(
     result: Pick<RunnerResult, "timedOut" | "exitObserved" | "code"> & {
       signal?: string | null;
@@ -377,3 +394,140 @@ test("a transferred ready child without a detached group is signalled individual
   assert.equal(result.code, 0);
   assert.deepEqual(result.terminationSignals, ["SIGTERM"]);
 });
+
+const withBase = async (body: (base: string) => Promise<void>) => {
+  const base = await mkdtemp(join(tmpdir(), "cab-run-root-test-"));
+  try {
+    await body(base);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+};
+
+const childEnv = (root: string) => ({ ...process.env, TMPDIR: root });
+
+test("the per-run temp root is removed after a passing, failing or throwing run", () =>
+  withBase(async (base) => {
+    for (const [code, exit] of [
+      ["", 0],
+      ["process.exitCode=3", 3],
+    ] as const) {
+      let root = "";
+      const result = await runner.withRunTempRoot(base, async (dir) => {
+        root = dir;
+        return runner.runTestProcess(
+          [
+            "-e",
+            `require("node:fs").writeFileSync(process.env.TMPDIR+"/probe","x");${code}`,
+          ],
+          { env: childEnv(dir) },
+        );
+      });
+      assert.equal(result.code, exit);
+      assert.match(root, /\/cab-run-[A-Za-z0-9]{6}$/);
+      assert.ok(basename(root).length <= 14);
+      assert.deepEqual(await readdir(base), []);
+    }
+    await assert.rejects(
+      runner.withRunTempRoot(base, async () => {
+        throw new Error("body failed");
+      }),
+      /body failed/,
+    );
+    assert.deepEqual(await readdir(base), []);
+  }));
+
+for (const [name, signal, limits] of [
+  ["a deadline", false, "deadlineMs:200"],
+  ["a forwarded SIGTERM", true, "forwardSignals:true,deadlineMs:5000"],
+] as const)
+  test(`the per-run temp root is removed after ${name}`, () =>
+    withBase(async (base) => {
+      const code = `const {withRunTempRoot,runTestProcess}=await import(${JSON.stringify(pathToFileURL(resolve("scripts/run-tests.mjs")).href)}); const r=await withRunTempRoot(${JSON.stringify(base)},(dir)=>{${signal ? 'setTimeout(()=>process.kill(process.pid,"SIGTERM"),200);' : ""} return runTestProcess(["-e","setInterval(()=>{},1000)"],{env:{...process.env,TMPDIR:dir},graceMs:1000,forceWaitMs:1000,${limits}});}); console.log(JSON.stringify({timedOut:r.timedOut,interrupted:r.interrupted}));`;
+      const child = spawn(process.execPath, [
+        "--input-type=module",
+        "-e",
+        code,
+      ]);
+      let out = "";
+      child.stdout.on("data", (chunk) => (out += chunk));
+      const [status] = await once(child, "close");
+      assert.equal(status, 0);
+      const seen = JSON.parse(out) as {
+        timedOut: boolean;
+        interrupted: string | null;
+      };
+      assert.equal(
+        signal ? seen.interrupted === "SIGTERM" : seen.timedOut,
+        true,
+      );
+      assert.deepEqual(await readdir(base), []);
+    }));
+
+test("the stale-root sweep removes only provably dead runs it owns", () =>
+  withBase(async (base) => {
+    const dead = spawn(process.execPath, ["-e", ""]);
+    await once(dead, "close");
+    const stale = async (name: string, pid?: string) => {
+      await mkdir(join(base, name));
+      if (pid !== undefined)
+        await writeFile(join(base, name, "owner.pid"), pid);
+    };
+    await stale("cab-run-aaaaaa", String(dead.pid));
+    await stale("cab-run-bbbbbb", String(process.pid));
+    await stale("cab-run-cccccc");
+    await stale("cab-run-dddddd", "not-a-pid");
+    await stale("other-dir", String(dead.pid));
+    const victim = join(base, "victim");
+    await mkdir(victim);
+    await writeFile(join(victim, "file"), "keep");
+    await writeFile(join(victim, "owner.pid"), String(dead.pid));
+    await symlink(victim, join(base, "cab-run-eeeeee"));
+    await mkdir(join(base, "cab-run-gggggg"));
+    await symlink(
+      join(victim, "owner.pid"),
+      join(base, "cab-run-gggggg", "owner.pid"),
+    );
+    await writeFile(join(base, "cab-run-ffffff"), String(dead.pid));
+
+    runner.sweepStaleRunTempRoots(base, () => true);
+    assert.ok((await readdir(base)).includes("cab-run-aaaaaa"));
+
+    runner.sweepStaleRunTempRoots(base);
+    assert.deepEqual((await readdir(base)).sort(), [
+      "cab-run-bbbbbb",
+      "cab-run-cccccc",
+      "cab-run-dddddd",
+      "cab-run-eeeeee",
+      "cab-run-ffffff",
+      "cab-run-gggggg",
+      "other-dir",
+      "victim",
+    ]);
+    assert.equal(await readFile(join(victim, "file"), "utf8"), "keep");
+    assert.ok((await stat(join(base, "other-dir"))).isDirectory());
+  }));
+
+test(
+  "a partly removed run root keeps its pid file so a later sweep retries it",
+  { skip: process.getuid?.() === 0 },
+  () =>
+    withBase(async (base) => {
+      const dead = spawn(process.execPath, ["-e", ""]);
+      await once(dead, "close");
+      const root = join(base, "cab-run-hhhhhh");
+      const locked = join(root, "locked");
+      await mkdir(locked, { recursive: true });
+      await writeFile(join(locked, "file"), "x");
+      await writeFile(join(root, "owner.pid"), String(dead.pid));
+      await chmod(locked, 0o500);
+      try {
+        runner.sweepStaleRunTempRoots(base);
+        assert.ok((await readdir(root)).includes("owner.pid"));
+      } finally {
+        await chmod(locked, 0o700);
+      }
+      runner.sweepStaleRunTempRoots(base);
+      assert.deepEqual(await readdir(base), []);
+    }),
+);
