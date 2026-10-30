@@ -684,4 +684,16 @@ test("Profile configuration sets two skills of a plugin, rejects a missing plugi
       `${plugin}: review, plan`,
     )
     .then((same) => assert.equal(same, true));
+  // Back to Codex: the skills stay visible, the save is refused, and clearing them saves.
+  await page.getByLabel("Runtime", { exact: true }).selectOption("codex");
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page
+    .getByText("Only Claude profiles load skill plugins: clear this field.")
+    .waitFor();
+  assert.equal(d.profileRuntime(builder).harness, "claude");
+  await page.getByLabel("Skill plugins", { exact: true }).fill("");
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByText("Current revision 3.").waitFor();
+  assert.deepEqual(d.profileSkills(builder), { plugins: [] });
+  assert.equal(d.profileRuntime(builder).harness, "codex");
 });

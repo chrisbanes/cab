@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -2629,6 +2630,18 @@ test("profile skills reject missing plugins, unknown skills and a harness that l
       }),
     ),
     ["skills.plugins.0.skills.1"],
+  );
+  // A tree that could never be digested is refused when saved, not when its work waits.
+  const linked = writeSkillPlugin(join(root, "linked"), ["probe-skill"]);
+  symlinkSync(root, join(linked, "loop"));
+  assert.deepEqual(
+    await fieldsOf(
+      configure({
+        runtime: claude,
+        skills: { plugins: [{ path: linked, skills: ["probe-skill"] }] },
+      }),
+    ),
+    ["skills.plugins.0.path"],
   );
   // Codex loads no profile skills yet, so it cannot enable any.
   assert.deepEqual(

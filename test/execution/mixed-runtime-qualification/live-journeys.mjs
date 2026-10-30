@@ -874,11 +874,11 @@ async function crashJourney(withSubagent) {
   if (withSubagent) {
     // Scope: holds visible, the CLI and its tool processes ended by recorded identity, and
     // the resolution releasing the holds. A resumed turn after a mid-subagent crash did not
-    // complete for haiku or sonnet in earlier attempts, so it is recorded as untested.
+    // complete for haiku or sonnet in earlier attempts, so it is recorded as not demonstrated.
     const after = await snapshot(second, ids.taskId);
     const released = after.recovery.find((r) => r.workId === record.workId);
     evidence.observations.holdsAfterResolve = released?.holds ?? null;
-    evidence.observations.resumedTurnAfterSubagentCrash = "untested";
+    evidence.observations.resumedTurnAfterSubagentCrash = "not-demonstrated";
     const h = released?.holds;
     if (!h || h.writer || h.capacity || h.uncertainty)
       throw new Error("holds were not released by the recovery resolution");

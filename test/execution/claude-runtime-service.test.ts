@@ -815,7 +815,9 @@ test("a Claude turn loads its profile's skill plugins and records their digests 
     t.after(() => releaseTemporaryBase(base));
   }
   const options = run.sessions[0]?.options;
-  assert.deepEqual(options?.plugins, [{ type: "local", path: plugin }]);
+  assert.deepEqual(options?.plugins, [
+    { type: "local", path: plugin, skipMcpDiscovery: true },
+  ]);
   assert.deepEqual(options?.skills, ["review", "plan"]);
   const digest = await digestPlugin(plugin);
   assert.deepEqual(

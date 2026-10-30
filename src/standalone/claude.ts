@@ -138,6 +138,8 @@ const initSchema = z.object({
 const assistantSchema = z.object({
   type: z.literal("assistant"),
   uuid: z.string().min(1).max(128),
+  /** Set on a subagent's frames; its prose is not the lead's conversation. */
+  parent_tool_use_id: z.string().nullish(),
   message: z.object({
     content: z.array(
       z.union([
@@ -370,7 +372,10 @@ export const claudePolicyLimits: readonly string[] = [
   "The subprocess environment scrub is qualified for sandboxed Bash only (#827): Bash saw neither the token variable nor its value, and could not read its parent's environment with ps. Other ways to read a parent process's environment are untested.",
   "After a service crash, a running Claude CLI process can outlive the service (#827); verify it has exited before recovering the turn.",
   "Only the Claude Code version the pinned SDK declares was qualified. The installed claude is not version-checked, and another version may enforce the sandbox, tool and permission controls differently.",
-  "Skill plugins contribute skills, instructions and scripts only: a plugin's hooks and MCP servers never run, and skills are instructions to the agent, not cab policy. Subagents share the turn's tool policy and sandbox, and the same recovery boundary.",
+  "Skill plugins contribute skills, instructions and scripts only: a plugin's hooks and MCP servers never run, and skills are instructions to the agent, not cab policy. Subagents share the turn's tool policy and sandbox and the same recovery boundary.",
+  "cab refuses a subagent's isolation, model, effort and mode overrides.",
+  "Plugin hooks are switched off through managed settings, which an organisation's managed-settings tier can replace; qualified for a personal login only.",
+  "Background subagents are untested against Stop and resume; a turn resumed after a crash during a subagent did not complete in two attempts (undiagnosed).",
   "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",
   "The sandboxed agent can write the per-task temporary directory; cab checks only its top-level entries before each turn.",
   "The per-task temporary directory has a predictable name under /tmp; another local user who creates it first makes Claude work wait, but never shares it.",
@@ -963,6 +968,7 @@ export class ClaudeRuntime implements Runtime {
             plugins: plugins.map((p) => ({
               type: "local" as const,
               path: p.path,
+              skipMcpDiscovery: true,
             })),
             skills: enabledSkills,
           }
@@ -1261,6 +1267,7 @@ export class ClaudeRuntime implements Runtime {
     if (head.data.type === "assistant") {
       const assistant = assistantSchema.safeParse(message);
       if (!assistant.success) return false;
+      if (assistant.data.parent_tool_use_id) return true;
       assistant.data.message.content.forEach((block, index) => {
         if (!("text" in block) || typeof block.text !== "string") return;
         const item = {
@@ -1327,6 +1334,18 @@ export class ClaudeRuntime implements Runtime {
       !name.startsWith(mcpToolPrefix)
     )
       return refuse(`${name} is outside cab's tool policy`);
+    // A subagent runs in the turn's workspace, model and sandbox: no worktree or remote
+    // isolation, model, effort or permission-mode override.
+    if (
+      name === agentTool &&
+      (!fields.success ||
+        ["isolation", "model", "effort", "mode"].some(
+          (key) => fields.data[key] !== undefined,
+        ))
+    )
+      return refuse(
+        "A subagent runs in the task's workspace with the turn's settings",
+      );
     if (name === "Write" || name === "Edit") {
       const path = fields.success ? fields.data.file_path : undefined;
       if (

@@ -321,6 +321,27 @@ test("profile summary is optional, edited in place and added to older databases"
   }
 });
 
+test("profiles and revisions written before skill plugins enable none", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: profile,
+      name: "Old",
+      instructions: "Build",
+      capabilities: "code",
+    });
+    for (const table of ["profiles", "profile_revisions"])
+      f.db.exec(`ALTER TABLE ${table} DROP COLUMN skills`);
+    f.reopen();
+    assert.deepEqual(f.domain.profileSkills(profile), { plugins: [] });
+    assert.deepEqual(f.domain.profileSkills(profile, 1), { plugins: [] });
+  } finally {
+    f.close();
+  }
+});
+
 test("legacy profile receipts replay unchanged after summary migration", () => {
   const f = fixture();
   try {

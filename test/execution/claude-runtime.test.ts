@@ -527,6 +527,42 @@ test("interrupting a Claude turn aborts its query and ends it as interrupted", a
   }
 });
 
+test("a subagent's prose is not the lead's conversation", async () => {
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        yield {
+          type: "assistant",
+          uuid: "a-sub",
+          parent_tool_use_id: "toolu_agent",
+          message: { content: [{ type: "text", text: "from the subagent" }] },
+        };
+        yield {
+          type: "assistant",
+          uuid: "a-lead",
+          parent_tool_use_id: null,
+          message: { content: [{ type: "text", text: "from the lead" }] },
+        };
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    const texts = f.emitted.flatMap((event) => {
+      const e = event as { kind: string; text?: string };
+      return e.kind === "completed" ? [e.text] : [];
+    });
+    assert.deepEqual(texts, ["from the lead"]);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("losing the Claude process mid-tool reports an anomaly and never a terminal", async () => {
   const f = fixture({
     scripts: [
@@ -1346,6 +1382,8 @@ test("a profile's skill plugins load as local plugins with only their enabled sk
           ["Write", { file_path: join(workspace, "ok.txt"), content: "x" }],
           ["Task", { description: "d" }],
           ["WebFetch", { url: "https://example.com" }],
+          ["Agent", { description: "d", prompt: "p", isolation: "worktree" }],
+          ["Agent", { description: "d", prompt: "p", model: "opus" }],
         ];
         for (const [index, [name, input]] of calls.entries()) {
           decisions.push(await session.hook(name, input, `main_${index}`));
@@ -1368,7 +1406,9 @@ test("a profile's skill plugins load as local plugins with only their enabled sk
     });
     assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
     const options = f.sessions[0]?.options;
-    assert.deepEqual(options?.plugins, [{ type: "local", path: plugin.dir }]);
+    assert.deepEqual(options?.plugins, [
+      { type: "local", path: plugin.dir, skipMcpDiscovery: true },
+    ]);
     assert.deepEqual(options?.skills, ["probe-skill"]);
     assert.deepEqual(options?.tools, [
       "Read",
@@ -1405,6 +1445,8 @@ test("a profile's skill plugins load as local plugins with only their enabled sk
       "deny",
       "deny",
       undefined,
+      "deny",
+      "deny",
       "deny",
       "deny",
     ];

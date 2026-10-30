@@ -1,8 +1,8 @@
 {
   "claude-skill": {
     "facet": "claude-skill",
-    "attempt": 1,
-    "candidate": "08e5be9ba0ef0ea2655607d0df7c8fedf8942064",
+    "attempt": 2,
+    "candidate": "3ea4a503b32741ff2e9bda7b0b718c09d08383f8",
     "node": "v24.22.1",
     "sdk": "0.3.310",
     "claudeCode": "2.1.310",
@@ -11,7 +11,7 @@
       "version": "codex-cli 0.165.0-alpha.1.2"
     },
     "model": {
-      "claude": "haiku",
+      "claude": "sonnet",
       "reasoningEffort": "low"
     },
     "stage": "run",
@@ -27,7 +27,7 @@
         {
           "name": "cabprobe",
           "skills": ["probe-skill"],
-          "digest": "4adb4ba138d3703c83c5d8a5442211e2bee30b63daa6689d36d87662a3262be6"
+          "digest": "43a33e8bc3c3918b4029eeb5a8b124e33d611f19ae9c2b777bfa52db85ff7321"
         }
       ],
       "digestMatchesDirectory": true
@@ -69,9 +69,9 @@
     },
     "budget": {
       "attempt": {
-        "number": 1,
-        "model": "haiku",
-        "startedAt": 1793368261350,
+        "number": 2,
+        "model": "sonnet",
+        "startedAt": 1793370782435,
         "turns": {
           "claude": 1,
           "codex": 0
@@ -80,7 +80,7 @@
         "failureKind": null
       },
       "totals": {
-        "claude": 1,
+        "claude": 5,
         "codex": 0
       }
     }
@@ -88,7 +88,7 @@
   "claude-subagent-stop": {
     "facet": "claude-subagent-stop",
     "attempt": 1,
-    "candidate": "08e5be9ba0ef0ea2655607d0df7c8fedf8942064",
+    "candidate": "3ea4a503b32741ff2e9bda7b0b718c09d08383f8",
     "node": "v24.22.1",
     "sdk": "0.3.310",
     "claudeCode": "2.1.310",
@@ -169,7 +169,7 @@
       "attempt": {
         "number": 1,
         "model": "haiku",
-        "startedAt": 1793368418965,
+        "startedAt": 1793370661953,
         "turns": {
           "claude": 1,
           "codex": 0
@@ -178,15 +178,15 @@
         "failureKind": null
       },
       "totals": {
-        "claude": 1,
+        "claude": 2,
         "codex": 0
       }
     }
   },
   "claude-subagent-crash": {
     "facet": "claude-subagent-crash",
-    "attempt": 2,
-    "candidate": "08e5be9ba0ef0ea2655607d0df7c8fedf8942064",
+    "attempt": 1,
+    "candidate": "3ea4a503b32741ff2e9bda7b0b718c09d08383f8",
     "node": "v24.22.1",
     "sdk": "0.3.310",
     "claudeCode": "2.1.310",
@@ -234,7 +234,7 @@
         "uncertainty": false,
         "stop": false
       },
-      "resumedTurnAfterSubagentCrash": "untested"
+      "resumedTurnAfterSubagentCrash": "not-demonstrated"
     },
     "startTurn": {
       "turns": 0,
@@ -292,7 +292,7 @@
         "event": "terminate",
         "label": "service-child",
         "signal": "SIGKILL",
-        "pid": "66506"
+        "pid": "7259"
       },
       {
         "event": "terminate",
@@ -304,7 +304,7 @@
         "event": "terminate",
         "label": "claude-cli (killed service)",
         "signal": "SIGTERM",
-        "pid": "67077"
+        "pid": "16288"
       },
       {
         "event": "terminate",
@@ -328,9 +328,9 @@
     },
     "budget": {
       "attempt": {
-        "number": 2,
+        "number": 1,
         "model": "haiku",
-        "startedAt": 1793369195658,
+        "startedAt": 1793370704579,
         "turns": {
           "claude": 2,
           "codex": 0
