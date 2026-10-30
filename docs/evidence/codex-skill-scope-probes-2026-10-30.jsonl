@@ -1,0 +1,17 @@
+{"event": "versions", "codex": "codex-cli 0.164.0", "model": "gpt-6-luna", "effort": "low"}
+{"event": "account", "present": true}
+{"facet": "S1", "disposition": "demonstrated", "userSkills": ["other-skill", "probe-skill"], "bundledSkills": ["imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer"], "pluginsFeature": "disabled"}
+{"event": "home-discovery", "skillsFromRealHome": 0}
+{"facet": "S5", "after": "thread A", "linkIntact": true, "inode": 93589025}
+{"facet": "S2", "disposition": "demonstrated", "threadASkills": ["probe-skill"], "threadAProbeRan": true, "threadAOtherRan": false, "threadBSkills": ["imagegen", "openai-docs", "other-skill", "probe-skill", "skill-creator", "skill-installer"], "threadBOtherRan": true}
+{"facet": "S3", "disposition": "demonstrated", "resumedWithConfigSkills": ["probe-skill"], "resumedWithConfigOtherRan": false}
+{"facet": "S5", "after": "resume", "linkIntact": true, "inode": 93589025}
+{"facet": "S4", "disposition": "demonstrated", "shellHomeIsRealHome": true, "skillsFromRealHome": 0, "shellOutput": "HOME=<real-home>", "itemKinds": ["agentMessage", "commandExecution", "userMessage"], "reply": "```text\nHOME=<real-home>\n```"}
+{"facet": "S5", "after": "all turns", "linkIntact": true, "inode": 93589025}
+{"facet": "S5", "disposition": "demonstrated", "inodeUnchanged": true}
+{"event": "server-exit", "pid": 52916, "exit": -9, "gone": true}
+{"facet": "S6", "disposition": "untested", "subagentToolItems": false, "itemKinds": ["agentMessage", "userMessage"], "outsideWriteLanded": false, "interrupted": false, "processesBelowServerDuringTurn": 0, "survivorsAfterInterrupt": 0, "note": "recorded only; cab keeps Codex subagents disabled"}
+{"event": "server-exit", "pid": 53714, "exit": -9, "gone": true}
+{"facet": "S5", "after": "subagent probe", "linkIntact": true}
+{"event": "result", "outcome": "passed"}
+{"event": "cleanup", "directory_removed": true}
