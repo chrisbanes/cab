@@ -605,7 +605,7 @@ settlement, result-destination reconciliation and messages to delegated assignme
 are task-view controls, and the CLI offers the same commands. Controls the app does not offer remain on retained
 server-rendered routes: local task edits and source review decisions on `/task/:id`;
 delivery policy on `/project/:id`; and Stop/Resume and recovery on
-`/runtime/task/:id`. They are reached from a task's History tab, Project settings'
+`/runtime/task/:id`. They are reached from a task's inspector, Project settings'
 Open advanced editor and a task's Execution link. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
@@ -1128,19 +1128,32 @@ remote-write reconciliation and permission rules.
 
 ### Task detail
 
-The initial task view presents the outcome, current situation and next actor,
-unresolved decisions, and relevant results or evidence before detailed history.
-Keep delivery observations, artifacts, dependencies, assignments and captured
-conversations accessible within task detail. Understanding current work
-must not require reading raw runtime output.
+The task Overview is the task's conversation
+([ADR-1022](adr/1022-task-conversation-view.md)). An attention card pinned at the top
+lists the unresolved decisions waiting on the operator; beneath it the lead's
+conversation runs oldest to newest, and the reply composer is docked at the bottom.
+The outcome, current situation and next actor stay in the task header, and the brief,
+evidence, delivery observations, artifacts, dependencies and assignments stay in the
+inspector. Understanding current work must not require reading raw runtime output.
+
+The conversation interleaves captured assistant text (sanitized Markdown with a
+raw-text view), operator messages and follow-ups, questions and answers, approvals,
+results, delegations and curated tool activity, from one paged service timeline read.
+A question or approval is answerable from the attention card or from its place in the
+conversation, with one shared request state. Tool activity shows each command's
+summary and exit status, with bounded redacted output on request; consecutive calls
+are grouped with a failure count, file changes open the Changes tab, and cab's own
+coordination calls appear as the records they produce.
 
 Preserve the task, assignment and conversation hierarchy: the task retains the
 outcome and accountable lead, assignments identify delegated responsibility, and
-conversations supply supporting history. Use recorded facts and attributed,
-source-faithful excerpts for the overview. Do not invent narrative summaries,
-recommendations or ownership when the evidence is absent. Unavailable or stale
-evidence remains explicit. This presentation adds no terminal, embedded browser
-or complete-transcript capability.
+each delegated assignment appears where the lead delegated it as a collapsible
+sub-conversation with its assignment, profile and harness. Do not invent narrative
+summaries, recommendations or ownership when the evidence is absent. Unavailable or
+stale evidence remains explicit: omitted items, expired tool activity and activity a
+harness does not capture are inline gaps, and an absent tool row is not evidence
+that no tool ran. This presentation adds no terminal, embedded browser or
+complete-transcript capability.
 
 Every entry point that opens a task (Overview, List/Board, Inbox, Search, recovery
 links and assignment links) reaches the same task workspace at `/app/tasks/:id`.

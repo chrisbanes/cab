@@ -125,6 +125,7 @@ fixed application dimensions.
 | Compact progress | Task progress across Overview, List, Board and Inbox entry points |
 | Review components | Criterion rows and local-feedback context |
 | Inspection components | Observation strip, selectable code line, editor row with separate gutter, marker and source |
+| Conversation components | Pinned attention card (phone: one-line banner), agent text with raw-text view, tinted operator message, request and result cards, grouped tool row with per-command output, file-change row, delegation sub-conversation, gap marker, docked composer, Jump to latest |
 
 Rules:
 
@@ -152,10 +153,12 @@ Make the next decision obvious, and keep its evidence close:
   the existing board mapping. A running agent alone is insufficient evidence of a
   repair. Show unknown responsibility honestly. Keep readiness, completed work,
   cancellation and provider closure without delivery distinguishable.
-- **Task detail:** prioritise outcome, current situation/next actor, unresolved
-  decisions and evidence. Disclose assignments and captured history underneath,
-  retaining the task's accountable lead and assignment/conversation identities.
-  Use recorded facts and attributed excerpts; add no invented summary capability.
+- **Task detail:** the Overview is the task's conversation. Pin what is waiting on
+  the operator above it, keep outcome and next actor in the header, and put the
+  brief, evidence and assignments in the inspector. Delegations read as collapsible
+  sub-conversations in place, retaining the task's accountable lead and
+  assignment/conversation identities. Use recorded facts and attributed excerpts;
+  add no invented summary capability.
 - **Composer:** keep project, title and outcome prominent; disclose optional
   context, references, assignee and dependencies with a summary of supplied values.
   Preserve validation, drafts and truthful creation/admission feedback.
