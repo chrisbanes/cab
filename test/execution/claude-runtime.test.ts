@@ -1113,6 +1113,15 @@ test("a Bash tool use is recorded as a command item with exit status and bounded
         returnCodeInterpretation: "No matches found",
       },
     });
+    await session.hook("Bash", { command }, "toolu_bg");
+    await session.postHook("Bash", { command }, "toolu_bg", {
+      response: {
+        stdout: "",
+        stderr: "",
+        interrupted: false,
+        backgroundTaskId: "bg1",
+      },
+    });
     await session.hook("Bash", { command }, "toolu_bad");
     await session.postHook("Bash", { command }, "toolu_bad", {
       response: "not an object",
@@ -1165,6 +1174,7 @@ test("a Bash tool use is recorded as a command item with exit status and bounded
     [completed("toolu_interp").status, completed("toolu_interp").exitCode],
     ["completed", null],
   );
+  assert.equal(completed("toolu_bg").exitCode, null);
   assert.equal(completed("toolu_bad").exitCode, null);
   assert.equal("aggregatedOutput" in completed("toolu_bad"), false);
 });

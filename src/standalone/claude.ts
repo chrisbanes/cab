@@ -184,6 +184,9 @@ const bashResponseSchema = z.object({
   stderr: z.string(),
   interrupted: z.boolean(),
   returnCodeInterpretation: z.string().optional(),
+  // A backgrounded or auto-backgrounded command has not exited yet.
+  backgroundTaskId: z.string().optional(),
+  timedOutAfterMs: z.number().optional(),
 });
 
 /** Maps a validated result to failure evidence; null means a completed turn. */
@@ -1320,7 +1323,7 @@ export class ClaudeRuntime implements Runtime {
     if (!input.success) return {};
     const call = input.data;
     if (call.hook_event_name === "PostToolUseFailure") {
-      const code = /^Exit code (\d{1,3})\n?/.exec(call.error);
+      const code = /^Exit code (\d+)(?:\n|$)/.exec(call.error);
       this.emitTool(turn, "completed", call, {
         status: "failed",
         exitCode: call.is_interrupt || !code ? null : Number(code[1]),
@@ -1334,7 +1337,9 @@ export class ClaudeRuntime implements Runtime {
       exitCode:
         bash.success &&
         !bash.data.interrupted &&
-        bash.data.returnCodeInterpretation === undefined
+        bash.data.returnCodeInterpretation === undefined &&
+        bash.data.backgroundTaskId === undefined &&
+        bash.data.timedOutAfterMs === undefined
           ? 0
           : null,
       ...(bash.success
