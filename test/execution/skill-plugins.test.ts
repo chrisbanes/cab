@@ -30,6 +30,9 @@ test("a plugin digest is stable, changes with any file, and ignores timestamps",
     const first = await digestPlugin(plugin);
     assert.match(first, /^[a-f0-9]{64}$/);
     assert.equal(await digestPlugin(plugin), first);
+    // The same tree through an aliased path has the same digest.
+    assert.equal(await digestPlugin(`${plugin}/.`), first);
+    assert.equal(await digestPlugin(`${plugin}//`), first);
     const skill = join(plugin, "skills", "a", "SKILL.md");
     writeFileSync(skill, "changed\n");
     const changed = await digestPlugin(plugin);

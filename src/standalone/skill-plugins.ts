@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { z } from "zod";
 import type { ProfileSkills } from "../core/execution-runtime.js";
 
@@ -127,8 +127,9 @@ export async function digestPlugin(path: string): Promise<string> {
   files.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const hash = createHash("sha256");
   for (const file of files) {
-    const relative = file.slice(path.length + 1);
-    hash.update(`${Buffer.byteLength(relative)}:${relative}\0`);
+    // `relative`, not a slice: a configured path with `.` or `//` is normalised by `join`.
+    const name = relative(path, file);
+    hash.update(`${Buffer.byteLength(name)}:${name}\0`);
     const size = sizes.get(file) ?? 0;
     hash.update(`${size}\0`);
     await readRegular(file, size, maxPluginBytes, (chunk) =>
