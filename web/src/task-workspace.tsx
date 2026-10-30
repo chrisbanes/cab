@@ -1610,7 +1610,14 @@ export function TaskWorkspace({
         ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
       ].find((e) => e.dataset.recordId === `delegation:${id}`);
       if (place) showSection(place);
-      else reveal("conversation");
+      else if (id === data.leadAssignmentId) reveal("conversation");
+      else {
+        // Its entries are older than the loaded window: its retained History holds them.
+        state.chronological = false;
+        state.expanded.add(id);
+        changed();
+        requestAnimationFrame(() => reveal("history"));
+      }
     });
   };
   async function refreshSource() {

@@ -370,6 +370,19 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     fullPage: false,
   });
 
+  // A delegated assignment with no entry in the loaded conversation opens its History.
+  await openTaskTab(page, "Overview");
+  await openOverviewCard(page, "assignments");
+  await page
+    .locator(".assignment-row", { hasText: "Independent focus review" })
+    .getByRole("button")
+    .first()
+    .click();
+  await page.locator("#history details[open]").first().waitFor();
+  assert.equal(await selectedTab(page), "History");
+  await page.locator("#history details[open] > summary").first().click();
+  await openTaskTab(page, "Overview");
+
   // Expanded history and an unsent reply survive a refresh.
   await openTaskTab(page, "History");
   await page.locator("#history details > summary").first().click();

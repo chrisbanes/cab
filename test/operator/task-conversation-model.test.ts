@@ -16,6 +16,8 @@ import {
   conversationTree,
   gapCopy,
   mergeTimeline,
+  pendingBelow,
+  prependTimeline,
   type ConversationItem,
   type TimelineEntry,
 } from "../../web/src/task-conversation-model.js";
@@ -158,6 +160,28 @@ test("an entry the newest page covers but no longer returns is dropped, older on
   // `pruned` sits inside the page's range but is gone; `below` lies under the page.
   assert.deepEqual(ids(merged.window.entries), ids([below, first, kept]));
   assert.equal(merged.changed, true);
+});
+
+test("an unfinished entry behind the newest page is found, and an older page completes it in place", () => {
+  const streaming = entry(
+    { kind: "assistant", workId: "w", lifecycle: "streaming", text: null },
+    { rank: timelineRank.history },
+  );
+  const done = {
+    ...streaming,
+    lifecycle: "completed",
+    text: "finished",
+  } as TimelineEntry;
+  const newest = text("newest");
+  const held = window([streaming, newest]);
+  assert.equal(pendingBelow(held, newest), true);
+  assert.equal(pendingBelow(window([done, newest]), newest), false);
+  const joined = prependTimeline(held, page([done]));
+  assert.ok(joined && joined !== held);
+  assert.equal(joined.entries[0], done);
+  assert.equal(joined.entries.length, 2);
+  // The same page again changes nothing.
+  assert.equal(prependTimeline(joined, page([done])), joined);
 });
 
 test("entries with equal whole-second time keep the service's tie order", () => {

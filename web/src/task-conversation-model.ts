@@ -97,20 +97,51 @@ export function mergeTimeline(
   };
 }
 
-/** Older entries joined above the window, from a page read with `before`. */
+/**
+ * Older entries joined above the window, from a page read with `before`. An entry already held
+ * takes the page's content, and the window keeps its identity when nothing differs.
+ */
 export function prependTimeline(
   window: TimelineWindow,
   page: Pick<Page, "visibilityRevision" | "entries">,
 ): TimelineWindow | null {
   if (page.visibilityRevision !== window.visibilityRevision) return null;
-  const held = new Set(window.entries.map((e) => e.entryId));
-  return {
-    visibilityRevision: window.visibilityRevision,
-    entries: [
-      ...page.entries.filter((e) => !held.has(e.entryId)),
-      ...window.entries,
-    ].sort(byKey),
-  };
+  const held = new Map(window.entries.map((e) => [e.entryId, e]));
+  let changed = false;
+  for (const entry of page.entries) {
+    const before = held.get(entry.entryId);
+    if (!before || JSON.stringify(before) !== JSON.stringify(entry)) {
+      changed = true;
+      held.set(entry.entryId, entry);
+    }
+  }
+  return changed
+    ? {
+        visibilityRevision: window.visibilityRevision,
+        entries: [...held.values()].sort(byKey),
+      }
+    : window;
+}
+
+/** Content that can still change: streaming text, or a tool the harness has not finished. */
+const isPending = (entry: TimelineEntry) =>
+  entry.kind === "assistant"
+    ? entry.lifecycle !== "completed"
+    : entry.kind === "tool" &&
+      /progress|running|started/i.test(entry.status ?? "");
+
+/**
+ * Whether an unfinished entry sits older than `floor`, beyond what a newest-page read returns,
+ * so its completion would never reach the window.
+ */
+export function pendingBelow(
+  window: TimelineWindow,
+  floor: TimelineEntry,
+): boolean {
+  const limit = keyOf(floor);
+  return window.entries.some(
+    (e) => isPending(e) && compareTimelineKeys(keyOf(e), limit) < 0,
+  );
 }
 
 export type ConversationItem =

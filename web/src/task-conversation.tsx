@@ -22,6 +22,7 @@ import {
   conversationTree,
   gapCopy,
   mergeTimeline,
+  pendingBelow,
   prependTimeline,
   type ConversationCache,
   type ConversationItem,
@@ -48,6 +49,8 @@ export interface TaskTimeline {
 }
 
 const pageLimit = 50;
+/** Older pages read to finish an unfinished entry that fell behind the newest page. */
+const maxCatchUpPages = 5;
 
 /**
  * Reads the newest page whenever the task read changes (`observedAt`) and merges it into the
@@ -104,33 +107,48 @@ export function useTaskTimeline({
       loadingEarlier: false,
       error: error instanceof Error ? error.message : "Unavailable",
     });
-  // The newest page, merged into what is held.
-  const refresh = (signal?: AbortSignal) =>
-    read("", signal).then(
-      ({ data: page }) => {
+  // The newest page, merged into what is held. An unfinished entry older than that page would
+  // never see its completion, so the pages down to it are read too (bounded).
+  const refresh = async (signal?: AbortSignal) => {
+    try {
+      const { data: page } = await read("", signal);
+      if (signal?.aborted) return;
+      const current = held.current.cache;
+      const merged = mergeTimeline(current?.window ?? null, page);
+      let next = merged.window,
+        floor = page.entries[0],
+        cursor = page.olderCursor;
+      for (let n = 0; n < maxCatchUpPages && floor && cursor; n++) {
+        if (!pendingBelow(next, floor)) break;
+        const { data: older } = await read(`&before=${cursor}`, signal);
         if (signal?.aborted) return;
-        const current = held.current.cache;
-        const merged = mergeTimeline(current?.window ?? null, page);
-        if (!merged.changed && held.current.error === null) return;
-        apply.current(!current);
-        commit({
-          error: null,
-          appended:
-            current && merged.changed
-              ? held.current.appended + 1
-              : held.current.appended,
-          cache: {
-            window: merged.window,
-            cursor:
-              !current || merged.reset ? page.olderCursor : current.cursor,
-          },
-        });
-      },
+        const joined = prependTimeline(next, older);
+        if (!joined) break;
+        next = joined;
+        floor = older.entries[0];
+        cursor = older.olderCursor;
+      }
+      const changed = merged.changed || next !== merged.window;
+      if (!changed && held.current.error === null) return;
+      // The cache may have moved while the older pages were read.
+      if (held.current.cache !== current) return void refresh(signal);
+      apply.current(!current);
+      commit({
+        error: null,
+        appended:
+          current && changed
+            ? held.current.appended + 1
+            : held.current.appended,
+        cache: {
+          window: next,
+          cursor: !current || merged.reset ? page.olderCursor : current.cursor,
+        },
+      });
+    } catch (error) {
       // A read that was superseded or abandoned fails quietly; it is not a stale conversation.
-      (error) => {
-        if (!signal?.aborted) fail(error);
-      },
-    );
+      if (!signal?.aborted) fail(error);
+    }
+  };
   // Reads that are not tied to the task read (Load earlier, Retry) end with the task's view.
   const life = useRef(new AbortController());
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new `read` is a new task or client, which starts a new lifetime.
