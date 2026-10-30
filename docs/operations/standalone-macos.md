@@ -226,10 +226,11 @@ release. It then runs these stages:
    credential or Claude does not block it. A configured GitLab credential that
    fails, or a `glab` login shadowed by `GITLAB_TOKEN`, does block it. The identity check confirms the same installation.
 
-On success it prints the version, the startup snapshot (null when this start
-had no pending migrations, as when it reloads the release that last started or the new
-release applies none); a retry that reuses the snapshot a failed attempt took also reports null, as that attempt already reported it, log paths and each readiness
-status. On a failure from `stop` onward it leaves the job stopped: it boots out
+On success it prints the version, the startup snapshot, log paths and each readiness
+status. The snapshot is null when this start had no pending migrations, as when it
+reloads the release that last started or the new release applies none, and when a retry
+reuses the snapshot a failed attempt took, which that attempt already reported. On a
+failure from `stop` onward it leaves the job stopped: it boots out
 the new job if it started, with its exit confirmed, and removes the LaunchAgent
 so nothing starts at login. It keeps the install record and prints
 `{"ok":false,"operation":"upgrade","stage",…,"jobStopped","snapshot","logs"}`.
