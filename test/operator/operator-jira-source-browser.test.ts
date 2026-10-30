@@ -187,3 +187,105 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     .click();
   await page.getByText("cab can’t publish tasks to Jira yet.").waitFor();
 });
+
+test("a Jira readiness rule is edited in settings, explains a Draft task, and a blocker links to Jira", async (_t, journey) => {
+  for (const [name, value] of Object.entries(variables)) {
+    const previous = process.env[name];
+    journey.cleanup(async () => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    }, `restore-${name}`);
+    process.env[name] = value;
+  }
+  const jira = fakeJira(() =>
+    json({
+      issues: [
+        jiraIssue(1, {
+          issuelinks: [
+            {
+              type: { inward: "is blocked by", outward: "blocks" },
+              inwardIssue: {
+                id: "10003",
+                key: "ABC-3",
+                fields: {
+                  status: { statusCategory: { key: "indeterminate" } },
+                },
+              },
+            },
+          ],
+        }),
+        jiraIssue(2, { status: { id: "3", name: "In Progress" } }),
+      ],
+    }),
+  );
+  const { f, web, page } = await setupJourney(journey, {
+    discovery: false,
+    projects: true,
+    jiraFetcher: jira.fetcher,
+  });
+  const domain = f.service.domain();
+  const projectId = String(domain.projects()[0]?.id);
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: site,
+    credential: {
+      siteRef: "env:FIXTURE_JIRA_BROWSER_SITE",
+      emailRef: "env:FIXTURE_JIRA_BROWSER_EMAIL",
+      tokenRef: "env:FIXTURE_JIRA_BROWSER_TOKEN",
+    },
+  });
+  domain.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: domain.jiraConfiguration(projectId)?.version ?? 1,
+    instance: site,
+    selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
+  });
+  await page.goto(
+    `${web.origin}/app/projects/${projectId}/settings?tab=github&tracker=jira`,
+  );
+  const conditions = page.getByLabel("Readiness conditions, one per line");
+  await conditions.fill("status in 1, 7");
+  const saved = commandRequest(page);
+  await page.getByRole("button", { name: "Save Jira source" }).click();
+  assert.deepEqual((await saved).postDataJSON().readiness, {
+    mode: "all",
+    conditions: [{ kind: "status", operator: "in", statusIds: ["1", "7"] }],
+  });
+  await page
+    .getByText("Saved rule: Jira status is one of 1, 7.", { exact: false })
+    .waitFor();
+  await page.reload();
+  await conditions.waitFor();
+  assert.equal(await conditions.inputValue(), "status in 1, 7");
+  // An unreadable line is refused where it is typed, and nothing is sent.
+  await conditions.fill("status has 1");
+  await page.getByRole("button", { name: "Save Jira source" }).click();
+  await page
+    .getByText("Cannot read “status has 1”.", { exact: false })
+    .first()
+    .waitFor();
+
+  await page.getByRole("button", { name: "Refresh now" }).click();
+  await page.getByText(/S-1 · last synced/).waitFor();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const draft = String(stores.issue("10002")?.taskId);
+  const blocked = String(stores.issue("10001")?.taskId);
+  await page.goto(`${web.origin}/app/tasks?state=all&ready=any`);
+  await page
+    .locator(`.task-list [data-task-id="${draft}"]`)
+    .getByText("Not Ready: needs Jira status is one of To Do, 7", {
+      exact: true,
+    })
+    .waitFor();
+  await page.goto(`${web.origin}/app/tasks/${blocked}`);
+  const link = page.getByRole("link", { name: "ABC-3" }).first();
+  assert.equal(await link.getAttribute("href"), `https://${site}/browse/ABC-3`);
+});

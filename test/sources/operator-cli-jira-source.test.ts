@@ -156,3 +156,89 @@ test("a Jira project accepts only the jira edit, and a GitHub edit key is refuse
   assert.notEqual(mixed.code, 0);
   assert.match(mixed.out + mixed.err, /carries no other key/);
 });
+
+test("a Jira edit carries its readiness rule into the prepared command and shows it in the preview", async (t) => {
+  const w = await world(t);
+  const readiness = {
+    mode: "all",
+    conditions: [
+      { kind: "status", operator: "in", statusIds: ["10001"] },
+      { kind: "label", operator: "has", name: "ready" },
+    ],
+  };
+  const out = join(w.h.dir, "jira-readiness.json");
+  const prepared = await w.ok("ro", [
+    "project",
+    "prepare-source",
+    w.projectId,
+    "--out",
+    out,
+    "--edit-file",
+    w.file(
+      "edit.json",
+      JSON.stringify({
+        jira: {
+          instance: site,
+          selections: [{ jql: "project = ABC" }],
+          readiness,
+        },
+      }),
+    ),
+  ]);
+  const document = JSON.parse(readFileSync(out, "utf8"));
+  assert.deepEqual(document.command.readiness, readiness);
+  assert.ok(
+    prepared.data.document.preview.changes.some(
+      (c: Json) => c.field === "readiness",
+    ),
+  );
+  assert.match(
+    JSON.stringify(prepared.data.document.preview),
+    /all of 2 conditions/,
+  );
+  await w.ok("rw", ["project", "apply", "--file", out]);
+  const saved = await w.ok("ro", ["project", "sources", w.projectId]);
+  assert.equal(saved.data.source.readiness.kind, "rule");
+  assert.equal(saved.data.source.readiness.conditions[0].kind, "status");
+
+  // Omitting readiness keeps the rule, and null removes it.
+  const keep = join(w.h.dir, "keep.json");
+  await w.ok("ro", [
+    "project",
+    "prepare-source",
+    w.projectId,
+    "--out",
+    keep,
+    "--edit-file",
+    w.file(
+      "keep-edit.json",
+      JSON.stringify({
+        jira: { instance: site, selections: [{ jql: "project = ABC" }] },
+      }),
+    ),
+  ]);
+  assert.equal(
+    "readiness" in JSON.parse(readFileSync(keep, "utf8")).command,
+    false,
+  );
+  const clear = join(w.h.dir, "clear.json");
+  await w.ok("ro", [
+    "project",
+    "prepare-source",
+    w.projectId,
+    "--out",
+    clear,
+    "--edit-file",
+    w.file(
+      "clear-edit.json",
+      JSON.stringify({
+        jira: {
+          instance: site,
+          selections: [{ jql: "project = ABC" }],
+          readiness: null,
+        },
+      }),
+    ),
+  ]);
+  assert.equal(JSON.parse(readFileSync(clear, "utf8")).command.readiness, null);
+});

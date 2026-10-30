@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import type { z } from "zod";
 import type { jiraReadinessSchema } from "../../src/core/github-source-contracts.js";
@@ -58,7 +59,10 @@ interface JiraState {
   truncated: Set<string>;
 }
 
-async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
+async function fixture(
+  t: { after: (fn: () => void | Promise<void>) => void },
+  options: { lead?: boolean } = {},
+) {
   for (const key of Object.keys(names) as (keyof typeof names)[]) {
     const previous = process.env[names[key]];
     t.after(() => {
@@ -108,13 +112,24 @@ async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
   await service.start();
   const api = new OperatorApi(service, [dataDir]);
   const projectId = randomUUID();
+  const leadProfileId = options.lead ? randomUUID() : null;
+  if (leadProfileId)
+    service.domain().execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId: leadProfileId,
+      name: "Lead",
+      instructions: "Lead",
+      capabilities: "work",
+    });
   service.domain().execute({
     type: "project.create",
     actor: "operator",
     key: randomUUID(),
     projectId,
     name: "Alpha",
-    leadProfileId: null,
+    leadProfileId,
   });
   const configureCredential = () =>
     api.execute({
@@ -143,6 +158,7 @@ async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
   return {
     api,
     service,
+    dataDir,
     state,
     jira,
     projectId,
@@ -584,4 +600,100 @@ test("a select-field rule is read from the scripted custom field and gates readi
       .reasons.includes("task-unready");
   assert.equal(unready("10001"), false);
   assert.equal(unready("10002"), true);
+});
+
+test("the operator sees a Jira rule with observed names, unmet conditions and Jira-keyed blockers", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  const rule = {
+    mode: "all" as const,
+    conditions: [
+      {
+        kind: "status" as const,
+        operator: "in" as const,
+        statusIds: ["1", "7"],
+      },
+    ],
+  };
+  await f.configureJira(
+    [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
+    1,
+    rule,
+  );
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, { issuelinks: [link("is blocked by", 3)] }),
+    jiraIssue(2, { status: { id: "3", name: "In Progress" } }),
+  ];
+  await f.api.refreshSources();
+  const view = (await f.api.readProjectConfiguration(f.projectId)).data.source
+    .readiness;
+  assert.deepEqual(view, {
+    kind: "rule",
+    mode: "all",
+    conditions: [{ ...rule.conditions[0], statusNames: { "1": "To Do" } }],
+  });
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskOf = (nodeId: string) => String(stores.issue(nodeId)?.taskId);
+  const unmet = (await f.api.readTask(taskOf("10002"))).data.source;
+  assert.equal(unmet?.readiness.outcome, "unmet");
+  assert.deepEqual(
+    unmet?.readiness.unmet,
+    view.kind === "rule" ? view.conditions : [],
+  );
+  const blocked = (await f.api.readTask(taskOf("10001"))).data.source;
+  assert.equal(blocked?.readiness.outcome, "matched");
+  const expected = { label: "ABC-3", url: `https://${site}/browse/ABC-3` };
+  assert.deepEqual(
+    blocked?.nativeBlockers.map((b) => ({ label: b.label, url: b.url })),
+    [expected],
+  );
+  const listed = (await f.api.readTaskListPage()).data.tasks.find(
+    (task) => task.id === taskOf("10001"),
+  );
+  assert.deepEqual(
+    listed?.source?.openBlockers.map((b) => ({ label: b.label, url: b.url })),
+    [expected],
+  );
+});
+
+test("a Jira readiness loss gives the lead one source-hold notice, and a repeat read none", async (t) => {
+  const f = await fixture(t, { lead: true });
+  await f.configureCredential();
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }], 1, {
+    mode: "all",
+    conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
+  });
+  f.state.issues["project = ABC"] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  const domain = f.service.domain();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskId = String(stores.issue("10001")?.taskId);
+  const leadId = String(domain.ensureLeadAssignment(taskId)?.id);
+  const db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
+  t.after(() => db.close());
+  db.prepare("UPDATE domain_assignments SET state = 'held' WHERE id = ?").run(
+    leadId,
+  );
+  const notices = () =>
+    Number(
+      (
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold'",
+          )
+          .get(leadId) as { count: number }
+      ).count,
+    );
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, { status: { id: "3", name: "In Progress" } }),
+  ];
+  await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.reason, "readiness-lost");
+  assert.equal(notices(), 1);
+  await f.api.refreshSources();
+  assert.equal(notices(), 1);
 });

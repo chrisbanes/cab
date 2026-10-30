@@ -1628,6 +1628,51 @@ export class GitHubSourceStore {
     );
   }
 
+  /**
+   * Jira status and single-select option names, from the last observation of the project's
+   * imported issues. A status or option no imported issue holds has no name.
+   */
+  observedNames(projectId: string): {
+    statuses: Map<string, string>;
+    options: Map<string, Map<string, string>>;
+  } {
+    const names = {
+      statuses: new Map<string, string>(),
+      options: new Map<string, Map<string, string>>(),
+    };
+    const rows = this.db
+      .prepare(`SELECT e.observedStatus, e.observedFields FROM external_items e
+        JOIN domain_tasks t ON t.id = e.taskId
+        WHERE t.projectId = ? AND (e.observedStatus IS NOT NULL OR e.observedFields IS NOT NULL)`)
+      .all(projectId) as Row[];
+    for (const row of rows) {
+      if (row.observedStatus != null) {
+        const status = z
+          .object({ id: z.string(), name: z.string() })
+          .passthrough()
+          .parse(JSON.parse(String(row.observedStatus)) as unknown);
+        names.statuses.set(status.id, status.name);
+      }
+      if (row.observedFields != null)
+        for (const f of z
+          .array(
+            z
+              .object({
+                fieldId: z.string(),
+                optionId: z.string(),
+                name: z.string(),
+              })
+              .passthrough(),
+          )
+          .parse(JSON.parse(String(row.observedFields)) as unknown)) {
+          const options = names.options.get(f.fieldId) ?? new Map();
+          options.set(f.optionId, f.name);
+          names.options.set(f.fieldId, options);
+        }
+    }
+    return names;
+  }
+
   /** Conditions or field values with their stored names; see `withProjectFieldNames`. */
   withFieldNames<T extends ProjectFieldIds>(
     items: readonly T[],

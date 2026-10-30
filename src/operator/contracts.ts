@@ -1410,6 +1410,9 @@ const source = z
           repositoryName: z.string().max(512),
           number: revision,
           state: z.enum(["open", "closed"]),
+          /** The tracker's own name for the blocker, `owner/name#n` or `KEY-n`, and its link. */
+          label: text,
+          url: sourceUrl.nullable(),
         })
         .strict(),
     ),

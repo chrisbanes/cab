@@ -134,7 +134,7 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
                   ? `Draft · ${unmet}`
                   : "Draft"
                 : blocker
-                  ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
+                  ? `Ready · waiting on ${blocker.label}`
                   : reason
                     ? `Ready · ${midSentence(waitLabels[reason])}`
                     : execution.state === "idle"

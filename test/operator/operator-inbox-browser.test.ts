@@ -596,6 +596,8 @@ async function serveSourceHold(page: Page, taskId: string) {
           repositoryName: "acme/design-system",
           number: 87,
           state: "open",
+          label: "acme/design-system#87",
+          url: "https://github.com/acme/design-system/issues/87",
         },
       ],
       review: null,

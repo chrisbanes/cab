@@ -46,6 +46,8 @@ export const jiraIssue = (
     summary?: string;
     description?: unknown;
     issuelinks?: unknown[];
+    /** An open status other than To Do, such as one a readiness rule excludes. */
+    status?: { id: string; name: string };
     /** Extra fields, such as a custom field a readiness rule reads. */
     fields?: Record<string, unknown>;
   } = {},
@@ -55,8 +57,8 @@ export const jiraIssue = (
   fields: {
     summary: over.summary ?? `Issue ${n}`,
     status: {
-      id: over.done ? "9" : "1",
-      name: over.done ? "Done" : "To Do",
+      id: over.status?.id ?? (over.done ? "9" : "1"),
+      name: over.status?.name ?? (over.done ? "Done" : "To Do"),
       statusCategory: { key: over.done ? "done" : "new" },
     },
     labels: ["ready"],

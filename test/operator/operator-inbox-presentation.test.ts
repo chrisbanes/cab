@@ -235,6 +235,7 @@ test("hold notices name each independent hold and what approval does not clear",
         repositoryName: "acme/design-system",
         number: 87,
         state: "open",
+        label: "acme/design-system#87",
       },
       {
         nodeId: "n2",
@@ -242,6 +243,7 @@ test("hold notices name each independent hold and what approval does not clear",
         repositoryName: "acme/design-system",
         number: 12,
         state: "closed",
+        label: "acme/design-system#12",
       },
     ],
   } as unknown as TaskRead["data"]["source"];
@@ -543,6 +545,7 @@ test("answering a question words each hold notice for answers, with the same tit
         repositoryName: "acme/design-system",
         number: 87,
         state: "open",
+        label: "acme/design-system#87",
       },
     ],
   } as unknown as TaskRead["data"]["source"];
