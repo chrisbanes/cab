@@ -174,8 +174,11 @@ test("an unfinished entry behind the newest page is found, and an older page com
   } as TimelineEntry;
   const newest = text("newest");
   const held = window([streaming, newest]);
-  assert.equal(pendingBelow(held, newest), true);
-  assert.equal(pendingBelow(window([done, newest]), newest), false);
+  const active = new Set([lead]);
+  assert.equal(pendingBelow(held, newest, active), true);
+  assert.equal(pendingBelow(window([done, newest]), newest, active), false);
+  // An entry of an assignment that is not running will not finish, so nothing waits for it.
+  assert.equal(pendingBelow(held, newest, new Set()), false);
   const joined = prependTimeline(held, page([done]));
   assert.ok(joined && joined !== held);
   assert.equal(joined.entries[0], done);

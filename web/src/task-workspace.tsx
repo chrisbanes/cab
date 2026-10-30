@@ -855,6 +855,11 @@ export function TaskWorkspace({
       state.conversation = value;
     },
     observedAt: resource.state.fetchedAt,
+    running: new Set(
+      data?.assignments
+        .filter((a) => a.state === "running")
+        .map((a) => a.assignmentId),
+    ),
     beforeApply: (first) => {
       // Opening a task shows its header and decisions first; the conversation is followed from there.
       if (first) bottom.current = false;

@@ -64,6 +64,7 @@ export function useTaskTimeline({
   cache,
   setCache,
   observedAt,
+  running: runningAssignments,
   beforeApply,
 }: {
   client: OperatorClient;
@@ -71,6 +72,8 @@ export function useTaskTimeline({
   cache: ConversationCache | null;
   setCache: (value: ConversationCache | null) => void;
   observedAt: number | null | undefined;
+  /** Assignments the task read shows running: only their unfinished entries can still finish. */
+  running: ReadonlySet<string>;
   beforeApply: (first: boolean) => void;
 }): TaskTimeline {
   const [view, setView] = useState({
@@ -81,6 +84,8 @@ export function useTaskTimeline({
   });
   const held = useRef(view);
   held.current = view;
+  const running = useRef(runningAssignments);
+  running.current = runningAssignments;
   const apply = useRef(beforeApply);
   apply.current = beforeApply;
   const save = useRef(setCache);
@@ -107,19 +112,36 @@ export function useTaskTimeline({
       loadingEarlier: false,
       error: error instanceof Error ? error.message : "Unavailable",
     });
-  // The newest page, merged into what is held. An unfinished entry older than that page would
-  // never see its completion, so the pages down to it are read too (bounded).
+  // The newest page, merged into what is held and shown at once. An unfinished entry of a
+  // running assignment older than that page would never see its completion, so the pages down
+  // to it are read after (bounded); finishing it in place is not a new entry.
   const refresh = async (signal?: AbortSignal) => {
     try {
       const { data: page } = await read("", signal);
       if (signal?.aborted) return;
       const current = held.current.cache;
       const merged = mergeTimeline(current?.window ?? null, page);
+      if (merged.changed || held.current.error !== null) {
+        apply.current(!current);
+        commit({
+          error: null,
+          appended:
+            current && merged.changed
+              ? held.current.appended + 1
+              : held.current.appended,
+          cache: {
+            window: merged.window,
+            cursor:
+              !current || merged.reset ? page.olderCursor : current.cursor,
+          },
+        });
+      }
+      const base = held.current.cache;
       let next = merged.window,
         floor = page.entries[0],
         cursor = page.olderCursor;
       for (let n = 0; n < maxCatchUpPages && floor && cursor; n++) {
-        if (!pendingBelow(next, floor)) break;
+        if (!pendingBelow(next, floor, running.current)) break;
         const { data: older } = await read(`&before=${cursor}`, signal);
         if (signal?.aborted) return;
         const joined = prependTimeline(next, older);
@@ -128,22 +150,10 @@ export function useTaskTimeline({
         floor = older.entries[0];
         cursor = older.olderCursor;
       }
-      const changed = merged.changed || next !== merged.window;
-      if (!changed && held.current.error === null) return;
-      // The cache may have moved while the older pages were read.
-      if (held.current.cache !== current) return void refresh(signal);
-      apply.current(!current);
-      commit({
-        error: null,
-        appended:
-          current && changed
-            ? held.current.appended + 1
-            : held.current.appended,
-        cache: {
-          window: next,
-          cursor: !current || merged.reset ? page.olderCursor : current.cursor,
-        },
-      });
+      if (next === merged.window || !base || held.current.cache !== base)
+        return;
+      apply.current(false);
+      commit({ cache: { window: next, cursor: base.cursor } });
     } catch (error) {
       // A read that was superseded or abandoned fails quietly; it is not a stale conversation.
       if (!signal?.aborted) fail(error);

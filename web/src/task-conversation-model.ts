@@ -131,16 +131,21 @@ const isPending = (entry: TimelineEntry) =>
       /progress|running|started/i.test(entry.status ?? "");
 
 /**
- * Whether an unfinished entry sits older than `floor`, beyond what a newest-page read returns,
- * so its completion would never reach the window.
+ * Whether an unfinished entry of a running assignment sits older than `floor`, beyond what a
+ * newest-page read returns, so its completion would never reach the window. An entry whose
+ * assignment is not running will not finish, so it is not waited for.
  */
 export function pendingBelow(
   window: TimelineWindow,
   floor: TimelineEntry,
+  running: ReadonlySet<string>,
 ): boolean {
   const limit = keyOf(floor);
   return window.entries.some(
-    (e) => isPending(e) && compareTimelineKeys(keyOf(e), limit) < 0,
+    (e) =>
+      running.has(e.assignmentId) &&
+      isPending(e) &&
+      compareTimelineKeys(keyOf(e), limit) < 0,
   );
 }
 
