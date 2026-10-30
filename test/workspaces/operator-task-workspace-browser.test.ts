@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type Locator,
+  type Page,
+  type Response,
+} from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -19,13 +25,31 @@ import {
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
-import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 const test = browserSuite("operator-task-workspace-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
 const serviceWords =
   /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid/i;
-test("production workspace retains literal history, pending request, focused reply and exact result through updates and failed reads on desktop and phone", async (_t, j) => {
+/** Reads older pages of the conversation until `target` is shown, as an operator presses Load earlier. */
+async function loadEarlierUntil(page: Page, target: Locator) {
+  const loadEarlier = page.getByRole("button", {
+    name: "Load earlier",
+    exact: true,
+  });
+  const entries = page.locator("[role=log] [data-record-id]");
+  for (let pages = 0; (await target.count()) === 0; pages++) {
+    assert.ok(pages < 20, "the conversation ends before the target");
+    const before = await entries.count();
+    await loadEarlier.evaluate((el) => (el as HTMLButtonElement).click());
+    await page.waitForFunction(
+      (n) =>
+        document.querySelectorAll("[role=log] [data-record-id]").length > n,
+      before,
+    );
+  }
+}
+test("production workspace retains literal captured text, pending request, focused reply and exact result through updates and failed reads on desktop and phone", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -99,23 +123,21 @@ test("production workspace retains literal history, pending request, focused rep
       capture.recordEarlyBufferLimit(binding);
     }
   });
+  // One omission per assignment, however often the limit was recorded: the responsibility
+  // assignment has no captured text at all, the worker has 250 items besides.
   const omissionApi = new OperatorApi(f.service, [f.directory]);
-  const omissionOnly = await omissionApi.readAssignmentHistory(
-    responsibilityAssignmentId,
+  const omissions = (
+    await omissionApi.readTaskTimeline(
+      a.taskId,
+      new URLSearchParams("limit=50"),
+    )
+  ).data.entries.filter(
+    (entry) => entry.kind === "gap" && entry.reason === "early-buffer-limit",
   );
-  assert.equal(omissionOnly.data.items.length, 0);
-  assert.equal(omissionOnly.data.turnOmissions.length, 1);
-  assert.equal(
-    omissionOnly.data.turnOmissions[0]?.reason,
-    "early-buffer-limit",
+  assert.deepEqual(
+    omissions.map((entry) => entry.assignmentId).sort(),
+    [r.assignmentId, responsibilityAssignmentId].sort(),
   );
-  const mixed = await omissionApi.readAssignmentHistory(r.assignmentId);
-  assert.equal(mixed.data.turnOmissions.length, 1);
-  const earlierMixed = await omissionApi.readAssignmentHistory(
-    r.assignmentId,
-    mixed.data.items[0]!.sequence,
-  );
-  assert.equal(earlierMixed.data.turnOmissions.length, 1);
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
@@ -131,60 +153,59 @@ test("production workspace retains literal history, pending request, focused rep
     .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
   await page
-    .locator("#history")
+    .locator("#assignments")
     .getByText("Review responsibility distinct from implementation", {
       exact: true,
     })
     .waitFor({ state: "attached" });
   assert.ok((await page.getByText(/Requester assignment:/).count()) >= 2);
+  // The one pending request: its form is in the attention card, its entry in the conversation.
+  const question = page
+    .locator("#decisions")
+    .getByText("Which focus target?", { exact: true });
+  assert.equal(await question.count(), 1);
+  const log = page.getByRole("log", { name: "Task conversation" });
+  // Each assignment's captured text sits in its own sub-conversation, closed until opened.
+  for (const id of [r.assignmentId, responsibilityAssignmentId])
+    await log
+      .locator(`[data-record-id="delegation:${id}"] .conv-delegation-head`)
+      .click();
+  const literalItem = (n: number) =>
+    log.getByText(`Literal update ${n} long supplied text`, { exact: true });
+  const newestItem = log.getByText("Literal update 250 newer retained item");
+  const omissionRecords = log.locator(".conv-gap", {
+    hasText: "capture buffer",
+  });
+  await loadEarlierUntil(page, literalItem(0));
+  assert.equal(await omissionRecords.count(), 2);
   assert.equal(
-    await page.getByText("Which focus target?", { exact: true }).count(),
-    1,
-  );
-  await openTaskTab(page, "History");
-  await page
-    .getByRole("button", { name: "Expand all history", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: /Load earlier retained history/ })
-    .click();
-  await page
-    .getByText("Literal update 0 long supplied text ", { exact: true })
-    .waitFor({ state: "attached" });
-  await page
-    .getByRole("button", { name: "Expand all history", exact: true })
-    .click();
-  assert.equal(
-    await page.locator('[data-record-id^="turn-omission:"]').count(),
+    new Set(
+      await omissionRecords.evaluateAll((els) =>
+        els.map((el) => el.getAttribute("data-record-id")),
+      ),
+    ).size,
     2,
   );
-  await page
-    .getByRole("button", { name: "Chronological view", exact: true })
-    .click();
-  assert.equal(
-    await page.locator('[data-record-id^="turn-omission:"]').count(),
-    2,
+  // The worker's omission names its work and turn once its details are opened.
+  const workerOmission = log.locator(
+    `[data-record-id="delegation:${r.assignmentId}"] .conv-gap`,
+    { hasText: "capture buffer" },
   );
-  await page
-    .getByRole("button", { name: "Chronological view", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Expand all history", exact: true })
-    .click();
-  const omission = page.locator(
-    `[data-record-id="turn-omission:${r.workId}:${r.workId}:${r.workId}"]`,
-  );
-  await omission
-    .getByText(
-      `Early buffer limit (early-buffer-limit). Work ${r.workId}; assignment ${r.assignmentId}; thread ${r.workId}; turn ${r.workId}. Captured turn content is unavailable.`,
-      { exact: true },
-    )
-    .waitFor();
-  await omission.scrollIntoViewIfNeeded();
+  await workerOmission.getByRole("button", { name: /^Details/ }).click();
+  const detail = workerOmission.locator("dl");
+  await detail.getByText(r.workId, { exact: true }).first().waitFor();
+  assert.equal(await detail.getByText(r.workId, { exact: true }).count(), 2);
+  await workerOmission.scrollIntoViewIfNeeded();
   await captureBrowserEvidence(page, "1366-retained-turn-omissions", {
     fullPage: false,
   });
-  const reading = page.locator(`[data-record-id="${r.workId}:item-0"]`);
+  // The oldest literal entry is the reading position; its id outlives its text being redacted.
+  const readingId = await log
+    .locator(".conv-agent", { hasText: "Literal update 0 long supplied" })
+    .getAttribute("data-record-id");
+  assert.ok(readingId);
+  const reading = log.locator(`[data-record-id="${readingId}"]`);
+  const readingButton = reading.getByRole("button");
   await reading.scrollIntoViewIfNeeded();
   const readingY = await reading.evaluate(
     (el) => el.getBoundingClientRect().top,
@@ -205,13 +226,11 @@ test("production workspace retains literal history, pending request, focused rep
         "Literal update 250 newer retained item",
       ),
   );
-  await reading.locator("summary").focus();
+  await readingButton.focus();
   await page
     .getByRole("button", { name: "Refresh task", exact: true })
     .evaluate((el) => (el as HTMLElement).click());
-  await page
-    .getByText("Literal update 0 long supplied text ", { exact: true })
-    .waitFor({ state: "attached" });
+  await newestItem.waitFor();
   assert.ok(
     Math.abs(
       (await reading.evaluate((el) => el.getBoundingClientRect().top)) -
@@ -224,59 +243,55 @@ test("production workspace retains literal history, pending request, focused rep
     }),
   );
   assert.equal(
-    await reading
-      .locator("summary")
-      .evaluate((el) => el === document.activeElement),
+    await readingButton.evaluate((el) => el === document.activeElement),
     true,
   );
-  const retainedIds = await page
-    .locator(`[data-record-id^="${r.workId}:item-"]`)
-    .evaluateAll((els) => els.map((el) => el.getAttribute("data-record-id")));
-  assert.equal(retainedIds.length, 251);
-  assert.equal(new Set(retainedIds).size, 251);
-  assert.equal(
-    await page.locator('[data-record-id^="turn-omission:"]').count(),
-    2,
-  );
-  for (let item = 0; item <= 250; item++)
-    assert.ok(retainedIds.includes(`${r.workId}:item-${item}`));
+  const literalNumbers = () =>
+    log.locator(".conv-agent").evaluateAll((els) =>
+      els.flatMap((el) => {
+        const n = /Literal update (\d+) /.exec(el.textContent ?? "")?.[1];
+        return n === undefined ? [] : [Number(n)];
+      }),
+    );
+  const retained = await literalNumbers();
+  assert.equal(retained.length, 251);
+  assert.equal(new Set(retained).size, 251);
+  assert.equal(await omissionRecords.count(), 2);
+  for (let item = 0; item <= 250; item++) assert.ok(retained.includes(item));
   // Exercise the production 15-second polling callback without waiting wall-clock time.
-  const timerHistory = page.waitForResponse((response) =>
-    response
-      .url()
-      .includes(`/assignments/${r.assignmentId}/history?beforeSequence=`),
-  );
+  const newestTimeline = (response: Response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname === `/api/operator/tasks/${a.taskId}/timeline` &&
+      !url.searchParams.has("before")
+    );
+  };
+  const timerTimeline = page.waitForResponse(newestTimeline);
   await page.clock.runFor(15000);
-  await timerHistory;
-  await reading.waitFor({ state: "attached" });
+  await timerTimeline;
+  await reading.waitFor();
   assert.equal(
-    await reading
-      .locator("summary")
-      .evaluate((el) => el === document.activeElement),
+    await readingButton.evaluate((el) => el === document.activeElement),
     true,
   );
   const explicitRefresh = page.getByRole("button", {
     name: "Refresh task",
     exact: true,
   });
-  const explicitHistory = page.waitForResponse((response) =>
-    response
-      .url()
-      .includes(`/assignments/${r.assignmentId}/history?beforeSequence=`),
-  );
+  const explicitTimeline = page.waitForResponse(newestTimeline);
   await explicitRefresh.click();
-  await explicitHistory;
-  await reading.waitFor({ state: "attached" });
+  await explicitTimeline;
+  await reading.waitFor();
   assert.equal(
     await explicitRefresh.evaluate((el) => el === document.activeElement),
     true,
   );
-  await reading.locator("summary").focus();
+  await readingButton.focus();
   let releaseFocus!: () => void, enterFocus!: () => void;
   const focusBarrier = new Promise<void>((r) => (releaseFocus = r)),
     focusEntry = new Promise<void>((r) => (enterFocus = r));
   let focusHeld = false;
-  const focusRoute = `**/api/operator/assignments/${r.assignmentId}/history*`;
+  const focusRoute = `**/api/operator/tasks/${a.taskId}/timeline*`;
   await page.route(focusRoute, async (route) => {
     const response = await route.fetch();
     if (!focusHeld) {
@@ -288,12 +303,14 @@ test("production workspace retains literal history, pending request, focused rep
   });
   await explicitRefresh.evaluate((el) => (el as HTMLElement).click());
   await focusEntry;
-  await reading.waitFor({ state: "detached" });
-  // The operator moves to the reply on Overview while the history read is held.
-  await openTaskTab(page, "Overview");
+  // The validated conversation stays shown while the read is held.
+  assert.equal(await reading.count(), 1);
+  // The operator moves to the reply while the conversation read is held.
   await page.getByLabel("Editable reply").focus();
+  const heldTimeline = page.waitForResponse(newestTimeline);
   releaseFocus();
-  await reading.waitFor({ state: "attached" });
+  await heldTimeline;
+  await reading.waitFor();
   assert.equal(
     await page
       .getByLabel("Editable reply")
@@ -301,9 +318,12 @@ test("production workspace retains literal history, pending request, focused rep
     true,
   );
   await page.unroute(focusRoute);
-  await openTaskTab(page, "History");
+  // The banner for the newer entry belongs to this visit, so the position is measured without it.
+  await page
+    .getByRole("button", { name: "New updates — jump to latest", exact: true })
+    .click();
   await reading.scrollIntoViewIfNeeded();
-  await reading.locator("summary").focus();
+  await readingButton.focus();
   const navigationReadingY = await reading.evaluate(
     (el) => el.getBoundingClientRect().top,
   );
@@ -311,9 +331,7 @@ test("production workspace retains literal history, pending request, focused rep
   await page
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();
-  await page
-    .getByText("Literal update 0 long supplied text ", { exact: true })
-    .waitFor({ state: "attached" });
+  await literalItem(0).waitFor();
   assert.ok(
     Math.abs(
       (await reading.evaluate((el) => el.getBoundingClientRect().top)) -
@@ -326,16 +344,18 @@ test("production workspace retains literal history, pending request, focused rep
     }),
   );
   assert.equal(
-    await reading
-      .locator("summary")
-      .evaluate((el) => el === document.activeElement),
+    await readingButton.evaluate((el) => el === document.activeElement),
     true,
   );
-  await openTaskTab(page, "Overview");
   await page
     .getByLabel("Editable reply")
     .fill("Navigation draft remains exact");
-  await openTaskTab(page, "History");
+  // Each assignment's result is linked from its facts in the Overview's assignments card.
+  await openOverviewCard(page, "assignments");
+  const facts = page.locator("details.assignment-facts", {
+    hasText: `Assignment ${responsibilityAssignmentId}`,
+  });
+  await facts.locator("> summary").click();
   const exactLink = page.getByRole("link", {
     name: `Open exact assignment result ${responsibilityResult.resultId}`,
     exact: true,
@@ -375,15 +395,11 @@ test("production workspace retains literal history, pending request, focused rep
       url.searchParams.get("resultId") === r.resultId
     );
   });
-  const returnedHistory = page.waitForResponse((response) =>
-    response
-      .url()
-      .includes(`/assignments/${r.assignmentId}/history?beforeSequence=`),
-  );
+  const returnedTimeline = page.waitForResponse(newestTimeline);
   await page.goBack();
   await returnedTask;
-  await returnedHistory;
-  await reading.waitFor({ state: "attached" });
+  await returnedTimeline;
+  await reading.waitFor();
   assert.ok(
     Math.abs(
       (await exactLink.evaluate((el) => el.getBoundingClientRect().top)) -
@@ -397,24 +413,16 @@ test("production workspace retains literal history, pending request, focused rep
     }),
   );
   assert.equal(
-    await exactLink.evaluate((el) => el === document.activeElement),
-    true,
-  );
-  assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Navigation draft remains exact",
   );
-  await page
-    .getByRole("button", { name: "Collapse all history", exact: true })
-    .click();
-  // History hides Overview's request; the strip names it, and its button opens it.
-  await page
-    .locator("[data-task-strip]")
-    .getByRole("button", { name: "Next: you · answer question" })
-    .click();
-  assert.ok(
-    await page.getByText("Which focus target?", { exact: true }).isVisible(),
+  assert.equal(
+    await exactLink.evaluate((el) => el === document.activeElement),
+    true,
+    "Back returns focus to the exact result link",
   );
+  // The request is still pending after every update, read and navigation above.
+  assert.ok(await question.isVisible());
   // The restored navigation draft has been checked; explicitly finish that intent.
   await page.getByLabel("Editable reply").fill("");
   await page
@@ -433,6 +441,7 @@ test("production workspace retains literal history, pending request, focused rep
       if (el instanceof HTMLElement) el.click();
     });
   await page
+    .locator("#review")
     .getByText("Original source-faithful result", { exact: true })
     .waitFor();
   assert.equal(
@@ -466,6 +475,7 @@ test("production workspace retains literal history, pending request, focused rep
   );
   assert.ok(
     await page
+      .locator("#review")
       .getByText("Original source-faithful result", { exact: true })
       .isVisible(),
   );
@@ -716,30 +726,81 @@ test("production workspace retains literal history, pending request, focused rep
     true,
   );
   assert.equal(replyRequests.length, 2);
-  let releaseHistory!: () => void,
-    historyEntered!: () => void,
-    historySettled!: () => void;
-  const historyBarrier = new Promise<void>((r) => (releaseHistory = r)),
-    historyEntry = new Promise<void>((r) => (historyEntered = r)),
-    historyDone = new Promise<void>((r) => (historySettled = r));
-  let delayedHistory = false;
+  // An item of the worker that is still being written. Once newer text pushes it below the
+  // newest page without leaving a hole, a newest-page read also reads the page beneath it, to
+  // see it finish.
+  const streamingAt = 1;
+  const addItem = (
+    itemId: string,
+    lifecycle: string,
+    text: string | null,
+    at: number,
+  ) =>
+    f.seedPersistedState((db) =>
+      db
+        .prepare(
+          "INSERT INTO conversation_history_items(workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision,workRevision,threadId,turnId,itemId,lifecycle,text,omissionReason,deltaBytes,createdAt,updatedAt) VALUES(?,?,?,1,1,1,1,1,?,?,?,?,?,NULL,0,?,?)",
+        )
+        .run(
+          r.workId,
+          a.taskId,
+          r.assignmentId,
+          r.workId,
+          r.workId,
+          itemId,
+          lifecycle,
+          text,
+          at,
+          at,
+        ),
+    );
+  const refreshTask = () =>
+    page
+      .getByRole("button", { name: "Refresh task", exact: true })
+      .evaluate((el) => (el as HTMLElement).click());
+  markLeadStarted(f, r.assignmentId);
+  addItem("streaming", "streaming", null, streamingAt);
+  await refreshTask();
+  await log.getByText("writing…").waitFor();
+  for (let i = 0; i < 48; i++)
+    addItem(`newer-${i}`, "completed", `Newer note ${i}`, streamingAt + 1 + i);
   const batchRequests: string[] = [];
-  const historyRoute = `**/api/operator/assignments/${r.assignmentId}/history*`;
-  await page.route(historyRoute, async (route) => {
+  const timelineRoute = `**/api/operator/tasks/${a.taskId}/timeline*`;
+  const catchUps = () =>
+    batchRequests.filter((url) => new URL(url).searchParams.has("before"));
+  await page.route(timelineRoute, async (route) => {
+    batchRequests.push(route.request().url());
+    await route.fallback();
+  });
+  // Control: a read that stays current reads the page beneath the streaming item as well.
+  const caughtUp = page.waitForResponse((response) =>
+    new URL(response.url()).searchParams.has("before"),
+  );
+  await refreshTask();
+  await caughtUp;
+  assert.equal(catchUps().length >= 1, true);
+  await page.unroute(timelineRoute);
+  batchRequests.length = 0;
+  let releaseTimeline!: () => void,
+    timelineEntered!: () => void,
+    timelineSettled!: () => void;
+  const timelineBarrier = new Promise<void>((r) => (releaseTimeline = r)),
+    timelineEntry = new Promise<void>((r) => (timelineEntered = r)),
+    timelineDone = new Promise<void>((r) => (timelineSettled = r));
+  let delayedTimeline = false;
+  await page.route(timelineRoute, async (route) => {
     batchRequests.push(route.request().url());
     const response = await route.fetch();
-    if (!delayedHistory && !route.request().url().includes("beforeSequence")) {
-      delayedHistory = true;
-      historyEntered();
-      await historyBarrier;
+    if (!delayedTimeline && !route.request().url().includes("before=")) {
+      delayedTimeline = true;
+      timelineEntered();
+      await timelineBarrier;
       await route.fulfill({ response });
-      historySettled();
+      timelineSettled();
     } else await route.fulfill({ response });
   });
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
-  await historyEntry;
+  await refreshTask();
+  await timelineEntry;
   f.service.domain().execute({
     type: "profile.configure",
     actor: "operator",
@@ -749,40 +810,30 @@ test("production workspace retains literal history, pending request, focused rep
     instructions: "Literal update 0 long supplied text",
   });
   await page.getByRole("button", { name: "Refresh task", exact: true }).click();
-  await page
-    .getByText("Literal update 0 long supplied text ", { exact: true })
-    .waitFor({ state: "detached" });
-  await reading.getByText(/\[redacted\]/).waitFor({ state: "attached" });
+  // The changed visibility starts the window again from the newest page, below which the
+  // redacted item now waits.
+  await newestItem.waitFor();
+  await literalItem(0).waitFor({ state: "detached" });
   const replacementRequests = [...batchRequests];
-  assert.equal(replacementRequests.length, 3);
-  assert.equal(
-    replacementRequests.filter((url) => url.includes("beforeSequence")).length,
-    1,
-  );
-  releaseHistory();
-  await historyDone;
+  assert.equal(replacementRequests.length, 2);
+  assert.equal(catchUps().length, 0);
+  releaseTimeline();
+  await timelineDone;
   await page.evaluate(
     () =>
       new Promise<void>((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       ),
   );
-  assert.equal(
-    await page
-      .getByText("Literal update 0 long supplied text ", { exact: true })
-      .count(),
-    0,
-  );
   assert.deepEqual(
     batchRequests,
     replacementRequests,
-    "Superseded recent-page response must not issue its next retained cursor",
+    "Superseded newest-page response must not issue its next older page",
   );
-  assert.equal(
-    await page.locator(`[data-record-id^="${r.workId}:item-"]`).count(),
-    251,
-  );
-  await page.unroute(historyRoute);
+  await loadEarlierUntil(page, reading.getByText(/\[redacted\]/));
+  assert.equal(await literalItem(0).count(), 0);
+  assert.equal((await literalNumbers()).length, 250);
+  await page.unroute(timelineRoute);
   f.service.domain().execute({
     type: "profile.configure",
     actor: "operator",
@@ -791,26 +842,25 @@ test("production workspace retains literal history, pending request, focused rep
     expectedVersion: Number(f.service.domain().profile(a.profileId).version),
     instructions: "Literal update 1 long supplied text",
   });
-  await page.route(historyRoute, (route) =>
+  await page.route(timelineRoute, (route) =>
     route.fulfill({
       status: 503,
       contentType: "application/json",
       body: JSON.stringify({ error: { code: "unavailable" } }),
     }),
   );
-  await page
-    .getByRole("button", { name: "Refresh task", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
-  await page
-    .getByText(/History refresh failed:/)
-    .first()
-    .waitFor({ state: "attached" });
-  assert.equal(
-    await page
-      .getByText("Literal update 1 long supplied text ", { exact: true })
-      .count(),
-    0,
-  );
+  await refreshTask();
+  const stale = page.getByRole("alert").filter({
+    hasText:
+      "The conversation could not be refreshed, so this view may be out of date.",
+  });
+  await stale.waitFor();
+  // The last validated window stays shown and says so. Retrying once the read works shows the
+  // text the newer instructions redact as redacted.
+  await page.unroute(timelineRoute);
+  await stale.getByRole("button", { name: "Retry", exact: true }).click();
+  await stale.waitFor({ state: "detached" });
+  assert.equal(await literalItem(1).count(), 0);
 });
 
 test("a replayed auxiliary request focuses its control after the page commits", async (_t, j) => {

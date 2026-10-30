@@ -512,7 +512,7 @@ const intervention = (code: TaskInboxItem["attentionCode"]): TaskInboxItem => ({
   reason: "Execution ownership is uncertain",
   attentionCode: code,
   destination: `/app/tasks/${taskId}?section=decisions`,
-  evidence: `/app/tasks/${taskId}#history`,
+  evidence: `/app/tasks/${taskId}#conversation`,
   conversation: null,
 });
 const interventionFor = (id: string): TaskInboxItem => ({

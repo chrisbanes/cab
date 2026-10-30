@@ -3,7 +3,7 @@
 **Status:** built for the budgeted entry points. Changes opens on the Branch
 comparison, and the file rail's heading shows the file and +/− line counts. The
 latest result links to Changes with its changed-file count, and the changed-file list
-fits the 390 × 844 first screen. An Inbox evidence link opens the task's History tab.
+fits the 390 × 844 first screen. An Inbox evidence link opens the task's conversation at its newest entry.
 The budget is asserted at 1366 × 900 and 390 × 844 by
 `test/operator/operator-inspect-changes-browser.test.ts` ("inspect changes budget").
 

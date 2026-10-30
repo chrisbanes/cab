@@ -9,11 +9,7 @@ import {
 } from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
 import { StartAgainAction, taskChangedEvent } from "./task-restart.js";
-import {
-  CommandNetworkLine,
-  ExecutionNotices,
-  PolicyDisclosure,
-} from "./execution-notice.js";
+import { CommandNetworkLine, PolicyDisclosure } from "./execution-notice.js";
 import { executionSummary } from "./execution-runtime.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {
@@ -28,7 +24,6 @@ import {
 import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import {
-  assignmentHistorySchema,
   executionHarnessLabels,
   type CommandReceipt,
   type OperatorCommand,
@@ -104,6 +99,12 @@ import {
   TaskConversation,
   useTaskTimeline,
 } from "./task-conversation.js";
+import {
+  conversationTree,
+  hasDelegation,
+  type TimelineEntry,
+  type TimelineWindow,
+} from "./task-conversation-model.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
   type TaskHeaderReport,
@@ -112,7 +113,9 @@ import {
   taskHeaderReport,
 } from "./task-header.js";
 import {
+  type ConversationTarget,
   type TaskTab,
+  conversationTarget,
   tabForLocation,
   tabForSection,
   tabIds,
@@ -129,7 +132,6 @@ import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
-type History = z.infer<typeof assignmentHistorySchema>["data"];
 const sectionIds = [
   "decisions",
   "brief",
@@ -140,7 +142,6 @@ const sectionIds = [
   "context",
   "changes",
   "local-review",
-  "history",
   "reply",
 ];
 /** The section a tab opens at when a link names no section. */
@@ -149,7 +150,6 @@ const tabSections: Record<TaskTab, string> = {
   files: "files",
   changes: "changes",
   review: "local-review",
-  history: "history",
 };
 const sourceGap =
   "Retained source body and checklist coverage are unavailable. Source fields are retained only up to 16,000 characters; private or missing material may also be unavailable. Consult the external source or ask the lead.";
@@ -189,6 +189,30 @@ function TabPanel({
     </div>
   );
 }
+/**
+ * Keeps a restored reading position while late content lays out above it, until the reader
+ * scrolls or types or a moment passes; returns the function that ends the hold.
+ */
+function holdReadingAnchor(anchor: { id: string; y: number }) {
+  const inputs = ["wheel", "touchstart", "keydown", "pointerdown"];
+  const observer = new ResizeObserver(() => {
+    const el = [
+      ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
+    ].find(
+      (e) => e.dataset.recordId === anchor.id && !e.closest("[data-pinned]"),
+    );
+    if (el) scrollBy(0, el.getBoundingClientRect().top - anchor.y);
+  });
+  const stop = () => {
+    observer.disconnect();
+    clearTimeout(timer);
+    for (const type of inputs) removeEventListener(type, stop);
+  };
+  const timer = setTimeout(stop, 1500);
+  observer.observe(document.documentElement);
+  for (const type of inputs) addEventListener(type, stop, { passive: true });
+  return stop;
+}
 function ChecklistCoverage({
   source,
 }: {
@@ -213,25 +237,6 @@ function ChecklistCoverage({
       </p>
     );
   return null;
-}
-function TurnOmission({
-  omission,
-  state,
-  changed,
-}: {
-  omission: History["turnOmissions"][number];
-  state: TaskWorkspaceState;
-  changed: () => void;
-}) {
-  return (
-    <Disclosure
-      id={`turn-omission:${omission.workId}:${omission.threadId}:${omission.turnId}`}
-      title={`${date(omission.createdAt)} · retained turn omission · ${omission.assignmentId} · ${omission.turnId}`}
-      text={`Early buffer limit (early-buffer-limit). Work ${omission.workId}; assignment ${omission.assignmentId}; thread ${omission.threadId}; turn ${omission.turnId}. Captured turn content is unavailable.`}
-      state={state}
-      changed={changed}
-    />
-  );
 }
 const date = (n: number) => new Date(n < 1e12 ? n * 1000 : n).toLocaleString();
 function Literal({ text }: { text: string | null | undefined }) {
@@ -423,22 +428,18 @@ export function TaskWorkspace({
   };
   const [, render] = useState(0),
     changed = () => render((n) => n + 1);
-  const [histories, setHistory] = useState<Record<string, History>>({}),
-    [historyErrors, setHistoryErrors] = useState<Record<string, string>>({}),
-    [sendingNow, setPending] = useState(false),
+  const [sendingNow, setPending] = useState(false),
     [updates, setUpdates] = useState(false);
   // A write sent before the page was left may still be in flight when it is reopened.
   const pending = sendingNow || Boolean(auxSend.sending);
-  const historyRequests = useRef(new Map<string, number>());
-  const invalidateHistory = (clear = true) => {
-    for (const [id, revision] of historyRequests.current)
-      historyRequests.current.set(id, revision + 1);
-    if (clear) setHistory({});
-  };
   const replyInFlight = useRef<string | null>(null);
   const leaving = useRef(false),
     urlRequest = useRef<string | null | undefined>(undefined),
-    appendedSeen = useRef(0);
+    appendedSeen = useRef(0),
+    holdReading = useRef<() => void>(() => {}),
+    pendingLink = useRef<ConversationTarget | null>(null),
+    linkFollow = useRef(0),
+    followLink = useRef<(link: ConversationTarget) => void>(() => {});
   const scope = useRef(true),
     anchor = useRef<{ id: string; y: number } | null>(null),
     anchorElement = useRef<HTMLElement | null>(null),
@@ -446,7 +447,6 @@ export function TaskWorkspace({
     first = useRef(true),
     restoreReadingFocus = useRef(true),
     capturedFocus = useRef<HTMLElement | null>(null),
-    capturedHistoryFocus = useRef(false),
     material = useRef<string | null>(null);
   const params = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]);
   const selectedPath = useRef<string | null>(null);
@@ -484,8 +484,6 @@ export function TaskWorkspace({
       )
         state.inspectorOpen = true;
       if (named === "result-evidence") state.overview.add("evidence");
-      if (params.has("assignment"))
-        state.expanded.add(params.get("assignment") ?? "");
       // Exact inspection links; the service still enforces scope and exclusions.
       const rawPath = params.get("path");
       // An exact link is never normalized into a different path.
@@ -639,18 +637,13 @@ export function TaskWorkspace({
       (document.getElementById("conversation-end")?.getBoundingClientRect()
         .bottom ?? 1) > 0);
   /** Scrolls to the newest conversation entry with the composer fully below it. */
-  const followLatest = () => scrollBy(0, Math.max(0, toBottom()));
+  const followLatest = () => {
+    // Following the bottom ends a hold on a restored position.
+    holdReading.current();
+    scrollBy(0, Math.max(0, toBottom()));
+  };
   const capture = () => {
     if (leaving.current) return;
-    if (
-      restoreReadingFocus.current &&
-      state.focusRecord &&
-      capturedHistoryFocus.current &&
-      capturedFocus.current &&
-      !capturedFocus.current.isConnected &&
-      document.activeElement === document.body
-    )
-      return;
     bottom.current = atBottom();
     // The pinned attention card never moves, so it cannot anchor the reading position.
     const visible = [
@@ -671,14 +664,11 @@ export function TaskWorkspace({
       ? { id: el.dataset.recordId ?? "", y: el.getBoundingClientRect().top }
       : null;
     state.scrollY = scrollY;
-    state.historyAnchor = anchor.current;
+    state.readingAnchor = anchor.current;
     capturedFocus.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    capturedHistoryFocus.current = Boolean(
-      capturedFocus.current?.closest("#history"),
-    );
     state.focusHref =
       capturedFocus.current instanceof HTMLAnchorElement
         ? capturedFocus.current.getAttribute("href")
@@ -692,7 +682,7 @@ export function TaskWorkspace({
         ...history.state,
         taskWorkspaceReading: {
           scrollY: state.scrollY,
-          historyAnchor: state.historyAnchor,
+          readingAnchor: state.readingAnchor,
           focusRecord: state.focusRecord,
           tab: state.tab,
         },
@@ -702,7 +692,6 @@ export function TaskWorkspace({
   };
   const refresh = () => {
     capture();
-    invalidateHistory();
     resource.refresh();
   };
   /**
@@ -714,7 +703,7 @@ export function TaskWorkspace({
     state.tabScroll[state.tab] = scrollY;
     anchor.current = null;
     anchorElement.current = null;
-    state.historyAnchor = null;
+    state.readingAnchor = null;
     bottom.current = false;
     state.tab = tab;
     // Show the panel now so a caller can scroll to or focus what it holds; the render agrees.
@@ -732,7 +721,7 @@ export function TaskWorkspace({
           ...history.state,
           taskWorkspaceReading: {
             ...history.state?.taskWorkspaceReading,
-            historyAnchor: null,
+            readingAnchor: null,
             focusRecord: null,
             tab,
             scrollY: state.scrollY,
@@ -820,6 +809,7 @@ export function TaskWorkspace({
           }),
         };
       }
+      holdReading.current();
       sourceRequest.current++;
       sourceRead.current = null;
       if (state.sourceObservation === "pending") {
@@ -854,7 +844,7 @@ export function TaskWorkspace({
     setCache: (value) => {
       state.conversation = value;
     },
-    observedAt: resource.state.fetchedAt,
+    taskRead: resource.state.data,
     running: new Set(
       data?.assignments
         .filter((a) => a.state === "running")
@@ -867,7 +857,7 @@ export function TaskWorkspace({
     },
   });
   const layoutPath = useRef(path);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: history DOM insertion must restore the previously captured reading anchor.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversation DOM insertion must restore the previously captured reading anchor.
   useLayoutEffect(() => {
     if (!data) return;
     // New conversation entries count as updates, like a changed result or message.
@@ -880,9 +870,9 @@ export function TaskWorkspace({
         // Restoring keeps the saved entry as it is.
         if (tabIds.includes(saved.tab)) selectTab(saved.tab, false);
         state.scrollY = saved.scrollY;
-        state.historyAnchor = saved.historyAnchor;
+        state.readingAnchor = saved.readingAnchor;
         state.focusRecord = saved.focusRecord;
-        anchor.current = saved.historyAnchor;
+        anchor.current = saved.readingAnchor;
         restoreReadingFocus.current = true;
         scrollTo(0, saved.scrollY);
       } else {
@@ -896,11 +886,14 @@ export function TaskWorkspace({
               ? (linkedCard(p) ?? tabSections.overview)
               : tabSections[tab]));
         selectTab(tab);
-        const target = document.getElementById(id);
-        if (target) {
-          showSection(target);
+        // A link into the conversation waits for the conversation to be read.
+        const link = conversationTarget(path);
+        if (link) pendingLink.current = link;
+        const target = link ? null : document.getElementById(id);
+        if (target || link) {
+          if (target) showSection(target);
           anchor.current = null;
-          state.historyAnchor = null;
+          state.readingAnchor = null;
           bottom.current = false;
           state.scrollY = scrollY;
           restoreReadingFocus.current = false;
@@ -934,6 +927,7 @@ export function TaskWorkspace({
         record = p.get("record") ?? p.get("request"),
         section = p.get("section");
       const fragment = path.split("#")[1] || location.hash.slice(1),
+        link = conversationTarget(path, location.hash),
         linked =
           record || section
             ? null
@@ -948,7 +942,9 @@ export function TaskWorkspace({
             : linked
               ? document.getElementById(linked)
               : null;
-      if (target && state.scrollY === 0) {
+      // A link into the conversation waits for the conversation to be read.
+      if (link && state.scrollY === 0) pendingLink.current = link;
+      if (!link && target && state.scrollY === 0) {
         // A Search record can sit in a closed card; only its first arrival opens it, so a
         // Back or Forward keeps the operator's choice.
         if (record && !state.recordRevealed) {
@@ -956,19 +952,23 @@ export function TaskWorkspace({
           openDisclosures(target);
         }
         // A linked record or section opens on the tab whose panel holds it, unless the link
-        // names its tab (`?request=…#history` is that request's History).
+        // names its tab (`?record=…&section=files` is that tab's section).
         const tab = target.closest<HTMLElement>(".task-panel")?.dataset.tab,
           named = Boolean(section || path.split("#")[1] || location.hash);
         if (tab && !(record && named)) selectTab(tab as TaskTab);
-        if (section && !state.focusRecord && !state.historyAnchor)
+        if (section && !state.focusRecord && !state.readingAnchor)
           showSection(target);
         else target.scrollIntoView();
-      } else scrollTo(0, state.scrollY);
+      } else {
+        scrollTo(0, state.scrollY);
+        if (state.readingAnchor && !link)
+          holdReading.current = holdReadingAnchor(state.readingAnchor);
+      }
       if (state.focusRecord)
         readingFocusTarget()?.focus({ preventScroll: true });
       return;
     }
-    const a = anchor.current ?? state.historyAnchor,
+    const a = anchor.current ?? state.readingAnchor,
       captured = anchorElement.current,
       // Review contexts nest a second element with the same record id, so the first match can be the wrong one.
       // A request's card is pinned and shares its id with its conversation entry, which anchors.
@@ -994,176 +994,15 @@ export function TaskWorkspace({
       if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
       if (newMaterial || appended) setUpdates(true);
     }
-  }, [data, histories, state, path, timeline.window]);
-  const loadHistory = useCallback(
-    async (
-      id: string,
-      before?: number,
-      beforeOmission?: number,
-      keepShown = false,
-    ) => {
-      const current = client.captureAuthenticationScope();
-      const revision = (historyRequests.current.get(id) ?? 0) + 1;
-      historyRequests.current.set(id, revision);
-      const owned = () =>
-        scope.current &&
-        current() &&
-        historyRequests.current.get(id) === revision;
-      if (!keepShown)
-        setHistory((old) => {
-          const next = { ...old };
-          delete next[id];
-          return next;
-        });
-      try {
-        const itemDepth =
-          (state.historyPages[id]?.length ?? 0) + (before ? 1 : 0);
-        const omissionDepth =
-          (state.omissionHistoryPages[id]?.length ?? 0) +
-          (beforeOmission ? 1 : 0);
-        const pages: number[] = [],
-          omissionPages: number[] = [],
-          values: History[] = [],
-          itemValues: History[] = [],
-          omissionValues: History[] = [];
-        let boundary: number | undefined, omissionBoundary: number | undefined;
-        let itemActive = true,
-          omissionActive = true;
-        for (let page = 0; page <= Math.max(itemDepth, omissionDepth); page++) {
-          if (!owned()) return;
-          const query = new URLSearchParams();
-          if (boundary !== undefined)
-            query.set("beforeSequence", String(boundary));
-          if (omissionBoundary !== undefined)
-            query.set("beforeOmissionSequence", String(omissionBoundary));
-          const value = (
-            await client.read(
-              `/api/operator/assignments/${id}/history${query.size ? `?${query}` : ""}`,
-              assignmentHistorySchema,
-            )
-          ).data;
-          if (!owned()) return;
-          values.push(value);
-          boundary = undefined;
-          omissionBoundary = undefined;
-          if (itemActive && page <= itemDepth) {
-            itemValues.push(value);
-            if (
-              page < itemDepth &&
-              value.omittedItemCount &&
-              value.items.length
-            ) {
-              boundary = value.items[0]!.sequence;
-              pages.push(boundary);
-            } else itemActive = false;
-          }
-          if (omissionActive && page <= omissionDepth) {
-            omissionValues.push(value);
-            if (
-              page < omissionDepth &&
-              value.omittedTurnCount &&
-              value.turnOmissions.length
-            ) {
-              omissionBoundary = value.turnOmissions[0]!.sequence;
-              omissionPages.push(omissionBoundary);
-            } else omissionActive = false;
-          }
-          if (!itemActive && !omissionActive) break;
-        }
-        if (!owned()) return;
-        const recent = values[0];
-        if (!recent) return;
-        if (
-          values.some(
-            (value) => value.visibilityRevision !== recent.visibilityRevision,
-          )
-        ) {
-          setHistory((old) => {
-            if (!owned()) return old;
-            const next = { ...old };
-            delete next[id];
-            return next;
-          });
-          throw Error(
-            "History visibility changed while loading retained pages",
-          );
-        }
-        const items = itemValues
-          .flatMap((value) => value.items)
-          .filter(
-            (item, i, all) =>
-              all.findIndex(
-                (other) =>
-                  other.workId === item.workId && other.itemId === item.itemId,
-              ) === i,
-          )
-          .sort((a, b) => a.sequence - b.sequence);
-        state.historyPages[id] = pages;
-        state.omissionHistoryPages[id] = omissionPages;
-        setHistory((old) =>
-          owned()
-            ? {
-                ...old,
-                [id]: {
-                  ...recent,
-                  items,
-                  turnOmissions: omissionValues
-                    .flatMap((value) => value.turnOmissions)
-                    .filter(
-                      (item, i, all) =>
-                        all.findIndex(
-                          (other) =>
-                            other.workId === item.workId &&
-                            other.threadId === item.threadId &&
-                            other.turnId === item.turnId,
-                        ) === i,
-                    )
-                    .sort(
-                      (a, b) =>
-                        a.createdAt - b.createdAt || a.sequence - b.sequence,
-                    ),
-                  omittedItemCount:
-                    itemValues.at(-1)?.omittedItemCount ??
-                    recent.omittedItemCount,
-                  omittedTurnCount:
-                    omissionValues.at(-1)?.omittedTurnCount ??
-                    recent.omittedTurnCount,
-                },
-              }
-            : old,
-        );
-        setHistoryErrors((old) => (owned() ? { ...old, [id]: "" } : old));
-      } catch (e) {
-        if (owned()) {
-          setHistory((old) => {
-            if (!owned()) return old;
-            const next = { ...old };
-            delete next[id];
-            return next;
-          });
-          setHistoryErrors((old) =>
-            owned()
-              ? {
-                  ...old,
-                  [id]: e instanceof Error ? e.message : "Unavailable",
-                }
-              : old,
-          );
-        }
-      }
-    },
-    [client, state],
-  );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pending/error invalidates the current history ownership before any late batch can publish.
+  }, [data, state, path, timeline.window]);
+  // A link into the conversation is followed once the task and the conversation have been read.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the link is read from its ref; the reads and the path are the triggers.
   useEffect(() => {
-    // A timer poll never publishes pending, so only an explicit read clears what is shown.
-    if (resource.state.pending || resource.state.error) {
-      invalidateHistory(resource.state.pending);
-      return;
-    }
-    for (const a of data?.assignments ?? [])
-      void loadHistory(a.assignmentId, undefined, undefined, true);
-  }, [data, loadHistory, resource.state.pending, resource.state.error]);
+    const link = pendingLink.current;
+    if (!link || !data || !(timeline.window || timeline.error)) return;
+    pendingLink.current = null;
+    followLink.current(link);
+  }, [data, path, timeline.window, timeline.error]);
   async function command(input: OperatorCommand) {
     if (pending) return;
     if (
@@ -1594,11 +1433,11 @@ export function TaskWorkspace({
       </>
     );
   };
-  // An assignment's place in the conversation: its delegation, with those above it, open.
-  const openAssignment = (id: string) => {
+  // Opens an assignment's delegation, with those above it, so its entries are in view.
+  const expandDelegations = (assignmentId: string) => {
     const chain = new Set<string>();
     for (
-      let a = data.assignments.find((x) => x.assignmentId === id);
+      let a = data.assignments.find((x) => x.assignmentId === assignmentId);
       a &&
       a.assignmentId !== data.leadAssignmentId &&
       !chain.has(a.assignmentId);
@@ -1609,21 +1448,74 @@ export function TaskWorkspace({
       chain.add(a.assignmentId);
       state.expanded.add(`c:delegation:${a.assignmentId}`);
     }
+  };
+  // Reads older pages for a conversation record (at most ten), then scrolls to the selector
+  // `place` returns for the window that holds it, after opening what hides it. A record still
+  // missing leaves the page at the conversation's top, which says so and offers Load earlier.
+  const goToRecord = async (
+    miss: NonNullable<TaskWorkspaceState["conversationNotice"]>,
+    found: (window: TimelineWindow) => boolean,
+    place: (window: TimelineWindow) => string,
+  ) => {
+    const follow = ++linkFollow.current;
+    const read = await timeline.loadUntil(found);
+    // A newer link, or leaving the task, ends this one.
+    if (!scope.current || follow !== linkFollow.current) return;
+    state.conversationNotice = read.found ? null : miss;
+    const selector = read.window && place(read.window);
     changed();
     requestAnimationFrame(() => {
-      const place = [
-        ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
-      ].find((e) => e.dataset.recordId === `delegation:${id}`);
-      if (place) showSection(place);
-      else if (id === data.leadAssignmentId) reveal("conversation");
-      else {
-        // Its entries are older than the loaded window: its retained History holds them.
-        state.chronological = false;
-        state.expanded.add(id);
-        changed();
-        requestAnimationFrame(() => reveal("history"));
-      }
+      if (!scope.current || follow !== linkFollow.current) return;
+      const target = selector
+        ? document.querySelector<HTMLElement>(selector)
+        : null;
+      if (target) showSection(target);
+      else reveal("conversation");
     });
+  };
+  // An assignment's place in the conversation: its delegation, with those above it, open.
+  const openAssignment = (id: string) => {
+    expandDelegations(id);
+    if (id === data.leadAssignmentId) {
+      linkFollow.current++;
+      state.conversationNotice = null;
+      changed();
+      return requestAnimationFrame(() => reveal("conversation"));
+    }
+    const name = data.assignments.find((a) => a.assignmentId === id)?.name;
+    void goToRecord(
+      {
+        subject: `The conversation of ${name ?? "this assignment"}`,
+        kind: "assignment",
+        id,
+      },
+      (w) =>
+        hasDelegation(
+          conversationTree(w.entries, data.assignments, leadId ?? null),
+          id,
+          true,
+        ),
+      () => `[data-record-id="delegation:${CSS.escape(id)}"]`,
+    );
+  };
+  followLink.current = (link) => {
+    if (link.kind === "assignment") return openAssignment(link.id);
+    if (link.kind === "latest") {
+      linkFollow.current++;
+      state.conversationNotice = null;
+      changed();
+      return requestAnimationFrame(followLatest);
+    }
+    const isRequest = (e: TimelineEntry) =>
+      e.kind === "request" && e.interactionId === link.id;
+    void goToRecord(
+      { subject: "That request", kind: "request", id: link.id },
+      (w) => w.entries.some(isRequest),
+      (w) => {
+        expandDelegations(w.entries.find(isRequest)?.assignmentId ?? "");
+        return `[data-interaction-id="${CSS.escape(link.id)}"]`;
+      },
+    );
   };
   async function refreshSource() {
     if (!data) return;
@@ -1736,7 +1628,7 @@ export function TaskWorkspace({
     ? `${newestViewed >= 0 ? `${data.results.length - newestViewed - 1} new result(s)` : "Newer results unknown; no retained viewed result ordering"}; ${sourceObservation === "pending" ? "source comparison pending" : sourceObservation === "unknown" ? "source comparison unknown; current source state unavailable" : review.viewed.sourceId !== latestSource?.sourceId ? "source requirements changed" : "source unchanged"}`
     : "No viewing baseline. Comparison with previously viewed material is unknown.";
   // Each collapsed Overview card keeps its content mounted; its toggle is the one writer of
-  // `state.overview`, so a poll, a refresh or "Collapse all history" never opens or closes one.
+  // `state.overview`, so a poll or a refresh never opens or closes one.
   const overviewCard = (id: OverviewCard) => ({
     open: state.overview.has(id),
     onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => {
@@ -2352,6 +2244,15 @@ export function TaskWorkspace({
                 requests={requestPlaces}
                 following={!updates}
                 openChanges={() => selectTab("changes")}
+                messageAssignment={(assignment) => (
+                  <AssignmentMessage
+                    client={client}
+                    session={session}
+                    taskId={taskId}
+                    assignment={assignment}
+                    onChanged={refreshAll}
+                  />
+                )}
               />
               {reply}
             </div>
@@ -2771,223 +2672,6 @@ export function TaskWorkspace({
         </TabPanel>
         <TabPanel tab="review" active={state.tab}>
           <LocalReviewPanel />
-        </TabPanel>
-        <TabPanel tab="history" active={state.tab}>
-          <section id="history">
-            <h3 className="section-heading">
-              Assignments and retained history
-            </h3>
-            <div className="task-actions">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  for (const a of data.assignments)
-                    state.expanded.add(a.assignmentId);
-                  for (const h of Object.values(histories)) {
-                    for (const i of h.items)
-                      state.expanded.add(`${i.workId}:${i.itemId}`);
-                    for (const i of h.turnOmissions)
-                      state.expanded.add(
-                        `turn-omission:${i.workId}:${i.threadId}:${i.turnId}`,
-                      );
-                  }
-                  changed();
-                }}
-              >
-                Expand all history
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  state.expanded.clear();
-                  changed();
-                }}
-              >
-                Collapse all history
-              </Button>
-              <Button
-                variant="secondary"
-                aria-pressed={state.chronological}
-                onClick={() => {
-                  state.chronological = !state.chronological;
-                  changed();
-                }}
-              >
-                Chronological view
-              </Button>
-            </div>
-            <p>
-              Source-faithful captured text; no generated summaries or
-              full-transcript promise. Redaction and retention can omit content.
-            </p>
-            {state.chronological ? (
-              <div>
-                {Object.values(histories)
-                  .flatMap((h) => [...h.items, ...h.turnOmissions])
-                  .sort((a, b) => {
-                    const time = a.createdAt - b.createdAt;
-                    if (time) return time;
-                    const aOmission = "reason" in a,
-                      bOmission = "reason" in b;
-                    return aOmission === bOmission
-                      ? a.sequence - b.sequence
-                      : aOmission
-                        ? 1
-                        : -1;
-                  })
-                  .map((i) =>
-                    "reason" in i ? (
-                      <TurnOmission
-                        key={`turn-omission:${i.workId}:${i.threadId}:${i.turnId}`}
-                        omission={i}
-                        state={state}
-                        changed={changed}
-                      />
-                    ) : (
-                      <Disclosure
-                        key={`${i.workId}:${i.itemId}`}
-                        id={`${i.workId}:${i.itemId}`}
-                        title={`${date(i.createdAt)} · ${i.assignmentId} · ${i.lifecycle}`}
-                        text={
-                          i.text ??
-                          `Omitted: ${i.omissionReason ?? "unavailable"}`
-                        }
-                        state={state}
-                        changed={changed}
-                      />
-                    ),
-                  )}
-              </div>
-            ) : (
-              data.assignments.map((a) => {
-                return (
-                  <details
-                    key={a.assignmentId}
-                    data-record-id={a.assignmentId}
-                    open={state.expanded.has(a.assignmentId)}
-                    onToggle={(e) => {
-                      if (e.currentTarget.open)
-                        state.expanded.add(a.assignmentId);
-                      else state.expanded.delete(a.assignmentId);
-                      changed();
-                    }}
-                  >
-                    <summary>
-                      {a.name ?? "Assignment"} · {a.state} · version {a.version}
-                    </summary>
-                    {assignmentFacts(a)}
-                    <ExecutionNotices assignment={a} />
-                    {(a.state === "pending" || a.state === "running") &&
-                      a.assignmentId !== data.leadAssignmentId && (
-                        <AssignmentMessage
-                          client={client}
-                          session={session}
-                          taskId={taskId}
-                          assignment={a}
-                          onChanged={refreshAll}
-                        />
-                      )}
-                    {historyErrors[a.assignmentId] && (
-                      <p role="alert">
-                        History refresh failed: {historyErrors[a.assignmentId]}.
-                        Unvalidated history is hidden; retry to read current
-                        material.
-                      </p>
-                    )}
-                    <p className="literal-preview">
-                      {histories[a.assignmentId]?.items
-                        .at(-1)
-                        ?.text?.slice(0, 500) ??
-                        "Recent captured text unavailable"}
-                    </p>
-                    {histories[a.assignmentId]?.omittedItemCount ? (
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          capture();
-                          void loadHistory(
-                            a.assignmentId,
-                            histories[a.assignmentId]?.items[0]?.sequence,
-                          );
-                        }}
-                      >
-                        Load earlier retained history (
-                        {histories[a.assignmentId]?.omittedItemCount})
-                      </Button>
-                    ) : null}
-                    {histories[a.assignmentId]?.omittedTurnCount ? (
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          capture();
-                          void loadHistory(
-                            a.assignmentId,
-                            undefined,
-                            histories[a.assignmentId]?.turnOmissions[0]
-                              ?.sequence,
-                          );
-                        }}
-                      >
-                        Load earlier retained turn omissions (
-                        {histories[a.assignmentId]?.omittedTurnCount})
-                      </Button>
-                    ) : null}
-                    {histories[a.assignmentId]?.items.map((i) => (
-                      <Disclosure
-                        key={`${i.workId}:${i.itemId}`}
-                        id={`${i.workId}:${i.itemId}`}
-                        title={`${date(i.createdAt)} · ${i.lifecycle} · ${i.itemId}`}
-                        text={
-                          i.text ??
-                          `Omitted: ${i.omissionReason ?? "unavailable"}`
-                        }
-                        state={state}
-                        changed={changed}
-                      />
-                    ))}
-                    {histories[a.assignmentId]?.turnOmissions.map((i) => (
-                      <TurnOmission
-                        key={`turn-omission:${i.workId}:${i.threadId}:${i.turnId}`}
-                        omission={i}
-                        state={state}
-                        changed={changed}
-                      />
-                    ))}
-                    <Button
-                      variant="secondary"
-                      onClick={() => void loadHistory(a.assignmentId)}
-                    >
-                      Refresh captured history
-                    </Button>
-                  </details>
-                );
-              })
-            )}
-            {data.messages.map((m) => (
-              <div key={m.eventId} data-record-id={m.eventId}>
-                <p>
-                  {m.eventType}
-                  {m.requester
-                    ? ` · requested by ${m.requester === "assignment" ? "agent" : "operator"}`
-                    : ""}{" "}
-                  · {m.deliveryState} · {date(m.createdAt)}
-                </p>
-                <Literal text={m.text} />
-                {m.questionAnswers &&
-                  Object.entries(m.questionAnswers).map(([id, a]) => (
-                    <div key={id}>
-                      <p>
-                        Question {id}: {a.optionIds.join(", ")}
-                      </p>
-                      <Literal text={a.text} />
-                    </div>
-                  ))}
-                {m.reference && (
-                  <p>Exact feedback reference: {JSON.stringify(m.reference)}</p>
-                )}
-              </div>
-            ))}
-          </section>
         </TabPanel>
       </article>
     </LocalReviewProvider>

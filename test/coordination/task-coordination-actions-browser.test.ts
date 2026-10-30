@@ -96,10 +96,9 @@ test("the task view delivers an undelivered result and messages a delegated assi
     0,
   );
 
-  // A pending delegated assignment takes a durable message from its History row.
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}?section=history`);
-  const assignment = page.locator(`details[data-record-id="${pendingId}"]`);
-  await assignment.locator("> summary").click();
+  // A pending delegated assignment takes a durable message from its sub-conversation header.
+  const assignment = page.locator(`[data-record-id="delegation:${pendingId}"]`);
+  await assignment.getByRole("button").first().click();
   const send = assignment.getByRole("button", { name: /^Send to / });
   assert.equal(await send.isDisabled(), true, "nothing to send yet");
   await assignment
@@ -140,7 +139,7 @@ test("the task view delivers an undelivered result and messages a delegated assi
   for (const id of [a.assignmentId, delegateId])
     assert.equal(
       await page
-        .locator(`details[data-record-id="${id}"] form.assignment-message`)
+        .locator(`[data-record-id="delegation:${id}"] form.assignment-message`)
         .count(),
       0,
     );
@@ -327,9 +326,8 @@ test("a check settles as refused only on a definite refusal, and a new session s
   );
   const { a, pendingId } = await seedCoordination(f);
   const { page, web, commands } = await openTask(f, j, a.taskId, hold);
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}?section=history`);
-  const assignment = page.locator(`details[data-record-id="${pendingId}"]`);
-  await assignment.locator("> summary").click();
+  const assignment = page.locator(`[data-record-id="delegation:${pendingId}"]`);
+  await assignment.getByRole("button").first().click();
   const box = assignment.getByRole("textbox", { name: /^Message / });
   const messages = () =>
     f.service
@@ -403,8 +401,8 @@ test("a check settles as refused only on a definite refusal, and a new session s
   await assignment.getByRole("button", { name: /^Send to / }).click();
   await check(assignment).waitFor();
   await signOutFromSidebar(page);
-  await signIn(page, web, `/app/tasks/${a.taskId}?section=history`);
-  await assignment.locator("> summary").click();
+  await signIn(page, web, `/app/tasks/${a.taskId}`);
+  await assignment.getByRole("button").first().click();
   assert.equal(await check(page).count(), 0);
   assert.equal(await box.inputValue(), "");
 });

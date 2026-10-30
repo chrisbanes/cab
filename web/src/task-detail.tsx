@@ -62,7 +62,11 @@ export function AssignmentRows({
         {assignments.map((a) => {
           const row = assignmentRow(a, assignments);
           return (
-            <tr className="assignment-row" key={a.assignmentId}>
+            <tr
+              className="assignment-row"
+              key={a.assignmentId}
+              data-record-id={`assignment:${a.assignmentId}`}
+            >
               <td>
                 <span className="assignment-id">{row.id}</span>
                 <button type="button" onClick={() => open(a.assignmentId)}>

@@ -301,7 +301,12 @@ export class TaskWorkspaceState {
   overview = new Set<OverviewCard>();
   /** Results (by result and source) whose "N more" criteria are open; the operator's own toggle writes it. */
   criteriaOpen = new Set<string>();
-  chronological = false;
+  /** The record a link named that the loaded conversation did not hold, or null. */
+  conversationNotice: {
+    subject: string;
+    kind: "assignment" | "request";
+    id: string;
+  } | null = null;
   /** The conversation's retained window, kept while the task is open; it is read again on arrival. */
   conversation: ConversationCache | null = null;
   /** The request whose single form is in the conversation; the attention card holds the rest. */
@@ -370,11 +375,9 @@ export class TaskWorkspaceState {
   /** The open tab and each tab's own scroll offset, kept while the task is open. */
   tab: TaskTab = "overview";
   tabScroll: Partial<Record<TaskTab, number>> = {};
-  historyPages: Record<string, number[]> = {};
-  omissionHistoryPages: Record<string, number[]> = {};
   focusRecord: string | null = null;
   focusHref: string | null = null;
-  historyAnchor: { id: string; y: number } | null = null;
+  readingAnchor: { id: string; y: number } | null = null;
   selectionInitialized = false;
   /** A linked record's closed card was opened once; a Back or Forward remount never reopens it. */
   recordRevealed = false;

@@ -193,7 +193,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
       .count(),
     0,
   );
-  // Five tabs without counts; Overview is selected.
+  // Four tabs without counts; Overview is selected.
   const tabs = page
     .getByRole("tablist", { name: "Task sections" })
     .getByRole("tab");
@@ -202,7 +202,6 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     "Files",
     "Changes",
     "Review",
-    "History",
   ]);
   assert.equal(await tabs.first().getAttribute("aria-selected"), "true");
   // Stop… uses the tinted destructive button.
@@ -359,18 +358,18 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   assert.equal(await forms.count(), 1);
   assert.equal(await forms.getAttribute("href"), `/task/${a.taskId}`);
   assert.equal(await page.locator('a[href^="/coordination/"]').count(), 0);
-  await openTaskTab(page, "History");
+  await openTaskTab(page, "Files");
   assert.equal(
     await forms.isVisible(),
     false,
-    "History does not repeat the link",
+    "Files does not repeat the link",
   );
   await page.evaluate(() => scrollTo(0, 0));
   await captureBrowserEvidence(page, "task-detail-desktop", {
     fullPage: false,
   });
 
-  // A delegated assignment with no entry in the loaded conversation opens its History.
+  // A delegated assignment with nothing captured yet still has its sub-conversation, opened by its title.
   await openTaskTab(page, "Overview");
   await openOverviewCard(page, "assignments");
   await page
@@ -378,17 +377,17 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     .getByRole("button")
     .first()
     .click();
-  await page.locator("#history details[open]").first().waitFor();
-  assert.equal(await selectedTab(page), "History");
-  await page.locator("#history details[open] > summary").first().click();
-  await openTaskTab(page, "Overview");
+  const placeholder = page
+    .locator("#conversation .conv-delegation")
+    .filter({ hasText: "Nothing captured for this assignment yet." });
+  await placeholder.waitFor();
+  // A pending delegate can be messaged from there, though nothing of it is captured yet.
+  await placeholder.getByRole("button", { name: /^Send to / }).waitFor();
+  assert.equal(await selectedTab(page), "Overview");
 
-  // Expanded history and an unsent reply survive a refresh.
-  await openTaskTab(page, "History");
-  await page.locator("#history details > summary").first().click();
-  const expanded = page.locator("#history details[open]").first();
-  await expanded.waitFor();
-  await openTaskTab(page, "Overview");
+  // Expanded assignment facts and an unsent reply survive a refresh.
+  await page.locator(".assignment-facts > summary").first().click();
+  await page.locator(".assignment-facts[open]").first().waitFor();
   await page.getByLabel("Editable reply").fill("Unsent reply");
   // Read the anchor with the result in view; the grid must not disturb restoration.
   const anchor = page.locator(`[data-record-id="${a.result.resultId}"]`);
@@ -416,7 +415,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     Math.abs(after - anchorTop) <= 1,
     `anchor ${anchorTop} -> ${after}`,
   );
-  assert.equal(await page.locator("#history details[open]").count(), 1);
+  assert.equal(await page.locator(".assignment-facts[open]").count(), 1);
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Unsent reply",
@@ -697,16 +696,14 @@ test("A question opened on the task page names its requester", async (_t, j) => 
     .getByText("Recommended by Task lead", { exact: true })
     .waitFor();
   assert.equal(await selectedTab(page), "Overview");
-  // Its evidence link opens History in place, as a fresh load of that link would.
+  // Its evidence link goes to that request in the conversation, on the Overview.
   await page
     .getByRole("link", { name: "Question evidence", exact: true })
     .click();
-  await page.waitForFunction(() =>
-    document
-      .querySelector('[role="tablist"] [aria-selected="true"]')
-      ?.textContent?.includes("History"),
-  );
-  assert.deepEqual(await visiblePanels(page), ["task-panel-history"]);
+  await page
+    .locator(`#conversation [data-interaction-id="${q.interactionId}"]`)
+    .waitFor();
+  assert.deepEqual(await visiblePanels(page), ["task-panel-overview"]);
 });
 
 test("A rejected completion is a decision the strip and decision card both name", async (_t, j) => {
@@ -1740,9 +1737,9 @@ for (const engine of ["chromium", "webkit"] as const)
         ["ArrowRight", "Files"],
         ["ArrowRight", "Changes"],
         ["ArrowLeft", "Files"],
-        ["End", "History"],
+        ["End", "Review"],
         ["ArrowRight", "Overview"],
-        ["ArrowLeft", "History"],
+        ["ArrowLeft", "Review"],
         ["Home", "Overview"],
       ] as const) {
         await page.keyboard.press(key);
@@ -1796,21 +1793,16 @@ test("Task deep links open their tab on the first paint", async (_t, j) => {
   });
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
   await taskTab(page, "Overview").waitFor();
-  const read = await page.evaluate(
-    (id) => fetch(`/api/operator/tasks/${id}`).then((r) => r.json()),
-    a.taskId,
-  );
-  const message = read.data.messages[0]?.eventId as string | undefined;
   const cases: [string, string][] = [
     ["?section=files", "Files"],
     ["?section=local-review", "Review"],
-    [`?assignment=${a.assignmentId}#history`, "History"],
+    [`?assignment=${a.assignmentId}#history`, "Overview"],
+    ["?section=history", "Overview"],
     ["?path=notes.md", "Files"],
     ["?target=branch", "Changes"],
     [`?result=${a.result.resultId}`, "Overview"],
     ["#changes", "Changes"],
   ];
-  if (message) cases.push([`?record=${message}`, "History"]);
   for (const [query, name] of cases) {
     await page.goto(`${web.origin}/app/tasks/${a.taskId}${query}`);
     await page
@@ -1829,12 +1821,6 @@ test("Task deep links open their tab on the first paint", async (_t, j) => {
       `${query} first paint`,
     );
   }
-  assert.ok(message, "the seeded task records a message to link to");
-  // An expanded assignment link shows that assignment's history.
-  await page.goto(
-    `${web.origin}/app/tasks/${a.taskId}?assignment=${a.assignmentId}#history`,
-  );
-  await page.locator("#history details[open]").first().waitFor();
 });
 
 test("Tab switches, Refresh task and polls keep the reply, expansions and each tab's reading position", async (_t, j) => {
@@ -1850,7 +1836,7 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
     .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
   // Persistent tools stay on every tab; the inspector is Overview's alone.
-  for (const name of ["Overview", "Files", "Changes", "Review", "History"]) {
+  for (const name of ["Overview", "Files", "Changes", "Review"]) {
     await openTaskTab(page, name as "Overview");
     for (const tool of ["Advanced task controls", "Requests and coordination"])
       assert.equal(
@@ -1869,11 +1855,13 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   }
   await openTaskTab(page, "Overview");
   // An expanded assignment, an unsent reply and a reading anchor on Overview.
-  await openTaskTab(page, "History");
-  await page.locator("#history details > summary").first().click();
-  await page.locator("#history details[open]").first().waitFor();
-  assert.equal(await selectedTab(page), "History");
-  await openTaskTab(page, "Overview");
+  await openOverviewCard(page, "assignments");
+  await page.locator(".assignment-facts > summary").first().click();
+  await page.locator(".assignment-facts[open]").first().waitFor();
+  // The Files panel is short; a spacer makes it scroll so each tab's offset can be told apart.
+  await page.addStyleTag({
+    content: '#task-panel-files::after{content:"";display:block;height:3000px}',
+  });
   await page.getByLabel("Editable reply").fill("Unsent reply");
   const anchor = page.locator(`[data-record-id="${a.result.resultId}"]`);
   await anchor.evaluate((e) => e.scrollIntoView());
@@ -1894,7 +1882,7 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
       await page.getByLabel("Editable reply").inputValue(),
       "Unsent reply",
     );
-    assert.equal(await page.locator("#history details[open]").count(), 1);
+    assert.equal(await page.locator(".assignment-facts[open]").count(), 1);
   };
   await switchTo("Files");
   await kept("tab switch");
@@ -1910,30 +1898,30 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   await kept("Refresh task on Files");
 
   // Each tab keeps its own scroll.
-  await switchTo("History");
+  await switchTo("Files");
   await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
-  const historyY = await page.evaluate(() => scrollY);
-  assert.ok(historyY > 0, "History scrolls");
+  const filesY = await page.evaluate(() => scrollY);
+  assert.ok(filesY > 0, "Files scrolls");
   await switchTo("Overview");
   const overviewY = await page.evaluate(() => scrollY);
-  assert.notEqual(overviewY, historyY);
-  await switchTo("History");
-  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - historyY) <= 1);
+  assert.notEqual(overviewY, filesY);
+  await switchTo("Files");
+  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - filesY) <= 1);
   await switchTo("Overview");
   assert.ok(Math.abs((await page.evaluate(() => scrollY)) - overviewY) <= 1);
 
-  // A timer poll while History is open keeps its position and expansion.
-  await switchTo("History");
+  // A timer poll while Files is open keeps its position and Overview's expansion.
+  await switchTo("Files");
   const polled = page.waitForResponse(
     (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
   await page.clock.runFor(15000);
   await polled;
   await settle(page);
-  assert.equal(await selectedTab(page), "History");
-  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - historyY) <= 1);
-  assert.equal(await page.locator("#history details[open]").count(), 1);
-  await captureBrowserEvidence(page, "1366-task-detail-history", {
+  assert.equal(await selectedTab(page), "Files");
+  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - filesY) <= 1);
+  assert.equal(await page.locator(".assignment-facts[open]").count(), 1);
+  await captureBrowserEvidence(page, "1366-task-detail-files", {
     fullPage: false,
   });
 
@@ -1944,10 +1932,13 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
     .click();
   await page.getByRole("heading", { name: "Overview", level: 1 }).waitFor();
   await page.goBack();
-  await page.locator("#history details[open]").first().waitFor();
+  await page
+    .locator(".assignment-facts[open]")
+    .first()
+    .waitFor({ state: "attached" });
   await settle(page);
-  assert.equal(await selectedTab(page), "History");
-  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - historyY) <= 1);
+  assert.equal(await selectedTab(page), "Files");
+  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - filesY) <= 1);
   await openTaskTab(page, "Overview");
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
@@ -2109,7 +2100,7 @@ test("An open approval leads Overview and stays reachable from every tab through
     assert.doesNotMatch(inspected, absent);
   assert.match((await inspector.textContent()) ?? "", /Results & artifacts/);
 
-  // The assignments table keeps a row per assignment and opens its history.
+  // The assignments table keeps a row per assignment and opens it in the conversation.
   await openOverviewCard(page, "assignments");
   const table = page.locator("section#assignments table");
   assert.deepEqual(await table.locator("th[scope=col]").allTextContents(), [
@@ -3973,7 +3964,7 @@ for (const engine of ["chromium", "webkit"] as const)
             .filter((link) => !link.closest("aside"))
             .map((link) => link.getAttribute("href") ?? "")
             .filter((href) =>
-              /#(files|changes|local-review|context|history)$/.test(href),
+              /#(files|changes|local-review|context)$/.test(href),
             ),
         ),
         [],
@@ -4259,15 +4250,16 @@ for (const engine of ["chromium", "webkit"] as const)
         },
         {
           link: `?request=${a.interactionId}#history`,
-          tab: "History",
+          tab: "Overview",
           open: [],
-          target: "#task-panel-history",
+          target: `#conversation [data-interaction-id="${a.interactionId}"]`,
         },
         {
           link: `?assignment=${a.assignmentId}#history`,
-          tab: "History",
+          tab: "Overview",
           open: [],
-          target: "#task-panel-history",
+          target: "#conversation",
+          focus: "#conversation h3",
         },
         {
           link: "?section=context",
@@ -4385,7 +4377,7 @@ for (const engine of ["chromium", "webkit"] as const)
 
 for (const engine of ["chromium", "webkit"] as const)
   testForEngine(
-    `Overview disclosures survive polls, refresh, Collapse all history and leaving the task, and never take focus (${engine})`,
+    `Overview disclosures survive polls, refresh and leaving the task, and never take focus (${engine})`,
     engine,
     async (_t, j) => {
       const fixture = await openFixture(j, engine);
@@ -4468,14 +4460,6 @@ for (const engine of ["chromium", "webkit"] as const)
         .getByRole("button", { name: "Next: you · review material & decide" })
         .waitFor();
       await unchanged("arriving approval");
-
-      // Collapse all history closes History's disclosures, not Overview's.
-      await openTaskTab(page, "History");
-      await page
-        .getByRole("button", { name: "Collapse all history", exact: true })
-        .click();
-      await openTaskTab(page, "Overview");
-      assert.deepEqual(await states(), expected, "Collapse all history");
 
       // Leave for another view and press Back: same cards, same reading position. The
       // conversation is the reading flow; the inspector beside it is not its anchor.

@@ -130,7 +130,7 @@ fixed application dimensions.
 Rules:
 
 - Project and permitted-assignee fields are selects. Task lists are tables;
-  assignments are table rows that disclose their history. Grouped multi-select
+  assignments are table rows that disclose their facts. Grouped multi-select
   questions use checkboxes, single-choice questions radios. Labels, descriptions,
   selected values, validation messages and response controls remain explicit.
 - Phone screens use one of two headers: top-level (menu, title, count badge, one

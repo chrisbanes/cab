@@ -172,7 +172,8 @@ export type ConversationItem =
  * delegation sits in its requester's stream (the lead's when none is recorded or known), with
  * the delegated stream nested under it. Consecutive commands, and consecutive file changes,
  * of one stream read as one row. A delegated assignment whose delegation entry is not loaded
- * is placed at its first loaded entry and takes its header from the task read.
+ * is placed at its first loaded entry and takes its header from the task read; one that is
+ * pending or running with nothing loaded is placed last.
  */
 export function conversationTree(
   entries: readonly TimelineEntry[],
@@ -225,7 +226,14 @@ export function conversationTree(
       const entry = delegations.get(child) ?? null;
       const nested = build(child, new Set([...seen, child]));
       const first = nested.length ? firstPlace(nested[0], place) : undefined;
-      const at = entry ? place(entry) : first;
+      // A pending or running assignment can still be messaged, so it has its place even when
+      // nothing of it is loaded (no captured text yet, or its delegation is on an older page).
+      const open = ["pending", "running"].includes(
+        known.get(child)?.state ?? "",
+      );
+      const at = entry
+        ? place(entry)
+        : (first ?? (open ? Number.MAX_SAFE_INTEGER : undefined));
       if (at === undefined) continue;
       placed.push({
         at,
@@ -242,6 +250,24 @@ export function conversationTree(
   };
   return build(root, new Set([root]));
 }
+
+/**
+ * Whether the tree places a delegation sub-conversation for the assignment, at any depth.
+ * With `loaded`, an empty placeholder for an open assignment does not count: something of it
+ * (its delegation or an entry) is on a loaded page.
+ */
+export const hasDelegation = (
+  items: readonly ConversationItem[],
+  assignmentId: string,
+  loaded = false,
+): boolean =>
+  items.some(
+    (item) =>
+      item.type === "delegation" &&
+      ((item.id === assignmentId &&
+        (!loaded || item.entry !== null || item.items.length > 0)) ||
+        hasDelegation(item.items, assignmentId, loaded)),
+  );
 
 function firstPlace(
   item: ConversationItem | undefined,

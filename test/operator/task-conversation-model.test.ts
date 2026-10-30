@@ -15,6 +15,7 @@ import {
   commandsLabel,
   conversationTree,
   gapCopy,
+  hasDelegation,
   mergeTimeline,
   pendingBelow,
   prependTimeline,
@@ -305,8 +306,45 @@ test("a delegation whose entry is not loaded takes its header from the assignmen
   assert.equal(child.assignment?.assignmentId, worker);
   // It sits at its first loaded entry, so it comes before the lead entry that follows.
   assert.equal(tree[0]?.type, "delegation");
-  // An assignment with nothing loaded at all is not invented.
+  // A finished assignment with nothing loaded at all is not invented.
   assert.equal(conversationTree([text("lead")], assignments, lead).length, 1);
+});
+
+test("a pending or running assignment with nothing loaded still has its place, last", () => {
+  const withState = (state: string) => [
+    assignment(lead, null),
+    { ...assignment(worker, lead), state } as Assignment,
+  ];
+  for (const state of ["pending", "running"]) {
+    const tree = conversationTree([text("lead")], withState(state), lead);
+    assert.deepEqual(
+      tree.map((i) => i.type),
+      ["entry", "delegation"],
+      state,
+    );
+    assert.equal(hasDelegation(tree, worker), true);
+    // The placeholder is not something loaded: a link still reads earlier pages for it.
+    assert.equal(hasDelegation(tree, worker, true), false);
+  }
+  assert.equal(
+    conversationTree([text("lead")], withState("completed"), lead).length,
+    1,
+  );
+});
+
+test("hasDelegation finds an assignment's place at any depth, and none when nothing of it is loaded", () => {
+  const tree = conversationTree(
+    [delegation(worker, lead), delegation(grandchild, worker)],
+    assignments,
+    lead,
+  );
+  for (const id of [worker, grandchild])
+    assert.equal(hasDelegation(tree, id), true);
+  assert.equal(hasDelegation(tree, lead), false);
+  assert.equal(
+    hasDelegation(conversationTree([text("lead")], assignments, lead), worker),
+    false,
+  );
 });
 
 test("every gap reason has copy", () => {

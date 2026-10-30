@@ -718,6 +718,11 @@ export function App() {
   useEffect(() => {
     const href = restoreFocus.current;
     if (!href) return;
+    // Focus already placed, by the page or by the reader, is not taken back.
+    if (document.activeElement && document.activeElement !== document.body) {
+      restoreFocus.current = null;
+      return;
+    }
     const target = [
       ...document.querySelectorAll<HTMLAnchorElement>("a[href]"),
     ].find((a) => a.getAttribute("href") === href);
