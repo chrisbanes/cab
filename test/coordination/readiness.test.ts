@@ -583,6 +583,41 @@ test("GitLab credentials check is not configured, passes, or fails with a fixed 
   assert.equal(stalled.status, "fail");
 });
 
+test("service readiness fails a GitLab credential the running runtimes inherited", async (t) => {
+  const f = fixture(t);
+  let restartRequired = false;
+  const service = {
+    verifyCodexLogin: async () => "verified",
+    domain: () => ({
+      discoveryCredentialReference: () => null,
+      claudeTokenReference: () => null,
+      profiles: () => [],
+    }),
+    claudeTokenStatus: () => ({ state: "not-configured" }),
+    harnessStatuses: () => [],
+    harnessSettings: () => null,
+    gitLabCredentialRestartRequired: () => restartRequired,
+  } as unknown as StandaloneService;
+  const api = {
+    codeHostCredentialLocalState: async () => ({
+      configured: true,
+      unusable: false,
+      unreachable: false,
+      overridden: false,
+    }),
+  } as never;
+  const status = async () =>
+    (
+      await serviceReadiness(service, api, {
+        dataDir: f.data,
+        authFile: f.auth,
+      }).read()
+    ).data.checks.find((c) => c.id === "gitlab-credentials")?.status;
+  assert.equal(await status(), "pass");
+  restartRequired = true;
+  assert.equal(await status(), "fail");
+});
+
 test("service discovery probes gh only for a gh reference", async (t) => {
   const f = fixture(t);
   const variable = "CAB_READINESS_DISCOVERY_TEST";

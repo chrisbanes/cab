@@ -156,6 +156,12 @@ test("failures map to reason codes that never reveal the token or URL", async ()
     assert.equal(await reason(reader.user()), expected);
     assert.equal(f.calls.length, 1, "a 3xx is not followed");
   }
+  // A token that cannot be a header value is not a host failure.
+  for (const bad of ["", "a\nb", "tökén"])
+    assert.throws(
+      () => new GitLabDiscoveryReader("gitlab.example.com", bad),
+      (e) => e instanceof GitLabDiscoveryFailure && e.reason === "unreadable",
+    );
   assert.throws(
     () => new GitLabDiscoveryReader("github.com", token),
     (e) => e instanceof GitLabDiscoveryFailure && e.reason === "unreadable",

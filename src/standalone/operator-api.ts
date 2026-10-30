@@ -7035,10 +7035,15 @@ export class OperatorApi {
   }
   /** Configured GitLab hosts with each credential's kind, usability and account. */
   async readCodeHostCredentials() {
+    const credentials = await readCodeHostCredentials(
+      this.domain(),
+      this.setup,
+    );
     return codeHostCredentialsSchema.parse({
       data: {
+        // After the reads, so a token glab resolved just now is counted.
         restartRequired: this.service.gitLabCredentialRestartRequired(),
-        credentials: await readCodeHostCredentials(this.domain(), this.setup),
+        credentials,
       },
       observedAt: Date.now(),
     });

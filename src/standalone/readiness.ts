@@ -152,7 +152,7 @@ const fixes = {
   claudeVersion:
     "Run `claude --version` as the service user, or reinstall Claude Code, then restart the service",
   claudeAdd: "Add a Claude token in Settings → Add Claude",
-  claudeRestart: "Restart the service",
+  restart: "Restart the service",
   claudeVariable:
     "Set the variable in the service environment and restart the service, or clear the reference in Add Claude",
   claudeFile:
@@ -428,7 +428,7 @@ export class Readiness {
           id,
           "fail",
           "Restart the service so running runtimes exclude this GitLab credential",
-          fixes.claudeRestart,
+          fixes.restart,
         )
       : pass(id);
   }
@@ -523,7 +523,7 @@ export class Readiness {
         source.kind === "env"
           ? "Restart the service to use this variable"
           : "Restart the service to use this token",
-        fixes.claudeRestart,
+        fixes.restart,
       );
     if (source.kind === "env")
       return outcome(

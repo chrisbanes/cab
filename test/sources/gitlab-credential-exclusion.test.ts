@@ -230,6 +230,7 @@ test("a GitLab credential configured after start is excluded at once and flags a
     GITLAB_ACCESS_TOKEN: undefined,
     OAUTH_TOKEN: undefined,
     [LATE]: undefined,
+    [ALIAS]: undefined,
     [CLAUDE]: CLAUDE_VALUE,
   });
   const glab = createFakeGlab();
@@ -301,15 +302,23 @@ test("a GitLab credential configured after start is excluded at once and flags a
   // A restart takes a fresh snapshot without the credential and clears the notice.
   await service.stop();
   await service.start();
-  assert.equal(codexSnapshot()?.GITLAB_TOKEN, undefined);
-  assert.equal(JSON.stringify(codexSnapshot()).includes(canary), false);
+  // Before codexSnapshot(), which takes a new snapshot of its own.
   assert.equal(service.gitLabCredentialRestartRequired(), false);
   assert.equal(await flagged(), false);
+  assert.equal(codexSnapshot()?.GITLAB_TOKEN, undefined);
+  assert.equal(JSON.stringify(codexSnapshot()).includes(canary), false);
 
   // A variable that was not in the environment at start cannot have been inherited.
   configure(`env:${LATE}`);
   process.env[LATE] = "gxlatevalue311";
   assert.equal(service.gitLabCredentialRestartRequired(), false);
   assert.equal(await flagged(), false);
+  // A value held under another name is inherited by value alone.
+  process.env[ALIAS] = "gxaliasvalue311";
+  await service.stop();
+  await service.start();
+  configure(`env:${LATE}`);
+  process.env[LATE] = "gxaliasvalue311";
+  assert.equal(service.gitLabCredentialRestartRequired(), true);
   configure(null);
 });
