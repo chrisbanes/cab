@@ -5,6 +5,7 @@ import {
 } from "../core/redaction-limits.js";
 import { type Database, transaction } from "../core/store.js";
 import type { RuntimeConversationEvent } from "./codex.js";
+import { keysetBelow, type TimelineKey, timelineRank } from "./timeline-key.js";
 
 export type ConversationHistoryBinding = z.infer<typeof bindingSchema>;
 export type ConversationHistoryLifecycle = z.infer<
@@ -388,6 +389,65 @@ export class ConversationHistoryStore {
       omittedItemCount: Math.max(0, itemCount - items.length),
       omittedTurnCount: Math.max(0, omissionCount - rawOmissions.length),
     };
+  }
+
+  /**
+   * The task's newest items and turn omissions strictly below `before`, newest first,
+   * at most `limit` of each. Text is stored, not re-sanitised; callers do that.
+   */
+  readTaskBefore(
+    taskId: string,
+    before: TimelineKey | undefined,
+    limit: number,
+  ): {
+    items: ConversationHistoryEntry[];
+    turnOmissions: ConversationHistoryTurnOmission[];
+  } {
+    const items = keysetBelow(
+      timelineRank.history,
+      before,
+      "createdAt",
+      "sequence",
+    );
+    const omissions = keysetBelow(
+      timelineRank.turnOmission,
+      before,
+      "createdAt",
+      "sequence",
+    );
+    return {
+      items: this.db
+        .prepare(`SELECT sequence, workId, taskId, assignmentId, assignmentVersion,
+          instructionsRevision, profileRevision, conversationRevision,
+          workRevision, threadId, turnId, itemId, lifecycle, text,
+          omissionReason, deltaBytes, createdAt, updatedAt
+        FROM conversation_history_items WHERE taskId = ? AND ${items.sql}
+        ORDER BY createdAt DESC, sequence DESC LIMIT ?`)
+        .all(taskId, ...items.params, limit)
+        .map((row) => historyEntrySchema.parse(row)),
+      turnOmissions: this.db
+        .prepare(`SELECT sequence, workId, taskId, assignmentId, assignmentVersion,
+          instructionsRevision, profileRevision, conversationRevision,
+          workRevision, threadId, turnId, reason, createdAt
+        FROM conversation_history_turn_omissions WHERE taskId = ? AND ${omissions.sql}
+        ORDER BY createdAt DESC, sequence DESC LIMIT ?`)
+        .all(taskId, ...omissions.params, limit)
+        .map((row) => turnOmissionSchema.parse(row)),
+    };
+  }
+
+  /** The earliest item time of each work with captured history. */
+  workStarts(
+    taskId: string,
+  ): { workId: string; assignmentId: string; createdAt: number }[] {
+    return this.db
+      .prepare(`SELECT workId, assignmentId, MIN(createdAt) AS createdAt
+        FROM conversation_history_items WHERE taskId = ? GROUP BY workId, assignmentId`)
+      .all(taskId) as {
+      workId: string;
+      assignmentId: string;
+      createdAt: number;
+    }[];
   }
 
   private recordOmission(

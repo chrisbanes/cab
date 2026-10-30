@@ -588,6 +588,12 @@ export class CoordinationStore {
         response TEXT NOT NULL,
         PRIMARY KEY(threadId, turnId, callId)
       );
+      CREATE TABLE IF NOT EXISTS coordination_delegations (
+        assignmentId TEXT PRIMARY KEY REFERENCES domain_assignments(id),
+        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+        delegatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS coordination_delegations_task ON coordination_delegations(taskId);
       CREATE TABLE IF NOT EXISTS coordination_results ${resultColumns};
       CREATE INDEX IF NOT EXISTS coordination_results_task_created ON coordination_results(taskId,createdAt);
       CREATE TABLE IF NOT EXISTS coordination_unresolved_result_destinations (
@@ -1281,6 +1287,11 @@ export class CoordinationStore {
           String(binding.assignmentId),
           String(binding.assignmentId),
         );
+      this.db
+        .prepare(
+          "INSERT INTO coordination_delegations (assignmentId, taskId, delegatedAt) VALUES (?, ?, ?)",
+        )
+        .run(assignmentId, String(binding.taskId), Date.now());
       const response = {
         text: `Delegated assignment ${assignmentId}`,
         success: true,
@@ -2960,6 +2971,33 @@ export class CoordinationStore {
       );
       return this.parseEvent(event);
     });
+  }
+
+  /**
+   * When each delegated assignment of the task was delegated. `delegatedAt` is null
+   * for a delegation made before the table existed; `workId` then names the
+   * delegating work from its receipt, so a caller can anchor it to that work.
+   */
+  delegationTimes(taskId: string): {
+    assignmentId: string;
+    delegatedAt: number | null;
+    workId: string | null;
+  }[] {
+    return (
+      this.db
+        .prepare(`SELECT a.id AS assignmentId, d.delegatedAt AS delegatedAt,
+            (SELECT r.workId FROM coordination_receipts r
+              WHERE r.taskId = a.taskId AND r.tool = 'cab_delegate'
+                AND json_extract(r.response, '$.text') = 'Delegated assignment ' || a.id) AS workId
+          FROM domain_assignments a
+          LEFT JOIN coordination_delegations d ON d.assignmentId = a.id
+          WHERE a.taskId = ? AND a.requesterAssignmentId IS NOT NULL`)
+        .all(uuid.parse(taskId)) as Row[]
+    ).map((row) => ({
+      assignmentId: String(row.assignmentId),
+      delegatedAt: row.delegatedAt === null ? null : Number(row.delegatedAt),
+      workId: row.workId === null ? null : String(row.workId),
+    }));
   }
 
   results(taskId?: string): AssignmentResult[] {
