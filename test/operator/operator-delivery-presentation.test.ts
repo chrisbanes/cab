@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   checkStatusWord,
+  codeHostActionLabel,
   deliveryActionLine,
   deliveryBlockerSentence,
   pullRequestReference,
@@ -109,4 +110,55 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
     deliveryActionLine({ ...base, reason: "provider-http-404" }),
     /provider-http-404/,
   );
+});
+
+test("a GitLab merge request is named in GitLab's form and links only over https", () => {
+  const url = "https://gitlab.example.com/group/sub/app/-/merge_requests/12";
+  const binding = {
+    repositoryName: "group/sub/app",
+    number: 12,
+    url,
+    codeHost: "gitlab" as const,
+  };
+  assert.equal(pullRequestReference(binding), "group/sub/app!12");
+  assert.equal(safePullRequestUrl(url, "gitlab"), url);
+  assert.equal(
+    safePullRequestUrl(url),
+    null,
+    "GitHub links stay on github.com",
+  );
+  assert.equal(
+    safePullRequestUrl(url.replace("https", "http"), "gitlab"),
+    null,
+  );
+  assert.equal(safePullRequestUrl("javascript:alert(1)", "gitlab"), null);
+  assert.equal(
+    pullRequestReference({ ...binding, url: undefined }),
+    "Merge request !12",
+  );
+  assert.equal(
+    deliveryBlockerSentence("pr-not-confirmed-merged", "gitlab"),
+    "Waiting for GitLab to confirm the merge request merged.",
+  );
+});
+
+test("code-host actions are named for their host, and an absent host is GitHub", () => {
+  assert.equal(
+    codeHostActionLabel("pr.thread.resolve", "gitlab"),
+    "GitLab discussion",
+  );
+  assert.equal(
+    codeHostActionLabel("pr.edit", "gitlab"),
+    "GitLab merge request",
+  );
+  assert.equal(codeHostActionLabel("branch.push", "gitlab"), "GitLab branch");
+  assert.equal(
+    codeHostActionLabel("pr.thread.reply", undefined),
+    "GitHub review thread",
+  );
+  assert.equal(
+    codeHostActionLabel("pr.ready", "github"),
+    "GitHub pull request",
+  );
+  assert.equal(codeHostActionLabel("issue.comment", "gitlab"), null);
 });

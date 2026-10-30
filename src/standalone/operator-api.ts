@@ -604,6 +604,17 @@ export function gitlabCompareUrl(
     : `https://${host}/${projectPath}/-/commit/${outsideHeadSha}`;
 }
 
+/** A GitLab merge request's link, from the link's verified project path. */
+export function gitlabMergeRequestUrl(
+  projectPath: string,
+  iid: number,
+  host: string,
+) {
+  return isGitLabProjectPath(projectPath)
+    ? `https://${host}/${projectPath}/-/merge_requests/${iid}`
+    : null;
+}
+
 /** See `OperatorApi.exclusionBase`; one read attempt owns it. */
 type ExclusionBase = {
   readonly values: readonly (readonly [tag: string | null, value: string])[];
@@ -3500,6 +3511,11 @@ export class OperatorApi {
       } catch {}
     }
     const recovery = externalActionSchema.safeParse(material);
+    const codeHost =
+      recovery.success && /^(pr|branch)\./.test(recovery.data.kind)
+        ? (this.link(i.taskId, recovery.data.target.repositoryId)?.codeHost ??
+          "github")
+        : null;
     const compare =
       recovery.success && isRecoveryAction(recovery.data)
         ? this.recoveryCompareUrl(i.taskId, recovery.data, excluded)
@@ -3525,6 +3541,7 @@ export class OperatorApi {
         this.disclosable(i.action, excluded) &&
         this.disclosable(i.target, excluded),
       ...(compare ?? {}),
+      ...(codeHost ? { codeHost } : {}),
       materialUnavailable,
       response: this.safe(i.response, excluded),
       revision: i.revision,
@@ -3538,10 +3555,6 @@ export class OperatorApi {
     return d
       .repositoryLinks(String(d.task(taskId).projectId))
       .links.find((l) => l.repositoryId === repositoryId);
-  }
-  /** The host of the repository's link; an unlinked repository is on github.com. */
-  private linkHost(taskId: string, repositoryId: string) {
-    return this.link(taskId, repositoryId)?.host ?? "github.com";
   }
   /** The compare link of a recovery's material, named for the source repository or the one a push verified. */
   private recoveryCompareUrl(
@@ -5230,15 +5243,24 @@ export class OperatorApi {
     // The source's name is the PR's repository name only when `githubPullUrl` verifies it is the PR's own.
     const source =
       b || v.branches.length ? this.sourceSummary(taskId, excluded) : null;
-    const url = b
-      ? githubPullUrl(
-          source?.repositoryName ?? null,
-          source?.identity.repositoryId ?? null,
-          b.observation.repositoryId,
-          b.observation.number,
-          this.linkHost(taskId, b.observation.repositoryId),
-        )
-      : null;
+    const link = b ? this.link(taskId, b.observation.repositoryId) : undefined;
+    const gitlab = link?.codeHost === "gitlab" ? link : null;
+    let url: string | null = null;
+    if (b)
+      url = gitlab
+        ? gitlabMergeRequestUrl(
+            gitlab.projectPath,
+            b.observation.number,
+            gitlab.host,
+          )
+        : githubPullUrl(
+            source?.repositoryName ?? null,
+            source?.identity.repositoryId ?? null,
+            b.observation.repositoryId,
+            b.observation.number,
+            link?.host ?? "github.com",
+          );
+    if (gitlab && url && !this.disclosable(url, excluded)) url = null;
     return deliveryReadSchema.parse({
       mode: v.mode,
       policyVersion: v.policyVersion,
@@ -5255,8 +5277,11 @@ export class OperatorApi {
         ? {
             revision: b.revision,
             number: b.observation.number,
+            ...(gitlab ? { codeHost: "gitlab" as const } : {}),
             repositoryName: url
-              ? (source?.repositoryName ?? b.observation.repositoryId)
+              ? (gitlab?.projectPath ??
+                source?.repositoryName ??
+                b.observation.repositoryId)
               : b.observation.repositoryId,
             ...(url ? { url } : {}),
             draft: b.observation.draft,

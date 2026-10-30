@@ -154,7 +154,7 @@ export class DeliveryCoordinator {
     projectId: string,
     repositoryId: string,
   ): { codeHost: CodeHost; host: string } {
-    // shortcut: unlinked code-host targets default to GitHub on github.com, replace when GitLab delivery (#1313) refuses them
+    // shortcut: an unlinked target defaults to GitHub on github.com, replace when every delivery target has a repository link
     return (
       this.options.codeHostOf?.(projectId, repositoryId) ?? {
         codeHost: "github",

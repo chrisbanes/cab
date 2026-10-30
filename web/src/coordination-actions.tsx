@@ -15,6 +15,7 @@ import {
   useCommandSends,
 } from "./command-send.js";
 import { Button, ShortId } from "./components.js";
+import { codeHostName } from "./delivery-presentation.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { Textarea } from "./ui/textarea.js";
 
@@ -105,7 +106,7 @@ export function SendFeedback({
 
 /**
  * A reviewable PR's handback, settled by the operator: Accept covers the shown head and policy
- * version only; Settle as closed sends the outcome back. Neither writes to GitHub.
+ * version only; Settle as closed sends the outcome back. Neither writes to the code host.
  */
 export function HandbackSettlement(props: {
   client: OperatorClient;
@@ -146,6 +147,7 @@ function HandbackSettlementCard({
     },
   );
   if (d?.mode !== "reviewable-pr" || !b || b.state === "MERGED") return null;
+  const gitlab = b.codeHost === "gitlab";
   // Current only while completion does not await a new one: head, task and policy versions all match.
   const current =
       b.settlement &&
@@ -192,14 +194,17 @@ function HandbackSettlementCard({
       ) : (
         <>
           <p>
-            <strong>Reviewable PR handed back.</strong> The task completes only
-            after you settle head <ShortId value={b.headSha} />. Settling does
-            not merge, close or comment on GitHub.
+            <strong>
+              Reviewable {gitlab ? "merge request" : "PR"} handed back.
+            </strong>{" "}
+            The task completes only after you settle head{" "}
+            <ShortId value={b.headSha} />. Settling does not merge, close or
+            comment on {codeHostName(b.codeHost)}.
           </p>
           {b.readError ? (
             <p className="muted">
-              The last GitHub read failed. Refresh delivery status before
-              settling.
+              The last {codeHostName(b.codeHost)} read failed. Refresh delivery
+              status before settling.
             </p>
           ) : (
             !uncertain && (
@@ -233,7 +238,7 @@ function HandbackSettlementCard({
         entry={entry}
         outcome={outcome?.kind === "recorded" ? null : outcome}
         recorded="Handback settled."
-        conflict="Not settled: the PR, branch or policy changed since it was read. Refresh delivery status and review the current head."
+        conflict={`Not settled: the ${gitlab ? "merge request" : "PR"}, branch or policy changed since it was read. Refresh delivery status and review the current head.`}
         check={() => void send()}
         review={{ label: "Review current state", onClick: clear }}
       />

@@ -9,6 +9,7 @@ import {
 import type { OperatorClient } from "./api.js";
 import { failureText } from "../../src/operator/runtime-restart-copy.js";
 import { ActionLink, Button } from "./components.js";
+import { approvalActsOn } from "./delivery-presentation.js";
 import { clockLabel } from "./presentation.js";
 import { holdNotices, requestActionLabel } from "./inbox-presentation.js";
 import { QuestionResponse } from "./question-response.js";
@@ -95,10 +96,17 @@ export function ApprovalFacts({
   const approval = task.approvals.find(
     (a) => a.interactionId === (item.interactionId ?? item.id),
   );
+  const actsOn = approval ? approvalActsOn(approval) : null;
   return approval && !approval.materialUnavailable ? (
     <dl className="inbox-approval-facts">
       <dt>Exact action</dt>
       <dd className="literal">{approval.action ?? "Unavailable"}</dd>
+      {actsOn && (
+        <>
+          <dt>Acts on</dt>
+          <dd>{actsOn}</dd>
+        </>
+      )}
       <dt>Target</dt>
       <dd className="literal">{approval.target ?? "Unavailable"}</dd>
       <dt>Version</dt>

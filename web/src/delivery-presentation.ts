@@ -7,28 +7,48 @@ import {
 import type { StatusMappingEvent } from "../../src/core/status-mapping-contracts.js";
 import { codeSentence } from "./presentation.js";
 
-const blockerSentences = {
-  "reviewable-pr-awaiting-current-settlement":
-    "Waiting for the current PR head to be settled.",
-  "pr-not-confirmed-merged": "Waiting for GitHub to confirm the PR merged.",
-  "delivery-provider-read-unavailable":
-    "The last GitHub read failed, so delivery state may be out of date.",
-  "delivery-mode-changed":
-    "The project's delivery mode changed after this PR was bound.",
-  "external-action-prepared":
-    "A GitHub action is prepared and has not been attempted.",
-  "external-action-attempting": "A GitHub action is in progress.",
-  "external-action-uncertain":
-    "A GitHub action's outcome is unknown; check it before retrying.",
+export type CodeHost = "github" | "gitlab";
+/** An absent code host is GitHub, as on servers that predate GitLab merge requests. */
+export const codeHostName = (codeHost: CodeHost | undefined) =>
+  codeHost === "gitlab" ? "GitLab" : "GitHub";
+const changeRequestNoun = (codeHost: CodeHost | undefined) =>
+  codeHost === "gitlab" ? "merge request" : "PR";
+
+const blockerSentences = (codeHost: CodeHost | undefined) => {
+  const name = codeHostName(codeHost),
+    noun = changeRequestNoun(codeHost);
+  return {
+    "reviewable-pr-awaiting-current-settlement": `Waiting for the current ${noun} head to be settled.`,
+    "pr-not-confirmed-merged": `Waiting for ${name} to confirm the ${noun} merged.`,
+    "delivery-provider-read-unavailable": `The last ${name} read failed, so delivery state may be out of date.`,
+    "delivery-mode-changed": `The project's delivery mode changed after this ${noun} was bound.`,
+    "external-action-prepared": `A ${name} action is prepared and has not been attempted.`,
+    "external-action-attempting": `A ${name} action is in progress.`,
+    "external-action-uncertain": `A ${name} action's outcome is unknown; check it before retrying.`,
+  };
 };
 
 /** A delivery blocker code as a sentence; an unmapped code gets the generic one, never the raw code. */
-export const deliveryBlockerSentence = (code: string) =>
+export const deliveryBlockerSentence = (code: string, codeHost?: CodeHost) =>
   codeSentence(
     code,
-    blockerSentences,
+    blockerSentences(codeHost),
     "Delivery is waiting on a condition this version can't describe.",
   );
+
+/** What a code-host action acts on, named for its host; null for an action that is not one. */
+export function codeHostActionLabel(
+  action: string,
+  codeHost: CodeHost | undefined,
+) {
+  const name = codeHostName(codeHost),
+    gitlab = codeHost === "gitlab";
+  if (action.startsWith("pr.thread."))
+    return `${name} ${gitlab ? "discussion" : "review thread"}`;
+  if (action.startsWith("pr."))
+    return `${name} ${gitlab ? "merge request" : "pull request"}`;
+  return action.startsWith("branch.") ? `${name} branch` : null;
+}
 
 export const pullRequestStateLabel = (
   state: "OPEN" | "CLOSED" | "MERGED",
@@ -45,12 +65,34 @@ export const pullRequestStateLabel = (
 export const checkStatusWord = (status: "success" | "pending" | "failure") =>
   ({ success: "Passed", pending: "Pending", failure: "Failed" })[status];
 
-/** The link only when it is an https github.com URL: defence in depth behind the read schema, which already rejects any other URL. */
-export function safePullRequestUrl(url: string | undefined) {
+/** What an approval's exact material acts on, when the server named the code host of its repository link. */
+export function approvalActsOn(approval: {
+  codeHost?: CodeHost | undefined;
+  material: unknown;
+}) {
+  const material = approval.material;
+  const kind =
+    typeof material === "object" && material !== null && "kind" in material
+      ? material.kind
+      : null;
+  return approval.codeHost && typeof kind === "string"
+    ? codeHostActionLabel(kind, approval.codeHost)
+    : null;
+}
+
+/**
+ * The link only on its code host: github.com for GitHub, any https URL for GitLab. Defence in depth
+ * behind the read schema, which already rejects any other URL.
+ */
+export function safePullRequestUrl(
+  url: string | undefined,
+  codeHost: CodeHost = "github",
+) {
   if (!url) return null;
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "https:" && parsed.hostname === "github.com"
+    return parsed.protocol === "https:" &&
+      (codeHost === "gitlab" || parsed.hostname === "github.com")
       ? url
       : null;
   } catch {
@@ -58,24 +100,17 @@ export function safePullRequestUrl(url: string | undefined) {
   }
 }
 
-/** A compare link on the code host that produced it: github.com for GitHub, any https URL for GitLab. */
-export function safeCompareUrl(
+/** A compare link on the code host that produced it; a link without a code host is not shown. */
+export const safeCompareUrl = (
   url: string | undefined,
-  codeHost: "github" | "gitlab" | undefined,
-) {
-  if (codeHost === "github") return safePullRequestUrl(url);
-  if (codeHost !== "gitlab" || !url) return null;
-  try {
-    return new URL(url).protocol === "https:" ? url : null;
-  } catch {
-    return null;
-  }
-}
+  codeHost: CodeHost | undefined,
+) => (codeHost ? safePullRequestUrl(url, codeHost) : null);
 
 type PullRequestBinding = {
   number: number;
   repositoryName: string;
   url?: string | undefined;
+  codeHost?: CodeHost | undefined;
 };
 
 /**
@@ -83,14 +118,17 @@ type PullRequestBinding = {
  * because without one `repositoryName` is the provider's opaque repository id.
  */
 export const pullRequestRepository = (binding: PullRequestBinding) =>
-  safePullRequestUrl(binding.url) ? binding.repositoryName : null;
+  safePullRequestUrl(binding.url, binding.codeHost)
+    ? binding.repositoryName
+    : null;
 
-/** "acme/app#12", or "PR #12" when the repository name is not verified. */
+/** "acme/app#12" (GitLab: "group/app!12"), or "PR #12" when the repository name is not verified. */
 export function pullRequestReference(binding: PullRequestBinding) {
-  const repository = pullRequestRepository(binding);
+  const repository = pullRequestRepository(binding),
+    gitlab = binding.codeHost === "gitlab";
   return repository
-    ? `${repository}#${binding.number}`
-    : `PR #${binding.number}`;
+    ? `${repository}${gitlab ? "!" : "#"}${binding.number}`
+    : `${gitlab ? "Merge request !" : "PR #"}${binding.number}`;
 }
 
 /**

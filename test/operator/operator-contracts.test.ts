@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { executionIntentStateSchema } from "../../src/core/execution-runtime.js";
 import {
   assignmentRecoverySchema,
+  deliveryReadSchema,
   commandReceiptSchema,
   interactionSchema,
   localReviewOperationReadSchema,
@@ -822,6 +823,44 @@ test("an approval's compare link comes with its code host, and a GitHub link sta
       compareUrl: "http://gitlab.example.com/g/app/-/commit/abc",
       compareCodeHost: "gitlab",
     },
+  ])
+    assert.equal(ok(bad), false, JSON.stringify(bad));
+});
+
+test("a delivery binding's link stays on github.com unless it is a GitLab merge request", () => {
+  const binding = {
+    revision: 1,
+    number: 12,
+    repositoryName: "group/sub/app",
+    headSha: "a".repeat(40),
+    state: "OPEN",
+    observedAt: 1,
+    readError: null,
+    omittedCheckCount: 0,
+    omittedFeedbackCount: 0,
+    checks: [],
+    feedback: [],
+  };
+  const ok = (extra: Record<string, unknown>) =>
+    deliveryReadSchema.safeParse({
+      mode: "reviewable-pr",
+      policyVersion: 1,
+      blockers: [],
+      omittedBlockerCount: 0,
+      omittedActionCount: 0,
+      binding: { ...binding, ...extra },
+      actions: [],
+    }).success;
+  const gitlabUrl =
+    "https://gitlab.example.com/group/sub/app/-/merge_requests/12";
+  assert.equal(ok({}), true);
+  assert.equal(ok({ url: "https://github.com/acme/app/pull/12" }), true);
+  assert.equal(ok({ codeHost: "gitlab", url: gitlabUrl }), true);
+  assert.equal(ok({ codeHost: "gitlab" }), true);
+  for (const bad of [
+    { url: gitlabUrl },
+    { codeHost: "github", url: gitlabUrl },
+    { codeHost: "gitlab", url: gitlabUrl.replace("https", "http") },
   ])
     assert.equal(ok(bad), false, JSON.stringify(bad));
 });

@@ -3216,6 +3216,104 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
   await page.unrouteAll({ behavior: "wait" });
 });
 
+test("The delivery block names a GitLab merge request, its link and its read, and the handback names GitLab", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Fieldnotes",
+    "MR task",
+    "Ship it.",
+  );
+  a.result("Guide drafted");
+  setLinkedRepository(fixture.f, a.projectId, true);
+  const { web, page } = await fixture.launch();
+  const head = "1".repeat(40),
+    observedAt = new Date(2026, 9, 16, 9, 7, 30).getTime(),
+    url = "https://gitlab.example.com/group/sub/app/-/merge_requests/12";
+  const read = (binding: Record<string, unknown>, blockers: string[] = []) => ({
+    mode: "reviewable-pr",
+    policyVersion: 1,
+    blockers,
+    omittedBlockerCount: 0,
+    omittedActionCount: 0,
+    binding: {
+      revision: 1,
+      number: 12,
+      codeHost: "gitlab",
+      repositoryName: "group/sub/app",
+      url,
+      headSha: head,
+      state: "OPEN",
+      observedAt,
+      readError: null,
+      omittedCheckCount: 0,
+      omittedFeedbackCount: 0,
+      checks: [],
+      feedback: [],
+      ...binding,
+    },
+    actions: [],
+  });
+  let delivery: unknown = read({}, ["pr-not-confirmed-merged"]);
+  await page.route(
+    (u) => /^\/api\/operator\/tasks\/[^/]+$/.test(u.pathname),
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.delivery = delivery;
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await openTaskTab(page, "Changes");
+  const changes = page.locator("#changes");
+  const link = changes.getByRole("link", { name: "group/sub/app!12" });
+  await link.waitFor();
+  assert.equal(await link.getAttribute("href"), url);
+  assert.equal(
+    (
+      await changes
+        .locator("p", {
+          has: page.getByRole("link", { name: "group/sub/app!12" }),
+        })
+        .innerText()
+    )
+      .replace(/\s+/g, " ")
+      .trim(),
+    "group/sub/app!12 (opens GitLab) Open head 11111111",
+  );
+  await changes.getByText(`GitLab read ${clockLabel(observedAt)}`).waitFor();
+  await changes
+    .getByText("Waiting for GitLab to confirm the merge request merged.", {
+      exact: true,
+    })
+    .waitFor();
+  await changes.getByText(/^Reviewable merge request handed back\./).waitFor();
+  await changes
+    .getByText(/Settling does not merge, close or comment on GitLab\./)
+    .waitFor();
+  assert.equal(await changes.getByText(/GitHub/).count(), 0);
+
+  delivery = read({ readError: "provider-read-unavailable" });
+  await refreshTask(page, a.taskId);
+  await changes
+    .getByText(
+      `Last GitLab read failed; showing the read from ${clockLabel(observedAt)}.`,
+      { exact: true },
+    )
+    .waitFor();
+
+  delivery = read({ url: undefined, repositoryName: "42" });
+  await refreshTask(page, a.taskId);
+  await changes
+    .getByText(
+      "No GitLab link: this merge request's project name was not observed.",
+    )
+    .waitFor();
+  assert.equal(await changes.locator('a[href*="merge_requests"]').count(), 0);
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 test("The delivery block links the PR, says its state and blockers in words, and says when checks were not observed", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedReviewTask(

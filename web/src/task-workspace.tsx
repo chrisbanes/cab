@@ -63,6 +63,7 @@ import {
 import {
   checkStatusWord,
   deliveryActionLine,
+  codeHostName,
   deliveryBlockerSentence,
   pullRequestReference,
   pullRequestStateLabel,
@@ -3096,7 +3097,8 @@ function PullRequestLine({
 }: {
   binding: NonNullable<NonNullable<TaskRead["data"]["delivery"]>["binding"]>;
 }) {
-  const href = safePullRequestUrl(binding.url),
+  const href = safePullRequestUrl(binding.url, binding.codeHost),
+    host = codeHostName(binding.codeHost),
     tone = {
       MERGED: "success",
       CLOSED: "warning",
@@ -3107,7 +3109,7 @@ function PullRequestLine({
       {href ? (
         <a href={href} target="_blank" rel="noopener noreferrer">
           {pullRequestReference(binding)}
-          <span className="sr-only"> (opens GitHub)</span>
+          <span className="sr-only"> (opens {host})</span>
         </a>
       ) : (
         pullRequestReference(binding)
@@ -3117,7 +3119,13 @@ function PullRequestLine({
       </StatusBadge>{" "}
       head <ShortId value={binding.headSha} />
       {!href && (
-        <> No GitHub link: this PR's repository name was not observed.</>
+        <>
+          {" "}
+          No {host} link: this{" "}
+          {binding.codeHost === "gitlab" ? "merge request" : "PR"}'s{" "}
+          {binding.codeHost === "gitlab" ? "project" : "repository"} name was
+          not observed.
+        </>
       )}
     </p>
   );
@@ -3230,11 +3238,14 @@ function Changes({
           <p>
             {d.binding.readError ? (
               <>
-                Last GitHub read failed; showing the read from{" "}
-                {clockLabel(d.binding.observedAt)}.
+                Last {codeHostName(d.binding.codeHost)} read failed; showing the
+                read from {clockLabel(d.binding.observedAt)}.
               </>
             ) : (
-              <>GitHub read {clockLabel(d.binding.observedAt)}</>
+              <>
+                {codeHostName(d.binding.codeHost)} read{" "}
+                {clockLabel(d.binding.observedAt)}
+              </>
             )}
           </p>
           {d.binding.readError && (
@@ -3283,8 +3294,8 @@ function Changes({
           ))}
           {d.binding.state === "MERGED" && (
             <p>
-              PR merged; task completion still requires its recorded completion
-              workflow.
+              {d.binding.codeHost === "gitlab" ? "Merge request" : "PR"} merged;
+              task completion still requires its recorded completion workflow.
             </p>
           )}
         </>
@@ -3298,7 +3309,7 @@ function Changes({
       {delivers &&
         d?.blockers.map((b) => (
           <div key={b}>
-            <p>{deliveryBlockerSentence(b)}</p>
+            <p>{deliveryBlockerSentence(b, d.binding?.codeHost)}</p>
             <OutcomeDetails fields={[["Code", b]]} />
           </div>
         ))}
