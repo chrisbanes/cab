@@ -105,9 +105,13 @@ export function TaskInspector({
                     ) : (
                       <CircleCheck aria-hidden="true" data-tone="ok" />
                     )}
-                    <span className="task-id">
-                      {b.repositoryName}#{b.number}
-                    </span>
+                    {b.url ? (
+                      <a className="task-id" href={b.url}>
+                        {b.label}
+                      </a>
+                    ) : (
+                      <span className="task-id">{b.label}</span>
+                    )}
                     <span className="muted">
                       {b.state === "open" ? "Open blocker" : "Closed"}
                     </span>

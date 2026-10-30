@@ -10,7 +10,7 @@ import type {
   ProviderActionObservation,
 } from "../../src/core/delivery.js";
 import type { IssueSnapshot } from "../../src/core/github-source.js";
-import type { Readiness } from "../../src/core/github-source-contracts.js";
+import type { GitHubReadiness } from "../../src/core/github-source-contracts.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import type { CodeHostDeliveryProvider } from "../../src/standalone/code-host.js";
 import type { IssueTrackerWriter } from "../../src/standalone/issue-tracker.js";
@@ -336,16 +336,16 @@ export const noRuntime: Runtime = {
 export type PublicationFixtureOptions = {
   /** The selections the source reads, in order. */
   selections?: ("repo" | "project" | "search" | "filtered")[];
-  readiness?: Readiness | null;
+  readiness?: GitHubReadiness | null;
   grants?: ("create" | "item" | "field")[];
   mode?: "allow" | "approval";
 };
 
-const labelReady: Readiness = {
+const labelReady: GitHubReadiness = {
   mode: "any",
   conditions: [{ kind: "label", operator: "has", name: "ready" }],
 };
-export const fieldReady: Readiness = {
+export const fieldReady: GitHubReadiness = {
   mode: "any",
   conditions: [
     {
@@ -357,7 +357,7 @@ export const fieldReady: Readiness = {
     },
   ],
 };
-export const labelAndFieldReady: Readiness = {
+export const labelAndFieldReady: GitHubReadiness = {
   mode: "all",
   conditions: [...labelReady.conditions, ...fieldReady.conditions],
 };

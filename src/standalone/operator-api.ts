@@ -515,6 +515,19 @@ type LocalReviewCommand = Extract<
       | "review.send.reconcile";
   }
 >;
+/** A Jira issue's `KEY-n` and browse link on its site, from the stored project key and number. */
+function jiraIssueLink(site: string, project: unknown, number: number | null) {
+  const projectKey = /^[A-Z][A-Z0-9_]{0,254}$/.test(String(project))
+    ? String(project)
+    : null;
+  const key = projectKey && number ? `${projectKey}-${number}` : null;
+  return {
+    projectKey,
+    key,
+    url: key ? `https://${site}/browse/${key}` : null,
+  };
+}
+
 /**
  * A delivery branch's repository: the GitHub source's name when the branch is in the source
  * repository, else the repository ID. A Jira project ID is never a repository, even when it
@@ -2308,12 +2321,11 @@ export class OperatorApi {
         detail: {},
       };
     }
-    const projectKey = /^[A-Z][A-Z0-9_]{0,254}$/.test(
-      String(issue?.repositoryName),
-    )
-      ? String(issue?.repositoryName)
-      : null;
-    const key = projectKey && number ? `${projectKey}-${number}` : null;
+    const { projectKey, key, url } = jiraIssueLink(
+      identity.provider,
+      issue?.repositoryName,
+      number,
+    );
     const status = z
       .object({ name: z.string(), categoryKey: z.string() })
       .passthrough()
@@ -2326,7 +2338,7 @@ export class OperatorApi {
     return {
       repositoryName: projectKey,
       number,
-      url: key ? `https://${identity.provider}/browse/${key}` : null,
+      url,
       detail: {
         ...(key ? { key } : {}),
         status: status.success
@@ -2739,23 +2751,41 @@ export class OperatorApi {
       ? String(value)
       : null;
   }
-  /** Open GitHub blockers; one imported into the same project is named by its task's disclosable title. */
-  private openBlockers(
-    nodeId: string,
+  /** A blocker's label and link in its tracker's own terms: `owner/name#n`, or a Jira `KEY-n` on the site. */
+  private blockerName(
+    identity: { provider: string; tracker?: "jira" },
+    b: Row,
     excluded: readonly string[] | undefined,
   ) {
-    return this.service
-      .githubSources()
-      .nativeBlockers(nodeId)
+    const number = Number(b.issueNumber) || null;
+    if (identity.tracker) {
+      const { key, url } = jiraIssueLink(
+        identity.provider,
+        b.repositoryName,
+        number,
+      );
+      return { label: key ?? "Jira issue", url };
+    }
+    const name = this.repositoryName(b.repositoryName, excluded);
+    return {
+      label: `${name ?? "GitHub"}#${Number(b.issueNumber)}`,
+      url: githubIssueUrl(name, number),
+    };
+  }
+  /** Open blockers; one imported into the same project is named by its task's disclosable title. */
+  private openBlockers(
+    identity: { provider: string; tracker?: "jira"; nodeId: string },
+    excluded: readonly string[] | undefined,
+  ) {
+    return this.sourceStore(identity)
+      .nativeBlockers(identity.nodeId)
       .filter((b) => b.status === "open")
       .slice(0, 100)
       .map((b) => {
-        const name = this.repositoryName(b.repositoryName, excluded),
-          title = b.taskId ? this.safe(b.taskTitle, excluded) : null;
+        const title = b.taskId ? this.safe(b.taskTitle, excluded) : null;
         return {
-          label: `${name ?? "GitHub"}#${Number(b.issueNumber)}`,
+          ...this.blockerName(identity, b, excluded),
           task: title ? { id: String(b.taskId), title } : null,
-          url: githubIssueUrl(name, Number(b.issueNumber) || null),
         };
       });
   }
@@ -2787,13 +2817,14 @@ export class OperatorApi {
         excluded,
         readiness,
       ),
-      openBlockers: this.openBlockers(identity.nodeId, excluded),
+      openBlockers: this.openBlockers(identity, excluded),
     };
   }
   /** A stored null rule is `none`; a rule the exclusions withhold is `unavailable`. */
   private readinessRuleView(
     rule: Readiness | null,
     excluded: readonly string[] | undefined,
+    projectId: () => string,
   ) {
     if (rule === null) return { kind: "none" as const };
     if (this.exact(JSON.stringify(rule), excluded) === null)
@@ -2801,8 +2832,45 @@ export class OperatorApi {
     return {
       kind: "rule" as const,
       ...rule,
-      conditions: this.fieldNames(rule.conditions, excluded),
+      conditions: this.conditionNames(rule.conditions, excluded, projectId),
     };
+  }
+  /**
+   * Conditions with the names a read of their tracker listed: Project field names for GitHub,
+   * and for Jira the status and option names last observed on the project's imported issues.
+   * Jira fields are named by ID.
+   */
+  private conditionNames(
+    conditions: readonly Readiness["conditions"][number][],
+    excluded: readonly string[] | undefined,
+    projectId: () => string,
+  ) {
+    const named = this.fieldNames(conditions, excluded);
+    if (
+      !conditions.some((c) => c.kind === "status" || c.kind === "select-field")
+    )
+      return named;
+    const observed = this.service.githubSources().observedNames(projectId());
+    const shown = (ids: readonly string[], names?: Map<string, string>) =>
+      Object.fromEntries(
+        ids.flatMap((id) => {
+          const name = names?.get(id);
+          return name !== undefined &&
+            this.exact(name, excluded, textMaxLength) !== null
+            ? [[id, name]]
+            : [];
+        }),
+      );
+    return named.map((c) =>
+      c.kind === "status"
+        ? { ...c, statusNames: shown(c.statusIds, observed.statuses) }
+        : c.kind === "select-field"
+          ? {
+              ...c,
+              optionNames: shown(c.optionIds, observed.options.get(c.fieldId)),
+            }
+          : c,
+    );
   }
   /** Node-ID conditions or field values with each stored name the exclusions leave whole. */
   private fieldNames<T extends ProjectFieldIds>(
@@ -2829,13 +2897,14 @@ export class OperatorApi {
       rule = this.readinessRuleView(
         result ? result.rule : store.readinessRule(projectId()),
         excluded,
+        projectId,
       );
     return rule.kind === "unavailable" || !result
       ? { rule, outcome: "not-evaluated" as const, unmet: [] }
       : {
           rule,
           outcome: result.outcome,
-          unmet: this.fieldNames(result.unmet, excluded),
+          unmet: this.conditionNames(result.unmet, excluded, projectId),
         };
   }
   private async taskSummary(
@@ -4698,6 +4767,7 @@ export class OperatorApi {
         repositoryName: String(b.repositoryName),
         number: Number(b.issueNumber),
         state: b.status,
+        ...this.blockerName(identity, b, excluded),
       })),
       review: review
         ? {
@@ -5924,7 +5994,11 @@ export class OperatorApi {
               active: active.includes(s.id),
             })),
           ],
-          readiness: this.readinessRuleView(g.readiness, excluded),
+          readiness: this.readinessRuleView(
+            jira ? jira.readiness : g.readiness,
+            excluded,
+            () => projectId,
+          ),
           closedIssues: g.closedIssues,
         },
       },
@@ -6271,6 +6345,7 @@ export class OperatorApi {
           const readiness = this.readinessRuleView(
               this.service.githubSources().readinessRule(projectId),
               excluded,
+              () => projectId,
             ),
             counted = this.service.githubSources().selectionCounts(projectId),
             fieldCounts = this.service

@@ -214,7 +214,12 @@ test("taskReadiness states recorded state and wait", () => {
       waits: [{ code: "imported-blockers-blocked" }],
       source: {
         nativeBlockers: [
-          { repositoryName: "acme/design-system", number: 87, state: "open" },
+          {
+            repositoryName: "acme/design-system",
+            number: 87,
+            state: "open",
+            label: "acme/design-system#87",
+          },
         ],
       },
     }),

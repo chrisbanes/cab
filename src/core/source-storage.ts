@@ -60,7 +60,7 @@ export function migrateSourceStorage(db: Database): void {
       taskId TEXT NOT NULL UNIQUE REFERENCES domain_tasks(id), containerId TEXT NOT NULL,
       containerName TEXT NOT NULL, number INTEGER NOT NULL,
       observedTitle TEXT NOT NULL, observedBody TEXT NOT NULL, observedState TEXT NOT NULL,
-      labels TEXT NOT NULL, observedStatus TEXT, PRIMARY KEY(provider, instance, externalId)
+      labels TEXT NOT NULL, observedStatus TEXT, observedFields TEXT, PRIMARY KEY(provider, instance, externalId)
     );
     CREATE TABLE IF NOT EXISTS source_memberships (
       projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
@@ -131,15 +131,14 @@ export function migrateSourceStorage(db: Database): void {
       fieldId TEXT NOT NULL, name TEXT NOT NULL, options TEXT NOT NULL,
       PRIMARY KEY(provider, instance, scopeId, fieldId)
     );`);
-  // The tracker's own status as JSON `{id,name,categoryKey}`; NULL for GitHub.
-  if (
-    !(
-      db.prepare("PRAGMA table_info(external_items)").all() as {
-        name: string;
-      }[]
-    ).some((column) => column.name === "observedStatus")
-  )
-    db.exec("ALTER TABLE external_items ADD COLUMN observedStatus TEXT");
+  // The tracker's own status as JSON `{id,name,categoryKey}`, and its single-select values as
+  // JSON `[{fieldId,optionId,name}]`; NULL for GitHub.
+  const columns = (
+    db.prepare("PRAGMA table_info(external_items)").all() as { name: string }[]
+  ).map((column) => column.name);
+  for (const column of ["observedStatus", "observedFields"])
+    if (!columns.includes(column))
+      db.exec(`ALTER TABLE external_items ADD COLUMN ${column} TEXT`);
   moveLegacyGitHubSourceStorage(db);
 }
 

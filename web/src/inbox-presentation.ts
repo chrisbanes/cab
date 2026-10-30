@@ -137,7 +137,7 @@ export function holdNotices(
   const notices: HoldNotice[] = [],
     openBlockers = (task.source?.nativeBlockers ?? [])
       .filter((blocker) => blocker.state === "open")
-      .map((blocker) => `${blocker.repositoryName}#${blocker.number}`);
+      .map((blocker) => blocker.label);
   // The task read's waits in the flow's order, then what makes the task itself not startable.
   const codes = [
     ...task.waits.map((wait) => wait.code),

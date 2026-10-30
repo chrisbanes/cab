@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { DomainConflictError } from "../../src/core/domain-errors.js";
-import type { Readiness } from "../../src/core/github-source-contracts.js";
+import type { GitHubReadiness } from "../../src/core/github-source-contracts.js";
 import {
   fieldReady,
   labelAndFieldReady,
@@ -268,7 +268,7 @@ test("publication writes the first option of an in condition, nothing for lacks,
     operator: "not-in" as const,
     optionNodeIds: [publicationProject.other],
   };
-  const writes = async (readiness: Readiness) => {
+  const writes = async (readiness: GitHubReadiness) => {
     const f = await publicationFixture({
       selections: ["project"],
       readiness,
@@ -352,7 +352,7 @@ test("a Draft task is refused where a bare new issue would satisfy the rule thro
     name: "blocked",
   };
   const has = { ...lacks, operator: "has" as const, name: "ready" };
-  const reason = async (readiness: Readiness, ready: boolean) => {
+  const reason = async (readiness: GitHubReadiness, ready: boolean) => {
     const f = await publicationFixture({ readiness });
     t.after(() => f.close());
     return f.target(f.task(ready), "repo").reasonCode;

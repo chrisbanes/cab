@@ -41,15 +41,24 @@ export const adfParagraph = (text: string) => ({
 
 export const jiraIssue = (
   n: number,
-  over: { done?: boolean; summary?: string; description?: unknown } = {},
+  over: {
+    done?: boolean;
+    summary?: string;
+    description?: unknown;
+    issuelinks?: unknown[];
+    /** An open status other than To Do, such as one a readiness rule excludes. */
+    status?: { id: string; name: string };
+    /** Extra fields, such as a custom field a readiness rule reads. */
+    fields?: Record<string, unknown>;
+  } = {},
 ) => ({
   id: String(10000 + n),
   key: `ABC-${n}`,
   fields: {
     summary: over.summary ?? `Issue ${n}`,
     status: {
-      id: over.done ? "9" : "1",
-      name: over.done ? "Done" : "To Do",
+      id: over.status?.id ?? (over.done ? "9" : "1"),
+      name: over.status?.name ?? (over.done ? "Done" : "To Do"),
       statusCategory: { key: over.done ? "done" : "new" },
     },
     labels: ["ready"],
@@ -58,5 +67,7 @@ export const jiraIssue = (
         ? adfParagraph(`Body ${n}`)
         : over.description,
     project: { id: "10000", key: "ABC" },
+    issuelinks: over.issuelinks ?? [],
+    ...over.fields,
   },
 });

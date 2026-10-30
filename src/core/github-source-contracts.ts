@@ -59,38 +59,77 @@ export const jiraSelectionSchema = z
   })
   .strict();
 
-export const readinessConditionSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("label"),
-      operator: z.enum(["has", "lacks"]),
-      name: nonempty,
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("project-field"),
-      projectNodeId: nonempty,
-      fieldNodeId: nonempty,
-      operator: z.enum(["in", "not-in"]),
-      optionNodeIds: z
-        .array(nonempty)
-        .min(1)
-        .max(256)
-        .refine((ids) => new Set(ids).size === ids.length, {
-          message: "optionNodeIds must be unique",
-        }),
-    })
-    .strict(),
-]);
-
-export const readinessSchema = z
+const labelCondition = z
   .object({
-    mode: z.enum(["all", "any"]),
-    conditions: z.array(readinessConditionSchema).min(1).max(20),
+    kind: z.literal("label"),
+    operator: z.enum(["has", "lacks"]),
+    name: nonempty,
   })
   .strict();
+const uniqueIds = (ids: string[]) => new Set(ids).size === ids.length;
+const projectFieldCondition = z
+  .object({
+    kind: z.literal("project-field"),
+    projectNodeId: nonempty,
+    fieldNodeId: nonempty,
+    operator: z.enum(["in", "not-in"]),
+    optionNodeIds: z.array(nonempty).min(1).max(256).refine(uniqueIds, {
+      message: "optionNodeIds must be unique",
+    }),
+  })
+  .strict();
+const statusCondition = z
+  .object({
+    kind: z.literal("status"),
+    operator: z.enum(["in", "not-in"]),
+    statusIds: z.array(nonempty).min(1).max(256).refine(uniqueIds, {
+      message: "statusIds must be unique",
+    }),
+  })
+  .strict();
+const selectFieldCondition = z
+  .object({
+    kind: z.literal("select-field"),
+    fieldId: z.string().regex(/^customfield_\d{1,20}$/),
+    operator: z.enum(["in", "not-in"]),
+    optionIds: z.array(nonempty).min(1).max(256).refine(uniqueIds, {
+      message: "optionIds must be unique",
+    }),
+  })
+  .strict();
+
+/** Every stored condition kind; a tracker's own schema below limits what it may save. */
+export const readinessConditionSchema = z.discriminatedUnion("kind", [
+  labelCondition,
+  projectFieldCondition,
+  statusCondition,
+  selectFieldCondition,
+]);
+
+const ruleOf = <C extends z.ZodType>(condition: C) =>
+  z
+    .object({
+      mode: z.enum(["all", "any"]),
+      conditions: z.array(condition).min(1).max(20),
+    })
+    .strict();
+
+/** The stored rule, whichever tracker saved it. */
+export const readinessSchema = ruleOf(readinessConditionSchema);
+/** What a GitHub source may save. */
+export const githubReadinessSchema = ruleOf(
+  z.discriminatedUnion("kind", [labelCondition, projectFieldCondition]),
+);
+/** What a Jira source may save. */
+export const jiraReadinessSchema = ruleOf(
+  z.discriminatedUnion("kind", [
+    labelCondition,
+    statusCondition,
+    selectFieldCondition,
+  ]),
+);
 export type Readiness = z.output<typeof readinessSchema>;
+export type GitHubReadiness = z.output<typeof githubReadinessSchema>;
 export type ReadinessCondition = z.output<typeof readinessConditionSchema>;
 type ProjectField = z.output<typeof projectFieldsSchema>[number];
 
@@ -101,27 +140,52 @@ export const hasLabelName = (
 ): boolean => labels.some((l) => l.toLowerCase() === name.toLowerCase());
 
 /**
- * The readiness predicate over one issue's labels and Project fields. A `null` rule
+ * The readiness predicate over one issue's labels, Project fields, and (Jira) status and
+ * select fields. An unobserved status or field never satisfies a condition. A `null` rule
  * filters nothing. `unmet` lists the unsatisfied conditions (all) or, when none is
  * satisfied, every condition (any).
  */
 export function evaluateReadiness(
   rule: Readiness | null,
-  facts: { labels: readonly string[]; fields: readonly ProjectField[] },
+  facts: {
+    labels: readonly string[];
+    fields: readonly ProjectField[];
+    status?: string | null;
+    selectFields?: readonly { fieldId: string; optionId: string }[];
+  },
 ): { satisfied: boolean; unmet: ReadinessCondition[] } {
   if (!rule) return { satisfied: true, unmet: [] };
   const unmet = rule.conditions.filter((c) => {
     if (c.kind === "label")
       return hasLabelName(facts.labels, c.name) !== (c.operator === "has");
-    const held = facts.fields.filter(
-      (f) =>
-        f.projectNodeId === c.projectNodeId && f.fieldNodeId === c.fieldNodeId,
-    );
+    if (c.kind === "status") {
+      const status = facts.status ?? null;
+      return c.operator === "in"
+        ? status === null || !c.statusIds.includes(status)
+        : status === null || c.statusIds.includes(status);
+    }
+    const [ids, held] =
+      c.kind === "select-field"
+        ? [
+            c.optionIds,
+            (facts.selectFields ?? [])
+              .filter((f) => f.fieldId === c.fieldId)
+              .map((f) => f.optionId),
+          ]
+        : [
+            c.optionNodeIds,
+            facts.fields
+              .filter(
+                (f) =>
+                  f.projectNodeId === c.projectNodeId &&
+                  f.fieldNodeId === c.fieldNodeId,
+              )
+              .map((f) => f.optionNodeId),
+          ];
     // `not-in` needs a value: an item with none, or outside the Project, is unmet.
     return c.operator === "in"
-      ? !held.some((f) => c.optionNodeIds.includes(f.optionNodeId))
-      : !held.length ||
-          held.some((f) => c.optionNodeIds.includes(f.optionNodeId));
+      ? !held.some((id) => ids.includes(id))
+      : !held.length || held.some((id) => ids.includes(id));
   });
   const satisfied =
     rule.mode === "all"
@@ -176,7 +240,7 @@ export const githubConfigurationSchema = z
         "Selection IDs must be unique",
       ),
     /** `null` is no readiness rule: open issues in active selections are not filtered. */
-    readiness: readinessSchema.nullable(),
+    readiness: githubReadinessSchema.nullable(),
     closedIssues: closedIssuesSchema,
   })
   .strict();
@@ -218,6 +282,8 @@ export const jiraConfigurationSchema = z
           new Set(values.map((value) => value.id)).size === values.length,
         "Selection IDs must be unique",
       ),
+    /** `null` is no readiness rule: every issue the selections match is Ready. */
+    readiness: jiraReadinessSchema.nullable(),
   })
   .strict();
 export type JiraSelection = z.output<typeof jiraSelectionSchema>;

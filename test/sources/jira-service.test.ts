@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import type { z } from "zod";
+import type { jiraReadinessSchema } from "../../src/core/github-source-contracts.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import {
   deliveryRepositoryLabel,
@@ -16,6 +19,8 @@ import {
   json,
 } from "../fixtures/fake-jira.js";
 import { tmpdir } from "../fixtures/temp.js";
+
+type JiraReadiness = z.output<typeof jiraReadinessSchema>;
 
 class IdleRuntime implements Runtime {
   async start() {}
@@ -50,9 +55,14 @@ const values = {
 interface JiraState {
   issues: Record<string, ReturnType<typeof jiraIssue>[]>;
   fail: Record<string, number>;
+  /** JQL whose response is cut off mid-body. */
+  truncated: Set<string>;
 }
 
-async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
+async function fixture(
+  t: { after: (fn: () => void | Promise<void>) => void },
+  options: { lead?: boolean } = {},
+) {
   for (const key of Object.keys(names) as (keyof typeof names)[]) {
     const previous = process.env[names[key]];
     t.after(() => {
@@ -61,7 +71,7 @@ async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
     });
     process.env[names[key]] = values[key];
   }
-  const state: JiraState = { issues: {}, fail: {} };
+  const state: JiraState = { issues: {}, fail: {}, truncated: new Set() };
   const jira = fakeJira((request) => {
     if (request.url.pathname.endsWith("/myself"))
       return json({ accountId: "acct-1", displayName: "Chris" });
@@ -79,6 +89,8 @@ async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
       });
     const status = state.fail[jql];
     if (status) return new Response("", { status });
+    if (state.truncated.has(jql))
+      return new Response('{"issues":[{"id":"1', { status: 200 });
     return json({ issues: state.issues[jql] ?? [] });
   });
   const dataDir = join(mkdtempSync(join(tmpdir(), "cab-jira-")), "data");
@@ -100,13 +112,24 @@ async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
   await service.start();
   const api = new OperatorApi(service, [dataDir]);
   const projectId = randomUUID();
+  const leadProfileId = options.lead ? randomUUID() : null;
+  if (leadProfileId)
+    service.domain().execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId: leadProfileId,
+      name: "Lead",
+      instructions: "Lead",
+      capabilities: "work",
+    });
   service.domain().execute({
     type: "project.create",
     actor: "operator",
     key: randomUUID(),
     projectId,
     name: "Alpha",
-    leadProfileId: null,
+    leadProfileId,
   });
   const configureCredential = () =>
     api.execute({
@@ -121,6 +144,7 @@ async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
     selections: { id: string; kind: "jql"; jql: string }[],
     expectedVersion = service.domain().jiraConfiguration(projectId)?.version ??
       1,
+    readiness?: JiraReadiness | null,
   ) =>
     api.execute({
       type: "jira.configure",
@@ -129,10 +153,12 @@ async function fixture(t: { after: (fn: () => void | Promise<void>) => void }) {
       expectedVersion,
       instance: site,
       selections,
+      ...(readiness === undefined ? {} : { readiness }),
     });
   return {
     api,
     service,
+    dataDir,
     state,
     jira,
     projectId,
@@ -261,6 +287,7 @@ test("a Jira project imports, deduplicates, updates, withdraws, holds and surviv
 
   // A partial read withdraws nothing, and imported Jira tasks are not admitted.
   f.state.fail["project = ABC"] = 500;
+  f.state.fail["labels = ready"] = 500;
   await f.api.refreshSources();
   assert.equal(stores.memberships("10001").length, 1);
   assert.equal(stores.hold("10002")?.active ?? 0, 0);
@@ -269,6 +296,7 @@ test("a Jira project imports, deduplicates, updates, withdraws, holds and surviv
     domain.admission(taskId).reasons.includes("imported-blockers-unknown"),
   );
   delete f.state.fail["project = ABC"];
+  delete f.state.fail["labels = ready"];
 
   // Closing an issue in Jira holds its task as an external closure.
   f.state.issues["project = ABC"] = [
@@ -437,4 +465,282 @@ test("a Jira project ID that equals a linked repository ID never names the deliv
   assert.equal(deliveryRepositoryLabel(github, "R_1"), "org/repo");
   assert.equal(deliveryRepositoryLabel(github, "R_2"), "R_2");
   assert.equal(deliveryRepositoryLabel(null, "R_2"), "R_2");
+});
+
+const link = (inward: string, n: number, done = false) => ({
+  type: { name: "Blocks", inward, outward: "blocks" },
+  inwardIssue: {
+    id: String(10000 + n),
+    key: `ABC-${n}`,
+    fields: {
+      status: { statusCategory: { key: done ? "done" : "indeterminate" } },
+    },
+  },
+});
+
+test("'is blocked by' links gate admission until the blocker is done, and other links are ignored", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }]);
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const domain = f.service.domain();
+  const reasons = (nodeId: string) =>
+    domain.admission(String(stores.issue(nodeId)?.taskId)).reasons;
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, { issuelinks: [link("is blocked by", 2)] }),
+    jiraIssue(2),
+    jiraIssue(3, { issuelinks: [link("relates to", 2)] }),
+  ];
+  await f.api.refreshSources();
+  assert.ok(reasons("10001").includes("imported-blockers-blocked"));
+  assert.deepEqual(
+    stores.nativeBlockers("10001").map((b) => [b.blockerNodeId, b.status]),
+    [["10002", "open"]],
+  );
+  assert.ok(!reasons("10002").some((r) => r.startsWith("imported-blockers-")));
+  assert.ok(!reasons("10003").some((r) => r.startsWith("imported-blockers-")));
+
+  // The blocker is done in Jira: the next complete read clears the dependent.
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, { issuelinks: [link("is blocked by", 2, true)] }),
+    jiraIssue(2, { done: true }),
+    jiraIssue(3),
+  ];
+  await f.api.refreshSources();
+  assert.ok(!reasons("10001").some((r) => r.startsWith("imported-blockers-")));
+  assert.ok(!reasons("10001").includes("imported-blockers-blocked"));
+});
+
+test("a failed, truncated or rate-limited read keeps a dependency and never clears it", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }]);
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const domain = f.service.domain();
+  const taskId = () => String(stores.issue("10001")?.taskId);
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, { issuelinks: [link("is blocked by", 2)] }),
+  ];
+  await f.api.refreshSources();
+  assert.ok(
+    domain.admission(taskId()).reasons.includes("imported-blockers-blocked"),
+  );
+  const jql = "project = ABC";
+  // The blocker is done upstream, but no complete read says so.
+  f.state.issues[jql] = [
+    jiraIssue(1, { issuelinks: [link("is blocked by", 2, true)] }),
+  ];
+  const failures: (() => void)[] = [
+    () => {
+      f.state.fail[jql] = 500;
+    },
+    () => {
+      delete f.state.fail[jql];
+      f.state.truncated.add(jql);
+    },
+    () => {
+      f.state.truncated.delete(jql);
+      f.state.fail[jql] = 429;
+    },
+  ];
+  for (const fail of failures) {
+    fail();
+    await f.api.refreshSources();
+    const reasons = domain.admission(taskId()).reasons;
+    assert.ok(reasons.includes("imported-blockers-unknown"));
+    assert.deepEqual(
+      stores.nativeBlockers("10001").map((b) => [b.blockerNodeId, b.status]),
+      [["10002", "open"]],
+    );
+  }
+});
+
+test("a select-field rule is read from the scripted custom field and gates readiness", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }], 1, {
+    mode: "all",
+    conditions: [
+      {
+        kind: "select-field",
+        fieldId: "customfield_10010",
+        operator: "in",
+        optionIds: ["20"],
+      },
+    ],
+  });
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const domain = f.service.domain();
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, {
+      fields: { customfield_10010: { id: "20", value: "High" } },
+    }),
+    jiraIssue(2, {
+      fields: { customfield_10010: { id: "21", value: "Low" } },
+    }),
+  ];
+  await f.api.refreshSources();
+  const search = f.jira.requests.findLast((r) =>
+    r.url.pathname.endsWith("/search/jql"),
+  );
+  assert.ok(
+    (search?.body as { fields: string[] } | undefined)?.fields.includes(
+      "customfield_10010",
+    ),
+  );
+  const unready = (nodeId: string) =>
+    domain
+      .admission(String(stores.issue(nodeId)?.taskId))
+      .reasons.includes("task-unready");
+  assert.equal(unready("10001"), false);
+  assert.equal(unready("10002"), true);
+});
+
+test("the operator sees a Jira rule with observed names, unmet conditions and Jira-keyed blockers", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  const rule = {
+    mode: "all" as const,
+    conditions: [
+      {
+        kind: "status" as const,
+        operator: "in" as const,
+        statusIds: ["1", "7"],
+      },
+    ],
+  };
+  await f.configureJira(
+    [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
+    1,
+    rule,
+  );
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, { issuelinks: [link("is blocked by", 3)] }),
+    jiraIssue(2, { status: { id: "3", name: "In Progress" } }),
+  ];
+  await f.api.refreshSources();
+  const view = (await f.api.readProjectConfiguration(f.projectId)).data.source
+    .readiness;
+  assert.deepEqual(view, {
+    kind: "rule",
+    mode: "all",
+    conditions: [{ ...rule.conditions[0], statusNames: { "1": "To Do" } }],
+  });
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskOf = (nodeId: string) => String(stores.issue(nodeId)?.taskId);
+  const unmet = (await f.api.readTask(taskOf("10002"))).data.source;
+  assert.equal(unmet?.readiness.outcome, "unmet");
+  assert.deepEqual(
+    unmet?.readiness.unmet,
+    view.kind === "rule" ? view.conditions : [],
+  );
+  const blocked = (await f.api.readTask(taskOf("10001"))).data.source;
+  assert.equal(blocked?.readiness.outcome, "matched");
+  const expected = { label: "ABC-3", url: `https://${site}/browse/ABC-3` };
+  assert.deepEqual(
+    blocked?.nativeBlockers.map((b) => ({ label: b.label, url: b.url })),
+    [expected],
+  );
+  const listed = (await f.api.readTaskListPage()).data.tasks.find(
+    (task) => task.id === taskOf("10001"),
+  );
+  assert.deepEqual(
+    listed?.source?.openBlockers.map((b) => ({ label: b.label, url: b.url })),
+    [expected],
+  );
+});
+
+test("a Jira readiness loss gives the lead one source-hold notice, and a repeat read none", async (t) => {
+  const f = await fixture(t, { lead: true });
+  await f.configureCredential();
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }], 1, {
+    mode: "all",
+    conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
+  });
+  f.state.issues["project = ABC"] = [jiraIssue(1)];
+  await f.api.refreshSources();
+  const domain = f.service.domain();
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  const taskId = String(stores.issue("10001")?.taskId);
+  const leadId = String(domain.ensureLeadAssignment(taskId)?.id);
+  const db = new DatabaseSync(join(f.dataDir, "standalone.sqlite"));
+  t.after(() => db.close());
+  db.prepare("UPDATE domain_assignments SET state = 'held' WHERE id = ?").run(
+    leadId,
+  );
+  const notices = () =>
+    Number(
+      (
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM coordination_inbox_events WHERE recipientAssignmentId = ? AND eventType = 'source-hold'",
+          )
+          .get(leadId) as { count: number }
+      ).count,
+    );
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, { status: { id: "3", name: "In Progress" } }),
+  ];
+  await f.api.refreshSources();
+  assert.equal(stores.hold("10001")?.reason, "readiness-lost");
+  assert.equal(notices(), 1);
+  await f.api.refreshSources();
+  assert.equal(notices(), 1);
+});
+
+test("a project without select-field conditions never hides another project's observed fields on a shared issue", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }], 1, {
+    mode: "all",
+    conditions: [
+      {
+        kind: "select-field",
+        fieldId: "customfield_10010",
+        operator: "in",
+        optionIds: ["20"],
+      },
+    ],
+  });
+  const second = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: second,
+    name: "Beta",
+    leadProfileId: null,
+  });
+  await f.api.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId: second,
+    expectedVersion: 1,
+    instance: site,
+    selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
+  });
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, {
+      fields: { customfield_10010: { id: "20", value: "High" } },
+    }),
+  ];
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  for (let i = 0; i < 2; i++) await f.api.refreshSources();
+  const taskId = String(stores.issue("10001")?.taskId);
+  assert.equal(stores.hold("10001")?.active ?? 0, 0);
+  assert.ok(
+    !f.service.domain().admission(taskId).reasons.includes("task-unready"),
+  );
 });

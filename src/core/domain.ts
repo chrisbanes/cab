@@ -51,6 +51,7 @@ import {
   closedIssuesSchema,
   githubIssueTracker,
   jiraConfigurationSchema,
+  jiraReadinessSchema,
   jiraInstanceSchema,
   jiraSelectionSchema,
 } from "./github-source-contracts.js";
@@ -237,6 +238,8 @@ const commandSchema = z.discriminatedUnion("type", [
       projectId: id,
       expectedVersion: z.number().int().positive(),
       ...jiraConfigurationSchema.shape,
+      /** Omitted keeps the saved rule, so commands recorded before it existed still replay. */
+      readiness: jiraConfigurationSchema.shape.readiness.optional(),
     })
     .strict(),
   z
@@ -1333,10 +1336,11 @@ export class DomainStore {
     version: number;
     instance: string;
     selections: z.output<typeof jiraSelectionSchema>[];
+    readiness: z.output<typeof jiraReadinessSchema> | null;
   } | null {
     this.project(projectId);
     const row = this.required(
-      "SELECT provider, instance, version, selections FROM project_task_sources WHERE projectId = ?",
+      "SELECT provider, instance, version, selections, readiness FROM project_task_sources WHERE projectId = ?",
       id.parse(projectId),
     );
     return row.provider === "jira"
@@ -1346,6 +1350,9 @@ export class DomainStore {
           selections: z
             .array(jiraSelectionSchema)
             .parse(JSON.parse(String(row.selections))),
+          readiness: jiraReadinessSchema
+            .nullable()
+            .parse(JSON.parse(String(row.readiness))),
         }
       : null;
   }
@@ -2679,10 +2686,19 @@ export class DomainStore {
       case "jira.configure": {
         this.operator(command);
         const row = this.required(
-          "SELECT provider, instance, version FROM project_task_sources WHERE projectId = ?",
+          "SELECT provider, instance, version, readiness FROM project_task_sources WHERE projectId = ?",
           command.projectId,
         );
         this.version({ version: Number(row.version) }, command.expectedVersion);
+        // A GitHub project's saved rule may hold GitHub-only conditions, so it never carries over.
+        const readiness =
+          command.readiness === undefined
+            ? row.provider === "jira"
+              ? jiraReadinessSchema
+                  .nullable()
+                  .parse(JSON.parse(String(row.readiness)))
+              : null
+            : command.readiness;
         if (
           (row.provider !== "jira" || row.instance !== command.instance) &&
           this.sourceInUse(command.projectId)
@@ -2696,11 +2712,12 @@ export class DomainStore {
           throw new DomainConflictError("Jira site has no credential");
         this.db
           .prepare(
-            "UPDATE project_task_sources SET provider = 'jira', instance = ?, version = version + 1, credentialRef = NULL, selections = ?, readiness = 'null', closedIssues = 'skip' WHERE projectId = ?",
+            "UPDATE project_task_sources SET provider = 'jira', instance = ?, version = version + 1, credentialRef = NULL, selections = ?, readiness = ?, closedIssues = 'skip' WHERE projectId = ?",
           )
           .run(
             command.instance,
             JSON.stringify(command.selections),
+            JSON.stringify(readiness),
             command.projectId,
           );
         const selectionIds = JSON.stringify(
@@ -2745,6 +2762,7 @@ export class DomainStore {
           version: Number(row.version) + 1,
           instance: command.instance,
           selections: command.selections,
+          readiness,
         };
       }
       case "repositories.configure": {

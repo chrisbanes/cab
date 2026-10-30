@@ -121,7 +121,7 @@ test("retained rendered form actions, fields and mounted route controls match do
   });
   f.seedPersistedState((db) => {
     db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]',NULL)",
+      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]',NULL,NULL)",
     ).run(importedId);
     db.prepare(
       "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'repo','github','github.com','I1','[]')",

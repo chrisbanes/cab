@@ -23,6 +23,8 @@ import {
   usePrivateValues,
 } from "./settings.js";
 import { clockLabel } from "./presentation.js";
+import { parseRule, ruleLines, savedRule } from "./jira-readiness.js";
+import { ruleText } from "../../src/operator/readiness-text.js";
 import type { ObservationResource } from "./sync-placement.js";
 import { NativeSelect } from "./ui/native-select.js";
 
@@ -219,6 +221,11 @@ export function JiraSourceTab(
   const { data, projectId } = p;
   const siteId = useId();
   const saved = data.source.tracker === "jira";
+  // A GitHub project's rule never carries over to Jira.
+  const rule = saved ? savedRule(data.source.readiness) : null;
+  // A rule the read withholds cannot be shown, so a save leaves it as it is.
+  const withheld = saved && data.source.readiness.kind === "unavailable";
+  const savedRuleLines = ruleLines(rule);
   const d = useDraft(p.drafts, `jira.configure:${projectId}`);
   const priv = usePrivateValues(
     p.client,
@@ -259,10 +266,12 @@ export function JiraSourceTab(
           expectedVersion: String(data.source.version),
           instance: saved ? String(data.source.instance ?? "") : "",
           jql: loadedJql,
+          readinessMode: rule?.mode ?? "all",
+          readiness: savedRuleLines,
           key: key(),
         },
     p.loadedAt,
-    [data.source.version, loadedJql],
+    [data.source.version, loadedJql, savedRuleLines],
   );
   const lines = String(d.values.jql ?? "")
     .split("\n")
@@ -314,6 +323,10 @@ export function JiraSourceTab(
     (c) => c.usable,
   );
   const blocked = !instance || lines.length === 0 || lines.length > 30;
+  const readiness = parseRule(
+    String(d.values.readinessMode ?? "all"),
+    String(d.values.readiness ?? ""),
+  );
   // The saved queries are private text: the editor opens only once they are read.
   const editorReady = !saved || known !== undefined;
   return (
@@ -350,11 +363,19 @@ export function JiraSourceTab(
                       kind: "jql",
                       jql,
                     })),
+                    ...(withheld || "error" in readiness
+                      ? {}
+                      : { readiness: readiness.rule }),
                   },
                   p.refreshConfiguration,
-                  blocked
-                    ? { jql: "Enter a site and at least one query." }
-                    : {},
+                  {
+                    ...(blocked
+                      ? { jql: "Enter a site and at least one query." }
+                      : {}),
+                    ...("error" in readiness && !withheld
+                      ? { readiness: readiness.error }
+                      : {}),
+                  },
                 )
               }
             >
@@ -391,6 +412,37 @@ export function JiraSourceTab(
                 label="JQL queries, one per line"
                 multiline
               />
+              {withheld ? (
+                <p className="metadata muted">
+                  The saved readiness rule is not shown here, and saving leaves
+                  it as it is.
+                </p>
+              ) : (
+                <>
+                  <DraftField
+                    draft={d}
+                    field="readinessMode"
+                    label="Readiness mode"
+                  >
+                    <option value="all">All conditions must hold</option>
+                    <option value="any">Any condition may hold</option>
+                  </DraftField>
+                  <DraftField
+                    draft={d}
+                    field="readiness"
+                    label="Readiness conditions, one per line"
+                    multiline
+                  />
+                  <p className="metadata muted">
+                    {rule
+                      ? `Saved rule: ${ruleText(data.source.readiness)}. `
+                      : "No readiness rule: every matched open issue is Ready. "}
+                    Write label has|lacks NAME, status in|not-in ID, or
+                    customfield_N in|not-in ID, with IDs separated by commas.
+                    Leave empty for no rule.
+                  </p>
+                </>
+              )}
               <div className="settings-actions">
                 <Button
                   type="button"

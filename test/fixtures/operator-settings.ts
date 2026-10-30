@@ -210,7 +210,7 @@ export function seedImportedConflict(
   f.service.domain().markImportedTask(taskId, nodeId, "R_PLACEMENT");
   f.seedPersistedState((db) => {
     db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com',?,?,'R_PLACEMENT','owner/repo',?,'Imported','Body','open','[]',NULL)",
+      "INSERT INTO external_items VALUES ('github','github.com',?,?,'R_PLACEMENT','owner/repo',?,'Imported','Body','open','[]',NULL,NULL)",
     ).run(nodeId, taskId, issueNumber);
     for (const projectId of projectIds)
       db.prepare(

@@ -10,6 +10,7 @@ import { sourceCredentialReference } from "../core/credential-reference.js";
 import {
   closedIssuesSchema,
   jiraInstanceSchema,
+  jiraReadinessSchema,
   type Readiness,
   readinessSchema,
   selectionSchema,
@@ -290,6 +291,8 @@ const editSchema = z
         selections: z
           .array(z.object({ jql: z.string().trim().min(1).max(4096) }).strict())
           .max(30),
+        /** A rule replaces, `null` removes the rule, omitted keeps the saved one. */
+        readiness: jiraReadinessSchema.nullable().optional(),
       })
       .strict()
       .optional(),
@@ -390,6 +393,9 @@ function jiraEditCommand(
   }));
   const ids = (list: { id: string | null }[]) =>
     list.map((s) => s.id).join(",") || "none";
+  // Only a Jira project's own rule is kept; a GitHub project's is dropped on the switch.
+  const savedRule =
+    source.tracker === "jira" ? source.readiness : { kind: "none" as const };
   return {
     command: {
       type: "jira.configure",
@@ -397,6 +403,7 @@ function jiraEditCommand(
       expectedVersion: source.version,
       instance: jira.instance,
       selections,
+      ...(jira.readiness === undefined ? {} : { readiness: jira.readiness }),
     },
     changes: [
       {
@@ -409,9 +416,27 @@ function jiraEditCommand(
         from: ids(source.selections),
         to: ids(selections),
       },
+      ...(jira.readiness === undefined ||
+      JSON.stringify(jira.readiness) ===
+        JSON.stringify(readinessCommandValue(savedRule))
+        ? []
+        : [
+            {
+              field: "readiness",
+              from: readinessText(savedRule),
+              to: ruleSummary(jira.readiness),
+            },
+          ]),
     ] as Change[],
     // Queries are never shown; Jira checks each new or changed one before anything is saved.
-    diff: selections.map((s) => `${s.id} · Jira JQL (query private) · active`),
+    diff: [
+      ...selections.map((s) => `${s.id} · Jira JQL (query private) · active`),
+      ...(jira.readiness === undefined
+        ? []
+        : [
+            `Readiness: ${jira.readiness ? `${ruleSummary(jira.readiness)}: ${ruleText({ kind: "rule", ...jira.readiness })}` : "no readiness rule"}`,
+          ]),
+    ],
     notes: [
       "Saving replaces every selection and activates all of them; Jira validates each new or changed JQL first, and a rejected query saves nothing.",
       "Selections are numbered S-1 onward in the order given. The Jira site's credential must be configured first.",
@@ -432,7 +457,7 @@ export function sourceEditCommand(
     if (!jira || Object.keys(others).length)
       throw bad(
         isJira
-          ? 'A Jira project\'s source is edited with only "jira": {"instance", "selections"}.'
+          ? 'A Jira project\'s source is edited with only "jira": {"instance", "selections", "readiness"}.'
           : 'A "jira" edit carries no other key.',
       );
     return jiraEditCommand(projectId, source, jira);

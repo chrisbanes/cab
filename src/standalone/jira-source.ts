@@ -17,6 +17,8 @@ const pageSize = 100;
 const maxPages = 100;
 const previewSize = 20;
 const searchFields = ["summary", "status", "labels", "description", "project"];
+// The link type whose inward side reads "is blocked by": the linked issue blocks this one.
+const blockedByLink = "is blocked by";
 
 const issueSchema = z
   .object({
@@ -35,9 +37,39 @@ const issueSchema = z
         labels: z.array(z.string()).default([]),
         description: z.unknown().optional(),
         project: z.object({ id: z.string().min(1) }).passthrough(),
+        // Absent from a preview, which does not request it; a selection read requires it.
+        issuelinks: z
+          .array(
+            z
+              .object({
+                type: z.object({ inward: z.string() }).passthrough(),
+                // Only a blocker link's linked issue is read, and strictly.
+                inwardIssue: z.unknown().optional(),
+              })
+              .passthrough(),
+          )
+          .optional(),
       })
       .passthrough(),
   })
+  .passthrough();
+const blockerSchema = z
+  .object({
+    id: z.string().regex(/^\d{1,20}$/),
+    key: issueSchema.shape.key,
+    fields: z
+      .object({
+        status: z
+          .object({
+            statusCategory: z.object({ key: z.string().min(1) }).passthrough(),
+          })
+          .passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+const selectValueSchema = z
+  .object({ id: z.string().min(1), value: z.string() })
   .passthrough();
 const searchSchema = z
   .object({
@@ -72,6 +104,7 @@ export class JiraSourceReader {
     access: JiraAccess,
     jql: string,
     maxResults: number,
+    fields: string[],
     nextPageToken?: string,
   ) {
     const page = searchSchema.safeParse(
@@ -79,7 +112,7 @@ export class JiraSourceReader {
         method: "POST",
         body: {
           jql,
-          fields: searchFields,
+          fields,
           maxResults,
           ...(nextPageToken ? { nextPageToken } : {}),
         },
@@ -89,11 +122,18 @@ export class JiraSourceReader {
     return page.data;
   }
 
-  /** Every issue the selection's JQL matches, or an incomplete read with a stable reason. */
-  async readSelection(selection: JiraSelection): Promise<SelectionSnapshot> {
+  /**
+   * Every issue the selection's JQL matches, or an incomplete read with a stable reason.
+   * `fieldIds` are the custom fields a readiness rule needs; links arrive in the same read.
+   */
+  async readSelection(
+    selection: JiraSelection,
+    fieldIds: readonly string[] = [],
+  ): Promise<SelectionSnapshot> {
     const issues: IssueSnapshot[] = [];
     try {
       const access = this.resolved();
+      const fields = [...searchFields, "issuelinks", ...fieldIds];
       const tokens = new Set<string>();
       let token: string | undefined;
       for (let page = 0; ; page++) {
@@ -102,10 +142,11 @@ export class JiraSourceReader {
           access,
           selection.jql,
           pageSize,
+          fields,
           token,
         );
         for (const issue of result.issues)
-          issues.push(snapshot(access.instance, issue));
+          issues.push(snapshot(access.instance, issue, fieldIds));
         token = result.nextPageToken;
         if (!token) return { complete: true, issues, reason: null };
         if (tokens.has(token)) throw new JiraFailure("malformed");
@@ -148,7 +189,7 @@ export class JiraSourceReader {
   /** Up to 20 matches of a valid query, without saving anything. */
   async preview(jql: string) {
     const access = this.resolved();
-    const result = await this.search(access, jql, previewSize);
+    const result = await this.search(access, jql, previewSize, searchFields);
     return {
       matches: result.issues.slice(0, previewSize).map((issue) => ({
         key: issue.key,
@@ -160,17 +201,63 @@ export class JiraSourceReader {
   }
 }
 
+const keyParts = (key: string) => {
+  const separator = key.lastIndexOf("-");
+  return {
+    project: key.slice(0, separator),
+    number: Number(key.slice(separator + 1)),
+  };
+};
+
+/** The issues an issue "is blocked by"; any other link type or direction is ignored. */
+function blockedBy(
+  instance: string,
+  links: NonNullable<z.output<typeof issueSchema>["fields"]["issuelinks"]>,
+): IssueSnapshot[] {
+  return links.flatMap((link) => {
+    if (
+      link.type.inward.trim().toLowerCase() !== blockedByLink ||
+      link.inwardIssue === undefined
+    )
+      return [];
+    const parsed = blockerSchema.safeParse(link.inwardIssue);
+    // A blocker that cannot be read must not be skipped: the whole read is malformed.
+    if (!parsed.success) throw new JiraFailure("malformed");
+    const { project, number } = keyParts(parsed.data.key);
+    return [
+      {
+        providerInstance: instance,
+        nodeId: parsed.data.id,
+        // The link carries no project ID, so the key stands in; identity is the issue ID.
+        repositoryId: project,
+        repositoryName: project,
+        number,
+        title: "",
+        body: "",
+        state:
+          parsed.data.fields.status.statusCategory.key === "done"
+            ? ("closed" as const)
+            : ("open" as const),
+        labels: [],
+        projectFields: [],
+      },
+    ];
+  });
+}
+
 function snapshot(
   instance: string,
   issue: z.output<typeof issueSchema>,
+  fieldIds: readonly string[],
 ): IssueSnapshot {
-  const separator = issue.key.lastIndexOf("-");
+  const { project, number } = keyParts(issue.key);
+  if (issue.fields.issuelinks === undefined) throw new JiraFailure("malformed");
   return {
     providerInstance: instance,
     nodeId: issue.id,
     repositoryId: issue.fields.project.id,
-    repositoryName: issue.key.slice(0, separator),
-    number: Number(issue.key.slice(separator + 1)),
+    repositoryName: project,
+    number,
     title: issue.fields.summary,
     body:
       issue.fields.description == null
@@ -184,6 +271,14 @@ function snapshot(
       name: issue.fields.status.name,
       categoryKey: issue.fields.status.statusCategory.key,
     },
+    // A single-select value is `{id, value}`; null, a list or any other shape is no value.
+    selectFields: fieldIds.flatMap((fieldId) => {
+      const value = selectValueSchema.safeParse(issue.fields[fieldId]);
+      return value.success
+        ? [{ fieldId, optionId: value.data.id, name: value.data.value }]
+        : [];
+    }),
+    blockedBy: blockedBy(instance, issue.fields.issuelinks),
     projectFields: [],
   };
 }
