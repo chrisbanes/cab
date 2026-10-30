@@ -783,16 +783,24 @@ export async function until(predicate: () => boolean, label: string) {
 export async function publicationWorld(
   mode: "allow" | "approval",
   gitlab?: GitLabLink,
+  options: {
+    /** An existing checkout (already linked to its origin) to provision instead of a new repository. */
+    source?: string;
+    deliveryMode?: "reviewable-pr" | "through-merge";
+  } = {},
 ) {
   const repositoryId = gitlab?.repositoryId ?? "R1";
-  const source = realpathSync(makeTemp(join(osTmp(), "cab-publish-src-")));
-  runGit(source, "init", "-q", "-b", "main");
-  writeFile(join(source, "a.txt"), "a\n");
-  runGit(source, "add", ".");
-  runGit(source, "commit", "-q", "-m", "base");
-  if (gitlab) runGit(source, "remote", "add", "origin", gitlab.origin);
+  let source = options.source;
+  if (!source) {
+    source = realpathSync(makeTemp(join(osTmp(), "cab-publish-src-")));
+    runGit(source, "init", "-q", "-b", "main");
+    writeFile(join(source, "a.txt"), "a\n");
+    runGit(source, "add", ".");
+    runGit(source, "commit", "-q", "-m", "base");
+    if (gitlab) runGit(source, "remote", "add", "origin", gitlab.origin);
+  }
   const f = await createReleaseDeliveryFixture(
-    "reviewable-pr",
+    options.deliveryMode ?? "reviewable-pr",
     {},
     true,
     null,

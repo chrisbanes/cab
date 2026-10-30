@@ -37,6 +37,7 @@
     "coordination:routing:live": "node test/coordination/live-qualification/live-routing.mjs",
     "status-mapping:live": "node test/delivery/github-qualification/live-status-mapping.mjs",
     "task-publication:live": "node test/delivery/github-qualification/live-task-publication.mjs",
+    "gitlab-delivery:live": "node test/delivery/gitlab-qualification/live-gitlab-delivery.mjs --live",
     "network-access:live": "node test/execution/network-access-qualification/live-network.mjs --live --one-attempt",
     "drafting:live": "node test/execution/drafting-qualification/live-drafting.mjs",
     "recovery:live": "node test/execution/recovery-qualification/live-runtime.mjs --live",

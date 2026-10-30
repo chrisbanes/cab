@@ -6,7 +6,7 @@ const saved = (text: string) =>
     .trimEnd();
 
 /** The credential user the scripted instance reports. */
-export const gitLabUser = { id: 7 };
+export const gitLabUser = { id: 7, username: "cab-test" };
 
 export interface ScriptedPipeline {
   id: number;
@@ -129,7 +129,18 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
     carStatus: "fresh",
     /** A merge or train write takes effect, then its response is lost. */
     loseMergeResponse: false,
+    /** Branch heads by name; a branch without one reads as `head`. */
+    heads: new Map<string, string>(),
+    /** The head of `main`, when the script reports one. */
+    mainHead: null as string | null,
+    /** The latest pipeline status on `main`. */
+    mainPipeline: "success",
+    /** Which kind each bearer token is: OAuth tokens and personal access tokens answer different probes. */
+    tokenKinds: new Map<string, "oauth" | "pat">(),
+    /** Commits made through the commits API so far. */
+    commits: 0,
   };
+  const headOf = (branch: string) => state.heads.get(branch) ?? state.head;
   /** The merge and train writes, with their bodies. */
   const merges: Array<{
     route: "merge" | "train";
@@ -169,13 +180,50 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
     const path = decodeURIComponent(new URL(url).pathname);
     const project = `/api/v4/projects/${options.repositoryId}`;
     if (path === project) return json(state.project);
+    if (path === `${project}/repository/commits` && method === "POST") {
+      const commit = JSON.parse(String(init.body));
+      const sha = (++state.commits).toString(16).padStart(40, "c");
+      state.heads.set(commit.branch, sha);
+      for (const mr of state.mergeRequests)
+        if (mr.source_branch === commit.branch)
+          Object.assign(mr, { sha, head_pipeline: null });
+      return json({ id: sha }, 201);
+    }
     if (path.startsWith(`${project}/repository/branches/`)) {
       const branch = path.slice(`${project}/repository/branches/`.length);
-      return state.head
-        ? json({ name: branch, commit: { id: state.head } })
+      if (method === "DELETE") {
+        state.heads.delete(branch);
+        return new Response(null, { status: 204 });
+      }
+      const head =
+        branch === "main" && state.mainHead ? state.mainHead : headOf(branch);
+      return head
+        ? json({ name: branch, commit: { id: head } })
         : json({ message: "404 Branch Not Found" }, 404);
     }
+    if (path === `${project}/pipelines`)
+      return json([{ status: state.mainPipeline, sha: state.mainHead }]);
     if (path === "/api/v4/user") return json(gitLabUser);
+    if (path === "/api/v4/version") return json({ version: "17.0.0-test" });
+    if (path === "/api/v4/projects")
+      return json([
+        {
+          id: Number(options.repositoryId),
+          path_with_namespace: (
+            state.project as { path_with_namespace: string }
+          ).path_with_namespace,
+          default_branch: "main",
+        },
+      ]);
+    const bearer = String(
+      (init.headers as Record<string, string> | undefined)?.authorization ?? "",
+    ).replace(/^Bearer /, "");
+    if (path === "/oauth/token/info")
+      return state.tokenKinds.get(bearer) === "oauth"
+        ? json({})
+        : json({}, 401);
+    if (path === "/api/v4/personal_access_tokens/self")
+      return state.tokenKinds.get(bearer) === "pat" ? json({}) : json({}, 401);
     const body = init.body ? JSON.parse(String(init.body)) : {};
     if (path === "/api/graphql") {
       const mr = state.mergeRequests.find(
@@ -215,12 +263,16 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       const mr = gitLabMergeRequest({
         id,
         iid: id - 9000,
+        source_project_id: Number(options.repositoryId),
+        target_project_id: Number(options.repositoryId),
         source_branch: body.source_branch,
         target_branch: body.target_branch,
         title: body.title,
         description: saved(String(body.description)),
         draft: /^Draft: /.test(body.title),
-        ...(state.head ? { sha: state.head } : {}),
+        ...(headOf(body.source_branch) === null
+          ? {}
+          : { sha: String(headOf(body.source_branch)) }),
       });
       state.mergeRequests.push(mr);
       return json(mr, 201);
@@ -248,6 +300,7 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
     const rest = mrMatch[2];
     if (!rest && method === "GET") return json(mr);
     if (!rest && method === "PUT") {
+      if (body.state_event === "close") mr.state = "closed";
       if (body.title !== undefined) {
         mr.title = body.title;
         mr.draft = /^Draft: /.test(body.title);
@@ -265,6 +318,18 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       mr.state = "merged";
       if (state.loseMergeResponse) throw new TypeError("fetch failed");
       return json(mr);
+    }
+    if (rest === "discussions" && method === "POST") {
+      const id = (state.nextId++).toString(16);
+      const created = gitLabDiscussion(id, [
+        {
+          id: state.nextId++,
+          body: saved(String(body.body)),
+          author: { id: gitLabUser.id },
+        },
+      ]);
+      state.discussions.push(created);
+      return json(created, 201);
     }
     if (rest === "discussions") return paged(state.discussions, new URL(url));
     const discussion = rest?.match(/^discussions\/([^/]+)(\/notes)?$/);
