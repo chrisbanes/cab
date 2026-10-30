@@ -42,6 +42,7 @@ export function TaskInspector({
   selectResult,
   open,
   onToggle,
+  latest,
   children,
 }: {
   data: Data;
@@ -52,6 +53,8 @@ export function TaskInspector({
   /** The fold's state: open beside the conversation on wide screens, closed above it on a phone. */
   open: boolean;
   onToggle: (open: boolean) => void;
+  /** The latest result, which stays in view when the rest of the fold is closed. */
+  latest: ReactNode;
   /** The brief, evidence and assignment cards, ahead of the facts. */
   children: ReactNode;
 }) {
@@ -69,6 +72,7 @@ export function TaskInspector({
   };
   return (
     <aside className="task-inspector" aria-label="Task context">
+      {latest}
       <details
         className="inspector-fold"
         open={open}

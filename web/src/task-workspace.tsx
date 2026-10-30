@@ -623,26 +623,23 @@ export function TaskWorkspace({
   }, [resource.state.data, resource.state.error, resource.state.status]);
 
   /**
-   * On Overview, "at the bottom" means the newest conversation entry and the docked composer
-   * beneath it are in view; elsewhere it is the end of the page.
+   * On Overview the bottom is the newest conversation entry with the composer beneath it: the
+   * composer is docked on a wide screen and ends the page on a phone. How far the page must
+   * scroll to get there is positive when the newest entry or the composer is below the view.
    */
-  const atBottom = () => {
+  const toBottom = () => {
     const end = document.getElementById("conversation-end"),
       composer = document.getElementById("reply");
-    if (state.tab === "overview" && end && composer)
-      return (
-        end.getBoundingClientRect().bottom + composer.offsetHeight <=
-        innerHeight + 64
-      );
-    return innerHeight + scrollY >= document.documentElement.scrollHeight - 64;
+    if (state.tab === "overview" && end && composer) {
+      const e = end.getBoundingClientRect(),
+        c = composer.getBoundingClientRect();
+      return Math.max(e.bottom - c.top, c.bottom - innerHeight);
+    }
+    return document.documentElement.scrollHeight - innerHeight - scrollY;
   };
+  const atBottom = () => toBottom() <= 64;
   /** Scrolls to the newest conversation entry with the composer fully below it. */
-  const followLatest = () => {
-    const composer = document.getElementById("reply");
-    if (state.tab === "overview" && composer)
-      composer.scrollIntoView({ block: "end" });
-    else scrollTo(0, document.documentElement.scrollHeight);
-  };
+  const followLatest = () => scrollBy(0, Math.max(0, toBottom()));
   const capture = () => {
     if (
       restoreReadingFocus.current &&
@@ -1460,7 +1457,7 @@ export function TaskWorkspace({
     nextActor = taskNextActor(data),
     attentionCollapsed =
       (openRequests.length > 0 || nextActor.operator) &&
-      !state.attentionOpen &&
+      state.attentionCollapsed &&
       !requestId,
     inView = openRequests.find(
       (q) => q.interactionId === (state.inlineAnswer ?? requestId),
@@ -1493,7 +1490,7 @@ export function TaskWorkspace({
     answerInCard: (id) => {
       state.cardRequest = id;
       state.inlineAnswer = null;
-      state.attentionOpen = true;
+      state.attentionCollapsed = false;
       changed();
     },
     form: (id) => {
@@ -1575,8 +1572,12 @@ export function TaskWorkspace({
     const chain = new Set<string>();
     for (
       let a = data.assignments.find((x) => x.assignmentId === id);
-      a && a.assignmentId !== data.leadAssignmentId && !chain.has(a.assignmentId);
-      a = data.assignments.find((x) => x.assignmentId === a?.requesterAssignmentId)
+      a &&
+      a.assignmentId !== data.leadAssignmentId &&
+      !chain.has(a.assignmentId);
+      a = data.assignments.find(
+        (x) => x.assignmentId === a?.requesterAssignmentId,
+      )
     ) {
       chain.add(a.assignmentId);
       state.expanded.add(`c:delegation:${a.assignmentId}`);
@@ -2100,7 +2101,7 @@ export function TaskWorkspace({
                     className="attention-banner"
                     aria-expanded={!attentionCollapsed}
                     onClick={() => {
-                      state.attentionOpen = attentionCollapsed;
+                      state.attentionCollapsed = !attentionCollapsed;
                       changed();
                     }}
                   >
@@ -2332,128 +2333,131 @@ export function TaskWorkspace({
                 state.inspectorOpen = open;
                 changed();
               }}
-            >
-              <section id="review">
-                <h3 className="section-heading">Latest result</h3>
-                {state.selectedResult && !selected && (
-                  <p role="alert">
-                    Exact selected result is unavailable. A newer result is not
-                    substituted.
-                  </p>
-                )}
-                {selected ? (
-                  <div data-record-id={selected.resultId}>
-                    <p className="metadata muted">
-                      R{data.results.indexOf(selected) + 1} ·{" "}
-                      <ShortId value={selected.resultId} /> · assignment{" "}
-                      <ShortId value={selected.assignmentId} /> · work revision{" "}
-                      {selected.workRevision} · {date(selected.createdAt)}
+              latest={
+                <section id="review">
+                  <h3 className="section-heading">Latest result</h3>
+                  {state.selectedResult && !selected && (
+                    <p role="alert">
+                      Exact selected result is unavailable. A newer result is
+                      not substituted.
                     </p>
-                    <Literal text={selected.summary} />
-                    <p className="metadata">
-                      <ActionLink
-                        variant="secondary"
-                        href={`/app/tasks/${taskId}?section=changes&result=${selected.resultId}`}
-                      >
-                        {meta?.metadata.changes
-                          ? `Changes · ${meta.metadata.changes.files.length} ${meta.metadata.changes.files.length === 1 ? "file" : "files"}`
-                          : "Changes"}
-                      </ActionLink>
-                    </p>
-                    {meta ? (
-                      <CriteriaRows
-                        data={data}
-                        resultId={selected.resultId}
-                        sourceId={meta.metadata.sourceId}
-                        ask={ask}
-                        more={criteriaMore(
-                          `${selected.resultId}:${meta.metadata.sourceId}`,
-                        )}
-                      />
-                    ) : (
-                      <p>
-                        No structured review evidence was supplied for this
-                        result.
+                  )}
+                  {selected ? (
+                    <div data-record-id={selected.resultId}>
+                      <p className="metadata muted">
+                        R{data.results.indexOf(selected) + 1} ·{" "}
+                        <ShortId value={selected.resultId} /> · assignment{" "}
+                        <ShortId value={selected.assignmentId} /> · work
+                        revision {selected.workRevision} ·{" "}
+                        {date(selected.createdAt)}
                       </p>
-                    )}
-                    <Button
-                      variant="secondary"
-                      onClick={() =>
-                        ask(
-                          {
-                            resultId: selected.resultId,
-                            workId: selected.workId,
-                            ...(meta?.metadata.sourceId
-                              ? { sourceId: meta.metadata.sourceId }
-                              : {}),
-                          },
-                          `result ${selected.resultId}`,
-                        )
-                      }
+                      <Literal text={selected.summary} />
+                      <p className="metadata">
+                        <ActionLink
+                          variant="secondary"
+                          href={`/app/tasks/${taskId}?section=changes&result=${selected.resultId}`}
+                        >
+                          {meta?.metadata.changes
+                            ? `Changes · ${meta.metadata.changes.files.length} ${meta.metadata.changes.files.length === 1 ? "file" : "files"}`
+                            : "Changes"}
+                        </ActionLink>
+                      </p>
+                      {meta ? (
+                        <CriteriaRows
+                          data={data}
+                          resultId={selected.resultId}
+                          sourceId={meta.metadata.sourceId}
+                          ask={ask}
+                          more={criteriaMore(
+                            `${selected.resultId}:${meta.metadata.sourceId}`,
+                          )}
+                        />
+                      ) : (
+                        <p>
+                          No structured review evidence was supplied for this
+                          result.
+                        </p>
+                      )}
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          ask(
+                            {
+                              resultId: selected.resultId,
+                              workId: selected.workId,
+                              ...(meta?.metadata.sourceId
+                                ? { sourceId: meta.metadata.sourceId }
+                                : {}),
+                            },
+                            `result ${selected.resultId}`,
+                          )
+                        }
+                      >
+                        Ask lead about result
+                      </Button>
+                    </div>
+                  ) : (
+                    !state.selectedResult && <p>No result recorded.</p>
+                  )}
+                  {/* A viewing reference needs a result to view; a lost response stays checkable. */}
+                  {data.results.length > 0 && (
+                    <>
+                      <p className="metadata muted">{changes}</p>
+                      <Button
+                        variant="secondary"
+                        data-unconfirmed-control="review.view"
+                        onClick={() =>
+                          void command({
+                            type: "review.view",
+                            key: crypto.randomUUID(),
+                            taskId,
+                            sourceId: state.selectedSource
+                              ? (source?.sourceId ?? null)
+                              : selected
+                                ? (meta?.metadata.sourceId ?? null)
+                                : (source?.sourceId ?? null),
+                            resultIds: selected ? [selected.resultId] : [],
+                          })
+                        }
+                        disabled={
+                          Boolean(state.selectedResult && !selected) ||
+                          Boolean(state.selectedSource && !source) ||
+                          Boolean(unconfirmed)
+                        }
+                      >
+                        Set viewing reference
+                      </Button>
+                    </>
+                  )}
+                  {unconfirmedCheck("review.view")}
+                  {data.results.length > 0 && (
+                    <p>
+                      Viewing records availability only; it does not approve
+                      work or clear holds. Retained records may be incomplete.
+                    </p>
+                  )}
+                  <label htmlFor="retained-result-revision">
+                    Result revision{" "}
+                    <NativeSelect
+                      id="retained-result-revision"
+                      className="control"
+                      value={state.selectedResult ?? ""}
+                      onChange={(e) => {
+                        state.selectedResult = e.target.value || null;
+                        changed();
+                      }}
                     >
-                      Ask lead about result
-                    </Button>
-                  </div>
-                ) : (
-                  !state.selectedResult && <p>No result recorded.</p>
-                )}
-                {/* A viewing reference needs a result to view; a lost response stays checkable. */}
-                {data.results.length > 0 && (
-                  <>
-                    <p className="metadata muted">{changes}</p>
-                    <Button
-                      variant="secondary"
-                      data-unconfirmed-control="review.view"
-                      onClick={() =>
-                        void command({
-                          type: "review.view",
-                          key: crypto.randomUUID(),
-                          taskId,
-                          sourceId: state.selectedSource
-                            ? (source?.sourceId ?? null)
-                            : selected
-                              ? (meta?.metadata.sourceId ?? null)
-                              : (source?.sourceId ?? null),
-                          resultIds: selected ? [selected.resultId] : [],
-                        })
-                      }
-                      disabled={
-                        Boolean(state.selectedResult && !selected) ||
-                        Boolean(state.selectedSource && !source) ||
-                        Boolean(unconfirmed)
-                      }
-                    >
-                      Set viewing reference
-                    </Button>
-                  </>
-                )}
-                {unconfirmedCheck("review.view")}
-                {data.results.length > 0 && (
-                  <p>
-                    Viewing records availability only; it does not approve work
-                    or clear holds. Retained records may be incomplete.
-                  </p>
-                )}
-                <label htmlFor="retained-result-revision">
-                  Result revision{" "}
-                  <NativeSelect
-                    id="retained-result-revision"
-                    className="control"
-                    value={state.selectedResult ?? ""}
-                    onChange={(e) => {
-                      state.selectedResult = e.target.value || null;
-                      changed();
-                    }}
-                  >
-                    <option value="">Latest result</option>
-                    {data.results.map((r, i) => (
-                      <option key={r.resultId} value={r.resultId}>
-                        R{i + 1}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </label>
-              </section>
+                      <option value="">Latest result</option>
+                      {data.results.map((r, i) => (
+                        <option key={r.resultId} value={r.resultId}>
+                          R{i + 1}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                </section>
+              }
+            >
               <section id="brief">
                 <details
                   className="overview-disclosure"

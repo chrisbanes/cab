@@ -838,6 +838,14 @@ a.task-source-chip:hover {
   overflow-y: auto;
 }
 
+/* On a phone only the collapsed banner is pinned; an open card scrolls with the page. */
+@media (max-width: 759px) {
+  .task-workspace .task-columns > section#decisions:not([data-collapsed]) {
+    position: static;
+    max-height: none;
+  }
+}
+
 .attention-banner {
   display: none;
 }
@@ -875,10 +883,34 @@ a.task-source-chip:hover {
   }
 }
 
-/* The inspector folds: open beside the conversation, closed above it on a phone. */
+/* The conversation is a plain column, not a card. */
+.task-workspace .task-columns > section.conversation {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+/* Below 1024px the inspector folds sit between the attention card and the conversation, so the
+   conversation and the composer end the page. */
 @media (max-width: 1023px) {
+  .task-columns {
+    display: contents;
+  }
+
+  .task-columns > #decisions {
+    order: 0;
+  }
+
   .task-inspector {
-    order: -1;
+    order: 1;
+  }
+
+  .task-columns > .conversation {
+    order: 2;
+  }
+
+  .task-columns > .reply-card {
+    order: 3;
   }
 }
 

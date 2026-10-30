@@ -310,8 +310,8 @@ export class TaskWorkspaceState {
   cardRequest: string | null = null;
   /** The inspector's fold; null follows the screen: open beside the conversation, closed above it on a phone. */
   inspectorOpen: boolean | null = null;
-  /** The phone banner's expanded attention card. */
-  attentionOpen = false;
+  /** The phone banner's collapsed attention card; it opens on arrival so the first screen holds the decision. */
+  attentionCollapsed = false;
   get sourceObservation() {
     return this.reply.sourceObservation;
   }
