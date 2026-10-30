@@ -274,3 +274,92 @@ test("assignment history reads stay bounded, sanitized and scoped, with omission
   await service.start();
   await verify();
 });
+
+test("task history reads page items and omissions below a timeline key", () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-task-history-"));
+  const db = new DatabaseSync(join(root, "history.sqlite"));
+  try {
+    let now = 1000;
+    const store = new ConversationHistoryStore(db, () => now);
+    const binding = (assignmentId: string, taskId = "task-1") => ({
+      workId: `work-${assignmentId}`,
+      taskId,
+      assignmentId,
+      assignmentVersion: 1,
+      instructionsRevision: 1,
+      profileRevision: 1,
+      conversationRevision: 1,
+      workRevision: 1,
+      threadId: "thread",
+      turnId: "turn",
+    });
+    const done = (assignmentId: string, itemId: string, taskId?: string) =>
+      store.record(
+        binding(assignmentId, taskId),
+        {
+          kind: "completed",
+          threadId: "thread",
+          turnId: "turn",
+          itemId,
+          text: itemId,
+        },
+        [],
+      );
+    done("a1", "one");
+    now = 1000;
+    done("a2", "two");
+    now = 1001;
+    done("a1", "three");
+    done("a1", "foreign", "task-2");
+    now = 1002;
+    store.recordEarlyBufferLimit(binding("a1"));
+    const all = store.readTaskBefore("task-1", undefined, 10);
+    assert.deepEqual(
+      all.items.map((i) => i.itemId),
+      ["three", "two", "one"],
+    );
+    assert.equal(all.turnOmissions.length, 1);
+    // Rank 1 (items) sits below rank 2 (omissions) at the same instant.
+    const key = (timeMs: number, rank: number, ordinal: number) => ({
+      timeMs,
+      rank,
+      ordinal,
+      id: "x",
+    });
+    assert.deepEqual(
+      store
+        .readTaskBefore("task-1", key(1001, 2, 0), 10)
+        .items.map((i) => i.itemId),
+      ["three", "two", "one"],
+    );
+    assert.deepEqual(
+      store
+        .readTaskBefore("task-1", key(1001, 1, 3), 10)
+        .items.map((i) => i.itemId),
+      ["two", "one"],
+    );
+    assert.deepEqual(
+      store
+        .readTaskBefore("task-1", key(1001, 1, 3), 1)
+        .items.map((i) => i.itemId),
+      ["two"],
+    );
+    assert.equal(
+      store.readTaskBefore("task-1", key(1000, 0, 0), 10).items.length,
+      0,
+    );
+    assert.deepEqual(
+      store
+        .workStarts("task-1")
+        .map((w) => [w.assignmentId, w.createdAt])
+        .sort(),
+      [
+        ["a1", 1000],
+        ["a2", 1000],
+      ],
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

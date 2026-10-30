@@ -465,3 +465,75 @@ test("large excluded texts with patterns do not exhaust the redaction limits", (
     "x [redacted] y",
   );
 });
+
+test("task tool queries page by key, pair completions and stay within the task", () => {
+  const f = fixture();
+  try {
+    f.store.begin({ ...identity("w2"), taskId: "other" });
+    const item = (
+      workId: string,
+      name: string,
+      itemId: string,
+      at: number,
+      kind: "runtime" | "tool" = "runtime",
+    ) => {
+      f.clock.t = at;
+      f.store.record(workId, kind, name, "info", itemId, { name }, []);
+    };
+    item("w1", "commandExecution/started", "a", 10);
+    item("w1", "reasoning/completed", "r", 11);
+    item("w1", "commandExecution/completed", "a", 12);
+    item("w1", "fileChange/completed", "b", 12);
+    item("w1", "cab_delegate", "c", 13, "tool");
+    item("w2", "commandExecution/completed", "x", 14);
+    item("w1", "commandExecution/completed", "d", 15);
+    const names = [
+      "commandExecution/started",
+      "commandExecution/completed",
+      "fileChange/completed",
+    ];
+    const page = (
+      before: Parameters<typeof f.store.toolItemsBefore>[1],
+      limit: number,
+    ) => f.store.toolItemsBefore("t1", before, limit, names);
+    const all = page(undefined, 10);
+    // One entry per item, keyed on its first row; other kinds, types and tasks are absent.
+    assert.deepEqual(
+      all.map((e) => [e.first.itemId, e.first.name, e.last?.name ?? null]),
+      [
+        ["d", "commandExecution/completed", "commandExecution/completed"],
+        ["b", "fileChange/completed", "fileChange/completed"],
+        ["a", "commandExecution/started", "commandExecution/completed"],
+      ],
+    );
+    // Pages below the previous page's oldest key continue without repeat or gap.
+    const keyOf = (e: (typeof all)[number]) => ({
+      timeMs: e.first.createdAt,
+      rank: 3,
+      ordinal: e.first.sequence,
+      id: "x",
+    });
+    const first = page(undefined, 2);
+    const next = page(keyOf(first[1] as (typeof all)[number]), 2);
+    assert.deepEqual(
+      [...first, ...next].map((e) => e.first.sequence),
+      all.map((e) => e.first.sequence),
+    );
+    // Against a higher-ranked cursor at the same instant the tie is admitted; against a
+    // lower-ranked one it is not.
+    const at = (rank: number) =>
+      page({ timeMs: 12, rank, ordinal: 0, id: "x" }, 10).map(
+        (e) => e.first.itemId,
+      );
+    assert.deepEqual(at(4), ["b", "a"]);
+    assert.deepEqual(at(2), ["a"]);
+    assert.equal(f.store.item(all[0]?.first.sequence ?? 0)?.workId, "w1");
+    assert.equal(f.store.item(99999), undefined);
+    assert.deepEqual(
+      f.store.executionsForTask("t1").map((e) => e.workId),
+      ["w1"],
+    );
+  } finally {
+    f.cleanup();
+  }
+});
