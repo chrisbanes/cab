@@ -23,6 +23,12 @@ export interface TimelineWindow {
   entries: TimelineEntry[];
 }
 
+/** The conversation's retained window and the cursor beneath it; a remount keeps both. */
+export interface ConversationCache {
+  window: TimelineWindow;
+  cursor: string | null;
+}
+
 const keyOf = (entry: TimelineEntry) => {
   const key = parseTimelineCursor(entry.key);
   if (!key) throw new Error("invalid-timeline-key");

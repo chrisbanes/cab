@@ -827,3 +827,258 @@ a.task-source-chip:hover {
   justify-content: space-between;
   gap: var(--space-8);
 }
+
+/* Pinned attention: it stays under the page top while the conversation scrolls beneath it. On a
+   phone it collapses to one banner line that expands in place. */
+.task-workspace .task-columns > section#decisions {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.attention-banner {
+  display: none;
+}
+
+@media (max-width: 759px) {
+  .attention-banner {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--attn);
+    font: inherit;
+    font-weight: var(--weight-medium);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .decision-card[data-collapsed] > :not(.attention-banner) {
+    display: none;
+  }
+}
+
+/* The composer docks under the viewport bottom beside the inspector; on a phone it simply ends
+   the page after the conversation. */
+@media (min-width: 1024px) {
+  .task-workspace .task-columns > section.reply-card {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+}
+
+/* The inspector folds: open beside the conversation, closed above it on a phone. */
+@media (max-width: 1023px) {
+  .task-inspector {
+    order: -1;
+  }
+}
+
+.inspector-fold > summary {
+  padding: var(--space-12) 14px;
+  color: var(--fg-2);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.task-inspector > .inspector-fold > section {
+  min-width: 0;
+  padding: var(--space-12) 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.task-inspector .inspector-fold > section > .section-heading:first-child {
+  margin-top: 0;
+}
+
+/* Conversation: one column, oldest first. */
+.conversation-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.conv-entry {
+  min-width: 0;
+  /* Scrolling to an entry leaves it clear of the pinned card and the docked composer. */
+  scroll-margin-block: 160px 240px;
+}
+
+.conv-entry > header {
+  margin-bottom: var(--space-4);
+  color: var(--fg-3);
+  font-size: var(--type-xs);
+}
+
+.conv-entry > header strong {
+  color: var(--fg-2);
+  font-weight: var(--weight-medium);
+}
+
+.conv-agent {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.conv-operator {
+  padding: 10px var(--space-12);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--raised);
+}
+
+.conv-request {
+  padding: 10px var(--space-12);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.conv-request[data-status="open"] {
+  border-color: var(--attn-border);
+  background: var(--attn-soft);
+}
+
+.conv-result {
+  padding-left: var(--space-12);
+  border-left: 2px solid var(--ok-border);
+}
+
+.conv-text,
+.conv-raw {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.conv-raw {
+  padding: var(--space-8);
+  border-radius: 6px;
+  background: var(--raised);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.conv-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--fg-2);
+  font-size: var(--type-xs);
+}
+
+.conv-tools[data-failed] {
+  border: 1px solid var(--risk-border);
+}
+
+.conv-commands {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.conv-commands code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.conv-failed {
+  color: var(--risk);
+}
+
+.conv-gap {
+  padding: var(--space-8) var(--space-12);
+  border: 1px dashed var(--line-strong);
+  border-radius: 6px;
+  color: var(--fg-2);
+  font-size: var(--type-xs);
+}
+
+.conv-gap p {
+  margin: 0 0 var(--space-4);
+}
+
+.conv-gap-detail {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-4) var(--space-12);
+  margin: var(--space-8) 0 0;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.conv-gap-detail dd {
+  margin: 0;
+}
+
+.conv-delegation {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.conv-delegation h4 {
+  margin: 0;
+}
+
+.conv-delegation-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  padding: var(--space-8) var(--space-12);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conv-delegation-head .identifier-line {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+}
+
+.conv-delegation-summary {
+  margin: 0;
+  padding: 0 var(--space-12) var(--space-8);
+}
+
+.conv-delegation-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: 0 var(--space-12) var(--space-12);
+  padding-left: var(--space-12);
+  border-left: 2px solid var(--line-strong);
+}
+
+@media (max-width: 1120px) {
+  .conv-delegation-head,
+  .conv-entry [data-slot="button"],
+  .conv-tools [data-slot="button"],
+  .conv-gap [data-slot="button"] {
+    min-height: 44px;
+  }
+}

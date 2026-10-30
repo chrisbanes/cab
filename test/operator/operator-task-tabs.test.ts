@@ -23,7 +23,7 @@ test("tabForSection maps every task section to the panel that holds it", () => {
     ["files", "files"],
     ["changes", "changes"],
     ["local-review", "review"],
-    ["context", "history"],
+    ["context", "overview"],
     ["history", "history"],
     ["unknown", "overview"],
   ] as const)
