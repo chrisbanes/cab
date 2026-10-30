@@ -227,7 +227,9 @@ const blocks = (
 test("a read requests links and the rule's select fields in the same search", async () => {
   const { reader: r, requests } = reader(() => json({ issues: [] }));
   await r.readSelection(selection, ["customfield_10010"]);
-  assert.deepEqual((requests[0]?.body as { fields: string[] }).fields, [
+  const sent = (i: number) =>
+    (requests[i]?.body as { fields: string[] } | undefined)?.fields;
+  assert.deepEqual(sent(0), [
     "summary",
     "status",
     "labels",
@@ -237,9 +239,7 @@ test("a read requests links and the rule's select fields in the same search", as
     "customfield_10010",
   ]);
   await r.preview("project = ABC");
-  assert.ok(
-    !(requests[1]?.body as { fields: string[] }).fields.includes("issuelinks"),
-  );
+  assert.equal(sent(1)?.includes("issuelinks"), false);
 });
 
 test("only an inward 'is blocked by' link is a blocker, open until its status category is done", async () => {

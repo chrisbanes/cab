@@ -574,7 +574,9 @@ test("a select-field rule is read from the scripted custom field and gates readi
     r.url.pathname.endsWith("/search/jql"),
   );
   assert.ok(
-    (search?.body as { fields: string[] }).fields.includes("customfield_10010"),
+    (search?.body as { fields: string[] } | undefined)?.fields.includes(
+      "customfield_10010",
+    ),
   );
   const unready = (nodeId: string) =>
     domain
