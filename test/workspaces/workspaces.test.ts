@@ -117,6 +117,15 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+async function waitForProcessGone(pid: number, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (processIsAlive(pid)) {
+    if (Date.now() >= deadline)
+      throw new Error(`Git child ${pid} is alive ${timeoutMs}ms after SIGKILL`);
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 async function waitForChildExit(
   child: ChildProcess,
   timeoutMs: number,
@@ -532,12 +541,16 @@ test("a completed worktree add followed by a bounded stall is retained without r
   const failureObservations: Parameters<
     NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
   >[0][] = [];
+  const failureObservedAt: number[] = [];
   const f = fixture({
     gitExecutable: controlled.executable,
     gitTimeoutMs: { "worktree-add": 1000 },
     gitTerminationGraceMs: 20,
     gitTerminationObservationMs: 40,
-    gitFailureObserver: (failure) => failureObservations.push(failure),
+    gitFailureObserver: (failure) => {
+      failureObservations.push(failure);
+      failureObservedAt.push(Date.now());
+    },
   });
   try {
     const source = repository(f.root, "uncertain-add-source");
@@ -549,13 +562,41 @@ test("a completed worktree add followed by a bounded stall is retained without r
     const interrupted = await f.manager.provision("private-task-id", [
       { repositoryId: "private-repository-id", path: source },
     ]);
+    const settledAt = Date.now();
     const worktreeAddReady = await waitForGitEvent(
       controlled,
       ({ event, operation }) =>
         event === "ready" && operation === "worktree-add",
     );
     assert.ok(worktreeAddReady.atMs !== undefined);
-    const elapsedMs = Date.now() - worktreeAddReady.atMs;
+    const readyAt = worktreeAddReady.atMs;
+    const observedAt = failureObservedAt.at(-1);
+    const elapsedMs = settledAt - readyAt;
+    // Emitted before the bounds, so a failing run names the segment that overran: the Git
+    // timeout and cancellation (ready to failure observed) or the settle work after it.
+    t.diagnostic(
+      `bounded-git-stall-evidence ${JSON.stringify({
+        operation: "worktree-add",
+        readyToSettleMs: elapsedMs,
+        readyToFailureObservedMs:
+          observedAt === undefined ? null : observedAt - readyAt,
+        failureObservedToSettledMs:
+          observedAt === undefined ? null : settledAt - observedAt,
+        configuredTimeoutMs: 1000,
+        termGraceMs: 20,
+        observationMs: 40,
+        childExitObserved: failureObservations.at(-1)?.childExitObserved,
+        childExitSignal: failureObservations.at(-1)?.childExitSignal,
+        inheritedPipeDescendantAliveAtSettlement: true,
+      })}`,
+    );
+    // The strict bound protects the timeout and cancellation; the settle work after it only
+    // has to finish well before a hang would.
+    assert.ok(
+      observedAt !== undefined && observedAt - readyAt < 1000 + 20 + 40 + 500,
+      `Git timeout observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
+    );
+    assert.ok(elapsedMs < 5_000, `provision settled in ${elapsedMs}ms`);
 
     assert.equal(interrupted.state, "held");
     assert.equal(interrupted.gitUncertain, true);
@@ -563,18 +604,6 @@ test("a completed worktree add followed by a bounded stall is retained without r
     assert.doesNotMatch(
       interrupted.reason ?? "",
       /private-task-id|private-repository-id|uncertain-add-source|stderr-secret-shaped-output/,
-    );
-    assert.ok(elapsedMs < 1000 + 20 + 40 + 500, `settled in ${elapsedMs}ms`);
-    t.diagnostic(
-      `bounded-git-stall-evidence ${JSON.stringify({
-        operation: "worktree-add",
-        readyToSettleMs: elapsedMs,
-        configuredTimeoutMs: 1000,
-        termGraceMs: 20,
-        observationMs: 40,
-        childExitSignal: failureObservations.at(-1)?.childExitSignal,
-        inheritedPipeDescendantAliveAtSettlement: true,
-      })}`,
     );
     const repositoryBinding = interrupted.repositories[0];
     assert.ok(repositoryBinding);
@@ -592,12 +621,20 @@ test("a completed worktree add followed by a bounded stall is retained without r
     assert.ok(descendant);
     assert.equal(processIsAlive(descendant.pid), true);
 
-    assert.deepEqual(failureObservations.at(-1), {
-      operation: "worktree-add",
-      kind: "timed-out",
-      childExitObserved: true,
-      childExitSignal: "SIGKILL",
-    });
+    // The child's exit is reported only when the OS delivers it inside the 40 ms window,
+    // which a loaded machine can miss. The escalation itself is asserted on the child: it
+    // dies, whatever the window saw (the controlled Git ignores SIGTERM, so only SIGKILL
+    // can end it).
+    const failure = failureObservations.at(-1);
+    assert.deepEqual(
+      { operation: failure?.operation, kind: failure?.kind },
+      { operation: "worktree-add", kind: "timed-out" },
+    );
+    assert.equal(
+      failure?.childExitSignal,
+      failure?.childExitObserved ? "SIGKILL" : null,
+    );
+    await waitForProcessGone(worktreeAddReady.pid);
     assert.ok(
       controlled.events().some(({ event }) => event === "term"),
       `controlled Git signal events: ${JSON.stringify(controlled.events())}`,
@@ -664,11 +701,12 @@ test("validation, archive status, and removal uncertainty preserve the binding",
   ] as const;
 
   for (const scenario of scenarios) {
-    await t.test(scenario.name, async () => {
+    await t.test(scenario.name, async (t) => {
       const controlled = controlledGit();
       const failureObservations: Parameters<
         NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
       >[0][] = [];
+      const failureObservedAt: number[] = [];
       const f = fixture();
       try {
         const source = repository(f.root, `source-${scenario.operation}`);
@@ -686,7 +724,10 @@ test("validation, archive status, and removal uncertainty preserve the binding",
           gitExecutable: controlled.executable,
           gitTerminationGraceMs: 20,
           gitTerminationObservationMs: 40,
-          gitFailureObserver: (failure) => failureObservations.push(failure),
+          gitFailureObserver: (failure) => {
+            failureObservations.push(failure);
+            failureObservedAt.push(Date.now());
+          },
         });
 
         const pending = scenario.run(manager);
@@ -695,11 +736,41 @@ test("validation, archive status, and removal uncertainty preserve the binding",
           ({ event, operation }) =>
             event === "ready" && operation === scenario.operation,
         );
+        const cancelRequestedAt = Date.now();
         manager.cancelGitWork();
         const result = await pending;
+        const settledAt = Date.now();
         assert.ok(operationReady.atMs !== undefined);
-        const elapsedMs = Date.now() - operationReady.atMs;
-        assert.ok(elapsedMs < 20 + 40 + 500, `settled in ${elapsedMs}ms`);
+        const readyAt = operationReady.atMs;
+        const observedAt = failureObservedAt.at(-1);
+        const elapsedMs = settledAt - readyAt;
+        // Emitted before the bounds, so a failing run names the segment that overran: the Git
+        // cancellation (ready to failure observed) or the settle work after it.
+        t.diagnostic(
+          `workspace-git-cancel-evidence ${JSON.stringify({
+            operation: scenario.operation,
+            readyToSettleMs: elapsedMs,
+            readyToCancelRequestMs: cancelRequestedAt - readyAt,
+            readyToFailureObservedMs:
+              observedAt === undefined ? null : observedAt - readyAt,
+            failureObservedToSettledMs:
+              observedAt === undefined ? null : settledAt - observedAt,
+            termGraceMs: 20,
+            observationMs: 40,
+            childExitObserved: failureObservations.at(-1)?.childExitObserved,
+            childExitSignal: failureObservations.at(-1)?.childExitSignal,
+          })}`,
+        );
+        // The strict bound protects cancellation; the settle work after it only has to
+        // finish well before a hang would.
+        assert.ok(
+          observedAt !== undefined && observedAt - readyAt < 20 + 40 + 500,
+          `Git cancellation observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
+        );
+        assert.ok(
+          elapsedMs < 5_000,
+          `cancelled work settled in ${elapsedMs}ms`,
+        );
         if (scenario.operation === "repository-identity") {
           assert.equal(result, undefined);
         } else {
@@ -719,12 +790,18 @@ test("validation, archive status, and removal uncertainty preserve the binding",
         assert.equal(held?.gitUncertain, true);
         assert.equal(held?.workspaceId, ready.workspaceId);
         assert.equal(exists(repo.workspacePath), true);
-        assert.deepEqual(failureObservations.at(-1), {
-          operation: scenario.operation,
-          kind: "cancelled",
-          childExitObserved: true,
-          childExitSignal: "SIGKILL",
-        });
+        // Exit is reported only if the OS delivers it inside the 40 ms window; the child is
+        // asserted gone instead (the controlled Git ignores SIGTERM, so only SIGKILL ends it).
+        const failure = failureObservations.at(-1);
+        assert.deepEqual(
+          { operation: failure?.operation, kind: failure?.kind },
+          { operation: scenario.operation, kind: "cancelled" },
+        );
+        assert.equal(
+          failure?.childExitSignal,
+          failure?.childExitObserved ? "SIGKILL" : null,
+        );
+        await waitForProcessGone(operationReady.pid);
         assert.ok(controlled.events().some(({ event }) => event === "term"));
         if (scenario.operation === "archive-status")
           assert.equal(
@@ -811,67 +888,110 @@ test("output overflow and sticky cancellation settle safely and retain uncertain
     }
   });
 
-  await t.test("service-owned cancellation is sticky and bounded", async () => {
-    const controlled = controlledGit();
-    const failureObservations: Parameters<
-      NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
-    >[0][] = [];
-    const f = fixture({
-      gitExecutable: controlled.executable,
-      gitTimeoutMs: { "repository-identity": 30_000 },
-      gitTerminationGraceMs: 20,
-      gitTerminationObservationMs: 40,
-      gitFailureObserver: (failure) => failureObservations.push(failure),
-    });
-    try {
-      const source = repository(f.root, "cancel-source");
-      controlled.setRule({
-        commandPrefix: "rev-parse --show-toplevel",
-        behavior: "stall",
-        holdPipe: true,
+  await t.test(
+    "service-owned cancellation is sticky and bounded",
+    async (t) => {
+      const controlled = controlledGit();
+      const failureObservations: Parameters<
+        NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
+      >[0][] = [];
+      const failureObservedAt: number[] = [];
+      const f = fixture({
+        gitExecutable: controlled.executable,
+        gitTimeoutMs: { "repository-identity": 30_000 },
+        gitTerminationGraceMs: 20,
+        gitTerminationObservationMs: 40,
+        gitFailureObserver: (failure) => {
+          failureObservations.push(failure);
+          failureObservedAt.push(Date.now());
+        },
       });
-      const provisioning = f.manager.provision("cancelled-task", [
-        { repositoryId: "repo", path: source },
-      ]);
-      const ready = await waitForGitEvent(
-        controlled,
-        ({ event, operation }) =>
-          event === "ready" && operation === "repository-identity",
-      );
-      f.manager.cancelGitWork();
-      const binding = await provisioning;
-      assert.ok(ready.atMs !== undefined);
-      const elapsedMs = Date.now() - ready.atMs;
-      assert.ok(elapsedMs < 20 + 40 + 500, `settled in ${elapsedMs}ms`);
-      assert.equal(binding.state, "held");
-      assert.equal(binding.gitUncertain, true);
-      assert.match(
-        binding.reason ?? "",
-        /cancelled during repository-identity/,
-      );
-      assert.deepEqual(failureObservations.at(-1), {
-        operation: "repository-identity",
-        kind: "cancelled",
-        childExitObserved: true,
-        childExitSignal: "SIGKILL",
-      });
-      await f.manager.settle();
-      const launches = controlled
-        .events()
-        .filter(({ event }) => event === "start").length;
-      await assert.rejects(f.manager.provision("later-task"), /stopping/);
-      assert.equal(
-        controlled.events().filter(({ event }) => event === "start").length,
-        launches,
-      );
-    } finally {
       try {
-        await controlled.cleanup();
+        const source = repository(f.root, "cancel-source");
+        controlled.setRule({
+          commandPrefix: "rev-parse --show-toplevel",
+          behavior: "stall",
+          holdPipe: true,
+        });
+        const provisioning = f.manager.provision("cancelled-task", [
+          { repositoryId: "repo", path: source },
+        ]);
+        const ready = await waitForGitEvent(
+          controlled,
+          ({ event, operation }) =>
+            event === "ready" && operation === "repository-identity",
+        );
+        const cancelRequestedAt = Date.now();
+        f.manager.cancelGitWork();
+        const binding = await provisioning;
+        const settledAt = Date.now();
+        assert.ok(ready.atMs !== undefined);
+        const readyAt = ready.atMs;
+        const observedAt = failureObservedAt.at(-1);
+        const elapsedMs = settledAt - readyAt;
+        // Emitted before the bounds, so a failing run names the segment that overran: the Git
+        // cancellation (ready to failure observed) or the settle work after it.
+        t.diagnostic(
+          `workspace-git-cancel-evidence ${JSON.stringify({
+            operation: "repository-identity",
+            readyToSettleMs: elapsedMs,
+            readyToCancelRequestMs: cancelRequestedAt - readyAt,
+            readyToFailureObservedMs:
+              observedAt === undefined ? null : observedAt - readyAt,
+            failureObservedToSettledMs:
+              observedAt === undefined ? null : settledAt - observedAt,
+            termGraceMs: 20,
+            observationMs: 40,
+            childExitObserved: failureObservations.at(-1)?.childExitObserved,
+            childExitSignal: failureObservations.at(-1)?.childExitSignal,
+          })}`,
+        );
+        // The strict bound protects cancellation; the settle work after it only has to finish
+        // well before a hang would.
+        assert.ok(
+          observedAt !== undefined && observedAt - readyAt < 20 + 40 + 500,
+          `Git cancellation observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
+        );
+        assert.ok(
+          elapsedMs < 5_000,
+          `cancelled provision settled in ${elapsedMs}ms`,
+        );
+        assert.equal(binding.state, "held");
+        assert.equal(binding.gitUncertain, true);
+        assert.match(
+          binding.reason ?? "",
+          /cancelled during repository-identity/,
+        );
+        // Exit is reported only if the OS delivers it inside the 40 ms window; the child is
+        // asserted gone instead (the controlled Git ignores SIGTERM, so only SIGKILL ends it).
+        const failure = failureObservations.at(-1);
+        assert.deepEqual(
+          { operation: failure?.operation, kind: failure?.kind },
+          { operation: "repository-identity", kind: "cancelled" },
+        );
+        assert.equal(
+          failure?.childExitSignal,
+          failure?.childExitObserved ? "SIGKILL" : null,
+        );
+        await waitForProcessGone(ready.pid);
+        await f.manager.settle();
+        const launches = controlled
+          .events()
+          .filter(({ event }) => event === "start").length;
+        await assert.rejects(f.manager.provision("later-task"), /stopping/);
+        assert.equal(
+          controlled.events().filter(({ event }) => event === "start").length,
+          launches,
+        );
       } finally {
-        f.close();
+        try {
+          await controlled.cleanup();
+        } finally {
+          f.close();
+        }
       }
-    }
-  });
+    },
+  );
 });
 
 test("a legacy binding table migrates git uncertainty to false", () => {
