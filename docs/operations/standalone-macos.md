@@ -225,7 +225,7 @@ release. It then runs these stages:
 5. `readiness`: reads readiness until no check reports Fail, for up to 120
    seconds. Not configured is accepted, so an unused GitHub discovery, GitLab
    credential or Claude does not block it. A configured GitLab credential that
-   fails, or a `glab` login shadowed by `GITLAB_TOKEN`, does block it. The identity check confirms the same installation.
+   fails, or a `glab` login shadowed by `GITLAB_TOKEN`, does block it, as a failing configured GitHub discovery credential does. The identity check confirms the same installation.
 
 On success it prints the version, the startup snapshot, log paths and each readiness
 status. The snapshot is null when this start had no pending migrations, as when it
@@ -646,8 +646,11 @@ the service environment overrides the stored login, and `cab doctor` reports it 
 a failed GitLab credentials check: unset it, or choose an environment variable
 reference. A [LaunchDaemon](#launchdaemon-mode) cannot read a keychain-backed glab
 login before login; use a login glab keeps in its config file, or an environment
-variable. A credential added after the service started needs a restart before new
-Codex spawns exclude it.
+variable. A host that does not answer is reported as unreachable (glab within 8
+seconds), not as signed out. A credential added or changed after the service started
+applies at once to helper, `gh`, `glab` and Claude turn environments; a running Codex
+runtime that inherited its variable or value keeps it, and `cab doctor` and Settings
+report that a restart is needed until the service restarts.
 
 ### GitHub discovery credential
 

@@ -221,3 +221,104 @@ test("a glab value resolved earlier stays excluded after the credential is clear
   );
   assert.equal(cleared[ALIAS], undefined);
 });
+
+test("a GitLab credential configured after start is excluded at once and flags a restart for runtimes that inherited it", async (t) => {
+  const LATE = "FIXTURE_GX_LATE";
+  const canary = "gxlatecanary311";
+  withEnvironment(t, {
+    GITLAB_TOKEN: canary,
+    GITLAB_ACCESS_TOKEN: undefined,
+    OAUTH_TOKEN: undefined,
+    [LATE]: undefined,
+    [ALIAS]: undefined,
+    [CLAUDE]: CLAUDE_VALUE,
+  });
+  const glab = createFakeGlab();
+  const dataDir = join(
+    mkdtempSync(join(tmpdir(), "cab-gitlab-exclusion-")),
+    "data",
+  );
+  const contexts = new Map<ExecutionHarness, RuntimeSpawnContext>();
+  const service = new StandaloneService(
+    dataDir,
+    (context, harness) => {
+      contexts.set(harness, context);
+      return new ContextRuntime();
+    },
+    undefined,
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      power: { enabled: false },
+      routingClient: null,
+      glabExecutable: glab.executable,
+    },
+  );
+  t.after(async () => {
+    await service.stop().catch(() => {});
+    rmSync(join(dataDir, ".."), { recursive: true, force: true });
+    glab.close();
+  });
+  await service.start();
+  const execute = (command: Record<string, unknown>) =>
+    service.domain().execute({
+      actor: "operator",
+      key: randomUUID(),
+      ...command,
+    } as never);
+  const configure = (credentialRef: string | null) =>
+    execute({
+      type: "code-host-credential.configure",
+      codeHost: "gitlab",
+      host,
+      credentialRef,
+    });
+  execute({ type: "claude-token.configure", credentialRef: `env:${CLAUDE}` });
+  const api = new OperatorApi(service, [dataDir], undefined, undefined, {
+    glabExecutable: glab.executable,
+  });
+  const codexSnapshot = () => contexts.get("codex")?.spawnEnvironment();
+  const flagged = async () => {
+    const read = JSON.stringify(await api.readCodeHostCredentials());
+    assert.equal(read.includes(canary), false);
+    assert.equal(read.includes("GITLAB_TOKEN"), false);
+    return (await api.readCodeHostCredentials()).data.restartRequired;
+  };
+
+  // With no GitLab credential the runtime legitimately inherits the variable.
+  assert.equal(codexSnapshot()?.GITLAB_TOKEN, canary);
+  assert.equal(service.gitLabCredentialRestartRequired(), false);
+
+  configure(`glab:${host}`);
+  // Children the service builds from now on exclude it with no restart.
+  assert.equal(childProcessEnvironment().GITLAB_TOKEN, undefined);
+  const turn = contexts.get("claude")?.claude?.turnEnvironment();
+  assert.ok(turn && "env" in turn, JSON.stringify(turn));
+  assert.equal(turn.env.GITLAB_TOKEN, undefined);
+  assert.equal(JSON.stringify(turn.env).includes(canary), false);
+  // The Codex runtime keeps what it inherited, so the operator is told.
+  assert.equal(service.gitLabCredentialRestartRequired(), true);
+  assert.equal(await flagged(), true);
+
+  // A restart takes a fresh snapshot without the credential and clears the notice.
+  await service.stop();
+  await service.start();
+  // Before codexSnapshot(), which takes a new snapshot of its own.
+  assert.equal(service.gitLabCredentialRestartRequired(), false);
+  assert.equal(await flagged(), false);
+  assert.equal(codexSnapshot()?.GITLAB_TOKEN, undefined);
+  assert.equal(JSON.stringify(codexSnapshot()).includes(canary), false);
+
+  // A variable that was not in the environment at start cannot have been inherited.
+  configure(`env:${LATE}`);
+  process.env[LATE] = "gxlatevalue311";
+  assert.equal(service.gitLabCredentialRestartRequired(), false);
+  assert.equal(await flagged(), false);
+  // A value held under another name is inherited by value alone.
+  process.env[ALIAS] = "gxaliasvalue311";
+  await service.stop();
+  await service.start();
+  configure(`env:${LATE}`);
+  process.env[LATE] = "gxaliasvalue311";
+  assert.equal(service.gitLabCredentialRestartRequired(), true);
+  configure(null);
+});
