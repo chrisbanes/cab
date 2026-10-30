@@ -1324,6 +1324,7 @@ export class GitHubSourceStore {
       });
       // Closing moves a Jira status to Done, and a sync may have stored it before this runs, so a
       // status condition cannot count against a closure made through the tracker's own status.
+      // shortcut: a mixed any-mode rule whose only satisfier was the status reads as unmet (the pre-close status is not kept), which holds the task; revisit if it matters.
       const readinessProof =
         readiness.satisfied ||
         (snapshot.status !== undefined &&

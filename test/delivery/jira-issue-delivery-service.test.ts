@@ -298,7 +298,7 @@ test("cab's own closure under a status readiness rule is not counted against it 
   }
 });
 
-test("a lost label still reports readiness-lost after cab's own closure under a status rule", async (t) => {
+test("an unmet label condition still reports readiness-lost after cab's own closure under a status rule", async (t) => {
   const f = await fixture(t, undefined, {
     mode: "all",
     conditions: [
