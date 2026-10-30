@@ -195,7 +195,16 @@ export async function runGitLabQualification(
     assert.equal(project.path_with_namespace, projectPath);
     const mainHead = await api(`${base}/repository/branches/main`);
     const clone = join(temp, "clone");
-    git(temp, "clone", "-q", "--no-hardlinks", options.source, clone);
+    git(
+      temp,
+      "clone",
+      "-q",
+      "--no-hardlinks",
+      "--branch",
+      "main",
+      options.source,
+      clone,
+    );
     git(
       clone,
       "remote",
