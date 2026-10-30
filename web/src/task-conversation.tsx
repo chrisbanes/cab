@@ -583,18 +583,18 @@ function CommandGroup({
   item: Extract<ConversationItem, { type: "commands" }>;
   ctx: Context;
 }) {
-  const key = `c:tools:${item.id}`;
-  const open = ctx.expanded(key);
+  // Open state is kept per command, so a group that gains commands at either end stays open.
+  const keys = item.entries.map((entry) => `c:tools:${entry.entryId}`);
+  const open = keys.some((key) => ctx.expanded(key));
   return (
-    <div
-      className="conv-tools"
-      data-record-id={`c:${item.id}`}
-      data-failed={item.failed > 0 || undefined}
-    >
+    <div className="conv-tools" data-failed={item.failed > 0 || undefined}>
       <Button
         variant="secondary"
         aria-expanded={open}
-        onClick={() => ctx.toggle(key)}
+        onClick={() => {
+          if (!open) return ctx.toggle(keys[0] as string);
+          for (const key of keys) if (ctx.expanded(key)) ctx.toggle(key);
+        }}
       >
         {commandsLabel(item.entries.length, item.failed)}
       </Button>

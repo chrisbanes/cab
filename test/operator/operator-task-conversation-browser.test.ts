@@ -394,6 +394,14 @@ for (const [label, viewport] of [
       await page.waitForTimeout(100);
     assert.equal(outputReads.length, 2);
     await page.unroute(timelineUrl);
+    // The group closes and opens again, whichever of its commands holds the open state.
+    const group = log.getByRole("button", {
+      name: "Ran 3 commands · 1 failed",
+    });
+    await group.click();
+    assert.equal(await group.getAttribute("aria-expanded"), "false");
+    await group.click();
+    assert.equal(await group.getAttribute("aria-expanded"), "true");
     await log.getByRole("button", { name: "Open in Changes" }).click();
     assert.equal(
       await page
