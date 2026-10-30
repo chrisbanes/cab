@@ -13,8 +13,6 @@ contract and dedicated diagnostic projections; direct database access would
 couple clients to storage and bypass those controls.
 
 Authorized instruction views and bounded diagnostic capture support operational
-debugging. They are distinct from the restricted, deferred ChatGPT interface in
-ADR-1006, whose exclusion of private instructions and raw logs remains intact.
-This decision does not reopen that integration or claim isolation from an agent
+debugging. This decision does not claim isolation from an agent
 running under the operator's host account. See the
 [operator CLI design](../design/operator-cli.md) for scope and acceptance.
