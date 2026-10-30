@@ -2,7 +2,7 @@
   "codex-skill": {
     "facet": "codex-skill",
     "attempt": 2,
-    "candidate": "8dfd841798fe7571f418bc8ad5c7f11ccbc2220d",
+    "candidate": "af36db11ad26d874b04de03fe2d6b57635c741ff",
     "node": "v24.22.1",
     "sdk": "0.3.310",
     "claudeCode": "2.1.310",
@@ -27,14 +27,20 @@
         {
           "name": "cabprobe",
           "skills": ["probe-skill"],
-          "digest": "c6eaab32f77d1950750bbf11174f7e91094578ebf2603130843deeefb465e132"
+          "digest": "979bc9656d6d8da1e75bd6fcfb6da9ecddb8883dafaa968aca11eba66797ebeb"
+        },
+        {
+          "name": "cabprobe",
+          "skills": ["probe-skill"],
+          "digest": "979bc9656d6d8da1e75bd6fcfb6da9ecddb8883dafaa968aca11eba66797ebeb"
         }
       ],
       "digestMatchesDirectory": true,
-      "loginLinkIntact": true
+      "loginLinkIntact": true,
+      "followUpTurnRanSkill": true
     },
     "startTurn": {
-      "turns": 1,
+      "turns": 2,
       "refused": []
     },
     "processes": [
@@ -67,24 +73,24 @@
       "attempt": {
         "number": 2,
         "model": "haiku",
-        "startedAt": 1793375180683,
+        "startedAt": 1793376732223,
         "turns": {
           "claude": 0,
-          "codex": 1
+          "codex": 2
         },
         "outcome": "passed",
         "failureKind": null
       },
       "totals": {
-        "claude": 0,
-        "codex": 2
+        "claude": 1,
+        "codex": 5
       }
     }
   },
   "mixed": {
     "facet": "mixed",
     "attempt": 1,
-    "candidate": "8dfd841798fe7571f418bc8ad5c7f11ccbc2220d",
+    "candidate": "af36db11ad26d874b04de03fe2d6b57635c741ff",
     "node": "v24.22.1",
     "sdk": "0.3.310",
     "claudeCode": "2.1.310",
@@ -165,7 +171,7 @@
       "attempt": {
         "number": 1,
         "model": "haiku",
-        "startedAt": 1793375205292,
+        "startedAt": 1793376682544,
         "turns": {
           "claude": 1,
           "codex": 2
@@ -175,7 +181,7 @@
       },
       "totals": {
         "claude": 1,
-        "codex": 4
+        "codex": 3
       }
     }
   }

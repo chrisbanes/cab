@@ -36,6 +36,7 @@ import {
   withAttempt,
 } from "./harness.mjs";
 import {
+  codexSkillBrief,
   SLEEP,
   setupJourney,
   shellOnly,
@@ -623,6 +624,34 @@ async function skill(current, ids, check, plugin) {
     "the skill's marker",
     true,
   );
+  // A Codex conversation resumes its thread before every later turn, so the profile's skill
+  // scope is reapplied through the real runtime: a follow-up must run the skill again.
+  let followUpRan = null;
+  if (facet === "codex-skill") {
+    const binding = current.service.recoveryForTask(ids.taskId)[0]?.binding;
+    if (!binding) throw new Error("no conversation to continue");
+    rmSync(plugin.skillMarker);
+    await current.service.coordinationView().postOperatorMessage({
+      key: randomUUID(),
+      taskId: ids.taskId,
+      recipientAssignmentId: binding.assignmentId,
+      expectedAssignmentVersion: binding.assignmentVersion,
+      message: codexSkillBrief,
+    });
+    await waitUntil(
+      () => {
+        check();
+        return (
+          existsSync(plugin.skillMarker) &&
+          current.service.list().every((i) => settled(i.state))
+        );
+      },
+      TURN_MS,
+      "the follow-up turn's skill marker",
+      true,
+    );
+    followUpRan = true;
+  }
   const { digestPlugin } = await import(
     "../../../dist/src/standalone/skill-plugins.js"
   );
@@ -647,7 +676,12 @@ async function skill(current, ids, check, plugin) {
       digest: d,
     })),
     digestMatchesDirectory: recorded.some((p) => p.digest === digest),
-    ...(facet === "codex-skill" ? { loginLinkIntact: loginLinkIntact() } : {}),
+    ...(facet === "codex-skill"
+      ? {
+          loginLinkIntact: loginLinkIntact(),
+          followUpTurnRanSkill: followUpRan,
+        }
+      : {}),
   };
   const o = evidence.observations;
   if (facet === "codex-skill" && !o.loginLinkIntact)
