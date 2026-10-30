@@ -219,7 +219,8 @@ release. It then runs these stages:
    seconds.
 2. `render`: renders, lints and records the new plist, with new log files.
 3. `start`: `launchctl bootstrap`. The starting service takes and verifies the
-   [startup snapshot](#startup-snapshot) before it migrates, or refuses to start.
+   [startup snapshot](#startup-snapshot) before it applies pending migrations, or
+   refuses to start.
 4. `health`: waits up to 120 seconds for `/app`.
 5. `readiness`: reads readiness until no check reports Fail, for up to 120
    seconds. Not configured is accepted, so an unused GitHub discovery, GitLab

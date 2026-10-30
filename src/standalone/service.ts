@@ -894,9 +894,8 @@ export class StandaloneService {
       return value;
     };
     try {
-      // Before the database is opened for writing: data
-      // with migrations pending is snapshotted and verified under the held owner lock, or
-      // startup is refused.
+      // Before the database is opened for writing: data with migrations pending is
+      // snapshotted and verified under the held owner lock, or startup is refused.
       const level = this.options.startupSnapshot?.level ?? MIGRATION_LEVEL;
       const startupState = await protectBeforeMigration(dataDirectory, {
         ...this.options.startupSnapshot,

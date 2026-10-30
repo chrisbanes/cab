@@ -591,10 +591,9 @@ test("a snapshot directory the service account does not exclusively own refuses 
 });
 
 /**
- * Digest of the schema a fresh start creates: columns, foreign keys, and the SQL of every index,
- * trigger and view. It reads `PRAGMA table_xinfo`, not the stored CREATE TABLE text, so it does
- * not change with how a migration spells or reaches the same table. CHECK constraints are not
- * covered.
+ * Digest of the schema a fresh start creates: the stored SQL of every table, index, trigger and
+ * view, which includes column, CHECK, UNIQUE and foreign-key constraints. A spelling-only
+ * change also changes it and forces a level bump, the safe direction.
  */
 function schemaDigest(data: string): string {
   const db = new DatabaseSync(join(data, "standalone.sqlite"), {
@@ -603,19 +602,10 @@ function schemaDigest(data: string): string {
   try {
     const objects = db
       .prepare(
-        "SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+        "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
       )
-      .all() as Array<{ type: string; name: string; sql: string | null }>;
-    const inventory = objects.map(({ type, name, sql }) =>
-      type === "table"
-        ? {
-            table: name,
-            columns: db.prepare(`PRAGMA table_xinfo("${name}")`).all(),
-            foreignKeys: db.prepare(`PRAGMA foreign_key_list("${name}")`).all(),
-          }
-        : { type, name, sql },
-    );
-    return createHash("sha256").update(JSON.stringify(inventory)).digest("hex");
+      .all();
+    return createHash("sha256").update(JSON.stringify(objects)).digest("hex");
   } finally {
     db.close();
   }
@@ -623,7 +613,7 @@ function schemaDigest(data: string): string {
 
 /** The schema digest each migration level created. Append an entry with every level bump. */
 const SCHEMA_PINS: Record<number, string> = {
-  1: "a3a94c41a7e1d0922e131d0d8c9de4d331bd350d5e21b0b90930b0b69ecac22a",
+  1: "70a7b6cd96317bf46d0857b2816ad74bf84046906c740923689c885c68d31d4f",
 };
 
 test("the migration level matches the schema this build creates", async () => {
