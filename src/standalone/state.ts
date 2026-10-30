@@ -2101,17 +2101,18 @@ export class ExecutionState {
     // too, so a Draft task is not stranded; the Ready initial turn is refused the same way.
     if (row.draftTurn === 1)
       return (
-        (reasons.length === 1 && reasons[0] === previousCodexHomeMessage) ||
-        (reasons.some(
+        reasons.some(
           (reason) =>
             refusedAssignmentRevisionReasons.has(reason) ||
-            reason === "task-revision-changed",
+            reason === "task-revision-changed" ||
+            reason === previousCodexHomeMessage,
         ) &&
-          reasons.every(
-            (reason) =>
-              safeRefusedAssignmentRevisionReasons.has(reason) ||
-              reason === "task-revision-changed",
-          ))
+        reasons.every(
+          (reason) =>
+            safeRefusedAssignmentRevisionReasons.has(reason) ||
+            reason === "task-revision-changed" ||
+            reason === previousCodexHomeMessage,
+        )
       );
     if (
       reasons.length === 0 ||
