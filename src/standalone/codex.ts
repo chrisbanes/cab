@@ -1973,11 +1973,6 @@ export class CodexRuntime implements Runtime {
     if (this.child !== expectedChild) throw new Error("Runtime stopped");
   }
 
-  /**
-   * Thread config that scopes skills to the bound profile revision. App Server holds one
-   * set of extra roots per process, so the roots are the union of every profile's plugins
-   * and each thread disables what its own profile does not enable, on start and on resume.
-   */
   /** Runs thread start/resume one at a time, so a scope is computed and applied against one root set. */
   private exclusive<T>(work: () => Promise<T>): Promise<T> {
     const run = this.scopeQueue.then(work, work);
@@ -1988,6 +1983,11 @@ export class CodexRuntime implements Runtime {
     return run;
   }
 
+  /**
+   * Thread config that scopes skills to the bound profile revision. App Server holds one
+   * set of extra roots per process, so the roots are the union of every profile's plugins
+   * and each thread disables what its own profile does not enable, on start and on resume.
+   */
   private async skillConfig(
     workspace: string,
     settings: RuntimeTurnSettings | undefined,

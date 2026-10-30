@@ -15,14 +15,14 @@ login linked into cab's own Codex home. Redacted output:
 
 | Facet | Result | Observation |
 | --- | --- | --- |
-| `codex-skill` | passed, attempt 2 | A Codex lead whose profile enables `probe-skill` ran the skill: its script wrote the marker inside the task workspace, the turn recorded the plugin's name, skills and digest (equal to an independent digest of the plugin directory), no plugin hook or MCP server ran, and cab's `auth.json` was still a symbolic link to a regular file (metadata only). An operator follow-up then continued the conversation, so the runtime unsubscribed the thread and resumed it with the profile's skill scope, and that second turn ran the skill again and recorded its digest. Two Codex turns. |
+| `codex-skill` | passed, attempt 2 | A Codex lead whose profile enables `probe-skill` ran the skill: its script wrote the marker inside the task workspace, the turn recorded the plugin's name, skills and digest (equal to an independent digest of the plugin directory), no plugin hook or MCP server ran, and cab's `auth.json` was still a symbolic link to a regular file (metadata only). An operator follow-up then continued the conversation, which takes the runtime's resume path (it unsubscribes the thread and resumes it with the profile's skill scope), and that second turn ran the skill again and recorded its digest. Two Codex turns. |
 | `mixed` | passed, attempt 1 | The existing journey, rerun: a Codex lead delegates to a Claude worker, the worker reports, and the lead's completion request finalizes. Two Codex turns and one Claude turn. |
 
 Every recorded process was verified exited by exact identity.
 
 ## Versions and limits
 
-- The JSON's `candidate` is the commit the final runs started from; the follow-up turn check was added to the facet in the working tree afterwards, and the `mixed` run is from the same commit.
+- The JSON's `candidate` is the commit the final runs started from; the `codex-skill` run included the follow-up turn check, which was uncommitted when it started and is committed afterwards; the `mixed` run is from the same commit.
 - The journeys run the approved launcher, `codex-cli 0.165.0-alpha.1.2`; the scoping proof
   ran on the `codex` on `PATH`, 0.164.0. Both ran the
   skill.
