@@ -75,6 +75,7 @@ test("inspection sections are reached from task origins and exact direct links w
   const searchURL = page.url();
   await page.locator(`[data-search-record="${result.resultId}"] a`).click();
   await page
+    .locator("#review")
     .getByText("Navigable inspection result", { exact: true })
     .waitFor();
   assert.ok(page.url().includes(`result=${result.resultId}`));

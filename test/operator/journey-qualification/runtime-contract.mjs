@@ -817,6 +817,7 @@ export async function runQualification(options = {}) {
     await step(async () => {
       await page.reload();
       await page
+        .locator("#review")
         .getByText("UI07 exact native answer consumption observed", {
           exact: true,
         })
