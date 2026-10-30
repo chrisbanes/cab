@@ -447,6 +447,7 @@ test("change request text in a Jira project never closes a Jira issue with a key
     "Implementing ABC-7",
     "Some detail\nclosed ABC-7 in this change",
     "CLOSING ABC-9",
+    "Closes ABC-7x",
   ]) {
     assert.throws(
       () => cr.create("ABC-7 Fix", text),

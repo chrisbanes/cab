@@ -3976,9 +3976,9 @@ export class StandaloneService {
         });
         const source = sources.issue(String(imported.nodeId));
         if (!source) continue;
+        // The source version is shared by every tracker's project source.
         const config = domain.githubConfiguration(String(project.id));
         const nodeId = String(imported.nodeId);
-        // The source version is shared by every tracker's project source.
         try {
           const result = await deliveryCoordinator.inspectOwnClosure(
             String(task.id),
