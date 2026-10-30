@@ -627,11 +627,12 @@ export async function runQualification(options = {}) {
       await page.getByLabel("Password").fill(password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page
+        .locator("#review")
         .getByText("UI04 synthetic callback recorded", { exact: true })
         .waitFor();
       await page.getByText(/Synthetic callback transport only/).waitFor();
-      // Captured context is on the History tab.
-      await page.getByRole("tab", { name: "History", exact: true }).click();
+      // Captured context is a card in the Overview inspector.
+      await page.locator("#context > details > summary").click();
       await page
         .getByRole("heading", { name: "Captured context", exact: true })
         .waitFor();

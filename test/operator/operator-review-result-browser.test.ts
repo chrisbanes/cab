@@ -128,6 +128,8 @@ async function openEvidence(page: Page) {
   await card.and(page.locator("[open]")).waitFor();
   const record = card.getByText("Unit tests").first();
   await record.waitFor();
+  // The card opens beneath its summary, which can sit at the foot of the first screen.
+  await record.evaluate((e) => e.scrollIntoView({ block: "center" }));
   assert.equal(
     await inFirstViewport(page, record),
     true,
@@ -254,7 +256,9 @@ for (const [label, viewport] of [
     assert.equal(
       await inFirstViewport(
         s.page,
-        named.getByText("Captured context").first(),
+        named.getByRole("heading", {
+          name: "Assignments and retained history",
+        }),
       ),
       true,
       "the History panel is in view",

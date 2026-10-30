@@ -5,7 +5,11 @@ import {
 } from "../core/redaction-limits.js";
 import { type Database, transaction } from "../core/store.js";
 import type { RuntimeConversationEvent } from "./codex.js";
-import { keysetBelow, type TimelineKey, timelineRank } from "./timeline-key.js";
+import {
+  keysetBelow,
+  type TimelineKey,
+  timelineRank,
+} from "../operator/timeline-key.js";
 
 export type ConversationHistoryBinding = z.infer<typeof bindingSchema>;
 export type ConversationHistoryLifecycle = z.infer<

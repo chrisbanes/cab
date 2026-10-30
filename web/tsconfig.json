@@ -13,5 +13,10 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src/**/*", "../src/operator/contracts.ts", "vite.config.ts"]
+  "include": [
+    "src/**/*",
+    "../src/operator/contracts.ts",
+    "../src/operator/timeline-key.ts",
+    "vite.config.ts"
+  ]
 }

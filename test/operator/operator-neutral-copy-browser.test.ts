@@ -156,11 +156,13 @@ for (const [name, viewport] of [
 
     await openOverviewCard(page, "assignments");
     const row = page.locator(".assignment-row", { hasText: "Claude work" });
-    await row.getByText(reason, { exact: false }).waitFor();
-    await row.getByRole("button").first().click();
-    const details = page.locator(
-      `#history details[data-record-id="${workerId}"]`,
-    );
+    await row
+      .locator("td")
+      .last()
+      .getByText(reason, { exact: false })
+      .waitFor();
+    const details = row.locator("details.assignment-facts");
+    await details.locator("> summary").click();
     await details
       .getByText(`Recorded wait / execution reason: ${reason}.`)
       .waitFor();

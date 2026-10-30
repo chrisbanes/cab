@@ -198,7 +198,7 @@ import {
   parseTimelineCursor,
   serializeTimelineKey,
   timelineRank,
-} from "./timeline-key.js";
+} from "../operator/timeline-key.js";
 import {
   ResetUnavailableError,
   StartAgainUnavailableError,

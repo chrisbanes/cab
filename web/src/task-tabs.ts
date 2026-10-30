@@ -13,7 +13,6 @@ const sectionTabs: Record<string, TaskTab> = {
   files: "files",
   changes: "changes",
   "local-review": "review",
-  context: "history",
   history: "history",
 };
 

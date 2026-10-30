@@ -1,20 +1,26 @@
-import type { MouseEvent } from "react";
+import type { ReactNode } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
-import { isPlainClick } from "./components.js";
 import { assignmentRow } from "./task-overview.js";
 import { ExecutionNotices } from "./execution-notice.js";
 import "./task-detail.css";
 
-/** Opens the collapsed Overview card (or "N more" criteria) that holds a linked record, so a link never lands on a closed one. */
+const folds =
+  "details.overview-disclosure, details.criteria-more, details.inspector-fold";
+
+/** Opens the collapsed Overview cards (and the inspector holding them) around a linked record, so a link never lands on a closed one. */
 export function openDisclosures(target: HTMLElement) {
-  const card = target.closest<HTMLDetailsElement>(
-    "details.overview-disclosure, details.criteria-more",
-  );
-  if (card) card.open = true;
+  for (
+    let card = target.closest<HTMLDetailsElement>(folds);
+    card;
+    card = card.parentElement?.closest<HTMLDetailsElement>(folds) ?? null
+  )
+    card.open = true;
 }
 
 /** Move to a task section in place: no history entry, focus on its heading or card summary. */
 export function showSection(target: HTMLElement) {
+  const fold = target.closest<HTMLDetailsElement>("details.inspector-fold");
+  if (fold) fold.open = true;
   target.scrollIntoView();
   const summary = target.querySelector<HTMLElement>(
     ":scope > details.overview-disclosure > summary",
@@ -27,34 +33,19 @@ export function showSection(target: HTMLElement) {
   }
 }
 
-/**
- * Keep this history entry, and so its origin, instead of pushing a hash entry. `reveal`
- * selects the section's tab, then moves to it.
- */
-function inPage(id: string, reveal: (id: string) => void, before?: () => void) {
-  return (event: MouseEvent<HTMLElement>) => {
-    // Links keep modified clicks (new tab or window); the assignment buttons always act.
-    if (
-      event.currentTarget instanceof HTMLAnchorElement &&
-      !isPlainClick(event)
-    )
-      return;
-    event.preventDefault();
-    if (!before) return reveal(id);
-    before();
-    requestAnimationFrame(() => reveal(id));
-  };
-}
-
-/** The assignments table; opening one expands that assignment's history. */
+/** The assignments table; a title opens that assignment in the conversation, and its facts expand in the row. */
 export function AssignmentRows({
   assignments,
   open,
-  reveal,
+  facts,
+  factsOpen,
+  onFactsToggle,
 }: {
   assignments: TaskRead["data"]["assignments"];
   open: (assignmentId: string) => void;
-  reveal: (id: string) => void;
+  facts: (assignment: TaskRead["data"]["assignments"][number]) => ReactNode;
+  factsOpen: (assignmentId: string) => boolean;
+  onFactsToggle: (assignmentId: string, open: boolean) => void;
 }) {
   if (assignments.length === 0)
     return <p className="muted">No assignments yet.</p>;
@@ -74,14 +65,19 @@ export function AssignmentRows({
             <tr className="assignment-row" key={a.assignmentId}>
               <td>
                 <span className="assignment-id">{row.id}</span>
-                <button
-                  type="button"
-                  onClick={inPage("history", reveal, () =>
-                    open(a.assignmentId),
-                  )}
-                >
+                <button type="button" onClick={() => open(a.assignmentId)}>
                   {row.title}
                 </button>
+                <details
+                  className="assignment-facts"
+                  open={factsOpen(a.assignmentId)}
+                  onToggle={(event) =>
+                    onFactsToggle(a.assignmentId, event.currentTarget.open)
+                  }
+                >
+                  <summary>Assignment facts</summary>
+                  {facts(a)}
+                </details>
               </td>
               <td>{row.flow}</td>
               <td>

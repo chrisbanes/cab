@@ -74,9 +74,9 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   const unavailable = page.getByText("Recent captured text unavailable"),
     unavailableCount = await unavailable.count();
   assert.ok(opened >= 3);
-  // Reading position inside the captured-context section, where record ids nest.
+  // Reading position inside the history section, where record ids nest.
   await page
-    .locator("#context")
+    .locator("#history h3")
     .evaluate((el) =>
       scrollTo(0, el.getBoundingClientRect().top + scrollY - 90),
     );
