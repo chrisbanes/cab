@@ -205,22 +205,42 @@ async function freePort() {
 const git = (...args) =>
   execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
 
-/** A version-bump-only commit with no branch or ref, so it cannot be pushed. */
+const LEVEL_FILE = "src/standalone/startup-snapshot.ts";
+const LEVEL_LINE = /^export const MIGRATION_LEVEL = (\d+);$/gm;
+
+/**
+ * A commit with no branch or ref, so it cannot be pushed, that bumps the package version and
+ * the migration level: release B has a migration pending for release A's data.
+ */
 function versionBumpCommit(version) {
   const index = join(root, "bump.index");
   const env = { ...process.env, GIT_INDEX_FILE: index };
   execFileSync("git", ["read-tree", "HEAD"], { cwd: repo, env });
   const pkg = JSON.parse(git("show", "HEAD:package.json"));
   pkg.version = version;
-  const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
-    cwd: repo,
-    input: `${JSON.stringify(pkg, null, 2)}\n`,
-    encoding: "utf8",
-  }).trim();
-  execFileSync(
-    "git",
-    ["update-index", "--cacheinfo", `100644,${blob},package.json`],
-    { cwd: repo, env },
+  const levelSource = git("show", `HEAD:${LEVEL_FILE}`);
+  const levels = [...levelSource.matchAll(LEVEL_LINE)];
+  if (levels.length !== 1)
+    throw new Error(`${LEVEL_FILE} must declare MIGRATION_LEVEL exactly once`);
+  const from = Number(levels[0][1]);
+  const to = from + 1;
+  const write = (path, content) => {
+    const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+      cwd: repo,
+      input: content,
+      encoding: "utf8",
+    }).trim();
+    execFileSync(
+      "git",
+      ["update-index", "--cacheinfo", `100644,${blob},${path}`],
+      { cwd: repo, env },
+    );
+  };
+  write("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+  write(
+    LEVEL_FILE,
+    levelSource.replace(LEVEL_LINE, `export const MIGRATION_LEVEL = ${to};`) +
+      "\n",
   );
   const tree = execFileSync("git", ["write-tree"], {
     cwd: repo,
@@ -228,11 +248,12 @@ function versionBumpCommit(version) {
     encoding: "utf8",
   }).trim();
   rmSync(index);
-  return execFileSync(
+  const commit = execFileSync(
     "git",
     ["commit-tree", tree, "-p", "HEAD", "-m", `Live #980 release ${version}`],
     { cwd: repo, encoding: "utf8" },
   ).trim();
+  return { commit, from, to };
 }
 
 function buildAndUnpack(commit, out, versions) {
@@ -295,9 +316,9 @@ async function main() {
     join(root, "bootstrap"),
   );
   const installedA = join(state, "versions", a.version);
-  const bumpCommit = versionBumpCommit("0.1.1-live.980");
+  const bump = versionBumpCommit("0.1.1-live.980");
   const b = buildAndUnpack(
-    bumpCommit,
+    bump.commit,
     join(root, "build-b"),
     join(state, "versions"),
   );
@@ -439,10 +460,10 @@ async function main() {
     processCommand(jobB.pid).includes(join(b.directory, "node", "bin", "node")),
   );
   const report = evidence.upgradeOutput;
-  // Release B's own start took it: the CLI no longer snapshots.
+  // Release B's own start took it, for the migration level it adds: the CLI no longer snapshots.
   assert.ok(
     report.snapshot?.startsWith(
-      join(state, "snapshots", `startup.${a.version}-to-${b.version}.`),
+      join(state, "snapshots", `startup.${bump.from}-to-${bump.to}.`),
     ),
     `service-taken snapshot, got ${report.snapshot}`,
   );
@@ -691,20 +712,23 @@ async function npmMain() {
     processCommand(jobB.pid).includes(stageDir(b.version)),
     "the new process runs from the new stage",
   );
-  assert.ok(
-    report.snapshot?.startsWith(
-      join(state, "snapshots", `startup.${a.version}-to-${b.version}.`),
-    ),
-    `service-taken snapshot, got ${report.snapshot}`,
+  // The same code at a new version has no migration pending, so the start takes no snapshot.
+  assert.equal(
+    report.snapshot,
+    null,
+    "no snapshot without a pending migration",
   );
-  const verify = cab(["snapshot", "verify", report.snapshot]);
-  assert.equal(verify.code, 0, "snapshot verify");
+  assert.deepEqual(
+    readdirSync(join(state, "snapshots")),
+    [],
+    "no startup snapshot exists",
+  );
   assert.ok(existsSync(stageDir(a.version)), "the old stage stays");
   step("5-upgrade", {
     output: report,
     oldPidExited: true,
     newPidRunsStageB: true,
-    snapshotVerify: JSON.parse(verify.out),
+    snapshot: null,
   });
 
   const authBytes = readFileSync(authFile);
@@ -715,7 +739,6 @@ async function npmMain() {
   for (const kept of [
     join(state, "data"),
     authFile,
-    report.snapshot,
     stageDir(a.version),
     stageDir(b.version),
     ...report.logs,
@@ -724,7 +747,7 @@ async function npmMain() {
   step("6-uninstall", {
     output: JSON.parse(uninstall.out),
     printExit: 113,
-    kept: ["data", "auth", "snapshot", "both stages", "logs"],
+    kept: ["data", "auth", "both stages", "logs"],
   });
 
   const again = await install("token-2", "Operator password: ");

@@ -341,6 +341,44 @@ const boundNode = ({ configuration: { nodePath, cliPath } }: InstallRecord) =>
     ? undefined
     : nodePath;
 
+const SEMVER =
+  /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+function parseSemver(value: string) {
+  const match = SEMVER.exec(value);
+  if (!match) throw new Error("Release version is not a semantic version");
+  return {
+    core: match.slice(1, 4).map((part) => BigInt(part)),
+    pre: match[4]?.split("."),
+  };
+}
+
+/** Semantic-version precedence: negative when `left` is older than `right`. */
+export function compareReleaseVersions(left: string, right: string): number {
+  const a = parseSemver(left);
+  const b = parseSemver(right);
+  for (const [index, part] of a.core.entries()) {
+    const other = b.core[index] as bigint;
+    if (part !== other) return part < other ? -1 : 1;
+  }
+  if (!a.pre || !b.pre) return a.pre ? -1 : b.pre ? 1 : 0;
+  for (const [index, part] of a.pre.entries()) {
+    const other = b.pre[index];
+    if (other === undefined) return 1;
+    const numeric = /^\d+$/.test(part);
+    const otherNumeric = /^\d+$/.test(other);
+    if (numeric && otherNumeric) {
+      if (BigInt(part) !== BigInt(other))
+        return BigInt(part) < BigInt(other) ? -1 : 1;
+    } else if (numeric !== otherNumeric) {
+      return numeric ? -1 : 1;
+    } else if (part !== other) {
+      return part < other ? -1 : 1;
+    }
+  }
+  return a.pre.length === b.pre.length ? 0 : -1;
+}
+
 const releaseVersionSchema = z.string().regex(/^[0-9A-Za-z][0-9A-Za-z.+-]*$/);
 
 /** A tarball release (bundled Node.js) or the copy of a global npm package a service runs from. */
@@ -2009,7 +2047,7 @@ async function upgradeServiceLocked(
       );
     const found = service.source(target);
     const { version } = found;
-    const { compareReleaseVersions, readStartupState } = await import(
+    const { readStartupState } = await import(
       "../standalone/startup-snapshot.js"
     );
     // Equal versions are the reload route; a database a newer release started is never reopened.
@@ -2036,11 +2074,11 @@ async function upgradeServiceLocked(
       }
     };
     const before = readState();
-    // The snapshot this upgrade's start took or reused; none for a reload.
+    // The snapshot this upgrade's start took; none when it had no migrations pending.
     startupSnapshot = async () => {
-      const taken = readState()?.snapshot;
-      return taken?.to === version && before?.release !== version
-        ? taken.path
+      const taken = readState()?.snapshot?.path;
+      return taken !== undefined && taken !== before?.snapshot?.path
+        ? taken
         : null;
     };
     service.requireOwned(record, await service.loadedJob());

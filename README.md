@@ -152,8 +152,8 @@ owns delivery scope and status.
 - **Operations.** `cab service install`, `upgrade` and `uninstall` manage a
   per-user macOS LaunchAgent bound to an unpacked release; upgrade stops the job,
   starts the new release and checks readiness, and a failure leaves the job
-  stopped. The service itself takes and verifies a snapshot before it migrates
-  data an older release wrote, and refuses to start without one. `service install --mode daemon` is an opt-in LaunchDaemon that starts at
+  stopped. The service itself takes and verifies a snapshot before it applies
+  pending migrations to existing data, and refuses to start without one. `service install --mode daemon` is an opt-in LaunchDaemon that starts at
   boot and prints the `sudo` steps to install it; its real-host behavior is unproved. `cab snapshot create|verify|restore` provides offline database
   backup, verification and restore
   ([standalone operations](docs/operations/standalone-macos.md)).

@@ -211,9 +211,9 @@ import type {
 import { resolveOnPath } from "./executable-path.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
 import {
+  MIGRATION_LEVEL,
   protectBeforeMigration,
-  recordStartedRelease,
-  releaseVersion,
+  recordMigrationLevel,
   type StartupSnapshotOptions,
 } from "./startup-snapshot.js";
 import {
@@ -894,12 +894,12 @@ export class StandaloneService {
       return value;
     };
     try {
-      // Before the database is opened for writing: an older release's data is
+      // Before the database is opened for writing: data with migrations pending is
       // snapshotted and verified under the held owner lock, or startup is refused.
-      const release = this.options.startupSnapshot?.release ?? releaseVersion();
+      const level = this.options.startupSnapshot?.level ?? MIGRATION_LEVEL;
       const startupState = await protectBeforeMigration(dataDirectory, {
         ...this.options.startupSnapshot,
-        release,
+        level,
       });
       const rawDb = new DatabaseSync(database);
       this.db = rawDb;
@@ -1641,7 +1641,7 @@ export class StandaloneService {
           ).unref(),
         );
       }
-      recordStartedRelease(dataDirectory, startupState, release);
+      recordMigrationLevel(db, dataDirectory, startupState, level);
     } catch (error) {
       generation.accepting = false;
       this.abortRuntimeRestarts();
