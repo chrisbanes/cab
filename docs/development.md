@@ -57,8 +57,9 @@ npm run test:built -- --profile=service
 browser-dependent cases while retaining service assertions in mixed test files.
 Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
 their engine. Missing compiled tests, unknown suites/options and empty shards
-fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence directory
-(set `CAB_TEST_EVIDENCE_DIR` to keep it after the run); CI uploads these with the synthetic evidence. Refresh a profile from a successful
+fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence
+directory (set `CAB_TEST_EVIDENCE_DIR` to keep it after the run); CI uploads these with
+the synthetic evidence. Refresh a profile from a successful
 complete run, or all its shards, using:
 
 ```sh
