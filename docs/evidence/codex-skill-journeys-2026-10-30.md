@@ -22,6 +22,7 @@ Every recorded process was verified exited by exact identity.
 
 ## Versions and limits
 
+- The JSON's `candidate` is the commit the final runs started from; the follow-up turn check was added to the facet in the working tree afterwards, and the `mixed` run is from the same commit.
 - The journeys run the approved launcher, `codex-cli 0.165.0-alpha.1.2`; the scoping proof
   ran on the `codex` on `PATH`, 0.164.0. Both ran the
   skill.
