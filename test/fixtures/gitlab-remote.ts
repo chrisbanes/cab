@@ -30,6 +30,8 @@ export interface ScriptedMergeRequest {
   author: { id: number };
   diff_refs: { base_sha: string | null } | null;
   head_pipeline: ScriptedPipeline | null;
+  detailed_merge_status: string | null;
+  merge_when_pipeline_succeeds: boolean;
 }
 export interface ScriptedNote {
   id: number;
@@ -69,6 +71,8 @@ export function gitLabMergeRequest(
     author: { id: gitLabUser.id },
     diff_refs: { base_sha: "b".repeat(40) },
     head_pipeline: null,
+    detailed_merge_status: "mergeable",
+    merge_when_pipeline_succeeds: false,
     ...fields,
   };
 }
@@ -119,7 +123,18 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
     /** The project as the API reports it; the path may differ in case from the link. */
     project: null as unknown,
     redirect: false,
+    /** Merge train cars by merge request IID: a car's status, absent when the request is not on the train. */
+    cars: new Map<number, string>(),
+    /** The status a train gives a request added to it. */
+    carStatus: "fresh",
+    /** A merge or train write takes effect, then its response is lost. */
+    loseMergeResponse: false,
   };
+  /** The merge and train writes, with their bodies. */
+  const merges: Array<{
+    route: "merge" | "train";
+    body: Record<string, unknown>;
+  }> = [];
   const requests: Array<{ url: string; init: RequestInit }> = [];
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status });
@@ -172,6 +187,26 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       }
       return json({ data: { mergeRequestSetDraft: { errors: [] } } });
     }
+    const trainPath = `${project}/merge_trains/merge_requests/`;
+    if (path.startsWith(trainPath)) {
+      const iid = Number(path.slice(trainPath.length));
+      const train = state.mergeRequests.find((m) => m.iid === iid);
+      if (!train) return json({}, 404);
+      if (method === "POST") {
+        merges.push({ route: "train", body });
+        if (body.sha !== train.sha) return json({}, 409);
+        if (
+          train.state !== "opened" ||
+          train.detailed_merge_status !== "mergeable"
+        )
+          return json({}, 405);
+        state.cars.set(iid, state.carStatus);
+        if (state.loseMergeResponse) throw new TypeError("fetch failed");
+        return json({ status: state.carStatus }, 201);
+      }
+      const status = state.cars.get(iid);
+      return status ? json({ status }) : json({}, 404);
+    }
     const requestsPath = `${project}/merge_requests`;
     if (path === requestsPath && method === "POST") {
       const id = state.nextId++;
@@ -219,6 +254,16 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
         mr.description = saved(String(body.description));
       return json(mr);
     }
+    if (rest === "merge" && method === "PUT") {
+      merges.push({ route: "merge", body });
+      // GitLab refuses a moved head with 409 and an unmergeable request with 405.
+      if (body.sha !== mr.sha) return json({}, 409);
+      if (mr.state !== "opened" || mr.detailed_merge_status !== "mergeable")
+        return json({}, 405);
+      mr.state = "merged";
+      if (state.loseMergeResponse) throw new TypeError("fetch failed");
+      return json(mr);
+    }
     if (rest === "discussions") return paged(state.discussions, new URL(url));
     const discussion = rest?.match(/^discussions\/([^/]+)(\/notes)?$/);
     const found = state.discussions.find((d) => d.id === discussion?.[1]);
@@ -249,5 +294,5 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
         }
     return json(found);
   }) as typeof fetch;
-  return { state, requests, fetcher };
+  return { state, requests, merges, fetcher };
 }

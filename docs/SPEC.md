@@ -49,9 +49,8 @@ items; readiness is separate. Jira Cloud imports issues by JQL: a project uses o
 tracker. Comments, label changes and closing on Jira issues are delivered (see the Jira
 delivery paragraph below); Jira status mapping and issue edit or publication are planned and
 not implemented.
-GitLab merge request merging is planned and not implemented; a project can link a
-GitLab checkout and deliver its branches and open, edit, ready and discuss its merge
-requests ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
+A project can link a GitLab checkout and deliver its branches, open, edit, ready,
+discuss and merge its merge requests ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
 a plugin marketplace, multiple execution machines, team/RBAC administration and
 migration of old live runs are outside the first release. Source interfaces follow
 concrete integrations.
@@ -906,9 +905,9 @@ another. A GitLab link must also have an
 `origin` remote on its host whose full project path matches, case-insensitively, and
 a refusal names the link and reason without echoing a path or remote. Branch
 actions (`branch.push`, `branch.force-push`, `branch.adopt`) and merge request actions
-(`pr.create`, `pr.edit`, `pr.ready`, `pr.thread.reply`, `pr.thread.resolve`) on a GitLab link
-are delivered to that project with the host's credential, resolved on every use;
-`pr.merge` and every other code-host action that names a GitLab link is refused with
+(`pr.create`, `pr.edit`, `pr.ready`, `pr.merge`, `pr.thread.reply`, `pr.thread.resolve`) on a
+GitLab link are delivered to that project with the host's credential, resolved on every use;
+every other code-host action that names a GitLab link is refused with
 `code-host-delivery-unavailable`, before any provider or Git transport runs. Only merge
 requests inside the linked project are acted on, never a fork's. A host with no usable credential holds the
 action as `provider-preflight-held`, with no request and no Git. Saving the
@@ -2069,8 +2068,30 @@ Readback finds exactly one merge request or note carrying the operation marker, 
 credential user, with the exact text, draft status, head commit and branches in the linked
 project; a thread resolves only when the credential user resolved it. GitLab runs a line starting
 with `/command` in a description or note as the credential user, so a create, edit or reply whose
-text has one is held as `provider-preflight-held` before any write. Merging, approvals and
-GitLab merge gates are not implemented, so a merge request always reports `merge-unsupported`.
+text has one is held as `provider-preflight-held` before any write.
+
+A GitLab merge is gated on GitLab's own verdict. The merge request reports no merge blocker only when it
+is open, not a draft, its `detailed_merge_status` is exactly `mergeable` and every required check of the
+project's delivery configuration passed on the head commit (the head pipeline, named `pipeline`).
+Otherwise the observation lists `pr-not-open`, `pr-draft`, `check-<name>-unproved` or
+`merge-status-<status>` (`merge-status-unproved` when GitLab reports none), so GitLab's approval,
+pipeline and discussion rules apply through its verdict. Approvals are not read (`reviewDecision`
+stays null), and a merged results pipeline is not a `pipeline` check because its commit is the merge
+ref. The merge methods follow the project's squash setting: `merge` unless it is `always`,
+`squash` unless it is `never`, and never `rebase`; the project's merge method decides the commit
+shape. The merge is held as `provider-preflight-held` when a blocker or the method refuses it or the
+head moved. The store alone allows it in through-merge mode and only at the commit cab last pushed to
+the task branch, and the request carries that commit as `sha`, so GitLab refuses a head that moved.
+cab never sets auto-merge: every merge sends `auto_merge: false`. When the project uses merge trains,
+the request is added to the train instead and the action stays unproved as `provider-merge-train-pending`
+while a car holds it (`idle`, `fresh`, `stale` or `merging`). A later read settles it as merged, or as
+`provider-merge-train-dropped` when the car is gone, or merged without the merge request being
+merged; dropped is concluded only for a merge the train was seen holding. A merge request with
+auto-merge set by someone else stays unproved as `provider-auto-merge-set`. A merged merge request is
+acceptance at any head, as on GitHub. Merging is irreversible and cab has no unmerge or revert, and no
+action to cancel auto-merge or to take a request off a train: the operator does that in GitLab, and
+cab reconciles the result. While a train merge is pending, completion is held as an action with an
+unknown outcome; the operator's action line describes the pending and dropped train states.
 
 On a Jira issue the issue actions use the same lifecycle, granted per Jira project: the target is the
 Jira project ID as the repository, the key's number and the issue ID as the node ID. Only

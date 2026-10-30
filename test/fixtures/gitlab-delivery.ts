@@ -83,3 +83,61 @@ export function assertNoToken(w: Awaited<ReturnType<typeof gitlabWorld>>) {
   assert.equal(JSON.stringify(actions).includes(token), false);
   assert.equal(JSON.stringify(branchOf(w)).includes(token), false);
 }
+
+type GitLabWorld = Awaited<ReturnType<typeof gitlabWorld>>;
+
+/** Pushes the task branch, then opens a merge request on it through the lead's tools. */
+export async function opened(w: GitLabWorld, draft = true) {
+  const sha = w.commit("one.txt");
+  assert.equal((await w.push(sha)).success, true);
+  const created = await w.f.call("cab_external_action", {
+    operationId: randomUUID(),
+    action: {
+      kind: "pr.create",
+      target: {
+        repositoryId,
+        baseRef: "main",
+        headRef: String(branchOf(w)?.branch),
+        expectedHeadSha: sha,
+      },
+      title: "Change",
+      body: "Body",
+      draft,
+    },
+  });
+  assert.equal(created.success, true, created.text);
+  const mr = w.remote.state.mergeRequests[0];
+  assert.ok(mr);
+  mr.head_pipeline = {
+    id: 54,
+    sha,
+    status: "success",
+    started_at: "2026-01-01T00:00:00Z",
+    finished_at: "2026-01-01T00:04:00Z",
+  };
+  const target = {
+    repositoryId,
+    number: mr.iid,
+    nodeId: String(mr.id),
+  };
+  const registered = await w.f.call("cab_register_pr", {
+    repositoryId,
+    prNumber: mr.iid,
+    expectedPrNodeId: String(mr.id),
+    expectedHeadSha: sha,
+  });
+  assert.equal(registered.success, true, registered.text);
+  const pr = {
+    ...target,
+    baseRef: "main",
+    headRef: String(branchOf(w)?.branch),
+    expectedHeadSha: sha,
+  };
+  const act = (action: Record<string, unknown>, extra = {}, turn?: number) =>
+    w.f.call(
+      "cab_external_action",
+      { operationId: randomUUID(), action, ...extra },
+      turn,
+    );
+  return { sha, mr, target, pr, act };
+}

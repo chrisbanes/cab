@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { canonicalMaterial } from "../../src/core/delivery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   assertNoToken,
-  branchOf,
   gitlabWorld,
+  opened,
   host,
   projectPath,
   repositoryId,
@@ -18,62 +17,6 @@ type World = Awaited<ReturnType<typeof gitlabWorld>>;
 
 const allow = (...actions: string[]) =>
   actions.map((action) => ({ action, mode: "allow" as const }));
-
-/** Pushes the task branch, then opens a merge request on it through the lead's tools. */
-async function opened(w: World, draft = true) {
-  const sha = w.commit("one.txt");
-  assert.equal((await w.push(sha)).success, true);
-  const created = await w.f.call("cab_external_action", {
-    operationId: randomUUID(),
-    action: {
-      kind: "pr.create",
-      target: {
-        repositoryId,
-        baseRef: "main",
-        headRef: String(branchOf(w)?.branch),
-        expectedHeadSha: sha,
-      },
-      title: "Change",
-      body: "Body",
-      draft,
-    },
-  });
-  assert.equal(created.success, true, created.text);
-  const mr = w.remote.state.mergeRequests[0];
-  assert.ok(mr);
-  mr.head_pipeline = {
-    id: 54,
-    sha,
-    status: "success",
-    started_at: "2026-01-01T00:00:00Z",
-    finished_at: "2026-01-01T00:04:00Z",
-  };
-  const target = {
-    repositoryId,
-    number: mr.iid,
-    nodeId: String(mr.id),
-  };
-  const registered = await w.f.call("cab_register_pr", {
-    repositoryId,
-    prNumber: mr.iid,
-    expectedPrNodeId: String(mr.id),
-    expectedHeadSha: sha,
-  });
-  assert.equal(registered.success, true, registered.text);
-  const pr = {
-    ...target,
-    baseRef: "main",
-    headRef: String(branchOf(w)?.branch),
-    expectedHeadSha: sha,
-  };
-  const act = (action: Record<string, unknown>, extra = {}, turn?: number) =>
-    w.f.call(
-      "cab_external_action",
-      { operationId: randomUUID(), action, ...extra },
-      turn,
-    );
-  return { sha, mr, target, pr, act };
-}
 
 const wakes = (w: World) =>
   w.f.readDb(
@@ -104,7 +47,7 @@ test("a draft merge request is created from the task branch only, registered, an
     assert.equal(bound?.observation.nodeId, String(mr.id));
     assert.equal(bound?.observation.number, mr.iid);
     assert.equal(bound?.observation.draft, true);
-    assert.deepEqual(bound?.observation.mergeBlockers, ["merge-unsupported"]);
+    assert.deepEqual(bound?.observation.mergeBlockers, ["pr-draft"]);
     assertNoToken(w);
   } finally {
     await w.f.close();
