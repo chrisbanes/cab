@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   chromium,
+  errors,
   type Browser,
   type Locator,
   type Page,
@@ -415,9 +416,10 @@ test("production local review composes exact multi-origin anchors and sends one 
 async function openFile(page: Page, name: RegExp) {
   const files = page.locator("#files");
   let lastPreview = "no preview response";
+  const isPreview = (response: Response) =>
+    new URL(response.url()).pathname.endsWith("/preview");
   const onResponse = (response: Response) => {
-    if (new URL(response.url()).pathname.endsWith("/preview"))
-      lastPreview = `HTTP ${response.status()}`;
+    if (isPreview(response)) lastPreview = `HTTP ${response.status()}`;
   };
   page.on("response", onResponse);
   try {
@@ -428,31 +430,33 @@ async function openFile(page: Page, name: RegExp) {
       .getByRole("alert")
       .filter({ hasText: /^File preview refresh failed/ });
     for (let refreshes = 0; ; refreshes++) {
-      const settled = await ready
+      // A failed refresh renders beside the retained preview, so several of these can match.
+      let pending = false;
+      await ready
         .or(unavailable)
         .or(failed)
+        .first()
         .waitFor()
-        .then(
-          () => true,
-          () => false,
-        );
-      if (settled && (await ready.isVisible())) return;
-      const text = !settled
+        .catch((error: unknown) => {
+          if (!(error instanceof errors.TimeoutError)) throw error;
+          pending = true;
+        });
+      if (!pending && (await ready.isVisible())) return;
+      const refreshFailed = !pending && (await failed.isVisible());
+      const text = pending
         ? `still pending: ${(await files.innerText()).slice(0, 200)}`
-        : (((await failed.isVisible())
-            ? await failed.textContent()
-            : await unavailable.textContent()) ?? "");
-      const recoverable =
-        settled &&
-        (text.startsWith("Preview is unavailable") ||
-          text.startsWith("File preview refresh failed"));
-      if (!recoverable || refreshes === 2)
+        : refreshFailed
+          ? await failed.textContent()
+          : await unavailable.first().textContent();
+      if (
+        pending ||
+        refreshes === 2 ||
+        !(refreshFailed || text?.startsWith("Preview is unavailable"))
+      )
         throw new Error(
           `The preview of ${name} did not become ready: ${text}; last preview response: ${lastPreview}`,
         );
-      const read = page.waitForResponse((response) =>
-        new URL(response.url()).pathname.endsWith("/preview"),
-      );
+      const read = page.waitForResponse(isPreview);
       await files.getByRole("button", { name: "Refresh", exact: true }).click();
       await read;
       await files

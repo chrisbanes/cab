@@ -100,8 +100,7 @@ test("initial service and web startup share one fixture deadline", async (t) => 
     );
     const closing = await fixture.close().then(
       () => "closed",
-      (error: unknown) =>
-        String(error instanceof Error ? error.message : error),
+      (error: unknown) => String(error),
     );
     // Emitted before any assertion, so a failing run names the step that overran.
     t.diagnostic(

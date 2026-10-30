@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
-import { monitorEventLoopDelay } from "node:perf_hooks";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -1047,10 +1046,8 @@ test("predecessor identity is immutable across restart", async () => {
 
     const db = new DatabaseSync(join(f.root, "data", "standalone.sqlite"));
     const saved = db
-      .prepare(
-        `SELECT workId, previousWorkId FROM execution_request_predecessors
-      WHERE workId IN ('null-request','id-request') ORDER BY workId`,
-      )
+      .prepare(`SELECT workId, previousWorkId FROM execution_request_predecessors
+      WHERE workId IN ('null-request','id-request') ORDER BY workId`)
       .all() as { workId: string; previousWorkId: string | null }[];
     assert.deepEqual(
       saved.map((row) => ({ ...row })),
@@ -1136,13 +1133,11 @@ test("legacy ready work with unknown predecessor is held and refused", async () 
     assert.deepEqual(
       {
         ...(disposition
-          .prepare(
-            `SELECT p.predecessorKnown,
+          .prepare(`SELECT p.predecessorKnown,
             CASE WHEN pending.workId IS NULL THEN 0 ELSE 1 END AS pending
             FROM execution_request_predecessors p
             LEFT JOIN task_work_revision_pending pending ON pending.workId = p.workId
-            WHERE p.workId = 'legacy-ready'`,
-          )
+            WHERE p.workId = 'legacy-ready'`)
           .get() as { predecessorKnown: number; pending: number }),
       },
       { predecessorKnown: 0, pending: 1 },
@@ -1890,42 +1885,24 @@ test("service stop settles archive status and worktree removal before database c
             event === "ready" && operation === scenario.operation,
         );
         assert.ok(ready.atMs !== undefined);
-        const loopDelay = monitorEventLoopDelay({ resolution: 10 });
-        loopDelay.enable();
-        const stopStartedAt = Date.now();
-        const archivalSettledAt = archival.then(
-          () => Date.now(),
-          () => Date.now(),
-        );
-        await f.service.stop();
-        const stopSettledAt = Date.now();
-        loopDelay.disable();
-        const result = await archival;
+        // Together, so an archival that rejects during teardown is not left unhandled.
+        const [result, stopSettledAt] = await Promise.all([
+          archival,
+          f.service.stop().then(() => Date.now()),
+        ]);
         const readyAt = ready.atMs;
         const observedAt = failureObservedAt.at(-1);
-        const termEvent = controlled
-          .events()
-          .find(({ event, pid }) => event === "term" && pid === ready.pid);
         const elapsedMs = stopSettledAt - readyAt;
-        // Emitted before the bound, so a failing run names the segment that overran: the
+        // Emitted before the bounds, so a failing run names the segment that overran: the
         // Git cancellation (ready to failure observed) or the service teardown after it.
         t.diagnostic(
           `service-archive-stop-evidence ${JSON.stringify({
             operation: scenario.operation,
             readyToSettleMs: elapsedMs,
-            readyToStopStartMs: stopStartedAt - readyAt,
-            readyToTermMs:
-              termEvent?.atMs === undefined ? null : termEvent.atMs - readyAt,
             readyToFailureObservedMs:
               observedAt === undefined ? null : observedAt - readyAt,
-            failureObservedToArchivalSettledMs:
-              observedAt === undefined
-                ? null
-                : (await archivalSettledAt) - observedAt,
             failureObservedToStopSettledMs:
               observedAt === undefined ? null : stopSettledAt - observedAt,
-            maxLoopDelayMs: Math.round(loopDelay.max / 1e6),
-            failureCount: failures.length,
             termGraceMs: 20,
             observationMs: 40,
             childExitObserved: failures.at(-1)?.childExitObserved,
@@ -1954,7 +1931,8 @@ test("service stop settles archive status and worktree removal before database c
         }
         // The child's exit is reported only when the OS delivers it inside the 40 ms window,
         // which a loaded machine can miss (the SIGKILLed child still alive at settlement). The
-        // escalation itself is asserted on the child: it dies, whatever the window saw.
+        // escalation itself is asserted on the child: it dies, whatever the window saw (the
+        // controlled Git ignores SIGTERM, so only SIGKILL can end it).
         const failure = failures.at(-1);
         assert.deepEqual(
           { operation: failure?.operation, kind: failure?.kind },
