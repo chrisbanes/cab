@@ -198,7 +198,7 @@ const envelope = <T extends z.ZodType>(schema: T) =>
 const policyDisclosureSchema = z
   .object({
     lines: z.array(z.string().max(300)).max(10),
-    limits: z.array(z.string().max(300)).max(16),
+    limits: z.array(z.string().max(300)).max(20),
   })
   .strict();
 const harnessStatusBase = {

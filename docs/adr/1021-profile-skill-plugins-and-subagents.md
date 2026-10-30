@@ -46,7 +46,8 @@ running, a subagent under Stop, and a crash during a subagent.
   the CLI and its tool processes running until recovery terminates them by recorded
   identity, exactly as for the main agent. That existing recovery boundary is accepted
   for subagents and gets no new rules. `AskUserQuestion`, web tools and plan mode stay
-  disallowed. cab refuses a subagent's isolation, model, effort and mode overrides, and
+  disallowed. cab refuses isolation, model, effort and mode overrides in a subagent call (the settings of
+  a named agent definition, including a plugin's, are untested), and
   does not show its prose as the lead's conversation. Plugin hooks are switched off
   through Claude Code managed settings, which an organisation's managed-settings tier can
   replace, so that guarantee is qualified for a personal login only. Background subagents

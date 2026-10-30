@@ -373,7 +373,7 @@ export const claudePolicyLimits: readonly string[] = [
   "After a service crash, a running Claude CLI process can outlive the service (#827); verify it has exited before recovering the turn.",
   "Only the Claude Code version the pinned SDK declares was qualified. The installed claude is not version-checked, and another version may enforce the sandbox, tool and permission controls differently.",
   "Skill plugins contribute skills, instructions and scripts only: a plugin's hooks and MCP servers never run, and skills are instructions to the agent, not cab policy. Subagents share the turn's tool policy and sandbox and the same recovery boundary.",
-  "cab refuses a subagent's isolation, model, effort and mode overrides.",
+  "cab refuses isolation, model, effort and mode overrides in a subagent call; a named agent definition's own settings, including a plugin's agent definitions, are untested.",
   "Plugin hooks are switched off through managed settings, which an organisation's managed-settings tier can replace; qualified for a personal login only.",
   "Background subagents are untested against Stop and resume; a turn resumed after a crash during a subagent did not complete in two attempts (undiagnosed).",
   "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",

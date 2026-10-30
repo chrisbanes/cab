@@ -933,7 +933,8 @@ levels of depth makes the work wait visibly with a reason that names no path, an
 runs without it. Claude may start subagents with its `Agent` tool: their tool calls
 follow the same policy, sandbox and recovery boundary as the main agent and are recorded
 with the subagent that made them, and their prose is not shown as the lead's conversation.
-cab refuses a subagent's isolation, model, effort and mode overrides. Plugin hooks are
+cab refuses isolation, model, effort and mode overrides in a subagent call; the settings of a
+named agent definition, including a plugin's, are untested. Plugin hooks are
 switched off with Claude Code managed settings, which an organisation's managed-settings
 tier can replace, so the guarantee is qualified for a personal login only. Background
 subagents are untested against Stop and resume, and a turn resumed after a crash during a

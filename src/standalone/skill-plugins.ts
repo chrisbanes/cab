@@ -36,7 +36,7 @@ export interface TurnPlugin {
 
 const manifestSchema = z.object({ name: z.string().min(1).max(128) });
 
-/** Longest a plugin may take to inspect and digest; a stuck read waits the work, never the scheduler. */
+/** Longest all of a profile's plugins may take to inspect and digest together. A stuck read ends the wait but is not cancelled. */
 const inspectionTimeoutMs = 30_000;
 const withTimeout = <T>(work: Promise<T>): Promise<T> => {
   let timer: NodeJS.Timeout | undefined;
@@ -82,7 +82,8 @@ async function readRegular(
         buffer.length,
         position,
       );
-      if (bytesRead === 0) break;
+      if (bytesRead === 0)
+        throw new SkillPluginError("changed while it was read");
       onChunk(buffer.subarray(0, Math.min(bytesRead, info.size - position)));
       position += bytesRead;
     }
@@ -176,18 +177,21 @@ export async function inspectPlugin(
  * Field paths a profile's skills fail on, empty when every plugin and enabled skill
  * exists. Used to reject a profile change before it is recorded.
  */
-export async function skillFieldErrors(
-  skills: ProfileSkills,
-): Promise<string[]> {
+export const skillFieldErrors = (skills: ProfileSkills): Promise<string[]> =>
+  withTimeout(fieldErrors(skills)).catch(() =>
+    skills.plugins.map((_, index) => `skills.plugins.${index}.path`),
+  );
+
+async function fieldErrors(skills: ProfileSkills): Promise<string[]> {
   const fields: string[] = [];
   for (const [index, plugin] of skills.plugins.entries()) {
-    const found = await withTimeout(
-      inspectPlugin(plugin.path, plugin.skills),
-    ).catch(() => undefined);
+    const found = await inspectPlugin(plugin.path, plugin.skills).catch(
+      () => undefined,
+    );
     // A tree that could never be digested is refused now, not when its work waits.
     const loadable =
       found !== undefined &&
-      (await withTimeout(digestPlugin(plugin.path)).then(
+      (await digestPlugin(plugin.path).then(
         () => true,
         () => false,
       ));
@@ -203,14 +207,16 @@ export async function skillFieldErrors(
  * Loads the plugins a turn runs with and digests them. Throws a `SkillPluginError` whose
  * message is safe to show: a missing or unreadable plugin makes work wait, never fall back.
  */
-export async function loadProfilePlugins(
+export const loadProfilePlugins = (
   skills: ProfileSkills,
-): Promise<LoadedPlugin[]> {
+): Promise<LoadedPlugin[]> => withTimeout(loadPlugins(skills));
+
+async function loadPlugins(skills: ProfileSkills): Promise<LoadedPlugin[]> {
   const loaded: LoadedPlugin[] = [];
   for (const [index, plugin] of skills.plugins.entries()) {
-    const found = await withTimeout(
-      inspectPlugin(plugin.path, plugin.skills),
-    ).catch(() => undefined);
+    const found = await inspectPlugin(plugin.path, plugin.skills).catch(
+      () => undefined,
+    );
     if (!found || found.missing.length > 0)
       throw new SkillPluginError(
         `Skill plugin ${index + 1} is missing or no longer has its enabled skills`,
@@ -220,7 +226,7 @@ export async function loadProfilePlugins(
         path: plugin.path,
         name: found.name,
         skills: [...plugin.skills],
-        digest: await withTimeout(digestPlugin(plugin.path)),
+        digest: await digestPlugin(plugin.path),
       });
     } catch (error) {
       throw new SkillPluginError(

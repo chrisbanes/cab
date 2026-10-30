@@ -657,6 +657,13 @@ test("Profile configuration sets two skills of a plugin, rejects a missing plugi
     .getByText("One plugin per line", { exact: false })
     .first()
     .waitFor();
+  // A malformed line on a Claude profile is not told to leave Claude.
+  assert.equal(
+    await page
+      .getByText("Only Claude profiles load skill plugins: clear")
+      .count(),
+    0,
+  );
   assert.deepEqual(d.profileSkills(builder), { plugins: [] });
 
   await field.fill(`${plugin}-missing: review`);

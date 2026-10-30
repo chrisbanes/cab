@@ -27,7 +27,7 @@ const claudePolicySchema = z
     sharedWriteRoots: z.array(z.string().min(1)).max(16),
     network: z.literal("denied"),
     fileToolConfinement: z.literal("hook"),
-    limits: z.array(z.string().min(1).max(300)).max(16),
+    limits: z.array(z.string().min(1).max(300)).max(20),
   })
   .strict();
 
