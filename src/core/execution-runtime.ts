@@ -50,6 +50,45 @@ export const profileRuntimeSchema = z.discriminatedUnion("harness", [
     .strict(),
 ]);
 export type ProfileRuntime = z.infer<typeof profileRuntimeSchema>;
+
+/**
+ * Skill plugins a profile enables: absolute local directories on the service host, each
+ * with the names of its skills the profile enables. Shared by both harnesses, so it is
+ * not part of the runtime JSON. A plugin contributes skills, instructions and scripts only.
+ */
+export const skillNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
+export const profileSkillsSchema = z
+  .object({
+    plugins: z
+      .array(
+        z
+          .object({
+            path: z
+              .string()
+              .max(1024)
+              .regex(/^\/[^\0]*[^/\0]$/),
+            skills: z
+              .array(skillNameSchema)
+              .min(1)
+              .max(32)
+              .refine((names) => new Set(names).size === names.length, {
+                message: "Duplicate skill",
+              }),
+          })
+          .strict(),
+      )
+      .max(16)
+      .refine(
+        (plugins) =>
+          new Set(plugins.map((p) => p.path)).size === plugins.length,
+        { message: "Duplicate plugin" },
+      ),
+  })
+  .strict();
+export type ProfileSkills = z.infer<typeof profileSkillsSchema>;
+export const noProfileSkills: ProfileSkills = { plugins: [] };
 /** A new profile's runtime: the first enabled harness, else Codex, with default settings. */
 export function defaultProfileRuntime(
   enabled: readonly ExecutionHarness[],

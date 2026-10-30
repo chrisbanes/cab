@@ -60,9 +60,12 @@ import {
   questionFormSchema,
 } from "../core/question-forms.js";
 import {
+  defaultProfileRuntime,
   executionHarnessLabels,
   executionIntentStateSchema,
+  noProfileSkills,
 } from "../core/execution-runtime.js";
+import { skillFieldErrors } from "./skill-plugins.js";
 import {
   runtimeInboxHeadline,
   runtimeInboxReason,
@@ -4448,6 +4451,7 @@ export class OperatorApi {
               }
             : null,
           settings,
+          skillPlugins: this.service.turnSkillPlugins(workId),
           counts: {
             items: record ? (store?.itemCount(workId) ?? 0) : 0,
             payloadBytes: record?.payloadBytes ?? 0,
@@ -5834,6 +5838,7 @@ export class OperatorApi {
         instructionRevision: Number(row.version),
         capabilities: this.safe(row.capabilities, excluded),
         runtime,
+        skills: this.domain().profileSkills(profileId),
       },
       observedAt: Date.now(),
     });
@@ -7937,6 +7942,31 @@ export class OperatorApi {
         c.type === "github.configure" ||
         c.type === "github.place"
       ) {
+        // Skill plugins must exist, and only a harness that loads them may enable any.
+        if (
+          (c.type === "profile.create" || c.type === "profile.configure") &&
+          (c.skills || (c.type === "profile.configure" && c.runtime)) &&
+          this.domain().recordedCommand({ ...c, actor: "operator" }) ===
+            undefined
+        ) {
+          const d = this.domain();
+          const harness = (
+            c.runtime ??
+            (c.type === "profile.configure"
+              ? d.profileRuntime(c.profileId)
+              : defaultProfileRuntime(d.enabledRuntimes()))
+          ).harness;
+          const skills =
+            c.skills ??
+            (c.type === "profile.configure"
+              ? d.profileSkills(c.profileId)
+              : noProfileSkills);
+          if (harness !== "claude" && skills.plugins.length > 0)
+            throw new OperatorApiError(400, "invalid-input", ["skills"]);
+          const fields = c.skills ? await skillFieldErrors(c.skills) : [];
+          if (fields.length > 0)
+            throw new OperatorApiError(400, "invalid-input", fields);
+        }
         // Supported values are authoritative once the runtime has read them.
         if (
           (c.type === "profile.create" || c.type === "profile.configure") &&

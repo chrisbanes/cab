@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
@@ -28,6 +29,7 @@ import {
   type RuntimeDiagnosticEvent,
   RuntimeNotEnabledError,
   type RuntimeToolCall,
+  type RuntimeTurnSettings,
   type UnexpectedRequest,
 } from "../../src/standalone/codex.js";
 import type { ClaudeTurnEnvironment } from "../../src/standalone/service.js";
@@ -156,16 +158,21 @@ function fixture(
   });
   /** Starts a turn and binds it the way the service does. */
   const settings = { model: "haiku", reasoningEffort: "low" };
-  const turn = async (threadId: string, access?: "read-only") => {
+  const turn = async (
+    threadId: string,
+    access?: "read-only",
+    skills?: RuntimeTurnSettings["skills"],
+  ) => {
+    const turnSettings = skills ? { ...settings, skills } : settings;
     assert.equal(
-      await settledPreflight(runtime, { workspace, settings }),
+      await settledPreflight(runtime, { workspace, settings: turnSettings }),
       undefined,
     );
     const turnId = await runtime.startTurn(
       threadId,
       workspace,
       "Do the work",
-      settings,
+      turnSettings,
       access ? { networkAccess: false, access } : undefined,
     );
     const generation = runtime.currentUserInputGeneration();
@@ -300,6 +307,7 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       "Write",
       "Edit",
       "Bash",
+      "Agent",
     ]);
     assert.deepEqual(options.allowedTools, [
       "Read",
@@ -308,17 +316,20 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       "Write",
       "Edit",
       "Bash",
+      "Agent",
       "mcp__cab__*",
     ]);
     assert.deepEqual(options.disallowedTools, [
       "AskUserQuestion",
       "WebFetch",
       "WebSearch",
-      "Agent",
-      "Task",
       "EnterPlanMode",
       "ExitPlanMode",
     ]);
+    // No profile skills: no plugin, no Skill tool; plugin hooks are off in every turn.
+    assert.deepEqual(options.managedSettings, { disableAllHooks: true });
+    assert.equal(options.plugins, undefined);
+    assert.equal(options.skills, undefined);
     assert.deepEqual(options.sandbox, {
       enabled: true,
       failIfUnavailable: true,
@@ -1297,5 +1308,191 @@ test("a failing diagnostic listener changes no hook result or turn outcome", asy
   assert.deepEqual(seen.throw, seen.none);
   assert.ok(
     (seen.none ?? []).some((entry) => JSON.stringify(entry).includes("deny")),
+  );
+});
+
+/** The probe plugin: a skill, plus a hook and an MCP server that must never run. */
+async function pluginFixture(root: string) {
+  const { writePluginFixture } = (await import(
+    pathToFileURL(
+      join(
+        process.cwd(),
+        "test/execution/skill-plugin-qualification/fixture.mjs",
+      ),
+    ).href
+  )) as {
+    writePluginFixture: (
+      root: string,
+      options: { dir?: string; nonce: string },
+    ) => { dir: string };
+  };
+  return writePluginFixture(root, { nonce: "unit" });
+}
+
+test("a profile's skill plugins load as local plugins with only their enabled skills, never their hooks or MCP servers", async () => {
+  const decisions: unknown[] = [];
+  let outside = "";
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        const workspace = String(session.options.cwd);
+        const subagent = { id: "agent-1", type: "general-purpose" };
+        const calls: Array<[string, unknown]> = [
+          ["Skill", { skill: "probe-skill" }],
+          ["Agent", { description: "d", prompt: "p" }],
+          ["Write", { file_path: join(outside, "x.txt"), content: "x" }],
+          ["Bash", { command: "ls", dangerouslyDisableSandbox: true }],
+          ["Write", { file_path: join(workspace, "ok.txt"), content: "x" }],
+          ["Task", { description: "d" }],
+          ["WebFetch", { url: "https://example.com" }],
+        ];
+        for (const [index, [name, input]] of calls.entries()) {
+          decisions.push(await session.hook(name, input, `main_${index}`));
+          decisions.push(
+            await session.hook(name, input, `sub_${index}`, subagent),
+          );
+        }
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    outside = join(f.root, "outside");
+    mkdirSync(outside);
+    const plugin = await pluginFixture(f.root);
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId, undefined, {
+      plugins: [{ path: plugin.dir, skills: ["probe-skill"] }],
+    });
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    const options = f.sessions[0]?.options;
+    assert.deepEqual(options?.plugins, [{ type: "local", path: plugin.dir }]);
+    assert.deepEqual(options?.skills, ["probe-skill"]);
+    assert.deepEqual(options?.tools, [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "Bash",
+      "Agent",
+      "Skill",
+    ]);
+    assert.ok(!options?.disallowedTools?.includes("Agent"));
+    assert.ok(!options?.disallowedTools?.includes("Task"));
+    // Hooks and MCP servers the plugin declares are not passed to the harness and are off.
+    assert.deepEqual(options?.managedSettings, { disableAllHooks: true });
+    assert.equal(options?.strictMcpConfig, true);
+    assert.deepEqual(options?.settingSources, []);
+    assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["cab"]);
+    assert.deepEqual(Object.keys(options?.hooks ?? {}).sort(), [
+      "PostToolUse",
+      "PostToolUseFailure",
+      "PreToolUse",
+    ]);
+    const verdict = (index: number) =>
+      (
+        decisions[index] as {
+          hookSpecificOutput?: { permissionDecision: string };
+        }
+      ).hookSpecificOutput?.permissionDecision;
+    // Each call is decided identically for the main agent (even) and a subagent (odd).
+    const expected = [
+      undefined,
+      undefined,
+      "deny",
+      "deny",
+      undefined,
+      "deny",
+      "deny",
+    ];
+    for (const [call, want] of expected.entries()) {
+      assert.equal(verdict(call * 2), want, `main ${call}`);
+      assert.equal(verdict(call * 2 + 1), want, `subagent ${call}`);
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("the Skill tool is outside policy for a turn whose profile enables no skills", async () => {
+  const decisions: unknown[] = [];
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        decisions.push(await session.hook("Skill", { skill: "x" }, "t1"));
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    assert.equal(
+      (
+        decisions[0] as {
+          hookSpecificOutput?: { permissionDecision: string };
+        }
+      ).hookSpecificOutput?.permissionDecision,
+      "deny",
+    );
+    assert.deepEqual(f.sessions[0]?.options.tools, [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "Bash",
+      "Agent",
+    ]);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a subagent's tool calls are recorded with their attribution, and a denied call as declined", async () => {
+  const run = await diagnosticTurn(async (session) => {
+    const subagent = { id: "agent-7", type: "general-purpose" };
+    await session.hook("Agent", { description: "d", prompt: "p" }, "a1");
+    await session.hook("Bash", { command: "ls" }, "b1", subagent);
+    await session.postHook(
+      "Bash",
+      { command: "ls" },
+      "b1",
+      { response: { stdout: "x", stderr: "", interrupted: false } },
+      subagent,
+    );
+    await session.hook("Write", { file_path: "/etc/x", content: "x" }, "w1", {
+      id: "agent-7",
+    });
+  });
+  const items = run.diagnostics.filter(
+    (event): event is Extract<RuntimeDiagnosticEvent, { kind: "item" }> =>
+      event.kind === "item",
+  );
+  assert.deepEqual(
+    items.map((e) => [e.itemId, e.phase, e.status, e.subagent]),
+    [
+      ["a1", "started", "inProgress", undefined],
+      [
+        "b1",
+        "started",
+        "inProgress",
+        { id: "agent-7", type: "general-purpose" },
+      ],
+      [
+        "b1",
+        "completed",
+        "completed",
+        { id: "agent-7", type: "general-purpose" },
+      ],
+      ["w1", "started", "inProgress", { id: "agent-7" }],
+      ["w1", "completed", "declined", { id: "agent-7" }],
+    ],
   );
 });

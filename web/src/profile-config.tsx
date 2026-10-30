@@ -15,8 +15,15 @@ import {
   privateField,
   profileChanges,
   runtimeChanged,
+  skillsChanged,
   type Values,
 } from "./settings-changes.js";
+import {
+  parseSkills,
+  skillErrorMessages,
+  skillsFormat,
+  skillsToText,
+} from "./skill-plugins.js";
 import {
   harnessNote,
   runtimeCommand,
@@ -197,6 +204,35 @@ export function RuntimeFields({
   );
 }
 
+/** Skill plugins, one per line; shown for a runtime that loads them. */
+function SkillFields({ draft }: { draft: ConfigurationDraft }) {
+  if (draft.values.runtimeHarness !== "claude")
+    return (
+      <p className="metadata muted">
+        Skill plugins are not loaded for Codex profiles yet.
+      </p>
+    );
+  const messages = skillErrorMessages(draft.errors);
+  return (
+    <>
+      <DraftField
+        draft={draft}
+        field="skills"
+        label="Skill plugins"
+        multiline
+      />
+      <p className="metadata muted">
+        {skillsFormat}. Leave empty to enable no skills.
+      </p>
+      {messages.map((message) => (
+        <span key={message} className="error-text" role="alert">
+          {message}
+        </span>
+      ))}
+    </>
+  );
+}
+
 export function ProfileCreate(p: SettingsProps) {
   const d = useDraft(p.drafts, "profile.create");
   const harness = defaultHarness(p.workspace);
@@ -316,6 +352,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
         replaceCapabilities: false,
         revoked: data.profile.revoked,
         ...runtimeValues(data.runtime),
+        skills: skillsToText(data.skills),
         expectedVersion: String(data.profile.version),
       }
     : null;
@@ -372,6 +409,9 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
       ...(runtimeChanged(data.runtime, v)
         ? { runtime: runtimeCommand(v) }
         : {}),
+      ...(skillsChanged(data.skills, v) && parseSkills(String(v.skills))
+        ? { skills: parseSkills(String(v.skills)) }
+        : {}),
     };
   };
   const revoked = Boolean(d.values.revoked);
@@ -426,12 +466,17 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                         resource.refresh();
                       },
                       // An unchanged stored runtime is never re-validated.
-                      runtimeChanged(data.runtime, d.values)
-                        ? runtimeErrors(
-                            d.values,
-                            harnessSettings(p.workspace, d.values),
-                          )
-                        : {},
+                      {
+                        ...(runtimeChanged(data.runtime, d.values)
+                          ? runtimeErrors(
+                              d.values,
+                              harnessSettings(p.workspace, d.values),
+                            )
+                          : {}),
+                        ...(parseSkills(String(d.values.skills ?? "")) === null
+                          ? { skills: skillsFormat }
+                          : {}),
+                      },
                       holdSave,
                     )
                   }
@@ -488,6 +533,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     />
                   )}
                   <RuntimeFields draft={d} workspace={p.workspace} />
+                  <SkillFields draft={d} />
                   <ChangeList lines={lines} />
                   <DraftOutcome
                     draft={d}
@@ -518,6 +564,13 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                 ]}
               />
               <Aside title="Runtime change" items={[runtimeChangeNote]} />
+              <Aside
+                title="About skill plugins"
+                items={[
+                  "Skills are instructions to the agent, not cab policy. A plugin contributes skills, instructions and scripts only; its hooks and MCP servers never run.",
+                  "Skill scripts run through the shell tool under the same sandbox and network policy. A skills change affects new conversations only.",
+                ]}
+              />
               <PolicyAside draft={d} workspace={p.workspace} />
               <Aside
                 title="Related"

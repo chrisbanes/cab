@@ -215,6 +215,19 @@ const executionGet: BrowseCommand = {
               d.settings.map((s) => [s.name, s.value ?? "-", s.source]),
             )
           : "Settings: not captured.",
+        ...(d.skillPlugins.length > 0
+          ? [
+              "",
+              table(
+                ["Skill plugin", "Skills", "Digest"],
+                d.skillPlugins.map((p) => [
+                  p.name,
+                  p.skills.join(", "),
+                  p.digest,
+                ]),
+              ),
+            ]
+          : []),
       ].join("\n"),
     });
   },

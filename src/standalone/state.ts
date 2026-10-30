@@ -40,6 +40,7 @@ import type {
   RuntimeThreadQualificationEvidence,
 } from "./runtime-retention.js";
 import { previousCodexHomeMessage } from "./codex-home.js";
+import type { TurnPlugin } from "./skill-plugins.js";
 import { cabCodexHome } from "./runtime-retention.js";
 
 export type TaskControlReceipt = Extract<
@@ -276,6 +277,18 @@ function parseRuntimeTerminalEvidence(input: unknown): RuntimeTerminalEvidence {
     throw new Error("Runtime terminal failure evidence has no failed status");
   return { ...row, conflicted: row.conflicted === 1, failure };
 }
+
+const turnPluginsSchema = z
+  .array(
+    z
+      .object({
+        name: z.string().min(1).max(128),
+        skills: z.array(z.string().min(1).max(64)).max(32),
+        digest: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict(),
+  )
+  .max(16);
 
 const runtimeThreadQualificationSchema = z
   .object({
@@ -672,6 +685,12 @@ export class ExecutionState {
       developerInstructionsDigest TEXT,
       harness TEXT NOT NULL DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64),
       codexHome TEXT
+    );
+    CREATE TABLE IF NOT EXISTS execution_turn_skill_plugins (
+      workId TEXT NOT NULL REFERENCES execution_intents(workId),
+      turnId TEXT NOT NULL CHECK(length(turnId) BETWEEN 1 AND 512),
+      plugins TEXT NOT NULL CHECK(length(plugins) <= 65536),
+      PRIMARY KEY(workId, turnId)
     );
     CREATE TABLE IF NOT EXISTS runtime_retention_migrations (
       migrationId TEXT PRIMARY KEY
@@ -2521,6 +2540,35 @@ export class ExecutionState {
     if (record === undefined)
       throw new Error("Runtime terminal evidence is unavailable");
     return parseRuntimeTerminalEvidence(record);
+  }
+
+  /** The skill plugins a turn ran with, as digests; no path is recorded. */
+  recordTurnSkillPlugins(
+    workId: string,
+    turnId: string,
+    plugins: readonly TurnPlugin[],
+  ): void {
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO execution_turn_skill_plugins (workId, turnId, plugins) VALUES (?, ?, ?)",
+      )
+      .run(
+        z.string().min(1).max(512).parse(workId),
+        z.string().min(1).max(512).parse(turnId),
+        JSON.stringify(turnPluginsSchema.parse(plugins)),
+      );
+  }
+
+  /** The recorded plugins of the execution's turn; empty when it ran with none. */
+  turnSkillPlugins(workId: string): TurnPlugin[] {
+    const row = this.db
+      .prepare(
+        "SELECT plugins FROM execution_turn_skill_plugins WHERE workId = ? ORDER BY rowid DESC LIMIT 1",
+      )
+      .get(z.string().min(1).max(512).parse(workId)) as
+      | { plugins: string }
+      | undefined;
+    return row ? turnPluginsSchema.parse(JSON.parse(row.plugins)) : [];
   }
 
   registerRuntimeThreadTools(

@@ -32,8 +32,11 @@ import {
   defaultProfileRuntime,
   type ExecutionHarness,
   executionHarnessSchema,
+  noProfileSkills,
   type ProfileRuntime,
   profileRuntimeSchema,
+  type ProfileSkills,
+  profileSkillsSchema,
 } from "./execution-runtime.js";
 import {
   effectiveOwnClosure,
@@ -189,6 +192,7 @@ const commandSchema = z.discriminatedUnion("type", [
       instructions: prose,
       capabilities: prose,
       runtime: profileRuntimeSchema.optional(),
+      skills: profileSkillsSchema.optional(),
     })
     .strict(),
   z
@@ -203,6 +207,7 @@ const commandSchema = z.discriminatedUnion("type", [
       capabilities: prose.optional(),
       revoked: z.boolean().optional(),
       runtime: profileRuntimeSchema.optional(),
+      skills: profileSkillsSchema.optional(),
     })
     .strict(),
   z
@@ -622,13 +627,15 @@ export class DomainStore {
           instructions TEXT NOT NULL, capabilities TEXT NOT NULL,
           revoked INTEGER NOT NULL CHECK(revoked IN (0,1)),
           summary TEXT NOT NULL DEFAULT '',
-          runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'
+          runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}',
+          skills TEXT NOT NULL DEFAULT '{"plugins":[]}'
         );
         CREATE TABLE IF NOT EXISTS profile_revisions (
           profileId TEXT NOT NULL REFERENCES profiles(id), revision INTEGER NOT NULL,
           name TEXT NOT NULL, instructions TEXT NOT NULL, capabilities TEXT NOT NULL,
           revoked INTEGER NOT NULL,
           runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}',
+          skills TEXT NOT NULL DEFAULT '{"plugins":[]}',
           PRIMARY KEY(profileId, revision)
         );
         CREATE TABLE IF NOT EXISTS project_routing (
@@ -758,6 +765,16 @@ export class DomainStore {
         )
           this.db.exec(
             `ALTER TABLE ${table} ADD COLUMN runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'`,
+          );
+      // Profiles written before skill plugins enable none.
+      for (const table of ["profiles", "profile_revisions"])
+        if (
+          !(this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).some(
+            (column) => column.name === "skills",
+          )
+        )
+          this.db.exec(
+            `ALTER TABLE ${table} ADD COLUMN skills TEXT NOT NULL DEFAULT '{"plugins":[]}'`,
           );
       extractLegacyRepositoryLinks(this.db, (json) =>
         asGitHubLinks(z.array(linkedRepositorySchema).parse(json)),
@@ -1786,6 +1803,22 @@ export class DomainStore {
     return profileRuntimeSchema.parse(JSON.parse(String(row.runtime)));
   }
 
+  /** The skill plugins the profile enables, or those of one immutable revision. */
+  profileSkills(profileId: string, revision?: number): ProfileSkills {
+    const row =
+      revision === undefined
+        ? this.required(
+            "SELECT skills FROM profiles WHERE id = ?",
+            id.parse(profileId),
+          )
+        : this.required(
+            "SELECT skills FROM profile_revisions WHERE profileId = ? AND revision = ?",
+            id.parse(profileId),
+            revision,
+          );
+    return profileSkillsSchema.parse(JSON.parse(String(row.skills)));
+  }
+
   profileRevision(profileId: string, revision: number): Row {
     return this.required(
       "SELECT profileId, revision, name, instructions, capabilities, revoked FROM profile_revisions WHERE profileId = ? AND revision = ?",
@@ -2492,7 +2525,7 @@ export class DomainStore {
         this.operator(command);
         this.db
           .prepare(
-            "INSERT INTO profiles (id, version, name, summary, instructions, capabilities, revoked, runtime) VALUES (?, 1, ?, ?, ?, ?, 0, ?)",
+            "INSERT INTO profiles (id, version, name, summary, instructions, capabilities, revoked, runtime, skills) VALUES (?, 1, ?, ?, ?, ?, 0, ?, ?)",
           )
           .run(
             command.profileId,
@@ -2503,6 +2536,7 @@ export class DomainStore {
             canonical(
               command.runtime ?? defaultProfileRuntime(this.enabledRuntimes()),
             ),
+            canonical(command.skills ?? noProfileSkills),
           );
         this.snapshotProfile(command.profileId);
         return this.profile(command.profileId);
@@ -2513,7 +2547,7 @@ export class DomainStore {
         this.version(current, command.expectedVersion);
         this.db
           .prepare(
-            "UPDATE profiles SET version = version + 1, name = ?, summary = ?, instructions = ?, capabilities = ?, revoked = ?, runtime = ? WHERE id = ?",
+            "UPDATE profiles SET version = version + 1, name = ?, summary = ?, instructions = ?, capabilities = ?, revoked = ?, runtime = ?, skills = ? WHERE id = ?",
           )
           .run(
             command.name ?? present(current, "name"),
@@ -2526,6 +2560,7 @@ export class DomainStore {
             canonical(
               command.runtime ?? this.profileRuntime(command.profileId),
             ),
+            canonical(command.skills ?? this.profileSkills(command.profileId)),
             command.profileId,
           );
         this.snapshotProfile(command.profileId);
@@ -3310,7 +3345,7 @@ export class DomainStore {
     const p = this.profile(profileId);
     this.db
       .prepare(
-        "INSERT INTO profile_revisions (profileId, revision, name, instructions, capabilities, revoked, runtime) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO profile_revisions (profileId, revision, name, instructions, capabilities, revoked, runtime, skills) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         profileId,
@@ -3320,6 +3355,7 @@ export class DomainStore {
         present(p, "capabilities"),
         present(p, "revoked"),
         canonical(this.profileRuntime(profileId)),
+        canonical(this.profileSkills(profileId)),
       );
   }
 

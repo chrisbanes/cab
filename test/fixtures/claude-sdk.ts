@@ -19,10 +19,12 @@ export interface Session {
   options: Options;
   child: ChildProcess;
   prompt: SDKUserMessage | undefined;
+  /** `agent` is set when the hook fires from within a subagent. */
   hook(
     toolName: string,
     toolInput: unknown,
     toolUseId: string,
+    agent?: { id: string; type?: string },
   ): Promise<unknown>;
   /** Invokes the PostToolUse or PostToolUseFailure hook the way the CLI does. */
   postHook(
@@ -30,6 +32,7 @@ export interface Session {
     toolInput: unknown,
     toolUseId: string,
     outcome: { response: unknown } | { error: string; isInterrupt?: boolean },
+    agent?: { id: string; type?: string },
   ): Promise<unknown>;
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
   waitForExit(): Promise<void>;
@@ -136,7 +139,7 @@ export function fakeSdk(
             options,
             child,
             prompt: first.value,
-            hook: (toolName, toolInput, toolUseId) => {
+            hook: (toolName, toolInput, toolUseId, agent) => {
               const hook = options.hooks?.PreToolUse?.[0]
                 ?.hooks[0] as HookCallback;
               return hook(
@@ -145,12 +148,18 @@ export function fakeSdk(
                   tool_name: toolName,
                   tool_input: toolInput,
                   tool_use_id: toolUseId,
+                  ...(agent
+                    ? {
+                        agent_id: agent.id,
+                        ...(agent.type ? { agent_type: agent.type } : {}),
+                      }
+                    : {}),
                 } as never,
                 toolUseId,
                 { signal: forwarded.signal },
               );
             },
-            postHook: (toolName, toolInput, toolUseId, outcome) => {
+            postHook: (toolName, toolInput, toolUseId, outcome, agent) => {
               const failed = "error" in outcome;
               const event = failed ? "PostToolUseFailure" : "PostToolUse";
               const hook = options.hooks?.[event]?.[0]
@@ -161,6 +170,12 @@ export function fakeSdk(
                   tool_name: toolName,
                   tool_input: toolInput,
                   tool_use_id: toolUseId,
+                  ...(agent
+                    ? {
+                        agent_id: agent.id,
+                        ...(agent.type ? { agent_type: agent.type } : {}),
+                      }
+                    : {}),
                   ...(failed
                     ? {
                         error: outcome.error,

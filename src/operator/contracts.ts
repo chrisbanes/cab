@@ -77,12 +77,14 @@ import {
   executionHarnessSchema,
   executionIntentStateSchema,
   profileRuntimeSchema,
+  profileSkillsSchema,
   supportedRuntimeSettingsSchema,
 } from "../core/execution-runtime.js";
 export {
   executionHarnessLabels,
   type ExecutionHarness,
   type ProfileRuntime,
+  type ProfileSkills,
   runtimeSummary,
   type SupportedRuntimeSettings,
   unsupportedRuntimeField,
@@ -196,7 +198,7 @@ const envelope = <T extends z.ZodType>(schema: T) =>
 const policyDisclosureSchema = z
   .object({
     lines: z.array(z.string().max(300)).max(10),
-    limits: z.array(z.string().max(300)).max(12),
+    limits: z.array(z.string().max(300)).max(16),
   })
   .strict();
 const harnessStatusBase = {
@@ -2293,6 +2295,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       instructions: text,
       capabilities: text,
       runtime: profileRuntimeSchema.optional(),
+      skills: profileSkillsSchema.optional(),
     })
     .strict(),
   z
@@ -2307,6 +2310,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       capabilities: text.optional(),
       revoked: z.boolean().optional(),
       runtime: profileRuntimeSchema.optional(),
+      skills: profileSkillsSchema.optional(),
     })
     .strict(),
   z
@@ -3169,6 +3173,8 @@ export const profileConfigurationSchema = envelope(
       instructionRevision: revision,
       capabilities: safeText,
       runtime: profileRuntimeSchema,
+      /** Skill plugins and their enabled skills; an empty list enables none. */
+      skills: profileSkillsSchema,
     })
     .strict(),
 );
@@ -4524,6 +4530,13 @@ export const executionListSchema = envelope(
     })
     .strict(),
 );
+const skillPluginRecordSchema = z
+  .object({
+    name: z.string().max(128),
+    skills: z.array(z.string().max(64)).max(32),
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
 const settingEntrySchema = z
   .object({
     name: z.string().max(64),
@@ -4557,6 +4570,8 @@ export const executionDetailSchema = envelope(
         .strict()
         .nullable(),
       settings: z.array(settingEntrySchema).nullable(),
+      /** The skill plugins the turn ran with, by digest; empty when it ran with none. */
+      skillPlugins: z.array(skillPluginRecordSchema).max(16),
       counts: z
         .object({
           items: z.number().int().nonnegative().safe(),

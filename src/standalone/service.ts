@@ -128,6 +128,12 @@ import {
   PreviousCodexHomeError,
   previousCodexHomeMessage,
 } from "./codex-home.js";
+import {
+  type LoadedPlugin,
+  loadProfilePlugins,
+  SkillPluginError,
+  turnPlugins,
+} from "./skill-plugins.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import {
@@ -765,6 +771,8 @@ export class StandaloneService {
   /** Serialises enable/disable per harness; shutdown awaits them. */
   private readonly runtimeToggles = new Map<ExecutionHarness, Promise<void>>();
   /** Keyed like conversation captures; finished ones stay to count late events. */
+  /** Plugins loaded at admission, recorded with the turn once it exists; dropped when the execution ends. */
+  private readonly turnPlugins = new Map<string, LoadedPlugin[]>();
   private readonly diagnosticCaptures = new Map<
     string,
     ExecutionDiagnosticsCapture
@@ -2951,6 +2959,11 @@ export class StandaloneService {
       })),
     });
     return parsed.success ? parsed.data : null;
+  }
+
+  /** The skill plugins a turn ran with, by digest; empty when it ran with none. */
+  turnSkillPlugins(workId: string) {
+    return this.started().state.turnSkillPlugins(workId);
   }
 
   /** Codex's is static; Claude's comes from its started runtime, else null. */
@@ -7518,6 +7531,18 @@ export class StandaloneService {
           return;
         }
       }
+      const pluginWait = await this.skillPluginWait(request);
+      if (
+        this.runtimes.get(harness) !== runtime ||
+        this.generation !== generation ||
+        !generation.accepting
+      )
+        return;
+      if (pluginWait !== undefined) {
+        state.wait(intent.id, pluginWait);
+        store.wait(request.workId, pluginWait);
+        return;
+      }
       // A sleep/wake during a turn that ended before now must be observed
       // first. No await may separate this check from state.begin.
       const power = this.current?.power;
@@ -7611,11 +7636,38 @@ export class StandaloneService {
     const runtime = domain.profileRuntime(profileId, request.profileRevision);
     const model = runtime.model ?? null,
       reasoningEffort = runtime.reasoningEffort ?? null;
+    const skills = domain.profileSkills(profileId, request.profileRevision);
     return runtime.harness === "claude" ||
       model !== null ||
-      reasoningEffort !== null
-      ? { model, reasoningEffort }
+      reasoningEffort !== null ||
+      skills.plugins.length > 0
+      ? {
+          model,
+          reasoningEffort,
+          ...(skills.plugins.length > 0 ? { skills } : {}),
+        }
       : undefined;
+  }
+
+  /**
+   * Loads and digests the turn's skill plugins before admission. A reason keeps the work
+   * waiting, with no hold taken: a missing or unreadable plugin never falls back to running
+   * without it. The reason never contains a path.
+   */
+  private async skillPluginWait(
+    request: TurnRequest,
+  ): Promise<string | undefined> {
+    this.turnPlugins.delete(request.workId);
+    try {
+      const skills = this.turnSettings(request)?.skills;
+      if (skills)
+        this.turnPlugins.set(request.workId, await loadProfilePlugins(skills));
+      return undefined;
+    } catch (error) {
+      return error instanceof SkillPluginError
+        ? error.message
+        : "Skill plugins could not be read";
+    }
   }
 
   /** Never awaited by admission: admissionResumed wakes the scheduler drain. */
@@ -7862,6 +7914,17 @@ export class StandaloneService {
       let turnBound = runtimeGeneration
         ? state.bindTurn(intent.id, turnId, runtimeGeneration)
         : state.bindTurn(intent.id, turnId);
+      try {
+        const loaded = this.turnPlugins.get(request.workId);
+        if (loaded)
+          state.recordTurnSkillPlugins(
+            request.workId,
+            turnId,
+            turnPlugins(loaded),
+          );
+      } catch {
+        // The record is evidence only; its storage failure cannot change the turn.
+      }
       if (turnBound) void this.current?.statusMappingWriter.run();
       let nativeRejected = false;
       if (!turnBound) {
@@ -8190,6 +8253,7 @@ export class StandaloneService {
         }
       }
     } finally {
+      this.turnPlugins.delete(request.workId);
       if (draftingTimer) clearTimeout(draftingTimer);
       if (draftingRunId) this.draftingControls.delete(draftingRunId);
       if (conversationCapture) {

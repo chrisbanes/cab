@@ -29,6 +29,8 @@ import {
   sessionOf,
 } from "../fixtures/claude-sdk.js";
 import { stopWithoutDrain } from "../fixtures/service-internals.js";
+import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
+import { digestPlugin } from "../../src/standalone/skill-plugins.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { failureNotice } from "../../web/src/execution-runtime.js";
@@ -786,6 +788,82 @@ test("a Claude assignment turn completes, its coordination call carries the hook
   const codexEnvironment = run.codexContexts.at(-1)?.spawnEnvironment();
   assert.ok(codexEnvironment);
   assert.equal(JSON.stringify(codexEnvironment).includes(T6_TOKEN), false);
+});
+
+test("a Claude turn loads its profile's skill plugins and records their digests with the turn", async (t) => {
+  const run = await claudeServiceRun(t, [
+    async function* (session) {
+      yield init(sessionOf(session));
+      yield result(sessionOf(session));
+    },
+  ]);
+  const plugin = writeSkillPlugin(join(run.root, "plugin"), ["review", "plan"]);
+  const { projectId, worker } = run.setup();
+  run.execute({
+    type: "profile.configure",
+    profileId: worker,
+    expectedVersion: 1,
+    skills: { plugins: [{ path: plugin, skills: ["review", "plan"] }] },
+  });
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(
+    () => run.intent(workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  const options = run.sessions[0]?.options;
+  assert.deepEqual(options?.plugins, [{ type: "local", path: plugin }]);
+  assert.deepEqual(options?.skills, ["review", "plan"]);
+  const digest = await digestPlugin(plugin);
+  assert.deepEqual(
+    (await new OperatorApi(run.service).readExecution(workId)).data
+      .skillPlugins,
+    [{ name: "unit-plugin", skills: ["review", "plan"], digest }],
+  );
+  // The record carries no path.
+  assert.equal(
+    JSON.stringify(run.service.turnSkillPlugins(workId)).includes(plugin),
+    false,
+  );
+});
+
+test("a missing skill plugin keeps the work waiting with a reason that names no path, then it runs", async (t) => {
+  const run = await claudeServiceRun(t, [
+    async function* (session) {
+      yield init(sessionOf(session));
+      yield result(sessionOf(session));
+    },
+  ]);
+  const plugin = join(run.root, "late-plugin");
+  const { projectId, worker } = run.setup();
+  run.execute({
+    type: "profile.configure",
+    profileId: worker,
+    expectedVersion: 1,
+    skills: { plugins: [{ path: plugin, skills: ["review"] }] },
+  });
+  const { workId } = await run.claudeTask(projectId, worker);
+  const request = () =>
+    run.service.turnRequests().find((r) => r.workId === workId);
+  await waitUntil(
+    () => /Skill plugin 1 is missing/.test(request()?.reason ?? ""),
+    run.describe,
+  );
+  assert.equal(request()?.state, "queued");
+  assert.equal(`${request()?.reason}`.includes(plugin), false);
+  assert.notEqual(run.intent(workId)?.state, "held");
+  assert.equal(run.queries.includes("turn"), false);
+  writeSkillPlugin(plugin, ["review"]);
+  await run.wake();
+  await waitUntil(
+    () => run.intent(workId)?.state === "completed",
+    run.describe,
+  );
+  const base = run.intent(workId)?.workspace;
+  t.after(() => releaseTemporaryBase(base));
 });
 
 test("a Claude turn records its commands as runtime items with exit status and redacted output", async (t) => {
