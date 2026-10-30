@@ -10,10 +10,12 @@ depends on skills, most of them distributed as plugins, and several of those ski
 delegate work to subagents. Delivery scope lives in
 [#1336](https://github.com/chrisbanes/cab/issues/1336).
 
-The Codex home, login link and previous-home refusal below are implemented. Profile
-skill plugins and in-turn subagents are the accepted target and are not implemented yet;
-[ADR-1008](1008-claude-code-execution-harness.md) and `docs/SPEC.md` describe the
-implemented Claude contract until they are.
+The Codex home, login link and previous-home refusal below are implemented, as are
+profile skill plugins and in-turn subagents for Claude. Codex receiving the profile's
+skills is the accepted target and is not implemented yet: a profile that enables skills
+needs the Claude runtime, and the operator API refuses them for Codex. The
+Claude [journey record](../evidence/skill-plugin-journeys-2026-10-30.md) shows a skill
+running, a subagent under Stop, and a crash during a subagent.
 
 ## Decision
 

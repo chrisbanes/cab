@@ -38,8 +38,10 @@ import {
   setupJourney,
   shellOnly,
   startJourneyService,
+  subagentSleep,
   TOKEN_VARIABLE,
 } from "./service-child.mjs";
+import { writePluginFixture } from "../skill-plugin-qualification/fixture.mjs";
 
 const refuse = (message) => {
   process.stderr.write(`Refusing live Claude journeys: ${message}\n`);
@@ -205,6 +207,72 @@ function findFile(directory, name, depth = 3) {
   return null;
 }
 
+/** Tool calls the diagnostics attribute to a subagent: counts only, never payloads. */
+function subagentToolCalls() {
+  const db = new DatabaseSync(join(root, "data", "standalone.sqlite"), {
+    readOnly: true,
+  });
+  try {
+    return db
+      .prepare(
+        "SELECT payload FROM diagnostic_items WHERE payload LIKE '%\"subagent\"%'",
+      )
+      .all()
+      .map((row) => JSON.parse(row.payload))
+      .filter((p) => p?.subagent?.id);
+  } finally {
+    db.close();
+  }
+}
+
+/** The CLI's process tree below it, by exact identity: a subagent's Bash and its sleep. */
+async function captureDescendants(rootPid) {
+  const table = execFileSync("ps", ["-A", "-o", "pid=,ppid="], {
+    encoding: "utf8",
+  })
+    .trim()
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number));
+  const found = [];
+  const queue = [rootPid];
+  while (queue.length) {
+    const parent = queue.shift();
+    for (const [pid, ppid] of table)
+      if (ppid === parent) {
+        found.push(pid);
+        queue.push(pid);
+      }
+  }
+  const identities = [];
+  for (const pid of found) {
+    const identity = await captureProcessIdentity(pid).catch(() => null);
+    if (identity) identities.push(identity);
+  }
+  return identities;
+}
+
+/** Waits for a subagent's Bash to be in flight, then records the sleeping tree. */
+async function subagentInFlight(record, check) {
+  await waitUntil(
+    () => {
+      check();
+      return subagentToolCalls().some((p) => p.command?.includes("sleep"));
+    },
+    TURN_MS,
+    "a subagent Bash call",
+    true,
+  );
+  // The call is recorded before its shell starts, so wait for the sleep itself.
+  const cliPid = Number(record.processIdentity.processId);
+  await waitUntil(
+    async () => (await captureDescendants(cliPid)).length > 0,
+    20_000,
+    "a process below the Claude CLI during the subagent",
+  );
+  await delay(2000); // The shell exists before its sleep does.
+  return captureDescendants(cliPid);
+}
+
 const running = (records) =>
   records.find((r) => r.intent.state === "running" && r.processIdentity);
 const settled = (state) => !["running", "submitting"].includes(state);
@@ -253,14 +321,29 @@ async function inProcess(run) {
     if (timedOut)
       throw new Error("a turn exceeded its time cap and was stopped");
   };
+  let plugin;
   const ids = await setupJourney(current.service, {
     facet,
     model: evidence.model.claude,
     repository,
+    ...(facet === "claude-skill"
+      ? {
+          skills: {
+            plugins: [{ path: join(root, "plugin"), skills: ["probe-skill"] }],
+          },
+          onProvisioned: (workspace) => {
+            mkdirSync(join(root, "traces"), { mode: 0o700 });
+            plugin = writePluginFixture(root, {
+              nonce: randomUUID().slice(0, 8),
+              workspace,
+            });
+          },
+        }
+      : {}),
   });
   current.taskId = ids.taskId;
   try {
-    await run(current, ids, check);
+    await run(current, ids, check, plugin);
   } finally {
     recordClaudeCli([current.observed.claudeSpawns]);
   }
@@ -444,7 +527,7 @@ async function scrub(current, ids, check) {
   evidence.observations = o;
 }
 
-async function stop(current, ids, check) {
+async function stop(current, ids, check, withSubagent = false) {
   const records = () => {
     const r = current.service.recoveryForTask(ids.taskId);
     noteClaude(r);
@@ -459,7 +542,9 @@ async function stop(current, ids, check) {
     "running Claude turn with a process identity",
     true,
   );
-  await delay(15_000); // Lets the sleep start inside the turn.
+  const descendants = withSubagent
+    ? await subagentInFlight(record, check)
+    : await delay(15_000).then(() => []); // Lets the sleep start inside the turn.
   if (!running(records()))
     // Not compliance: the CLI's own refusal ended the first such turn (#827).
     throw new Error("the turn ended before Stop; sleep did not run");
@@ -480,9 +565,19 @@ async function stop(current, ids, check) {
     record.processIdentity,
     15_000,
   );
+  const gone = [];
+  for (const identity of descendants)
+    gone.push(await settleProcess("subagent process", identity, 15_000));
   await delay(30_000);
   const outcome = observation.outcomes.find((o) => o.workId === record.workId);
   evidence.observations = {
+    ...(withSubagent
+      ? {
+          subagentToolCalls: subagentToolCalls().length,
+          descendantsRecorded: descendants.length,
+          descendantsExitedByThemselves: gone.every((g) => g.exitedByItself),
+        }
+      : {}),
     interrupt: outcome?.interrupt ?? null,
     terminal: outcome?.terminal ?? null,
     stateAfter: after.intent.state,
@@ -495,8 +590,59 @@ async function stop(current, ids, check) {
   if (!observed && !(after.intent.state === "held" && after.holds.writer))
     throw new Error("Stop was neither observed nor held with the writer hold");
   if (!cli.exitedByItself) throw new Error("the Claude CLI survived Stop");
+  if (withSubagent && !evidence.observations.descendantsExitedByThemselves)
+    throw new Error("a subagent process survived Stop");
   if (evidence.observations.startTurnAfterStop !== 0)
     throw new Error("a turn started after Stop");
+}
+
+/** A profile skill plugin reaches the turn, runs under the sandbox and runs no hook or MCP server. */
+async function skill(current, ids, check, plugin) {
+  await waitUntil(
+    () => {
+      check();
+      return (
+        existsSync(plugin.skillMarker) &&
+        current.service.list().every((i) => settled(i.state))
+      );
+    },
+    TURN_MS,
+    "the skill's marker",
+    true,
+  );
+  const { digestPlugin } = await import(
+    "../../../dist/src/standalone/skill-plugins.js"
+  );
+  const { OperatorApi } = await import(
+    "../../../dist/src/standalone/operator-api.js"
+  );
+  const api = new OperatorApi(current.service, [root]);
+  const recorded = current.service
+    .list()
+    .flatMap((i) => current.service.turnSkillPlugins(i.workId));
+  const profile = (await api.readProfileConfiguration(ids.leadProfileId)).data;
+  const digest = await digestPlugin(plugin.dir);
+  evidence.observations = {
+    skillScriptRan: existsSync(plugin.skillMarker),
+    outsideWriteDenied: !existsSync(plugin.skillEscape),
+    pluginHookRan: existsSync(plugin.hookMarker),
+    pluginMcpStarted: existsSync(plugin.mcpMarker),
+    profileSkillNames: profile.skills.plugins.flatMap((p) => p.skills),
+    turnPlugins: recorded.map(({ name, skills, digest: d }) => ({
+      name,
+      skills,
+      digest: d,
+    })),
+    digestMatchesDirectory: recorded.some((p) => p.digest === digest),
+  };
+  const o = evidence.observations;
+  if (!o.skillScriptRan) throw new Error("the skill's script did not run");
+  if (!o.outsideWriteDenied)
+    throw new Error("the skill's outside write was not denied");
+  if (o.pluginHookRan || o.pluginMcpStarted)
+    throw new Error("a plugin hook or MCP server ran");
+  if (!o.digestMatchesDirectory)
+    throw new Error("no turn recorded the plugin's digest");
 }
 
 const IPC_MS = 120_000;
@@ -580,15 +726,20 @@ async function stopChild(entry) {
 /** SIGKILLs the exact child service mid-turn, restarts it, then recovers by receipt. */
 async function crash() {
   try {
-    await crashJourney();
+    await crashJourney(facet === "claude-subagent-crash");
   } finally {
     // The killed service's last snapshot and the recovered service's both count.
-    recordClaudeCli(active.children.map((entry) => entry.claudeSpawns ?? []));
+    // The subagent variant starts no turn after recovery, so its second generation ran no query.
+    recordClaudeCli(
+      active.children
+        .map((entry) => entry.claudeSpawns ?? [])
+        .filter((run) => run.length > 0 || facet === "crash"),
+    );
   }
   assertPathClaude();
 }
 
-async function crashJourney() {
+async function crashJourney(withSubagent) {
   const repository = gitFixture();
   const snapshot = async (entry, taskId) => {
     const s = await entry.call("snapshot", { taskId });
@@ -619,7 +770,7 @@ async function crashJourney() {
     taskId: ids.taskId,
     recipientAssignmentId: completed.binding.assignmentId,
     expectedAssignmentVersion: completed.binding.assignmentVersion,
-    message: shellOnly(SLEEP),
+    message: withSubagent ? subagentSleep : shellOnly(SLEEP),
   });
   const record = await waitUntil(
     async () => running((await snapshot(first, ids.taskId)).recovery),
@@ -627,7 +778,9 @@ async function crashJourney() {
     "running follow-up Claude turn with a process identity",
     true,
   );
-  await delay(15_000);
+  const descendants = withSubagent
+    ? await subagentInFlight(record, () => {})
+    : await delay(15_000).then(() => []);
   if (!running((await snapshot(first, ids.taskId)).recovery))
     throw new ComplianceError("the turn ended before the crash");
   stage("sigkill");
@@ -645,6 +798,16 @@ async function crashJourney() {
   );
   if (cli.verification !== "verified")
     throw new Error("the crashed turn's Claude CLI exit is not verified");
+  // The tool processes the crash left, ended only by their recorded identity.
+  const survivors = [];
+  for (const identity of descendants)
+    survivors.push(
+      await settleProcess(
+        "subagent process (killed service)",
+        identity,
+        10_000,
+      ),
+    );
   stage("restart");
   const second = await spawnChild();
   const read = async () =>
@@ -664,6 +827,15 @@ async function crashJourney() {
   evidence.observations = {
     serviceKill: killed,
     cliExitedByItself: cli.exitedByItself,
+    ...(withSubagent
+      ? {
+          subagentToolCalls: subagentToolCalls().length,
+          descendantsRecorded: descendants.length,
+          descendantsExitedByThemselves: survivors.every(
+            (s) => s.exitedByItself,
+          ),
+        }
+      : {}),
     heldState: held?.intent.state ?? null,
     observationKinds: held?.observations.map((o) => o.kind) ?? [],
     holds: held?.holds ?? null,
@@ -699,6 +871,21 @@ async function crashJourney() {
       workspace: "preserved",
     },
   });
+  if (withSubagent) {
+    // Scope: holds visible, the CLI and its tool processes ended by recorded identity, and
+    // the resolution releasing the holds. A resumed turn after a mid-subagent crash did not
+    // complete for haiku or sonnet in earlier attempts, so it is recorded as untested.
+    const after = await snapshot(second, ids.taskId);
+    const released = after.recovery.find((r) => r.workId === record.workId);
+    evidence.observations.holdsAfterResolve = released?.holds ?? null;
+    evidence.observations.resumedTurnAfterSubagentCrash = "untested";
+    const h = released?.holds;
+    if (!h || h.writer || h.capacity || h.uncertainty)
+      throw new Error("holds were not released by the recovery resolution");
+    if (after.turns.length + after.refused.length !== 0)
+      throw new Error("a turn started during recovery");
+    return;
+  }
   await second.call("message", {
     key: randomUUID(),
     taskId: ids.taskId,
@@ -842,14 +1029,18 @@ async function attemptBody(attempt) {
     process.env.CAB_C5_CONTROL = "present";
     stage("run");
     work =
-      facet === "crash"
+      facet === "crash" || facet === "claude-subagent-crash"
         ? crash()
-        : inProcess((current, ids, check) =>
+        : inProcess((current, ids, check, plugin) =>
             facet === "scrub"
               ? scrub(current, ids, check)
               : facet === "stop"
                 ? stop(current, ids, check)
-                : coordination(current, ids, check),
+                : facet === "claude-subagent-stop"
+                  ? stop(current, ids, check, true)
+                  : facet === "claude-skill"
+                    ? skill(current, ids, check, plugin)
+                    : coordination(current, ids, check),
           );
     work.catch(() => {});
     await Promise.race([work, aborted]);

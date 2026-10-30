@@ -24,6 +24,10 @@ export const FACETS = {
   // A completed turn, the killed follow-up and the recovered turn: only a
   // completed turn gives recovery a session to resume.
   crash: { claude: 3, codex: 0 },
+  // #1336: a profile skill plugin, and a subagent under Stop and under a service crash.
+  "claude-skill": { claude: 2, codex: 0 },
+  "claude-subagent-stop": { claude: 1, codex: 0 },
+  "claude-subagent-crash": { claude: 3, codex: 0 },
 };
 export const GLOBAL_CAPS = { claude: 30, codex: 10 };
 export const MAX_ATTEMPTS = 2;

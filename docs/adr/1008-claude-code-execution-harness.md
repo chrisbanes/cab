@@ -120,9 +120,18 @@ Match the Codex default policy and disclose where enforcement differs:
 - Reads keep full access subject to host permissions, as with Codex.
 
 Agents load no user, project or plugin Claude configuration: no setting sources,
-strict MCP configuration and a dedicated Claude configuration directory. cab
-supplies repository instructions (`CLAUDE.md`, `AGENTS.md`) as instruction text, so
-repository content cannot add permission rules, hooks or MCP servers.
+strict MCP configuration, `managedSettings.disableAllHooks` and a dedicated Claude
+configuration directory. cab supplies repository instructions (`CLAUDE.md`,
+`AGENTS.md`) as instruction text, so repository content cannot add permission rules,
+hooks or MCP servers. The one addition is the profile's skill plugins
+([ADR-1021](1021-profile-skill-plugins-and-subagents.md)): local plugin directories
+passed through the SDK `plugins` option, with the enabled names in `skills` and the
+`Skill` tool allowed only when a profile enables any. A plugin contributes skills,
+instructions and scripts; the hooks and MCP servers it declares never run, and its
+scripts run through the ordinary sandboxed shell. The `Agent` tool is allowed on every
+turn: a subagent's tool calls pass the same `PreToolUse` hook (which sees `agent_id`),
+allowlist and sandbox, are recorded as diagnostic items with their allow or deny
+decision and the subagent that made them, and share the main agent's recovery boundary.
 
 Native `AskUserQuestion` is disabled. Agents ask the operator through
 `cab_ask_question`, which is durable across restarts.
