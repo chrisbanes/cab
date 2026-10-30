@@ -34,8 +34,9 @@ A piece of work belonging to one project, created locally or linked to an extern
 _Avoid_: Issue when referring to work independently of its external provider
 
 **Readiness condition**:
-One test of a project's readiness rule: a label the issue has or lacks, or a Project field whose
-value is in or not in a set of options. A rule is a flat all/any list of them.
+One test of a project's readiness rule: a label the issue has or lacks, or a GitHub Project field
+or a Jira status or single-select field whose value is in or not in a set of options. A rule is a
+flat all/any list of them.
 _Avoid_: Readiness filter
 
 **Task dependency**:

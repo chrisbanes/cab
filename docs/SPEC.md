@@ -46,7 +46,7 @@ select permitted profiles but cannot create profiles or expand project authority
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
 items; readiness is separate. Jira Cloud imports issues by JQL: a project uses one
-tracker, and Jira readiness conditions, dependencies, comments, closing issues in
+tracker, and Jira comments, closing issues in
 Jira, status mapping and issue edit or publication are planned and not implemented.
 GitLab merge request merging is planned and not implemented; a project can link a
 GitLab checkout and deliver its branches and open, edit, ready and discuss its merge
@@ -787,8 +787,19 @@ selections, saved and activated together; Jira's strict JQL parse must accept ev
 new or changed query before anything is saved, and the preview reads at most 20
 matches without saving. An issue is closed when Jira's status category is Done. A
 read that is incomplete for any reason (rate limit, credential, network, malformed
-or truncated pages) never withdraws a task. Imported Jira tasks keep unknown imported
-blockers, so admission refuses them until Jira dependencies are read. A project that
+or truncated pages) never withdraws a task. A Jira project's optional readiness rule is
+the same flat all/any list as GitHub's, over the issue's labels (by name, case-insensitive),
+its status (by status ID) and its single-select custom fields (`customfield_N`, by option
+ID); `not-in` on a select field needs a value. A status or field no complete read has
+observed never satisfies a condition. Names shown for IDs come from the project's imported
+issues and are display only. Losing readiness applies the ordinary readiness-lost hold and
+a later complete read releases it. A Jira "is blocked by" link makes the linked issue a
+source-owned dependency, open until its status category is Done, shown by Jira key and
+linked to Jira with no local override; every other link type and direction is ignored.
+Links are read with every selection read, so a committed complete read replaces an issue's
+dependencies; a failed, partial, truncated, rate-limited or malformed read keeps the
+existing ones and leaves imported blockers unknown. Imported Jira tasks keep unknown
+imported blockers until their first complete read. A project that
 has Jira selections or imported tasks cannot switch tracker, and a GitHub project
 with selections or imported tasks cannot become a Jira project.
 
