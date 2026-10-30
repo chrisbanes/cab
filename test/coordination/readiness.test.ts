@@ -442,6 +442,21 @@ test("codex login passes when verified and fails otherwise with the login fix", 
   }
 });
 
+test("a missing or replaced Codex login link fails without naming paths", async (t) => {
+  const f = fixture(t);
+  for (const [result, reason] of [
+    ["link-missing", /login file is missing/],
+    ["link-replaced", /replaced by another file/],
+  ] as const) {
+    const login = await check(f, "codex-login", {
+      codexLogin: async () => result,
+    });
+    assert.equal(login.status, "fail", result);
+    assert.match(login.reason ?? "", reason, result);
+    assert.doesNotMatch(`${login.reason} ${login.fix}`, /\/(Users|tmp|var)\//);
+  }
+});
+
 test("a Codex policy mismatch is not reported as a missing login", async (t) => {
   const f = fixture(t);
   const result = await check(f, "codex-login", {

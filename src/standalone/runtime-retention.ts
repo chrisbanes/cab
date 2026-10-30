@@ -45,7 +45,12 @@ export interface RuntimeThreadQualification {
   serviceTier: string | null;
   developerInstructionsDigest: string | null;
   harness: ExecutionHarness;
+  /** `cabCodexHome` for a Codex thread started under cab's own home; null for any other. */
+  codexHome: string | null;
 }
+
+/** Marks a Codex thread started under cab's Codex home; older threads stay null. */
+export const cabCodexHome = "cab";
 
 export interface RuntimeThreadQualificationEvidence {
   threadId: string;

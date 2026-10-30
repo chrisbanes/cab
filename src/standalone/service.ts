@@ -122,6 +122,11 @@ import {
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
 } from "./codex.js";
+import {
+  type CodexHome,
+  codexHomeFor,
+  PreviousCodexHomeError,
+} from "./codex-home.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import {
@@ -346,6 +351,7 @@ export type ClaudeTurnEnvironment =
 export interface RuntimeSpawnContext {
   spawnEnvironment: () => NodeJS.ProcessEnv;
   safety: RuntimeSafetyPort;
+  codex?: CodexHome;
   claude?: {
     configDirectory: string;
     turnEnvironment: () => ClaudeTurnEnvironment;
@@ -1419,7 +1425,12 @@ export class StandaloneService {
       this.spawnRuntime = (harness) => {
         // Keyed by the requested harness: test fakes do not declare one.
         const runtime = this.runtimeFactory(
-          { ...spawnEnvironment, safety: runtimeSafety(harness), claude },
+          {
+            ...spawnEnvironment,
+            safety: runtimeSafety(harness),
+            codex: codexHomeFor(this.dataDir),
+            claude,
+          },
           harness,
         );
         this.attachRuntime(
@@ -8104,7 +8115,9 @@ export class StandaloneService {
       if (state.get(intent.id).state !== "held")
         state.hold(
           intent.id,
-          `Runtime submission or observation uncertain: ${String(error)}`,
+          error instanceof PreviousCodexHomeError
+            ? error.message
+            : `Runtime submission or observation uncertain: ${String(error)}`,
         );
       // The run stays held, with its capacity, until the next start verifies the runtime ended.
       if (

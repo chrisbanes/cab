@@ -38,12 +38,19 @@ import {
   ArchivedResumeRejectedError,
   archivedResumeRejectionSchema,
 } from "./pre-turn-recovery.js";
-import type {
-  RuntimeSafetyPort,
-  RuntimeTerminalEvidence,
-  RuntimeTerminalFailureEvidence,
-  RuntimeThreadQualification,
+import {
+  cabCodexHome,
+  type RuntimeSafetyPort,
+  type RuntimeTerminalEvidence,
+  type RuntimeTerminalFailureEvidence,
+  type RuntimeThreadQualification,
 } from "./runtime-retention.js";
+import {
+  type CodexHome,
+  PreviousCodexHomeError,
+  prepareCodexHome,
+  realHome,
+} from "./codex-home.js";
 
 const rpc = z.object({
   id: z.union([z.string(), z.number()]).optional(),
@@ -1602,6 +1609,11 @@ export class CodexRuntime implements Runtime {
     private readonly options: {
       safety: RuntimeSafetyPort;
       spawnEnvironment?: () => NodeJS.ProcessEnv;
+      /**
+       * cab's own Codex home. Codex then runs with `CODEX_HOME` and `HOME` under it and a
+       * linked login, and refuses to resume conversations started under the previous home.
+       */
+      codex?: CodexHome;
       /** Test-only executable identity for deterministic stdio fixtures. */
       qualifiedExecutableHash?: string;
       /** Test-only OS boundary for deterministic attached child identity. */
@@ -1789,6 +1801,8 @@ export class CodexRuntime implements Runtime {
     this.nativeTurns.clear();
     this.invalidNativeTurns.clear();
     this.nativeReadbacks.clear();
+    const codex = this.options.codex;
+    if (codex) await prepareCodexHome(codex, environment);
     const child = spawn(
       executable,
       [
@@ -1797,8 +1811,29 @@ export class CodexRuntime implements Runtime {
         "approval_policy=never",
         "-c",
         "sandbox_mode=workspace-write",
+        ...(codex
+          ? [
+              // The keyring and auto modes key credentials by CODEX_HOME and would ignore the link.
+              "-c",
+              "cli_auth_credentials_store=file",
+              "-c",
+              "features.multi_agent=false",
+              "-c",
+              "features.plugins=false",
+              "-c",
+              "features.skill_mcp_dependency_install=false",
+              // Agent shell commands keep the real HOME; only Codex itself runs isolated.
+              "-c",
+              `shell_environment_policy.set.HOME=${JSON.stringify(realHome(environment))}`,
+            ]
+          : []),
       ],
-      { stdio: "pipe", env: environment },
+      {
+        stdio: "pipe",
+        env: codex
+          ? { ...environment, CODEX_HOME: codex.home, HOME: codex.userHome }
+          : environment,
+      },
     );
     this.child = child;
     this.processIdentityValue = null;
@@ -1960,6 +1995,16 @@ export class CodexRuntime implements Runtime {
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
   ): Promise<void> {
+    // Fail closed: a thread without a durable cab-home marker predates the switch.
+    if (this.options.codex) {
+      let marker: string | null | undefined;
+      try {
+        marker = this.options.safety.threadQualification(threadId)?.codexHome;
+      } catch {
+        marker = undefined;
+      }
+      if (marker !== cabCodexHome) throw new PreviousCodexHomeError();
+    }
     let snapshot = this.threadSnapshots.get(threadId);
     let restoredEmptyTools = false;
     if (!snapshot && tools === undefined) {

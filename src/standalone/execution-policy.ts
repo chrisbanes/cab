@@ -12,6 +12,7 @@ export function codexPolicyDisclosure(): PolicyDisclosure {
     lines: [
       "Default policy: workspace writes with broad host-permitted reads.",
       "Command network access is disabled unless the project enables it. Approval policy is never.",
+      "Codex runs in cab's own Codex home with the operator's login linked in, so it loads no settings, skills or plugins from the service user's Codex home. Codex subagents are disabled.",
     ],
     limits: [
       "Stricter isolation, exhaustive ambient access containment, and universal descendant containment are not proved.",

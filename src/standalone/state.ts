@@ -39,6 +39,7 @@ import type {
   RuntimeThreadQualification,
   RuntimeThreadQualificationEvidence,
 } from "./runtime-retention.js";
+import { cabCodexHome } from "./runtime-retention.js";
 
 export type TaskControlReceipt = Extract<
   CommandReceipt,
@@ -296,6 +297,7 @@ const runtimeThreadQualificationSchema = z
       .regex(/^[a-f0-9]{64}$/)
       .nullable(),
     harness: executionHarnessSchema,
+    codexHome: z.string().min(1).max(64).nullable(),
   })
   .strict();
 
@@ -667,7 +669,8 @@ export class ExecutionState {
       reasoningEffort TEXT,
       serviceTier TEXT,
       developerInstructionsDigest TEXT,
-      harness TEXT NOT NULL DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64)
+      harness TEXT NOT NULL DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64),
+      codexHome TEXT
     );
     CREATE TABLE IF NOT EXISTS runtime_retention_migrations (
       migrationId TEXT PRIMARY KEY
@@ -735,6 +738,17 @@ export class ExecutionState {
         this.db.exec(`ALTER TABLE ${table} ADD COLUMN harness TEXT NOT NULL
           DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64)`);
     }
+    // Rows that exist now were started under the previous Codex home and stay null.
+    if (
+      !(
+        this.db
+          .prepare("PRAGMA table_info(runtime_thread_qualification)")
+          .all() as Array<{ name: string }>
+      ).some(({ name }) => name === "codexHome")
+    )
+      this.db.exec(
+        "ALTER TABLE runtime_thread_qualification ADD COLUMN codexHome TEXT",
+      );
     this.migrateRuntimeRetention();
     this.migratePreTurnReceipts();
     this.migrateStopInterruptState();
@@ -2517,9 +2531,14 @@ export class ExecutionState {
       .parse(toolDigest);
     const inserted = this.db
       .prepare(
-        "INSERT OR IGNORE INTO runtime_thread_qualification (threadId, toolDigest, harness) VALUES (?, ?, ?)",
+        "INSERT OR IGNORE INTO runtime_thread_qualification (threadId, toolDigest, harness, codexHome) VALUES (?, ?, ?, ?)",
       )
-      .run(id, digest, executionHarness) as { changes: number };
+      .run(
+        id,
+        digest,
+        executionHarness,
+        executionHarness === "codex" ? cabCodexHome : null,
+      ) as { changes: number };
     if (inserted.changes === 0) {
       const existing = this.runtimeThreadQualification(id);
       if (
@@ -2536,7 +2555,7 @@ export class ExecutionState {
   ): RuntimeThreadQualification | null {
     const row = this.db
       .prepare(
-        "SELECT threadId, toolDigest, codexVersion, executableHash, model, modelProvider, reasoningEffort, serviceTier, developerInstructionsDigest, harness FROM runtime_thread_qualification WHERE threadId = ?",
+        "SELECT threadId, toolDigest, codexVersion, executableHash, model, modelProvider, reasoningEffort, serviceTier, developerInstructionsDigest, harness, codexHome FROM runtime_thread_qualification WHERE threadId = ?",
       )
       .get(z.string().min(1).max(512).parse(threadId));
     return row === undefined
@@ -2612,6 +2631,7 @@ export class ExecutionState {
           toolDigest: value.toolDigest,
           ...qualification,
           harness: prior.harness,
+          codexHome: prior.codexHome,
         })
     )
       throw new Error("Runtime thread qualification could not be persisted");
