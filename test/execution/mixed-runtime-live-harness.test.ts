@@ -288,6 +288,13 @@ test("the skill and subagent facets are accepted, and their briefs name the tool
     facetOutcome("claude-subagent-stop", { workerProfileId: "w", nonce: "n" }),
     subagentSleep,
   );
+  // A Codex-only facet reserves no Claude turn.
+  assert.equal(parseArgs(["--live", "--facet", "codex-skill"]), "codex-skill");
+  assert.equal(FACETS["codex-skill"].claude, 0);
+  assert.match(
+    facetOutcome("codex-skill", { workerProfileId: "w", nonce: "n" }),
+    /skill probe-skill/,
+  );
   assert.match(subagentSleep, /Agent tool/);
   assert.match(subagentSleep, new RegExp(`\n${SLEEP}\n`));
   assert.doesNotMatch(subagentSleep, /verbatim: sleep\s+\d/);

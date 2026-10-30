@@ -177,6 +177,13 @@ export const skillBrief = [
   `Then call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
 ].join("\n");
 
+/** The Codex skill brief: Codex has no Skill tool, so the skill is named and used directly. */
+export const codexSkillBrief = [
+  "Disposable cab skill probe.",
+  "Use the skill probe-skill now and follow its instructions exactly.",
+  `Then call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
+].join("\n");
+
 /** Lead outcome text per facet; the worker brief is carried inside the lead's instructions. */
 export function facetOutcome(facet, { workerProfileId, nonce }) {
   if (facet === "scrub") return shellOnly(PROBE);
@@ -184,6 +191,7 @@ export function facetOutcome(facet, { workerProfileId, nonce }) {
   if (facet === "stop") return shellOnly(SLEEP);
   if (facet === "claude-subagent-stop") return subagentSleep;
   if (facet === "claude-skill") return skillBrief;
+  if (facet === "codex-skill") return codexSkillBrief;
   if (facet === "crash" || facet === "claude-subagent-crash")
     return `Disposable cab qualification probe. Call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`;
   const brief =
@@ -218,7 +226,10 @@ export async function setupJourney(
     name: "C5 lead",
     instructions: "Follow the task instructions exactly and briefly.",
     capabilities: "task coordination, shell",
-    runtime: facet === "mixed" ? { harness: "codex" } : claude,
+    runtime:
+      facet === "mixed" || facet === "codex-skill"
+        ? { harness: "codex" }
+        : claude,
     ...(skills ? { skills } : {}),
   });
   exec({

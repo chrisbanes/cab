@@ -4,15 +4,17 @@
 {"event": "home-discovery", "skillsFromRealHome": 0}
 {"facet": "S5", "after": "thread A", "linkIntact": true, "inode": 93589025}
 {"facet": "S2", "disposition": "demonstrated", "threadASkills": ["probe-skill"], "threadAProbeRan": true, "threadAOtherRan": false, "threadBSkills": ["imagegen", "openai-docs", "other-skill", "probe-skill", "skill-creator", "skill-installer"], "threadBOtherRan": true}
-{"event": "server-exit", "pid": 55804, "exit": -9, "gone": true}
+{"event": "server-exit", "pid": 70144, "exit": -9, "gone": true}
 {"facet": "S3", "disposition": "demonstrated", "resumedWithConfigSkills": ["probe-skill"], "resumedWithConfigOtherRan": false}
 {"facet": "S5", "after": "resume", "linkIntact": true, "inode": 93589025}
+{"facet": "S3b", "disposition": "demonstrated", "beforeResume": ["imagegen", "openai-docs", "other-skill", "probe-skill", "skill-creator", "skill-installer"], "afterPlainResume": ["imagegen", "openai-docs", "other-skill", "probe-skill", "skill-creator", "skill-installer"], "afterUnsubscribeAndResume": ["probe-skill"]}
+{"facet": "S3c", "disposition": "demonstrated", "threadABeforeRefresh": ["probe-skill", "third-skill"], "threadAAfterRefresh": ["probe-skill"]}
 {"facet": "S4", "disposition": "demonstrated", "shellHomeIsRealHome": true, "skillsFromRealHome": 0, "shellOutput": "HOME=<real-home>", "itemKinds": ["agentMessage", "commandExecution", "userMessage"], "reply": "```text\nHOME=<real-home>\n```"}
 {"facet": "S5", "after": "all turns", "linkIntact": true, "inode": 93589025}
 {"facet": "S5", "disposition": "demonstrated", "inodeUnchanged": true}
-{"event": "server-exit", "pid": 56001, "exit": -9, "gone": true}
-{"facet": "S6", "disposition": "demonstrated-subagent-activity", "subagentToolItems": true, "itemKinds": ["agentMessage", "subAgentActivity", "userMessage"], "outsideWriteLanded": false, "interrupted": false, "processesBelowServerDuringTurn": 0, "survivorsAfterInterrupt": 0, "note": "recorded only; cab keeps Codex subagents disabled"}
-{"event": "server-exit", "pid": 56293, "exit": -9, "gone": true}
+{"event": "server-exit", "pid": 71694, "exit": -9, "gone": true}
+{"facet": "S6", "disposition": "untested", "subagentToolItems": false, "itemKinds": ["agentMessage", "userMessage"], "outsideWriteLanded": false, "interrupted": false, "processesBelowServerDuringTurn": 1, "survivorsAfterInterrupt": 1, "note": "recorded only; cab keeps Codex subagents disabled"}
+{"event": "server-exit", "pid": 73490, "exit": -9, "gone": true}
 {"facet": "S5", "after": "subagent probe", "linkIntact": true}
 {"event": "result", "outcome": "passed"}
 {"event": "cleanup", "directory_removed": true}
