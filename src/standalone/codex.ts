@@ -264,6 +264,8 @@ export type RuntimeDiagnosticEvent =
       itemId: string;
       itemType: string;
       status?: string;
+      /** Claude `toolCall` items only: the tool's fixed name, never its input. */
+      tool?: string;
       /** Present only for `commandExecution` items. */
       command?: string | RuntimeOmittedField;
       cwd?: string;
@@ -381,8 +383,16 @@ const diagnosticItemSchema = z.object({
     aggregatedOutput: z.string().nullable().optional().catch(undefined),
   }),
 });
-const maxDiagnosticCommandBytes = 4 * 1024;
-const maxDiagnosticOutputBytes = 48 * 1024;
+export const maxDiagnosticCommandBytes = 4 * 1024;
+export const maxDiagnosticOutputBytes = 48 * 1024;
+/** Replaces a string over its byte limit whole; shared by every harness. */
+export function capDiagnosticField(
+  value: string,
+  limit: number,
+): string | RuntimeOmittedField {
+  const bytes = Buffer.byteLength(value, "utf8");
+  return bytes > limit ? { omitted: "size-limit", bytes } : value;
+}
 const maxObservedThreads = 128;
 const conversationItemStartedSchema = z.object({
   threadId: conversationIdentity,
@@ -2407,13 +2417,6 @@ export class CodexRuntime implements Runtime {
     if (!parsed.success) return;
     const { threadId, turnId, item } = parsed.data;
     if (item.type === "agentMessage" || item.type === "userMessage") return;
-    const cap = (
-      value: string,
-      limit: number,
-    ): string | RuntimeOmittedField => {
-      const bytes = Buffer.byteLength(value, "utf8");
-      return bytes > limit ? { omitted: "size-limit", bytes } : value;
-    };
     const command = item.type === "commandExecution";
     listener({
       kind: "item",
@@ -2424,7 +2427,12 @@ export class CodexRuntime implements Runtime {
       itemType: item.type,
       ...(item.status !== undefined ? { status: item.status } : {}),
       ...(command && item.command !== undefined
-        ? { command: cap(item.command, maxDiagnosticCommandBytes) }
+        ? {
+            command: capDiagnosticField(
+              item.command,
+              maxDiagnosticCommandBytes,
+            ),
+          }
         : {}),
       ...(command && item.cwd !== undefined ? { cwd: item.cwd } : {}),
       ...(command && item.exitCode !== undefined
@@ -2435,7 +2443,10 @@ export class CodexRuntime implements Runtime {
             aggregatedOutput:
               item.aggregatedOutput === null
                 ? null
-                : cap(item.aggregatedOutput, maxDiagnosticOutputBytes),
+                : capDiagnosticField(
+                    item.aggregatedOutput,
+                    maxDiagnosticOutputBytes,
+                  ),
           }
         : {}),
     });

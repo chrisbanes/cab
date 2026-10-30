@@ -371,11 +371,14 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
    Capture is on by default (`enhanced`) for task-bound executions; `project.configure`
    with `diagnosticCapture: "baseline"` (shown by `project get`) reduces later
    executions to an execution row and a `capture-baseline` gap, and `"enhanced"`
-   restores it. Neither erases anything. Runtime events are Codex tool-like items
+   restores it. Neither erases anything. Runtime events are tool-like items
    (command executions with command, working directory, status, exit code and
-   bounded output; other item types by type and status only) and turn status. No
-   message text, deltas or reasoning is collected, tool observation is never
-   claimed complete, and Claude executions report runtime events `unsupported`.
+   bounded output; other item types by type and status only) and turn status.
+   Claude records Bash as command executions (command, status, exit code and
+   bounded output, with no working directory), `Write` and `Edit` as file changes,
+   and other tools by name and status; its `cab_*` tools appear as coordination
+   records, not runtime items. No message text, deltas or reasoning is collected
+   and tool observation is never claimed complete.
    Payloads are redacted before storage and again with current exclusions on every
    read; when exclusions are unavailable an item reads as
    `omitted/redaction-unavailable`. Capture, storage or pruning failures become

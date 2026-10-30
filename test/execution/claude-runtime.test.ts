@@ -25,6 +25,7 @@ import {
 import { coordinationTools } from "../../src/standalone/coordination-tools.js";
 import {
   type RuntimeConversationEvent,
+  type RuntimeDiagnosticEvent,
   RuntimeNotEnabledError,
   type RuntimeToolCall,
   type UnexpectedRequest,
@@ -71,6 +72,7 @@ function fixture(
     selfTest?: () => boolean;
     hangModels?: boolean;
     resolveExecutable?: () => Promise<string | null>;
+    diagnostic?: "collect" | "throw" | "none";
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "cab-claude-runtime-"));
@@ -137,6 +139,12 @@ function fixture(
   }> = [];
   const unexpected: UnexpectedRequest[] = [];
   const toolCalls: RuntimeToolCall[] = [];
+  const diagnostics: RuntimeDiagnosticEvent[] = [];
+  if (options.diagnostic !== "none")
+    runtime.onDiagnosticEvent((event) => {
+      if (options.diagnostic === "throw") throw new Error("listener failed");
+      diagnostics.push(event);
+    });
   runtime.onConversationEvent((event: RuntimeConversationEvent) =>
     emitted.push(event),
   );
@@ -173,6 +181,7 @@ function fixture(
     log,
     recorded,
     emitted,
+    diagnostics,
     anomalies,
     unexpected,
     toolCalls,
@@ -1048,4 +1057,245 @@ test("stopping the runtime ends a settings read that is still waiting", async ()
   } finally {
     await f.cleanup();
   }
+});
+
+/** Runs one scripted turn and returns what the fixture recorded. */
+async function diagnosticTurn(
+  calls: (session: Parameters<Script>[0]) => Promise<unknown>,
+  diagnostic: "collect" | "throw" | "none" = "collect",
+) {
+  const f = fixture({
+    diagnostic,
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        await calls(session);
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId);
+    const outcome = await f.runtime.waitForTurn(threadId, turnId);
+    return { outcome, diagnostics: f.diagnostics, threadId, turnId };
+  } finally {
+    await f.cleanup();
+  }
+}
+
+test("a Bash tool use is recorded as a command item with exit status and bounded output", async () => {
+  const command = "echo hi";
+  const run = await diagnosticTurn(async (session) => {
+    await session.hook("Bash", { command }, "toolu_ok");
+    await session.postHook("Bash", { command }, "toolu_ok", {
+      response: { stdout: "ok\n", stderr: "", interrupted: false },
+    });
+    await session.hook("Bash", { command }, "toolu_err");
+    await session.postHook("Bash", { command }, "toolu_err", {
+      response: { stdout: "o", stderr: "e", interrupted: false },
+    });
+    for (const [id, outcome] of [
+      ["toolu_f2", { error: "Exit code 2\nboom" }],
+      ["toolu_f_plain", { error: "no prefix" }],
+      ["toolu_f_int", { error: "Exit code 130\nx", isInterrupt: true }],
+    ] as const) {
+      await session.hook("Bash", { command }, id);
+      await session.postHook("Bash", { command }, id, outcome);
+    }
+    await session.hook("Bash", { command }, "toolu_interp");
+    await session.postHook("Bash", { command }, "toolu_interp", {
+      response: {
+        stdout: "",
+        stderr: "",
+        interrupted: false,
+        returnCodeInterpretation: "No matches found",
+      },
+    });
+    await session.hook("Bash", { command }, "toolu_bg");
+    await session.postHook("Bash", { command }, "toolu_bg", {
+      response: {
+        stdout: "",
+        stderr: "",
+        interrupted: false,
+        backgroundTaskId: "bg1",
+      },
+    });
+    await session.hook("Bash", { command }, "toolu_bad");
+    await session.postHook("Bash", { command }, "toolu_bad", {
+      response: "not an object",
+    });
+  });
+  assert.equal(run.outcome, "completed");
+  const { threadId, turnId } = run;
+  const item = (id: string, phase: "started" | "completed") =>
+    run.diagnostics.find(
+      (event) =>
+        event.kind === "item" && event.itemId === id && event.phase === phase,
+    );
+  assert.deepEqual(item("toolu_ok", "started"), {
+    kind: "item",
+    phase: "started",
+    threadId,
+    turnId,
+    itemId: "toolu_ok",
+    itemType: "commandExecution",
+    status: "inProgress",
+    command,
+  });
+  assert.deepEqual(item("toolu_ok", "completed"), {
+    kind: "item",
+    phase: "completed",
+    threadId,
+    turnId,
+    itemId: "toolu_ok",
+    itemType: "commandExecution",
+    status: "completed",
+    command,
+    exitCode: 0,
+    aggregatedOutput: "ok\n",
+  });
+  const completed = (id: string) =>
+    item(id, "completed") as Extract<RuntimeDiagnosticEvent, { kind: "item" }>;
+  assert.equal(completed("toolu_err").aggregatedOutput, "o\ne");
+  assert.deepEqual(
+    [
+      completed("toolu_f2").status,
+      completed("toolu_f2").exitCode,
+      completed("toolu_f2").aggregatedOutput,
+    ],
+    ["failed", 2, "boom"],
+  );
+  assert.equal(completed("toolu_f_plain").exitCode, null);
+  assert.equal(completed("toolu_f_plain").aggregatedOutput, "no prefix");
+  assert.equal(completed("toolu_f_int").exitCode, null);
+  assert.deepEqual(
+    [completed("toolu_interp").status, completed("toolu_interp").exitCode],
+    ["completed", null],
+  );
+  assert.equal(completed("toolu_bg").exitCode, null);
+  assert.equal(completed("toolu_bad").exitCode, null);
+  assert.equal("aggregatedOutput" in completed("toolu_bad"), false);
+});
+
+test("oversized Claude commands and output are replaced whole, as for Codex", async () => {
+  const command = "x".repeat(5 * 1024);
+  const run = await diagnosticTurn(async (session) => {
+    await session.hook("Bash", { command }, "toolu_big");
+    await session.postHook("Bash", { command }, "toolu_big", {
+      response: {
+        stdout: "y".repeat(49 * 1024),
+        stderr: "",
+        interrupted: false,
+      },
+    });
+  });
+  const [started, completed] = run.diagnostics as Array<
+    Extract<RuntimeDiagnosticEvent, { kind: "item" }>
+  >;
+  assert.deepEqual(started?.command, { omitted: "size-limit", bytes: 5120 });
+  assert.deepEqual(completed?.aggregatedOutput, {
+    omitted: "size-limit",
+    bytes: 49 * 1024,
+  });
+});
+
+test("file changes and other tools record no path, content or input", async () => {
+  const run = await diagnosticTurn(async (session) => {
+    const path = join(String(session.options.cwd), "secret-name.txt");
+    await session.hook("Write", { file_path: path, content: "BODY" }, "w1");
+    await session.postHook(
+      "Write",
+      { file_path: path, content: "BODY" },
+      "w1",
+      {
+        response: { filePath: path, content: "BODY" },
+      },
+    );
+    await session.hook("Read", { file_path: path }, "r1");
+    await session.postHook("Read", { file_path: path }, "r1", {
+      response: { file: { content: "BODY" } },
+    });
+  });
+  assert.deepEqual(
+    run.diagnostics.map((event) =>
+      event.kind === "item"
+        ? [event.itemType, event.phase, event.status, event.tool]
+        : event,
+    ),
+    [
+      ["fileChange", "started", "inProgress", undefined],
+      ["fileChange", "completed", "completed", undefined],
+      ["toolCall", "started", "inProgress", "Read"],
+      ["toolCall", "completed", "completed", "Read"],
+    ],
+  );
+  const text = JSON.stringify(run.diagnostics);
+  assert.equal(/secret-name|BODY|file_path|cwd/.test(text), false);
+});
+
+test("cab tools emit nothing and refused calls are recorded as declined", async () => {
+  const run = await diagnosticTurn(async (session) => {
+    await session.hook("mcp__cab__cab_report_result", {}, "c1");
+    await session.postHook("mcp__cab__cab_report_result", {}, "c1", {
+      response: {},
+    });
+    await session.hook("Write", { file_path: "/etc/x", content: "x" }, "w1");
+    await session.hook(
+      "Bash",
+      { command: "ls", dangerouslyDisableSandbox: true },
+      "b1",
+    );
+  });
+  assert.deepEqual(
+    run.diagnostics.map((event) =>
+      event.kind === "item"
+        ? [event.itemId, event.itemType, event.phase, event.status]
+        : event,
+    ),
+    [
+      ["w1", "fileChange", "started", "inProgress"],
+      ["w1", "fileChange", "completed", "declined"],
+      ["b1", "commandExecution", "started", "inProgress"],
+      ["b1", "commandExecution", "completed", "declined"],
+    ],
+  );
+});
+
+test("a failing diagnostic listener changes no hook result or turn outcome", async () => {
+  const script = async (session: Parameters<Script>[0]) => {
+    const cwd = String(session.options.cwd);
+    const results: unknown[] = [];
+    for (const [name, input] of [
+      ["Bash", { command: "ls" }],
+      ["Write", { file_path: "/etc/x" }],
+      ["Bash", { command: "ls", dangerouslyDisableSandbox: true }],
+      ["Write", { file_path: join(cwd, "ok.txt"), content: "x" }],
+    ] as const) {
+      results.push(await session.hook(name, input, `t_${results.length}`));
+      results.push(
+        await session.postHook(name, input, `t_${results.length}`, {
+          response: { stdout: "", stderr: "", interrupted: false },
+        }),
+      );
+      results.push(
+        await session.postHook(name, input, `t_${results.length}`, {
+          error: "Exit code 1\nx",
+        }),
+      );
+    }
+    return results;
+  };
+  const seen: Record<string, unknown[]> = {};
+  for (const mode of ["none", "throw"] as const) {
+    const outcome = await diagnosticTurn(async (session) => {
+      seen[mode] = (await script(session)) as unknown[];
+    }, mode);
+    assert.equal(outcome.outcome, "completed");
+  }
+  assert.deepEqual(seen.throw, seen.none);
+  assert.ok(
+    (seen.none ?? []).some((entry) => JSON.stringify(entry).includes("deny")),
+  );
 });

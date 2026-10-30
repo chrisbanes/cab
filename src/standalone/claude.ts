@@ -21,10 +21,14 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import {
+  capDiagnosticField,
   type FailureEvidence,
+  maxDiagnosticCommandBytes,
+  maxDiagnosticOutputBytes,
   terminalFailureEvidence,
   type Runtime,
   type RuntimeConversationEvent,
+  type RuntimeDiagnosticEvent,
   RuntimeNotEnabledError,
   type RuntimeToolCall,
   type RuntimeToolDefinition,
@@ -157,6 +161,32 @@ const hookInputSchema = z.object({
   tool_name: z.string().min(1),
   tool_input: z.unknown(),
   tool_use_id: z.string().min(1),
+});
+const postToolUseSchema = z.discriminatedUnion("hook_event_name", [
+  z.object({
+    hook_event_name: z.literal("PostToolUse"),
+    tool_name: z.string().min(1),
+    tool_input: z.unknown(),
+    tool_response: z.unknown(),
+    tool_use_id: z.string().min(1),
+  }),
+  z.object({
+    hook_event_name: z.literal("PostToolUseFailure"),
+    tool_name: z.string().min(1),
+    tool_input: z.unknown(),
+    error: z.string(),
+    is_interrupt: z.boolean().optional(),
+    tool_use_id: z.string().min(1),
+  }),
+]);
+const bashResponseSchema = z.object({
+  stdout: z.string(),
+  stderr: z.string(),
+  interrupted: z.boolean(),
+  returnCodeInterpretation: z.string().optional(),
+  // A backgrounded or auto-backgrounded command has not exited yet.
+  backgroundTaskId: z.string().optional(),
+  timedOutAfterMs: z.number().optional(),
 });
 
 /** Maps a validated result to failure evidence; null means a completed turn. */
@@ -504,6 +534,7 @@ export class ClaudeRuntime implements Runtime {
     reason: string;
   }) => void;
   private conversation?: (event: RuntimeConversationEvent) => void;
+  private diagnostic?: (event: RuntimeDiagnosticEvent) => void;
 
   constructor(private readonly options: ClaudeRuntimeOptions) {}
 
@@ -528,6 +559,9 @@ export class ClaudeRuntime implements Runtime {
     listener: (event: RuntimeConversationEvent) => void,
   ): void {
     this.conversation = listener;
+  }
+  onDiagnosticEvent(listener: (event: RuntimeDiagnosticEvent) => void): void {
+    this.diagnostic = listener;
   }
 
   /** Terminal evidence is bound to this per-start generation. */
@@ -878,6 +912,8 @@ export class ClaudeRuntime implements Runtime {
       };
     }
     const hook: HookCallback = async (input) => this.preToolUse(turn, input);
+    const postHook: HookCallback = async (input) =>
+      this.postToolUse(turn, input);
     const canUseTool: CanUseTool = async (toolName) => {
       this.unexpected?.({
         method: `claude/canUseTool:${toolName}`,
@@ -925,7 +961,11 @@ export class ClaudeRuntime implements Runtime {
           ),
         }),
       },
-      hooks: { PreToolUse: [{ hooks: [hook] }] },
+      hooks: {
+        PreToolUse: [{ hooks: [hook] }],
+        PostToolUse: [{ hooks: [postHook] }],
+        PostToolUseFailure: [{ hooks: [postHook] }],
+      },
       canUseTool,
       systemPrompt: {
         type: "preset",
@@ -1244,8 +1284,13 @@ export class ClaudeRuntime implements Runtime {
     if (!input.success) return deny("cab could not read this tool call");
     const { tool_name: name, tool_input: toolInput } = input.data;
     const fields = z.record(z.string(), z.unknown()).safeParse(toolInput);
+    this.emitTool(turn, "started", input.data);
+    const refuse = (reason: string) => {
+      this.emitTool(turn, "completed", input.data, { status: "declined" });
+      return deny(reason);
+    };
     if (!builtInTools.includes(name) && !name.startsWith(mcpToolPrefix))
-      return deny(`${name} is outside cab's tool policy`);
+      return refuse(`${name} is outside cab's tool policy`);
     if (name === "Write" || name === "Edit") {
       const path = fields.success ? fields.data.file_path : undefined;
       if (
@@ -1253,13 +1298,13 @@ export class ClaudeRuntime implements Runtime {
         path.split(/[\\/]/).includes("..") ||
         !(await withinRoots(resolve(turn.roots[0] ?? "/", path), turn.roots))
       )
-        return deny("File edits are confined to the task's writable roots");
+        return refuse("File edits are confined to the task's writable roots");
     }
     if (
       name === "Bash" &&
       (!fields.success || fields.data.dangerouslyDisableSandbox === true)
     )
-      return deny("Commands never run outside the sandbox");
+      return refuse("Commands never run outside the sandbox");
     if (name.startsWith(mcpToolPrefix)) {
       if (turn.pendingCount >= maxPendingToolUses)
         return deny("Too many pending cab tool calls");
@@ -1270,6 +1315,98 @@ export class ClaudeRuntime implements Runtime {
       turn.pendingCount++;
     }
     return {};
+  }
+
+  /** Records the tool outcome; the result is always `{}` so capture never steers the turn. */
+  private async postToolUse(turn: ClaudeTurn, raw: unknown) {
+    const input = postToolUseSchema.safeParse(raw);
+    if (!input.success) return {};
+    const call = input.data;
+    if (call.hook_event_name === "PostToolUseFailure") {
+      const code = /^Exit code (\d+)(?:\n|$)/.exec(call.error);
+      this.emitTool(turn, "completed", call, {
+        status: "failed",
+        exitCode: call.is_interrupt || !code ? null : Number(code[1]),
+        output: code ? call.error.slice(code[0].length) : call.error,
+      });
+      return {};
+    }
+    const bash = bashResponseSchema.safeParse(call.tool_response);
+    this.emitTool(turn, "completed", call, {
+      status: "completed",
+      exitCode:
+        bash.success &&
+        !bash.data.interrupted &&
+        bash.data.returnCodeInterpretation === undefined &&
+        bash.data.backgroundTaskId === undefined &&
+        bash.data.timedOutAfterMs === undefined
+          ? 0
+          : null,
+      ...(bash.success
+        ? {
+            output:
+              bash.data.stdout +
+              (bash.data.stderr ? `\n${bash.data.stderr}` : ""),
+          }
+        : {}),
+    });
+    return {};
+  }
+
+  /**
+   * Best-effort diagnostic item for a built-in tool. Never throws, never awaits,
+   * and carries no input except a Bash command; cab's own tools are recorded as
+   * coordination records instead.
+   */
+  private emitTool(
+    turn: ClaudeTurn,
+    phase: "started" | "completed",
+    call: { tool_name: string; tool_input: unknown; tool_use_id: string },
+    done?: { status: string; exitCode?: number | null; output?: string },
+  ): void {
+    if (!this.diagnostic || call.tool_name.startsWith(mcpToolPrefix)) return;
+    try {
+      const bash = call.tool_name === "Bash";
+      const itemType = bash
+        ? "commandExecution"
+        : call.tool_name === "Write" || call.tool_name === "Edit"
+          ? "fileChange"
+          : "toolCall";
+      const command = z
+        .object({ command: z.string() })
+        .safeParse(call.tool_input);
+      this.diagnostic({
+        kind: "item",
+        phase,
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        itemId: call.tool_use_id,
+        itemType,
+        status: done?.status ?? "inProgress",
+        ...(itemType === "toolCall" ? { tool: call.tool_name } : {}),
+        ...(bash && command.success
+          ? {
+              command: capDiagnosticField(
+                command.data.command,
+                maxDiagnosticCommandBytes,
+              ),
+            }
+          : {}),
+        ...(bash && done?.exitCode !== undefined
+          ? { exitCode: done.exitCode }
+          : {}),
+        ...(bash && done?.output !== undefined
+          ? {
+              aggregatedOutput: capDiagnosticField(
+                done.output,
+                maxDiagnosticOutputBytes,
+              ),
+            }
+          : {}),
+      });
+    } catch {
+      // Diagnostics are best-effort and never alter a hook's decision.
+    }
   }
 
   private async handleTool(

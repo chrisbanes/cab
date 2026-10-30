@@ -7,6 +7,7 @@ import type { Database } from "../../src/core/store.js";
 import {
   boundDetail,
   DiagnosticCursorError,
+  ExecutionDiagnosticsCapture,
   ExecutionDiagnosticsStore,
   diagnosticLimitsFromEnv,
   type DiagnosticLimits,
@@ -160,6 +161,37 @@ test("execution byte and row limits coalesce into one gap row", () => {
     assert.equal(gap(items, "item-limit")?.count, 2);
   } finally {
     items.cleanup();
+  }
+});
+
+test("a Claude command item without exclusions is omitted, not stored", () => {
+  const f = fixture();
+  try {
+    const capture = new ExecutionDiagnosticsCapture({
+      store: f.store,
+      workId: "w1",
+      threadId: "th1",
+      exclusions: undefined,
+    });
+    capture.bind("tu1");
+    capture.receive({
+      kind: "item",
+      phase: "completed",
+      threadId: "th1",
+      turnId: "tu1",
+      itemId: "toolu_1",
+      itemType: "commandExecution",
+      status: "failed",
+      command: "echo hi",
+      exitCode: 3,
+      aggregatedOutput: "nope",
+    });
+    const [row] = rows(f);
+    assert.equal(row?.state, "omitted");
+    assert.equal(row?.reason, "redaction-unavailable");
+    assert.equal(row?.payload, null);
+  } finally {
+    f.cleanup();
   }
 });
 

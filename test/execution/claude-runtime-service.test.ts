@@ -788,6 +788,70 @@ test("a Claude assignment turn completes, its coordination call carries the hook
   assert.equal(JSON.stringify(codexEnvironment).includes(T6_TOKEN), false);
 });
 
+test("a Claude turn records its commands as runtime items with exit status and redacted output", async (t) => {
+  const run = await claudeServiceRun(t, [
+    async function* (session) {
+      yield init(sessionOf(session));
+      const ok = { command: "echo hi" };
+      await session.hook("Bash", ok, "toolu_ok");
+      await session.postHook("Bash", ok, "toolu_ok", {
+        response: { stdout: `hi ${T6_TOKEN}`, stderr: "", interrupted: false },
+      });
+      const bad = { command: "false" };
+      await session.hook("Bash", bad, "toolu_bad");
+      await session.postHook("Bash", bad, "toolu_bad", {
+        error: "Exit code 3\nnope",
+      });
+      const args = { summary: "Claude finished" };
+      await session.hook("mcp__cab__cab_report_result", args, "toolu_cab");
+      await session.callTool("cab_report_result", args);
+      await session.postHook("mcp__cab__cab_report_result", args, "toolu_cab", {
+        response: {},
+      });
+      yield result(sessionOf(session));
+    },
+  ]);
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(
+    () => run.intent(workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  const execution = run
+    .db()
+    .prepare("SELECT eventSource FROM diagnostic_executions WHERE workId = ?")
+    .get(workId) as { eventSource: string };
+  assert.equal(execution.eventSource, "supported");
+  const items = run
+    .db()
+    .prepare(
+      "SELECT name, itemId, payload FROM diagnostic_items WHERE workId = ? AND kind = 'runtime' ORDER BY sequence",
+    )
+    .all(workId) as Array<{ name: string; itemId: string; payload: string }>;
+  assert.deepEqual(
+    items.map((item) => [item.name, item.itemId]),
+    [
+      ["commandExecution/started", "toolu_ok"],
+      ["commandExecution/completed", "toolu_ok"],
+      ["commandExecution/started", "toolu_bad"],
+      ["commandExecution/completed", "toolu_bad"],
+    ],
+  );
+  const [, okDone, , badDone] = items.map(
+    (item) => JSON.parse(item.payload) as Record<string, unknown>,
+  );
+  assert.equal(okDone?.exitCode, 0);
+  assert.equal(okDone?.command, "echo hi");
+  assert.match(String(okDone?.aggregatedOutput), /\[redacted\]/);
+  assert.equal(badDone?.exitCode, 3);
+  assert.equal(badDone?.aggregatedOutput, "nope");
+  assert.equal(JSON.stringify(items).includes(T6_TOKEN), false);
+});
+
 test("an installed service runs a Claude turn from a token file with no token in its environment", async (t) => {
   const path = tokenFile(t);
   const run = await claudeServiceRun(
