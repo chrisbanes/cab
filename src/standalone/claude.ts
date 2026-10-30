@@ -91,7 +91,7 @@ export interface ClaudeRuntimeOptions {
 }
 
 /** SDK version qualified by the runtime tests and bounded upgrade probes. */
-export const claudeSdkVersion = "0.3.310";
+export const claudeSdkVersion = "0.3.312";
 const effortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 const supportedModelsSchema = z
   .array(
