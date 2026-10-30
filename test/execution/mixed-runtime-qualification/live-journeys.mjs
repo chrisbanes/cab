@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   ATTEMPT_MS,
   attemptLimitMs,
@@ -61,7 +62,7 @@ const launcher =
 if (!existsSync(launcher)) refuse("the approved Codex launcher is absent");
 // The service runs the `claude` on PATH, never the SDK's bundled binary (#981).
 const { resolveOnPath } = await import(
-  "../../dist/src/standalone/executable-path.js"
+  "../../../dist/src/standalone/executable-path.js"
 );
 const claudeOnPath = await resolveOnPath("claude", process.env);
 if (!claudeOnPath) refuse("claude is not on PATH");
@@ -391,7 +392,39 @@ async function scrub(current, ids, check) {
   );
   for (const name of PROBE_FILES) rmSync(findFile(ids.workspace, name));
   const listed = names.split("\n");
+  // Counts and booleans only; payloads never leave this function.
+  const diagnostics = new DatabaseSync(
+    join(root, "data", "standalone.sqlite"),
+    {
+      readOnly: true,
+    },
+  );
+  let claudeRows;
+  let allPayloads;
+  try {
+    claudeRows = diagnostics
+      .prepare(
+        `SELECT i.payload FROM diagnostic_items i
+         JOIN diagnostic_executions e ON e.workId = i.workId
+         WHERE e.harness = 'claude' AND i.kind = 'runtime'
+           AND i.name = 'commandExecution/completed'`,
+      )
+      .all()
+      .map((row) => (row.payload === null ? null : JSON.parse(row.payload)));
+    allPayloads = diagnostics
+      .prepare("SELECT payload FROM diagnostic_items WHERE payload IS NOT NULL")
+      .all();
+  } finally {
+    diagnostics.close();
+  }
   const o = {
+    claudeCommandItems: claudeRows.length,
+    claudeExitCodesNumeric:
+      claudeRows.length > 0 &&
+      claudeRows.every((p) => Number.isInteger(p?.exitCode)),
+    tokenValueInDiagnostics: allPayloads.some((row) =>
+      row.payload.includes(token),
+    ),
     tokenNamePresent: listed.includes("CLAUDE_CODE_OAUTH_TOKEN"),
     referenceNamePresent: listed.includes(TOKEN_VARIABLE),
     tokenValueInEnv: full.includes(token),
@@ -403,7 +436,7 @@ async function scrub(current, ids, check) {
   };
   o.disposition = !o.controlPresent
     ? "inconclusive"
-    : o.tokenValueInEnv || o.tokenValueInParentPs
+    : o.tokenValueInEnv || o.tokenValueInParentPs || o.tokenValueInDiagnostics
       ? "residual-exposure"
       : o.tokenNamePresent || o.referenceNamePresent
         ? "inconclusive"

@@ -24,6 +24,13 @@ export interface Session {
     toolInput: unknown,
     toolUseId: string,
   ): Promise<unknown>;
+  /** Invokes the PostToolUse or PostToolUseFailure hook the way the CLI does. */
+  postHook(
+    toolName: string,
+    toolInput: unknown,
+    toolUseId: string,
+    outcome: { response: unknown } | { error: string; isInterrupt?: boolean },
+  ): Promise<unknown>;
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
   waitForExit(): Promise<void>;
 }
@@ -138,6 +145,28 @@ export function fakeSdk(
                   tool_name: toolName,
                   tool_input: toolInput,
                   tool_use_id: toolUseId,
+                } as never,
+                toolUseId,
+                { signal: forwarded.signal },
+              );
+            },
+            postHook: (toolName, toolInput, toolUseId, outcome) => {
+              const failed = "error" in outcome;
+              const event = failed ? "PostToolUseFailure" : "PostToolUse";
+              const hook = options.hooks?.[event]?.[0]
+                ?.hooks[0] as HookCallback;
+              return hook(
+                {
+                  hook_event_name: event,
+                  tool_name: toolName,
+                  tool_input: toolInput,
+                  tool_use_id: toolUseId,
+                  ...(failed
+                    ? {
+                        error: outcome.error,
+                        ...(outcome.isInterrupt ? { is_interrupt: true } : {}),
+                      }
+                    : { tool_response: outcome.response }),
                 } as never,
                 toolUseId,
                 { signal: forwarded.signal },
