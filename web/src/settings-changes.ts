@@ -357,7 +357,9 @@ export function repositoryChanges(
     if (r.keep && r.removed)
       lines.push(`− Repository access: ${r.repositoryId}`);
     else if (!r.keep && !r.removed)
-      lines.push(`+ Repository access: ${r.repositoryId} · ${r.ref}`);
+      lines.push(
+        `+ Repository access: ${r.repositoryId} · ${r.ref}${r.codeHost === "gitlab" ? ` · GitLab ${r.host}` : ""}`,
+      );
     else if (r.keep) {
       const current = saved.links.find(
         (s) => s.repositoryId === r.repositoryId,
@@ -578,7 +580,8 @@ export function repositoryCommand(
     key: v.key,
     projectId,
     expectedVersion: Number(v.expectedVersion),
-    // A saved row keeps its code host and host; a row added in the form is GitHub.
+    // A saved row keeps its code host and host; a row added in the form is GitHub or GitLab,
+    // and only a new GitLab row names its project path.
     repositories: live(parseRows(v.repositories)).map((r) => ({
       codeHost: r.codeHost ?? "github",
       host: r.host ?? "github.com",
@@ -588,7 +591,10 @@ export function repositoryCommand(
         ? pathEdited(r, known)
           ? { path: r.path }
           : {}
-        : { path: r.path }),
+        : {
+            ...(r.codeHost === "gitlab" ? { projectPath: r.projectPath } : {}),
+            path: r.path,
+          }),
     })),
   };
 }

@@ -573,10 +573,24 @@ export class ConfigurationDraft {
         result.code === "invalid-input"
           ? result.message
           : undefined;
+      // A checkout that failed verification names its row and reason, never a path.
+      const repositoryRefusal =
+        result.state !== "recorded" &&
+        c.type === "repositories.configure" &&
+        result.code === "invalid-input" &&
+        fieldPaths.length === 1 &&
+        /^repositories\.\d+\.(path|ref)$/.test(fieldPaths[0] ?? "") &&
+        /^Repository \d+: /.test(result.message ?? "")
+          ? result.message
+          : undefined;
       this.errors = Object.fromEntries(
         fieldPaths.map((p) => [
           p,
-          nameTaken ?? mappingRefusal ?? jqlRefusal ?? "Check this field.",
+          nameTaken ??
+            mappingRefusal ??
+            jqlRefusal ??
+            repositoryRefusal ??
+            "Check this field.",
         ]),
       );
       this.credentialRefusal =

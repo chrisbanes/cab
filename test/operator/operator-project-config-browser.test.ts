@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
+import { join } from "node:path";
 import type { Locator, Page } from "playwright";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
-import { fakeDiscovery } from "../fixtures/setup-home.js";
+import { checkout, fakeDiscovery } from "../fixtures/setup-home.js";
 import {
   captureSettingsEvidence as captureBrowserEvidence,
   createCheckout,
@@ -1242,6 +1243,85 @@ test("a path that another writer saved identically is dropped, and later reads a
   );
   await assertClean(page, "Save changes");
   assert.equal(await path.inputValue(), checkout);
+});
+
+test("a GitLab link is added, refused with its reason, changed and removed in Settings", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=repositories",
+  );
+  const lab = join(f.directory, "lab"),
+    other = join(f.directory, "other");
+  await checkout(lab, "https://gitlab.example.com/group/atlas.git");
+  await checkout(other, "https://gitlab.example.com/group/other.git");
+  const links = () =>
+    f.service
+      .domain()
+      .repositoryLinks(ids.atlas)
+      .links.find((l) => l.repositoryId === "4242");
+  const field = (name: string) => page.locator(`#repository-1-${name}`);
+  await page.getByRole("button", { name: "Add repository" }).click();
+  await page.getByLabel("Code host", { exact: true }).selectOption("gitlab");
+  await page
+    .getByLabel("GitLab host", { exact: true })
+    .fill("gitlab.example.com");
+  await page
+    .getByLabel("GitLab project path", { exact: true })
+    .fill("group/atlas");
+  await page.getByLabel("GitLab project ID", { exact: true }).fill("4242");
+  await field("path").fill(await realpath(other));
+  await changes(page)
+    .getByText("+ Repository access: 4242 · main · GitLab gitlab.example.com")
+    .waitFor();
+  // The service refuses a checkout of another project, in its words, and the form keeps its edits.
+  const refused = page.waitForResponse((r) =>
+    r.url().endsWith("/api/operator/commands"),
+  );
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  assert.equal((await refused).status(), 400);
+  await page
+    .locator("#repository-error")
+    .getByText(
+      "Repository 2: the origin remote is a different project than configured.",
+    )
+    .waitFor();
+  assert.equal(await field("path").getAttribute("aria-invalid"), "true");
+  assert.equal(await field("path").inputValue(), await realpath(other));
+  assert.equal(await field("projectPath").inputValue(), "group/atlas");
+  await field("path").fill(await realpath(lab));
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  const { path: _path, gitCommonDirectory: _git, ...identity } = links() ?? {};
+  assert.deepEqual(identity, {
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    projectPath: "group/atlas",
+    repositoryId: "4242",
+    ref: "main",
+  });
+  await page.getByRole("heading", { name: "4242" }).waitFor();
+  await page.getByText("GitLab · gitlab.example.com").waitFor();
+  const api = new OperatorApi(f.service, [f.directory]);
+  assert.equal(
+    JSON.stringify(await api.readProjectConfiguration(ids.atlas)).includes(
+      await realpath(lab),
+    ),
+    false,
+  );
+  // A saved link changes its ref like a GitHub one; its identity is not editable.
+  assert.equal(await field("host").count(), 0);
+  await field("ref").fill("HEAD");
+  await changes(page).getByText("Ref for 4242: main → HEAD").waitFor();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.equal(links()?.ref, "HEAD");
+  await page
+    .getByRole("button", { name: "Remove repository 4242", exact: true })
+    .click();
+  await changes(page).getByText("− Repository access: 4242").waitFor();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.equal(links(), undefined);
 });
 
 test("Save waits for the saved text to be read again after Review changes", async (_t, journey) => {
