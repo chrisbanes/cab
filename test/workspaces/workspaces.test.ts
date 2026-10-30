@@ -1008,11 +1008,9 @@ test("a legacy binding table migrates git uncertainty to false", () => {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     )`);
-    db.prepare(
-      `INSERT INTO task_workspace_bindings
+    db.prepare(`INSERT INTO task_workspace_bindings
       (taskId, workspaceId, path, repositories, state, reason, createdAt, updatedAt)
-      VALUES (?, ?, ?, '[]', 'held', 'legacy hold', ?, ?)`,
-    ).run(
+      VALUES (?, ?, ?, '[]', 'held', 'legacy hold', ?, ?)`).run(
       "legacy-task",
       randomUUID(),
       join(root, "workspace"),

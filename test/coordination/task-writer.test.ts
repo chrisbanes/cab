@@ -1046,10 +1046,8 @@ test("predecessor identity is immutable across restart", async () => {
 
     const db = new DatabaseSync(join(f.root, "data", "standalone.sqlite"));
     const saved = db
-      .prepare(
-        `SELECT workId, previousWorkId FROM execution_request_predecessors
-      WHERE workId IN ('null-request','id-request') ORDER BY workId`,
-      )
+      .prepare(`SELECT workId, previousWorkId FROM execution_request_predecessors
+      WHERE workId IN ('null-request','id-request') ORDER BY workId`)
       .all() as { workId: string; previousWorkId: string | null }[];
     assert.deepEqual(
       saved.map((row) => ({ ...row })),
@@ -1135,13 +1133,11 @@ test("legacy ready work with unknown predecessor is held and refused", async () 
     assert.deepEqual(
       {
         ...(disposition
-          .prepare(
-            `SELECT p.predecessorKnown,
+          .prepare(`SELECT p.predecessorKnown,
             CASE WHEN pending.workId IS NULL THEN 0 ELSE 1 END AS pending
             FROM execution_request_predecessors p
             LEFT JOIN task_work_revision_pending pending ON pending.workId = p.workId
-            WHERE p.workId = 'legacy-ready'`,
-          )
+            WHERE p.workId = 'legacy-ready'`)
           .get() as { predecessorKnown: number; pending: number }),
       },
       { predecessorKnown: 0, pending: 1 },
