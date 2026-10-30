@@ -23,6 +23,7 @@ const evidence = await runGitLabQualification({
   fetcher: fetch,
   source: "/Users/chris/dev/Banes-project",
   credentialRef: "glab:gitlab.com",
+  glabExecutable: "glab",
   tokens: {
     env: () => process.env.CAB_GITLAB_TOKEN,
     glab: async () => {

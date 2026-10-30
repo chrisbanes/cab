@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
+import { createFakeGlab } from "../fixtures/fake-glab.js";
 import { git } from "../fixtures/publication.js";
 import { scriptedGitLabRemote } from "../fixtures/gitlab-remote.js";
 import {
@@ -18,7 +19,6 @@ import { runGitLabQualification } from "./gitlab-qualification/gitlab-journey.js
 
 const envToken = "glpat-synthetic-env-qualification-token";
 const glabToken = "gloas-synthetic-glab-qualification-token";
-const credentialVariable = "CAB_TEST_GITLAB_QUALIFICATION_TOKEN";
 const { id, path: projectPath } = qualificationProject;
 
 /** A scripted gitlab.com project and the checkout the run clones. */
@@ -35,12 +35,10 @@ function world(t: TestContext, options: { staleClone?: boolean } = {}) {
     : git(source, "rev-parse", "HEAD");
   remote.state.tokenKinds.set(envToken, "pat");
   remote.state.tokenKinds.set(glabToken, "oauth");
-  const prior = process.env[credentialVariable];
-  process.env[credentialVariable] = envToken;
-  t.after(() => {
-    if (prior === undefined) delete process.env[credentialVariable];
-    else process.env[credentialVariable] = prior;
-  });
+  // The delivery credential is a glab login, as in production; its token is the fake's.
+  const glab = createFakeGlab();
+  glab.setToken(glabToken);
+  t.after(() => glab.close());
   const pushes: string[] = [];
   /** Moves each open merge request's pipeline on, as gitlab.com would between polls: A fails, B passes. */
   const advance = async () => {
@@ -77,7 +75,8 @@ function world(t: TestContext, options: { staleClone?: boolean } = {}) {
       guard,
       fetcher: remote.fetcher,
       source,
-      credentialRef: `env:${credentialVariable}`,
+      credentialRef: "glab:gitlab.com",
+      glabExecutable: glab.executable,
       tokens: { env: () => envToken, glab: async () => glabToken },
       push: async (request) => {
         pushes.push(request.branch);
@@ -88,7 +87,7 @@ function world(t: TestContext, options: { staleClone?: boolean } = {}) {
       pause: advance,
       ...extra,
     });
-  return { remote, guard, run, pushes };
+  return { remote, guard, run, pushes, glab };
 }
 
 const written = (w: ReturnType<typeof world>) =>
@@ -102,6 +101,10 @@ test("both journeys pass on a scripted gitlab.com, within the write cap, and cle
   assert.equal(evidence.cleanup, "verified");
   assert.ok(w.guard.writeCount <= maxWrites);
   assert.equal(w.guard.mergeCount, 1);
+  assert.ok(
+    w.glab.commands().length > 0,
+    "the glab login supplied the delivery credential",
+  );
   // Exactly the writes the plan lists: A's six, B's four, and the three cleanup writes.
   assert.deepEqual(
     evidence.requests?.map((r) => r.route),

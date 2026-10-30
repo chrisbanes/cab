@@ -430,6 +430,8 @@ export interface GitLabLink {
   /** The checkout's `origin` remote. */
   origin: string;
   delivery: StandaloneServiceOptions["delivery"];
+  /** The `glab` executable behind a `glab:` credential; fixtures otherwise point it at nothing. */
+  glabExecutable?: string;
 }
 
 export async function createReleaseDeliveryFixture(
@@ -485,6 +487,7 @@ export async function createReleaseDeliveryFixture(
     },
     lifecycleOptions,
     () => new ReleaseRuntime(),
+    gitlab?.glabExecutable ? { glabExecutable: gitlab.glabExecutable } : {},
   );
   const projectId = randomUUID(),
     profileId = randomUUID();

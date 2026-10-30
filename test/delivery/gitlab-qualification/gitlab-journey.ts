@@ -39,6 +39,8 @@ export interface GitLabQualificationOptions {
     env: () => string | undefined;
     glab: () => Promise<string | undefined>;
   };
+  /** The `glab` executable behind a `glab:` credential. */
+  glabExecutable?: string;
   push?: PushFunction;
   adopt?: AdoptFunction;
   /** Waits between polls of the pipeline; tests advance their scripted host here. */
@@ -233,6 +235,9 @@ export async function runGitLabQualification(
           repositoryId,
           projectPath,
           origin: `https://${host}/${projectPath}.git`,
+          ...(options.glabExecutable
+            ? { glabExecutable: options.glabExecutable }
+            : {}),
           delivery: {
             fetcher,
             push: guard.guardPush(options.push ?? pushTaskCommit),
