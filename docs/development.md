@@ -72,6 +72,18 @@ covers runtime, test, web and runner inputs; changing these requires new receipt
 Committed initial weights are measured locally; hosted CI receipts can refresh
 them as runner performance changes.
 
+`test:built` and `check` run the tests under a per-run `cab-run-*` directory in the
+OS temp root, passed to the test process tree as `TMPDIR`, so fixtures that call
+`os.tmpdir()` place their large sandboxes there. The runner removes the directory
+when the run ends, including after a failure, a timeout or a forwarded SIGTERM or
+SIGINT. At the next start it removes `cab-run-*` directories of the current user
+whose recorded owner process has exited, which covers a runner killed outright;
+directories with a live, missing or unreadable owner are kept. Test evidence
+outlives the run only when `CAB_TEST_EVIDENCE_DIR` is set, as in CI. Harnesses run
+directly (the `*:live` commands) and `node --test` invocations bypass the runner and
+manage their own temp directories. The per-run override applies to POSIX `TMPDIR`
+only.
+
 Real App Server
 qualification is separate and runs only when requested explicitly, for example
 `npm run recovery:live`, `npm run planned-restart:live` and `npm run routing:live`,

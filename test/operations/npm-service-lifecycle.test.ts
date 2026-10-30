@@ -211,8 +211,33 @@ const capture = () => {
   };
 };
 
+/** Stops the services, then removes the sandbox even when stopping failed; reports every failure. */
+async function teardownSandbox(
+  launchd: { stopAll(): Promise<void> },
+  dir: string,
+  remove: typeof rmSync,
+) {
+  const errors: unknown[] = [];
+  try {
+    await launchd.stopAll();
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    remove(dir, { recursive: true, force: true });
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length)
+    throw new AggregateError(errors, "sandbox teardown failed");
+}
+
 /** One sandbox: a HOME, STATE, an isolated npm prefix, a fake `codex` and the spawning launchd. */
-async function sandbox(t: { after(fn: () => unknown): void }) {
+async function sandbox(
+  t: { after(fn: () => unknown): void },
+  remove: typeof rmSync = rmSync,
+) {
   const dir = mkdtempSync(join(tmpdir(), "cab-npm-lifecycle-"));
   chmodSync(dir, 0o700);
   const home = join(dir, "home");
@@ -230,10 +255,7 @@ async function sandbox(t: { after(fn: () => unknown): void }) {
     { mode: 0o755 },
   );
   const launchd = new SpawningLaunchd(home, codexDir);
-  t.after(async () => {
-    await launchd.stopAll();
-    rmSync(dir, { recursive: true, force: true });
-  });
+  t.after(() => teardownSandbox(launchd, dir, remove));
   const stateDir = join(home, "Library", "Application Support", "cab");
   const options: ServiceOptions = {
     stateDir,
@@ -578,3 +600,51 @@ test("the packaged CLI works against a service with no local server files", asyn
 });
 
 const realNode = () => realpathSync(process.execPath);
+
+test("sandbox teardown removes the directory when stopping the services fails", async () => {
+  const hooks: Array<() => unknown> = [];
+  const t = { after: (fn: () => unknown) => void hooks.push(fn) };
+  const stopFailure = new Error("stop failed");
+
+  const stopping = await sandbox(t);
+  stopping.launchd.stopAll = async () => {
+    throw stopFailure;
+  };
+  assert.ok(existsSync(stopping.dir));
+  await assert.rejects(async () => hooks[0]?.(), stopFailure);
+  assert.equal(existsSync(stopping.dir), false);
+
+  const removeFailure = new Error("remove failed");
+  const both = await sandbox(t, () => {
+    throw removeFailure;
+  });
+  both.launchd.stopAll = async () => {
+    throw stopFailure;
+  };
+  try {
+    await assert.rejects(
+      async () => hooks[1]?.(),
+      (error) =>
+        error instanceof AggregateError &&
+        error.errors.length === 2 &&
+        error.errors.includes(stopFailure) &&
+        error.errors.includes(removeFailure),
+    );
+  } finally {
+    rmSync(both.dir, { recursive: true, force: true });
+  }
+
+  let stopped = false;
+  const removing = await sandbox(t, () => {
+    throw removeFailure;
+  });
+  removing.launchd.stopAll = async () => {
+    stopped = true;
+  };
+  try {
+    await assert.rejects(async () => hooks[2]?.(), removeFailure);
+    assert.equal(stopped, true);
+  } finally {
+    rmSync(removing.dir, { recursive: true, force: true });
+  }
+});
