@@ -188,6 +188,7 @@ import {
   jiraCredentialStatus,
   resolveJiraAccess,
 } from "./jira-credential.js";
+import { JiraIssueTrackerWriter } from "./jira-delivery.js";
 import { JiraSourceReader } from "./jira-source.js";
 import { JiraSynchronizer } from "./jira-sync.js";
 import type {
@@ -1102,12 +1103,19 @@ export class StandaloneService {
         ...(this.options.delivery?.adopt
           ? { adopt: this.options.delivery.adopt }
           : {}),
-        ...(this.options.delivery?.issueTrackerFactories
-          ? {
-              issueTrackerFactories:
-                this.options.delivery.issueTrackerFactories,
-            }
-          : {}),
+        issueTrackerFactories: {
+          jira: (_projectId, _policy, instance) =>
+            new JiraIssueTrackerWriter(
+              () =>
+                resolveJiraAccess(
+                  domain
+                    .issueTrackerCredentials()
+                    .find((c) => c.instance === instance),
+                ),
+              this.options.issueTrackers?.jiraFetcher,
+            ),
+          ...this.options.delivery?.issueTrackerFactories,
+        },
         providerFactories: {
           gitlab: gitLabDeliveryFactory(domain, {
             glabExecutable: this.options.glabExecutable,
@@ -1119,7 +1127,6 @@ export class StandaloneService {
         },
         issueTrackerOf: (projectId) => {
           const source = projectIssueTracker(db, projectId);
-          // The coordinator refuses a tracker without a writer, which Jira has not.
           return source
             ? {
                 issueTracker: z
@@ -3469,7 +3476,7 @@ export class StandaloneService {
       imported = d.importedTask(taskId),
       source = this.taskReview().sources(taskId).at(-1),
       review = imported
-        ? this.githubSources().review(String(imported.nodeId))
+        ? this.importedSources(imported).review(String(imported.nodeId))
         : undefined;
     if (!imported || !source || !review)
       throw new DomainConflictError("Imported task source unavailable");
@@ -3488,8 +3495,17 @@ export class StandaloneService {
         .version,
     };
   }
+  /** The source store of an imported task's issue tracker. */
+  private importedSources(imported: Record<string, unknown>) {
+    return this.githubSources().forTracker({
+      provider: String(imported.provider),
+      instance: String(imported.instance),
+    });
+  }
   private operatorCommentAction(caller: OperatorDeliveryCaller, body: string) {
-    const issue = this.githubSources().issue(caller.sourceNodeId);
+    const imported = this.domain().importedTask(caller.taskId);
+    const issue =
+      imported && this.importedSources(imported).issue(caller.sourceNodeId);
     if (!issue)
       throw new DomainConflictError("Imported task issue unavailable");
     return {
@@ -3953,8 +3969,14 @@ export class StandaloneService {
           )
         )
           continue;
-        const source = githubSources.issue(String(imported.nodeId));
+        // The closure is recorded in the store of the task's own tracker.
+        const sources = githubSources.forTracker({
+          provider: String(imported.provider),
+          instance: String(imported.instance),
+        });
+        const source = sources.issue(String(imported.nodeId));
         if (!source) continue;
+        // The source version is shared by every tracker's project source.
         const config = domain.githubConfiguration(String(project.id));
         const nodeId = String(imported.nodeId);
         try {
@@ -3965,14 +3987,14 @@ export class StandaloneService {
               nodeId: String(source.nodeId),
               number: Number(source.issueNumber),
             },
-            githubSources.deliveryClosure(nodeId),
+            sources.deliveryClosure(nodeId),
           );
           if (result.kind === "reopened")
-            githubSources.supersedeDeliveryClosure(nodeId, result.operationId);
+            sources.supersedeDeliveryClosure(nodeId, result.operationId);
           else if (result.kind === "attribution-unproved")
-            githubSources.recordDeliveryClosureAttributionUnproved(nodeId);
+            sources.recordDeliveryClosureAttributionUnproved(nodeId);
           else
-            githubSources.recordDeliveryClosure(
+            sources.recordDeliveryClosure(
               String(project.id),
               config.version,
               result.snapshot,
@@ -3981,7 +4003,7 @@ export class StandaloneService {
               result.closedEventId,
             );
         } catch {
-          githubSources.recordDeliveryClosureUnavailable(nodeId);
+          sources.recordDeliveryClosureUnavailable(nodeId);
         }
       }
   }

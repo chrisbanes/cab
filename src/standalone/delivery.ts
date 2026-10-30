@@ -375,6 +375,13 @@ export class DeliveryCoordinator {
           receipt: null,
         });
       provider = this.issueTracker(caller.projectId, policy, resolved);
+      // A writer that implements only some actions refuses the rest the same way.
+      if (provider.supportsAction?.(action.kind) === false)
+        return this.store.recordObservation(record.operationId, {
+          state: "confirmed-failure",
+          reason: "issue-tracker-delivery-unavailable",
+          receipt: null,
+        });
     } else {
       const resolved = this.codeHost(caller.projectId, target);
       if (

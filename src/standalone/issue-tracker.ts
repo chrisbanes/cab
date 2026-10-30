@@ -7,7 +7,7 @@ import type {
 import type { GitHubSourceReader } from "./github-source.js";
 import type { JiraSourceReader } from "./jira-source.js";
 
-/** Issue trackers cab can read; only GitHub can also write (ADR-1020). */
+/** Issue trackers cab can read and write (ADR-1020). */
 export type IssueTracker = "github" | "jira";
 
 /** What cab reads of an issue tracker; today's GitHub source contract. */
@@ -27,7 +27,7 @@ export type IssueTrackerReaderFactories = {
 export interface IssueTrackerWriter
   extends Pick<
     CodeHostDeliveryProvider,
-    "inspectAction" | "preflight" | "performAction"
+    "supportsAction" | "inspectAction" | "preflight" | "performAction"
   > {
   inspectPublishedIssue(
     target: { repositoryId: string; number: number },

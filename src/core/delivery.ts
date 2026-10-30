@@ -7,7 +7,13 @@ import {
 import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { itemIs, itemKey, sameItem } from "./source-storage.js";
+import { githubIssueTracker } from "./github-source-contracts.js";
+import {
+  itemIs,
+  itemKey,
+  sameItem,
+  type SourceTracker,
+} from "./source-storage.js";
 import { transaction, type Database } from "./store.js";
 import { StatusMappingStore } from "./status-mapping.js";
 import {
@@ -63,6 +69,22 @@ export function validBranchPrefix(prefix: string): boolean {
     !prefix.startsWith("/") &&
     refSafe(prefix)
   );
+}
+const titleStartsWith = (title: string, key: string) =>
+  title.startsWith(key) && !/[A-Za-z0-9_-]/.test(title.charAt(key.length));
+const closingKeyword =
+  /\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)\b/i;
+// No trailing boundary: GitLab links `ABC-7x` as ABC-7.
+const jiraKeyShaped = /\b[A-Z][A-Z0-9_]*-\d+/;
+/**
+ * Whether a line has a closing keyword (GitLab's default set) followed by something shaped like a
+ * Jira key. It errs toward refusal: any key on the line counts, even one the keyword is not next to.
+ */
+function closesJiraIssue(text: string): boolean {
+  return text.split(/\r?\n/).some((line) => {
+    const keyword = closingKeyword.exec(line);
+    return !!keyword && jiraKeyShaped.test(line.slice(keyword.index));
+  });
 }
 /** A complete, cab-assigned task branch name. */
 export function safeBranchName(name: string): boolean {
@@ -833,9 +855,9 @@ export class DeliveryStore {
             (
               this.db
                 .prepare(
-                  `SELECT number AS issueNumber FROM external_items WHERE ${itemIs()}`,
+                  "SELECT number AS issueNumber FROM external_items WHERE taskId = ? AND externalId = ?",
                 )
-                .get(...itemKey(binding.sourceNodeId)) as
+                .get(binding.taskId, binding.sourceNodeId) as
                 | { issueNumber: number }
                 | undefined
             )?.issueNumber,
@@ -893,6 +915,7 @@ export class DeliveryStore {
         "forbidden",
         "External action denied by project policy",
       );
+    this.assertJiraChangeRequestText(action, binding);
     if (
       (grant.mode === "approval" ||
         action.kind === "issue.edit" ||
@@ -1325,9 +1348,9 @@ export class DeliveryStore {
       (edit) => {
         const synced = this.db
           .prepare(
-            `SELECT observedTitle, observedBody FROM external_items WHERE ${itemIs()}`,
+            "SELECT observedTitle, observedBody FROM external_items WHERE taskId = ? AND externalId = ?",
           )
-          .get(...itemKey(caller.sourceNodeId)) as
+          .get(caller.taskId, caller.sourceNodeId) as
           | { observedTitle: string; observedBody: string }
           | undefined;
         if (
@@ -1373,9 +1396,9 @@ export class DeliveryStore {
           (
             this.db
               .prepare(
-                `SELECT number AS issueNumber FROM external_items WHERE ${itemIs()}`,
+                "SELECT number AS issueNumber FROM external_items WHERE taskId = ? AND externalId = ?",
               )
-              .get(...itemKey(caller.sourceNodeId)) as
+              .get(caller.taskId, caller.sourceNodeId) as
               | { issueNumber: number }
               | undefined
           )?.issueNumber,
@@ -1848,8 +1871,59 @@ export class DeliveryStore {
       .map((row) => taskBranchSchema.parse(row));
   }
   /**
-   * Assigns the task's one branch per repository on first use: `<prefix><task id hex>-<title slug>`,
-   * with the id part lengthened on a collision. Later title or prefix changes never rename it.
+   * A change request for a task imported from Jira starts its title with the issue key, so the code
+   * host links it; and in a Jira project its text never carries a closing keyword for a Jira issue,
+   * which would make the host close the issue and cab could not prove the closure as its own.
+   */
+  private assertJiraChangeRequestText(
+    action: ExternalAction,
+    binding: DeliveryCaller,
+  ): void {
+    if (action.kind !== "pr.create" && action.kind !== "pr.edit") return;
+    const title =
+      action.kind === "pr.create" ? action.title : action.fields.title;
+    const body = action.kind === "pr.create" ? action.body : action.fields.body;
+    const key = this.jiraKey(binding.taskId);
+    const tracker = (
+      this.db
+        .prepare("SELECT provider FROM project_task_sources WHERE projectId=?")
+        .get(binding.projectId) as { provider: string } | undefined
+    )?.provider;
+    if (key && title !== undefined && !titleStartsWith(title, key))
+      throw new DomainPolicyError(
+        "forbidden",
+        `The change request title must start with the Jira issue key ${key}`,
+      );
+    if (
+      tracker === "jira" &&
+      [title, body].some((text) => text !== undefined && closesJiraIssue(text))
+    )
+      throw new DomainPolicyError(
+        "forbidden",
+        "Change request text must not close a Jira issue with a keyword such as Closes or Fixes; cab closes Jira issues itself",
+      );
+  }
+  /** The issue tracker of the task's imported item; GitHub for a local task. */
+  private trackerOf(taskId: string): SourceTracker {
+    return (
+      (this.db
+        .prepare("SELECT provider, instance FROM external_items WHERE taskId=?")
+        .get(taskId) as SourceTracker | undefined) ?? githubIssueTracker
+    );
+  }
+  /** The Jira key of a task imported from Jira (`ABC-7`), else null. */
+  private jiraKey(taskId: string): string | null {
+    const item = this.db
+      .prepare(
+        "SELECT containerName, number FROM external_items WHERE taskId=? AND provider='jira'",
+      )
+      .get(taskId) as { containerName: string; number: number } | undefined;
+    return item ? `${item.containerName}-${item.number}` : null;
+  }
+  /**
+   * Assigns the task's one branch per repository on first use: `<prefix><task id hex>-<title slug>`
+   * (`<prefix><Jira key>-<task id hex>-<title slug>` for a task imported from Jira, so the code host
+   * links it), with the id part lengthened on a collision. Later title or prefix changes never rename it.
    */
   assignTaskBranchWithinTransaction(
     taskId: string,
@@ -1873,9 +1947,10 @@ export class DeliveryStore {
           .replace(/^-|-$/g, "")
           .slice(0, 40)
           .replace(/-$/, "") || "task",
-      hex = taskId.replaceAll("-", "");
+      hex = taskId.replaceAll("-", ""),
+      key = this.jiraKey(taskId);
     for (const length of [8, 12, 16, 32]) {
-      const branch = `${prefix}${hex.slice(0, length)}-${slug}`;
+      const branch = `${prefix}${key ? `${key}-` : ""}${hex.slice(0, length)}-${slug}`;
       if (
         this.db
           .prepare(
@@ -2289,7 +2364,9 @@ export class DeliveryStore {
           .prepare(
             `SELECT operationId FROM source_closure_supersessions WHERE ${itemIs()}`,
           )
-          .all(...itemKey(nodeId)) as { operationId: string }[]
+          .all(...itemKey(nodeId, this.trackerOf(taskId))) as {
+          operationId: string;
+        }[]
       ).map((row) => row.operationId),
     );
     const binding = this.delivery(taskId);

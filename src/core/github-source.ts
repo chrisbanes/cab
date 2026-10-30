@@ -1237,7 +1237,7 @@ export class GitHubSourceStore {
   ): boolean {
     const snapshot = z
       .object({
-        providerInstance: z.literal("github.com"),
+        providerInstance: z.literal(this.tracker.instance),
         nodeId: nonempty,
         repositoryId: nonempty,
         repositoryName: nonempty,
@@ -1247,6 +1247,11 @@ export class GitHubSourceStore {
         state: z.literal("closed"),
         labels: z.array(nonempty),
         projectFields: projectFieldsSchema,
+        // Jira's own status; GitHub has none.
+        status: z
+          .object({ id: nonempty, name: z.string(), categoryKey: nonempty })
+          .strict()
+          .optional(),
       })
       .strict()
       .parse(input);
@@ -1285,17 +1290,18 @@ export class GitHubSourceStore {
       }
       this.db
         .prepare(
-          `UPDATE external_items SET observedState='closed',observedTitle=?,observedBody=?,labels=? WHERE ${itemIs()}`,
+          `UPDATE external_items SET observedState='closed',observedTitle=?,observedBody=?,labels=?,observedStatus=COALESCE(?,observedStatus) WHERE ${itemIs()}`,
         )
         .run(
           snapshot.title,
           snapshot.body,
           JSON.stringify(snapshot.labels),
+          snapshot.status ? JSON.stringify(snapshot.status) : null,
           ...this.key(snapshot.nodeId),
         );
       new TaskReviewStore(this.db).captureSource(
         String(issue.taskId),
-        "github",
+        this.tracker.provider === "jira" ? "jira" : "github",
         { title: snapshot.title, body: snapshot.body },
       );
       const priorHold = this.db
@@ -1304,10 +1310,25 @@ export class GitHubSourceStore {
       this.updateReadiness(String(issue.taskId), true);
       const rule = parseRule(config.readiness);
       // The closure read carries no Project fields and closing changes none: use those last observed.
-      const readinessProof = evaluateReadiness(rule, {
+      const observed = this.db
+        .prepare(
+          `SELECT observedStatus, observedFields FROM external_items WHERE ${itemIs()}`,
+        )
+        .get(...this.key(snapshot.nodeId)) as Row;
+      const facts = this.readinessFacts({ ...issue, ...observed, projectId });
+      const readiness = evaluateReadiness(rule, {
         labels: snapshot.labels,
-        fields: this.readinessFacts({ ...issue, projectId }).fields,
-      }).satisfied;
+        fields: facts.fields,
+        status: facts.status,
+        selectFields: facts.selectFields,
+      });
+      // Closing moves a Jira status to Done, and a sync may have stored it before this runs, so a
+      // status condition cannot count against a closure made through the tracker's own status.
+      // shortcut: a mixed any-mode rule whose only satisfier was the status reads as unmet (the pre-close status is not kept), which holds the task; revisit if it matters.
+      const readinessProof =
+        readiness.satisfied ||
+        (snapshot.status !== undefined &&
+          readiness.unmet.every((c) => c.kind === "status"));
       const hold = priorHold;
       if (
         readinessProof &&

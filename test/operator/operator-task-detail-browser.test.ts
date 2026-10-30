@@ -2642,7 +2642,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   ]);
 
   // The grant goes away after GitHub was selected: the reason replaces the sentence.
-  const noGrant = "This project doesn't permit GitHub issue comments.";
+  const noGrant = "This project doesn't permit issue comments.";
   a.setGrant(null);
   await refreshTask(page, a.taskId);
   await page.getByText(noGrant, { exact: true }).first().waitFor();
@@ -2681,7 +2681,7 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
 
   // No delivery credential: `available` stays true on the server but the web offers no send,
   // even in allow mode with GitHub selected.
-  const noCredential = "This project has no GitHub delivery credential set.";
+  const noCredential = "This project has no delivery credential set.";
   a.setGrant("allow", false);
   await refreshTask(page, a.taskId);
   await page.getByText(noCredential, { exact: true }).first().waitFor();
@@ -2753,12 +2753,9 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
   assert.equal(await page.locator("#github-comment-reason").count(), 0);
 
   const cases: [string, () => void][] = [
+    ["This project doesn't permit issue comments.", () => a.setGrant(null)],
     [
-      "This project doesn't permit GitHub issue comments.",
-      () => a.setGrant(null),
-    ],
-    [
-      "This project has no GitHub delivery credential set.",
+      "This project has no delivery credential set.",
       () => a.setGrant("allow", false),
     ],
     [
@@ -2825,10 +2822,7 @@ test("An older task read without a reason code falls back to its reason text", a
   // Neither a reason nor a code: one generic sentence, never a blank.
   reason = null;
   await refreshTask(page, a.taskId);
-  await unavailableComment(
-    page,
-    "GitHub comments aren't available for this task.",
-  );
+  await unavailableComment(page, "Comments aren't available for this task.");
 });
 
 test("The viewing reference appears only once a result exists", async (_t, j) => {
