@@ -267,6 +267,9 @@ for (const [label, viewport] of [
     const log = page.getByRole("log", { name: "Task conversation" });
     await log.getByText("Second: all steps ran.").waitFor();
 
+    // A superseded read is not a stale conversation.
+    assert.equal(await page.getByText("could not be refreshed").count(), 0);
+
     // 1. Header and attention card.
     await page
       .getByRole("heading", { name: "Command menu", level: 1 })

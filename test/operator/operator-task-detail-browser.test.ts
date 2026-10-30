@@ -227,17 +227,37 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     return b;
   };
   const card = await box('section[aria-label="Pending requests and holds"]'),
+    conversation = await box("section#conversation"),
     review = await box("section#review"),
-    reply = await box("section#reply"),
     brief = await box("section#brief");
-  assert.ok(card.y + card.height <= review.y);
-  assert.ok(
-    review.y + review.height <= reply.y,
-    "the reply follows the result",
+  assert.ok(card.y + card.height <= conversation.y);
+  // The reply card is docked at the bottom of the view, so its place is the document order.
+  assert.equal(
+    await page.evaluate(() => {
+      const after = (a: string, b: string) =>
+        ((document
+          .querySelector(a)
+          ?.compareDocumentPosition(document.querySelector(b) as Node) ?? 0) &
+          Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0;
+      return (
+        after("section#decisions", "section#conversation") &&
+        after("section#conversation", "section#reply")
+      );
+    }),
+    true,
+    "the conversation follows the decisions and the reply is last",
   );
-  assert.ok(reply.y + reply.height <= brief.y, "the brief follows the reply");
+  assert.ok(
+    review.y + review.height <= brief.y,
+    "the brief follows the result",
+  );
   const inspector = await box('aside[aria-label="Task context"]');
-  assert.ok(brief.x + brief.width <= inspector.x, "inspector is beside");
+  assert.ok(
+    conversation.x + conversation.width <= inspector.x,
+    "inspector is beside",
+  );
+  assert.ok(review.x >= inspector.x && brief.x >= inspector.x);
   assert.ok(inspector.width <= 320);
   assert.ok(
     await page
@@ -331,28 +351,28 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     4,
     "lead and three delegated assignments",
   );
-  // The retained task editor is one History link, not a header button; the coordination pages are gone.
+  // The retained task editor is one inspector link, not a header button; the coordination pages are gone.
   const forms = page.getByRole("link", {
     name: "Edit task and review source",
     exact: true,
   });
-  await openTaskTab(page, "History");
   assert.equal(await forms.count(), 1);
   assert.equal(await forms.getAttribute("href"), `/task/${a.taskId}`);
   assert.equal(await page.locator('a[href^="/coordination/"]').count(), 0);
-  await openTaskTab(page, "Overview");
-  assert.equal(await forms.count(), 0, "History carries the link alone");
+  await openTaskTab(page, "History");
+  assert.equal(
+    await forms.isVisible(),
+    false,
+    "History does not repeat the link",
+  );
   await page.evaluate(() => scrollTo(0, 0));
   await captureBrowserEvidence(page, "task-detail-desktop", {
     fullPage: false,
   });
 
   // Expanded history and an unsent reply survive a refresh.
-  await openOverviewCard(page, "assignments");
-  await page
-    .getByRole("button", { name: /^Task lead · Produce the scoped/ })
-    .first()
-    .click();
+  await openTaskTab(page, "History");
+  await page.locator("#history details > summary").first().click();
   const expanded = page.locator("#history details[open]").first();
   await expanded.waitFor();
   await openTaskTab(page, "Overview");
@@ -405,9 +425,12 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
       `${name} ${JSON.stringify(b)}`,
     );
   }
-  const phoneReview = await box("section#review"),
-    phoneBrief = await box("section#brief");
-  assert.ok(phoneReview.y + phoneReview.height <= phoneBrief.y);
+  // On a phone the inspector sits above the conversation and the reply ends the page.
+  const phoneInspector = await box('aside[aria-label="Task context"]'),
+    phoneConversation = await box("section#conversation"),
+    phoneReply = await box("section#reply");
+  assert.ok(phoneInspector.y + phoneInspector.height <= phoneConversation.y);
+  assert.ok(phoneConversation.y + phoneConversation.height <= phoneReply.y);
   assert.ok(await noHorizontalScroll(page));
   await captureBrowserEvidence(page, "task-detail-phone", { fullPage: false });
   await page.getByLabel("Editable reply").waitFor();
@@ -1833,11 +1856,8 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   }
   await openTaskTab(page, "Overview");
   // An expanded assignment, an unsent reply and a reading anchor on Overview.
-  await openOverviewCard(page, "assignments");
-  await page
-    .getByRole("button", { name: /^Task lead · Produce the scoped/ })
-    .first()
-    .click();
+  await openTaskTab(page, "History");
+  await page.locator("#history details > summary").first().click();
   await page.locator("#history details[open]").first().waitFor();
   assert.equal(await selectedTab(page), "History");
   await openTaskTab(page, "Overview");
@@ -2048,18 +2068,20 @@ test("An open approval leads Overview and stays reachable from every tab through
     assert.ok(b, selector);
     return b;
   };
-  const order = [
-    "section#decisions",
-    "section#review",
-    "section#reply",
-    "section#brief",
-    "section#assignments",
-  ];
+  // The decisions lead the main column's conversation; the inspector's cards stack in their own.
+  const order = ["section#decisions", "section#conversation"];
+  const beside = ["section#review", "section#brief", "section#assignments"];
   const boxes = await Promise.all(order.map(box));
   for (let i = 1; i < boxes.length; i++)
     assert.ok(
       boxes[i - 1]!.y + boxes[i - 1]!.height <= boxes[i]!.y,
       String(order[i]),
+    );
+  const stacked = await Promise.all(beside.map(box));
+  for (let i = 1; i < stacked.length; i++)
+    assert.ok(
+      stacked[i - 1]!.y + stacked[i - 1]!.height <= stacked[i]!.y,
+      String(beside[i]),
     );
   const inspector = page.locator('aside[aria-label="Task context"]');
   const aside = await box('aside[aria-label="Task context"]');
@@ -2100,15 +2122,17 @@ test("An open approval leads Overview and stays reachable from every tab through
     tabletMain = await box(".task-columns");
   assert.ok(tabletMain.x + tabletMain.width <= tablet.x, "beside at 1024");
 
-  // Phone: one column, the inspector after the reply, 44px assignment buttons.
+  // Phone: one column, the inspector between the decisions and the conversation, 44px buttons.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => scrollTo(0, 0));
-  const phoneReply = await box("section#reply"),
+  const phoneCard = await box("section#decisions"),
     phoneAside = await box('aside[aria-label="Task context"]'),
-    phoneCard = await box("section#decisions"),
-    phoneBrief = await box("section#brief");
-  assert.ok(phoneCard.y + phoneCard.height <= phoneBrief.y);
-  assert.ok(phoneReply.y + phoneReply.height <= phoneAside.y);
+    phoneConversation = await box("section#conversation"),
+    phoneReply = await box("section#reply");
+  assert.ok(phoneCard.y + phoneCard.height <= phoneAside.y);
+  assert.ok(phoneAside.y + phoneAside.height <= phoneConversation.y);
+  assert.ok(phoneConversation.y + phoneConversation.height <= phoneReply.y);
+  await openOverviewCard(page, "assignments");
   for (const b of await table
     .locator(".assignment-row button")
     .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height)))
@@ -3815,6 +3839,8 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
           ),
         top: box?.top ?? Number.NaN,
         bottom: box?.bottom ?? Number.NaN,
+        left: box?.left ?? Number.NaN,
+        right: box?.right ?? Number.NaN,
       };
     });
   }, selectors);
@@ -3824,9 +3850,16 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
       f.follows,
       `${selectors[i]} follows ${selectors[i - 1]} in the DOM`,
     );
-    if (i)
+    // Stacked within one column; the docked reply and the beside-column inspector overlap in height.
+    const above = found[i - 1];
+    if (
+      above &&
+      selectors[i] !== "section#reply" &&
+      above.left < f.right &&
+      f.left < above.right
+    )
       assert.ok(
-        found[i - 1]!.bottom <= f.top + 0.5,
+        above.bottom <= f.top + 0.5,
         `${selectors[i]} sits below ${selectors[i - 1]}`,
       );
   });
@@ -3834,12 +3867,13 @@ async function expectOverviewOrder(page: Page, selectors: string[]) {
 
 const overviewOrder = [
   "section#decisions",
-  "section#review",
+  "section#conversation",
   "section#reply",
-  "section#brief",
+  "section#review",
   "section#result-evidence",
+  "section#brief",
   "section#assignments",
-  "p.task-pointer",
+  "section#context",
 ];
 
 /** Follows an in-app link as the app's own links do: in place, with no page load. */
@@ -3932,8 +3966,8 @@ for (const engine of ["chromium", "webkit"] as const)
         [],
       );
 
-      // Tab order is the visual order: the decision card, the result, the reply, then the
-      // summaries, each reached once.
+      // Tab order is the visual order: the decision card, the conversation, the reply, then the
+      // inspector (the result and its summaries), each reached once.
       await page.evaluate(() => {
         const controls = document.querySelectorAll<HTMLElement>(
           "section#decisions a[href], section#decisions button:not([disabled])",
@@ -3957,13 +3991,18 @@ for (const engine of ["chromium", "webkit"] as const)
             `${stop.section} is reached through its summary`,
           );
       }
-      assert.deepEqual(visited, [
-        "review",
+      const order = [
+        "conversation",
         "reply",
-        "brief",
+        "review",
         "result-evidence",
+        // The inspector fold's own summary, ahead of the brief and the cards beneath it.
+        "outside",
+        "brief",
         "assignments",
-      ]);
+      ];
+      // WebKit does not Tab onto the conversation's buttons by default.
+      assert.deepEqual(visited, engine === "webkit" ? order.slice(1) : order);
     },
   );
 
@@ -4014,11 +4053,12 @@ for (const engine of ["chromium", "webkit"] as const)
         );
       const required = [
         "section#decisions",
-        "section#review",
+        "section#conversation",
         "section#reply",
+        "section#review",
         "section#brief",
         "section#assignments",
-        "p.task-pointer",
+        "section#context",
       ];
 
       // No decision: the card has no request and still leads the result.
@@ -4130,7 +4170,7 @@ for (const engine of ["chromium", "webkit"] as const)
       assert.ok(decisionHit, "Search finds the recorded decision");
       assert.ok(briefHit, "Search finds the brief");
       const decisionId = `${older.resultId}:decision:0`;
-      type Card = "brief" | "evidence" | "assignments";
+      type Card = "brief" | "evidence" | "assignments" | "context";
       const cases: {
         link: string;
         tab: string;
@@ -4218,9 +4258,10 @@ for (const engine of ["chromium", "webkit"] as const)
         },
         {
           link: "?section=context",
-          tab: "History",
-          open: [],
+          tab: "Overview",
+          open: ["context"],
           target: "#context",
+          focus: "#context > details > summary",
         },
       ];
       const inViewport = (selector: string) =>
@@ -4233,10 +4274,11 @@ for (const engine of ["chromium", "webkit"] as const)
           });
       const openCards = () =>
         Promise.all(
-          (["brief", "evidence", "assignments"] as const).map(async (name) =>
-            (await overviewCard(page, name).getAttribute("open")) === null
-              ? null
-              : name,
+          (["brief", "evidence", "assignments", "context"] as const).map(
+            async (name) =>
+              (await overviewCard(page, name).getAttribute("open")) === null
+                ? null
+                : name,
           ),
         ).then((cards) => cards.filter((c) => c !== null));
       for (const c of cases) {
@@ -4422,8 +4464,9 @@ for (const engine of ["chromium", "webkit"] as const)
       await openTaskTab(page, "Overview");
       assert.deepEqual(await states(), expected, "Collapse all history");
 
-      // Leave for another view and press Back: same cards, same reading position.
-      const anchor = page.locator(`[data-record-id="${result.resultId}"]`);
+      // Leave for another view and press Back: same cards, same reading position. The
+      // conversation is the reading flow; the inspector beside it is not its anchor.
+      const anchor = page.locator("#conversation [data-record-id]").first();
       await anchor.evaluate((e) => e.scrollIntoView());
       await page.evaluate(() => scrollBy(0, -40));
       const top = () => anchor.evaluate((e) => e.getBoundingClientRect().top);
@@ -4482,6 +4525,10 @@ for (const engine of ["chromium", "webkit"] as const)
       const { web, page } = await fixture.launch({ width: 1366, height: 700 });
       await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
       await page.locator("section#review").waitFor();
+      // The conversation fills in above the inspector's cards; read positions after it has.
+      await page
+        .getByText("Reading the conversation…")
+        .waitFor({ state: "detached" });
       await openOverviewCard(page, "evidence");
       const control = page.locator(
         `#result-evidence [data-record-id="${artifactId}"] button`,
@@ -4517,9 +4564,10 @@ for (const engine of ["chromium", "webkit"] as const)
       );
       await settle(page);
       assert.ok(await onControl(), "focus is back on the evidence control");
-      assert.ok(
-        Math.abs((await page.evaluate(() => scrollY)) - y) <= 1,
-        "reading position",
+      // The restore settles once the conversation beside the inspector has rendered.
+      await page.waitForFunction(
+        (expected) => Math.abs(scrollY - expected) <= 1,
+        y,
       );
 
       // Visiting Files and Changes and returning to Overview keeps the card and the scroll.

@@ -38,10 +38,14 @@ export function AssignmentRows({
   assignments,
   open,
   facts,
+  factsOpen,
+  onFactsToggle,
 }: {
   assignments: TaskRead["data"]["assignments"];
   open: (assignmentId: string) => void;
   facts: (assignment: TaskRead["data"]["assignments"][number]) => ReactNode;
+  factsOpen: (assignmentId: string) => boolean;
+  onFactsToggle: (assignmentId: string, open: boolean) => void;
 }) {
   if (assignments.length === 0)
     return <p className="muted">No assignments yet.</p>;
@@ -64,7 +68,13 @@ export function AssignmentRows({
                 <button type="button" onClick={() => open(a.assignmentId)}>
                   {row.title}
                 </button>
-                <details className="assignment-facts">
+                <details
+                  className="assignment-facts"
+                  open={factsOpen(a.assignmentId)}
+                  onToggle={(event) =>
+                    onFactsToggle(a.assignmentId, event.currentTarget.open)
+                  }
+                >
                   <summary>Assignment facts</summary>
                   {facts(a)}
                 </details>

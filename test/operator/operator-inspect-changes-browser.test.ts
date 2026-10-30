@@ -203,7 +203,9 @@ for (const [label, viewport] of [
       .getByRole("link", { name: "Changes · 2 files", exact: true });
     await assertFirstScreen(s.page, [
       s.page.locator("#review").getByRole("heading", { name: "Latest result" }),
-      s.page.getByText("Inspect result summary", { exact: true }),
+      s.page
+        .locator("#review")
+        .getByText("Inspect result summary", { exact: true }),
       link,
     ]);
     let interactions = 0;
@@ -263,7 +265,7 @@ for (const [label, viewport] of [
       .getByRole("tab", { name: "History" });
     await history.waitFor();
     assert.equal(await history.getAttribute("aria-selected"), "true");
-    await assertFirstScreen(page, [page.locator("#context h3").first()]);
+    await assertFirstScreen(page, [page.locator("#history h3").first()]);
     assert.equal(interactions, 1);
   });
 }

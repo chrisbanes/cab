@@ -50,7 +50,8 @@ const pageLimit = 50;
 /**
  * Reads the newest page whenever the task read changes (`observedAt`) and merges it into the
  * retained window by entry and the service's ordering key. `beforeApply` runs just before a
- * change is committed so the page can capture its reading position.
+ * change is committed so the page can capture its reading position; `first` marks the opening
+ * read, where the page stays where it is.
  */
 export function useTaskTimeline({
   client,
@@ -65,7 +66,7 @@ export function useTaskTimeline({
   cache: ConversationCache | null;
   setCache: (value: ConversationCache | null) => void;
   observedAt: number | null | undefined;
-  beforeApply: () => void;
+  beforeApply: (first: boolean) => void;
 }): TaskTimeline {
   const [view, setView] = useState({
     cache,
@@ -103,24 +104,31 @@ export function useTaskTimeline({
     });
   // The newest page, merged into what is held.
   const refresh = (signal?: AbortSignal) =>
-    read("", signal).then(({ data: page }) => {
-      if (signal?.aborted) return;
-      const current = held.current.cache;
-      const merged = mergeTimeline(current?.window ?? null, page);
-      if (!merged.changed && held.current.error === null) return;
-      apply.current();
-      commit({
-        error: null,
-        appended:
-          current && merged.changed
-            ? held.current.appended + 1
-            : held.current.appended,
-        cache: {
-          window: merged.window,
-          cursor: !current || merged.reset ? page.olderCursor : current.cursor,
-        },
-      });
-    }, fail);
+    read("", signal).then(
+      ({ data: page }) => {
+        if (signal?.aborted) return;
+        const current = held.current.cache;
+        const merged = mergeTimeline(current?.window ?? null, page);
+        if (!merged.changed && held.current.error === null) return;
+        apply.current(!current);
+        commit({
+          error: null,
+          appended:
+            current && merged.changed
+              ? held.current.appended + 1
+              : held.current.appended,
+          cache: {
+            window: merged.window,
+            cursor:
+              !current || merged.reset ? page.olderCursor : current.cursor,
+          },
+        });
+      },
+      // A read that was superseded or abandoned fails quietly; it is not a stale conversation.
+      (error) => {
+        if (!signal?.aborted) fail(error);
+      },
+    );
   // biome-ignore lint/correctness/useExhaustiveDependencies: the task read's time is the trigger.
   useEffect(() => {
     const abort = new AbortController();
@@ -134,7 +142,7 @@ export function useTaskTimeline({
     commit({ loadingEarlier: true });
     read(`&before=${current.cursor}`).then(({ data: page }) => {
       const joined = prependTimeline(current.window, page);
-      apply.current();
+      apply.current(false);
       commit({
         loadingEarlier: false,
         error: null,

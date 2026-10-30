@@ -878,7 +878,7 @@ a.task-source-chip:hover {
     position: sticky;
     bottom: 0;
     z-index: 2;
-    max-height: 50vh;
+    max-height: 40vh;
     overflow-y: auto;
   }
 }
@@ -921,14 +921,22 @@ a.task-source-chip:hover {
   cursor: pointer;
 }
 
+.task-inspector > section,
 .task-inspector > .inspector-fold > section {
   min-width: 0;
   padding: var(--space-12) 14px;
   border-bottom: 1px solid var(--line);
 }
 
-.task-inspector .inspector-fold > section > .section-heading:first-child {
+.task-inspector > section > .section-heading:first-child,
+.task-inspector > .inspector-fold > section > .section-heading:first-child {
   margin-top: 0;
+}
+
+@media (max-width: 759px) {
+  .task-inspector > section {
+    padding-block: var(--space-8);
+  }
 }
 
 /* Conversation: one column, oldest first. */

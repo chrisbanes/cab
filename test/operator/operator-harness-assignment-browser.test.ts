@@ -172,17 +172,11 @@ for (const [name, viewport] of [
       ))
       assert.ok(box >= 44 || viewport === desktop, `link height ${box}`);
 
-    await worker.getByRole("button").first().click();
-    const details = page.locator(
-      `#history details[data-record-id="${ids.workerId}"]`,
-    );
+    const details = worker.locator("details.assignment-facts");
+    await details.locator("> summary").click();
     await details
       .getByText(/^Execution: Claude · sonnet · high · work /)
       .waitFor();
-    assert.equal(
-      await details.getByRole("link", { name: "Edit profile" }).count(),
-      1,
-    );
     await details.getByText("Effective execution policy · Claude").click();
     await details
       .getByText(

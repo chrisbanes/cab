@@ -164,13 +164,7 @@ const linkedCard = (p: URLSearchParams) =>
         : null;
 const overviewCards = ["brief", "result-evidence", "assignments", "context"];
 /** Overview sections that sit in the inspector's fold. */
-const inspectorSections = [
-  "brief",
-  "review",
-  "result-evidence",
-  "assignments",
-  "context",
-];
+const inspectorSections = ["brief", "assignments", "context"];
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** One tab's panel: always mounted, hidden unless its tab is open. */
 function TabPanel({
@@ -442,7 +436,8 @@ export function TaskWorkspace({
     if (clear) setHistory({});
   };
   const replyInFlight = useRef<string | null>(null);
-  const urlRequest = useRef<string | null | undefined>(undefined),
+  const leaving = useRef(false),
+    urlRequest = useRef<string | null | undefined>(undefined),
     appendedSeen = useRef(0);
   const scope = useRef(true),
     anchor = useRef<{ id: string; y: number } | null>(null),
@@ -637,10 +632,16 @@ export function TaskWorkspace({
     }
     return document.documentElement.scrollHeight - innerHeight - scrollY;
   };
-  const atBottom = () => toBottom() <= 64;
+  // Scrolled past the conversation, into the inspector, the operator is reading elsewhere.
+  const atBottom = () =>
+    toBottom() <= 64 &&
+    (state.tab !== "overview" ||
+      (document.getElementById("conversation-end")?.getBoundingClientRect()
+        .bottom ?? 1) > 0);
   /** Scrolls to the newest conversation entry with the composer fully below it. */
   const followLatest = () => scrollBy(0, Math.max(0, toBottom()));
   const capture = () => {
+    if (leaving.current) return;
     if (
       restoreReadingFocus.current &&
       state.focusRecord &&
@@ -778,8 +779,14 @@ export function TaskWorkspace({
         (event.target as Element | null)?.closest(
           event.type === "submit" ? ".sidebar .search-work" : 'a[href^="/app"]',
         )
-      )
+      ) {
         captureRef.current();
+        // The reading saved on leaving stands: a read that lands while the route changes must not replace it.
+        leaving.current = true;
+        setTimeout(() => {
+          leaving.current = false;
+        }, 500);
+      }
     };
     const intentionalFocus = (event: FocusEvent) => {
       const target = event.target;
@@ -848,7 +855,11 @@ export function TaskWorkspace({
       state.conversation = value;
     },
     observedAt: resource.state.fetchedAt,
-    beforeApply: () => captureRef.current(),
+    beforeApply: (first) => {
+      // Opening a task shows its header and decisions first; the conversation is followed from there.
+      if (first) bottom.current = false;
+      else captureRef.current();
+    },
   });
   const layoutPath = useRef(path);
   // biome-ignore lint/correctness/useExhaustiveDependencies: history DOM insertion must restore the previously captured reading anchor.
@@ -952,18 +963,28 @@ export function TaskWorkspace({
         readingFocusTarget()?.focus({ preventScroll: true });
       return;
     }
-    if (bottom.current) followLatest();
-    else {
-      const a = anchor.current ?? state.historyAnchor,
-        captured = anchorElement.current,
-        // Review contexts nest a second element with the same record id, so the first match can be the wrong one.
-        el = !a
-          ? null
-          : captured?.isConnected && captured.dataset.recordId === a.id
-            ? captured
-            : [
-                ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
-              ].find((el) => el.dataset.recordId === a.id);
+    const a = anchor.current ?? state.historyAnchor,
+      captured = anchorElement.current,
+      // Review contexts nest a second element with the same record id, so the first match can be the wrong one.
+      // A request's card is pinned and shares its id with its conversation entry, which anchors.
+      el = !a
+        ? null
+        : captured?.isConnected && captured.dataset.recordId === a.id
+          ? captured
+          : [
+              ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
+            ].find(
+              (el) =>
+                el.dataset.recordId === a.id && !el.closest("[data-pinned]"),
+            );
+    if (bottom.current) {
+      // The conversation's newest entry is in view with the page's other columns, so hold the
+      // reading position first, then follow what arrived.
+      if (state.tab === "overview") {
+        if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
+        if (appended && toBottom() > 64) followLatest();
+      } else followLatest();
+    } else {
       if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
       if (newMaterial || appended) setUpdates(true);
     }
@@ -2334,128 +2355,169 @@ export function TaskWorkspace({
                 changed();
               }}
               latest={
-                <section id="review">
-                  <h3 className="section-heading">Latest result</h3>
-                  {state.selectedResult && !selected && (
-                    <p role="alert">
-                      Exact selected result is unavailable. A newer result is
-                      not substituted.
-                    </p>
-                  )}
-                  {selected ? (
-                    <div data-record-id={selected.resultId}>
-                      <p className="metadata muted">
-                        R{data.results.indexOf(selected) + 1} ·{" "}
-                        <ShortId value={selected.resultId} /> · assignment{" "}
-                        <ShortId value={selected.assignmentId} /> · work
-                        revision {selected.workRevision} ·{" "}
-                        {date(selected.createdAt)}
+                <>
+                  <section id="review">
+                    <h3 className="section-heading">Latest result</h3>
+                    {state.selectedResult && !selected && (
+                      <p role="alert">
+                        Exact selected result is unavailable. A newer result is
+                        not substituted.
                       </p>
-                      <Literal text={selected.summary} />
-                      <p className="metadata">
-                        <ActionLink
-                          variant="secondary"
-                          href={`/app/tasks/${taskId}?section=changes&result=${selected.resultId}`}
-                        >
-                          {meta?.metadata.changes
-                            ? `Changes · ${meta.metadata.changes.files.length} ${meta.metadata.changes.files.length === 1 ? "file" : "files"}`
-                            : "Changes"}
-                        </ActionLink>
-                      </p>
-                      {meta ? (
-                        <CriteriaRows
-                          data={data}
-                          resultId={selected.resultId}
-                          sourceId={meta.metadata.sourceId}
-                          ask={ask}
-                          more={criteriaMore(
-                            `${selected.resultId}:${meta.metadata.sourceId}`,
-                          )}
-                        />
-                      ) : (
-                        <p>
-                          No structured review evidence was supplied for this
-                          result.
+                    )}
+                    {selected ? (
+                      <div data-record-id={selected.resultId}>
+                        <p className="metadata muted">
+                          R{data.results.indexOf(selected) + 1} ·{" "}
+                          <ShortId value={selected.resultId} /> · assignment{" "}
+                          <ShortId value={selected.assignmentId} /> · work
+                          revision {selected.workRevision} ·{" "}
+                          {date(selected.createdAt)}
                         </p>
-                      )}
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          ask(
-                            {
-                              resultId: selected.resultId,
-                              workId: selected.workId,
-                              ...(meta?.metadata.sourceId
-                                ? { sourceId: meta.metadata.sourceId }
-                                : {}),
-                            },
-                            `result ${selected.resultId}`,
-                          )
-                        }
+                        <Literal text={selected.summary} />
+                        <p className="metadata">
+                          <ActionLink
+                            variant="secondary"
+                            href={`/app/tasks/${taskId}?section=changes&result=${selected.resultId}`}
+                          >
+                            {meta?.metadata.changes
+                              ? `Changes · ${meta.metadata.changes.files.length} ${meta.metadata.changes.files.length === 1 ? "file" : "files"}`
+                              : "Changes"}
+                          </ActionLink>
+                        </p>
+                        {meta ? (
+                          <CriteriaRows
+                            data={data}
+                            resultId={selected.resultId}
+                            sourceId={meta.metadata.sourceId}
+                            ask={ask}
+                            more={criteriaMore(
+                              `${selected.resultId}:${meta.metadata.sourceId}`,
+                            )}
+                          />
+                        ) : (
+                          <p>
+                            No structured review evidence was supplied for this
+                            result.
+                          </p>
+                        )}
+                        <Button
+                          variant="secondary"
+                          onClick={() =>
+                            ask(
+                              {
+                                resultId: selected.resultId,
+                                workId: selected.workId,
+                                ...(meta?.metadata.sourceId
+                                  ? { sourceId: meta.metadata.sourceId }
+                                  : {}),
+                              },
+                              `result ${selected.resultId}`,
+                            )
+                          }
+                        >
+                          Ask lead about result
+                        </Button>
+                      </div>
+                    ) : (
+                      !state.selectedResult && <p>No result recorded.</p>
+                    )}
+                    {/* A viewing reference needs a result to view; a lost response stays checkable. */}
+                    {data.results.length > 0 && (
+                      <>
+                        <p className="metadata muted">{changes}</p>
+                        <Button
+                          variant="secondary"
+                          data-unconfirmed-control="review.view"
+                          onClick={() =>
+                            void command({
+                              type: "review.view",
+                              key: crypto.randomUUID(),
+                              taskId,
+                              sourceId: state.selectedSource
+                                ? (source?.sourceId ?? null)
+                                : selected
+                                  ? (meta?.metadata.sourceId ?? null)
+                                  : (source?.sourceId ?? null),
+                              resultIds: selected ? [selected.resultId] : [],
+                            })
+                          }
+                          disabled={
+                            Boolean(state.selectedResult && !selected) ||
+                            Boolean(state.selectedSource && !source) ||
+                            Boolean(unconfirmed)
+                          }
+                        >
+                          Set viewing reference
+                        </Button>
+                      </>
+                    )}
+                    {unconfirmedCheck("review.view")}
+                    {data.results.length > 0 && (
+                      <p>
+                        Viewing records availability only; it does not approve
+                        work or clear holds. Retained records may be incomplete.
+                      </p>
+                    )}
+                    <label htmlFor="retained-result-revision">
+                      Result revision{" "}
+                      <NativeSelect
+                        id="retained-result-revision"
+                        className="control"
+                        value={state.selectedResult ?? ""}
+                        onChange={(e) => {
+                          state.selectedResult = e.target.value || null;
+                          changed();
+                        }}
                       >
-                        Ask lead about result
-                      </Button>
-                    </div>
-                  ) : (
-                    !state.selectedResult && <p>No result recorded.</p>
-                  )}
-                  {/* A viewing reference needs a result to view; a lost response stays checkable. */}
-                  {data.results.length > 0 && (
-                    <>
-                      <p className="metadata muted">{changes}</p>
-                      <Button
-                        variant="secondary"
-                        data-unconfirmed-control="review.view"
-                        onClick={() =>
-                          void command({
-                            type: "review.view",
-                            key: crypto.randomUUID(),
-                            taskId,
-                            sourceId: state.selectedSource
-                              ? (source?.sourceId ?? null)
-                              : selected
-                                ? (meta?.metadata.sourceId ?? null)
-                                : (source?.sourceId ?? null),
-                            resultIds: selected ? [selected.resultId] : [],
-                          })
-                        }
-                        disabled={
-                          Boolean(state.selectedResult && !selected) ||
-                          Boolean(state.selectedSource && !source) ||
-                          Boolean(unconfirmed)
-                        }
+                        <option value="">Latest result</option>
+                        {data.results.map((r, i) => (
+                          <option key={r.resultId} value={r.resultId}>
+                            R{i + 1}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </label>
+                  </section>
+                  {selected && (
+                    <section id="result-evidence">
+                      <details
+                        className="overview-disclosure"
+                        {...overviewCard("evidence")}
                       >
-                        Set viewing reference
-                      </Button>
-                    </>
+                        <summary>
+                          <h3 className="section-heading">Evidence</h3>
+                          <span className="metadata muted">
+                            {evidenceSummary}
+                          </span>
+                        </summary>
+                        <div>
+                          {meta && (
+                            <ReviewEvidence
+                              data={data}
+                              resultId={selected.resultId}
+                              sourceId={meta.metadata.sourceId}
+                              ask={ask}
+                            />
+                          )}
+                          <RetainedResultEvidence
+                            key={selected.resultId}
+                            client={client}
+                            session={session}
+                            taskId={taskId}
+                            resultId={selected.resultId}
+                            state={state.retained(selected.resultId)}
+                            changed={changed}
+                            openCurrent={(scope, filePath) => {
+                              state.files.openCurrentFile(scope, filePath);
+                              changed();
+                              requestAnimationFrame(() => reveal("files"));
+                            }}
+                          />
+                        </div>
+                      </details>
+                    </section>
                   )}
-                  {unconfirmedCheck("review.view")}
-                  {data.results.length > 0 && (
-                    <p>
-                      Viewing records availability only; it does not approve
-                      work or clear holds. Retained records may be incomplete.
-                    </p>
-                  )}
-                  <label htmlFor="retained-result-revision">
-                    Result revision{" "}
-                    <NativeSelect
-                      id="retained-result-revision"
-                      className="control"
-                      value={state.selectedResult ?? ""}
-                      onChange={(e) => {
-                        state.selectedResult = e.target.value || null;
-                        changed();
-                      }}
-                    >
-                      <option value="">Latest result</option>
-                      {data.results.map((r, i) => (
-                        <option key={r.resultId} value={r.resultId}>
-                          R{i + 1}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </label>
-                </section>
+                </>
               }
             >
               <section id="brief">
@@ -2556,43 +2618,6 @@ export function TaskWorkspace({
                   </label>
                 </details>
               </section>
-              {selected && (
-                <section id="result-evidence">
-                  <details
-                    className="overview-disclosure"
-                    {...overviewCard("evidence")}
-                  >
-                    <summary>
-                      <h3 className="section-heading">Evidence</h3>
-                      <span className="metadata muted">{evidenceSummary}</span>
-                    </summary>
-                    <div>
-                      {meta && (
-                        <ReviewEvidence
-                          data={data}
-                          resultId={selected.resultId}
-                          sourceId={meta.metadata.sourceId}
-                          ask={ask}
-                        />
-                      )}
-                      <RetainedResultEvidence
-                        key={selected.resultId}
-                        client={client}
-                        session={session}
-                        taskId={taskId}
-                        resultId={selected.resultId}
-                        state={state.retained(selected.resultId)}
-                        changed={changed}
-                        openCurrent={(scope, filePath) => {
-                          state.files.openCurrentFile(scope, filePath);
-                          changed();
-                          requestAnimationFrame(() => reveal("files"));
-                        }}
-                      />
-                    </div>
-                  </details>
-                </section>
-              )}
               <section id="assignments">
                 <details
                   className="overview-disclosure"
@@ -2607,6 +2632,13 @@ export function TaskWorkspace({
                   <AssignmentRows
                     assignments={data.assignments}
                     facts={assignmentFacts}
+                    factsOpen={(id) => state.expanded.has(`c:facts:${id}`)}
+                    onFactsToggle={(id, open) => {
+                      if (open === state.expanded.has(`c:facts:${id}`)) return;
+                      if (open) state.expanded.add(`c:facts:${id}`);
+                      else state.expanded.delete(`c:facts:${id}`);
+                      changed();
+                    }}
                     open={openAssignment}
                   />
                 </details>
