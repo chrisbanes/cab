@@ -7,11 +7,13 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +36,7 @@ import {
   withAttempt,
 } from "./harness.mjs";
 import {
+  codexSkillBrief,
   SLEEP,
   setupJourney,
   shellOnly,
@@ -326,7 +329,7 @@ async function inProcess(run) {
     facet,
     model: evidence.model.claude,
     repository,
-    ...(facet === "claude-skill"
+    ...(facet === "claude-skill" || facet === "codex-skill"
       ? {
           skills: {
             plugins: [{ path: join(root, "plugin"), skills: ["probe-skill"] }],
@@ -347,7 +350,8 @@ async function inProcess(run) {
   } finally {
     recordClaudeCli([current.observed.claudeSpawns]);
   }
-  assertPathClaude();
+  // A Codex-only facet runs no Claude query.
+  if (facet !== "codex-skill") assertPathClaude();
 }
 
 /** Pass or fail, the evidence shows which `claude` each service generation's queries ran. */
@@ -596,6 +600,16 @@ async function stop(current, ids, check, withSubagent = false) {
     throw new Error("a turn started after Stop");
 }
 
+/** Metadata only: cab's Codex home holds a symbolic link to a regular file, never a copy. */
+function loginLinkIntact() {
+  const link = join(root, "data", "codex", "home", "auth.json");
+  try {
+    return lstatSync(link).isSymbolicLink() && statSync(link).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** A profile skill plugin reaches the turn, runs under the sandbox and runs no hook or MCP server. */
 async function skill(current, ids, check, plugin) {
   await waitUntil(
@@ -610,6 +624,34 @@ async function skill(current, ids, check, plugin) {
     "the skill's marker",
     true,
   );
+  // A Codex conversation resumes its thread before every later turn, so the profile's skill
+  // scope is reapplied through the real runtime: a follow-up must run the skill again.
+  let followUpRan = null;
+  if (facet === "codex-skill") {
+    const binding = current.service.recoveryForTask(ids.taskId)[0]?.binding;
+    if (!binding) throw new Error("no conversation to continue");
+    rmSync(plugin.skillMarker);
+    await current.service.coordinationView().postOperatorMessage({
+      key: randomUUID(),
+      taskId: ids.taskId,
+      recipientAssignmentId: binding.assignmentId,
+      expectedAssignmentVersion: binding.assignmentVersion,
+      message: codexSkillBrief,
+    });
+    await waitUntil(
+      () => {
+        check();
+        return (
+          existsSync(plugin.skillMarker) &&
+          current.service.list().every((i) => settled(i.state))
+        );
+      },
+      TURN_MS,
+      "the follow-up turn's skill marker",
+      true,
+    );
+    followUpRan = true;
+  }
   const { digestPlugin } = await import(
     "../../../dist/src/standalone/skill-plugins.js"
   );
@@ -634,10 +676,19 @@ async function skill(current, ids, check, plugin) {
       digest: d,
     })),
     digestMatchesDirectory: recorded.some((p) => p.digest === digest),
+    ...(facet === "codex-skill"
+      ? {
+          loginLinkIntact: loginLinkIntact(),
+          followUpTurnRanSkill: followUpRan,
+        }
+      : {}),
   };
   const o = evidence.observations;
+  if (facet === "codex-skill" && !o.loginLinkIntact)
+    throw new Error("the Codex login link is not an intact link to a file");
   if (!o.skillScriptRan) throw new Error("the skill's script did not run");
-  if (!o.outsideWriteDenied)
+  // Codex's workspace-write also allows the temporary directory the disposable root lives in.
+  if (facet === "claude-skill" && !o.outsideWriteDenied)
     throw new Error("the skill's outside write was not denied");
   if (o.pluginHookRan || o.pluginMcpStarted)
     throw new Error("a plugin hook or MCP server ran");
@@ -1038,7 +1089,7 @@ async function attemptBody(attempt) {
                 ? stop(current, ids, check)
                 : facet === "claude-subagent-stop"
                   ? stop(current, ids, check, true)
-                  : facet === "claude-skill"
+                  : facet === "claude-skill" || facet === "codex-skill"
                     ? skill(current, ids, check, plugin)
                     : coordination(current, ids, check),
           );

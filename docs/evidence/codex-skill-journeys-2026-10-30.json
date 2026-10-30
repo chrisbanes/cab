@@ -1,0 +1,188 @@
+{
+  "codex-skill": {
+    "facet": "codex-skill",
+    "attempt": 2,
+    "candidate": "af36db11ad26d874b04de03fe2d6b57635c741ff",
+    "node": "v24.22.1",
+    "sdk": "0.3.310",
+    "claudeCode": "2.1.310",
+    "codex": {
+      "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+      "version": "codex-cli 0.165.0-alpha.1.2"
+    },
+    "model": {
+      "claude": "haiku",
+      "reasoningEffort": "low"
+    },
+    "stage": "run",
+    "outcome": "passed",
+    "failure": null,
+    "observations": {
+      "skillScriptRan": true,
+      "outsideWriteDenied": true,
+      "pluginHookRan": false,
+      "pluginMcpStarted": false,
+      "profileSkillNames": ["probe-skill"],
+      "turnPlugins": [
+        {
+          "name": "cabprobe",
+          "skills": ["probe-skill"],
+          "digest": "979bc9656d6d8da1e75bd6fcfb6da9ecddb8883dafaa968aca11eba66797ebeb"
+        },
+        {
+          "name": "cabprobe",
+          "skills": ["probe-skill"],
+          "digest": "979bc9656d6d8da1e75bd6fcfb6da9ecddb8883dafaa968aca11eba66797ebeb"
+        }
+      ],
+      "digestMatchesDirectory": true,
+      "loginLinkIntact": true,
+      "followUpTurnRanSkill": true
+    },
+    "startTurn": {
+      "turns": 2,
+      "refused": []
+    },
+    "processes": [
+      {
+        "label": "codex-app-server (before token)",
+        "exitedByItself": true,
+        "verification": "verified"
+      },
+      {
+        "label": "claude-cli",
+        "exitedByItself": true,
+        "verification": "verified"
+      }
+    ],
+    "trace": [],
+    "cleanup": {
+      "serviceStopped": true,
+      "temporaryBases": ["removed"],
+      "rootRemoved": true
+    },
+    "claudeCli": {
+      "services": 1,
+      "spawns": 0,
+      "version": null,
+      "fromPath": false,
+      "bundled": false,
+      "executableDirectory": null
+    },
+    "budget": {
+      "attempt": {
+        "number": 2,
+        "model": "haiku",
+        "startedAt": 1793376732223,
+        "turns": {
+          "claude": 0,
+          "codex": 2
+        },
+        "outcome": "passed",
+        "failureKind": null
+      },
+      "totals": {
+        "claude": 1,
+        "codex": 5
+      }
+    }
+  },
+  "mixed": {
+    "facet": "mixed",
+    "attempt": 1,
+    "candidate": "af36db11ad26d874b04de03fe2d6b57635c741ff",
+    "node": "v24.22.1",
+    "sdk": "0.3.310",
+    "claudeCode": "2.1.310",
+    "codex": {
+      "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+      "version": "codex-cli 0.165.0-alpha.1.2"
+    },
+    "model": {
+      "claude": "haiku",
+      "reasoningEffort": "low"
+    },
+    "stage": "run",
+    "outcome": "passed",
+    "failure": null,
+    "observations": {
+      "leadHarness": "codex",
+      "questionAnswered": false,
+      "resultNonceMatched": true,
+      "completionFinalized": true,
+      "turnsByHarness": {
+        "claude": 1,
+        "codex": 2
+      },
+      "tools": [
+        {
+          "harness": "codex",
+          "tool": "cab_delegate",
+          "success": true
+        },
+        {
+          "harness": "claude",
+          "tool": "cab_report_result",
+          "success": true
+        },
+        {
+          "harness": "codex",
+          "tool": "cab_request_completion",
+          "success": true
+        }
+      ]
+    },
+    "startTurn": {
+      "turns": 3,
+      "refused": []
+    },
+    "processes": [
+      {
+        "label": "codex-app-server (before token)",
+        "exitedByItself": true,
+        "verification": "verified"
+      },
+      {
+        "label": "claude-cli",
+        "exitedByItself": true,
+        "verification": "verified"
+      },
+      {
+        "label": "claude-cli",
+        "exitedByItself": true,
+        "verification": "verified"
+      }
+    ],
+    "trace": [],
+    "cleanup": {
+      "serviceStopped": true,
+      "temporaryBases": ["removed"],
+      "rootRemoved": true
+    },
+    "claudeCli": {
+      "services": 1,
+      "spawns": 2,
+      "version": "2.1.311 (Claude Code)",
+      "fromPath": true,
+      "bundled": false,
+      "executableDirectory": "/opt/homebrew/bin"
+    },
+    "budget": {
+      "attempt": {
+        "number": 1,
+        "model": "haiku",
+        "startedAt": 1793376682544,
+        "turns": {
+          "claude": 1,
+          "codex": 2
+        },
+        "outcome": "passed",
+        "failureKind": null
+      },
+      "totals": {
+        "claude": 1,
+        "codex": 3
+      }
+    }
+  }
+}

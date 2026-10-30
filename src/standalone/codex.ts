@@ -7,6 +7,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { isAbsolute } from "node:path";
+import { pluginSkillRoots, skillScopeConfig } from "./codex-skills.js";
 import { resolveOnPath } from "./executable-path.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -77,6 +78,21 @@ const thread = z.object({
   sandbox: z.object({ type: z.literal("workspaceWrite") }),
 });
 const turn = z.object({ turn: z.object({ id: z.string() }) });
+const unsubscribeResponseSchema = z
+  .object({ status: z.string() })
+  .passthrough();
+/** App Server `skills/list`: only where each skill's file is. */
+const skillListSchema = z.object({
+  data: z.array(
+    z
+      .object({
+        skills: z.array(
+          z.object({ name: z.string(), path: z.string() }).passthrough(),
+        ),
+      })
+      .passthrough(),
+  ),
+});
 /** App Server `model/list`: the runtime's own catalogue of models and their reasoning efforts. */
 const modelList = z.object({
   data: z.array(
@@ -650,6 +666,8 @@ export interface Runtime {
   resumeThread(
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
+    settings?: RuntimeTurnSettings,
+    workspace?: string,
   ): Promise<void>;
   /**
    * Checked before admission. A reason keeps the work waiting: no writer,
@@ -779,6 +797,9 @@ export class CodexRuntime implements Runtime {
   readonly harness = "codex" as const;
   private child: ChildProcessWithoutNullStreams | undefined;
   private nativeGeneration: string | undefined;
+  /** Plugin `skills/` roots set on this App Server process; it holds the union for all threads. */
+  private skillRoots = new Set<string>();
+  private scopeQueue: Promise<void> = Promise.resolve();
   private nativeExecutable:
     | { codexVersion: string; executableHash: string }
     | undefined;
@@ -1814,6 +1835,7 @@ export class CodexRuntime implements Runtime {
     if (this.child) throw new Error("Runtime already started");
     this.failure = undefined;
     this.clearConversationCaptures();
+    this.skillRoots = new Set();
     this.nativeGeneration = randomUUID();
     this.resetSupportedSettings();
     this.nativeEndpoints.clear();
@@ -1951,12 +1973,74 @@ export class CodexRuntime implements Runtime {
     if (this.child !== expectedChild) throw new Error("Runtime stopped");
   }
 
-  async startThread(
+  /** Runs thread start/resume one at a time, so a scope is computed and applied against one root set. */
+  private exclusive<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.scopeQueue.then(work, work);
+    this.scopeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /**
+   * Thread config that scopes skills to the bound profile revision. App Server holds one
+   * set of extra roots per process, so the roots are the union of every profile's plugins
+   * and each thread disables what its own profile does not enable, on start and on resume.
+   */
+  private async skillConfig(
+    workspace: string,
+    settings: RuntimeTurnSettings | undefined,
+  ) {
+    const plugins = settings?.skills?.plugins ?? [];
+    const wanted = await pluginSkillRoots(plugins);
+    if (wanted.some((root) => !this.skillRoots.has(root))) {
+      const next = new Set([...this.skillRoots, ...wanted]);
+      emptyResponseSchema.parse(
+        await this.request("skills/extraRoots/set", {
+          extraRoots: [...next].sort(),
+        }),
+      );
+      // Recorded only once App Server has them, so a failed call is retried.
+      this.skillRoots = next;
+    }
+    if (plugins.length === 0 && this.skillRoots.size === 0) return undefined;
+    const listed = skillListSchema.parse(
+      await this.request("skills/list", {
+        cwds: [workspace],
+        forceReload: true,
+      }),
+    );
+    return skillScopeConfig({
+      listed: listed.data.flatMap((entry) => entry.skills),
+      knownRoots: this.skillRoots,
+      plugins,
+    });
+  }
+
+  startThread(
     workspace: string,
     tools: readonly RuntimeToolDefinition[] = [],
     settings?: RuntimeTurnSettings,
   ): Promise<string> {
+    return this.exclusive(() =>
+      this.startThreadScoped(workspace, tools, settings),
+    );
+  }
+
+  private async startThreadScoped(
+    workspace: string,
+    tools: readonly RuntimeToolDefinition[],
+    settings: RuntimeTurnSettings | undefined,
+  ): Promise<string> {
     const definitions = registeredTools(tools);
+    const skills = await this.skillConfig(workspace, settings);
+    const config = {
+      ...(settings?.reasoningEffort
+        ? { model_reasoning_effort: settings.reasoningEffort }
+        : {}),
+      ...skills,
+    };
     const response = thread.parse(
       await this.request(
         "thread/start",
@@ -1967,9 +2051,7 @@ export class CodexRuntime implements Runtime {
           ephemeral: false,
           // The thread-start snapshot then reports the configured values, as later resumes do.
           ...(settings?.model ? { model: settings.model } : {}),
-          ...(settings?.reasoningEffort
-            ? { config: { model_reasoning_effort: settings.reasoningEffort } }
-            : {}),
+          ...(Object.keys(config).length > 0 ? { config } : {}),
           ...(definitions.length > 0 ? { dynamicTools: definitions } : {}),
         },
         (raw) => {
@@ -2027,12 +2109,29 @@ export class CodexRuntime implements Runtime {
     }
   }
 
-  async resumeThread(
+  resumeThread(
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
+    settings?: RuntimeTurnSettings,
+    workspace?: string,
+  ): Promise<void> {
+    return this.exclusive(() =>
+      this.resumeThreadScoped(threadId, tools, settings, workspace),
+    );
+  }
+
+  private async resumeThreadScoped(
+    threadId: string,
+    tools: readonly RuntimeToolDefinition[] | undefined,
+    settings: RuntimeTurnSettings | undefined,
+    workspace: string | undefined,
   ): Promise<void> {
     if (this.startedUnderPreviousHome(threadId))
       throw new PreviousCodexHomeError();
+    // Config is not persisted with the thread, so every resume repeats the profile's scope.
+    const skills = workspace
+      ? await this.skillConfig(workspace, settings)
+      : undefined;
     let snapshot = this.threadSnapshots.get(threadId);
     let restoredEmptyTools = false;
     if (!snapshot && tools === undefined) {
@@ -2047,12 +2146,19 @@ export class CodexRuntime implements Runtime {
       if (restoredEmptyTools) snapshot = { tools: [] };
     }
     const definitions = registeredTools(tools ?? snapshot?.tools ?? []);
+    // A loaded thread ignores new config on resume and also sees plugin roots that joined the
+    // process after it started, so an idle thread is unsubscribed first (probe S3b/S3c).
+    if (skills)
+      unsubscribeResponseSchema.parse(
+        await this.request("thread/unsubscribe", { threadId }),
+      );
     await this.request(
       "thread/resume",
       {
         threadId,
         approvalPolicy: "never",
         sandbox: "workspace-write",
+        ...(skills ? { config: skills } : {}),
         ...(definitions.length > 0 ? { dynamicTools: definitions } : {}),
       },
       (raw) => {

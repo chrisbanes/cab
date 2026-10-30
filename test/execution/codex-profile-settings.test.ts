@@ -40,7 +40,10 @@ class SettingsRuntime implements Runtime {
       this.settingsByThread.set(threadId, args[2] as RuntimeTurnSettings);
     return threadId;
   }
-  async resumeThread() {}
+  readonly resumes: unknown[][] = [];
+  async resumeThread(...args: unknown[]) {
+    this.resumes.push(args);
+  }
   async startTurn(...args: unknown[]) {
     this.turns.push(args);
     return `turn-${this.turns.length}`;
@@ -252,4 +255,83 @@ test("Codex turns carry the captured profile revision's settings, wait on a pref
   assert.deepEqual(reported.model, ["m-alt", "runtime-reported"]);
   assert.deepEqual(reported.reasoningEffort, ["medium", "runtime-reported"]);
   assert.equal("profile.model" in entries(plain), false);
+});
+
+test("a follow-up turn of a Codex profile without settings still resumes with its workspace, so the runtime can scope its skills", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-resume-"));
+  const runtime = new SettingsRuntime();
+  const service = new StandaloneService(
+    join(root, "data"),
+    () => runtime,
+    undefined,
+    { power: { enabled: false }, routingClient: null },
+  );
+  t.after(async () => {
+    await service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  });
+  const execute = (command: Record<string, unknown>) =>
+    service
+      .domain()
+      .execute({ key: randomUUID(), actor: "operator", ...command } as never);
+  await service.start();
+  const lead = randomUUID();
+  const projectId = randomUUID();
+  const taskId = randomUUID();
+  execute({
+    type: "profile.create",
+    profileId: lead,
+    name: "Plain lead",
+    instructions: "lead",
+    capabilities: "code",
+    runtime: { harness: "codex" },
+  });
+  execute({
+    type: "project.create",
+    projectId,
+    name: "Resume",
+    leadProfileId: lead,
+  });
+  execute({
+    type: "project.configure",
+    projectId,
+    expectedVersion: 1,
+    paused: false,
+  });
+  execute({
+    type: "task.create",
+    projectId,
+    taskId,
+    title: "Resume",
+    outcome: "Codex resume",
+    ready: false,
+  });
+  await service.provisionTask(taskId);
+  execute({
+    type: "task.configure",
+    projectId,
+    taskId,
+    expectedVersion: 1,
+    ready: true,
+  });
+  const describe = () =>
+    service.list().map((i) => [i.workId, i.state, i.reason]);
+  await waitUntil(
+    () => service.list().some((i) => i.state === "completed"),
+    describe,
+  );
+  const binding = service.recoveryForTask(taskId)[0]?.binding;
+  assert.ok(binding);
+  await service.coordinationView().postOperatorMessage({
+    key: randomUUID(),
+    taskId,
+    recipientAssignmentId: binding.assignmentId,
+    expectedAssignmentVersion: binding.assignmentVersion,
+    message: "Continue",
+  });
+  await waitUntil(() => runtime.resumes.length > 0, describe);
+  const [threadId, , settings, workspace] = runtime.resumes[0] ?? [];
+  assert.equal(threadId, "thread-1");
+  assert.equal(settings, undefined);
+  assert.equal(typeof workspace, "string");
 });

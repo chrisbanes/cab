@@ -204,16 +204,8 @@ export function RuntimeFields({
   );
 }
 
-/** Skill plugins, one per line; shown for a runtime that loads them. */
+/** Skill plugins, one per line; both runtimes load them. */
 function SkillFields({ draft }: { draft: ConfigurationDraft }) {
-  // Stored skills stay visible after a switch to a runtime that loads none, so they can be cleared.
-  if (
-    draft.values.runtimeHarness !== "claude" &&
-    String(draft.values.skills ?? "").trim() === ""
-  )
-    return (
-      <p className="metadata muted">Only Claude profiles load skill plugins.</p>
-    );
   const messages = skillErrorMessages(draft.errors);
   return (
     <>

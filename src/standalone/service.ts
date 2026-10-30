@@ -122,6 +122,7 @@ import {
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
 } from "./codex.js";
+import { SkillScopeError } from "./codex-skills.js";
 import {
   type CodexHome,
   codexHomeFor,
@@ -7842,7 +7843,15 @@ export class StandaloneService {
         if (state.get(intent.id).state !== "submitting")
           throw new Error("Execution admission was held");
         submissionStage = "resume";
-        await guard(runtime.resumeThread(previous.threadId, tools));
+        // Settings or not, the runtime scopes the thread's skills to what its profile enables.
+        await guard(
+          runtime.resumeThread(
+            previous.threadId,
+            tools,
+            this.turnSettings(request),
+            workspace,
+          ),
+        );
         threadId = previous.threadId;
       } else {
         if (state.get(intent.id).state !== "submitting")
@@ -8213,7 +8222,8 @@ export class StandaloneService {
       if (state.get(intent.id).state !== "held")
         state.hold(
           intent.id,
-          error instanceof PreviousCodexHomeError
+          error instanceof PreviousCodexHomeError ||
+            error instanceof SkillScopeError
             ? error.message
             : `Runtime submission or observation uncertain: ${String(error)}`,
         );

@@ -10,12 +10,13 @@ depends on skills, most of them distributed as plugins, and several of those ski
 delegate work to subagents. Delivery scope lives in
 [#1336](https://github.com/chrisbanes/cab/issues/1336).
 
-The Codex home, login link and previous-home refusal below are implemented, as are
-profile skill plugins and in-turn subagents for Claude. Codex receiving the profile's
-skills is the accepted target and is not implemented yet: a profile that enables skills
-needs the Claude runtime, and the operator API refuses them for Codex. The
-Claude [journey record](../evidence/skill-plugin-journeys-2026-10-30.md) shows a skill
-running, a subagent under Stop, and a crash during a subagent.
+All of this is implemented: the Codex home, login link and previous-home refusal, profile
+skill plugins for both harnesses, and in-turn subagents for Claude. The Claude
+[journey record](../evidence/skill-plugin-journeys-2026-10-30.md) shows a skill running,
+a subagent under Stop, and a crash during a subagent; the
+[Codex skill proof](../evidence/codex-skill-scope-probes-2026-10-30.md) and
+[Codex journey record](../evidence/codex-skill-journeys-2026-10-30.md) show per-thread
+skills and a Codex turn running its profile's skill.
 
 ## Decision
 
@@ -24,8 +25,10 @@ running, a subagent under Stop, and a crash during a subagent.
   assignment keeps the profile revision it started with.
 - Both harnesses receive the same skill set. Claude receives the plugins through the
   Agent SDK's local `plugins` option and the enabled names through its `skills`
-  option. Codex receives the same skills through cab's own Codex home instead of the
-  service user's `~/.codex`.
+  option. Codex receives each plugin's `skills/` directory as an extra skills root of its
+  App Server and scopes each thread to its profile's enabled skills (see Codex skills
+  below). The plugin directory needs a Claude plugin manifest for both, so one
+  definition serves both runtimes.
 - Plugins contribute skills, their instructions and their scripts only. Hooks and
   MCP servers a plugin declares do not run, so repository and plugin content still
   cannot change cab's tool policy. Claude keeps `strictMcpConfig` and adds
@@ -54,7 +57,8 @@ running, a subagent under Stop, and a crash during a subagent.
   and a turn resumed after a crash during a subagent are not demonstrated (see the
   journey record).
 - Codex subagents stay disabled (`features.multi_agent=false`). Enabling them needs a
-  later decision backed by a sandbox and Stop proof.
+  later decision backed by a sandbox and Stop proof; the Codex skill proof only records
+  what was observed.
 - The profile settings show the plugins and enabled skills, and the effective policy
   states that skills are instructions to the agent rather than cab policy.
 
@@ -94,6 +98,36 @@ loaded ([probe record](../evidence/skill-plugin-probes-2026-10-29.md)).
   There is no sessions link and no copy of rollouts. The thread's qualification row
   records the home it was started under: rows that exist at upgrade have none, and a
   resumed thread with no row is treated the same way. Captured history stays readable.
+
+## Codex skills
+
+One Codex App Server process serves every Codex conversation, and its extra skills roots
+are process-wide, so the roots are the union of every profile's plugin `skills/`
+directories and each thread is scoped by `skills.config` entries in its `thread/start`
+and `thread/resume` config. A thread whose profile enables skills disables every other
+listed skill (the plugins' other skills, the bundled skills and repository skills). A
+thread whose profile enables none disables the skills of cab's plugin roots only and
+keeps what it saw before; a process that never loaded plugins sends no skills config at all.
+The [proof](../evidence/codex-skill-scope-probes-2026-10-30.md) on Codex 0.164.0 shows:
+
+- Two threads on one App Server see different skills, and a restarted App Server resumes
+  a thread with the same scope.
+- A loaded thread ignores config sent on resume and also sees plugin roots that join the
+  process later, so before each resume that carries skills config cab sends
+  `thread/unsubscribe` for the (idle) thread and then resumes it with the current
+  config. A plugin directory that joins the process during a running turn can therefore
+  reach that turn until its conversation's next turn.
+- The scope is a model-facing list, not a security boundary: a thread given the path of
+  a disabled skill can still read its `SKILL.md`, and skills are instructions to the
+  agent, not cab policy. Scripts run through the shell tool under the existing sandbox.
+- A model-driven shell prints the real `HOME`, skill discovery loads nothing from it, and
+  the login link stays intact.
+
+Codex subagents stay disabled whatever the proof shows: with the feature on in a separate
+process, the recorded run showed the model delegating to a subagent whose outside write
+did not land, but two processes below the App Server were still running 3 s after
+`turn/interrupt`. That is a demonstrated gap in interrupt containment, and one more reason
+the feature stays off.
 
 ## Considered options
 

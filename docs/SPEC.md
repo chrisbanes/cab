@@ -353,7 +353,7 @@ readiness reports a missing target or a replaced link without naming paths. Code
 refreshes the login through the link and keeps it
 ([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
-installation are disabled. A Codex conversation started under the previous home is not
+installation are disabled. Codex gets plugin skills only from its profile's plugins. A Codex conversation started under the previous home is not
 resumed: admission refuses the request, naming "Started under the previous Codex home; restart
 the task" in its revision refusal, before it holds a writer, capacity or recovery
 state, and the runtime refuses the resume before any App Server request.
@@ -920,7 +920,7 @@ the runtime of each assignment and each runtime's effective policy, and sets the
 Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` reference
 without showing it.
 
-A Claude profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)):
+A profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)):
 absolute plugin directories on the service host, each with the names of its skills the
 profile enables, set in the profile settings or with `cab profile prepare --skills-file`.
 The directory needs a `.claude-plugin/plugin.json` manifest and a `SKILL.md` for each
@@ -934,7 +934,13 @@ regular files, read off the coordinating event loop) and records the digests wit
 turn, readable in the execution detail without paths. A plugin tree that is missing,
 unreadable, holds a symbolic link or special file, or exceeds 2000 files, 16 MiB or 12
 levels of depth makes the work wait visibly with a reason that names no path, and never
-runs without it. Claude may start subagents with its `Agent` tool: their tool calls
+runs without it. The same list serves a Codex profile: the digests are recorded the same
+way, Codex receives each plugin's `skills/` directory as a skills root, and each Codex
+thread runs with only its profile's enabled skills (other profiles' plugins, the plugin's
+other skills, the bundled skills and repository skills are disabled for it; a profile that enables none sees no plugin skills). cab re-sends the scope before each later
+turn of a conversation, but a plugin directory that joins the process during a running
+turn can reach that turn; skills are instructions to the agent, not a boundary, and a
+disabled skill's file stays readable. Claude may start subagents with its `Agent` tool: their tool calls
 follow the same policy, sandbox and recovery boundary as the main agent and are recorded
 with the subagent that made them, and their prose is not shown as the lead's conversation.
 cab refuses isolation, model, effort and mode overrides in a subagent call; the settings of a
@@ -942,10 +948,11 @@ named agent definition, including a plugin's, are untested. Plugin hooks are
 switched off with Claude Code managed settings, which an organisation's managed-settings
 tier can replace, so the guarantee is qualified for a personal login only. Background
 subagents are untested against Stop and resume, and a turn resumed after a crash during a
-subagent did not complete in two attempts (not diagnosed). Codex does not receive profile skills yet, so a
-profile on Codex cannot enable any, and Codex subagents stay disabled. The Claude
-journeys are recorded in
-[docs/evidence/skill-plugin-journeys-2026-10-30.md](evidence/skill-plugin-journeys-2026-10-30.md).
+subagent did not complete in two attempts (not diagnosed). Codex subagents stay
+disabled. The journeys are recorded in
+[Claude](evidence/skill-plugin-journeys-2026-10-30.md) and
+[Codex](evidence/codex-skill-journeys-2026-10-30.md), and the Codex scoping proof in
+[docs/evidence/codex-skill-scope-probes-2026-10-30.md](evidence/codex-skill-scope-probes-2026-10-30.md).
 
 The operator enables or disables each execution runtime for the installation in
 Settings → Runtime or with `cab runtime enable|disable`
