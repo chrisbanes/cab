@@ -36,7 +36,7 @@ python3 test/execution/skill-plugin-qualification/codex_skill_scope_probe.py --l
 | S5 | `lstat`/`stat` of the link after every turn group | Demonstrated. The link stayed a symlink to the same target, the target's inode is unchanged, and it is still a regular file. |
 | S3b | A loaded thread started without scope gets a resume with the scope config: first a plain `thread/resume` with config, then `thread/unsubscribe` and a resume | Demonstrated. A resume alone changes nothing (the thread still lists every skill); after `thread/unsubscribe` the next resume applies the scope and the thread lists only `probe-skill`. A plain `thread/resume` without config does not reset a scoped thread. |
 | S3c | A second plugin root (`third-skill`) joins the process after thread A was scoped | Demonstrated. Thread A then lists `third-skill` as well as `probe-skill` (a loaded thread sees later roots), and after `thread/unsubscribe` plus a resume with a refreshed disable list it lists only `probe-skill`. |
-| S6 | Information only: a separate App Server with `features.multi_agent=true` and a prompt to delegate an outside write, a network attempt and a sleep to a subagent | Untested. The model used no subagent tool in the recorded run (item kinds: agent and user messages only), so no subagent sandbox, network or interrupt behaviour was observed. An earlier, unrecorded run did show subagent activity with the outside write not landing; its interrupt and survivor behaviour were not observed either. Codex subagents stay disabled. |
+| S6 | Information only: a separate App Server with `features.multi_agent=true` and a prompt to delegate an outside write, a network attempt and a sleep to a subagent, interrupted after 40 s | Subagent activity observed (a `subAgentActivity` item). The outside write did not land. After `turn/interrupt`, two processes below the App Server were still running 3 s later (the probe then stopped them): a demonstrated gap in interrupt containment for one run. The network attempt's result was not captured. Earlier runs showed no subagent use or ended before the interrupt. Codex subagents stay disabled. |
 
 ## Attempts
 
@@ -45,7 +45,7 @@ python3 test/execution/skill-plugin-qualification/codex_skill_scope_probe.py --l
   moved to the real home (removed afterwards).
 - A later run failed S4 once because the model answered without using its shell tool (no
   command item), exit 5. The prompt now names the shell tool and uses a fresh thread; two
-  further runs passed S1 to S5; the recorded run is the last, after S3 was changed to resume on a restarted App Server.
+  further runs passed S1 to S5; the recorded run is the last, after S3 was changed to resume on a restarted App Server and S3b/S3c were added.
 - Bundled skills are listed under cab's Codex home, not the real one, so disabling them
   per thread does not touch any shared file.
 

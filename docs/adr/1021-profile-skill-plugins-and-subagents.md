@@ -124,8 +124,10 @@ The [proof](../evidence/codex-skill-scope-probes-2026-10-30.md) on Codex 0.164.0
   the login link stays intact.
 
 Codex subagents stay disabled whatever the proof shows: with the feature on in a separate
-process, the recorded run showed no subagent use (an earlier unrecorded run showed some),
-and interrupt and surviving-process behaviour were not observed.
+process, the recorded run showed the model delegating to a subagent whose outside write
+did not land, but two processes below the App Server were still running 3 s after
+`turn/interrupt`. That is a demonstrated gap in interrupt containment, and one more reason
+the feature stays off.
 
 ## Considered options
 
