@@ -156,6 +156,15 @@ test("both journeys pass on a scripted gitlab.com, within the write cap, and cle
     assert.equal(text.includes(secret), false);
 });
 
+test("a merge whose response is lost is read again until it settles, and is never sent twice", async (t) => {
+  const w = world(t);
+  w.remote.state.loseMergeResponse = true;
+  const evidence = await w.run();
+  assert.equal(evidence.failure, undefined);
+  assert.equal(evidence.qualification, "passed");
+  assert.equal(w.remote.merges.length, 1);
+});
+
 test("a failure part way still closes and deletes what the run recorded", async (t) => {
   const w = world(t);
   const evidence = await w.run({ maxPolls: 1 });

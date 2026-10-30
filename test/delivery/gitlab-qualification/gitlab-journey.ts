@@ -421,12 +421,23 @@ export async function runGitLabQualification(
       pass("a", "ready (GraphQL mergeRequestSetDraft)");
 
       // A failing pipeline wakes the lead once, and an unchanged refresh adds no wake.
-      const failureWakes = await pollUntil(a, "pipeline failure", () =>
+      await pollUntil(a, "pipeline failure", () =>
         Boolean(
           bound(a)?.observation.checks.some(
             (c) => c.name === "pipeline" && c.status === "failure",
           ),
         ),
+      );
+      // The wake that carried the failure may come from any earlier refresh, so count the wakes that name it.
+      const failureWakes = a.f.readDb(
+        (db) =>
+          (
+            db
+              .prepare(
+                "SELECT COUNT(*) AS n FROM coordination_inbox_events WHERE eventType='pr-delivery' AND payload LIKE '%pipeline: failure%'",
+              )
+              .get() as { n: number }
+          ).n,
       );
       assert.equal(failureWakes, 1, "the failing pipeline wakes the lead once");
       const unchanged = wakes(a);
@@ -602,10 +613,25 @@ export async function runGitLabQualification(
       assert.ok(allowed.includes(method));
       await drain();
       guard.allowMerge(mr.number);
-      const merged = await act(b, mergeAction(method));
-      if (!merged.success && guard.mergeMayBePending())
+      await act(b, mergeAction(method));
+      // GitLab may take a moment to report the merge: an unproved merge is read again, never sent again.
+      const mergeState = () =>
+        b.f.service
+          .delivery()
+          .actions(b.f.taskId)
+          .filter((x) => x.request.action.kind === "pr.merge")
+          .at(-1)?.state;
+      for (
+        let n = 0;
+        mergeState() === "uncertain" && n < (options.maxPolls ?? 60);
+        n++
+      ) {
+        await (options.pause ? options.pause() : sleep(10_000));
+        await refresh(b);
+      }
+      if (mergeState() !== "confirmed-success" && guard.mergeMayBePending())
         pendingMerge = { iid: mr.number, branch: mr.headRef };
-      assert.equal(merged.success, true, clean(merged.text));
+      assert.equal(mergeState(), "confirmed-success", "the merge settled");
       await refresh(b);
       assert.equal(bound(b)?.observation.merged, true);
       assert.deepEqual(completion(b), []);
