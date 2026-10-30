@@ -10,10 +10,12 @@ depends on skills, most of them distributed as plugins, and several of those ski
 delegate work to subagents. Delivery scope lives in
 [#1336](https://github.com/chrisbanes/cab/issues/1336).
 
-The Codex home, login link and previous-home refusal below are implemented. Profile
-skill plugins and in-turn subagents are the accepted target and are not implemented yet;
-[ADR-1008](1008-claude-code-execution-harness.md) and `docs/SPEC.md` describe the
-implemented Claude contract until they are.
+The Codex home, login link and previous-home refusal below are implemented, as are
+profile skill plugins and in-turn subagents for Claude. Codex receiving the profile's
+skills is the accepted target and is not implemented yet: a profile that enables skills
+needs the Claude runtime, and the operator API refuses them for Codex. The
+Claude [journey record](../evidence/skill-plugin-journeys-2026-10-30.md) shows a skill
+running, a subagent under Stop, and a crash during a subagent.
 
 ## Decision
 
@@ -35,7 +37,7 @@ implemented Claude contract until they are.
   out-of-policy calls, that a plugin's own hook and MCP server do not run, and that the
   skill's script ran under the sandbox with its outside write denied.
 - cab records a digest of each loaded plugin with the turn, alongside the existing
-  instruction digest, so a changed plugin is visible in the conversation history.
+  instruction digest, so a changed plugin is visible in the turn's execution detail.
 - Claude may start subagents through its `Agent` tool, which requires removing `Task`
   from the disallowed tools too. Every subagent tool call goes through the same
   `PreToolUse` hook (marked with `agent_id`), allowlist and sandbox as the main agent,
@@ -44,11 +46,17 @@ implemented Claude contract until they are.
   the CLI and its tool processes running until recovery terminates them by recorded
   identity, exactly as for the main agent. That existing recovery boundary is accepted
   for subagents and gets no new rules. `AskUserQuestion`, web tools and plan mode stay
-  disallowed.
+  disallowed. cab refuses isolation, model, effort and mode overrides in a subagent call (the settings of
+  a named agent definition, including a plugin's, are untested), and
+  does not show its prose as the lead's conversation. Plugin hooks are switched off
+  through Claude Code managed settings, which an organisation's managed-settings tier can
+  replace, so that guarantee is qualified for a personal login only. Background subagents
+  and a turn resumed after a crash during a subagent are not demonstrated (see the
+  journey record).
 - Codex subagents stay disabled (`features.multi_agent=false`). Enabling them needs a
   later decision backed by a sandbox and Stop proof.
-- The effective policy discloses the loaded plugins, the enabled skills, and that
-  skills are instructions to the agent rather than cab policy.
+- The profile settings show the plugins and enabled skills, and the effective policy
+  states that skills are instructions to the agent rather than cab policy.
 
 ## Codex home and login
 

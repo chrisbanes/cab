@@ -13,6 +13,10 @@ import {
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { commandRequest } from "../fixtures/setup-browser.js";
+import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   ClaudeShapedFixtureRuntime,
   CodexShapedFixtureRuntime,
@@ -628,4 +632,75 @@ test("Codex profile configuration rejects a stored effort the runtime no longer 
   await page.getByRole("button", { name: "Save profile", exact: true }).click();
   await page.getByText("Reasoning effort must be one of: medium.").waitFor();
   assert.equal(sent, 0);
+});
+
+test("Profile configuration sets two skills of a plugin, rejects a missing plugin and shows the skills on the profile", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(journey, "/app/settings");
+  const builder = ids.profiles.Builder as string;
+  const d = f.service.domain();
+  const plugin = writeSkillPlugin(
+    join(mkdtempSync(join(tmpdir(), "cab-skill-ui-")), "plugin"),
+    ["review", "plan"],
+  );
+  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  // Codex profiles do not load skill plugins yet.
+  await page.getByText("Only Claude profiles load skill plugins.").waitFor();
+  await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
+  await page
+    .getByRole("complementary", { name: "About skill plugins" })
+    .getByText("not cab policy", { exact: false })
+    .waitFor();
+  const field = page.getByLabel("Skill plugins", { exact: true });
+  await field.fill("not a plugin line");
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page
+    .getByText("One plugin per line", { exact: false })
+    .first()
+    .waitFor();
+  // A malformed line on a Claude profile is not told to leave Claude.
+  assert.equal(
+    await page
+      .getByText("Only Claude profiles load skill plugins: clear")
+      .count(),
+    0,
+  );
+  assert.deepEqual(d.profileSkills(builder), { plugins: [] });
+
+  await field.fill(`${plugin}-missing: review`);
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByText("not a plugin directory on the service host").waitFor();
+  assert.deepEqual(d.profileSkills(builder), { plugins: [] });
+
+  await field.fill(`${plugin}: review, plan`);
+  await page
+    .getByRole("region", { name: "Changes to save" })
+    .getByText("Skill plugins: none → 1 plugin, 2 skills")
+    .waitFor();
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByText("Current revision 2.").waitFor();
+  assert.deepEqual(d.profileSkills(builder), {
+    plugins: [{ path: plugin, skills: ["review", "plan"] }],
+  });
+  assert.deepEqual(d.profileSkills(builder, 1), { plugins: [] });
+  // The saved skills come back on reload.
+  await page.reload();
+  await page
+    .getByLabel("Skill plugins", { exact: true })
+    .evaluate(
+      (e, want) => (e as HTMLTextAreaElement).value === want,
+      `${plugin}: review, plan`,
+    )
+    .then((same) => assert.equal(same, true));
+  // Back to Codex: the skills stay visible, the save is refused, and clearing them saves.
+  await page.getByLabel("Runtime", { exact: true }).selectOption("codex");
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page
+    .getByText("Only Claude profiles load skill plugins: clear this field.")
+    .waitFor();
+  assert.equal(d.profileRuntime(builder).harness, "claude");
+  await page.getByLabel("Skill plugins", { exact: true }).fill("");
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByText("Current revision 3.").waitFor();
+  assert.deepEqual(d.profileSkills(builder), { plugins: [] });
+  assert.equal(d.profileRuntime(builder).harness, "codex");
 });

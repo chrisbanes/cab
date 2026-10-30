@@ -265,6 +265,34 @@ test("a service child whose parent disconnects exits, even before it starts a se
   assert.equal(code, 0);
 });
 
+test("the skill and subagent facets are accepted, and their briefs name the tool and the sleep", async () => {
+  const { parseArgs, FACETS } = await harness();
+  const { SLEEP, facetOutcome, subagentSleep } = await import(
+    pathToFileURL(
+      resolve("test/execution/mixed-runtime-qualification/service-child.mjs"),
+    ).href
+  );
+  for (const facet of [
+    "claude-skill",
+    "claude-subagent-stop",
+    "claude-subagent-crash",
+  ]) {
+    assert.equal(parseArgs(["--live", "--facet", facet]), facet);
+    assert.equal(FACETS[facet].codex, 0, facet);
+  }
+  assert.match(
+    facetOutcome("claude-skill", { workerProfileId: "w", nonce: "n" }),
+    /Skill tool/,
+  );
+  assert.equal(
+    facetOutcome("claude-subagent-stop", { workerProfileId: "w", nonce: "n" }),
+    subagentSleep,
+  );
+  assert.match(subagentSleep, /Agent tool/);
+  assert.match(subagentSleep, new RegExp(`\n${SLEEP}\n`));
+  assert.doesNotMatch(subagentSleep, /verbatim: sleep\s+\d/);
+});
+
 test("facet turns that follow their brief need no repair turn, and the crash follow-up resumes the session", async () => {
   const { SLEEP, facetOutcome, setupJourney, shellOnly } = await import(
     pathToFileURL(

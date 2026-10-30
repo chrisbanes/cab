@@ -163,12 +163,28 @@ export const shellOnly = (command) =>
     `Then call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
   ].join("\n");
 
+/** A subagent runs the sleeping Bash, so Stop and a crash land while it is in flight (#1336). */
+export const subagentSleep = [
+  "Disposable cab subagent probe.",
+  `Use the Agent tool exactly once with subagent_type general-purpose. Its prompt must tell the subagent to run exactly one Bash command, verbatim and alone on a line:\n${SLEEP}\nand then reply DONE. Do not run it yourself.`,
+  `Then call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
+].join("\n");
+
+/** The skill brief: invoke the enabled skill, then report. */
+export const skillBrief = [
+  "Disposable cab skill probe.",
+  "Invoke the skill probe-skill with the Skill tool and follow its instructions exactly.",
+  `Then call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
+].join("\n");
+
 /** Lead outcome text per facet; the worker brief is carried inside the lead's instructions. */
 export function facetOutcome(facet, { workerProfileId, nonce }) {
   if (facet === "scrub") return shellOnly(PROBE);
   // Claude Code blocks a bare `sleep N` (N >= 25) in the foreground.
   if (facet === "stop") return shellOnly(SLEEP);
-  if (facet === "crash")
+  if (facet === "claude-subagent-stop") return subagentSleep;
+  if (facet === "claude-skill") return skillBrief;
+  if (facet === "crash" || facet === "claude-subagent-crash")
     return `Disposable cab qualification probe. Call cab_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`;
   const brief =
     facet === "claude-only"
@@ -184,7 +200,10 @@ export function facetOutcome(facet, { workerProfileId, nonce }) {
 }
 
 /** Profiles, project and ready task on a disposable repository; returns ids and the workspace. */
-export async function setupJourney(service, { facet, model, repository }) {
+export async function setupJourney(
+  service,
+  { facet, model, repository, skills, onProvisioned },
+) {
   const exec = (body) =>
     service.domain().execute({ key: randomUUID(), actor: "operator", ...body });
   const claude = { harness: "claude", model, reasoningEffort: "low" };
@@ -200,6 +219,7 @@ export async function setupJourney(service, { facet, model, repository }) {
     instructions: "Follow the task instructions exactly and briefly.",
     capabilities: "task coordination, shell",
     runtime: facet === "mixed" ? { harness: "codex" } : claude,
+    ...(skills ? { skills } : {}),
   });
   exec({
     type: "profile.create",
@@ -245,6 +265,8 @@ export async function setupJourney(service, { facet, model, repository }) {
   const binding = await service.provisionTask(taskId, [
     { repositoryId: "c5-fixture", path: repository },
   ]);
+  // The plugin's script names the workspace, which exists only after provisioning.
+  onProvisioned?.(binding.path);
   exec({
     type: "task.configure",
     projectId,

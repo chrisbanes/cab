@@ -321,6 +321,27 @@ test("profile summary is optional, edited in place and added to older databases"
   }
 });
 
+test("profiles and revisions written before skill plugins enable none", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: profile,
+      name: "Old",
+      instructions: "Build",
+      capabilities: "code",
+    });
+    for (const table of ["profiles", "profile_revisions"])
+      f.db.exec(`ALTER TABLE ${table} DROP COLUMN skills`);
+    f.reopen();
+    assert.deepEqual(f.domain.profileSkills(profile), { plugins: [] });
+    assert.deepEqual(f.domain.profileSkills(profile, 1), { plugins: [] });
+  } finally {
+    f.close();
+  }
+});
+
 test("legacy profile receipts replay unchanged after summary migration", () => {
   const f = fixture();
   try {
@@ -1821,6 +1842,79 @@ test("committed rich creation replays its original receipt after wakeup failure 
       "Task",
     );
     assert.equal(f.domain.assignments(a).length, 1);
+  } finally {
+    f.close();
+  }
+});
+
+test("profiles store validated skill plugins per revision and assignments keep theirs", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: profile,
+      name: "Skilled",
+      instructions: "Build",
+      capabilities: "code",
+    });
+    assert.deepEqual(f.domain.profileSkills(profile), { plugins: [] });
+    const one = {
+      plugins: [{ path: "/plugins/a", skills: ["review", "plan"] }],
+    };
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 1,
+      skills: one,
+    });
+    // Other edits keep the skills; a revision keeps what it was saved with.
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 2,
+      name: "Renamed",
+    });
+    assert.deepEqual(f.domain.profileSkills(profile), one);
+    assert.deepEqual(f.domain.profileSkills(profile, 1), { plugins: [] });
+    assert.deepEqual(f.domain.profileSkills(profile, 2), one);
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 3,
+      skills: { plugins: [] },
+    });
+    assert.deepEqual(f.domain.profileSkills(profile), { plugins: [] });
+    assert.deepEqual(f.domain.profileSkills(profile, 3), one);
+
+    for (const skills of [
+      { plugins: [{ path: "relative/dir", skills: ["a"] }] },
+      { plugins: [{ path: "/p/.", skills: ["a"] }] },
+      { plugins: [{ path: "/p/../q", skills: ["a"] }] },
+      { plugins: [{ path: "/p", skills: [] }] },
+      { plugins: [{ path: "/p", skills: ["a", "a"] }] },
+      { plugins: [{ path: "/p", skills: ["a/b"] }] },
+      {
+        plugins: [
+          { path: "/p", skills: ["a"] },
+          { path: "/p", skills: ["b"] },
+        ],
+      },
+      { plugins: [{ path: "/p", skills: ["a"], hooks: true }] },
+    ])
+      assert.throws(() =>
+        run(f.domain, {
+          type: "profile.configure",
+          actor: "operator",
+          profileId: profile,
+          expectedVersion: 4,
+          skills,
+        } as WithoutKey<DomainCommand>),
+      );
+    assert.equal(f.domain.profile(profile).version, 4);
   } finally {
     f.close();
   }

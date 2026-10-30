@@ -294,6 +294,9 @@ test("existing profiles read as Codex after migration and unknown runtimes fail 
     domain.migrate();
     assert.deepEqual(domain.profileRuntime(profileId), { harness: "codex" });
     assert.deepEqual(domain.profileRuntime(profileId, 1), { harness: "codex" });
+    // Profiles written before skill plugins enable none, in the profile and its revision.
+    assert.deepEqual(domain.profileSkills(profileId), { plugins: [] });
+    assert.deepEqual(domain.profileSkills(profileId, 1), { plugins: [] });
 
     db.prepare("UPDATE profiles SET runtime = ? WHERE id = ?").run(
       '{"harness":"unknown"}',

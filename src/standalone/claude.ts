@@ -113,12 +113,13 @@ const maxSandboxTemporaryBytes = 44;
 const mcpServerName = "cab";
 const mcpToolPrefix = `mcp__${mcpServerName}__`;
 const builtInTools = ["Read", "Glob", "Grep", "Write", "Edit", "Bash"];
+/** Subagents run in the turn, under the same hook and sandbox; `Skill` only when skills are enabled. */
+const agentTool = "Agent";
+const skillTool = "Skill";
 const disallowedTools = [
   "AskUserQuestion",
   "WebFetch",
   "WebSearch",
-  "Agent",
-  "Task",
   "EnterPlanMode",
   "ExitPlanMode",
 ];
@@ -137,6 +138,8 @@ const initSchema = z.object({
 const assistantSchema = z.object({
   type: z.literal("assistant"),
   uuid: z.string().min(1).max(128),
+  /** Set on a subagent's frames; its prose is not the lead's conversation. */
+  parent_tool_use_id: z.string().nullish(),
   message: z.object({
     content: z.array(
       z.union([
@@ -156,11 +159,17 @@ const resultSchema = z.object({
   errors: z.array(z.string()).optional(),
 });
 type ClaudeResult = z.infer<typeof resultSchema>;
+/** Present only when the hook fires from within a subagent. */
+const subagentFields = {
+  agent_id: z.string().min(1).max(256).optional(),
+  agent_type: z.string().min(1).max(128).optional(),
+};
 const hookInputSchema = z.object({
   hook_event_name: z.literal("PreToolUse"),
   tool_name: z.string().min(1),
   tool_input: z.unknown(),
   tool_use_id: z.string().min(1),
+  ...subagentFields,
 });
 const postToolUseSchema = z.discriminatedUnion("hook_event_name", [
   z.object({
@@ -169,6 +178,7 @@ const postToolUseSchema = z.discriminatedUnion("hook_event_name", [
     tool_input: z.unknown(),
     tool_response: z.unknown(),
     tool_use_id: z.string().min(1),
+    ...subagentFields,
   }),
   z.object({
     hook_event_name: z.literal("PostToolUseFailure"),
@@ -177,6 +187,7 @@ const postToolUseSchema = z.discriminatedUnion("hook_event_name", [
     error: z.string(),
     is_interrupt: z.boolean().optional(),
     tool_use_id: z.string().min(1),
+    ...subagentFields,
   }),
 ]);
 const bashResponseSchema = z.object({
@@ -361,6 +372,10 @@ export const claudePolicyLimits: readonly string[] = [
   "The subprocess environment scrub is qualified for sandboxed Bash only (#827): Bash saw neither the token variable nor its value, and could not read its parent's environment with ps. Other ways to read a parent process's environment are untested.",
   "After a service crash, a running Claude CLI process can outlive the service (#827); verify it has exited before recovering the turn.",
   "Only the Claude Code version the pinned SDK declares was qualified. The installed claude is not version-checked, and another version may enforce the sandbox, tool and permission controls differently.",
+  "Skill plugins contribute skills, instructions and scripts only: a plugin's hooks and MCP servers never run, and skills are instructions to the agent, not cab policy. Subagents share the turn's tool policy and sandbox and the same recovery boundary.",
+  "cab refuses isolation, model, effort and mode overrides in a subagent call; a named agent definition's own settings, including a plugin's agent definitions, are untested.",
+  "Plugin hooks are switched off through managed settings, which an organisation's managed-settings tier can replace; qualified for a personal login only.",
+  "Background subagents are untested against Stop and resume; a turn resumed after a crash during a subagent did not complete in two attempts (undiagnosed).",
   "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",
   "The sandboxed agent can write the per-task temporary directory; cab checks only its top-level entries before each turn.",
   "The per-task temporary directory has a predictable name under /tmp; another local user who creates it first makes Claude work wait, but never shares it.",
@@ -490,6 +505,8 @@ interface ClaudeTurn {
   pendingToolUses: Map<string, string[]>;
   pendingCount: number;
   roots: readonly string[];
+  /** The `Skill` tool is allowed only when the bound profile revision enables skills. */
+  skills: boolean;
   release: (released: boolean) => void;
   started: ReturnType<typeof deferred<void>>;
   settled: ReturnType<typeof deferred<TurnOutcome>>;
@@ -874,6 +891,20 @@ export class ClaudeRuntime implements Runtime {
       policy?.access === "read-only" ? [base] : [workspace, base];
     const temporary = await ensureTemporaryBase(base);
     if (temporary) throw new Error(`Claude runtime unavailable: ${temporary}`);
+    const plugins = settings?.skills?.plugins ?? [];
+    // Qualified by the plugin's manifest name when known, so two plugins' same-named skills differ.
+    const enabledSkills = [
+      ...new Set(
+        plugins.flatMap((p) =>
+          p.skills.map((skill) => (p.name ? `${p.name}:${skill}` : skill)),
+        ),
+      ),
+    ];
+    const turnTools = [
+      ...builtInTools,
+      agentTool,
+      ...(enabledSkills.length > 0 ? [skillTool] : []),
+    ];
     const fresh = this.freshThreads.delete(threadId);
     const tools = this.threadTools.get(threadId) ?? [];
     this.threadTools.delete(threadId);
@@ -894,6 +925,7 @@ export class ClaudeRuntime implements Runtime {
       pendingToolUses: new Map(),
       pendingCount: 0,
       roots: writable,
+      skills: enabledSkills.length > 0,
       release: (released) => {
         turn.released = released;
         release(released);
@@ -936,9 +968,21 @@ export class ClaudeRuntime implements Runtime {
       ...(effort !== undefined ? { effort } : {}),
       settingSources: [],
       strictMcpConfig: true,
+      // Plugin hooks never run; cab's own in-process PreToolUse callback still does.
+      managedSettings: { disableAllHooks: true },
+      ...(plugins.length > 0
+        ? {
+            plugins: plugins.map((p) => ({
+              type: "local" as const,
+              path: p.path,
+              skipMcpDiscovery: true,
+            })),
+            skills: enabledSkills,
+          }
+        : {}),
       permissionMode: "dontAsk",
-      tools: [...builtInTools],
-      allowedTools: [...builtInTools, `${mcpToolPrefix}*`],
+      tools: [...turnTools],
+      allowedTools: [...turnTools, `${mcpToolPrefix}*`],
       disallowedTools: [...disallowedTools],
       sandbox: {
         enabled: true,
@@ -1230,6 +1274,7 @@ export class ClaudeRuntime implements Runtime {
     if (head.data.type === "assistant") {
       const assistant = assistantSchema.safeParse(message);
       if (!assistant.success) return false;
+      if (assistant.data.parent_tool_use_id) return true;
       assistant.data.message.content.forEach((block, index) => {
         if (!("text" in block) || typeof block.text !== "string") return;
         const item = {
@@ -1289,8 +1334,25 @@ export class ClaudeRuntime implements Runtime {
       this.emitTool(turn, "completed", input.data, { status: "declined" });
       return deny(reason);
     };
-    if (!builtInTools.includes(name) && !name.startsWith(mcpToolPrefix))
+    if (
+      !builtInTools.includes(name) &&
+      name !== agentTool &&
+      !(name === skillTool && turn.skills) &&
+      !name.startsWith(mcpToolPrefix)
+    )
       return refuse(`${name} is outside cab's tool policy`);
+    // A subagent runs in the turn's workspace, model and sandbox: no worktree or remote
+    // isolation, model, effort or permission-mode override.
+    if (
+      name === agentTool &&
+      (!fields.success ||
+        ["isolation", "model", "effort", "mode"].some(
+          (key) => fields.data[key] !== undefined,
+        ))
+    )
+      return refuse(
+        "A subagent runs in the task's workspace with the turn's settings",
+      );
     if (name === "Write" || name === "Edit") {
       const path = fields.success ? fields.data.file_path : undefined;
       if (
@@ -1361,7 +1423,13 @@ export class ClaudeRuntime implements Runtime {
   private emitTool(
     turn: ClaudeTurn,
     phase: "started" | "completed",
-    call: { tool_name: string; tool_input: unknown; tool_use_id: string },
+    call: {
+      tool_name: string;
+      tool_input: unknown;
+      tool_use_id: string;
+      agent_id?: string | undefined;
+      agent_type?: string | undefined;
+    },
     done?: { status: string; exitCode?: number | null; output?: string },
   ): void {
     if (!this.diagnostic || call.tool_name.startsWith(mcpToolPrefix)) return;
@@ -1384,6 +1452,14 @@ export class ClaudeRuntime implements Runtime {
         itemType,
         status: done?.status ?? "inProgress",
         ...(itemType === "toolCall" ? { tool: call.tool_name } : {}),
+        ...(call.agent_id
+          ? {
+              subagent: {
+                id: call.agent_id,
+                ...(call.agent_type ? { type: call.agent_type } : {}),
+              },
+            }
+          : {}),
         ...(bash && command.success
           ? {
               command: capDiagnosticField(

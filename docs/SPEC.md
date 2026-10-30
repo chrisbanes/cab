@@ -916,6 +916,33 @@ the runtime of each assignment and each runtime's effective policy, and sets the
 Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` reference
 without showing it.
 
+A Claude profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)):
+absolute plugin directories on the service host, each with the names of its skills the
+profile enables, set in the profile settings or with `cab profile prepare --skills-file`.
+The directory needs a `.claude-plugin/plugin.json` manifest and a `SKILL.md` for each
+enabled skill, or the change is refused with the failing fields. Each profile revision
+stores the list, and an assignment keeps the one it started with. The profile settings show the plugins and
+skills, and each runtime's effective policy states that skills are instructions to the
+agent, not cab policy. A plugin contributes skills, instructions and
+scripts only; the hooks and MCP servers it declares never run. At each Claude turn start
+cab digests every plugin (SHA-256 over the sorted relative paths and contents of its
+regular files, read off the coordinating event loop) and records the digests with the
+turn, readable in the execution detail without paths. A plugin tree that is missing,
+unreadable, holds a symbolic link or special file, or exceeds 2000 files, 16 MiB or 12
+levels of depth makes the work wait visibly with a reason that names no path, and never
+runs without it. Claude may start subagents with its `Agent` tool: their tool calls
+follow the same policy, sandbox and recovery boundary as the main agent and are recorded
+with the subagent that made them, and their prose is not shown as the lead's conversation.
+cab refuses isolation, model, effort and mode overrides in a subagent call; the settings of a
+named agent definition, including a plugin's, are untested. Plugin hooks are
+switched off with Claude Code managed settings, which an organisation's managed-settings
+tier can replace, so the guarantee is qualified for a personal login only. Background
+subagents are untested against Stop and resume, and a turn resumed after a crash during a
+subagent did not complete in two attempts (not diagnosed). Codex does not receive profile skills yet, so a
+profile on Codex cannot enable any, and Codex subagents stay disabled. The Claude
+journeys are recorded in
+[docs/evidence/skill-plugin-journeys-2026-10-30.md](evidence/skill-plugin-journeys-2026-10-30.md).
+
 The operator enables or disables each execution runtime for the installation in
 Settings → Runtime or with `cab runtime enable|disable`
 ([ADR-1012](adr/1012-operator-controlled-runtime-enablement.md)). A missing setting

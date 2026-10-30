@@ -26,7 +26,10 @@ import {
 } from "./native-input.js";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
-import { supportedRuntimeSettingsSchema } from "../core/execution-runtime.js";
+import {
+  type ProfileSkills,
+  supportedRuntimeSettingsSchema,
+} from "../core/execution-runtime.js";
 import type { ExecutionHarness } from "./execution-harness.js";
 import type {
   ExactExecutionIdentity,
@@ -266,6 +269,8 @@ export type RuntimeDiagnosticEvent =
       status?: string;
       /** Claude `toolCall` items only: the tool's fixed name, never its input. */
       tool?: string;
+      /** Claude only: the call came from a subagent of the turn. */
+      subagent?: { id: string; type?: string };
       /** Present only for `commandExecution` items. */
       command?: string | RuntimeOmittedField;
       cwd?: string;
@@ -591,6 +596,10 @@ export function unexpectedRequest(
 export interface RuntimeTurnSettings {
   model: string | null;
   reasoningEffort: string | null;
+  /** The skill plugins the bound profile revision enables; absent when it enables none. */
+  skills?: {
+    plugins: Array<ProfileSkills["plugins"][number] & { name?: string }>;
+  };
 }
 
 /**

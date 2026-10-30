@@ -232,6 +232,14 @@ const profileGet: BrowseCommand = {
         ["Version", String(d.profile.version)],
         ["Revoked", d.profile.revoked ? "yes" : "no"],
         ["Runtime", harnessLine(d.runtime)],
+        [
+          "Skills",
+          d.skills.plugins.length === 0
+            ? "none"
+            : d.skills.plugins
+                .map((p) => `${p.path} (${p.skills.join(", ")})`)
+                .join("; "),
+        ],
         ["Capabilities", unavailable(d.capabilities)],
         [
           "Instructions",

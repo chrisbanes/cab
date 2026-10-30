@@ -30,13 +30,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
  */
 export function writePluginFixture(
   root,
-  { dir = "plugin", nonce, hooks = true, mcp = true },
+  {
+    dir = "plugin",
+    nonce,
+    hooks = true,
+    mcp = true,
+    workspace = join(root, "workspace"),
+  },
 ) {
   const plugin = join(root, dir);
   const paths = {
     dir: plugin,
     script: join(plugin, "skills", SKILL_NAME, "mark.sh"),
-    skillMarker: join(root, "workspace", `skill-ran-${nonce}`),
+    skillMarker: join(workspace, `skill-ran-${nonce}`),
     skillEscape: join(root, "outside", `skill-escape-${nonce}`),
     hookMarker: join(root, "traces", `${dir}-hook-ran`),
     mcpMarker: join(root, "traces", `${dir}-mcp-started`),

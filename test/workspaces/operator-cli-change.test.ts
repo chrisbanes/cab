@@ -21,6 +21,7 @@ import {
   seedInstructionHistory,
 } from "../fixtures/instruction-history.js";
 import { startCliService } from "../fixtures/operator-cli.js";
+import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes and documents are asserted structurally
 type Json = Record<string, any>;
@@ -322,6 +323,77 @@ test("profile prepare sets, shows and clears Codex model and effort", async (t) 
     target,
   ]);
   assert.equal(none.code, 2);
+});
+
+test("profile prepare sets, shows and clears skill plugins from a file", async (t) => {
+  const { seed, d, file, out, cli, h } = await setup(t);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: seed.profileId,
+    expectedVersion: Number(d.profile(seed.profileId).version),
+    runtime: {
+      harness: "claude",
+      model: "default",
+      reasoningEffort: "default",
+    },
+  } as never);
+  const plugin = writeSkillPlugin(join(h.dir, "plugin"), ["probe-skill"]);
+  const prepare = (skillsFile: string, target = out()) =>
+    cli("ro", [
+      "profile",
+      "prepare",
+      seed.profileId,
+      "--skills-file",
+      skillsFile,
+      "--out",
+      target,
+    ]);
+  const apply = async (doc: string) => {
+    const r = await cli("rw", ["profile", "apply", "--file", doc]);
+    assert.equal(r.code, 0, r.err + r.out);
+  };
+  assert.deepEqual(d.profileSkills(seed.profileId), { plugins: [] });
+  const skills = { plugins: [{ path: plugin, skills: ["probe-skill"] }] };
+  const doc = out();
+  const prepared = await prepare(
+    file("skills.json", JSON.stringify(skills)),
+    doc,
+  );
+  assert.equal(prepared.code, 0, prepared.err + prepared.out);
+  assert.deepEqual(prepared.json().data.document.preview.changes, [
+    { field: "skills", from: "none", to: `${plugin} (probe-skill)` },
+  ]);
+  await apply(doc);
+  assert.deepEqual(d.profileSkills(seed.profileId), skills);
+  const shown = await cli("ro", ["profile", "get", seed.profileId]);
+  assert.deepEqual(shown.json().data.skills, skills);
+
+  // The same skills are no change, and a file that is not skills JSON writes nothing.
+  const same = out();
+  assert.equal(
+    (await prepare(file("same.json", JSON.stringify(skills)), same)).code,
+    2,
+  );
+  for (const bad of [
+    "not json",
+    '{"plugins":[{"path":"relative","skills":["a"]}]}',
+  ]) {
+    const target = out();
+    const refused = await prepare(file("bad.json", bad), target);
+    assert.equal(refused.code, 2, bad);
+    assert.equal(existsSync(target), false, bad);
+  }
+
+  // An empty list clears them.
+  const clear = out();
+  assert.equal(
+    (await prepare(file("clear.json", '{"plugins":[]}'), clear)).code,
+    0,
+  );
+  await apply(clear);
+  assert.deepEqual(d.profileSkills(seed.profileId), { plugins: [] });
 });
 
 test("profile and project instructions can be given inline or on stdin", async (t) => {

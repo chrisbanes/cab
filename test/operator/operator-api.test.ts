@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -47,6 +48,7 @@ import {
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
+import { writeSkillPlugin } from "../fixtures/skill-plugin.js";
 import { tmpdir } from "../fixtures/temp.js";
 import {
   createNativeWork,
@@ -2578,6 +2580,89 @@ test("profile configuration reads and writes a validated execution runtime", asy
   assert.deepEqual(
     (await api.readProfileConfiguration(ids.profileId)).data.runtime,
     runtime,
+  );
+});
+test("profile skills reject missing plugins, unknown skills and a harness that loads none", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cab-skill-api-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const plugin = writeSkillPlugin(join(root, "plugin"), ["probe-skill"]);
+  const fieldsOf = async (command: object) => {
+    const error = await api.execute(command as never).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    assert.ok(error instanceof OperatorApiError && error.status === 400);
+    return error.fieldPaths;
+  };
+  const configure = (extra: object, expectedVersion = 1) => ({
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: ids.profileId,
+    expectedVersion,
+    ...extra,
+  });
+  const claude = {
+    harness: "claude" as const,
+    model: null,
+    reasoningEffort: null,
+  };
+  // A plugin that is not there, and a skill the plugin does not have.
+  assert.deepEqual(
+    await fieldsOf(
+      configure({
+        runtime: claude,
+        skills: { plugins: [{ path: join(root, "absent"), skills: ["x"] }] },
+      }),
+    ),
+    ["skills.plugins.0.path"],
+  );
+  assert.deepEqual(
+    await fieldsOf(
+      configure({
+        runtime: claude,
+        skills: {
+          plugins: [{ path: plugin, skills: ["probe-skill", "other-skill"] }],
+        },
+      }),
+    ),
+    ["skills.plugins.0.skills.1"],
+  );
+  // A tree that could never be digested is refused when saved, not when its work waits.
+  const linked = writeSkillPlugin(join(root, "linked"), ["probe-skill"]);
+  symlinkSync(root, join(linked, "loop"));
+  assert.deepEqual(
+    await fieldsOf(
+      configure({
+        runtime: claude,
+        skills: { plugins: [{ path: linked, skills: ["probe-skill"] }] },
+      }),
+    ),
+    ["skills.plugins.0.path"],
+  );
+  // Codex loads no profile skills yet, so it cannot enable any.
+  assert.deepEqual(
+    await fieldsOf(
+      configure({
+        skills: { plugins: [{ path: plugin, skills: ["probe-skill"] }] },
+      }),
+    ),
+    ["skills"],
+  );
+  assert.equal(f.service.domain().profile(ids.profileId).version, 1);
+  const skills = { plugins: [{ path: plugin, skills: ["probe-skill"] }] };
+  await api.execute(configure({ runtime: claude, skills }) as never);
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.skills,
+    skills,
+  );
+  // Moving the profile back to Codex while skills remain is refused too.
+  assert.deepEqual(
+    await fieldsOf(configure({ runtime: { harness: "codex" } }, 2)),
+    ["skills"],
   );
 });
 test("task reads report the persisted binding harness of each execution generation", async (t) => {
