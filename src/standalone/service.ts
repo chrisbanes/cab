@@ -122,6 +122,7 @@ import {
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
 } from "./codex.js";
+import { SkillScopeError } from "./codex-skills.js";
 import {
   type CodexHome,
   codexHomeFor,
@@ -8221,7 +8222,8 @@ export class StandaloneService {
       if (state.get(intent.id).state !== "held")
         state.hold(
           intent.id,
-          error instanceof PreviousCodexHomeError
+          error instanceof PreviousCodexHomeError ||
+            error instanceof SkillScopeError
             ? error.message
             : `Runtime submission or observation uncertain: ${String(error)}`,
         );
