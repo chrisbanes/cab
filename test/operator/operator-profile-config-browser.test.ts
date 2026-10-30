@@ -644,7 +644,7 @@ test("Profile configuration sets two skills of a plugin, rejects a missing plugi
   );
   await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
   // Codex profiles do not load skill plugins yet.
-  await page.getByText("not loaded for Codex profiles yet").waitFor();
+  await page.getByText("Only Claude profiles load skill plugins.").waitFor();
   await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
   await page
     .getByRole("complementary", { name: "About skill plugins" })

@@ -209,7 +209,7 @@ function SkillFields({ draft }: { draft: ConfigurationDraft }) {
   if (draft.values.runtimeHarness !== "claude")
     return (
       <p className="metadata muted">
-        Skill plugins are not loaded for Codex profiles yet.
+        Only Claude profiles load skill plugins.
       </p>
     );
   const messages = skillErrorMessages(draft.errors);
