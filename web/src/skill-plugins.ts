@@ -36,13 +36,7 @@ export function skillErrorMessages(errors: Record<string, string>): string[] {
   for (const field of Object.keys(errors)) {
     const path = /^skills\.plugins\.(\d+)\.path$/.exec(field);
     const skill = /^skills\.plugins\.(\d+)\.skills\.(\d+)$/.exec(field);
-    // The form's own format error is stored under `skills` too; only the server's is this one.
-    if (field === "skills") {
-      if (errors.skills !== skillsFormat)
-        messages.push(
-          "Only Claude profiles load skill plugins: clear this field.",
-        );
-    } else if (path)
+    if (path)
       messages.push(
         `Plugin ${Number(path[1]) + 1}: not a plugin directory on the service host.`,
       );

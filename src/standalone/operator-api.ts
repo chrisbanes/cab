@@ -60,10 +60,8 @@ import {
   questionFormSchema,
 } from "../core/question-forms.js";
 import {
-  defaultProfileRuntime,
   executionHarnessLabels,
   executionIntentStateSchema,
-  noProfileSkills,
 } from "../core/execution-runtime.js";
 import { skillFieldErrors } from "./skill-plugins.js";
 import {
@@ -8327,28 +8325,14 @@ export class OperatorApi {
         c.type === "github.configure" ||
         c.type === "github.place"
       ) {
-        // Skill plugins must exist, and only a harness that loads them may enable any.
+        // Skill plugins must exist and be loadable; both harnesses receive them.
         if (
           (c.type === "profile.create" || c.type === "profile.configure") &&
-          (c.skills || (c.type === "profile.configure" && c.runtime)) &&
+          c.skills &&
           this.domain().recordedCommand({ ...c, actor: "operator" }) ===
             undefined
         ) {
-          const d = this.domain();
-          const harness = (
-            c.runtime ??
-            (c.type === "profile.configure"
-              ? d.profileRuntime(c.profileId)
-              : defaultProfileRuntime(d.enabledRuntimes()))
-          ).harness;
-          const skills =
-            c.skills ??
-            (c.type === "profile.configure"
-              ? d.profileSkills(c.profileId)
-              : noProfileSkills);
-          if (harness !== "claude" && skills.plugins.length > 0)
-            throw new OperatorApiError(400, "invalid-input", ["skills"]);
-          const fields = c.skills ? await skillFieldErrors(c.skills) : [];
+          const fields = await skillFieldErrors(c.skills);
           if (fields.length > 0)
             throw new OperatorApiError(400, "invalid-input", fields);
         }

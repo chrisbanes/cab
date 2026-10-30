@@ -2582,7 +2582,7 @@ test("profile configuration reads and writes a validated execution runtime", asy
     runtime,
   );
 });
-test("profile skills reject missing plugins, unknown skills and a harness that loads none", async (t) => {
+test("profile skills reject missing plugins and unknown skills, and follow the profile across runtimes", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const ids = await seed(f);
@@ -2643,26 +2643,22 @@ test("profile skills reject missing plugins, unknown skills and a harness that l
     ),
     ["skills.plugins.0.path"],
   );
-  // Codex loads no profile skills yet, so it cannot enable any.
-  assert.deepEqual(
-    await fieldsOf(
-      configure({
-        skills: { plugins: [{ path: plugin, skills: ["probe-skill"] }] },
-      }),
-    ),
-    ["skills"],
-  );
   assert.equal(f.service.domain().profile(ids.profileId).version, 1);
+  // Both harnesses load profile skills: the Codex profile saves them, and they follow it across runtimes.
   const skills = { plugins: [{ path: plugin, skills: ["probe-skill"] }] };
-  await api.execute(configure({ runtime: claude, skills }) as never);
+  await api.execute(configure({ skills }) as never);
+  assert.deepEqual(f.service.domain().profileRuntime(ids.profileId), {
+    harness: "codex",
+  });
   assert.deepEqual(
     (await api.readProfileConfiguration(ids.profileId)).data.skills,
     skills,
   );
-  // Moving the profile back to Codex while skills remain is refused too.
+  await api.execute(configure({ runtime: claude }, 2) as never);
+  await api.execute(configure({ runtime: { harness: "codex" } }, 3) as never);
   assert.deepEqual(
-    await fieldsOf(configure({ runtime: { harness: "codex" } }, 2)),
-    ["skills"],
+    (await api.readProfileConfiguration(ids.profileId)).data.skills,
+    skills,
   );
 });
 test("task reads report the persisted binding harness of each execution generation", async (t) => {

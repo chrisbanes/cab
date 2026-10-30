@@ -7842,7 +7842,17 @@ export class StandaloneService {
         if (state.get(intent.id).state !== "submitting")
           throw new Error("Execution admission was held");
         submissionStage = "resume";
-        await guard(runtime.resumeThread(previous.threadId, tools));
+        const resumeSettings = this.turnSettings(request);
+        await guard(
+          resumeSettings
+            ? runtime.resumeThread(
+                previous.threadId,
+                tools,
+                resumeSettings,
+                workspace,
+              )
+            : runtime.resumeThread(previous.threadId, tools),
+        );
         threadId = previous.threadId;
       } else {
         if (state.get(intent.id).state !== "submitting")

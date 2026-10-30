@@ -13,6 +13,8 @@ Facets (S1-S5 gate the Codex skill delivery; S6 is information only and never en
   S1 extra root lists both fixture skills with plugins disabled
   S2 thread A (other-skill and bundled skills disabled by config) vs thread B (nothing disabled)
   S3 a restarted App Server resumes the thread with the same config and keeps the scope
+  S3b a loaded thread takes a new scope only after thread/unsubscribe + resume
+  S3c a plugin root that joins later reaches loaded threads until that refresh
   S4 a model-driven shell prints the real HOME; skill discovery loads nothing from it
   S5 the login link is intact after every turn
   S6 subagents (a separate App Server with multi_agent=true): outside write, network, interrupt, survivors
@@ -58,6 +60,7 @@ home = os.path.join(root, "home")  # CODEX_HOME
 user = os.path.join(root, "user")  # HOME of Codex itself
 workspace = os.path.join(root, "ws")
 fixture = os.path.join(root, "fx", "plugin", "skills")
+fixture_late = os.path.join(root, "fx2", "skills")  # joins the process after threads are loaded
 link = os.path.join(home, "auth.json")
 SKILLS = ("probe-skill", "other-skill")
 
@@ -78,8 +81,8 @@ class Stop(Exception):
         self.code, self.reason = code, reason
 
 
-def write_skill(name):
-    directory = os.path.join(fixture, name)
+def write_skill(name, base=None):
+    directory = os.path.join(base or fixture, name)
     os.makedirs(directory)
     with open(os.path.join(directory, "SKILL.md"), "w") as file:
         file.write(
@@ -317,6 +320,34 @@ def run_facets(holder, env, target):
     clear_markers()
     link_check("resume")
 
+    # S3b: a loaded thread keeps the scope it was loaded with; resume alone does not change it.
+    # Unsubscribing first (idle thread) lets the next resume apply the current scope. cab does
+    # this before every turn after the first, so a thread keeps its profile's skills when
+    # another profile's plugins join the process.
+    thread_c = server.start_thread({})
+    seen_before = names_in(server.turn(thread_c, LIST)["messages"])
+    server.resume_thread(thread_c, config_a)
+    seen_plain = names_in(server.turn(thread_c, LIST)["messages"])
+    server.ask("thread/unsubscribe", {"threadId": thread_c})
+    server.resume_thread(thread_c, config_a)
+    seen_after = names_in(server.turn(thread_c, LIST)["messages"])
+    s3b = "other-skill" in seen_before and seen_after == ["probe-skill"]
+    emit(facet="S3b", disposition="demonstrated" if s3b else "failed", beforeResume=seen_before,
+         afterPlainResume=seen_plain, afterUnsubscribeAndResume=seen_after)
+
+    # S3c: another profile's plugin root joins the process; thread A (disabled the skills it
+    # knew) would see the newcomer until its next unsubscribe + resume with a refreshed scope.
+    server.ask("skills/extraRoots/set", {"extraRoots": [fixture, fixture_late]})
+    late = [i for i in server.skills() if i["name"] == "third-skill"]
+    config_a2 = {"skills": {"config": disabled + [{"path": late[0]["path"], "enabled": False}]}}
+    seen_leak = names_in(server.turn(thread_a, LIST)["messages"])
+    server.ask("thread/unsubscribe", {"threadId": thread_a})
+    server.resume_thread(thread_a, config_a2)
+    seen_fixed = names_in(server.turn(thread_a, LIST)["messages"])
+    s3c = seen_fixed == ["probe-skill"]
+    emit(facet="S3c", disposition="demonstrated" if s3c else "failed", threadABeforeRefresh=seen_leak,
+         threadAAfterRefresh=seen_fixed)
+
     # S4: a model-driven shell prints the real HOME (thread A's sandbox, no network, no skill).
     shell_thread = server.start_thread(config_a)
     shell = server.turn(
@@ -331,7 +362,7 @@ def run_facets(holder, env, target):
 
     inode_after = link_check("all turns")
     emit(facet="S5", disposition="demonstrated" if inode_after == inode else "failed", inodeUnchanged=inode_after == inode)
-    return s1, s2, s3, s4
+    return s1, s2, s3 and s3b and s3c, s4
 
 
 def subagent_info(env, target):
@@ -379,6 +410,7 @@ def main():
         os.makedirs(directory)
     for name in SKILLS:
         write_skill(name)
+    write_skill("third-skill", fixture_late)
     env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_HOME")}
     env.update(CODEX_HOME=home, HOME=user)
     version = subprocess.run(["codex", "--version"], env=env, capture_output=True, text=True).stdout.strip()
