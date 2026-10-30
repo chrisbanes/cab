@@ -1279,7 +1279,8 @@ A question or approval is answerable from the attention card or from its place i
 conversation, with one shared request state. Tool activity shows each command's
 summary and exit status, with bounded redacted output on request; consecutive calls
 are grouped with a failure count, file changes open the Changes tab, and cab's own
-coordination calls appear as the records they produce.
+coordination calls appear as the records they produce. A pending or running delegated
+assignment takes a durable message from its sub-conversation header.
 
 Preserve the task, assignment and conversation hierarchy: the task retains the
 outcome and accountable lead, assignments identify delegated responsibility, and
@@ -1292,7 +1293,12 @@ that no tool ran. This presentation adds no terminal, embedded browser or
 complete-transcript capability.
 
 Every entry point that opens a task (Overview, List/Board, Inbox, Search, recovery
-links and assignment links) reaches the same task workspace at `/app/tasks/:id`.
+links and assignment links) reaches the same task workspace at `/app/tasks/:id`. There
+is no History tab: a link that names the conversation (`#conversation`), an assignment
+(`?assignment=`) or a request (`?request=` with `#conversation`) opens the Overview at
+that place, reading earlier pages first when it is not in the part already loaded, and
+`?section=context` opens Captured context in the inspector. A link keeps working in the
+former forms `#history` and `?section=history`.
 Preserve visible actionable requests, reading position, disclosure choices and
 unfinished replies as the task updates. Existing execution, recovery and
 exact-material approval controls remain reachable.

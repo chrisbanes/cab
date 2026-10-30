@@ -160,7 +160,7 @@ test("overview, project list and inbox origins return correctly from Files", asy
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const files = page.locator("#files");
   const inspectAndReturn = async () => {
-    // Task evidence opens on History, so Files is reached through its tab.
+    // Task evidence opens the conversation on Overview, so Files is reached through its tab.
     await openTaskTab(page, "Files");
     await files.getByRole("button", { name: /notes\.md/ }).click();
     await files.getByText("origin notes", { exact: true }).waitFor();

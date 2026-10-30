@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Page } from "playwright";
-import { browserSuite } from "../fixtures/browser-diagnostics.js";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
+import {
+  browserSuite,
+  type BrowserJourney,
+} from "../fixtures/browser-diagnostics.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
@@ -25,7 +28,7 @@ const earlier = 60;
  * question and approval; a completed worker with a result and a nested delegate; and enough
  * older entries that the newest page leaves some above it.
  */
-async function seed(f: Fixture) {
+async function seed(f: Fixture, filler = earlier) {
   const started = await startOwnWork(f, "Command menu", "Atlas");
   const { a, work } = started;
   for (const [tool, args] of [
@@ -51,10 +54,14 @@ async function seed(f: Fixture) {
   await finishOwnWork(f, started);
   const d = f.service.domain();
   const worker = randomUUID(),
-    nested = randomUUID();
+    nested = randomUUID(),
+    elder = randomUUID(),
+    waiter = randomUUID();
   for (const [assignmentId, brief, requester] of [
     [worker, "Review keyboard support", a.assignmentId],
     [nested, "Check focus return", worker],
+    [elder, "Audit the older notes", a.assignmentId],
+    [waiter, "Cover toolbar launch", a.assignmentId],
   ] as const)
     d.execute({
       type: "assignment.create",
@@ -68,11 +75,12 @@ async function seed(f: Fixture) {
       resultDestination: "requester",
       requesterAssignmentId: requester,
     });
-  f.seedPersistedState((db) =>
-    db
-      .prepare("UPDATE domain_assignments SET state='completed' WHERE id=?")
-      .run(nested),
-  );
+  f.seedPersistedState((db) => {
+    for (const id of [nested, elder])
+      db.prepare(
+        "UPDATE domain_assignments SET state='completed' WHERE id=?",
+      ).run(id);
+  });
   const result = a.result("Keyboard support ready", undefined, worker);
   f.seedPersistedState((db) => {
     db.exec("PRAGMA foreign_keys = OFF");
@@ -112,10 +120,17 @@ async function seed(f: Fixture) {
         [],
       );
     // Older filler, so the newest page of 50 leaves entries above it.
-    for (let n = 0; n < earlier; n++) {
-      clock = t0 - (earlier - n) * 1000;
+    for (let n = 0; n < filler; n++) {
+      clock = t0 - (filler - n) * 1000;
       say(lead, `filler-${n}`, `Earlier note ${n}`);
     }
+    // An assignment delegated and heard from before all of that filler.
+    clock = t0 - (filler + 5) * 1000;
+    db.prepare(
+      "INSERT INTO coordination_delegations(assignmentId, delegatedAt) VALUES (?, ?)",
+    ).run(elder, clock);
+    clock += 1000;
+    say(bind(elder, `work-conv-${elder}`), "elder", "Elder note from before.");
     clock = t0;
     say(
       lead,
@@ -184,6 +199,7 @@ async function seed(f: Fixture) {
     for (const [assignmentId, at, text] of [
       [worker, 6000, "Worker found the menu opens on Enter."],
       [nested, 7000, "Nested delegate confirmed focus returns."],
+      [waiter, 8000, "Waiter is queued behind the review."],
     ] as const) {
       db.prepare(
         "INSERT INTO coordination_delegations(assignmentId, delegatedAt) VALUES (?, ?)",
@@ -192,7 +208,7 @@ async function seed(f: Fixture) {
       say(bind(assignmentId, `work-conv-${assignmentId}`), `n-${at}`, text);
     }
   });
-  return { ...started.a, worker, nested, result, work };
+  return { ...started.a, worker, nested, elder, waiter, result, work };
 }
 
 /** A newer captured entry on the lead's stream, shown after the next task read. */
@@ -300,10 +316,13 @@ for (const [label, viewport] of [
         await decisions.evaluate((e) => getComputedStyle(e).position),
         "sticky",
       );
-    assert.equal(
-      await page.getByRole("tab", { name: "History" }).count(),
-      1,
-      "History stays in this slice",
+    assert.deepEqual(
+      await page
+        .getByRole("tablist", { name: "Task sections" })
+        .getByRole("tab")
+        .allTextContents(),
+      ["Overview", "Files", "Changes", "Review"],
+      "the conversation replaced the History tab",
     );
 
     // The approval is decided in the card (its link keeps this entry); the conversation entry follows.
@@ -553,3 +572,251 @@ for (const [label, viewport] of [
     assert.equal(await page.locator("#context h3").isVisible(), true);
   });
 }
+
+const inView = (target: Locator) =>
+  target.evaluate((e) => {
+    const r = e.getBoundingClientRect();
+    return r.bottom > 0 && r.top < innerHeight;
+  });
+/** Waits for a link's scroll to settle on its target. */
+async function landsOn(page: Page, target: Locator, label: string) {
+  for (let i = 0; i < 50 && !(await inView(target)); i++)
+    await page.waitForTimeout(100);
+  assert.equal(await inView(target), true, label);
+}
+async function openFixture(
+  j: BrowserJourney,
+  filler = earlier,
+  viewport: typeof desktop = desktop,
+) {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const s = await seed(f, filler);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await stubReadiness(page);
+  return { f, s, web, page };
+}
+
+test("every former History link lands at its place in the conversation", async (_t, j) => {
+  const { f, s, web, page } = await openFixture(j);
+  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  const log = page.getByRole("log", { name: "Task conversation" });
+  await log.getByText("Second: all steps ran.").waitFor();
+  const question = f.service.coordinationView().readTask(s.taskId).questions[0];
+  assert.ok(question);
+  const delegation = (id: string) =>
+    log.locator(`[data-record-id="delegation:${id}"]`);
+  const open = async (id: string) =>
+    assert.equal(
+      await delegation(id)
+        .getByRole("button", { expanded: true })
+        .first()
+        .count(),
+      1,
+      `delegation ${id} is expanded`,
+    );
+  const reads: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/timeline?")) reads.push(request.url());
+  });
+
+  // The conversation's newest entry, however the former History link was written.
+  for (const link of ["#history", "?section=history", "#conversation"]) {
+    await page.goto(`${web.origin}/app/tasks/${s.taskId}${link}`);
+    await log.getByText("Second: all steps ran.").waitFor();
+    for (let i = 0; i < 50 && !(await atBottom(page)); i++)
+      await page.waitForTimeout(100);
+    assert.equal(await atBottom(page), true, link);
+    assert.equal(await page.getByRole("tab", { name: "History" }).count(), 0);
+  }
+
+  // Captured context sits in the inspector.
+  await page.goto(`${web.origin}/app/tasks/${s.taskId}?section=context`);
+  await page.locator("#context > details[open]").waitFor();
+
+  // An assignment opens its delegation, and those above it.
+  for (const link of [
+    `?assignment=${s.worker}`,
+    `?assignment=${s.worker}#history`,
+  ]) {
+    await page.goto(`${web.origin}/app/tasks/${s.taskId}${link}`);
+    await landsOn(page, delegation(s.worker), link);
+    await open(s.worker);
+  }
+  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.nested}`);
+  await landsOn(page, delegation(s.nested), "a nested delegation");
+  await open(s.worker);
+  await open(s.nested);
+
+  // The lead's own place is the conversation.
+  await page.goto(
+    `${web.origin}/app/tasks/${s.taskId}?assignment=${s.assignmentId}`,
+  );
+  await landsOn(page, page.locator("#conversation-heading"), "the lead");
+
+  // A request is reached in the conversation when the link names it.
+  await page.goto(
+    `${web.origin}/app/tasks/${s.taskId}?request=${question.interactionId}#history`,
+  );
+  await landsOn(
+    page,
+    log.locator(`[data-interaction-id="${question.interactionId}"]`),
+    "a request in the conversation",
+  );
+
+  // An assignment older than the loaded window: earlier pages are read until it is found.
+  reads.length = 0;
+  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.elder}`);
+  await landsOn(
+    page,
+    delegation(s.elder),
+    "an assignment older than the window",
+  );
+  await open(s.elder);
+  await log.getByText("Elder note from before.").waitFor();
+  assert.ok(
+    reads.some((url) => url.includes("before=")),
+    "read an earlier page",
+  );
+  assert.equal(await page.getByText("is older than the part").count(), 0);
+
+  // An open assignment whose entries are all on an older page has a placeholder at first;
+  // the link still reads the earlier page rather than stopping there.
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE domain_assignments SET state='pending' WHERE id=?")
+      .run(s.elder),
+  );
+  reads.length = 0;
+  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.elder}`);
+  await log.getByText("Elder note from before.").waitFor();
+  await landsOn(
+    page,
+    delegation(s.elder),
+    "an open assignment older than the window",
+  );
+  assert.ok(
+    reads.some((url) => url.includes("before=")),
+    "read an earlier page",
+  );
+});
+
+test("a link to a record beyond the ten-page bound stops at the conversation's top with Load earlier", async (_t, j) => {
+  // 560 older notes put the elder delegation 11 pages below the newest.
+  const { s, web, page } = await openFixture(j, 560);
+  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  const log = page.getByRole("log", { name: "Task conversation" });
+  await log.getByText("Second: all steps ran.").waitFor();
+  const earlierReads: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.url().includes("/timeline?") &&
+      request.url().includes("before=")
+    )
+      earlierReads.push(request.url());
+  });
+  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.elder}`);
+  const notice = page
+    .getByRole("status")
+    .filter({ hasText: "is older than the part" });
+  await notice.waitFor();
+  assert.match(
+    (await notice.textContent()) ?? "",
+    /^The conversation of .* is older than the part of the conversation loaded so far\.$/,
+  );
+  await landsOn(
+    page,
+    page.locator("#conversation-heading"),
+    "the conversation's top",
+  );
+  assert.equal(earlierReads.length, 10, "ten earlier pages at most");
+  await page
+    .getByRole("button", { name: "Load earlier", exact: true })
+    .waitFor();
+  assert.equal(
+    await log.locator(`[data-record-id="delegation:${s.elder}"]`).count(),
+    0,
+  );
+  // Load earlier carries on, and the delegation appears once its page does.
+  await page.getByRole("button", { name: "Load earlier", exact: true }).click();
+  await log.locator(`[data-record-id="delegation:${s.elder}"]`).waitFor();
+  assert.equal(
+    await notice.count(),
+    0,
+    "the notice goes once the record is loaded",
+  );
+});
+
+test("a delegate is messaged from its sub-conversation header, and an unconfirmed send keeps its draft and key", async (_t, j) => {
+  const { f, s, web, page } = await openFixture(j);
+  const sent: Array<{
+    type: string;
+    key: string;
+    message?: string;
+    recipientAssignmentId?: string;
+    raw: string;
+  }> = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/operator/commands"
+    )
+      sent.push({ ...request.postDataJSON(), raw: request.postData() ?? "" });
+  });
+  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  const log = page.getByRole("log", { name: "Task conversation" });
+  await log.getByText("Second: all steps ran.").waitFor();
+  // Only a pending or running delegate takes a message; the finished one has no form.
+  const done = log.locator(`[data-record-id="delegation:${s.worker}"]`);
+  await done.getByRole("button").first().click();
+  await done.getByText("Worker found the menu opens on Enter.").waitFor();
+  assert.equal(await done.locator("form.assignment-message").count(), 0);
+  const waiter = log.locator(`[data-record-id="delegation:${s.waiter}"]`);
+  assert.equal(
+    await waiter.locator("form.assignment-message").count(),
+    0,
+    "collapsed",
+  );
+  await waiter.getByRole("button").first().click();
+  const box = waiter.getByRole("textbox", { name: /^Message / });
+  const send = waiter.getByRole("button", { name: /^Send to / });
+  assert.equal(await send.isDisabled(), true, "nothing to send yet");
+
+  // The reply never reaches the service: the draft stays, and the check replays the same command.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await box.fill("Also cover toolbar launch.");
+  await send.click();
+  await waiter
+    .getByRole("button", { name: "Check whether it saved" })
+    .waitFor();
+  assert.equal(await box.inputValue(), "Also cover toolbar launch.");
+  assert.equal(sent.length, 1);
+  await page.unroute("**/api/operator/commands");
+  await waiter.getByRole("button", { name: "Check whether it saved" }).click();
+  await waiter.getByText(/^Sent to /).waitFor();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1]?.raw, sent[0]?.raw, "same key and body");
+  assert.equal(sent[0]?.type, "message");
+  assert.equal(sent[0]?.recipientAssignmentId, s.waiter);
+  const messages = f.service
+    .coordinationView()
+    .readTask(s.taskId)
+    .messages.filter(
+      (m) =>
+        m.recipientAssignmentId === s.waiter &&
+        m.eventType === "operator-message",
+    );
+  assert.equal(messages.length, 1, "one message, one receipt");
+  assert.equal(await box.inputValue(), "");
+});

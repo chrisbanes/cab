@@ -5,6 +5,7 @@ import {
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import { holdPills } from "../../web/src/settings-view.js";
+import { openOverviewCard } from "../fixtures/task-tabs.js";
 import {
   noPageOverflow,
   phone,
@@ -185,7 +186,7 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
   assert.deepEqual(hrefs, [
     `/runtime/assignment/${ids.assignmentId}`,
     `/runtime/task/${ids.taskId}`,
-    `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}#history`,
+    `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
     `/app/tasks/${ids.taskId}?assignment=${ids.assignmentId}`,
     `/assignment/${ids.assignmentId}`,
   ]);
@@ -198,6 +199,8 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
   await page
     .getByRole("link", { name: "Inspect execution", exact: true })
     .click();
+  // The assignment's execution notices, with its Recovery link, sit in the Assignments card.
+  await openOverviewCard(page, "assignments");
   const recoveryLink = page
     .getByRole("link", { name: "Recovery", exact: true })
     .first();
@@ -301,7 +304,7 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
   assert.deepEqual(siblingHrefs, [
     `/runtime/assignment/${siblingId}`,
     `/runtime/task/${ids.taskId}`,
-    `/app/tasks/${ids.taskId}?assignment=${siblingId}#history`,
+    `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
     `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
     `/assignment/${siblingId}`,
   ]);

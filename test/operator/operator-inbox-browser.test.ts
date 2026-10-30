@@ -1770,7 +1770,7 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
     (await aside
       .getByRole("link", { name: "Task evidence" })
       .getAttribute("href")) ?? "",
-    /#history$/,
+    /#conversation$/,
   );
   // Evidence links appear once on the page, in the inspector.
   assert.equal(
@@ -1785,6 +1785,14 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
     await page.getByRole("link", { name: "Requesting conversation" }).count(),
     item.conversation ? 1 : 0,
   );
+  // The conversation link names the requester's sub-conversation on the Overview.
+  if (item.conversation)
+    assert.match(
+      (await page
+        .getByRole("link", { name: "Requesting conversation" })
+        .getAttribute("href")) ?? "",
+      /^\/app\/tasks\/[^?#]+\?assignment=[^#]+$/,
+    );
   await captureBrowserEvidence(page, "1366-inbox-inspector", {
     fullPage: false,
   });

@@ -9,7 +9,7 @@ import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { markTaskReady, seedReviewTask } from "../fixtures/task-review.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { rememberAnyReadiness } from "../fixtures/operator-work.js";
-import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
+import { openOverviewCard } from "../fixtures/task-tabs.js";
 import {
   openSearchFromSidebar,
   searchDayEnd,
@@ -444,18 +444,17 @@ test("same-task historical Search entries preserve manual origin selections and 
     .getByText("Entry manually selected result", { exact: true })
     .waitFor();
   await page.getByLabel("Editable reply").fill("Shared unfinished entry reply");
-  const assignmentDisclosure = page.locator(
-    `#history details[data-record-id="${a.assignmentId}"]`,
-  );
+  await openOverviewCard(page, "assignments");
+  const assignmentDisclosure = page
+    .locator("#assignments .assignment-facts")
+    .first();
+  await assignmentDisclosure.locator(":scope > summary").click();
   assert.equal(
     await assignmentDisclosure.evaluate(
       (el) => (el as HTMLDetailsElement).open,
     ),
     true,
   );
-  await openTaskTab(page, "History");
-  await assignmentDisclosure.locator(":scope > summary").click();
-  await openTaskTab(page, "Overview");
 
   const brief = page.locator(`#brief [data-record-id="${source.sourceId}"]`);
   await brief.locator("summary").click();
@@ -518,7 +517,7 @@ test("same-task historical Search entries preserve manual origin selections and 
     await assignmentDisclosure.evaluate(
       (el) => (el as HTMLDetailsElement).open,
     ),
-    false,
+    true,
   );
   await captureBrowserEvidence(page, "1366-restored-manual-task-entry");
   await page.goForward();

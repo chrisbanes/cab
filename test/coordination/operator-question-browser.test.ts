@@ -1031,7 +1031,7 @@ test("action Inbox preserves drafts across exact task entry, filter and phone qu
     .fill("Inbox retained draft");
   await captureBrowserEvidence(page, "1366-inbox-draft", { fullPage: false });
   await page.getByRole("link", { name: "Task evidence", exact: true }).click();
-  // Task evidence opens History; the strip's Next button opens the request on Overview.
+  // Task evidence opens the conversation on Overview; the strip's Next button opens the request.
   await page
     .locator("[data-task-strip]")
     .getByRole("button", { name: "Next: you · answer question" })
@@ -1242,7 +1242,7 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
   );
   await uniqueIds();
   await page.getByRole("link", { name: "Task evidence", exact: true }).click();
-  // Task evidence opens History; the strip's Next button opens the request on Overview.
+  // Task evidence opens the conversation on Overview; the strip's Next button opens the request.
   await page
     .locator("[data-task-strip]")
     .getByRole("button", { name: "Next: you · answer question" })

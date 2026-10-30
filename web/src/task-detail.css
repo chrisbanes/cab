@@ -1108,6 +1108,10 @@ a.task-source-chip:hover {
   padding: 0 var(--space-12) var(--space-8);
 }
 
+.conv-delegation-message {
+  margin: 0 var(--space-12) var(--space-12);
+}
+
 .conv-delegation-body {
   display: flex;
   flex-direction: column;

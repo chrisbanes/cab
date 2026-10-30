@@ -21,6 +21,7 @@ import {
   commandsLabel,
   conversationTree,
   gapCopy,
+  hasDelegation,
   mergeTimeline,
   pendingBelow,
   prependTimeline,
@@ -45,15 +46,21 @@ export interface TaskTimeline {
   /** Counts newest-page reads that changed what was shown, so the page can offer Jump to latest. */
   appended: number;
   loadEarlier: () => void;
+  /** Reads older pages until the window satisfies `found`; the window it ends with, or null when none is read. */
+  loadUntil: (
+    found: (window: TimelineWindow) => boolean,
+  ) => Promise<{ window: TimelineWindow | null; found: boolean }>;
   retry: () => void;
 }
 
 const pageLimit = 50;
 /** Older pages read to finish an unfinished entry that fell behind the newest page. */
 const maxCatchUpPages = 5;
+/** Older pages read to reach a linked record before the page stops at "Load earlier". */
+const maxFindPages = 10;
 
 /**
- * Reads the newest page whenever the task read changes (`observedAt`) and merges it into the
+ * Reads the newest page whenever the task read changes (`taskRead`) and merges it into the
  * retained window by entry and the service's ordering key. `beforeApply` runs just before a
  * change is committed so the page can capture its reading position; `first` marks the opening
  * read, where the page stays where it is.
@@ -63,7 +70,7 @@ export function useTaskTimeline({
   taskId,
   cache,
   setCache,
-  observedAt,
+  taskRead,
   running: runningAssignments,
   beforeApply,
 }: {
@@ -71,7 +78,8 @@ export function useTaskTimeline({
   taskId: string;
   cache: ConversationCache | null;
   setCache: (value: ConversationCache | null) => void;
-  observedAt: number | null | undefined;
+  /** The task read this conversation goes with; each new read (not each new time) reads the newest page again. */
+  taskRead: unknown;
   /** Assignments the task read shows running: only their unfinished entries can still finish. */
   running: ReadonlySet<string>;
   beforeApply: (first: boolean) => void;
@@ -166,38 +174,56 @@ export function useTaskTimeline({
     life.current = new AbortController();
     return () => life.current.abort();
   }, [read]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the task read's time is the trigger.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the task read is the trigger.
   useEffect(() => {
     const abort = new AbortController();
     void refresh(abort.signal);
     return () => abort.abort();
-  }, [read, observedAt]);
+  }, [read, taskRead]);
 
+  // One read of the next older page at a time; a second caller waits for it.
+  const flight = useRef<Promise<void> | null>(null);
   const loadEarlier = () => {
+    flight.current ??= readEarlier().finally(() => {
+      flight.current = null;
+    });
+    return flight.current;
+  };
+  const readEarlier = async () => {
     const current = held.current.cache,
       signal = life.current.signal;
-    if (!current?.cursor || held.current.loadingEarlier) return;
+    if (!current?.cursor) return;
     commit({ loadingEarlier: true });
-    read(`&before=${current.cursor}`, signal).then(
-      ({ data: page }) => {
-        if (signal.aborted) return;
-        // A newer page merged while this one was in flight: the older page no longer fits beneath it.
-        if (held.current.cache !== current)
-          return commit({ loadingEarlier: false });
-        const joined = prependTimeline(current.window, page);
-        apply.current(false);
-        commit({
-          loadingEarlier: false,
-          error: null,
-          cache: joined ? { window: joined, cursor: page.olderCursor } : null,
-        });
-        // The visibility revision changed under the held pages: start again from the newest.
-        if (!joined) void refresh(signal);
-      },
-      (error) => {
-        if (!signal.aborted) fail(error);
-      },
-    );
+    try {
+      const { data: page } = await read(`&before=${current.cursor}`, signal);
+      if (signal.aborted) return;
+      // A newer page merged while this one was in flight: the older page no longer fits beneath it.
+      if (held.current.cache !== current)
+        return commit({ loadingEarlier: false });
+      const joined = prependTimeline(current.window, page);
+      apply.current(false);
+      commit({
+        loadingEarlier: false,
+        error: null,
+        cache: joined ? { window: joined, cursor: page.olderCursor } : null,
+      });
+      // The visibility revision changed under the held pages: start again from the newest.
+      if (!joined) void refresh(signal);
+    } catch (error) {
+      if (!signal.aborted) fail(error);
+    }
+  };
+  // Pages older than the window are read, at most `maxFindPages`, until `found` holds for it.
+  const loadUntil = async (found: (window: TimelineWindow) => boolean) => {
+    for (let n = 0; ; n++) {
+      const window = held.current.cache?.window ?? null;
+      if (window && found(window)) return { window, found: true };
+      if (n === maxFindPages || !held.current.cache?.cursor)
+        return { window, found: false };
+      await loadEarlier();
+      if (held.current.error !== null || life.current.signal.aborted)
+        return { window: held.current.cache?.window ?? null, found: false };
+    }
   };
   return {
     window: view.cache?.window ?? null,
@@ -205,7 +231,8 @@ export function useTaskTimeline({
     error: view.error,
     loadingEarlier: view.loadingEarlier,
     appended: view.appended,
-    loadEarlier,
+    loadEarlier: () => void loadEarlier(),
+    loadUntil,
     retry: () => void refresh(life.current.signal),
   };
 }
@@ -240,6 +267,7 @@ export function TaskConversation({
   requests,
   following,
   openChanges,
+  messageAssignment,
 }: {
   client: OperatorClient;
   taskId: string;
@@ -251,6 +279,8 @@ export function TaskConversation({
   /** True while the page is at the bottom, so the log announces what arrives. */
   following: boolean;
   openChanges: () => void;
+  /** The form that sends a message to a pending or running delegated assignment. */
+  messageAssignment: (assignment: Assignment) => ReactNode;
 }) {
   const expanded = (key: string) => state.expanded.has(key);
   const toggle = (key: string) => {
@@ -273,6 +303,18 @@ export function TaskConversation({
         : [],
     [entries, data.assignments, data.leadAssignmentId],
   );
+  // A linked record the window did not hold is named until it is loaded; nothing is said while the window is unread.
+  const notice = state.conversationNotice;
+  const missing =
+    notice &&
+    entries &&
+    !(notice.kind === "assignment"
+      ? hasDelegation(items, notice.id)
+      : entries.some(
+          (e) => e.kind === "request" && e.interactionId === notice.id,
+        ))
+      ? notice
+      : null;
   const ctx: Context = {
     client,
     visibility: timeline.window?.visibilityRevision ?? null,
@@ -283,6 +325,8 @@ export function TaskConversation({
     toggle,
     requests,
     openChanges,
+    messageAssignment,
+    earlier: timeline.hasEarlier,
   };
   return (
     <section
@@ -306,6 +350,14 @@ export function TaskConversation({
           <Button variant="secondary" onClick={timeline.retry}>
             Retry
           </Button>
+        </p>
+      )}
+      {missing && (
+        <p role="status" className="conversation-status">
+          {missing.subject}{" "}
+          {timeline.hasEarlier
+            ? "is older than the part of the conversation loaded so far."
+            : "is not in the retained conversation."}
         </p>
       )}
       {timeline.hasEarlier && (
@@ -347,6 +399,9 @@ interface Context {
   toggle: (key: string) => void;
   requests: RequestPlaces;
   openChanges: () => void;
+  messageAssignment: (assignment: Assignment) => ReactNode;
+  /** Older pages exist, so an assignment with nothing loaded may still have entries there. */
+  earlier: boolean;
 }
 
 function Items({ items, ctx }: { items: ConversationItem[]; ctx: Context }) {
@@ -744,6 +799,9 @@ function Delegation({
   const a: Assignment | undefined = item.assignment;
   const runtime = item.entry?.runtime ?? a?.runtime;
   const state = a?.state ?? item.entry?.state;
+  const canMessage =
+    (state === "pending" || state === "running") &&
+    item.id !== ctx.data.leadAssignmentId;
   const brief = a?.brief?.trim().split("\n")[0];
   const result = ctx.data.results
     .filter((r) => r.assignmentId === item.id)
@@ -765,7 +823,9 @@ function Delegation({
           <span className="identifier-line">
             <ShortId value={item.id} focusable={false} />
             {runtime && ` · ${executionHarnessLabels[runtime.harness]}`}
-            {item.entry === null && " · delegated earlier"}
+            {item.entry === null &&
+              (item.items.length > 0 || ctx.earlier) &&
+              " · delegated earlier"}
           </span>
           {state && (
             <StatusBadge
@@ -788,10 +848,19 @@ function Delegation({
           {result && ` · Result: ${(result.summary ?? "").slice(0, 120)}`}
         </p>
       )}
+      {open && a && canMessage && (
+        <div className="conv-delegation-message">
+          {ctx.messageAssignment(a)}
+        </div>
+      )}
       {open && (
         <div className="conv-delegation-body">
           {item.items.length === 0 ? (
-            <p className="muted">Nothing captured for this assignment yet.</p>
+            <p className="muted">
+              {item.entry === null && ctx.earlier
+                ? "Earlier entries, if any, are not loaded yet."
+                : "Nothing captured for this assignment yet."}
+            </p>
           ) : (
             <Items items={item.items} ctx={ctx} />
           )}

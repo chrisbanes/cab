@@ -259,13 +259,23 @@ for (const [label, viewport] of [
     let interactions = 0;
     await link.click();
     interactions++;
-    await page.waitForURL(new RegExp(`/app/tasks/${taskId}#history$`));
-    const history = page
+    await page.waitForURL(new RegExp(`/app/tasks/${taskId}#conversation$`));
+    const overview = page
       .getByRole("tablist", { name: "Task sections" })
-      .getByRole("tab", { name: "History" });
-    await history.waitFor();
-    assert.equal(await history.getAttribute("aria-selected"), "true");
-    await assertFirstScreen(page, [page.locator("#history h3").first()]);
+      .getByRole("tab", { name: "Overview" });
+    await overview.waitFor();
+    assert.equal(await overview.getAttribute("aria-selected"), "true");
+    // The link lands on the conversation's newest entry, so the page is scrolled to it.
+    const log = page.getByRole("log", { name: "Task conversation" });
+    await log.waitFor();
+    await settle(page);
+    const box = await log.boundingBox();
+    const height = await page.evaluate(() => innerHeight);
+    assert.ok(
+      box && box.y < height && box.y + box.height > 0,
+      JSON.stringify(box),
+    );
+    await noPageOverflow(page);
     assert.equal(interactions, 1);
   });
 }

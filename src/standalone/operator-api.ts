@@ -3443,7 +3443,7 @@ export class OperatorApi {
           projectId: String(task.projectId),
           projectName: summary.project.name,
           taskTitle: summary.title,
-          evidence: `/app/tasks/${taskId}#history`,
+          evidence: `/app/tasks/${taskId}#conversation`,
         };
         const attentionCode = interventionCode(summary.attention.codes);
         if (attentionCode)
@@ -3502,7 +3502,7 @@ export class OperatorApi {
                   : "Operator answer requested",
             attentionCode: delivering ? "question-delivery" : null,
             destination: `/app/tasks/${taskId}?request=${q.interactionId}`,
-            conversation: `/app/tasks/${taskId}?assignment=${q.requestingAssignmentId}#history`,
+            conversation: `/app/tasks/${taskId}?assignment=${q.requestingAssignmentId}`,
           });
         }
         if (this.requireTask(taskId).version !== task.version)

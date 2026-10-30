@@ -16,7 +16,7 @@ import {
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import { leadResumeNotice } from "../../web/src/lead-feedback.js";
-import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
+import { openOverviewCard } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-review-browser");
 test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, comparison identities and local artifact feedback on desktop and phone", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
@@ -993,10 +993,12 @@ test("every lead composer shows the same resume line for a completed lead and ke
     "Please review evidence artifact Lead screenshot.",
   );
   assert.ok(followUp?.reference?.artifactId);
-  // The message is listed in History.
-  await openTaskTab(page, "History");
+  // The message is listed in the conversation.
   await page
-    .getByText(/assignment-follow-up · requested by operator ·/)
+    .locator("#conversation")
+    .getByText("Please review evidence artifact Lead screenshot.", {
+      exact: true,
+    })
     .first()
     .waitFor();
   assert.equal(f.service.domain().task(a.taskId).state, "open");

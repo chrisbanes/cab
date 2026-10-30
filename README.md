@@ -128,7 +128,7 @@ owns delivery scope and status.
   captured context and separate local and GitHub replies. Search covers permitted
   retained tasks, decisions and results, with historical navigation and preserved
   return state.
-- **Assignment history.** Assignment pages show captured assistant messages for the
+- **Assignment conversation.** The task conversation shows captured assistant messages for the
   exact task, assignment and runtime turn. Only completed, sanitized text is
   retained; unfinished messages show progress metadata and omitted text is labelled.
   Known private instructions, credential values and control paths are redacted before

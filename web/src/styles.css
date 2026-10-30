@@ -1069,8 +1069,7 @@ nav {
   align-items: center;
   font-weight: 600;
 }
-.task-workspace .literal-text,
-.literal-preview {
+.task-workspace .literal-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;
