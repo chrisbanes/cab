@@ -2085,8 +2085,10 @@ the task branch, and the request carries that commit as `sha`, so GitLab refuses
 cab never sets auto-merge: every merge sends `auto_merge: false`. When the project uses merge trains,
 the request is added to the train instead and the action stays unproved as `provider-merge-train-pending`
 while a car holds it (`idle`, `fresh`, `stale` or `merging`). A later read settles it as merged, or as
-`provider-merge-train-dropped` when the car is gone, or merged without the merge request being
-merged; dropped is concluded only for a merge the train was seen holding. A merge request with
+`provider-merge-train-dropped` when the car is gone, merged without the merge request being merged,
+or the head moved (a push takes the request off the train); dropped is concluded only for a merge the
+train was seen holding, and a failed read keeps that evidence. GitLab reports a request on a train as
+auto-merge set, so the car decides before that flag does. A merge request with
 auto-merge set by someone else stays unproved as `provider-auto-merge-set`. A merged merge request is
 acceptance at any head, as on GitHub. Merging is irreversible and cab has no unmerge or revert, and no
 action to cancel auto-merge or to take a request off a train: the operator does that in GitLab, and

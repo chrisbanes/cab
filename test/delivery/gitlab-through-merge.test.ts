@@ -219,7 +219,9 @@ test("a merge train merge that leaves the train unmerged is dropped, with no fur
     const m = await throughMerge(w, true);
     await m.merge();
     assert.equal(m.action().reason, "provider-merge-train-pending");
+    // GitLab clears auto-merge when the car leaves the train.
     w.remote.state.cars.delete(m.mr.iid);
+    m.mr.merge_when_pipeline_succeeds = false;
     await m.refresh();
     assert.deepEqual(
       [m.action().state, m.action().reason],
@@ -243,6 +245,7 @@ test("a train that never showed the merge cannot be called dropped", async (t) =
     w.remote.state.loseMergeResponse = true;
     await m.merge();
     w.remote.state.cars.delete(m.mr.iid);
+    m.mr.merge_when_pipeline_succeeds = false;
     await m.refresh();
     const action = m.action();
     assert.equal(action?.state, "uncertain");

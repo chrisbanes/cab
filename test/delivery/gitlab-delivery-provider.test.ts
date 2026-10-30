@@ -1286,12 +1286,13 @@ test("a rejected merge is a definitive failure, and a lost response is settled b
   );
   assert.equal(lost.merges.length, 1);
 
-  // A write that is rejected without effect stays unproved when it cannot be told apart, and is not sent again.
+  // A write whose response is lost before it took effect stays unproved while the read shows the request open.
   const unseen = mergeRequestWorld();
-  unseen.state.intercept = (method, path) =>
-    method === "PUT" && path.endsWith("/merge")
-      ? Response.json({}, { status: 500 })
-      : undefined;
+  unseen.state.intercept = (method, path) => {
+    if (method === "PUT" && path.endsWith("/merge"))
+      throw new TypeError("fetch failed");
+    return undefined;
+  };
   const unseenRec = record(
     action,
     await unseen.provider.preflight(action, policy),
@@ -1299,6 +1300,11 @@ test("a rejected merge is a definitive failure, and a lost response is settled b
   const open = await unseen.provider.performAction(unseenRec);
   assert.deepEqual(
     [open.state, open.reason],
+    ["uncertain", "provider-effect-unproved"],
+  );
+  const again = await unseen.provider.inspectAction(unseenRec);
+  assert.deepEqual(
+    [again.state, again.reason],
     ["uncertain", "provider-effect-unproved"],
   );
   assert.equal(unseen.merges.length, 0);
@@ -1360,6 +1366,7 @@ test("a merge train merge joins the train, stays pending, and ends merged or dro
   for (const gone of [undefined, "skip_merged", "merged"]) {
     if (gone) dropped.state.cars.set(iid, gone);
     else dropped.state.cars.delete(iid);
+    dropped.state.mergeRequests[0]!.merge_when_pipeline_succeeds = false;
     const out = await dropped.provider.inspectAction(seen);
     assert.deepEqual(
       [out.state, out.reason, out.receipt],
@@ -1370,6 +1377,38 @@ test("a merge train merge joins the train, stays pending, and ends merged or dro
   dropped.state.mergeRequests[0]!.state = "closed";
   assert.equal(
     (await dropped.provider.inspectAction(seen)).reason,
+    "provider-merge-train-dropped",
+  );
+  // A push to the branch takes the request off the train: the moved head reads as dropped, not as an unreadable request.
+  dropped.state.mergeRequests[0]!.state = "opened";
+  dropped.state.mergeRequests[0]!.sha = old;
+  assert.equal(
+    (await dropped.provider.inspectAction(seen)).reason,
+    "provider-merge-train-dropped",
+  );
+  // A merge at another head is not the merge cab asked for.
+  dropped.state.mergeRequests[0]!.state = "merged";
+  assert.equal((await dropped.provider.inspectAction(seen)).state, "uncertain");
+  // A failed read keeps the train's evidence, so a later drop is still concluded.
+  const flaky = mergeRequestWorld();
+  flaky.state.project = trainProject;
+  const held = await flaky.provider.performAction(record(action, before));
+  const heldRec = record(action, before, {
+    state: "uncertain",
+    observation: held,
+  });
+  flaky.state.intercept = (_m, path) =>
+    path.includes("/merge_trains/")
+      ? Response.json({}, { status: 503 })
+      : undefined;
+  const failed = await flaky.provider.inspectAction(heldRec);
+  assert.equal(failed.reason, "provider-merge-train-pending");
+  flaky.state.intercept = undefined;
+  flaky.state.cars.delete(iid);
+  flaky.state.mergeRequests[0]!.merge_when_pipeline_succeeds = false;
+  assert.equal(
+    (await flaky.provider.inspectAction({ ...heldRec, observation: failed }))
+      .reason,
     "provider-merge-train-dropped",
   );
 

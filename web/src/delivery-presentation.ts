@@ -156,4 +156,4 @@ export const deliveryActionLine = (a: {
   reason: string | null;
   operationId: string;
 }) =>
-  `${a.caller === "service" && a.event ? `${statusMappingActionLabel} (${statusEventLabels[a.event]}) · ` : ""}${a.kind}: ${a.state} · ${statusMappingActionNote(a.reason) ?? (a.reason ? (mergeTrainNotes.get(a.reason) ?? a.reason) : "receipt recorded")} · operation ${a.operationId}`;
+  `${a.caller === "service" && a.event ? `${statusMappingActionLabel} (${statusEventLabels[a.event]}) · ` : ""}${a.kind}: ${a.state} · ${statusMappingActionNote(a.reason) ?? (a.reason && mergeTrainNotes.get(a.reason)) ?? a.reason ?? "receipt recorded"} · operation ${a.operationId}`;

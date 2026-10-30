@@ -201,6 +201,8 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
         )
           return json({}, 405);
         state.cars.set(iid, state.carStatus);
+        // GitLab reports a request on a train as auto-merge set, and clears it when the car leaves.
+        train.merge_when_pipeline_succeeds = true;
         if (state.loseMergeResponse) throw new TypeError("fetch failed");
         return json({ status: state.carStatus }, 201);
       }

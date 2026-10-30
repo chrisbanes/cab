@@ -719,7 +719,11 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     } catch {
       return {
         state: "uncertain",
-        reason: "provider-readback-unavailable",
+        // A failed read must not forget that the train was seen holding the merge.
+        reason:
+          record.observation?.reason === trainPendingReason
+            ? trainPendingReason
+            : "provider-readback-unavailable",
         receipt: null,
       };
     }
@@ -743,8 +747,16 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           },
         )
       : null;
-    const mr = await this.targetMergeRequest(a.target);
-    if (mr.state === "merged")
+    // A head that moved is read, not refused: pushing to the branch is how GitLab drops a request from the train.
+    const mr = await this.boundMergeRequest(a.target);
+    if (
+      mr.source_branch !== a.target.headRef ||
+      mr.target_branch !== a.target.baseRef
+    )
+      throw new Error("provider-head-changed");
+    if (mr.state === "merged") {
+      if (mr.sha !== a.target.expectedHeadSha)
+        throw new Error("provider-head-changed");
       return {
         state: "confirmed-success",
         reason: null,
@@ -755,16 +767,18 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           merged: true,
         },
       };
+    }
     const uncertain = (reason: string) => ({
       state: "uncertain" as const,
       reason,
       receipt: null,
     });
+    // GitLab reports a request on a train as auto-merge set, so the car decides before that flag does.
+    if (car !== null && trainPending.includes(car))
+      return uncertain(trainPendingReason);
     if (mr.merge_when_pipeline_succeeds)
       return uncertain("provider-auto-merge-set");
     if (!train) return uncertain("provider-effect-unproved");
-    if (car !== null && trainPending.includes(car))
-      return uncertain(trainPendingReason);
     // Dropped is concluded only for a merge the train was seen holding.
     return record.observation?.reason === trainPendingReason
       ? {
