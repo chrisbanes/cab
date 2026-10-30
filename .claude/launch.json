@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "prototype-task-thread",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "prototype:task-thread"],
+      "port": 5180
+    }
+  ]
+}
