@@ -51,6 +51,7 @@ async function fixture(
     "issue.comment",
     "issue.close",
   ],
+  readiness: unknown = null,
 ) {
   for (const key of Object.keys(names) as (keyof typeof names)[]) {
     const previous = process.env[names[key]];
@@ -131,7 +132,8 @@ async function fixture(
     expectedVersion: 1,
     instance: site,
     selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
-  });
+    readiness,
+  } as never);
   await api.refreshSources();
   const store = service
     .githubSources()
@@ -286,4 +288,15 @@ test("a Jira closure by another account holds the task as unproved, and a reopen
     undefined,
   );
   assert.ok(operationId);
+});
+
+test("cab's own closure under a status readiness rule is judged on the status before it moved", async (t) => {
+  const f = await fixture(t, undefined, {
+    mode: "all",
+    conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
+  });
+  closeAs(f, "acct-cab");
+  await f.service.refreshGitHub();
+  assert.equal(f.store.deliveryClosure(issueId)?.closedEventId, "700");
+  assert.equal(f.store.hold(issueId)?.reason, "closed");
 });

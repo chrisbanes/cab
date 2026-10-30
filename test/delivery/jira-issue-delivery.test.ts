@@ -57,6 +57,7 @@ function world(
     "issue.close",
   ],
   mode: "allow" | "approval" = "allow",
+  readiness: unknown = null,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "cab-jira-delivery-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -94,7 +95,8 @@ function world(
     expectedVersion: 1,
     instance: site,
     selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
-  });
+    readiness,
+  } as never);
   const sources = new GitHubSourceStore(db, jiraTracker);
   sources.reconcileSelection(
     projectId,
@@ -241,15 +243,11 @@ test("a Jira action needs a grant on the Jira project, and an approval grant wai
 });
 
 test("an agent cannot add or remove a Jira readiness label, but can change any other", async (t) => {
-  const w = world(t);
-  w.db
-    .prepare(
-      "UPDATE project_task_sources SET readiness = ? WHERE projectId = ?",
-    )
-    .run(
-      JSON.stringify({ mode: "any", conditions: [label("Ready")] }),
-      w.projectId,
-    );
+  // The rule is saved through jira.configure, as an operator would.
+  const w = world(t, undefined, "allow", {
+    mode: "any",
+    conditions: [label("Ready")],
+  });
   const labels = (add: string[], remove: string[]): ExternalAction => ({
     kind: "issue.labels",
     target,

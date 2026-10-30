@@ -74,7 +74,8 @@ const titleStartsWith = (title: string, key: string) =>
   title.startsWith(key) && !/[A-Za-z0-9_-]/.test(title.charAt(key.length));
 const closingKeyword =
   /\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)\b/i;
-// No trailing boundary: GitLab links `ABC-7x` as ABC-7.\nconst jiraKeyShaped = /\b[A-Z][A-Z0-9_]*-\d+/;
+// No trailing boundary: GitLab links `ABC-7x` as ABC-7.
+const jiraKeyShaped = /\b[A-Z][A-Z0-9_]*-\d+/;
 /**
  * Whether a line has a closing keyword (GitLab's default set) followed by something shaped like a
  * Jira key. It errs toward refusal: any key on the line counts, even one the keyword is not next to.
