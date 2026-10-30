@@ -1934,7 +1934,8 @@ export const taskTimelineSchema = envelope(
                 kind: z.literal("assistant"),
                 workId: z.string().min(1),
                 lifecycle: z.enum(["started", "streaming", "completed"]),
-                text: safeText,
+                // Captured text is bounded at 64 KiB, as in the assignment history.
+                text: z.string().nullable(),
               })
               .strict(),
             z
@@ -2047,7 +2048,8 @@ export const taskToolOutputSchema = envelope(
       reason: z
         .enum(["size-limit", "redaction-unavailable", "not-captured"])
         .nullable(),
-      text: safeText,
+      // Bounded by the 48 KiB capture limit rather than the 16,000-character field limit.
+      text: z.string().nullable(),
     })
     .strict(),
 );

@@ -94,6 +94,8 @@ async function setup(t: { after(fn: () => unknown): void }) {
       },
       [],
     );
+    clock = t0 + 7;
+    completed("long", "z".repeat(20_000));
     clock = t0 + 10;
     history.omitItem(binding, "too-big", "size-limit");
     clock = t0 + 20;
@@ -298,6 +300,12 @@ test("timeline pages concatenate to one total order with strictly increasing key
       `limit ${limit}`,
     );
   }
+  // Captured text past the 16,000-character field limit still reads, as in the history read.
+  assert.equal(
+    all.find((e) => e.kind === "assistant" && e.text?.startsWith("zzz"))?.text
+      .length,
+    20_000,
+  );
   const ids = all.map((e) => e.entryId);
   assert.equal(new Set(ids).size, ids.length);
   const keys = all.map((e) => e.key as string);
