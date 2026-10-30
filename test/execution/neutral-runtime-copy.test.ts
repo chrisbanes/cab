@@ -9,6 +9,7 @@ const runtimeNaming = /\bCodex\b|App Server/;
 /** Where Codex naming is truthful runtime identity or disclosure. */
 const allowed: Record<string, { reason: string; lines?: string[] }> = {
   [join("src", "standalone", "codex.ts")]: { reason: "the Codex runtime" },
+  [join("src", "standalone", "codex-home.ts")]: { reason: "the Codex home" },
   [join("src", "standalone", "readiness.ts")]: {
     reason: "the Codex readiness checks",
   },

@@ -24,10 +24,14 @@ export const operatorAuthFile = (environment: NodeJS.ProcessEnv): string =>
     "auth.json",
   );
 
-/** Thrown by `thread/resume` for a Codex conversation started under the previous Codex home. */
+/** Why a Codex conversation started under the previous Codex home is not resumed. */
+export const previousCodexHomeMessage =
+  "Started under the previous Codex home; restart the task";
+
+/** Thrown by `thread/resume` for such a conversation; admission normally refuses it first. */
 export class PreviousCodexHomeError extends Error {
   constructor() {
-    super("Started under the previous Codex home; restart the task");
+    super(previousCodexHomeMessage);
   }
 }
 

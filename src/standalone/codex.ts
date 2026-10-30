@@ -1789,6 +1789,9 @@ export class CodexRuntime implements Runtime {
       ? this.executable
       : ((await resolveOnPath(this.executable, environment)) ??
         this.executable);
+    const codex = this.options.codex;
+    // Awaited before the started guard so overlapping starts cannot both spawn.
+    if (codex) await prepareCodexHome(codex, environment);
     if (this.child) throw new Error("Runtime already started");
     this.failure = undefined;
     this.clearConversationCaptures();
@@ -1801,8 +1804,6 @@ export class CodexRuntime implements Runtime {
     this.nativeTurns.clear();
     this.invalidNativeTurns.clear();
     this.nativeReadbacks.clear();
-    const codex = this.options.codex;
-    if (codex) await prepareCodexHome(codex, environment);
     const child = spawn(
       executable,
       [
@@ -1991,20 +1992,28 @@ export class CodexRuntime implements Runtime {
     return response.thread.id;
   }
 
+  /**
+   * Whether the thread may predate cab's Codex home. Fails closed: a thread without a durable
+   * cab-home marker, or whose marker cannot be read, counts as earlier.
+   */
+  startedUnderPreviousHome(threadId: string): boolean {
+    if (!this.options.codex) return false;
+    try {
+      return (
+        this.options.safety.threadQualification(threadId)?.codexHome !==
+        cabCodexHome
+      );
+    } catch {
+      return true;
+    }
+  }
+
   async resumeThread(
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
   ): Promise<void> {
-    // Fail closed: a thread without a durable cab-home marker predates the switch.
-    if (this.options.codex) {
-      let marker: string | null | undefined;
-      try {
-        marker = this.options.safety.threadQualification(threadId)?.codexHome;
-      } catch {
-        marker = undefined;
-      }
-      if (marker !== cabCodexHome) throw new PreviousCodexHomeError();
-    }
+    if (this.startedUnderPreviousHome(threadId))
+      throw new PreviousCodexHomeError();
     let snapshot = this.threadSnapshots.get(threadId);
     let restoredEmptyTools = false;
     if (!snapshot && tools === undefined) {

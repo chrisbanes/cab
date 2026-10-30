@@ -201,9 +201,10 @@ tar -xzf cab-0.2.0-darwin-arm64.tar.gz --strip-components 1 -C "$STATE/versions/
 ```
 
 The first release that gives Codex its own home refuses to resume Codex
-conversations started before it, with the reason "Started under the previous Codex
-home; restart the task". Finish or restart open Codex work before upgrading;
-conversation history stays readable.
+conversations started before it: the request is refused, naming "Started under
+the previous Codex home; restart the task", and Reset task starts a new conversation.
+Finish or restart open Codex work before upgrading; conversation history stays
+readable.
 
 Before it changes anything, upgrade reads the install record, checks the target
 release as install does, checks that the running job is the one the record

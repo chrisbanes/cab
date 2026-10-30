@@ -126,6 +126,7 @@ import {
   type CodexHome,
   codexHomeFor,
   PreviousCodexHomeError,
+  previousCodexHomeMessage,
 } from "./codex-home.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
@@ -337,6 +338,7 @@ const immutableRevisionMismatches = new Set([
   "assignment-instructions-revision-stale",
   "assignment-profile-revision-stale",
   "task-revision-changed",
+  previousCodexHomeMessage,
 ]);
 
 /** The Claude turn's base environment and token, or why no turn may start. */
@@ -7256,6 +7258,19 @@ export class StandaloneService {
       : reason.startsWith("assignment-");
   }
 
+  /** Whether a resumed Codex conversation predates cab's Codex home; other runtimes never do. */
+  private startedUnderPreviousCodexHome(
+    workId: string,
+    threadId: string,
+  ): boolean {
+    const runtime = this.runtimes.get(
+      this.started().state.workHarness(workId),
+    ) as
+      | (Runtime & { startedUnderPreviousHome?: (threadId: string) => boolean })
+      | undefined;
+    return runtime?.startedUnderPreviousHome?.(threadId) ?? false;
+  }
+
   private async attemptRequest(
     queued: TurnRequest,
     generation = this.generation,
@@ -7342,6 +7357,15 @@ export class StandaloneService {
             );
           if (this.recoveryContinuationUnresolved(assignmentId, request.workId))
             reasons.push("recovery-continuation-unresolved");
+          // Refused here, before any writer or capacity is held, so Reset task can replace it.
+          if (
+            previous?.threadId &&
+            this.startedUnderPreviousCodexHome(
+              request.workId,
+              previous.threadId,
+            )
+          )
+            reasons.push(previousCodexHomeMessage);
           if (
             this.repositoryAccessRevoked(binding.taskId, binding.repositories)
           )

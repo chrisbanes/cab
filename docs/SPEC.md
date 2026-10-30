@@ -30,8 +30,7 @@ single operator. It owns tasks, scheduling, assignments, execution supervision,
 workspaces, durable conversations and an operator interface. Keep TypeScript,
 Node.js and SQLite. The first deployment runs on Chris's Mac and serves a web
 operator interface, using Codex with the existing operator login, linked into cab's
-own Codex home. Codex App
-Server qualification remains a runtime gate. No BB installation is required by
+own Codex home. Codex App Server qualification remains a runtime gate. No BB installation is required by
 the target product. Private remote access uses Tailscale plus a separate
 cab operator login. The standalone installation starts with a fresh database;
 historical BB record import is outside the first release.
@@ -344,7 +343,7 @@ drafting and direct turns, keeps today's restart hold.
 
 **Codex home.** Codex App Server runs with a `CODEX_HOME` and an isolated `HOME` that
 cab owns under its data directory ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)),
-so nothing is read from the service user's `~/.codex` or `~/.agents`. The home's
+so Codex itself loads nothing from the service user's `~/.codex` or `~/.agents`. The home's
 `auth.json` is only a symlink to the service user's own file-backed Codex login
 (`$CODEX_HOME/auth.json` from the service environment, else `~/.codex/auth.json`):
 cab never copies, creates, reads or hashes the login, and a regular file or a link to
@@ -354,11 +353,13 @@ readiness reports a missing target or a replaced link without naming paths. Code
 refreshes the login through the link and keeps it
 ([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
-installation are disabled. A Codex conversation started under the previous home is
-refused when it would resume, with the reason "Started under the previous Codex home;
-restart the task", before any App Server request: sessions are not linked or copied,
-and captured history stays readable. Finish or restart open Codex work before
-upgrading to the first release with this home.
+installation are disabled. A Codex conversation started under the previous home is not
+resumed: admission refuses the request, naming "Started under the previous Codex home; restart
+the task" in its revision refusal, before it holds a writer, capacity or recovery
+state, and the runtime refuses the resume before any App Server request.
+**Reset task** then replaces the conversation; **Start again** is refused the same way.
+Sessions are not linked or copied, and captured history stays readable. Finish or
+restart open Codex work before upgrading to the first release with this home.
 
 cab owns capacity admission with both a global active-turn cap and a cap for
 each project. Waiting for workers, people or external feedback

@@ -52,6 +52,17 @@ file, mode 0600, non-empty), then App Server `initialize` and
 After cleanup the operator's file was still a regular file owned by the operator,
 and no `cab-codex-auth-*` directory remained.
 
+## Spawn overrides
+
+The service's exact `codex app-server` overrides were accepted by Codex 0.164.0 in an
+isolated home: `approval_policy=never`, `sandbox_mode=workspace-write`,
+`cli_auth_credentials_store=file`, `features.multi_agent=false`,
+`features.plugins=false`, `features.skill_mcp_dependency_install=false` and
+`shell_environment_policy.set.HOME=<real home>`. `config/read` reported the
+`features` and `shell_environment_policy.set` values, and App Server `command/exec`
+under that start printed the real `HOME` (redacted as `<real-home>`) and cab's
+`CODEX_HOME`. A model-driven shell command is not exercised here.
+
 ## Limits
 
 - Stage B ran once. The mtime advance is attributed to the probe's refresh because
