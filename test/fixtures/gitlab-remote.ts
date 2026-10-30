@@ -220,7 +220,11 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
         id: state.nextId++,
         type: "DiscussionNote",
         system: false,
-        body: body.body,
+        // GitLab removes carriage returns and trailing whitespace from a note.
+        body: String(body.body)
+          .replaceAll("\r", "")
+          .replace(/[ \t]+$/gm, "")
+          .trimEnd(),
         author: { id: gitLabUser.id },
         updated_at: "2026-01-01T00:00:00.000Z",
         resolvable: true,

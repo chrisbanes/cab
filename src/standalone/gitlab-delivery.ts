@@ -93,6 +93,12 @@ type MergeRequest = z.output<typeof mergeRequestSchema>;
 
 /** GitLab has no draft field to write: a draft is a title that starts with `Draft:` (or its variants). */
 const draftPrefix = /^\s*(\[draft\]|\(draft\)|draft:)/i;
+/** GitLab removes carriage returns and trailing whitespace from a note before saving it. */
+const noteText = (text: string) =>
+  text
+    .replaceAll("\r", "")
+    .replace(/[ \t]+$/gm, "")
+    .trimEnd();
 const quickAction = /^\s*\/[A-Za-z]/m;
 const draftTitle = (title: string, draft: boolean) =>
   draft ? `Draft: ${title}` : title;
@@ -621,7 +627,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           if (
             matching.length === 1 &&
             note &&
-            note.body === `${a.body}\n\n${marker}` &&
+            noteText(note.body) === noteText(`${a.body}\n\n${marker}`) &&
             note.author.id === user.id
           )
             receipt = { nodeId: String(note.id) };

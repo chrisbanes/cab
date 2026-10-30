@@ -1086,3 +1086,17 @@ test("a resolve settles on the latest resolution even when the last note was res
   assert.equal(done.state, "confirmed-success");
   assert.deepEqual(done.receipt, { nodeId: "abc" });
 });
+
+test("a reply that GitLab normalizes on save still settles on its marker note", async () => {
+  const w = mergeRequestWorld();
+  w.state.discussions.push(gitLabDiscussion("abc", [{}]));
+  const action = {
+    kind: "pr.thread.reply",
+    target: threadTarget,
+    body: "First  \r\nSecond  ",
+  } as ExternalAction;
+  const before = await w.provider.preflight(action, policy);
+  const done = await w.provider.performAction(record(action, before));
+  assert.equal(done.state, "confirmed-success");
+  assert.doesNotMatch(w.state.discussions[0]?.notes[1]?.body ?? "", /\r/);
+});
