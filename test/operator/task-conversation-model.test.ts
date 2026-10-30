@@ -146,6 +146,20 @@ test("merging a newest page dedupes by entry, applies changed content in place a
   assert.equal(again.window, merged.window);
 });
 
+test("an entry the newest page covers but no longer returns is dropped, older ones stay", () => {
+  const below = text("below"),
+    first = text("first"),
+    pruned = text("pruned"),
+    kept = text("kept");
+  const merged = mergeTimeline(
+    window([below, first, pruned, kept]),
+    page([first, kept], { olderCursor: "more" }),
+  );
+  // `pruned` sits inside the page's range but is gone; `below` lies under the page.
+  assert.deepEqual(ids(merged.window.entries), ids([below, first, kept]));
+  assert.equal(merged.changed, true);
+});
+
 test("entries with equal whole-second time keep the service's tie order", () => {
   const sameSecond = { timeMs: 5_000 };
   const first = entry(

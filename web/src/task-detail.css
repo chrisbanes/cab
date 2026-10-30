@@ -947,7 +947,10 @@ a.task-source-chip:hover {
   min-width: 0;
 }
 
-.conv-entry {
+.conv-entry,
+.conv-tools,
+.conv-gap,
+.conv-delegation {
   min-width: 0;
   /* Scrolling to an entry leaves it clear of the pinned card and the docked composer. */
   scroll-margin-block: 160px 240px;
@@ -1116,6 +1119,9 @@ a.task-source-chip:hover {
 
 @media (max-width: 1120px) {
   .conv-delegation-head,
+  .assignment-facts > summary,
+  .conversation > [data-slot="button"],
+  .conversation-status [data-slot="button"],
   .conv-entry [data-slot="button"],
   .conv-tools [data-slot="button"],
   .conv-gap [data-slot="button"] {

@@ -1,6 +1,8 @@
 import {
+  memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -129,6 +131,12 @@ export function useTaskTimeline({
         if (!signal?.aborted) fail(error);
       },
     );
+  // Reads that are not tied to the task read (Load earlier, Retry) end with the task's view.
+  const life = useRef(new AbortController());
+  useEffect(() => {
+    life.current = new AbortController();
+    return () => life.current.abort();
+  }, [read]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the task read's time is the trigger.
   useEffect(() => {
     const abort = new AbortController();
@@ -137,20 +145,30 @@ export function useTaskTimeline({
   }, [read, observedAt]);
 
   const loadEarlier = () => {
-    const current = held.current.cache;
+    const current = held.current.cache,
+      signal = life.current.signal;
     if (!current?.cursor || held.current.loadingEarlier) return;
     commit({ loadingEarlier: true });
-    read(`&before=${current.cursor}`).then(({ data: page }) => {
-      const joined = prependTimeline(current.window, page);
-      apply.current(false);
-      commit({
-        loadingEarlier: false,
-        error: null,
-        cache: joined ? { window: joined, cursor: page.olderCursor } : null,
-      });
-      // The visibility revision changed under the held pages: start again from the newest.
-      if (!joined) void refresh();
-    }, fail);
+    read(`&before=${current.cursor}`, signal).then(
+      ({ data: page }) => {
+        if (signal.aborted) return;
+        // A newer page merged while this one was in flight: the older page no longer fits beneath it.
+        if (held.current.cache !== current)
+          return commit({ loadingEarlier: false });
+        const joined = prependTimeline(current.window, page);
+        apply.current(false);
+        commit({
+          loadingEarlier: false,
+          error: null,
+          cache: joined ? { window: joined, cursor: page.olderCursor } : null,
+        });
+        // The visibility revision changed under the held pages: start again from the newest.
+        if (!joined) void refresh(signal);
+      },
+      (error) => {
+        if (!signal.aborted) fail(error);
+      },
+    );
   };
   return {
     window: view.cache?.window ?? null,
@@ -159,7 +177,7 @@ export function useTaskTimeline({
     loadingEarlier: view.loadingEarlier,
     appended: view.appended,
     loadEarlier,
-    retry: () => void refresh(),
+    retry: () => void refresh(life.current.signal),
   };
 }
 
@@ -214,13 +232,18 @@ export function TaskConversation({
   const lead = data.assignments.find(
     (a) => a.assignmentId === data.leadAssignmentId,
   );
-  const items = timeline.window
-    ? conversationTree(
-        timeline.window.entries,
-        data.assignments,
-        data.leadAssignmentId ?? null,
-      )
-    : [];
+  const entries = timeline.window?.entries ?? null;
+  const items = useMemo(
+    () =>
+      entries
+        ? conversationTree(
+            entries,
+            data.assignments,
+            data.leadAssignmentId ?? null,
+          )
+        : [],
+    [entries, data.assignments, data.leadAssignmentId],
+  );
   const ctx: Context = {
     client,
     taskId,
@@ -310,7 +333,7 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
       return <CommandGroup item={item} ctx={ctx} />;
     case "changes":
       return (
-        <div className="conv-tools" data-record-id={item.id}>
+        <div className="conv-tools" data-record-id={`c:${item.id}`}>
           <span>{changesLabel(item.entries.length)}</span>
           <Button variant="secondary" onClick={ctx.openChanges}>
             Open in Changes
@@ -319,7 +342,7 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
       );
     case "tool":
       return (
-        <p className="conv-tools" data-record-id={item.id}>
+        <p className="conv-tools" data-record-id={`c:${item.id}`}>
           Tool · {item.entry.label ?? "Other tool"}
           {item.entry.status ? ` · ${item.entry.status}` : ""}
         </p>
@@ -331,6 +354,9 @@ function Item({ item, ctx }: { item: ConversationItem; ctx: Context }) {
   }
 }
 
+/** Parsing Markdown is the costly part of a render; the reply box re-renders the page per keystroke. */
+const FormattedText = memo(MarkdownPreview);
+
 const time = (entry: TimelineEntry) => (
   <time dateTime={new Date(entry.at).toISOString()}>
     {clockLabel(entry.at)}
@@ -341,7 +367,7 @@ function Entry({
   entry,
   ctx,
 }: {
-  entry: Exclude<ConversationItem & { type: "entry" }, never>["entry"];
+  entry: Extract<ConversationItem, { type: "entry" }>["entry"];
   ctx: Context;
 }) {
   const who = ctx.names.get(entry.assignmentId) ?? "Agent";
@@ -351,7 +377,7 @@ function Entry({
       return (
         <article
           className="conv-entry conv-agent"
-          data-record-id={entry.entryId}
+          data-record-id={`c:${entry.entryId}`}
         >
           <header>
             <strong>{who}</strong> {time(entry)}
@@ -364,11 +390,12 @@ function Entry({
           ) : raw ? (
             <pre className="conv-raw">{entry.text}</pre>
           ) : (
-            <MarkdownPreview text={entry.text} />
+            <FormattedText text={entry.text} />
           )}
           {entry.text !== null && (
             <Button
               variant="secondary"
+              aria-label={`${raw ? "Formatted" : "Raw text"} of ${who}'s entry at ${clockLabel(entry.at)}`}
               onClick={() => ctx.toggle(`c:raw:${entry.entryId}`)}
             >
               {raw ? "Formatted" : "Raw text"}
@@ -389,7 +416,7 @@ function Entry({
       return (
         <article
           className="conv-entry conv-operator"
-          data-record-id={entry.entryId}
+          data-record-id={`c:${entry.entryId}`}
         >
           <header>
             <strong>{label}</strong> {time(entry)}
@@ -418,7 +445,7 @@ function Entry({
       return (
         <article
           className="conv-entry conv-result"
-          data-record-id={entry.entryId}
+          data-record-id={`c:${entry.entryId}`}
         >
           <header>
             <strong>Result</strong> from {who} {time(entry)}
@@ -440,12 +467,17 @@ function Entry({
       );
     case "gap":
       return (
-        <div className="conv-gap" role="note" data-record-id={entry.entryId}>
+        <div
+          className="conv-gap"
+          role="note"
+          data-record-id={`c:${entry.entryId}`}
+        >
           <p>
             <strong>Not shown.</strong> {gapCopy(entry.reason)}
           </p>
           <Button
             variant="secondary"
+            aria-label={`Details of the gap: ${gapCopy(entry.reason)}`}
             aria-expanded={ctx.expanded(`c:gap:${entry.entryId}`)}
             onClick={() => ctx.toggle(`c:gap:${entry.entryId}`)}
           >
@@ -482,7 +514,7 @@ function RequestEntry({
   return (
     <article
       className="conv-entry conv-request"
-      data-record-id={entry.entryId}
+      data-record-id={`c:${entry.entryId}`}
       data-interaction-id={id}
       data-status={status}
     >
@@ -491,7 +523,15 @@ function RequestEntry({
           {label} from {who}
         </strong>{" "}
         {time(entry)}{" "}
-        <StatusBadge tone={status === "open" ? "warning" : "success"}>
+        <StatusBadge
+          tone={
+            status === "open"
+              ? "warning"
+              : status === "denied"
+                ? "idle"
+                : "success"
+          }
+        >
           {statusText[status]}
         </StatusBadge>
       </header>
@@ -544,7 +584,7 @@ function CommandGroup({
   return (
     <div
       className="conv-tools"
-      data-record-id={item.id}
+      data-record-id={`c:${item.id}`}
       data-failed={item.failed > 0 || undefined}
     >
       <Button
@@ -614,7 +654,7 @@ function CommandRow({ entry, ctx }: { entry: ToolEntry; ctx: Context }) {
   }, [open, sequence, ctx.client, ctx.taskId, attempt]);
   const failed = entry.exitCode !== null && entry.exitCode !== 0;
   return (
-    <li data-record-id={entry.entryId}>
+    <li data-record-id={`c:${entry.entryId}`}>
       <code>
         {entry.command ?? "Command"}
         {entry.truncated ? "…" : ""}
@@ -629,6 +669,7 @@ function CommandRow({ entry, ctx }: { entry: ToolEntry; ctx: Context }) {
       ) : (
         <Button
           variant="secondary"
+          aria-label={`${open ? "Hide" : "Show"} output of ${entry.command ?? "command"}`}
           aria-expanded={open}
           onClick={() => ctx.toggle(key)}
         >

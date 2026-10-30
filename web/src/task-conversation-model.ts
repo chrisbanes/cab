@@ -68,6 +68,17 @@ export function mergeTimeline(
     return fresh(true);
   const held = new Map(window.entries.map((e) => [e.entryId, e]));
   let changed = false;
+  // An entry the page's range covers but the service no longer returns (pruned by retention)
+  // is gone; the window does not keep showing it.
+  if (oldest) {
+    const floor = keyOf(oldest),
+      returned = new Set(page.entries.map((e) => e.entryId));
+    for (const [id, entry] of held)
+      if (!returned.has(id) && compareTimelineKeys(keyOf(entry), floor) >= 0) {
+        held.delete(id);
+        changed = true;
+      }
+  }
   for (const entry of page.entries) {
     const before = held.get(entry.entryId);
     if (!before || JSON.stringify(before) !== JSON.stringify(entry))
@@ -149,7 +160,9 @@ export function conversationTree(
       continue;
     }
     const stream = known.has(entry.assignmentId) ? entry.assignmentId : root;
-    own.set(stream, [...(own.get(stream) ?? []), entry]);
+    const mine = own.get(stream) ?? [];
+    mine.push(entry);
+    own.set(stream, mine);
   }
   const children = new Map<string, string[]>();
   for (const a of assignments) {

@@ -982,7 +982,8 @@ export function TaskWorkspace({
       // reading position first, then follow what arrived.
       if (state.tab === "overview") {
         if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
-        if (appended && toBottom() > 64) followLatest();
+        if (appended) followLatest();
+        setUpdates(false);
       } else followLatest();
     } else {
       if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
@@ -1525,7 +1526,7 @@ export function TaskWorkspace({
           requesterName={requesterOf(id)}
           onChanged={refreshAll}
         />
-      ) : (
+      ) : data.questions.some((q) => q.interactionId === id) ? (
         <QuestionResponse
           client={client}
           session={session}
@@ -1536,7 +1537,7 @@ export function TaskWorkspace({
           observedAt={resource.state.fetchedAt}
           requesterName={requesterOf(id)}
         />
-      );
+      ) : null;
     },
   };
   const assignmentFacts = (a: (typeof data.assignments)[number]) => {
@@ -2215,7 +2216,11 @@ export function TaskWorkspace({
                 {state.inlineAnswer &&
                   !openRequests.some(
                     (q) => q.interactionId === state.inlineAnswer,
-                  ) && <p role="status">Recorded in the conversation.</p>}
+                  ) && (
+                    <p role="status">
+                      No longer waiting; see the conversation.
+                    </p>
+                  )}
                 {data.completionRequests
                   .filter((r) => r.status === "pending")
                   .map((r) => (

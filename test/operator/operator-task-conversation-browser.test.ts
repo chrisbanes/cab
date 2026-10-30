@@ -442,7 +442,9 @@ for (const [label, viewport] of [
     await question.getByRole("button", { name: "Answer here instead" }).click();
     await response.getByRole("button", { name: "Submit answer" }).click();
     await question.getByText("Answered", { exact: true }).first().waitFor();
-    await decisions.getByText("Recorded in the conversation.").waitFor();
+    await decisions
+      .getByText("No longer waiting; see the conversation.")
+      .waitFor();
     const recorded = answers.filter((c) => c.type === "question.form.answer");
     assert.equal(recorded.length, 1);
     assert.equal(
@@ -507,19 +509,23 @@ for (const [label, viewport] of [
       .evaluate((e) => e.getBoundingClientRect().top);
     assert.ok(Math.abs(held - shown.top) <= 2, "visible entry held");
 
-    // 8. Search targets still reveal their inspector cards.
+    // 8. Search targets still reveal their inspector cards: a closed card opens, even on a phone.
     await page.goto(`${web.origin}/app/tasks/${s.taskId}?section=brief`);
-    await page.getByRole("heading", { name: "Shared brief" }).waitFor();
+    await page.locator("#brief > details[open]").waitFor();
     assert.equal(
-      (await page.locator("#brief > details").getAttribute("open")) !== null ||
-        (await page.locator("#brief").isVisible()),
+      await page.getByRole("heading", { name: "Shared brief" }).isVisible(),
       true,
     );
     await page.goto(
       `${web.origin}/app/tasks/${s.taskId}?section=review&result=${s.result.resultId}`,
     );
-    await page.getByText("Keyboard support ready").first().waitFor();
-    await openOverviewCard(page, "context");
-    assert.equal(await page.locator("#context").isVisible(), true);
+    const latest = page
+      .locator("#review")
+      .getByText("Keyboard support ready", { exact: true });
+    await latest.waitFor();
+    assert.equal(await latest.isVisible(), true);
+    await page.goto(`${web.origin}/app/tasks/${s.taskId}?section=context`);
+    await page.locator("#context > details[open]").waitFor();
+    assert.equal(await page.locator("#context h3").isVisible(), true);
   });
 }
