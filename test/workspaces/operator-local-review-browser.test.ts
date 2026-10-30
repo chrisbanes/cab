@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import {
+  chromium,
+  errors,
+  type Browser,
+  type Locator,
+  type Page,
+  type Response,
+} from "playwright";
 import {
   browserSuite,
   type BrowserJourney,
@@ -118,6 +125,11 @@ async function startReview(
   const binding = await fixture.service.taskWorkspace(task.taskId);
   const alpha = binding?.repositories[0]?.workspacePath;
   assert.ok(alpha);
+  // A workspace missing here surfaced once as a bare ENOENT; name the binding state instead.
+  assert.ok(
+    existsSync(alpha),
+    `Task workspace ${alpha} is absent: ${JSON.stringify({ state: binding.state, reason: binding.reason, gitUncertain: binding.gitUncertain })}`,
+  );
   writeFileSync(join(alpha, "diff.txt"), "keep\ntail\n");
   const events = () => {
     let count = 0;
@@ -396,28 +408,63 @@ test("production local review composes exact multi-origin anchors and sends one 
 
 /**
  * Opens a file in Files and waits for its preview to settle. The service bounds its Git ignore
- * check, so under load the first read can answer "Preview is unavailable"; the operator's
- * recovery is Refresh, used here at most twice. Any other non-ready preview fails at once.
+ * check, so under load a read can answer "Preview is unavailable" or fail outright ("File preview
+ * refresh failed"); the operator's recovery is Refresh, used here at most twice. Any other
+ * non-ready preview, including a read still pending at the wait limit, fails with the panel text
+ * and the last preview response so a recurrence names its cause.
  */
 async function openFile(page: Page, name: RegExp) {
   const files = page.locator("#files");
-  await files.getByRole("button", { name }).click();
-  const ready = files.getByRole("toolbar", { name: "Source presentation" });
-  const status = files.getByText(/^Preview is /);
-  for (let refreshes = 0; ; refreshes++) {
-    await ready.or(status).waitFor();
-    if (await ready.isVisible()) return;
-    const text = (await status.textContent()) ?? "";
-    if (!text.startsWith("Preview is unavailable") || refreshes === 2)
-      throw new Error(`The preview of ${name} did not become ready: ${text}`);
-    const read = page.waitForResponse((response) =>
-      new URL(response.url()).pathname.endsWith("/preview"),
-    );
-    await files.getByRole("button", { name: "Refresh", exact: true }).click();
-    await read;
-    await files
-      .locator('button[aria-busy="false"]', { hasText: "Refresh" })
-      .waitFor();
+  let lastPreview = "no preview response";
+  const isPreview = (response: Response) =>
+    new URL(response.url()).pathname.endsWith("/preview");
+  const onResponse = (response: Response) => {
+    if (isPreview(response)) lastPreview = `HTTP ${response.status()}`;
+  };
+  page.on("response", onResponse);
+  try {
+    await files.getByRole("button", { name }).click();
+    const ready = files.getByRole("toolbar", { name: "Source presentation" });
+    const unavailable = files.getByText(/^Preview is /);
+    const failed = files
+      .getByRole("alert")
+      .filter({ hasText: /^File preview refresh failed/ });
+    for (let refreshes = 0; ; refreshes++) {
+      // A failed refresh renders beside the retained preview, so several of these can match.
+      let pending = false;
+      await ready
+        .or(unavailable)
+        .or(failed)
+        .first()
+        .waitFor()
+        .catch((error: unknown) => {
+          if (!(error instanceof errors.TimeoutError)) throw error;
+          pending = true;
+        });
+      if (!pending && (await ready.isVisible())) return;
+      const refreshFailed = !pending && (await failed.isVisible());
+      const text = pending
+        ? `still pending: ${(await files.innerText()).slice(0, 200)}`
+        : refreshFailed
+          ? await failed.textContent()
+          : await unavailable.first().textContent();
+      if (
+        pending ||
+        refreshes === 2 ||
+        !(refreshFailed || text?.startsWith("Preview is unavailable"))
+      )
+        throw new Error(
+          `The preview of ${name} did not become ready: ${text}; last preview response: ${lastPreview}`,
+        );
+      const read = page.waitForResponse(isPreview);
+      await files.getByRole("button", { name: "Refresh", exact: true }).click();
+      await read;
+      await files
+        .locator('button[aria-busy="false"]', { hasText: "Refresh" })
+        .waitFor();
+    }
+  } finally {
+    page.off("response", onResponse);
   }
 }
 

@@ -246,10 +246,10 @@ export async function seedReviewTask(
   title = "Restore command focus",
   body = "- [ ] Restore focus\n- [ ] Retain drafts",
   repositories: TaskWorkspaceRepositoryInput[] = [],
+  taskId: string = randomUUID(),
 ) {
   const profileId = randomUUID(),
     projectId = randomUUID(),
-    taskId = randomUUID(),
     d = f.service.domain();
   const projectName = uniqueProjectName(d, name);
   d.execute({

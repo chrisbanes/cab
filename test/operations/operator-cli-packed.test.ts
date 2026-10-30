@@ -22,7 +22,13 @@ const run = promisify(execFile);
 test("the packed CLI installs offline and works against a real service over loopback and verified HTTPS", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "cab-cli-packed-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const project = await installPacked(dir);
+  const installStarted = performance.now();
+  const project = await installPacked(dir).catch((error: unknown) => {
+    throw new Error(
+      `Packed install failed after ${Math.round(performance.now() - installStarted)}ms: ${String(error)}`,
+      { cause: error },
+    );
+  });
   const installed = join(project, "node_modules", "@chrisbanes", "cab");
   assert.equal(
     JSON.parse(readFileSync(join(installed, "package.json"), "utf8")).name,
@@ -33,22 +39,42 @@ test("the packed CLI installs offline and works against a real service over loop
   assert.ok(existsSync(join(installed, "dist/operator/index.html")));
   const bin = join(project, "node_modules", ".bin", "cab");
   const config = join(dir, "config");
+  const steps = [`install ${Math.round(performance.now() - installStarted)}ms`];
+  // A failed assertion carries `detail`: the step, its exit, its stderr and every step so far.
   const cli = async (args: string[], env: Record<string, string> = {}) => {
-    try {
-      const r = await run(bin, args, {
-        cwd: project,
-        env: {
-          PATH: process.env.PATH ?? "",
-          HOME: dir,
-          CAB_CLI_CONFIG_DIR: config,
-          ...env,
-        },
-      });
-      return { code: 0, out: r.stdout, err: r.stderr };
-    } catch (error) {
-      const e = error as { code: number; stdout: string; stderr: string };
-      return { code: e.code, out: e.stdout, err: e.stderr };
-    }
+    const started = performance.now();
+    const result = await run(bin, args, {
+      cwd: project,
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: dir,
+        CAB_CLI_CONFIG_DIR: config,
+        ...env,
+      },
+    }).then(
+      (r) => ({ code: 0 as number | string, out: r.stdout, err: r.stderr }),
+      (error: unknown) => {
+        const e = error as {
+          code: number | string;
+          signal?: string;
+          stdout: string;
+          stderr: string;
+        };
+        return {
+          code: e.code,
+          out: e.stdout,
+          err: e.stderr,
+          signal: e.signal,
+        };
+      },
+    );
+    const shown = args.map((arg, i) =>
+      args[i - 1] === "--token-file" ? "<token-file>" : arg,
+    );
+    const step = `cab ${shown.join(" ")} -> exit ${result.code}${"signal" in result && result.signal ? ` signal ${result.signal}` : ""} in ${Math.round(performance.now() - started)}ms`;
+    steps.push(step);
+    const detail = `${step}\nstderr tail: ${result.err.slice(-500)}\nsteps so far:\n${steps.join("\n")}`;
+    return { ...result, detail };
   };
   const tokenFile = (token: string, name: string) => {
     const path = join(dir, name);
@@ -57,11 +83,12 @@ test("the packed CLI installs offline and works against a real service over loop
   };
 
   const { version } = JSON.parse(readFileSync("package.json", "utf8"));
-  assert.deepEqual(await cli(["--version"]), {
-    code: 0,
-    out: `cab ${version}\n`,
-    err: "",
-  });
+  const versionRun = await cli(["--version"]);
+  assert.deepEqual(
+    { code: versionRun.code, out: versionRun.out, err: versionRun.err },
+    { code: 0, out: `cab ${version}\n`, err: "" },
+    versionRun.detail,
+  );
 
   // Loopback.
   const s = await startCliService(t);
@@ -77,23 +104,23 @@ test("the packed CLI installs offline and works against a real service over loop
     "--token-file",
     file,
   ]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   r = await cli(["auth", "status"]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   r = await cli(["task", "get", s.taskId, "--output", "json"]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   const envelope = JSON.parse(r.out);
   assert.equal(envelope.schema, "cab.cli/v1");
   assert.equal(envelope.data.task.id, s.taskId);
   r = await cli(["project", "list", "--output", "json"]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.ok(
     JSON.parse(r.out).data.projects.some(
       (p: { id: string }) => p.id === s.projectId,
     ),
   );
   r = await cli(["task", "list", "--output", "json"]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   const list = JSON.parse(r.out);
   assert.equal(list.coverage.complete, true);
   assert.deepEqual(
@@ -101,10 +128,10 @@ test("the packed CLI installs offline and works against a real service over loop
     [s.taskId],
   );
   r = await cli(["execution", "list", "--task", s.taskId, "--output", "json"]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.deepEqual(JSON.parse(r.out).data.executions, []);
   r = await cli(["logs", "--execution", "unknown-work", "--output", "jsonl"]);
-  assert.equal(r.code, 2, r.err);
+  assert.equal(r.code, 2, r.detail);
   const record = JSON.parse(r.out);
   assert.equal(record.type, "error");
   assert.equal(record.error.code, "not-found");
@@ -120,7 +147,7 @@ test("the packed CLI installs offline and works against a real service over loop
     "--token-file",
     tokenFile(write.token, "loopback-rw.token"),
   ]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   const change = join(dir, "capacity.json");
   r = await cli([
     "capacity",
@@ -132,7 +159,7 @@ test("the packed CLI installs offline and works against a real service over loop
     "--connection",
     "rw",
   ]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   r = await cli([
     "capacity",
     "apply",
@@ -143,7 +170,7 @@ test("the packed CLI installs offline and works against a real service over loop
     "--output",
     "json",
   ]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   const applied = JSON.parse(r.out);
   assert.equal(applied.data.receipt.result.globalLimit, 6);
   r = await cli([
@@ -162,7 +189,7 @@ test("the packed CLI installs offline and works against a real service over loop
   assert.deepEqual(JSON.parse(r.out).data.receipt, applied.data.receipt);
   // CLI5: the inbox read and a receipted Stop through the installed binary.
   r = await cli(["inbox", "list", "--connection", "local", "--output", "json"]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.deepEqual(JSON.parse(r.out).data.items, []);
   r = await cli([
     "task",
@@ -173,7 +200,7 @@ test("the packed CLI installs offline and works against a real service over loop
     "--output",
     "json",
   ]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.equal(JSON.parse(r.out).data.receipt.kind, "task-stop");
   assert.equal(s.f.service.isTaskStopped(s.taskId), true);
   // CLI4: one source read and one delivery read through the installed binary.
@@ -186,7 +213,7 @@ test("the packed CLI installs offline and works against a real service over loop
     "--output",
     "json",
   ]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.deepEqual(JSON.parse(r.out).data.source.selections, []);
   r = await cli([
     "delivery",
@@ -197,7 +224,7 @@ test("the packed CLI installs offline and works against a real service over loop
     "--output",
     "json",
   ]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.equal(JSON.parse(r.out).data.issue, null);
   // CLI6: the installed binary reaches the recovery read (no assignment here).
   r = await cli([
@@ -209,14 +236,14 @@ test("the packed CLI installs offline and works against a real service over loop
     "--output",
     "json",
   ]);
-  assert.equal(r.code, 2, r.err);
+  assert.equal(r.code, 2, r.detail);
   assert.equal(JSON.parse(r.out).error.code, "not-found");
   r = await cli(["task", "get", s.taskId], {
     CAB_MANAGED_ASSIGNMENT: "1",
   });
-  assert.equal(r.code, 3);
+  assert.equal(r.code, 3, r.detail);
   r = await cli(["auth", "logout", "--connection", "local"]);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.equal((await s.bearer(read.token, "/api/operator/cli")).status, 200);
 
   // Verified HTTPS through a TLS-terminating proxy.
@@ -286,8 +313,8 @@ test("the packed CLI installs offline and works against a real service over loop
     "--token-file",
     remoteFile,
   ]);
-  assert.equal(r.code, 5);
-  assert.match(r.err, /tls-verification-failed/);
+  assert.equal(r.code, 5, r.detail);
+  assert.match(r.err, /tls-verification-failed/, r.detail);
   assert.equal(proxied, 0, "no request reached the service");
   const trusted = { NODE_EXTRA_CA_CERTS: join(dir, "cert.pem") };
   r = await cli(
@@ -303,9 +330,9 @@ test("the packed CLI installs offline and works against a real service over loop
     ],
     trusted,
   );
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   r = await cli(["auth", "status", "--connection", "remote"], trusted);
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.match(r.out, new RegExp(`URL: +https://localhost:${proxyPort}$`, "m"));
   r = await cli(
     [
@@ -319,15 +346,19 @@ test("the packed CLI installs offline and works against a real service over loop
     ],
     trusted,
   );
-  assert.equal(r.code, 0, r.err);
+  assert.equal(r.code, 0, r.detail);
   assert.equal(JSON.parse(r.out).data.task.id, remote.taskId);
   r = await cli(["auth", "status", "--connection", "remote"]);
-  assert.equal(r.code, 5, "verification is required on every use");
+  assert.equal(r.code, 5, `verification is required on every use: ${r.detail}`);
 
   // A redirect to another origin never forwards the credential.
+  // Only a request for the redirect's own path counts: another process's stray client can
+  // reach an ephemeral port (observed under concurrent load) and must not read as a followed redirect.
+  const redirectPath = `/api/operator/cli?redirect=${randomUUID()}`;
   const otherHits: string[] = [];
   const other = createHttpServer((incoming, outgoing) => {
-    otherHits.push(String(incoming.headers.authorization));
+    if (incoming.url === redirectPath)
+      otherHits.push(String(incoming.headers.authorization));
     outgoing.end("{}");
   });
   await new Promise<void>((resolve) => other.listen(0, "127.0.0.1", resolve));
@@ -335,7 +366,7 @@ test("the packed CLI installs offline and works against a real service over loop
   const redirect = createHttpServer((_incoming, outgoing) =>
     outgoing
       .writeHead(307, {
-        location: `http://127.0.0.1:${(other.address() as { port: number }).port}/api/operator/cli`,
+        location: `http://127.0.0.1:${(other.address() as { port: number }).port}${redirectPath}`,
       })
       .end(),
   );
@@ -353,8 +384,8 @@ test("the packed CLI installs offline and works against a real service over loop
     "--token-file",
     file,
   ]);
-  assert.equal(r.code, 5);
-  assert.match(r.err, /redirect-rejected/);
+  assert.equal(r.code, 5, r.detail);
+  assert.match(r.err, /redirect-rejected/, r.detail);
   assert.deepEqual(otherHits, []);
   const stored = readFileSync(join(config, "connections.json"), "utf8");
   for (const token of [read.token, remoteToken.token])

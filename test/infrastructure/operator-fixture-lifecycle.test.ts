@@ -58,19 +58,32 @@ test("rejected disconnected browser close retains dependent fixture resources", 
   }
 });
 
-test("initial service and web startup share one fixture deadline", async () => {
+test("initial service and web startup share one fixture deadline", async (t) => {
   let finishProbe!: () => void;
-  // A reset budget would give the stalled probe the full startup timeout; a
-  // shared one leaves it less than the service delay. The rest is headroom for
-  // the real service start on a loaded runner.
+  // The injected delay ends probeBudgetMs before the shared deadline, however long the real
+  // service start took, so probe-1.start can receive at most that much. A reset budget would
+  // give it the full startupTimeoutMs. The service start only needs to finish within
+  // startupTimeoutMs - probeBudgetMs, not within a fixed wall-clock allowance.
   const startupTimeoutMs = 4000,
-    serviceDelayMs = 2200;
+    probeBudgetMs = 500;
+  const began = performance.now();
+  let serviceStartMs: number | undefined;
   const fixture = await createOperatorFixture(null, undefined, undefined, {
     startupTimeoutMs,
     operation: async (name, operation) => {
       await operation();
-      if (name === "service.start")
-        await new Promise((resolve) => setTimeout(resolve, serviceDelayMs));
+      if (name === "service.start") {
+        serviceStartMs = performance.now() - began;
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            Math.max(
+              0,
+              began + startupTimeoutMs - probeBudgetMs - performance.now(),
+            ),
+          ),
+        );
+      }
       if (name === "probe-1.start")
         await new Promise<void>((resolve) => {
           finishProbe = resolve;
@@ -78,16 +91,39 @@ test("initial service and web startup share one fixture deadline", async () => {
     },
   });
   try {
-    await assert.rejects(fixture.startWeb(), /probe-1.start: timed-out/);
+    const startup = await fixture.startWeb().then(
+      () => "started",
+      (error: unknown) => String(error),
+    );
     const step = fixture.lifecycle.steps.find(
       (step) => step.name === "probe-1.start",
     );
+    const closing = await fixture.close().then(
+      () => "closed",
+      (error: unknown) => String(error),
+    );
+    // Emitted before any assertion, so a failing run names the step that overran.
+    t.diagnostic(
+      `fixture-deadline-evidence ${JSON.stringify({
+        serviceStartMs: Math.round(serviceStartMs ?? -1),
+        startupTimeoutMs,
+        probeBudgetMs,
+        startup,
+        closing,
+        steps: fixture.lifecycle.steps.map(({ name, status, elapsedMs }) => ({
+          name,
+          status,
+          elapsedMs,
+        })),
+      })}`,
+    );
+    assert.match(startup, /probe-1.start: timed-out/);
     assert.ok(step);
     assert.ok(
-      step.elapsedMs < serviceDelayMs,
+      step.elapsedMs < startupTimeoutMs / 2,
       `Initial startup budget was reset: ${step.elapsedMs} ms`,
     );
-    await assert.rejects(fixture.close(), /probe-1.close: dependency-skipped/);
+    assert.match(closing, /probe-1.close: dependency-skipped/);
   } finally {
     finishProbe();
     await new Promise<void>((resolve) => setImmediate(resolve));

@@ -421,7 +421,9 @@ export async function createOperatorFixture<
       const id = ++listenerSequence;
       const owned: OwnedWeb = {
         id,
-        probe: createServer(),
+        // Only reserves a port. A stray client of another process that reaches it (observed under
+        // concurrent load) would otherwise hold server.close() open until the cleanup deadline.
+        probe: createServer((socket) => socket.destroy()),
         probeClosed: false,
         starting: true,
         startSteps: [],
