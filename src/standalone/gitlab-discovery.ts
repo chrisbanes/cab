@@ -39,7 +39,7 @@ export class GitLabDiscoveryReader {
     private readonly fetcher: typeof fetch = fetch,
   ) {
     const parsed = gitLabHostSchema.safeParse(host);
-    // A token fetch would reject as a header value is unreadable, not an unreachable host.
+    // fetch rejects an invalid header value; that is an unreadable token, not an unreachable host.
     if (!parsed.success || !/^[\x21-\x7e]{1,4096}$/.test(token))
       throw new GitLabDiscoveryFailure("unreadable");
     this.api = `https://${parsed.data}/api/v4`;
