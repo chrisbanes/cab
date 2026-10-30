@@ -369,7 +369,6 @@ function Entry({
           {entry.text !== null && (
             <Button
               variant="secondary"
-              aria-pressed={raw}
               onClick={() => ctx.toggle(`c:raw:${entry.entryId}`)}
             >
               {raw ? "Formatted" : "Raw text"}

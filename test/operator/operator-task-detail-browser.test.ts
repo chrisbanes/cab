@@ -4377,7 +4377,7 @@ for (const engine of ["chromium", "webkit"] as const)
     async (_t, j) => {
       const fixture = await openFixture(j, engine);
       const a = await seedOwnApproval(fixture.f);
-      const result = a.delegatedResult("Keyboard support ready for review", {
+      a.delegatedResult("Keyboard support ready for review", {
         sourceId: a.source.sourceId,
       });
       const other = await seed(fixture.f);
