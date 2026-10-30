@@ -1291,17 +1291,14 @@ test("a GitLab link is added, refused with its reason, changed and removed in Se
   await field("path").fill(await realpath(lab));
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
-  assert.deepEqual(
-    { ...links(), path: undefined },
-    {
-      codeHost: "gitlab",
-      host: "gitlab.example.com",
-      projectPath: "group/atlas",
-      repositoryId: "4242",
-      ref: "main",
-      path: undefined,
-    },
-  );
+  const { path: _path, gitCommonDirectory: _git, ...identity } = links() ?? {};
+  assert.deepEqual(identity, {
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    projectPath: "group/atlas",
+    repositoryId: "4242",
+    ref: "main",
+  });
   await page.getByRole("heading", { name: "4242" }).waitFor();
   await page.getByText("GitLab · gitlab.example.com").waitFor();
   const api = new OperatorApi(f.service, [f.directory]);
