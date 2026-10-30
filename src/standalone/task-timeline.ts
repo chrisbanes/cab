@@ -20,18 +20,6 @@ export interface TimelineCandidate {
   body: { kind: string } & Record<string, unknown>;
 }
 
-export type TimelineGapReason =
-  | "size-limit"
-  | "item-limit"
-  | "active-turn-limit"
-  | "turn-ended"
-  | "missing-text"
-  | "redaction-unavailable"
-  | "early-buffer-limit"
-  | "tool-activity-expired"
-  | "tool-activity-not-captured"
-  | "tool-activity-incomplete";
-
 /**
  * The only diagnostic item types that reach the timeline, and how each is shown.
  * Reasoning, plans, messages and cab's own coordination tool calls are absent on
@@ -67,13 +55,6 @@ const toolPayload = z
   })
   .loose();
 
-/** Gap detail identifiers; the caller redacts them. */
-export interface GapIdentity {
-  workId: string;
-  turnId: string | null;
-  itemId: string | null;
-}
-
 export type ToolProjection =
   | {
       kind: "tool";
@@ -107,7 +88,18 @@ export function projectTool(
           ? "redaction-unavailable"
           : "size-limit",
     };
-  const bounded = boundDetail(row.payload, excluded);
+  // Pick the few fields first so nothing else is processed, let alone returned.
+  const raw = toolPayload.safeParse(row.payload);
+  const picked = raw.success
+    ? {
+        itemType: raw.data.itemType,
+        status: raw.data.status,
+        tool: raw.data.tool,
+        command: raw.data.command,
+        exitCode: raw.data.exitCode,
+      }
+    : undefined;
+  const bounded = boundDetail(picked, excluded);
   const payload = toolPayload.safeParse(bounded);
   if (!payload.success) return { kind: "gap", reason: "redaction-unavailable" };
   const data = payload.data;
@@ -116,10 +108,14 @@ export function projectTool(
     return { kind: "gap", reason: "redaction-unavailable" };
   if (typeof data.command === "object")
     return { kind: "gap", reason: "size-limit" };
-  const command =
+  // Collapse first, then redact again: collapsing must not assemble an excluded value.
+  const collapsed =
     tool === "command" && data.command !== undefined
-      ? data.command.replace(/\s+/g, " ").trim()
+      ? boundDetail(data.command.replace(/\s+/g, " ").trim(), excluded)
       : null;
+  if (collapsed === undefined)
+    return { kind: "gap", reason: "redaction-unavailable" };
+  const command = typeof collapsed === "string" ? collapsed : null;
   const label = data.tool ?? data.itemType;
   return {
     kind: "tool",

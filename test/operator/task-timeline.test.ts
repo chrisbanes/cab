@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { taskTimelineSchema } from "../../src/operator/contracts.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { ExecutionDiagnosticsStore } from "../../src/standalone/execution-diagnostics.js";
+import { projectTool } from "../../src/standalone/task-timeline.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
 import { instructionSecret } from "../fixtures/instruction-history.js";
@@ -200,8 +201,8 @@ async function setup(t: { after(fn: () => unknown): void }) {
     });
 
     db.prepare(
-      "INSERT INTO coordination_delegations(assignmentId, taskId, delegatedAt) VALUES (?, ?, ?)",
-    ).run(delegated, seed.taskA, t0);
+      "INSERT INTO coordination_delegations(assignmentId, delegatedAt) VALUES (?, ?)",
+    ).run(delegated, t0);
     db.prepare(
       `INSERT INTO coordination_interactions(interactionId,taskId,requestingAssignmentId,
         requestingWorkId,requestingWorkRevision,requestingAssignmentVersion,
@@ -585,5 +586,30 @@ test("tool output is bounded, redacted and limited to the task's own commands", 
   assert.deepEqual(
     [omitted.state, omitted.reason, omitted.text],
     ["omitted", "size-limit", null],
+  );
+});
+
+test("collapsing a command's whitespace cannot assemble an excluded value", () => {
+  const row = (command: string) => ({
+    sequence: 1,
+    workId: "w",
+    kind: "runtime" as const,
+    name: "commandExecution/completed",
+    severity: "info",
+    itemId: "c",
+    state: "available" as const,
+    reason: null,
+    payload: { itemType: "commandExecution", command, cwd: "/leak" },
+    payloadBytes: 1,
+    originalBytes: 1,
+    createdAt: 1,
+  });
+  const projected = projectTool(row("run  two\nwords now"), undefined, [
+    "two words",
+  ]);
+  assert.equal(projected.kind, "tool");
+  assert.equal(
+    projected.kind === "tool" ? projected.command : null,
+    "run [redacted] now",
   );
 });

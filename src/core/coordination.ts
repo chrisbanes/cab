@@ -590,10 +590,8 @@ export class CoordinationStore {
       );
       CREATE TABLE IF NOT EXISTS coordination_delegations (
         assignmentId TEXT PRIMARY KEY REFERENCES domain_assignments(id),
-        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
         delegatedAt INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS coordination_delegations_task ON coordination_delegations(taskId);
       CREATE TABLE IF NOT EXISTS coordination_results ${resultColumns};
       CREATE INDEX IF NOT EXISTS coordination_results_task_created ON coordination_results(taskId,createdAt);
       CREATE TABLE IF NOT EXISTS coordination_unresolved_result_destinations (
@@ -1289,9 +1287,9 @@ export class CoordinationStore {
         );
       this.db
         .prepare(
-          "INSERT INTO coordination_delegations (assignmentId, taskId, delegatedAt) VALUES (?, ?, ?)",
+          "INSERT INTO coordination_delegations (assignmentId, delegatedAt) VALUES (?, ?)",
         )
-        .run(assignmentId, String(binding.taskId), Date.now());
+        .run(assignmentId, Date.now());
       const response = {
         text: `Delegated assignment ${assignmentId}`,
         success: true,
@@ -2986,9 +2984,11 @@ export class CoordinationStore {
     return (
       this.db
         .prepare(`SELECT a.id AS assignmentId, d.delegatedAt AS delegatedAt,
-            (SELECT r.workId FROM coordination_receipts r
-              WHERE r.taskId = a.taskId AND r.tool = 'cab_delegate'
-                AND json_extract(r.response, '$.text') = 'Delegated assignment ' || a.id) AS workId
+            CASE WHEN d.delegatedAt IS NULL THEN
+              (SELECT r.workId FROM coordination_receipts r
+                WHERE r.taskId = a.taskId AND r.tool = 'cab_delegate'
+                  AND json_extract(r.response, '$.text') = 'Delegated assignment ' || a.id)
+            END AS workId
           FROM domain_assignments a
           LEFT JOIN coordination_delegations d ON d.assignmentId = a.id
           WHERE a.taskId = ? AND a.requesterAssignmentId IS NOT NULL`)

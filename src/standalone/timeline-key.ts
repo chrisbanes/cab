@@ -1,7 +1,9 @@
 /**
  * The ordering key of a task timeline entry: `(timeMs, rank, ordinal, id)`, compared
- * lexicographically. It derives only from immutable creation fields, so an entry keeps
- * its place when its content changes (a streaming item completes, a command finishes).
+ * lexicographically. It derives only from creation fields that never change, so an
+ * entry keeps its place when its content changes (a streaming item completes, a
+ * command finishes). The one exception is retention: a tool entry is keyed on its
+ * first retained diagnostic row, so pruning that row moves the entry.
  */
 export interface TimelineKey {
   timeMs: number;

@@ -790,10 +790,9 @@ test("delegation records its millisecond time once and legacy delegations anchor
     f.coordination.migrate();
     const rows = f.db
       .prepare("SELECT * FROM coordination_delegations")
-      .all() as { assignmentId: string; taskId: string; delegatedAt: number }[];
+      .all() as { assignmentId: string; delegatedAt: number }[];
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.assignmentId, assignmentId);
-    assert.equal(rows[0]?.taskId, taskA);
     assert.ok((rows[0]?.delegatedAt ?? 0) >= before);
     const times = f.coordination.delegationTimes(taskA);
     // The nested assignment was made by a domain command, before the table existed.
