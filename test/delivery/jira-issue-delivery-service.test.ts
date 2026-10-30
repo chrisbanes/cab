@@ -284,13 +284,29 @@ test("a Jira closure by another account holds the task as unproved, and a reopen
   assert.ok(operationId);
 });
 
-test("cab's own closure under a status readiness rule is judged on the status before it moved", async (t) => {
+test("cab's own closure under a status readiness rule is not counted against it for its status", async (t) => {
   const f = await fixture(t, undefined, {
     mode: "all",
     conditions: [{ kind: "status", operator: "in", statusIds: ["1"] }],
   });
   closeAs(f, "acct-cab");
+  // Every refresh reconciles the closure again, after the sync has stored the Done status.
+  for (let refresh = 0; refresh < 3; refresh++) {
+    await f.service.refreshGitHub();
+    assert.equal(f.store.deliveryClosure(issueId)?.closedEventId, "700");
+    assert.equal(f.store.hold(issueId)?.reason, "closed");
+  }
+});
+
+test("a lost label still reports readiness-lost after cab's own closure under a status rule", async (t) => {
+  const f = await fixture(t, undefined, {
+    mode: "all",
+    conditions: [
+      { kind: "status", operator: "in", statusIds: ["1"] },
+      { kind: "label", operator: "has", name: "approved" },
+    ],
+  });
+  closeAs(f, "acct-cab");
   await f.service.refreshGitHub();
-  assert.equal(f.store.deliveryClosure(issueId)?.closedEventId, "700");
-  assert.equal(f.store.hold(issueId)?.reason, "closed");
+  assert.equal(f.store.hold(issueId)?.reason, "readiness-lost");
 });

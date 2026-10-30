@@ -1288,12 +1288,6 @@ export class GitHubSourceStore {
           .run(String(issue.taskId));
         this.setSourceHold(snapshot.nodeId, "changed-text");
       }
-      // Closing moves a Jira status, so readiness is judged on the status and select values observed before.
-      const observed = this.db
-        .prepare(
-          `SELECT observedStatus, observedFields FROM external_items WHERE ${itemIs()}`,
-        )
-        .get(...this.key(snapshot.nodeId)) as Row;
       this.db
         .prepare(
           `UPDATE external_items SET observedState='closed',observedTitle=?,observedBody=?,labels=?,observedStatus=COALESCE(?,observedStatus) WHERE ${itemIs()}`,
@@ -1316,13 +1310,24 @@ export class GitHubSourceStore {
       this.updateReadiness(String(issue.taskId), true);
       const rule = parseRule(config.readiness);
       // The closure read carries no Project fields and closing changes none: use those last observed.
+      const observed = this.db
+        .prepare(
+          `SELECT observedStatus, observedFields FROM external_items WHERE ${itemIs()}`,
+        )
+        .get(...this.key(snapshot.nodeId)) as Row;
       const facts = this.readinessFacts({ ...issue, ...observed, projectId });
-      const readinessProof = evaluateReadiness(rule, {
+      const readiness = evaluateReadiness(rule, {
         labels: snapshot.labels,
         fields: facts.fields,
         status: facts.status,
         selectFields: facts.selectFields,
-      }).satisfied;
+      });
+      // Closing moves a Jira status to Done, and a sync may have stored it before this runs, so a
+      // status condition cannot count against a closure made through the tracker's own status.
+      const readinessProof =
+        readiness.satisfied ||
+        (snapshot.status !== undefined &&
+          readiness.unmet.every((c) => c.kind === "status"));
       const hold = priorHold;
       if (
         readinessProof &&
