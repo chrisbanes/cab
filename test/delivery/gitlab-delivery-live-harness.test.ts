@@ -10,6 +10,7 @@ import { scriptedGitLabRemote } from "../fixtures/gitlab-remote.js";
 import {
   GitLabGuard,
   GuardDenied,
+  liveInvocation,
   maxWrites,
   qualificationProject,
 } from "./gitlab-qualification/gitlab-guard.js";
@@ -101,6 +102,26 @@ test("both journeys pass on a scripted gitlab.com, within the write cap, and cle
   assert.equal(evidence.cleanup, "verified");
   assert.ok(w.guard.writeCount <= maxWrites);
   assert.equal(w.guard.mergeCount, 1);
+  // Exactly the writes the plan lists: A's six, B's four, and the three cleanup writes.
+  assert.deepEqual(
+    evidence.requests?.map((r) => r.route),
+    [
+      "git push",
+      "POST merge_requests",
+      "POST graphql ready",
+      "POST discussion",
+      "POST reply",
+      "PUT resolve",
+      "git push",
+      "POST merge_requests",
+      "POST commit",
+      "PUT merge",
+      "PUT merge_request",
+      "DELETE branch",
+      "DELETE branch",
+    ],
+  );
+  assert.deepEqual(w.guard.denied, []);
   assert.equal(
     evidence.steps.a.every((s) => s.result === "passed"),
     true,
@@ -160,6 +181,8 @@ test("a merge that may still be pending is left open, not closed", async (t) => 
     w.remote.state.mergeRequests.filter((m) => m.state === "opened").length,
     1,
   );
+  // The branch under the pending merge is left with it; the other journey's branch is deleted.
+  assert.equal(w.remote.state.heads.size, 1);
   assert.equal(w.guard.mergeCount, 1);
 });
 
@@ -199,6 +222,8 @@ test("the guard allows only gitlab.com, project 88319115, recorded resources and
   await denied(call("GET", `${project}`, undefined, "https://evil.example"));
   await denied(call("GET", "/api/v4/projects/1/repository/files"));
   await denied(call("GET", "/api/v4/groups"));
+  await denied(fetcher(new Request(`https://gitlab.com${project}`)));
+  await denied(call("GET", `${project}?x=1`, undefined, "http://gitlab.com"));
   await denied(call("POST", "/api/v4/projects/1/merge_requests", {}));
   // Nothing may be written before the run has recorded a branch.
   await denied(
@@ -253,6 +278,14 @@ test("the guard allows only gitlab.com, project 88319115, recorded resources and
     call("PUT", `${project}/merge_requests/1`, { state_event: "close" }),
   );
   assert.equal(seen.length, 2);
+  // Nothing but a task branch is pushed: not the default branch, and every refusal is recorded.
+  await denied(
+    guard.guardPush(async () => "pushed")({
+      host: "gitlab.com",
+      nameWithOwner: projectPath,
+      branch: "main",
+    }),
+  );
   // A push to another project is refused before it spends anything.
   await denied(
     guard.guardPush(async () => "pushed")({
@@ -261,26 +294,43 @@ test("the guard allows only gitlab.com, project 88319115, recorded resources and
       branch: "cab/y",
     }),
   );
+  assert.ok(guard.denied.includes("write-cap"));
+  assert.ok(guard.denied.includes("git-branch"));
 });
 
-test("the live wrapper refuses without --live, with a token variable set, or with stray arguments, before any request", () => {
-  const script = "test/delivery/gitlab-qualification/live-gitlab-delivery.mjs";
-  const run = (args: string[], env: Record<string, string> = {}) =>
-    spawnSync(process.execPath, [script, ...args], {
-      encoding: "utf8",
-      env: { PATH: process.env.PATH ?? "", ...env },
-    });
-  for (const [args, env] of [
+test("the live invocation needs --live, an absolute result path, the fixture credential and no glab token variable", () => {
+  const env = { CAB_GITLAB_TOKEN: "set" };
+  assert.deepEqual(liveInvocation(["--live"], env), { resultPath: undefined });
+  assert.deepEqual(liveInvocation(["--live", "--result", "/tmp/r.json"], env), {
+    resultPath: "/tmp/r.json",
+  });
+  assert.deepEqual(liveInvocation(["--result", "/tmp/r.json", "--live"], env), {
+    resultPath: "/tmp/r.json",
+  });
+  for (const [args, extra] of [
     [[], {}],
+    [["--result", "/tmp/r.json"], {}],
     [["--live", "extra"], {}],
+    [["--live", "--result"], {}],
+    [["--live", "--result", "relative.json"], {}],
+    [["--live"], { CAB_GITLAB_TOKEN: "" }],
     [["--live"], { GITLAB_TOKEN: "x" }],
     [["--live"], { GITLAB_ACCESS_TOKEN: "x" }],
     [["--live"], { OAUTH_TOKEN: "x" }],
-    [["--live", "--result", "relative.json"], {}],
-  ] as const) {
-    const result = run([...args], { ...env });
-    assert.notEqual(result.status, 0, args.join(" "));
-    assert.match(result.stderr, /Refusing execution/);
-    assert.equal(result.stderr.includes("x\n"), false);
-  }
+  ] as const)
+    assert.throws(
+      () => liveInvocation(args, { ...env, ...extra }),
+      /Refusing execution/,
+      JSON.stringify(args),
+    );
+});
+
+test("the live script refuses to start without the fixture credential, before any request", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["test/delivery/gitlab-qualification/live-gitlab-delivery.mjs", "--live"],
+    { encoding: "utf8", env: { PATH: process.env.PATH ?? "" } },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Refusing execution/);
 });

@@ -1,3 +1,6 @@
+import { isAbsolute } from "node:path";
+import { glabTokenVariables } from "../../../src/standalone/glab-credential.js";
+
 /** The only GitLab project a qualification run may write to, and the only host it may reach. */
 export const qualificationProject = {
   host: "gitlab.com",
@@ -37,6 +40,8 @@ export class GitLabGuard {
   readonly branches = new Set<string>();
   readonly requests = new Map<number, Created>();
   readonly log: Array<{ route: string; status: number | null }> = [];
+  /** Every request, push or fetch the guard refused; a clean run has none. */
+  readonly denied: string[] = [];
   private writes = 0;
   private merges = 0;
   private setupDiscussions = 0;
@@ -56,8 +61,24 @@ export class GitLabGuard {
     this.mergeable.add(iid);
   }
 
+  private deny(reason: string): never {
+    this.denied.push(reason);
+    throw new GuardDenied(reason);
+  }
+  /** Whether a merge was sent and no definitive refusal proved it had no effect. */
+  mergeMayBePending() {
+    const sent = this.log.find((e) => e.route === "PUT merge");
+    return (
+      sent !== undefined &&
+      !(
+        sent.status !== null &&
+        [400, 401, 403, 404, 405, 409, 422, 429].includes(sent.status)
+      )
+    );
+  }
+
   private spend(route: string) {
-    if (this.writes >= this.limit) throw new GuardDenied("write-cap");
+    if (this.writes >= this.limit) this.deny("write-cap");
     this.writes++;
     this.log.push({ route, status: null });
   }
@@ -69,12 +90,14 @@ export class GitLabGuard {
   /** A fetch that reaches GitLab only as far as the run's scope allows. */
   fetcher(next: typeof fetch): typeof fetch {
     return (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" || input instanceof URL ? input : input.url,
-      );
+      // The product sends a string URL, an explicit method and a JSON string body; nothing else is understood.
+      if (input instanceof Request) this.deny("request-object");
+      const url = new URL(input);
       const method = init?.method ?? "GET";
       if (url.origin !== `https://${qualificationProject.host}`)
-        throw new GuardDenied("origin");
+        this.deny("origin");
+      if (init?.body !== undefined && typeof init.body !== "string")
+        this.deny("body-type");
       const body =
         typeof init?.body === "string"
           ? (JSON.parse(init.body) as Record<string, unknown>)
@@ -102,7 +125,7 @@ export class GitLabGuard {
       path.startsWith(`${project}/`)
     )
       return;
-    throw new GuardDenied("read");
+    this.deny("read");
   }
 
   private writeAllowed(
@@ -113,8 +136,9 @@ export class GitLabGuard {
     // Auto-merge can never be asked for, by any request.
     const text = JSON.stringify(body);
     if (/merge_when_pipeline_succeeds|"auto_merge":true/.test(text))
-      throw new GuardDenied("auto-merge");
+      this.deny("auto-merge");
     const path = url.pathname;
+    if (url.search && url.search !== "?resolved=true") this.deny("query");
     if (method === "POST" && path === "/api/graphql") {
       const variables = body.variables as Record<string, unknown> | undefined;
       if (
@@ -123,11 +147,11 @@ export class GitLabGuard {
         variables?.projectPath !== qualificationProject.path ||
         !this.knownIid(variables?.iid)
       )
-        throw new GuardDenied("graphql");
+        this.deny("graphql");
       this.spend("POST graphql ready");
       return;
     }
-    if (!path.startsWith(`${project}/`)) throw new GuardDenied("write-scope");
+    if (!path.startsWith(`${project}/`)) this.deny("write-scope");
     const rest = path.slice(project.length);
     const mr = rest.match(new RegExp(`^/merge_requests/${iidPattern}(/.*)?$`));
     const iid = mr ? Number(mr[1]) : null;
@@ -137,7 +161,7 @@ export class GitLabGuard {
         !this.branches.has(String(body.source_branch)) ||
         body.target_branch !== qualificationProject.defaultBranch
       )
-        throw new GuardDenied("merge-request-create");
+        this.deny("merge-request-create");
       return this.spend("POST merge_requests");
     }
     if (method === "PUT" && mr && !mr[2]) {
@@ -149,7 +173,7 @@ export class GitLabGuard {
         ) ||
         (body.state_event !== undefined && body.state_event !== "close")
       )
-        throw new GuardDenied("merge-request-edit");
+        this.deny("merge-request-edit");
       return this.spend("PUT merge_request");
     }
     if (method === "PUT" && mr?.[2] === "/merge") {
@@ -164,9 +188,10 @@ export class GitLabGuard {
           (k) => !["sha", "squash", "auto_merge"].includes(k),
         )
       )
-        throw new GuardDenied("merge");
+        this.deny("merge");
+      this.spend("PUT merge");
       this.merges++;
-      return this.spend("PUT merge");
+      return;
     }
     if (method === "POST" && mr?.[2] === "/discussions") {
       if (
@@ -174,7 +199,7 @@ export class GitLabGuard {
         this.setupDiscussions > 0 ||
         Object.keys(body).join() !== "body"
       )
-        throw new GuardDenied("discussion");
+        this.deny("discussion");
       this.setupDiscussions++;
       return this.spend("POST discussion");
     }
@@ -182,13 +207,11 @@ export class GitLabGuard {
       method === "POST" &&
       mr?.[2]?.match(/^\/discussions\/[0-9a-f]+\/notes$/)
     ) {
-      if (!known || Object.keys(body).join() !== "body")
-        throw new GuardDenied("reply");
+      if (!known || Object.keys(body).join() !== "body") this.deny("reply");
       return this.spend("POST reply");
     }
     if (method === "PUT" && mr?.[2]?.match(/^\/discussions\/[0-9a-f]+$/)) {
-      if (!known || url.search !== "?resolved=true")
-        throw new GuardDenied("resolve");
+      if (!known || url.search !== "?resolved=true") this.deny("resolve");
       return this.spend("PUT resolve");
     }
     if (method === "POST" && rest === "/repository/commits") {
@@ -202,17 +225,17 @@ export class GitLabGuard {
         actions[0]?.action !== "create" ||
         !String(actions[0]?.file_path).startsWith("qual/")
       )
-        throw new GuardDenied("commit");
+        this.deny("commit");
       this.setupCommits++;
       return this.spend("POST commit");
     }
     const branch = rest.match(/^\/repository\/branches\/(.+)$/);
     if (method === "DELETE" && branch) {
       if (!this.branches.has(decodeURIComponent(branch[1] ?? "")))
-        throw new GuardDenied("branch-delete");
+        this.deny("branch-delete");
       return this.spend("DELETE branch");
     }
-    throw new GuardDenied("write");
+    this.deny("write");
   }
 
   private knownIid(value: unknown) {
@@ -244,7 +267,7 @@ export class GitLabGuard {
       request.host !== qualificationProject.host ||
       request.nameWithOwner !== qualificationProject.path
     )
-      throw new GuardDenied("git-scope");
+      this.deny("git-scope");
   }
   /** A push to the task's branch; the branch becomes one this run may delete. */
   guardPush<
@@ -253,6 +276,8 @@ export class GitLabGuard {
   >(next: (request: T) => Promise<R>) {
     return async (request: T) => {
       this.verified(request);
+      // Only a task branch, never the default branch or another existing one.
+      if (!request.branch.startsWith("cab/")) this.deny("git-branch");
       this.spend("git push");
       this.branches.add(request.branch);
       return next(request);
@@ -265,9 +290,32 @@ export class GitLabGuard {
   >(next: (request: T) => Promise<R>) {
     return async (request: T) => {
       this.verified(request);
-      if (!this.branches.has(request.branch))
-        throw new GuardDenied("git-fetch");
+      if (!this.branches.has(request.branch)) this.deny("git-fetch");
       return next(request);
     };
   }
+}
+
+/**
+ * Whether a command line and environment may start the live run: `--live`, optionally `--result` with an
+ * absolute path, nothing else; the fixture credential set; and none of the variables that make `glab` use
+ * a token instead of its own login. Any other state refuses before a credential is read or a request is made.
+ */
+export function liveInvocation(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): { resultPath: string | undefined } {
+  const at = args.indexOf("--result");
+  const resultPath = at < 0 ? undefined : args[at + 1];
+  if (
+    !args.includes("--live") ||
+    args.length !== (at < 0 ? 1 : 3) ||
+    (at >= 0 && !isAbsolute(resultPath ?? "")) ||
+    glabTokenVariables.some((name) => env[name]) ||
+    !env.CAB_GITLAB_TOKEN
+  )
+    throw new Error(
+      "Refusing execution: require --live [--result ABSOLUTE_PATH], CAB_GITLAB_TOKEN set, and none of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or OAUTH_TOKEN",
+    );
+  return { resultPath };
 }

@@ -49,12 +49,10 @@ export interface GitLabQualificationOptions {
 
 type World = Awaited<ReturnType<typeof publicationWorld>>;
 type Step = { step: string; result: "passed" | "failed"; detail?: string };
-type CredentialProbe =
-  | { state: "unavailable" }
-  | {
-      kind: "oauth" | "personal-access-token" | "unproved";
-      bearer: Record<"user" | "projects" | "delivery", "passed">;
-    };
+type CredentialProbe = {
+  kind: "oauth" | "personal-access-token" | "unproved";
+  bearer: Record<"user" | "projects" | "delivery", "passed">;
+};
 
 /** What a run reports: every field is a status, a count or an identifier, never a credential value. */
 export interface GitLabEvidence {
@@ -72,7 +70,7 @@ export interface GitLabEvidence {
   probe?: {
     env: CredentialProbe;
     glab: CredentialProbe;
-    sameAccount: boolean;
+    sameAccount: true;
   };
   mainPipelineAfterMerge?: string;
   cleanupReads: Array<{ resource: string; result: string }>;
@@ -186,7 +184,7 @@ export async function runGitLabQualification(
   const temp = realpathSync(mkdtempSync(join(tmpdir(), "cab-gitlab-qual-")));
   const worlds: World[] = [];
   /** A merge request whose merge was sent but not proved: cleanup leaves it open. */
-  let pendingMerge: number | null = null;
+  let pendingMerge: { iid: number; branch: string } | null = null;
   try {
     // Reads only, before anything is written: the project, its settings and that the clone is current.
     const version = await api("/api/v4/version");
@@ -381,7 +379,6 @@ export async function runGitLabQualification(
       "pr.thread.reply",
       "pr.thread.resolve",
     ]);
-    let probed = false;
     try {
       const mr = await open(
         a,
@@ -395,9 +392,13 @@ export async function runGitLabQualification(
       pass("a", "push and draft merge request registered", `!${mr.number}`);
 
       // The probe: both credentials authenticate with Bearer on the account, project and delivery reads.
-      evidence.probe = await probe(credentials, fetcher, mr);
-      probed = true;
-      steps.probe.push({ step: "bearer reads", result: "passed" });
+      try {
+        evidence.probe = await probe(credentials, fetcher, mr);
+        steps.probe.push({ step: "bearer reads", result: "passed" });
+      } catch (error) {
+        steps.probe.push({ step: "bearer reads", result: "failed" });
+        throw error;
+      }
 
       const ready = await act(a, { kind: "pr.ready", target: mr.target });
       assert.equal(ready.success, true, clean(ready.text));
@@ -495,7 +496,6 @@ export async function runGitLabQualification(
         result: "failed",
         detail: clean(error instanceof Error ? error.message : error),
       });
-      if (!probed) steps.probe.push({ step: "bearer reads", result: "failed" });
       throw error;
     }
 
@@ -563,6 +563,11 @@ export async function runGitLabQualification(
       const writesBefore = guard.writeCount;
       const early = await act(b, mergeAction("squash"));
       assert.equal(early.success, false);
+      assert.match(
+        clean(early.text),
+        /provider-preflight-held/,
+        "the provider refused the merge, not an earlier hold",
+      );
       assert.equal(
         guard.writeCount,
         writesBefore,
@@ -584,7 +589,8 @@ export async function runGitLabQualification(
       await drain();
       guard.allowMerge(mr.number);
       const merged = await act(b, mergeAction(method));
-      if (!merged.success && guard.mergeCount > 0) pendingMerge = mr.number;
+      if (!merged.success && guard.mergeMayBePending())
+        pendingMerge = { iid: mr.number, branch: mr.headRef };
       assert.equal(merged.success, true, clean(merged.text));
       await refresh(b);
       assert.equal(bound(b)?.observation.merged, true);
@@ -624,6 +630,8 @@ export async function runGitLabQualification(
       });
       throw error;
     }
+    // A refusal by the guard is a defect in the run, even when the product handled it.
+    assert.deepEqual(guard.denied, [], "the guard refused a request");
     evidence.qualification = "passed";
   } catch (error) {
     evidence.failure = clean(
@@ -632,40 +640,40 @@ export async function runGitLabQualification(
   } finally {
     // Cleanup acts only on what the run recorded, and counts toward pass or fail.
     const cleanup: Array<{ resource: string; result: string }> = [];
-    try {
-      for (const [iid] of guard.requests) {
-        const read = await api(`${base}/merge_requests/${iid}`);
-        let state = shapes.mergeRequest.parse(read.json).state;
-        if (state === "opened" && iid === pendingMerge) state = "pending-merge";
-        else if (state === "opened") {
-          await api(`${base}/merge_requests/${iid}`, {
-            method: "PUT",
-            body: { state_event: "close" },
-          });
-          state = shapes.mergeRequest.parse(
-            (await api(`${base}/merge_requests/${iid}`)).json,
-          ).state;
-        }
+    // Each resource is cleaned on its own, so one failure leaves no other behind.
+    const attempt = async (resource: string, work: () => Promise<string>) => {
+      try {
+        cleanup.push({ resource, result: await work() });
+      } catch (error) {
         cleanup.push({
-          resource: `merge_request !${iid}`,
-          result: String(state),
+          resource,
+          result: `failed: ${clean(error instanceof Error ? error.message : error)}`,
         });
       }
-      for (const branch of guard.branches) {
-        const route = `${base}/repository/branches/${encodeURIComponent(branch)}`;
-        if ((await api(route)).status === 200)
-          await api(route, { method: "DELETE" });
-        cleanup.push({
-          resource: `branch ${branch.replace(/^cab\/.*/, "cab/<task>")}`,
-          result: (await api(route)).status === 404 ? "deleted" : "present",
-        });
-      }
-    } catch (error) {
-      cleanup.push({
-        resource: "cleanup",
-        result: `failed: ${clean(error instanceof Error ? error.message : error)}`,
+    };
+    for (const [iid] of guard.requests)
+      await attempt(`merge_request !${iid}`, async () => {
+        const route = `${base}/merge_requests/${iid}`;
+        const state = (): Promise<string> =>
+          api(route).then((r) => shapes.mergeRequest.parse(r.json).state);
+        const current = await state();
+        if (current !== "opened") return current;
+        if (iid === pendingMerge?.iid) return "pending-merge";
+        await api(route, { method: "PUT", body: { state_event: "close" } });
+        return state();
       });
-    }
+    for (const branch of guard.branches)
+      await attempt(
+        `branch ${branch.replace(/^cab\/.*/, "cab/<task>")}`,
+        async () => {
+          // A branch under a merge that may still land is left with it.
+          if (branch === pendingMerge?.branch) return "pending-merge";
+          const route = `${base}/repository/branches/${encodeURIComponent(branch)}`;
+          if ((await api(route)).status === 200)
+            await api(route, { method: "DELETE" });
+          return (await api(route)).status === 404 ? "deleted" : "present";
+        },
+      );
     evidence.cleanupReads = cleanup;
     evidence.cleanup = cleanup.every((c) =>
       ["closed", "merged", "deleted", "pending-merge"].includes(c.result),
@@ -694,10 +702,8 @@ async function probe(
   const accounts = new Set<string>();
   for (const name of ["env", "glab"] as const) {
     const token = credentials[name];
-    if (!token) {
-      result[name] = { state: "unavailable" };
-      continue;
-    }
+    // Both credentials must authenticate for the probe to pass.
+    if (!token) throw new Error(`probe: ${name} credential unavailable`);
     const status = async (path: string) =>
       (
         await fetcher(`https://${host}${path}`, {
@@ -737,5 +743,6 @@ async function probe(
       bearer: reads,
     };
   }
-  return { ...result, sameAccount: accounts.size === 1 };
+  assert.equal(accounts.size, 1, "probe: the credentials act as one account");
+  return { ...result, sameAccount: true };
 }

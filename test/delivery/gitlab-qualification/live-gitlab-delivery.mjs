@@ -9,25 +9,14 @@
 // the guard limits every request, push and fetch to the fixture, with at most 16 writes.
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { isAbsolute } from "node:path";
 import { glabToken } from "../../../dist/src/standalone/glab-credential.js";
-import { GitLabGuard } from "../../../dist/test/delivery/gitlab-qualification/gitlab-guard.js";
+import {
+  GitLabGuard,
+  liveInvocation,
+} from "../../../dist/test/delivery/gitlab-qualification/gitlab-guard.js";
 import { runGitLabQualification } from "../../../dist/test/delivery/gitlab-qualification/gitlab-journey.js";
 
-const args = process.argv.slice(2);
-const resultPath = args[args.indexOf("--result") + 1];
-const tokenVariables = ["GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN"];
-if (
-  !args.includes("--live") ||
-  args.length !== (args.includes("--result") ? 3 : 1) ||
-  (args.includes("--result") && !isAbsolute(resultPath ?? "")) ||
-  // glab would use any of these instead of its own login, which would defeat the credential probe.
-  tokenVariables.some((name) => process.env[name]) ||
-  !process.env.CAB_GITLAB_TOKEN
-)
-  throw new Error(
-    "Refusing execution: require --live [--result ABSOLUTE_PATH], CAB_GITLAB_TOKEN set, and no GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or OAUTH_TOKEN",
-  );
+const { resultPath } = liveInvocation(process.argv.slice(2), process.env);
 
 const evidence = await runGitLabQualification({
   guard: new GitLabGuard(),
