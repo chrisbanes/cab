@@ -185,7 +185,7 @@ export function useSettingsRows(o: {
 
 /**
  * An edit that now equals the saved value (another writer saved the same) is no edit: drop it
- * so the form is clean and later reads apply. Returns whether any row matched.
+ * so the form is clean and later reads apply.
  */
 export function useDropMatchedEdits(
   d: ConfigurationDraft,
