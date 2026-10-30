@@ -35,19 +35,24 @@ export class JiraSynchronizer {
   }
 
   private async perform(): Promise<void> {
+    // An issue matched by projects on one site is stored once, so every read of that site
+    // requests the select fields any of its projects' rules need, not just its own.
+    const fieldsBySite = new Map<string, string[]>();
+    for (const project of this.domain.projects()) {
+      const config = this.domain.jiraConfiguration(String(project.id));
+      if (!config) continue;
+      const ids = new Set(fieldsBySite.get(config.instance));
+      for (const c of config.readiness?.conditions ?? [])
+        if (c.kind === "select-field") ids.add(c.fieldId);
+      fieldsBySite.set(config.instance, [...ids]);
+    }
     for (const project of this.domain.projects()) {
       const projectId = String(project.id);
       const config = this.domain.jiraConfiguration(projectId);
       if (!config) continue;
       const active = new Set(this.domain.githubActiveSelectionIds(projectId));
       const reader = this.readerFactory(config.instance);
-      const fieldIds = [
-        ...new Set(
-          (config.readiness?.conditions ?? []).flatMap((c) =>
-            c.kind === "select-field" ? [c.fieldId] : [],
-          ),
-        ),
-      ];
+      const fieldIds = fieldsBySite.get(config.instance) ?? [];
       for (const selection of config.selections) {
         if (this.stopped) return;
         if (!active.has(selection.id)) continue;

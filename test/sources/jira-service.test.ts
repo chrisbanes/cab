@@ -697,3 +697,50 @@ test("a Jira readiness loss gives the lead one source-hold notice, and a repeat 
   await f.api.refreshSources();
   assert.equal(notices(), 1);
 });
+
+test("a project without select-field conditions never hides another project's observed fields on a shared issue", async (t) => {
+  const f = await fixture(t);
+  await f.configureCredential();
+  await f.configureJira([{ id: "S-1", kind: "jql", jql: "project = ABC" }], 1, {
+    mode: "all",
+    conditions: [
+      {
+        kind: "select-field",
+        fieldId: "customfield_10010",
+        operator: "in",
+        optionIds: ["20"],
+      },
+    ],
+  });
+  const second = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: second,
+    name: "Beta",
+    leadProfileId: null,
+  });
+  await f.api.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId: second,
+    expectedVersion: 1,
+    instance: site,
+    selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
+  });
+  f.state.issues["project = ABC"] = [
+    jiraIssue(1, {
+      fields: { customfield_10010: { id: "20", value: "High" } },
+    }),
+  ];
+  const stores = f.service
+    .githubSources()
+    .forTracker({ provider: "jira", instance: site });
+  for (let i = 0; i < 2; i++) await f.api.refreshSources();
+  const taskId = String(stores.issue("10001")?.taskId);
+  assert.equal(stores.hold("10001")?.active ?? 0, 0);
+  assert.ok(
+    !f.service.domain().admission(taskId).reasons.includes("task-unready"),
+  );
+});
