@@ -13,12 +13,24 @@ export interface ListedSkill {
   path: string;
 }
 
+/** A profile's skills cannot be scoped for Codex; the message names no path, so it can be a hold reason. */
+export class SkillScopeError extends Error {
+  constructor() {
+    super("A skill the profile enables could not be loaded by Codex");
+  }
+}
+
+const resolved = (path: string) =>
+  realpath(path).catch(() => {
+    throw new SkillScopeError();
+  });
+
 /** The `skills/` directory of each plugin, resolved, deduplicated and sorted. */
 export async function pluginSkillRoots(
   plugins: readonly SkillPluginSettings[],
 ): Promise<string[]> {
   const roots = await Promise.all(
-    plugins.map((plugin) => realpath(join(plugin.path, "skills"))),
+    plugins.map((plugin) => resolved(join(plugin.path, "skills"))),
   );
   return [...new Set(roots)].sort();
 }
@@ -30,7 +42,7 @@ export async function enabledSkillFiles(
   const files = await Promise.all(
     plugins.flatMap((plugin) =>
       plugin.skills.map((skill) =>
-        realpath(join(plugin.path, "skills", skill, "SKILL.md")),
+        resolved(join(plugin.path, "skills", skill, "SKILL.md")),
       ),
     ),
   );
@@ -68,7 +80,7 @@ export async function skillScopeConfig(input: {
   }
   // Claude accepts a skill Codex may reject (for instance without frontmatter); never run without it.
   if (enabled && [...enabled].some((file) => !found.has(file)))
-    throw new Error("A skill the profile enables was not loaded by Codex");
+    throw new SkillScopeError();
   return disabled.length === 0
     ? undefined
     : {

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { CodexRuntime } from "../../src/standalone/codex.js";
 import { codexHomeFor } from "../../src/standalone/codex-home.js";
+import { SkillScopeError } from "../../src/standalone/codex-skills.js";
 import {
   closeRuntimeSafetyFixtures,
   runtimeSafetyFixture,
@@ -305,9 +306,59 @@ test("an enabled skill that Codex does not list stops the thread instead of runn
     await runtime.start();
     await assert.rejects(
       runtime.startThread(f.workspace, [], settings(plugin, ["probe-skill"])),
-      /was not loaded by Codex/,
+      /could not be loaded by Codex/,
     );
     assert.ok(!f.sent().some((r) => r.method === "thread/start"));
+  } finally {
+    await runtime.stop();
+    f.cleanup();
+  }
+});
+
+test("a plugin removed after admission stops the thread with a reason that names no path", async () => {
+  const f = fixture();
+  const runtime = f.runtime();
+  try {
+    const plugin = f.plugin("plugin-a", ["probe-skill"]);
+    rmSync(plugin, { recursive: true });
+    await runtime.start();
+    await assert.rejects(
+      runtime.startThread(f.workspace, [], settings(plugin, ["probe-skill"])),
+      (error: Error) =>
+        error instanceof SkillScopeError && !error.message.includes(plugin),
+    );
+  } finally {
+    await runtime.stop();
+    f.cleanup();
+  }
+});
+
+test("concurrent thread starts for different profiles each scope against one root set", async () => {
+  const f = fixture();
+  const runtime = f.runtime();
+  try {
+    const a = f.plugin("plugin-a", ["probe-skill", "other-skill"]);
+    const b = f.plugin("plugin-b", ["probe-skill", "other-skill"]);
+    f.list(a, b);
+    await runtime.start();
+    await Promise.all([
+      runtime.startThread(f.workspace, [], settings(a, ["probe-skill"])),
+      runtime.startThread(f.workspace, [], settings(b, ["probe-skill"])),
+    ]);
+    const scoped = f
+      .sent()
+      .map((r) => r.method)
+      .filter((m) =>
+        ["skills/extraRoots/set", "skills/list", "thread/start"].includes(m),
+      );
+    assert.deepEqual(scoped, [
+      "skills/extraRoots/set",
+      "skills/list",
+      "thread/start",
+      "skills/extraRoots/set",
+      "skills/list",
+      "thread/start",
+    ]);
   } finally {
     await runtime.stop();
     f.cleanup();
