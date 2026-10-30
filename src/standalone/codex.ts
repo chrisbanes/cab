@@ -597,7 +597,9 @@ export interface RuntimeTurnSettings {
   model: string | null;
   reasoningEffort: string | null;
   /** The skill plugins the bound profile revision enables; absent when it enables none. */
-  skills?: ProfileSkills;
+  skills?: {
+    plugins: Array<ProfileSkills["plugins"][number] & { name?: string }>;
+  };
 }
 
 /**

@@ -1459,6 +1459,34 @@ test("a profile's skill plugins load as local plugins with only their enabled sk
   }
 });
 
+test("enabled skills are qualified by their plugin's manifest name, so overlapping names stay distinct", async () => {
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId, undefined, {
+      plugins: [
+        { path: "/plugins/a", skills: ["review"], name: "plugin-a" },
+        { path: "/plugins/b", skills: ["test"], name: "plugin-b" },
+      ],
+    });
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    assert.deepEqual(f.sessions[0]?.options.skills, [
+      "plugin-a:review",
+      "plugin-b:test",
+    ]);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("the Skill tool is outside policy for a turn whose profile enables no skills", async () => {
   const decisions: unknown[] = [];
   const f = fixture({

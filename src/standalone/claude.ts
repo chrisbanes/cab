@@ -892,7 +892,14 @@ export class ClaudeRuntime implements Runtime {
     const temporary = await ensureTemporaryBase(base);
     if (temporary) throw new Error(`Claude runtime unavailable: ${temporary}`);
     const plugins = settings?.skills?.plugins ?? [];
-    const enabledSkills = [...new Set(plugins.flatMap((p) => p.skills))];
+    // Qualified by the plugin's manifest name when known, so two plugins' same-named skills differ.
+    const enabledSkills = [
+      ...new Set(
+        plugins.flatMap((p) =>
+          p.skills.map((skill) => (p.name ? `${p.name}:${skill}` : skill)),
+        ),
+      ),
+    ];
     const turnTools = [
       ...builtInTools,
       agentTool,

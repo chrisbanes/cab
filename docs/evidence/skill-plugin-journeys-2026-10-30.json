@@ -1,8 +1,8 @@
 {
   "claude-skill": {
     "facet": "claude-skill",
-    "attempt": 2,
-    "candidate": "3ea4a503b32741ff2e9bda7b0b718c09d08383f8",
+    "attempt": 1,
+    "candidate": "f3e5ecb9a7332f0127021bf5f8ce69581d333d76",
     "node": "v24.22.1",
     "sdk": "0.3.310",
     "claudeCode": "2.1.310",
@@ -11,7 +11,7 @@
       "version": "codex-cli 0.165.0-alpha.1.2"
     },
     "model": {
-      "claude": "sonnet",
+      "claude": "haiku",
       "reasoningEffort": "low"
     },
     "stage": "run",
@@ -27,7 +27,7 @@
         {
           "name": "cabprobe",
           "skills": ["probe-skill"],
-          "digest": "43a33e8bc3c3918b4029eeb5a8b124e33d611f19ae9c2b777bfa52db85ff7321"
+          "digest": "867f3e49e6c778afbe534f5ec3d016fbe6f8571ea6f757219cd33133229801b2"
         }
       ],
       "digestMatchesDirectory": true
@@ -69,9 +69,9 @@
     },
     "budget": {
       "attempt": {
-        "number": 2,
-        "model": "sonnet",
-        "startedAt": 1793370782435,
+        "number": 1,
+        "model": "haiku",
+        "startedAt": 1793373400385,
         "turns": {
           "claude": 1,
           "codex": 0
@@ -80,7 +80,7 @@
         "failureKind": null
       },
       "totals": {
-        "claude": 5,
+        "claude": 1,
         "codex": 0
       }
     }

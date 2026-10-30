@@ -818,7 +818,7 @@ test("a Claude turn loads its profile's skill plugins and records their digests 
   assert.deepEqual(options?.plugins, [
     { type: "local", path: plugin, skipMcpDiscovery: true },
   ]);
-  assert.deepEqual(options?.skills, ["review", "plan"]);
+  assert.deepEqual(options?.skills, ["unit-plugin:review", "unit-plugin:plan"]);
   const digest = await digestPlugin(plugin);
   assert.deepEqual(
     (await new OperatorApi(run.service).readExecution(workId)).data

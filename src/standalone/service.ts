@@ -7644,7 +7644,18 @@ export class StandaloneService {
       ? {
           model,
           reasoningEffort,
-          ...(skills.plugins.length > 0 ? { skills } : {}),
+          ...(skills.plugins.length > 0
+            ? {
+                skills: {
+                  // Manifest names qualify each skill, so overlapping names across plugins stay distinct.
+                  plugins: skills.plugins.map((plugin, index) => {
+                    const name = this.turnPlugins.get(request.workId)?.[index]
+                      ?.name;
+                    return name === undefined ? plugin : { ...plugin, name };
+                  }),
+                },
+              }
+            : {}),
         }
       : undefined;
   }
