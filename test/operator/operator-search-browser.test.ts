@@ -92,7 +92,10 @@ test("shared Search preserves exact historical target, dates, selected focus and
   );
   await captureBrowserEvidence(page, "1366-cross-project-search");
   await page.locator(`[data-search-record="${r.resultId}"] a`).click();
-  await page.getByText("Shared command R2 original", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("Shared command R2 original", { exact: true })
+    .waitFor();
   assert.ok(page.url().includes(`result=${r.resultId}`));
   await page
     .getByRole("link", { name: "Back to originating view", exact: true })
@@ -427,13 +430,17 @@ test("same-task historical Search entries preserve manual origin selections and 
   );
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByText("Entry ancient result", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("Entry ancient result", { exact: true })
+    .waitFor();
   await page.getByLabel("Result revision").selectOption(manual.resultId);
   await openOverviewCard(page, "brief");
   await page
     .getByLabel("Retained source revision")
     .selectOption(source.sourceId);
   await page
+    .locator("#review")
     .getByText("Entry manually selected result", { exact: true })
     .waitFor();
   await page.getByLabel("Editable reply").fill("Shared unfinished entry reply");
@@ -461,7 +468,10 @@ test("same-task historical Search entries preserve manual origin selections and 
     type: "result",
   });
   await page.locator(`[data-search-record="${old.resultId}"] a`).click();
-  await page.getByText("Entry ancient result", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("Entry ancient result", { exact: true })
+    .waitFor();
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Shared unfinished entry reply",
@@ -477,6 +487,7 @@ test("same-task historical Search entries preserve manual origin selections and 
   await page.getByRole("heading", { name: "Search", exact: true }).waitFor();
   await page.goBack();
   await page
+    .locator("#review")
     .getByText("Entry manually selected result", { exact: true })
     .waitFor();
   await page.waitForFunction(
@@ -519,12 +530,18 @@ test("same-task historical Search entries preserve manual origin selections and 
   );
   await page.locator(`[data-search-record="${old.resultId}"]`).waitFor();
   await page.goForward();
-  await page.getByText("Entry ancient result", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("Entry ancient result", { exact: true })
+    .waitFor();
   await rememberAnyReadiness(page);
   await page.getByRole("link", { name: "Tasks", exact: true }).click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
   await page.getByRole("link", { name: "Entry task", exact: true }).click();
-  await page.getByText("Entry latest result", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("Entry latest result", { exact: true })
+    .waitFor();
   assert.equal(await page.getByLabel("Result revision").inputValue(), "");
   assert.equal(
     await page.getByLabel("Retained source revision").inputValue(),
@@ -544,7 +561,10 @@ test("same-task historical Search entries preserve manual origin selections and 
     type: "result",
   });
   await page.locator(`[data-search-record="${old.resultId}"] a`).click();
-  await page.getByText("Entry ancient result", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("Entry ancient result", { exact: true })
+    .waitFor();
   await page.goBack();
   await page.locator(`[data-search-record="${old.resultId}"]`).waitFor();
   // Each applied filter is its own Search entry, so the empty Search entry sits further back.
@@ -555,7 +575,10 @@ test("same-task historical Search entries preserve manual origin selections and 
   );
   await page.getByRole("heading", { name: "Search", exact: true }).waitFor();
   await page.goBack();
-  await page.getByText("Entry latest result", { exact: true }).waitFor();
+  await page
+    .locator("#review")
+    .getByText("Entry latest result", { exact: true })
+    .waitFor();
   assert.equal(await page.getByLabel("Result revision").inputValue(), "");
   assert.equal(
     await page.getByLabel("Retained source revision").inputValue(),
