@@ -93,8 +93,8 @@ type MergeRequest = z.output<typeof mergeRequestSchema>;
 
 /** GitLab has no draft field to write: a draft is a title that starts with `Draft:` (or its variants). */
 const draftPrefix = /^\s*(\[draft\]|\(draft\)|draft:)/i;
-/** GitLab removes carriage returns and trailing whitespace from a note before saving it. */
-const noteText = (text: string) =>
+/** GitLab removes carriage returns and trailing whitespace from a note or description before saving it. */
+const savedText = (text: string) =>
   text
     .replaceAll("\r", "")
     .replace(/[ \t]+$/gm, "")
@@ -591,7 +591,8 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         if (
           found.length === 1 &&
           mr &&
-          mr.description === `${a.body}\n\n${marker}` &&
+          savedText(mr.description ?? "") ===
+            savedText(`${a.body}\n\n${marker}`) &&
           mr.title === draftTitle(a.title, a.draft) &&
           mr.draft === a.draft &&
           mr.author.id === user.id &&
@@ -614,7 +615,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
                     record.beforeState?.draft === true,
                   )) &&
               (a.fields.body === undefined ||
-                (mr.description ?? "") === a.fields.body);
+                savedText(mr.description ?? "") === savedText(a.fields.body));
         if (matches)
           receipt = { nodeId: String(mr.id), number: mr.iid, headSha: mr.sha };
       } else {
@@ -627,7 +628,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           if (
             matching.length === 1 &&
             note &&
-            noteText(note.body) === noteText(`${a.body}\n\n${marker}`) &&
+            savedText(note.body) === savedText(`${a.body}\n\n${marker}`) &&
             note.author.id === user.id
           )
             receipt = { nodeId: String(note.id) };

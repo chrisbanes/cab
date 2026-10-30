@@ -1100,3 +1100,27 @@ test("a reply that GitLab normalizes on save still settles on its marker note", 
   assert.equal(done.state, "confirmed-success");
   assert.doesNotMatch(w.state.discussions[0]?.notes[1]?.body ?? "", /\r/);
 });
+
+test("a create and an edit that GitLab normalizes on save still settle", async () => {
+  const w = world();
+  w.state.head = commit;
+  const create = created({ body: "First  \r\nSecond\n" });
+  const made = await w.provider.performAction(
+    record(create, await w.provider.preflight(create, policy)),
+  );
+  assert.equal(made.state, "confirmed-success");
+  assert.equal(w.state.mergeRequests[0]?.description?.includes("\r"), false);
+  const edit = {
+    kind: "pr.edit",
+    target: {
+      ...prTarget,
+      number: Number(made.receipt?.number),
+      nodeId: String(made.receipt?.nodeId),
+    },
+    fields: { body: "Third \r\nFourth\n" },
+  } as ExternalAction;
+  const edited = await w.provider.performAction(
+    record(edit, await w.provider.preflight(edit, policy)),
+  );
+  assert.equal(edited.state, "confirmed-success");
+});

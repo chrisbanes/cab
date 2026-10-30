@@ -1,3 +1,10 @@
+/** GitLab removes carriage returns and trailing whitespace from saved text. */
+const saved = (text: string) =>
+  text
+    .replaceAll("\r", "")
+    .replace(/[ \t]+$/gm, "")
+    .trimEnd();
+
 /** The credential user the scripted instance reports. */
 export const gitLabUser = { id: 7 };
 
@@ -174,7 +181,7 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
         source_branch: body.source_branch,
         target_branch: body.target_branch,
         title: body.title,
-        description: body.description,
+        description: saved(String(body.description)),
         draft: /^Draft: /.test(body.title),
         ...(state.head ? { sha: state.head } : {}),
       });
@@ -208,7 +215,8 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
         mr.title = body.title;
         mr.draft = /^Draft: /.test(body.title);
       }
-      if (body.description !== undefined) mr.description = body.description;
+      if (body.description !== undefined)
+        mr.description = saved(String(body.description));
       return json(mr);
     }
     if (rest === "discussions") return paged(state.discussions, new URL(url));
@@ -221,10 +229,7 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
         type: "DiscussionNote",
         system: false,
         // GitLab removes carriage returns and trailing whitespace from a note.
-        body: String(body.body)
-          .replaceAll("\r", "")
-          .replace(/[ \t]+$/gm, "")
-          .trimEnd(),
+        body: saved(String(body.body)),
         author: { id: gitLabUser.id },
         updated_at: "2026-01-01T00:00:00.000Z",
         resolvable: true,
