@@ -512,6 +512,8 @@ function RequestEntry({
   const id = entry.interactionId;
   const status = requests.status(id) ?? entry.status;
   const label = entry.requestKind === "approval" ? "Approval" : "Question";
+  // A request that left the task read has no form; the entry falls back to its summary.
+  const inlineForm = requests.inline === id ? requests.form(id) : null;
   return (
     <article
       className="conv-entry conv-request"
@@ -536,9 +538,7 @@ function RequestEntry({
           {statusText[status]}
         </StatusBadge>
       </header>
-      {requests.inline === id ? (
-        requests.form(id)
-      ) : (
+      {inlineForm ?? (
         <>
           <p className="conv-text">{entry.prompt}</p>
           {entry.requestKind === "approval" && (
