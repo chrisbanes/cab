@@ -12,7 +12,7 @@ and removes the directory (the link, never its target).
 Facets (S1-S5 gate the Codex skill delivery; S6 is information only and never enables subagents):
   S1 extra root lists both fixture skills with plugins disabled
   S2 thread A (other-skill and bundled skills disabled by config) vs thread B (nothing disabled)
-  S3 thread/resume with the same config keeps the scope; without it is recorded
+  S3 a restarted App Server resumes the thread with the same config and keeps the scope
   S4 a model-driven shell prints the real HOME; skill discovery loads nothing from it
   S5 the login link is intact after every turn
   S6 subagents (a separate App Server with multi_agent=true): outside write, network, interrupt, survivors
@@ -248,7 +248,8 @@ def clear_markers():
             os.unlink(path)
 
 
-def run_facets(server, target):
+def run_facets(holder, env, target):
+    server = holder[0]
     def link_check(label):
         state = link_state(target)
         intact = state["isSymlink"] and state["targetUnchanged"] and state["regular"]
@@ -302,7 +303,10 @@ def run_facets(server, target):
          threadAOtherRan=a_other, threadBSkills=seen_b, threadBOtherRan=b_other)
     clear_markers()
 
-    # S3: resume A with the same config; then without it (information).
+    # S3: a new App Server process (as after a cab restart) resumes A with the same config.
+    server.close()
+    server = holder[0] = Server(env)
+    server.ask("skills/extraRoots/set", {"extraRoots": [fixture]})
     server.resume_thread(thread_a, config_a)
     seen_resumed = names_in(server.turn(thread_a, LIST)["messages"])
     server.turn(thread_a, use("other-skill"))
@@ -388,15 +392,16 @@ def main():
     if not stat.S_ISREG(mode):
         raise Stop(2, "operator auth.json is not a regular file")
     os.symlink(target, link)
-    server = Server(env)
+    holder = [Server(env)]
     try:
+        server = holder[0]
         account = server.ask("account/read", {})["account"]
         emit(event="account", present=account is not None)
         if account is None:
             raise Stop(2, "no account behind the linked login")
-        s1, s2, s3, s4 = run_facets(server, target)
+        s1, s2, s3, s4 = run_facets(holder, env, target)
     finally:
-        server.close()
+        holder[0].close()
     subagent_info(env, target)
     state = link_state(target)
     emit(facet="S5", after="subagent probe", linkIntact=state["isSymlink"] and state["targetUnchanged"] and state["regular"])
