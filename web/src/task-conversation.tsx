@@ -247,6 +247,7 @@ export function TaskConversation({
   );
   const ctx: Context = {
     client,
+    visibility: timeline.window?.visibilityRevision ?? null,
     taskId,
     data,
     names,
@@ -309,6 +310,8 @@ export function TaskConversation({
 
 interface Context {
   client: OperatorClient;
+  /** The window's visibility revision: fetched output is read again when redaction may have changed. */
+  visibility: string | null;
   taskId: string;
   data: Data;
   names: Map<string, string | null>;
@@ -652,7 +655,7 @@ function CommandRow({ entry, ctx }: { entry: ToolEntry; ctx: Context }) {
         },
       );
     return () => abort.abort();
-  }, [open, sequence, ctx.client, ctx.taskId, attempt]);
+  }, [open, sequence, ctx.client, ctx.taskId, ctx.visibility, attempt]);
   const failed = entry.exitCode !== null && entry.exitCode !== 0;
   return (
     <li data-record-id={`c:${entry.entryId}`}>

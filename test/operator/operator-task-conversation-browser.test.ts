@@ -378,6 +378,22 @@ for (const [label, viewport] of [
     await failing.getByRole("button", { name: "Show output" }).click();
     await failing.getByText("output of step 2").waitFor();
     assert.equal(outputReads.length, 1);
+    // Fetched output is read again when the visibility revision changes, so redaction cannot lag.
+    const timelineUrl = "**/api/operator/tasks/*/timeline?limit=50";
+    await page.route(timelineUrl, async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.visibilityRevision = "f".repeat(64);
+      await route.fulfill({ response, json });
+    });
+    await refresh(page);
+    await page.waitForFunction(
+      () => document.querySelectorAll(".conv-commands pre").length > 0,
+    );
+    for (let i = 0; i < 50 && outputReads.length < 2; i++)
+      await page.waitForTimeout(100);
+    assert.equal(outputReads.length, 2);
+    await page.unroute(timelineUrl);
     await log.getByRole("button", { name: "Open in Changes" }).click();
     assert.equal(
       await page
