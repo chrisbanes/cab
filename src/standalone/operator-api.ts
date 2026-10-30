@@ -520,6 +520,19 @@ type LocalReviewCommand = Extract<
  * repository, else the repository ID. A Jira project ID is never a repository, even when it
  * equals a linked repository's ID.
  */
+/** A Jira issue's `KEY-n` and browse link on its site, from the stored project key and number. */
+function jiraIssueLink(site: string, project: unknown, number: number | null) {
+  const projectKey = /^[A-Z][A-Z0-9_]{0,254}$/.test(String(project))
+    ? String(project)
+    : null;
+  const key = projectKey && number ? `${projectKey}-${number}` : null;
+  return {
+    projectKey,
+    key,
+    url: key ? `https://${site}/browse/${key}` : null,
+  };
+}
+
 export function deliveryRepositoryLabel(
   source:
     | {
@@ -2308,12 +2321,11 @@ export class OperatorApi {
         detail: {},
       };
     }
-    const projectKey = /^[A-Z][A-Z0-9_]{0,254}$/.test(
-      String(issue?.repositoryName),
-    )
-      ? String(issue?.repositoryName)
-      : null;
-    const key = projectKey && number ? `${projectKey}-${number}` : null;
+    const { projectKey, key, url } = jiraIssueLink(
+      identity.provider,
+      issue?.repositoryName,
+      number,
+    );
     const status = z
       .object({ name: z.string(), categoryKey: z.string() })
       .passthrough()
@@ -2326,7 +2338,7 @@ export class OperatorApi {
     return {
       repositoryName: projectKey,
       number,
-      url: key ? `https://${identity.provider}/browse/${key}` : null,
+      url,
       detail: {
         ...(key ? { key } : {}),
         status: status.success
@@ -2747,14 +2759,12 @@ export class OperatorApi {
   ) {
     const number = Number(b.issueNumber) || null;
     if (identity.tracker) {
-      const project = /^[A-Z][A-Z0-9_]{0,254}$/.test(String(b.repositoryName))
-        ? String(b.repositoryName)
-        : null;
-      const key = project && number ? `${project}-${number}` : null;
-      return {
-        label: key ?? "Jira issue",
-        url: key ? `https://${identity.provider}/browse/${key}` : null,
-      };
+      const { key, url } = jiraIssueLink(
+        identity.provider,
+        b.repositoryName,
+        number,
+      );
+      return { label: key ?? "Jira issue", url };
     }
     const name = this.repositoryName(b.repositoryName, excluded);
     return {

@@ -25,26 +25,30 @@ import {
 const parseRule = (json: unknown) =>
   readinessSchema.nullable().parse(JSON.parse(String(json)) as unknown);
 
+const observedStatusSchema = z
+  .object({ id: z.string(), name: z.string() })
+  .passthrough();
+const observedFieldsSchema = z.array(
+  z
+    .object({ fieldId: z.string(), optionId: z.string(), name: z.string() })
+    .passthrough(),
+);
+
 /** An issue's labels, tracker status ID and select values as stored on its `external_items` row. */
 const observedFacts = (row: Row) => ({
   labels: z.array(z.string()).parse(JSON.parse(String(row.labels)) as unknown),
   status:
     row.observedStatus == null
       ? null
-      : z
-          .object({ id: z.string() })
-          .passthrough()
-          .parse(JSON.parse(String(row.observedStatus)) as unknown).id,
+      : observedStatusSchema.parse(
+          JSON.parse(String(row.observedStatus)) as unknown,
+        ).id,
   selectFields:
     row.observedFields == null
       ? []
-      : z
-          .array(
-            z
-              .object({ fieldId: z.string(), optionId: z.string() })
-              .passthrough(),
-          )
-          .parse(JSON.parse(String(row.observedFields)) as unknown),
+      : observedFieldsSchema.parse(
+          JSON.parse(String(row.observedFields)) as unknown,
+        ),
 });
 
 /** Why an imported task is or is not Draft, with its project's rule. */
@@ -1647,24 +1651,15 @@ export class GitHubSourceStore {
       .all(projectId) as Row[];
     for (const row of rows) {
       if (row.observedStatus != null) {
-        const status = z
-          .object({ id: z.string(), name: z.string() })
-          .passthrough()
-          .parse(JSON.parse(String(row.observedStatus)) as unknown);
+        const status = observedStatusSchema.parse(
+          JSON.parse(String(row.observedStatus)) as unknown,
+        );
         names.statuses.set(status.id, status.name);
       }
       if (row.observedFields != null)
-        for (const f of z
-          .array(
-            z
-              .object({
-                fieldId: z.string(),
-                optionId: z.string(),
-                name: z.string(),
-              })
-              .passthrough(),
-          )
-          .parse(JSON.parse(String(row.observedFields)) as unknown)) {
+        for (const f of observedFieldsSchema.parse(
+          JSON.parse(String(row.observedFields)) as unknown,
+        )) {
           const options = names.options.get(f.fieldId) ?? new Map();
           options.set(f.optionId, f.name);
           names.options.set(f.fieldId, options);

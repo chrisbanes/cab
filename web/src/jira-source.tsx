@@ -221,7 +221,8 @@ export function JiraSourceTab(
   const { data, projectId } = p;
   const siteId = useId();
   const saved = data.source.tracker === "jira";
-  const rule = savedRule(data.source.readiness);
+  // A GitHub project's rule never carries over to Jira.
+  const rule = saved ? savedRule(data.source.readiness) : null;
   // A rule the read withholds cannot be shown, so a save leaves it as it is.
   const withheld = data.source.readiness.kind === "unavailable";
   const savedRuleLines = ruleLines(rule);

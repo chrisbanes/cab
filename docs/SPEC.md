@@ -790,7 +790,7 @@ read that is incomplete for any reason (rate limit, credential, network, malform
 or truncated pages) never withdraws a task. A Jira project's optional readiness rule is
 the same flat all/any list as GitHub's, over the issue's labels (by name, case-insensitive),
 its status (by status ID) and its single-select custom fields (`customfield_N`, by option
-ID); `not-in` on a select field needs a value. A status or field no complete read has
+ID); `not-in` on a select field needs a value. A status or field no read has
 observed never satisfies a condition. Names shown for IDs come from the project's imported
 issues and are display only. Losing readiness applies the ordinary readiness-lost hold and
 a later complete read releases it. A Jira "is blocked by" link makes the linked issue a

@@ -242,3 +242,37 @@ test("a Jira edit carries its readiness rule into the prepared command and shows
   ]);
   assert.equal(JSON.parse(readFileSync(clear, "utf8")).command.readiness, null);
 });
+
+test("switching a GitHub project to Jira drops its GitHub readiness rule", async (t) => {
+  const w = await world(t);
+  w.d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.projectId,
+    expectedVersion: 1,
+    credentialRef: "env:TEST_GITHUB",
+    selections: [],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", operator: "has", name: "ready" }],
+    },
+  });
+  const out = join(w.h.dir, "switch.json");
+  await w.ok("ro", [
+    "project",
+    "prepare-source",
+    w.projectId,
+    "--out",
+    out,
+    "--edit-file",
+    w.file(
+      "switch-edit.json",
+      JSON.stringify({
+        jira: { instance: site, selections: [{ jql: "project = ABC" }] },
+      }),
+    ),
+  ]);
+  await w.ok("rw", ["project", "apply", "--file", out]);
+  assert.equal(w.d.jiraConfiguration(w.projectId)?.readiness, null);
+});

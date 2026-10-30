@@ -393,6 +393,9 @@ function jiraEditCommand(
   }));
   const ids = (list: { id: string | null }[]) =>
     list.map((s) => s.id).join(",") || "none";
+  // Only a Jira project's own rule is kept; a GitHub project's is dropped on the switch.
+  const savedRule =
+    source.tracker === "jira" ? source.readiness : { kind: "none" as const };
   return {
     command: {
       type: "jira.configure",
@@ -415,12 +418,12 @@ function jiraEditCommand(
       },
       ...(jira.readiness === undefined ||
       JSON.stringify(jira.readiness) ===
-        JSON.stringify(readinessCommandValue(source.readiness))
+        JSON.stringify(readinessCommandValue(savedRule))
         ? []
         : [
             {
               field: "readiness",
-              from: readinessText(source.readiness),
+              from: readinessText(savedRule),
               to: ruleSummary(jira.readiness),
             },
           ]),
