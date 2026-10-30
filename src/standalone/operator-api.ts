@@ -515,11 +515,6 @@ type LocalReviewCommand = Extract<
       | "review.send.reconcile";
   }
 >;
-/**
- * A delivery branch's repository: the GitHub source's name when the branch is in the source
- * repository, else the repository ID. A Jira project ID is never a repository, even when it
- * equals a linked repository's ID.
- */
 /** A Jira issue's `KEY-n` and browse link on its site, from the stored project key and number. */
 function jiraIssueLink(site: string, project: unknown, number: number | null) {
   const projectKey = /^[A-Z][A-Z0-9_]{0,254}$/.test(String(project))
@@ -533,6 +528,11 @@ function jiraIssueLink(site: string, project: unknown, number: number | null) {
   };
 }
 
+/**
+ * A delivery branch's repository: the GitHub source's name when the branch is in the source
+ * repository, else the repository ID. A Jira project ID is never a repository, even when it
+ * equals a linked repository's ID.
+ */
 export function deliveryRepositoryLabel(
   source:
     | {
