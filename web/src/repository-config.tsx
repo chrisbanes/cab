@@ -32,6 +32,8 @@ import {
   withKeys,
 } from "./settings-rows.js";
 import { Alert } from "./ui/alert.js";
+import { NativeSelect } from "./ui/native-select.js";
+import { codeHostName, type CodeHost } from "./delivery-presentation.js";
 
 /** The project's repository links: the checkouts workspaces, delivery and setup use. */
 export function RepositoryTab(p: TabProps) {
@@ -115,15 +117,22 @@ export function RepositoryTab(p: TabProps) {
       if (next.some((r) => !r.removed)) d.set("removeAll", false);
     },
   });
-  const savedPath = (index: number, baseline: string | undefined) =>
-    edit.savedValue(
-      "repositories",
-      index,
-      "path",
-      "Local repository path",
-      "Local path unavailable",
-      baseline,
-    );
+  /** A new row's identity fields differ by host, so a switch starts them over. */
+  const setCodeHost = (index: number, gitlab: boolean) => {
+    const next = parseRows(v.repositories);
+    const {
+      codeHost: _c,
+      host: _h,
+      projectPath: _p,
+      ...rest
+    } = next[index] ?? {};
+    next[index] = {
+      ...rest,
+      repositoryId: "",
+      ...(gitlab ? { codeHost: "gitlab", host: "", projectPath: "" } : {}),
+    };
+    edit.setRows("repositories", next);
+  };
   return (
     <form
       onSubmit={(e) =>
@@ -186,7 +195,9 @@ export function RepositoryTab(p: TabProps) {
                       <div className="settings-row-heading">
                         <div>
                           <h3 className="small-heading">{name}</h3>
-                          <p className="metadata muted">GitHub · github.com</p>
+                          <p className="metadata muted">
+                            {codeHostName(r.codeHost as CodeHost)} · {r.host}
+                          </p>
                         </div>
                         {r.removed && (
                           <StatusBadge tone="warning">
@@ -217,13 +228,54 @@ export function RepositoryTab(p: TabProps) {
                     )}
                     {!r.removed && (
                       <div className="settings-fields">
-                        {!r.keep &&
-                          edit.input(
-                            "repositories",
-                            i,
-                            "repositoryId",
-                            "Linked repository ID",
-                          )}
+                        {!r.keep && (
+                          <>
+                            <label
+                              className="field body"
+                              htmlFor={`repository-${i}-codeHost`}
+                            >
+                              Code host
+                              <NativeSelect
+                                className="control"
+                                id={`repository-${i}-codeHost`}
+                                aria-label="Code host"
+                                value={
+                                  r.codeHost === "gitlab" ? "gitlab" : "github"
+                                }
+                                onChange={(e) =>
+                                  setCodeHost(i, e.target.value === "gitlab")
+                                }
+                              >
+                                <option value="github">GitHub</option>
+                                <option value="gitlab">GitLab</option>
+                              </NativeSelect>
+                            </label>
+                            {r.codeHost === "gitlab" && (
+                              <>
+                                {edit.input(
+                                  "repositories",
+                                  i,
+                                  "host",
+                                  "GitLab host",
+                                )}
+                                {edit.input(
+                                  "repositories",
+                                  i,
+                                  "projectPath",
+                                  "GitLab project path",
+                                )}
+                              </>
+                            )}
+                            {edit.input(
+                              "repositories",
+                              i,
+                              "repositoryId",
+                              r.codeHost === "gitlab"
+                                ? "GitLab project ID"
+                                : "Linked repository ID",
+                            )}
+                          </>
+                        )}
                         {edit.input(
                           "repositories",
                           i,
@@ -231,8 +283,12 @@ export function RepositoryTab(p: TabProps) {
                           "Linked repository ref",
                         )}
                         {r.keep
-                          ? savedPath(
+                          ? edit.savedValue(
+                              "repositories",
                               i,
+                              "path",
+                              "Local repository path",
+                              "Local path unavailable",
                               known?.links.find(
                                 (x) => x.repositoryId === r.repositoryId,
                               )?.path,
@@ -271,7 +327,9 @@ export function RepositoryTab(p: TabProps) {
                   className="body error-text"
                   role="alert"
                 >
-                  Check linked repository IDs, paths and refs.
+                  {Object.values(d.errors).find((e) =>
+                    /^Repository \d+: /.test(e),
+                  ) ?? "Check linked repository IDs, paths and refs."}
                 </p>
               )}
             </fieldset>
@@ -302,7 +360,7 @@ export function RepositoryTab(p: TabProps) {
           <Aside
             title="Repository boundary"
             items={[
-              "Repository links are project configuration: workspaces, delivery and setup read them. Only GitHub on github.com is supported.",
+              "Repository links are project configuration: workspaces, delivery and setup read them. Links are GitHub on github.com or GitLab on a host you name.",
               "Readiness never grants repository access, and saving here neither imports nor activates any source.",
             ]}
           />

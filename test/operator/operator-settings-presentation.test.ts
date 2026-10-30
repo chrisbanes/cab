@@ -636,6 +636,65 @@ test("a saved GitLab link keeps its code host through the form and is shown with
   ]);
 });
 
+test("a new GitLab link names its project path and reads like the CLI preview; a kept one never sends it", () => {
+  const c = config();
+  const saved = {
+    ...c.repositories,
+    links: [
+      {
+        repositoryId: "4242",
+        codeHost: "gitlab" as const,
+        host: "gitlab.example.com",
+        ref: "main",
+      },
+    ],
+  };
+  const gitlab = {
+    codeHost: "gitlab",
+    host: "gitlab.example.com",
+    projectPath: "group/atlas",
+    repositoryId: "9",
+    ref: "main",
+    path: "/lab",
+  };
+  const github = { repositoryId: "acme/new", ref: "main", path: "/hub" };
+  const kept = {
+    ...repositoryRowsFrom(saved).repositories[0],
+    ref: "dev",
+    removed: true,
+  };
+  const values = (rows: object[]) => ({
+    key: "k",
+    expectedVersion: "2",
+    repositories: JSON.stringify(rows),
+  });
+  const command = repositoryCommand(projectId, values([gitlab, github]));
+  assert.deepEqual(command.repositories, [
+    { ...gitlab },
+    { codeHost: "github", host: "github.com", ...github },
+  ]);
+  assert.deepEqual(
+    repositoryCommand(projectId, values([{ ...kept, removed: false }]))
+      .repositories,
+    [
+      {
+        codeHost: "gitlab",
+        host: "gitlab.example.com",
+        repositoryId: "4242",
+        ref: "dev",
+      },
+    ],
+  );
+  assert.deepEqual(repositoryChanges(saved, values([kept, gitlab])), [
+    "− Repository access: 4242",
+    "+ Repository access: 9 · main · GitLab gitlab.example.com",
+  ]);
+  assert.deepEqual(
+    repositoryChanges(saved, values([{ ...kept, removed: false }])),
+    ["Ref for 4242: main → dev"],
+  );
+});
+
 test("no readiness rule loads no condition, saves null and never clears an unavailable rule silently", () => {
   const c = config();
   const none = { ...c.source, readiness: { kind: "none" as const } };
