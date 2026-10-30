@@ -25,10 +25,21 @@ import {
   readinessSchema,
 } from "../operator/readiness.js";
 import { claudeTokenSource, readClaudeToken } from "./claude-token.js";
+import { codexHomeFor, codexLoginLink } from "./codex-home.js";
 import { assertExistingCanonicalDirectoryPath } from "./data-directory.js";
 import { printVersion, resolveOnPath } from "./executable-path.js";
 import type { OperatorApi } from "./operator-api.js";
 import type { StandaloneService } from "./service.js";
+
+export type CodexLoginResult =
+  | "verified"
+  | "policy"
+  | "failed"
+  | "unavailable"
+  /** The link to the operator's login in cab's Codex home has no usable target. */
+  | "link-missing"
+  /** A regular file, or a link to another target, stands where the link belongs. */
+  | "link-replaced";
 
 type Discovery = Pick<
   z.infer<typeof discoveryStatusSchema>["data"],
@@ -49,7 +60,7 @@ export type ReadinessDeps = {
   dataDir: string;
   authFile: string;
   /** Re-runs the running App Server's authentication initialization; no model turn. */
-  codexLogin: () => Promise<"verified" | "policy" | "failed" | "unavailable">;
+  codexLogin: () => Promise<CodexLoginResult>;
   discovery: () => Promise<Discovery>;
   /** Local state of the configured GitLab credentials; cab makes no GitLab request (glab may, within its time limit). */
   gitLabCredentials: () => Promise<{
@@ -121,6 +132,10 @@ const fixes = {
   codex:
     "Install Codex into the fixed PATH, then turn Codex off and on in Settings → Runtime",
   codexLogin: "Run `codex login` as the service user",
+  codexLinkMissing:
+    "Run `codex login` as the service user with file-backed credentials; cab links that file and cannot use a keyring login",
+  codexLinkReplaced:
+    "Remove auth.json from cab's Codex home in the data directory, then restart the service",
   git: "Install git",
   discovery: "Run `gh auth login`, or Settings → discovery credential",
   gitlab:
@@ -323,7 +338,7 @@ export class Readiness {
 
   private async codexLogin(): Promise<ReadinessCheck> {
     const id = "codex-login";
-    let result: "verified" | "policy" | "failed" | "unavailable" | "timeout";
+    let result: CodexLoginResult | "timeout";
     try {
       result = await bounded(
         this.deps.codexLogin(),
@@ -339,6 +354,20 @@ export class Readiness {
         "fail",
         "Codex's approval policy or sandbox mode is not the one cab requires",
         fixes.codexPolicy,
+      );
+    if (result === "link-replaced")
+      return outcome(
+        id,
+        "fail",
+        "The login link in cab's Codex home was replaced by another file",
+        fixes.codexLinkReplaced,
+      );
+    if (result === "link-missing")
+      return outcome(
+        id,
+        "fail",
+        "The service user's Codex login file is missing or not file-backed",
+        fixes.codexLinkMissing,
       );
     const reason = {
       failed: "Codex is not signed in on the running service",
@@ -666,7 +695,17 @@ export function serviceReadiness(
     env: process.env,
     uid: process.getuid?.(),
     ...paths,
-    codexLogin: () => service.verifyCodexLogin(),
+    codexLogin: async () => {
+      const link = await codexLoginLink(
+        codexHomeFor(paths.dataDir),
+        process.env,
+      );
+      return link === "replaced"
+        ? "link-replaced"
+        : link === "missing-target"
+          ? "link-missing"
+          : service.verifyCodexLogin();
+    },
     discovery: async () => {
       // Only a `gh:` reference needs the `gh` probe; a stalled `gh` must not fail `env:`.
       const ref = service.domain().discoveryCredentialReference();

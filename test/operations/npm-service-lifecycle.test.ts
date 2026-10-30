@@ -225,6 +225,9 @@ async function sandbox(t: { after(fn: () => unknown): void }) {
   const codexDir = join(dir, "codex-bin");
   for (const path of [home, codexDir])
     mkdirSync(path, { recursive: true, mode: 0o700 });
+  // cab links the service user's login file into its own Codex home, so the target must exist.
+  mkdirSync(join(home, ".codex"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(home, ".codex", "auth.json"), "{}", { mode: 0o600 });
   writeFileSync(join(codexDir, "fake-codex.mjs"), fakeCodex);
   writeFileSync(
     join(codexDir, "codex"),

@@ -160,6 +160,11 @@ test("existing bindings and runtime evidence read as Codex after migration", () 
       state.runtimeThreadQualification("legacy-thread")?.harness,
       "codex",
     );
+    // A thread that exists at migration was started under the previous Codex home.
+    assert.equal(
+      state.runtimeThreadQualification("legacy-thread")?.codexHome,
+      null,
+    );
     for (const table of [
       "task_execution_bindings",
       "runtime_terminal_evidence",
@@ -246,6 +251,19 @@ test("new bindings and runtime evidence persist harness-neutral Codex facts", ()
     assert.equal(
       f.state.runtimeThreadQualification("fresh-thread")?.harness,
       "codex",
+    );
+    assert.equal(
+      f.state.runtimeThreadQualification("fresh-thread")?.codexHome,
+      "cab",
+    );
+    f.state.registerRuntimeThreadTools(
+      "claude-thread",
+      "d".repeat(64),
+      "claude",
+    );
+    assert.equal(
+      f.state.runtimeThreadQualification("claude-thread")?.codexHome,
+      null,
     );
   } finally {
     f.close();

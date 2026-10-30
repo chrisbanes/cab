@@ -200,6 +200,12 @@ tar -xzf cab-0.2.0-darwin-arm64.tar.gz --strip-components 1 -C "$STATE/versions/
 "$STATE/versions/0.2.0/bin/cab" service upgrade "$STATE/versions/0.2.0" --connection local
 ```
 
+The first release that gives Codex its own home refuses to resume Codex
+conversations started before it: the request is refused, naming "Started under
+the previous Codex home; restart the task", and Reset task starts a new conversation.
+Finish or restart open Codex work before upgrading; conversation history stays
+readable.
+
 Before it changes anything, upgrade reads the install record, checks the target
 release as install does, checks that the running job is the one the record
 describes, and loads the connection's token (`--connection`,
@@ -468,8 +474,9 @@ The JSON results include `"mode"` on install and uninstall; daemon install adds
 false, `"steps"`.
 
 **Credentials on a daemon host.** A daemon starts before anyone logs in, so it
-cannot read the login keychain. The Codex login is file-based
-(`~/.codex/auth.json`) and works. A Claude token configured as a
+cannot read the login keychain. The Codex login must be file-based
+(`~/.codex/auth.json`) so cab can link it; a keychain-backed Codex login cannot be
+used. A Claude token configured as a
 [`file:` reference](#claude-subscription-token) stays readable; a Claude or Codex
 login that lives only in the keychain does not. For GitHub, use a file-based
 `gh` login: run `gh auth login --insecure-storage` on the Mac. That keeps the token
@@ -615,9 +622,14 @@ discovery, GitLab credentials, the Claude executable and token, runtime harness 
 Fail or Not configured with one fix line and no token value or path. The checks
 change nothing and request no model turn; re-run them after any fix.
 
-The service uses the logged-in user's existing Codex login; it does not copy,
-read, or alter Codex credentials. The separate cab auth file is not that
-login. The launchd proof starts App Server and verifies authentication/config
+The service runs Codex in its own Codex home under the data directory
+(`DATA/codex/home`) with an isolated `HOME`; `auth.json` there is a symlink to the
+logged-in user's file-backed Codex login (`$CODEX_HOME/auth.json` from the service
+environment, else `~/.codex/auth.json`). It does not copy, read or hash Codex
+credentials, and Codex refreshes the login through the link. If readiness reports the
+link replaced, remove `auth.json` from `DATA/codex/home` and restart the service; if
+it reports the login file missing, run `codex login` as the service user. The separate
+cab auth file is not that login. The launchd proof starts App Server and verifies authentication/config
 initialization without requesting a model turn.
 
 ### GitLab credentials

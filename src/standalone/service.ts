@@ -122,6 +122,12 @@ import {
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
 } from "./codex.js";
+import {
+  type CodexHome,
+  codexHomeFor,
+  PreviousCodexHomeError,
+  previousCodexHomeMessage,
+} from "./codex-home.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import {
@@ -332,6 +338,7 @@ const immutableRevisionMismatches = new Set([
   "assignment-instructions-revision-stale",
   "assignment-profile-revision-stale",
   "task-revision-changed",
+  previousCodexHomeMessage,
 ]);
 
 /** The Claude turn's base environment and token, or why no turn may start. */
@@ -346,6 +353,7 @@ export type ClaudeTurnEnvironment =
 export interface RuntimeSpawnContext {
   spawnEnvironment: () => NodeJS.ProcessEnv;
   safety: RuntimeSafetyPort;
+  codex?: CodexHome;
   claude?: {
     configDirectory: string;
     turnEnvironment: () => ClaudeTurnEnvironment;
@@ -1419,7 +1427,12 @@ export class StandaloneService {
       this.spawnRuntime = (harness) => {
         // Keyed by the requested harness: test fakes do not declare one.
         const runtime = this.runtimeFactory(
-          { ...spawnEnvironment, safety: runtimeSafety(harness), claude },
+          {
+            ...spawnEnvironment,
+            safety: runtimeSafety(harness),
+            codex: codexHomeFor(this.dataDir),
+            claude,
+          },
           harness,
         );
         this.attachRuntime(
@@ -7245,6 +7258,19 @@ export class StandaloneService {
       : reason.startsWith("assignment-");
   }
 
+  /** Whether a resumed Codex conversation predates cab's Codex home; other runtimes never do. */
+  private startedUnderPreviousCodexHome(
+    workId: string,
+    threadId: string,
+  ): boolean {
+    const runtime = this.runtimes.get(
+      this.started().state.workHarness(workId),
+    ) as
+      | (Runtime & { startedUnderPreviousHome?: (threadId: string) => boolean })
+      | undefined;
+    return runtime?.startedUnderPreviousHome?.(threadId) ?? false;
+  }
+
   private async attemptRequest(
     queued: TurnRequest,
     generation = this.generation,
@@ -7331,6 +7357,15 @@ export class StandaloneService {
             );
           if (this.recoveryContinuationUnresolved(assignmentId, request.workId))
             reasons.push("recovery-continuation-unresolved");
+          // Refused here, before any writer or capacity is held, so Reset task can replace it.
+          if (
+            previous?.threadId &&
+            this.startedUnderPreviousCodexHome(
+              request.workId,
+              previous.threadId,
+            )
+          )
+            reasons.push(previousCodexHomeMessage);
           if (
             this.repositoryAccessRevoked(binding.taskId, binding.repositories)
           )
@@ -8104,7 +8139,9 @@ export class StandaloneService {
       if (state.get(intent.id).state !== "held")
         state.hold(
           intent.id,
-          `Runtime submission or observation uncertain: ${String(error)}`,
+          error instanceof PreviousCodexHomeError
+            ? error.message
+            : `Runtime submission or observation uncertain: ${String(error)}`,
         );
       // The run stays held, with its capacity, until the next start verifies the runtime ended.
       if (
