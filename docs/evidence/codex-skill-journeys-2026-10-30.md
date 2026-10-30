@@ -23,8 +23,8 @@ Every recorded process was verified exited by exact identity.
 ## Versions and limits
 
 - The journeys run the approved launcher, `codex-cli 0.165.0-alpha.1.2`; the scoping proof
-  ran on the `codex` on `PATH`, 0.164.0. Both produced the scoped skill list and the
-  skill run.
+  ran on the `codex` on `PATH`, 0.164.0. Both ran the
+  skill.
 - The first `codex-skill` attempt passed without the login-link check; the check was added
   and the facet rerun. The ledger lived in a private temporary directory, so the attempt
   count was not shared with earlier rounds.
