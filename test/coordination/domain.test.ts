@@ -1892,6 +1892,8 @@ test("profiles store validated skill plugins per revision and assignments keep t
 
     for (const skills of [
       { plugins: [{ path: "relative/dir", skills: ["a"] }] },
+      { plugins: [{ path: "/p/.", skills: ["a"] }] },
+      { plugins: [{ path: "/p/../q", skills: ["a"] }] },
       { plugins: [{ path: "/p", skills: [] }] },
       { plugins: [{ path: "/p", skills: ["a", "a"] }] },
       { plugins: [{ path: "/p", skills: ["a/b"] }] },

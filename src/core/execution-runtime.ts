@@ -68,7 +68,11 @@ export const profileSkillsSchema = z
             path: z
               .string()
               .max(1024)
-              .regex(/^\/[^\0]*[^/\0]$/),
+              .regex(/^\/[^\0]*[^/\0]$/)
+              // One spelling per directory: duplicates and digests compare it.
+              .refine((path) => !/\/\/|\/\.{1,2}(\/|$)/.test(path), {
+                message: "Path must be normalised",
+              }),
             skills: z
               .array(skillNameSchema)
               .min(1)
