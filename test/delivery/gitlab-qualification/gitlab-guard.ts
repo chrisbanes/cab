@@ -276,7 +276,7 @@ export class GitLabGuard {
   >(next: (request: T) => Promise<R>) {
     return async (request: T) => {
       this.verified(request);
-      // Only a task branch, never the default branch or another existing one.
+      // Only a task branch (`cab/` prefix), never the default branch.
       if (!request.branch.startsWith("cab/")) this.deny("git-branch");
       this.spend("git push");
       this.branches.add(request.branch);
