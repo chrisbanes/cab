@@ -1912,13 +1912,13 @@ test("service stop settles archive status and worktree removal before database c
         );
         // The bound protects cancellation: the Git child is stopped within its grace and
         // observation window, not left to the 30 s Git timeout. Teardown after that varies
-        // with load (up to 0.3 s locally, about 1 s on CI), so it only has to finish well
+        // with load (up to 0.5 s over 40 loaded local runs, about 1 s on CI), so it only has to finish well
         // before the Git timeout would have.
         assert.ok(
           observedAt !== undefined && observedAt - readyAt < 20 + 40 + 800,
           `Git cancellation observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
         );
-        assert.ok(elapsedMs < 15_000, `service stop settled in ${elapsedMs}ms`);
+        assert.ok(elapsedMs < 5_000, `service stop settled in ${elapsedMs}ms`);
         assert.equal(result.outcome, "retained");
         if (result.outcome === "retained") {
           assert.equal(result.binding.workspaceId, binding.workspaceId);
