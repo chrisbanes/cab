@@ -159,12 +159,6 @@ async function fixture(
       requiredChecks: [],
     });
   configureGrants(grants, 1);
-  // Jira blockers and readiness arrive with #1319; until then admission refuses an imported task.
-  (service as unknown as { db: import("node:sqlite").DatabaseSync }).db
-    .prepare(
-      "UPDATE domain_tasks SET importedBlockers = 'clear', ready = 1 WHERE id = ?",
-    )
-    .run(taskId);
   domain.execute({
     type: "project.configure",
     actor: "operator",
