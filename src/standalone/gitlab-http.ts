@@ -145,6 +145,10 @@ export class TtlCache {
       throw error;
     }
   }
+  /** Forgets this entry; the next read loads again. */
+  delete(key: string): void {
+    this.entries.delete(key);
+  }
   /** Forgets every entry whose key starts with `prefix`; the next read loads again. */
   drop(prefix: string): boolean {
     let dropped = false;

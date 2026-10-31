@@ -1086,6 +1086,11 @@ export class DomainStore {
     return row?.credentialRef ? String(row.credentialRef) : null;
   }
 
+  private codeHostCredentialChanges = 0;
+  /** Counts the changes made to code-host credential references since this store opened; never a value. */
+  codeHostCredentialEpoch(): number {
+    return this.codeHostCredentialChanges;
+  }
   /** Installation-level code-host credential references by host; never their values. */
   codeHostCredentials(): {
     codeHost: "gitlab";
@@ -3133,6 +3138,7 @@ export class DomainStore {
       }
       case "code-host-credential.configure": {
         this.operator(command);
+        this.codeHostCredentialChanges++;
         if (command.credentialRef === null)
           this.db
             .prepare(

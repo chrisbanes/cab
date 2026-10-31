@@ -232,6 +232,8 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
       if (mr && /draft: false/.test(body.query)) {
         mr.draft = false;
         mr.title = String(mr.title).replace(/^Draft: /, "");
+        if (mr.detailed_merge_status === "draft_status")
+          mr.detailed_merge_status = "mergeable";
       }
       return json({ data: { mergeRequestSetDraft: { errors: [] } } });
     }
@@ -270,6 +272,10 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
         title: body.title,
         description: saved(String(body.description)),
         draft: /^Draft: /.test(body.title),
+        // GitLab calls a draft unmergeable whatever its pipeline says.
+        ...(/^Draft: /.test(body.title)
+          ? { detailed_merge_status: "draft_status" }
+          : {}),
         ...(headOf(body.source_branch) === null
           ? {}
           : { sha: String(headOf(body.source_branch)) }),

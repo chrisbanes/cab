@@ -599,6 +599,11 @@ export async function runGitLabQualification(
       await refresh(b);
       const blockers = bound(b)?.observation.mergeBlockers ?? [];
       assert.ok(blockers.includes("pr-draft"), "the refusal names the draft");
+      // And GitLab's own verdict: a draft is never `mergeable`.
+      assert.ok(
+        blockers.some((b) => b.startsWith("merge-status-")),
+        "the refusal names GitLab's merge status",
+      );
       pass("b", "merge refused while a draft", blockers.join(","));
 
       const ready = await act(b, {

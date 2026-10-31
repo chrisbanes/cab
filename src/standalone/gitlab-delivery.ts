@@ -174,7 +174,7 @@ export interface GitLabDeliveryOptions {
   host: string;
   /** The project's linked GitLab project on `host` for a numeric ID, or null when it is not linked. */
   link: (repositoryId: string) => { projectPath: string } | null;
-  /** The host's code-host credential, resolved on every use; null when it is unusable. */
+  /** The host's code-host credential; null when it is unusable. A `glab:` login's token is kept briefly by the service. */
   token: () => Promise<string | null>;
   fetcher?: typeof fetch | undefined;
   push?: PushFunction | undefined;
@@ -319,7 +319,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     const link = this.options.link(repositoryId);
     if (!link) throw new Error("provider-repository-mismatch");
     const key = `project|${this.options.host}|${repositoryId}`;
-    if (fresh) this.options.cache?.drop(key);
+    if (fresh) this.options.cache?.delete(key);
     const load = async () =>
       projectSchema.parse(await this.get(`/projects/${repositoryId}`));
     // The link is compared on every use, so a cached read can never stand in for another project.
@@ -977,11 +977,13 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
 
 /**
  * Builds the GitLab provider for a project's repository link on `host`. The credential is the
- * installation's code-host credential for that host, read again on every use; it is only the
+ * installation's code-host credential for that host (an `env:` variable read on every use, a `glab:` login's
+ * token kept for a few minutes, see `cacheTtlMs`); it is only the
  * identity that acts, and the project's delivery grants still decide what may be done.
  */
 export function gitLabDeliveryFactory(
   domain: Pick<DomainStore, "repositoryLinks" | "codeHostCredentials"> &
+    Partial<Pick<DomainStore, "codeHostCredentialEpoch">> &
     Parameters<typeof codeHostToken>[0],
   seams: GitLabSeams & {
     fetcher?: typeof fetch | undefined;
@@ -1018,7 +1020,8 @@ export function gitLabDeliveryFactory(
           .find((c) => c.host === host)?.credentialRef;
         return ref?.startsWith("glab:")
           ? cache.get(
-              `token|${host}|${ref}`,
+              // A credential configured again, even to the same reference, is resolved again.
+              `token|${host}|${ref}|${domain.codeHostCredentialEpoch?.() ?? 0}`,
               cacheTtlMs.token,
               () => codeHostToken(domain, seams, host),
               (token) => token !== null,

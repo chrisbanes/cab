@@ -183,11 +183,13 @@ function factoryWorld(now: () => number) {
       : remote.fetcher(url, init);
   }) as typeof fetch;
   const credentialRef = { value: "glab:gitlab.example.com" };
+  const epoch = { value: 0 };
   const domain = {
     claudeTokenReference: () => null,
     projects: () => [],
     deliveryCredentialReference: () => null,
     discoveryCredentialReference: () => null,
+    codeHostCredentialEpoch: () => epoch.value,
     codeHostCredentials: () => [
       { codeHost: "gitlab", host, credentialRef: credentialRef.value },
     ],
@@ -217,6 +219,7 @@ function factoryWorld(now: () => number) {
       revoked = token;
     },
     credentialRef,
+    epoch,
   };
 }
 
@@ -287,6 +290,20 @@ test("an env credential is read as it is every time, and a 401 is not retried fo
     );
   } finally {
     delete process.env[variable];
+    w.glab.close();
+  }
+});
+
+test("configuring the credential again resolves the glab login again, even to the same reference", async () => {
+  const w = factoryWorld(() => 0);
+  try {
+    await w.provider().inspectPr(identity, policy);
+    await w.provider().inspectPr(identity, policy);
+    assert.equal(w.glab.commands().length, 1);
+    w.epoch.value++;
+    await w.provider().inspectPr(identity, policy);
+    assert.equal(w.glab.commands().length, 2);
+  } finally {
     w.glab.close();
   }
 });

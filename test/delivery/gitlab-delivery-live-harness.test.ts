@@ -64,8 +64,9 @@ function world(t: TestContext, options: { staleClone?: boolean } = {}) {
         started_at: "2026-01-01T00:00:00Z",
         finished_at: next === "running" ? null : "2026-01-01T00:04:00Z",
       };
-      mr.detailed_merge_status =
-        next === "running"
+      mr.detailed_merge_status = mr.draft
+        ? "draft_status"
+        : next === "running"
           ? "ci_still_running"
           : next === "success"
             ? "mergeable"
