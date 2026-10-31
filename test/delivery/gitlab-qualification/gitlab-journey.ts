@@ -129,9 +129,10 @@ const wakes = (w: World) =>
 /**
  * The bounded GitLab qualification: a credential probe, then two sequential journeys through the real
  * service, delivery coordinator and GitLab provider, with the fixture's scripted lead runtime (no model
- * turns). Journey A is reviewable-pr: push, draft merge request, ready, a failing pipeline, a discussion
- * reply and resolve, and the operator's handback settlement. Journey B is through-merge: push, merge
- * request, an outside commit adopted as the recovery, a refused merge, then the one merge. Cleanup closes
+ * turns). Journey A is reviewable-pr: push, merge request, a failing pipeline, a discussion reply and
+ * resolve, and the operator's handback settlement. Journey B is through-merge: push, a draft merge request,
+ * an outside commit adopted as the recovery, a merge refused while the request is a draft, ready, then the
+ * one merge. The refusal rests on the draft, which the run controls, not on how fast the pipeline runs. Cleanup closes
  * and deletes only what the guard recorded. Returns evidence that holds no credential value.
  */
 export async function runGitLabQualification(
@@ -382,7 +383,6 @@ export async function runGitLabQualification(
     configure(a, [
       "branch.push",
       "pr.create",
-      "pr.ready",
       "pr.thread.reply",
       "pr.thread.resolve",
     ]);
@@ -394,9 +394,9 @@ export async function runGitLabQualification(
           FAIL_PIPELINE: "",
           [`qual/${runId}-a.md`]: `Qualification ${runId}\n`,
         },
-        true,
+        false,
       );
-      pass("a", "push and draft merge request registered", `!${mr.number}`);
+      pass("a", "push and merge request registered", `!${mr.number}`);
 
       // The probe: both credentials authenticate with Bearer on the account, project and delivery reads.
       try {
@@ -411,12 +411,6 @@ export async function runGitLabQualification(
         steps.probe.push({ step: "bearer reads", result: "failed" });
         throw error;
       }
-
-      const ready = await act(a, { kind: "pr.ready", target: mr.target });
-      assert.equal(ready.success, true, clean(ready.text));
-      await refresh(a);
-      assert.equal(bound(a)?.observation.draft, false);
-      pass("a", "ready (GraphQL mergeRequestSetDraft)");
 
       // A failing pipeline wakes the lead once, and an unchanged refresh adds no wake.
       await pollUntil(a, "pipeline failure", () =>
@@ -525,15 +519,21 @@ export async function runGitLabQualification(
     // Journey B: through-merge.
     const b = await link("through-merge");
     worlds.push(b);
-    configure(b, ["branch.push", "branch.adopt", "pr.create", "pr.merge"]);
+    configure(b, [
+      "branch.push",
+      "branch.adopt",
+      "pr.create",
+      "pr.ready",
+      "pr.merge",
+    ]);
     try {
       const mr = await open(
         b,
         "b",
         { [`qual/${runId}-b.md`]: `Qualification ${runId}\n` },
-        false,
+        true,
       );
-      pass("b", "push and merge request registered", `!${mr.number}`);
+      pass("b", "push and draft merge request registered", `!${mr.number}`);
       // An outside commit on the task branch, made as the operator's account.
       const outside = await api(`${base}/repository/commits`, {
         method: "POST",
@@ -570,7 +570,7 @@ export async function runGitLabQualification(
       assert.equal(branchOf(b)?.lastPushedSha, outsideSha);
       pass("b", "outside head adopted (recovery)");
 
-      // The lead takes the pending wake-ups, then a merge before the pipeline passes is refused.
+      // The lead takes the pending wake-ups, then a merge of the draft is refused.
       const drain = async () => {
         const turn = b.f.runtime.turns;
         await b.f.terminal(turn);
@@ -598,8 +598,15 @@ export async function runGitLabQualification(
       );
       await refresh(b);
       const blockers = bound(b)?.observation.mergeBlockers ?? [];
-      assert.ok(blockers.length > 0, "the refusal names a blocker");
-      pass("b", "merge refused before the pipeline passed", blockers.join(","));
+      assert.ok(blockers.includes("pr-draft"), "the refusal names the draft");
+      pass("b", "merge refused while a draft", blockers.join(","));
+
+      const ready = await act(b, {
+        kind: "pr.ready",
+        target: { ...mr.target, expectedHeadSha: outsideSha },
+      });
+      assert.equal(ready.success, true, clean(ready.text));
+      pass("b", "ready (GraphQL mergeRequestSetDraft)");
 
       await pollUntil(
         b,
@@ -691,7 +698,10 @@ export async function runGitLabQualification(
   evidence.requestCounts = guard.counts;
   evidence.rateLimited = guard.rateLimited.map((r) => ({
     ...r,
-    body: clean(r.body).slice(0, 80),
+    headers: Object.fromEntries(
+      Object.entries(r.headers).map(([name, value]) => [name, clean(value)]),
+    ),
+    body: clean(r.body).slice(0, 200),
   }));
   return evidence;
 }

@@ -11,7 +11,7 @@ export const qualificationProject = {
 /** The writes cleanup needs at most: close both merge requests and delete both branches. */
 export const cleanupWrites = 4;
 /** The least time between two requests of a live run, so it stays far below GitLab's per-minute limits. */
-export const livePaceMs = 300;
+export const livePaceMs = 750;
 /** Provider writes (API writes and Git pushes) one run may make. */
 export const maxWrites = 16;
 
@@ -51,10 +51,16 @@ export class GitLabGuard {
   /** Each 429 GitLab answered: the rate-limit headers it carried (names, and the wait it named) and its text. */
   readonly rateLimited: Array<{
     route: string;
-    headers: string[];
+    /** Which request of the run this was, and when: seconds since the first, and requests in the minute before. */
+    request: number;
+    atSeconds: number;
+    lastMinute: number;
+    /** The rate-limit headers GitLab sent, name and value: the limit's name, its quota, what was observed and when it resets. */
+    headers: Record<string, string>;
     retryAfter: string | null;
     body: string;
   }> = [];
+  private readonly sentAt: number[] = [];
   private nextSlot = 0;
   /** The one-shot write the request being checked would spend, released if GitLab answers 429. */
   private oneShot: "merge" | "discussion" | "commit" | null = null;
@@ -137,6 +143,7 @@ export class GitLabGuard {
       else this.writeAllowed(method, url, body);
       const oneShot = this.oneShot;
       this.count(method, url);
+      this.sentAt.push(Date.now());
       // Reserve the next slot before waiting, so concurrent requests are spaced too.
       const slot = Math.max(Date.now(), this.nextSlot);
       this.nextSlot = slot + this.paceMs;
@@ -170,12 +177,17 @@ export class GitLabGuard {
     this.counts[key] = (this.counts[key] ?? 0) + 1;
   }
   private async noteRateLimit(method: string, url: URL, response: Response) {
-    const headers = [...response.headers.keys()].filter((name) =>
-      /^(ratelimit|retry-after)/.test(name),
-    );
+    const now = Date.now();
     this.rateLimited.push({
       route: this.shape(method, url),
-      headers,
+      request: this.sentAt.length,
+      atSeconds: Math.round((now - (this.sentAt[0] ?? now)) / 1000),
+      lastMinute: this.sentAt.filter((t) => now - t <= 60_000).length,
+      headers: Object.fromEntries(
+        [...response.headers.entries()].filter(([name]) =>
+          /^(ratelimit|retry-after)/.test(name),
+        ),
+      ),
       retryAfter: response.headers.get("retry-after"),
       body: (
         await response

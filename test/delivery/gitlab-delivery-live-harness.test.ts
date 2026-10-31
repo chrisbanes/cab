@@ -110,19 +110,19 @@ test("both journeys pass on a scripted gitlab.com, within the write cap, and cle
     w.glab.commands().length > 0,
     "the glab login supplied the delivery credential",
   );
-  // Exactly the writes the plan lists: A's six, B's four, and the three cleanup writes.
+  // Exactly the writes planned: A's five, B's five, and the three cleanup writes.
   assert.deepEqual(
     evidence.requests?.map((r) => r.route),
     [
       "git push",
       "POST merge_requests",
-      "POST graphql ready",
       "POST discussion",
       "POST reply",
       "PUT resolve",
       "git push",
       "POST merge_requests",
       "POST commit",
+      "POST graphql ready",
       "PUT merge",
       "PUT close merge_request",
       "DELETE branch",
@@ -130,6 +130,17 @@ test("both journeys pass on a scripted gitlab.com, within the write cap, and cle
     ],
   );
   assert.deepEqual(w.guard.denied, []);
+  // The read cache and the kept glab login keep the run's request volume down: glab ran once per service
+  // (not once per request), the project was read only for decisions and the occasional poll, and the
+  // account once per service.
+  assert.ok(w.glab.commands().length <= 4, String(w.glab.commands().length));
+  const counts = evidence.requestCounts ?? {};
+  assert.ok(
+    (counts["GET /api/v4/projects/:n"] ?? 99) <= 12,
+    JSON.stringify(counts),
+  );
+  assert.ok((counts["GET /api/v4/user"] ?? 99) <= 6, JSON.stringify(counts));
+
   assert.equal(
     evidence.steps.a.every((s) => s.result === "passed"),
     true,
@@ -355,7 +366,15 @@ test("the live script refuses to start without the fixture credential, before an
 const limited = () =>
   new Response("Retry later\n", {
     status: 429,
-    headers: { "retry-after": "30", "ratelimit-limit": "100" },
+    headers: {
+      "retry-after": "30",
+      "ratelimit-name": "throttle_authenticated_api",
+      "ratelimit-limit": "100",
+      "ratelimit-observed": "101",
+      "ratelimit-remaining": "0",
+      "ratelimit-reset": "1793440000",
+      "ratelimit-resettime": "Sat, 31 Oct 2026 10:26:40 GMT",
+    },
   });
 
 test("a 429 mid-run is waited out by the service and the harness, and the run records what GitLab sent", async (t) => {
@@ -372,13 +391,25 @@ test("a 429 mid-run is waited out by the service and the harness, and the run re
   assert.equal(evidence.failure, undefined);
   assert.equal(evidence.qualification, "passed");
   assert.deepEqual(waits, [30_000, 30_000]);
-  assert.deepEqual(
-    evidence.rateLimited?.map((r) => [r.headers, r.retryAfter, r.body]),
-    [
-      [["ratelimit-limit", "retry-after"], "30", "Retry later\n"],
-      [["ratelimit-limit", "retry-after"], "30", "Retry later\n"],
-    ],
-  );
+  assert.equal(evidence.rateLimited?.length, 2);
+  for (const [i, r] of (evidence.rateLimited ?? []).entries()) {
+    // The values name the limit that fired, and the position says when in the run and how busy it was.
+    assert.deepEqual(r.headers, {
+      "ratelimit-limit": "100",
+      "ratelimit-name": "throttle_authenticated_api",
+      "ratelimit-observed": "101",
+      "ratelimit-remaining": "0",
+      "ratelimit-reset": "1793440000",
+      "ratelimit-resettime": "Sat, 31 Oct 2026 10:26:40 GMT",
+      "retry-after": "30",
+    });
+    assert.equal(r.route, "GET /api/v4/projects/:n/merge_requests/:n");
+    assert.equal(r.body, "Retry later\n");
+    assert.ok(
+      r.request > 0 && r.lastMinute >= 1 && r.atSeconds >= 0,
+      String(i),
+    );
+  }
   assert.ok((evidence.requestCounts?.["GET /api/v4/projects/:n"] ?? 0) > 0);
 });
 
@@ -668,4 +699,35 @@ test("a cleanup that cannot read a merge request deletes no branch and says so",
   assert.ok(w.remote.state.heads.has("cab/unread"));
   assert.equal(mr.state, "opened");
   assert.deepEqual(written(w), []);
+});
+
+test("the refused merge of a draft does not depend on how fast the pipeline runs", async (t) => {
+  const w = world(t);
+  // Every read of a merge request finds its pipeline already passed and GitLab calling it mergeable, as the
+  // live run found after a rate-limit wait: only the draft is left to refuse the merge.
+  w.remote.state.intercept = (method, path) => {
+    if (method === "GET" && /\/merge_requests\/\d+$/.test(path))
+      for (const mr of w.remote.state.mergeRequests)
+        if (
+          mr.state === "opened" &&
+          / b$/.test(mr.title.replace(/^Draft: /, ""))
+        ) {
+          mr.head_pipeline = {
+            id: 99,
+            sha: mr.sha,
+            status: "success",
+            started_at: "x",
+            finished_at: "y",
+          };
+          mr.detailed_merge_status = mr.draft ? "draft_status" : "mergeable";
+        }
+    return undefined;
+  };
+  const evidence = await w.run();
+  assert.equal(evidence.failure, undefined);
+  assert.equal(evidence.qualification, "passed");
+  assert.deepEqual(w.guard.denied, []);
+  assert.ok(
+    evidence.steps.b.some((s) => s.step === "merge refused while a draft"),
+  );
 });

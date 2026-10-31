@@ -2078,6 +2078,13 @@ and a stopping service ends the waits of delivery requests. Past either bound th
 action's readback stays unproved, and a merge train's evidence is kept), and a write is a definitive
 `provider-http-429`. Only 429 is retried, and credential discovery's GitLab reads wait the same way.
 
+To keep within GitLab.com's per-user request limits, a service reuses a few reads. It keeps a project's identity and
+merge settings for 30 seconds (a merge's preflight reads them fresh), the account a token acts as for 10 minutes,
+and the token a `glab:` login resolved to for 5 minutes, because resolving it runs `glab`, which asks GitLab to
+check the token. A 401 drops the kept token, resolves the login again and sends the request once more, and a
+failed Git push or fetch drops it for the next attempt. An `env:` credential is read as it is every time. Merge
+requests, discussions, branches and pipelines are always read fresh, so no decision rests on a kept read.
+
 A GitLab merge is gated on GitLab's own verdict. The merge request reports no merge blocker only when it
 is open, not a draft, its `detailed_merge_status` is exactly `mergeable` and every required check of the
 project's delivery configuration passed on the head commit (the head pipeline, named `pipeline`).

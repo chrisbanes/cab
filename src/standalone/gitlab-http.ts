@@ -111,3 +111,55 @@ export async function readJson(response: Response): Promise<unknown> {
     throw new Error("provider-response-unreadable");
   }
 }
+
+/**
+ * A short-lived memory of what one service has read from GitLab and may reuse: the project's settings, the
+ * account a token acts as, and the token a `glab` login resolved to. A load that fails, or whose result
+ * `keep` refuses, is not remembered, and a load in flight is shared.
+ */
+export class TtlCache {
+  private readonly entries = new Map<
+    string,
+    { at: number; value: Promise<unknown> }
+  >();
+  constructor(private readonly now: () => number = Date.now) {}
+
+  async get<T>(
+    key: string,
+    ttlMs: number,
+    load: () => Promise<T>,
+    keep: (value: T) => boolean = () => true,
+  ): Promise<T> {
+    const hit = this.entries.get(key);
+    if (hit && this.now() - hit.at < ttlMs) return hit.value as Promise<T>;
+    const value = load();
+    const entry = { at: this.now(), value };
+    this.entries.set(key, entry);
+    try {
+      const loaded = await value;
+      if (!keep(loaded) && this.entries.get(key) === entry)
+        this.entries.delete(key);
+      return loaded;
+    } catch (error) {
+      if (this.entries.get(key) === entry) this.entries.delete(key);
+      throw error;
+    }
+  }
+  /** Forgets every entry whose key starts with `prefix`; the next read loads again. */
+  drop(prefix: string): boolean {
+    let dropped = false;
+    for (const key of [...this.entries.keys()])
+      if (key.startsWith(prefix)) dropped = this.entries.delete(key) || dropped;
+    return dropped;
+  }
+}
+
+/** How long each kind of read is reused. */
+export const cacheTtlMs = {
+  /** A `glab` login's token; a 401 drops it sooner. */
+  token: 5 * 60_000,
+  /** The account a token acts as. */
+  account: 10 * 60_000,
+  /** A project's identity and merge settings; a merge reads them fresh. */
+  project: 30_000,
+} as const;
