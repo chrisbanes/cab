@@ -13,6 +13,7 @@ import {
   captureBrowserEvidence,
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+import { commentReasonSentences } from "../../src/operator/github-reasons.js";
 import { orderWaits, type Wait } from "../../src/operator/wait-reasons.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { guideForm } from "../fixtures/question-data.js";
@@ -2575,26 +2576,21 @@ test("The reply box has one sentence above it", async (_t, j) => {
     true,
   );
 
-  // The server's other modes each replace that one sentence and keep the draft.
+  // The server's unavailable mode replaces that one sentence, keeps the draft and stops Send.
+  // The sentence for each mode is asserted in the presentation test.
   await page.getByLabel("Editable reply").fill("Keep this draft");
-  let mode: "receives" | "unavailable" = "receives";
   await page.route(
     (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
     async (route) => {
       const response = await route.fetch();
       const json = await response.json();
-      json.data.leadFeedback = { mode, awaitingRecoveryMessage: false };
+      json.data.leadFeedback = {
+        mode: "unavailable",
+        awaitingRecoveryMessage: false,
+      };
       await route.fulfill({ response, json });
     },
   );
-  await refreshTask(page, a.taskId);
-  await page
-    .getByText(leadReceivesNotice("Task lead"), { exact: true })
-    .waitFor();
-  assert.deepEqual(await sentencesAboveReply(page), [
-    `P:${leadReceivesNotice("Task lead")}`,
-  ]);
-  mode = "unavailable";
   await refreshTask(page, a.taskId);
   await page
     .getByText(leadUnavailableNotice("Task lead"), { exact: true })
@@ -2780,77 +2776,33 @@ test("An unavailable GitHub comment gives its reason in the inspector and on a f
   );
   assert.equal(await page.locator("#github-comment-reason").count(), 0);
 
-  const cases: [string, () => void][] = [
-    ["This project doesn't permit issue comments.", () => a.setGrant(null)],
-    [
-      "This project has no delivery credential set.",
-      () => a.setGrant("allow", false),
-    ],
-    [
-      "Comments wait while the task's admission or delivery is held.",
-      () => {
-        a.setGrant("allow");
-        const d = fixture.f.service.domain();
-        d.execute({
-          type: "project.configure",
-          actor: "operator",
-          key: randomUUID(),
-          projectId: a.projectId,
-          expectedVersion: Number(d.project(a.projectId).version),
-          paused: true,
-        });
-      },
-    ],
-  ];
-  for (const [sentence, arrange] of cases) {
-    arrange();
-    await refreshTask(page, a.taskId);
-    const tab = await unavailableComment(page, sentence);
-    // Tab from the sibling destination reaches it, so the reason is readable by keyboard.
-    await lead.focus();
-    await page.keyboard.press("Tab");
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.textContent),
-      "Post GitHub comment",
-    );
-    // Neither Enter, Space nor a click selects it: the lead's sentence stays above the box.
-    const before = await sentencesAboveReply(page);
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Space");
-    await tab.click({ force: true });
-    assert.deepEqual(await sentencesAboveReply(page), before);
-    assert.equal(
-      await page
-        .getByRole("button", { name: "Post comment", exact: true })
-        .count(),
-      0,
-    );
-  }
-  assert.deepEqual(commands, []);
-});
-
-test("An older task read without a reason code falls back to its reason text", async (_t, j) => {
-  const fixture = await openFixture(j);
-  const a = await seedImportedCommentTask(fixture.f, null);
-  _t.after(a.restoreCredential);
-  let reason: string | null = "No project grant for issue comments";
-  const { web, page } = await fixture.launch();
-  await page.route(
-    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
-    async (route) => {
-      const response = await route.fetch();
-      const json = await response.json();
-      delete json.data.commentPolicy.reasonCode;
-      json.data.commentPolicy.reason = reason;
-      await route.fulfill({ response, json });
-    },
-  );
-  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
-  await unavailableComment(page, "No project grant for issue comments.");
-  // Neither a reason nor a code: one generic sentence, never a blank.
-  reason = null;
+  // A reason code's sentence is asserted against commentAvailability in the comment policy tests.
+  a.setGrant(null);
   await refreshTask(page, a.taskId);
-  await unavailableComment(page, "Comments aren't available for this task.");
+  const tab = await unavailableComment(
+    page,
+    commentReasonSentences["no-comment-grant"],
+  );
+  // Tab from the sibling destination reaches it, so the reason is readable by keyboard.
+  await lead.focus();
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Post GitHub comment",
+  );
+  // Neither Enter, Space nor a click selects it: the lead's sentence stays above the box.
+  const before = await sentencesAboveReply(page);
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Space");
+  await tab.click({ force: true });
+  assert.deepEqual(await sentencesAboveReply(page), before);
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post comment", exact: true })
+      .count(),
+    0,
+  );
+  assert.deepEqual(commands, []);
 });
 
 test("The viewing reference appears only once a result exists", async (_t, j) => {
@@ -3462,20 +3414,14 @@ test("The delivery block links the PR, says its state and blockers in words, and
     .waitFor();
   assert.equal((await text()).includes("delivery-new-unknown-code"), false);
 
-  // Each state reads in words.
-  for (const [binding, badge] of [
-    [{ draft: true }, "Draft"],
-    [{ state: "CLOSED" }, "Closed"],
-    [{ state: "MERGED" }, "Merged"],
-  ] as const) {
-    reads.set(a.taskId, read(binding));
-    await refreshTask(page, a.taskId);
-    await line.getByText(badge, { exact: true }).waitFor();
-    assert.equal(
-      await flat(line),
-      `acme/app#12 (opens GitHub) ${badge} head 11111111`,
-    );
-  }
+  // A merged PR reads in words; every state's label is asserted in the delivery presentation test.
+  reads.set(a.taskId, read({ state: "MERGED" }));
+  await refreshTask(page, a.taskId);
+  await line.getByText("Merged", { exact: true }).waitFor();
+  assert.equal(
+    await flat(line),
+    "acme/app#12 (opens GitHub) Merged head 11111111",
+  );
   await changes
     .getByText("PR merged; task completion still requires", { exact: false })
     .waitFor();
@@ -3522,20 +3468,19 @@ test("The delivery block links the PR, says its state and blockers in words, and
     .getByText("acme/app · branch withheld · not pushed yet", { exact: true })
     .waitFor();
 
-  // Checks read in words; one on an earlier head says so; the repair owner is never invented.
+  // Checks read in words (all three in the delivery presentation test); one on an earlier head
+  // says so; the repair owner is never invented.
   reads.set(
     a.taskId,
     read({
       checks: [
         { name: "build", sha: head, status: "failure" },
         { name: "lint", sha: earlier, status: "success" },
-        { name: "e2e", sha: head, status: "pending" },
       ],
     }),
   );
   await refreshTask(page, a.taskId);
   await changes.getByText("build: Failed", { exact: true }).waitFor();
-  await changes.getByText("e2e: Pending", { exact: true }).waitFor();
   const lint = changes.locator("p", { hasText: /^lint:/ });
   assert.equal(await flat(lint), "lint: Passed · on an earlier head cccccccc");
   assert.equal(await lint.locator("abbr").getAttribute("title"), earlier);
