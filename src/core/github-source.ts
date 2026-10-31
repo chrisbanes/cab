@@ -389,6 +389,31 @@ export class GitHubSourceStore {
       : String(row.observedStatus);
   }
 
+  /**
+   * For a tracker whose items have no Project item (Jira): when the newest read of the issue's
+   * membership in the project was made, and the tracker status stored with it. `null` when it has no
+   * membership there.
+   */
+  membershipRead(
+    projectId: string,
+    nodeId: string,
+  ): { readAt: number | null; statusId: string | null } | null {
+    const row = this.db
+      .prepare(
+        `SELECT MAX(readAt) AS readAt, COUNT(*) AS n FROM source_memberships WHERE projectId = ? AND ${itemIs()}`,
+      )
+      .get(projectId, ...this.key(nodeId)) as Row;
+    if (!Number(row.n)) return null;
+    const status = this.observedStatus(nodeId);
+    return {
+      readAt: row.readAt === null ? null : Number(row.readAt),
+      statusId:
+        status === null
+          ? null
+          : observedStatusSchema.parse(JSON.parse(status) as unknown).id,
+    };
+  }
+
   memberships(nodeId: string): Row[] {
     return this.db
       .prepare(

@@ -15,22 +15,41 @@ export function isInFlightEvent(event: StatusMappingEvent): boolean {
   return event === "turnStarted" || event === "handedBack";
 }
 
-export const statusMappingSchema = z
+const eventsSchema = z
+  .object({
+    turnStarted: optionId.nullable(),
+    handedBack: optionId.nullable(),
+    held: optionId.nullable(),
+    done: optionId.nullable(),
+  })
+  .strict();
+/** A GitHub Project Status mapping; a stored mapping without `tracker` is this one. */
+export const githubStatusMappingSchema = z
   .object({
     selectionId: optionId,
     projectNodeId: optionId,
     fieldNodeId: optionId,
-    events: z
-      .object({
-        turnStarted: optionId.nullable(),
-        handedBack: optionId.nullable(),
-        held: optionId.nullable(),
-        done: optionId.nullable(),
-      })
-      .strict(),
+    events: eventsSchema,
   })
   .strict();
+/** A Jira mapping: target status IDs, bound to the project's Jira source (status IDs are site-wide). */
+export const jiraStatusMappingSchema = z
+  .object({ tracker: z.literal("jira"), events: eventsSchema })
+  .strict();
+export const statusMappingSchema = z.union([
+  jiraStatusMappingSchema,
+  githubStatusMappingSchema,
+]);
+export type GitHubStatusMapping = z.output<typeof githubStatusMappingSchema>;
+export type JiraStatusMapping = z.output<typeof jiraStatusMappingSchema>;
 export type StatusMapping = z.output<typeof statusMappingSchema>;
+export const isJiraMapping = (m: StatusMapping): m is JiraStatusMapping =>
+  "tracker" in m;
+
+/** Whether the rule can still hold given each applicable condition's verdict (all: every one; any: one). */
+const combine = (rule: Readiness | null, accepts: boolean[]) =>
+  !accepts.length ||
+  (rule?.mode === "all" ? accepts.every(Boolean) : accepts.some(Boolean));
 
 /**
  * Whether the rule can still hold with the field at `option`: a rule with no condition on that
@@ -43,13 +62,29 @@ export function readinessAccepts(
   fieldNodeId: string,
   option: string,
 ): boolean {
-  const accepts = (rule?.conditions ?? []).flatMap((c) =>
-    c.kind === "project-field" &&
-    c.projectNodeId === projectNodeId &&
-    c.fieldNodeId === fieldNodeId
-      ? [c.optionNodeIds.includes(option) === (c.operator === "in")]
-      : [],
+  return combine(
+    rule,
+    (rule?.conditions ?? []).flatMap((c) =>
+      c.kind === "project-field" &&
+      c.projectNodeId === projectNodeId &&
+      c.fieldNodeId === fieldNodeId
+        ? [c.optionNodeIds.includes(option) === (c.operator === "in")]
+        : [],
+    ),
   );
-  if (!accepts.length) return true;
-  return rule?.mode === "all" ? accepts.every(Boolean) : accepts.some(Boolean);
+}
+
+/** The same save-time check for a Jira status: only the rule's `status` conditions depend on it. */
+export function readinessAcceptsStatus(
+  rule: Readiness | null,
+  statusId: string,
+): boolean {
+  return combine(
+    rule,
+    (rule?.conditions ?? []).flatMap((c) =>
+      c.kind === "status"
+        ? [c.statusIds.includes(statusId) === (c.operator === "in")]
+        : [],
+    ),
+  );
 }

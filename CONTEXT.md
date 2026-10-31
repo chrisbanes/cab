@@ -105,8 +105,8 @@ takes the item's external reference and becomes imported.
 _Avoid_: Export or sync when referring to creating the external item
 
 **Status mapping**:
-A project's rules for which external status option cab writes when its own
-work reaches a given point. It reflects cab work back to the external system
+A project's rules for which external status option (a GitHub Project Status
+option or a Jira status) cab writes when its own work reaches a given point. It reflects cab work back to the external system
 and never makes a task Ready.
 _Avoid_: Board sync or column mapping
 

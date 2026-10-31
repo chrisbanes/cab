@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { StatusMapping } from "../../src/core/status-mapping-contracts.js";
+import type { GitHubStatusMapping as StatusMapping } from "../../src/core/status-mapping-contracts.js";
 import {
+  jiraDraftMapping,
+  jiraStatusMappingPlan,
   statusFieldNodeId,
   statusMappingPlan,
 } from "../../web/src/status-mapping-draft.js";
@@ -117,4 +119,47 @@ test("another Project with nothing chosen is not a clear of the saved mapping, e
     ...names,
   });
   assert.deepEqual([plan.mapping, plan.lines, plan.ready], [null, [], false]);
+});
+
+test("the Jira draft maps typed status IDs, and lists one line per changed event", () => {
+  const savedJira = {
+    tracker: "jira" as const,
+    events: { turnStarted: "3", handedBack: null, held: null, done: null },
+  };
+  assert.equal(jiraDraftMapping({ turnStarted: " ", done: "" }), null);
+  const plan = jiraStatusMappingPlan({
+    saved: savedJira,
+    clearing: false,
+    values: { turnStarted: " 3 ", handedBack: "4", held: "", done: "9" },
+  });
+  assert.deepEqual(plan.mapping, {
+    tracker: "jira",
+    events: { turnStarted: "3", handedBack: "4", held: null, done: "9" },
+  });
+  assert.deepEqual(plan.lines, [
+    "PR handed back for review: moves the issue to Jira status 4.",
+    "Done: moves the issue to Jira status 9.",
+  ]);
+  // Every event set to Nothing clears a saved mapping, and clears nothing when none is saved.
+  const nothing = { turnStarted: "", handedBack: "", held: "", done: "" };
+  assert.deepEqual(
+    jiraStatusMappingPlan({
+      saved: savedJira,
+      clearing: false,
+      values: nothing,
+    }),
+    { mapping: null, lines: ["Clears the status mapping."] },
+  );
+  assert.deepEqual(
+    jiraStatusMappingPlan({ saved: null, clearing: false, values: nothing }),
+    { mapping: null, lines: [] },
+  );
+  assert.deepEqual(
+    jiraStatusMappingPlan({
+      saved: savedJira,
+      clearing: true,
+      values: nothing,
+    }),
+    { mapping: null, lines: ["Clears the status mapping."] },
+  );
 });

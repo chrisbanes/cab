@@ -105,11 +105,13 @@ owns delivery scope and status.
   operator CLI does not offer it.
 - **Status mapping.** A project can map four of cab's work events (first turn
   started, PR handed back, stopped or blocked, Done) to options of its linked GitHub
-  Project's Status, set on the GitHub source tab. The service writes them through the
-  delivery lifecycle under `allow` Project field grants, only for tasks already Ready (or Done once the issue is closed),
-  and skips a write when the card moved on GitHub since cab last saw it. The
-  operator CLI cannot edit the mapping; the writes show on the task and never hold it
-  ([ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
+  Project's Status, set on the GitHub source tab, or to Jira status IDs, set on the Jira
+  source tab. The service writes them through the delivery lifecycle under `allow` grants
+  (`project.field` for GitHub, `issue.status` for Jira), only for tasks already Ready (or
+  Done once the issue is closed), and skips a write when the card or issue moved since cab
+  last saw it; on Jira it also skips when the issue is already there or not exactly one
+  transition reaches the status. The operator CLI cannot edit the mapping; the writes
+  show on the task and never hold it ([ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
 - **Publish to GitHub.** The operator can turn a never-started local task into a GitHub
   issue from task detail or the CLI (`delivery publish-review|publish-confirm|publish-send`),
   choosing a linked repository, or an unfiltered GitHub Project, after seeing the

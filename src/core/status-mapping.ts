@@ -7,7 +7,9 @@ import {
 } from "./github-source-contracts.js";
 import {
   isInFlightEvent,
+  isJiraMapping,
   readinessAccepts,
+  readinessAcceptsStatus,
   type StatusMapping,
   type StatusMappingEvent,
   statusMappingEvents,
@@ -87,9 +89,31 @@ export class StatusMappingStore {
       .parse(row ? JSON.parse(row.selections) : [])
       .flatMap((s) => (s.kind === "project" ? [s] : []));
   }
-  /** `unavailable` while the mapping's Project is no longer a `project` selection of the source. */
+  /** The Jira status the mapping moves a finished task to, if the project has a Jira mapping with one. */
+  jiraDoneStatus(projectId: string): string | null {
+    const { mapping } = this.current(projectId);
+    return mapping && isJiraMapping(mapping) ? mapping.events.done : null;
+  }
+  private isJiraProject(projectId: string): boolean {
+    return (
+      (
+        this.db
+          .prepare(
+            "SELECT provider FROM project_task_sources WHERE projectId=?",
+          )
+          .get(projectId) as { provider: string } | undefined
+      )?.provider === "jira"
+    );
+  }
+  /**
+   * `unavailable` while the mapping's Project is no longer a `project` selection of the source, or
+   * its tracker is not the project's (a Jira mapping binds to the Jira source itself).
+   */
   availability(projectId: string): "available" | "unavailable" {
     const { mapping } = this.current(projectId);
+    if (this.isJiraProject(projectId))
+      return !mapping || isJiraMapping(mapping) ? "available" : "unavailable";
+    if (mapping && isJiraMapping(mapping)) return "unavailable";
     const selections = this.projectSelections(projectId);
     return mapping
       ? selections.some(
@@ -120,9 +144,12 @@ export class StatusMappingStore {
     if (
       before &&
       (!mapping ||
-        before.selectionId !== mapping.selectionId ||
-        before.projectNodeId !== mapping.projectNodeId ||
-        before.fieldNodeId !== mapping.fieldNodeId)
+        isJiraMapping(before) !== isJiraMapping(mapping) ||
+        (!isJiraMapping(before) &&
+          !isJiraMapping(mapping) &&
+          (before.selectionId !== mapping.selectionId ||
+            before.projectNodeId !== mapping.projectNodeId ||
+            before.fieldNodeId !== mapping.fieldNodeId)))
     )
       this.forget(projectId);
     this.db
@@ -138,11 +165,14 @@ export class StatusMappingStore {
     policy: DeliveryPolicy,
   ): void {
     if (
-      !this.projectSelections(projectId).some(
-        (s) =>
-          s.id === mapping.selectionId &&
-          s.projectNodeId === mapping.projectNodeId,
-      )
+      isJiraMapping(mapping)
+        ? !this.isJiraProject(projectId)
+        : this.isJiraProject(projectId) ||
+          !this.projectSelections(projectId).some(
+            (s) =>
+              s.id === mapping.selectionId &&
+              s.projectNodeId === mapping.projectNodeId,
+          )
     )
       throw new StatusMappingRefusal("no-selection", null, null);
     const row = this.db
@@ -152,12 +182,13 @@ export class StatusMappingStore {
     for (const event of statusMappingEvents) {
       const option = mapping.events[event];
       if (option === null) continue;
-      const covering = policy.grants.filter(
-        (g) =>
-          g.action === "project.field" &&
-          g.projectNodeId === mapping.projectNodeId &&
-          g.fieldNodeId === mapping.fieldNodeId &&
-          g.optionNodeIds?.includes(option),
+      const covering = policy.grants.filter((g) =>
+        isJiraMapping(mapping)
+          ? g.action === "issue.status" && g.statusIds?.includes(option)
+          : g.action === "project.field" &&
+            g.projectNodeId === mapping.projectNodeId &&
+            g.fieldNodeId === mapping.fieldNodeId &&
+            g.optionNodeIds?.includes(option),
       );
       if (!covering.length)
         throw new StatusMappingRefusal("ungranted", event, option);
@@ -166,12 +197,14 @@ export class StatusMappingStore {
         throw new StatusMappingRefusal("approval-only", event, option);
       if (
         isInFlightEvent(event) &&
-        !readinessAccepts(
-          rule,
-          mapping.projectNodeId,
-          mapping.fieldNodeId,
-          option,
-        )
+        !(isJiraMapping(mapping)
+          ? readinessAcceptsStatus(rule, option)
+          : readinessAccepts(
+              rule,
+              mapping.projectNodeId,
+              mapping.fieldNodeId,
+              option,
+            ))
       )
         throw new StatusMappingRefusal("readiness", event, option);
     }

@@ -32,7 +32,10 @@ import {
   withinRedactionLimits,
 } from "../core/redaction-limits.js";
 import { StatusMappingRefusal } from "../core/status-mapping.js";
-import type { StatusMapping } from "../core/status-mapping-contracts.js";
+import {
+  isJiraMapping,
+  type GitHubStatusMapping,
+} from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
 import {
   type DomainCommand,
@@ -6343,7 +6346,12 @@ export class OperatorApi {
           availability:
             this.service.routingAvailability(projectId).reason ?? "available",
         },
-        statusMapping: this.statusMappingView(projectId, g.selections, active),
+        statusMapping: this.statusMappingView(
+          projectId,
+          g.selections,
+          active,
+          Boolean(jira),
+        ),
         repositories: {
           version: links.version,
           links: links.links.map((r) => ({
@@ -6403,7 +6411,7 @@ export class OperatorApi {
    * Reads the Project's single-select fields afresh and requires the mapped field to be the one
    * named `Status` and every mapped option to belong to it. Returns the options' names.
    */
-  private async verifyStatusField(mapping: StatusMapping) {
+  private async verifyStatusField(mapping: GitHubStatusMapping) {
     const read = await this.readDiscoveryProjectFields(
       new URLSearchParams({ project: mapping.projectNodeId }),
     );
@@ -6437,18 +6445,39 @@ export class OperatorApi {
         );
     return new Map(field.options.map((o) => [o.optionNodeId, o.name]));
   }
-  /** The saved status mapping, its Project selections and the options the delivery grants allow. */
+  /** The saved status mapping with what its editor needs: Project selections and granted options (GitHub), or granted statuses (Jira). */
   private statusMappingView(
     projectId: string,
     selections: ReturnType<DomainStore["githubConfiguration"]>["selections"],
     active: string[],
+    jira: boolean,
   ) {
     const d = this.domain(),
-      view = d.statusMapping(projectId);
+      view = d.statusMapping(projectId),
+      grants = this.service
+        .delivery()
+        .configuration(projectId)
+        .grants.filter((g) => g.mode === "allow");
+    // A mapping left by the other tracker is not shown: this editor starts afresh and replaces it.
+    const mapping =
+      view.mapping && isJiraMapping(view.mapping) === jira
+        ? view.mapping
+        : null;
+    if (jira)
+      return {
+        tracker: "jira" as const,
+        version: view.version,
+        availability:
+          view.mapping && !mapping ? "available" : view.availability,
+        mapping,
+        granted: grants.flatMap((g) =>
+          g.action === "issue.status" ? (g.statusIds ?? []) : [],
+        ),
+      };
     return {
       version: view.version,
-      availability: view.availability,
-      mapping: view.mapping,
+      availability: view.mapping && !mapping ? "available" : view.availability,
+      mapping,
       selections: selections.flatMap((s) =>
         s.kind === "project"
           ? [
@@ -6460,23 +6489,17 @@ export class OperatorApi {
             ]
           : [],
       ),
-      granted: this.service
-        .delivery()
-        .configuration(projectId)
-        .grants.flatMap((g) =>
-          g.action === "project.field" &&
-          g.mode === "allow" &&
-          g.projectNodeId &&
-          g.fieldNodeId
-            ? [
-                {
-                  projectNodeId: g.projectNodeId,
-                  fieldNodeId: g.fieldNodeId,
-                  optionNodeIds: g.optionNodeIds ?? [],
-                },
-              ]
-            : [],
-        ),
+      granted: grants.flatMap((g) =>
+        g.action === "project.field" && g.projectNodeId && g.fieldNodeId
+          ? [
+              {
+                projectNodeId: g.projectNodeId,
+                fieldNodeId: g.fieldNodeId,
+                optionNodeIds: g.optionNodeIds ?? [],
+              },
+            ]
+          : [],
+      ),
     };
   }
   async readRuntimeSettings() {
@@ -8290,7 +8313,9 @@ export class OperatorApi {
         const command = { ...c, actor: "operator" as const };
         // An exact replay returns its recorded receipt whatever GitHub shows now.
         const names =
-          c.mapping && this.domain().recordedCommand(command) === undefined
+          c.mapping &&
+          !isJiraMapping(c.mapping) &&
+          this.domain().recordedCommand(command) === undefined
             ? await this.verifyStatusField(c.mapping)
             : new Map<string, string>();
         let raw: Awaited<ReturnType<typeof this.executeDomain>>;
@@ -8309,6 +8334,7 @@ export class OperatorApi {
                 names.get(error.optionNodeId ?? "") ??
                   error.optionNodeId ??
                   "that option",
+                c.mapping && isJiraMapping(c.mapping) ? "jira" : "github",
               ),
             );
           throw domainApiError(error) ?? error;

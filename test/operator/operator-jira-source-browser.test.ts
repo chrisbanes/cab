@@ -289,3 +289,127 @@ test("a Jira readiness rule is edited in settings, explains a Draft task, and a 
   const link = page.getByRole("link", { name: "ABC-3" }).first();
   assert.equal(await link.getAttribute("href"), `https://${site}/browse/ABC-3`);
 });
+
+test("a Jira status mapping is typed on the Jira tab, marks an ungranted status, and is refused or saved in the service's words", async (_t, journey) => {
+  for (const [name, value] of Object.entries(variables)) {
+    const previous = process.env[name];
+    journey.cleanup(async () => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    }, `restore-${name}`);
+    process.env[name] = value;
+  }
+  const jira = fakeJira(() => json({ issues: [jiraIssue(1)] }));
+  const { f, web, page } = await setupJourney(journey, {
+    discovery: false,
+    projects: true,
+    jiraFetcher: jira.fetcher,
+  });
+  const domain = f.service.domain();
+  const projectId = String(domain.projects()[0]?.id);
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: site,
+    credential: {
+      siteRef: "env:FIXTURE_JIRA_BROWSER_SITE",
+      emailRef: "env:FIXTURE_JIRA_BROWSER_EMAIL",
+      tokenRef: "env:FIXTURE_JIRA_BROWSER_TOKEN",
+    },
+  });
+  domain.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: domain.jiraConfiguration(projectId)?.version ?? 1,
+    instance: site,
+    selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "status", operator: "in", statusIds: ["1", "3"] }],
+    },
+  });
+  domain.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: f.service.delivery().configuration(projectId).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: [
+      {
+        action: "issue.status",
+        repositoryId: "10000",
+        mode: "allow",
+        statusIds: ["3", "10005"],
+      },
+    ],
+    requiredChecks: [],
+  });
+  await page.goto(
+    `${web.origin}/app/projects/${projectId}/settings?tab=github&tracker=jira`,
+  );
+  const panel = page.locator("#status-mapping");
+  await panel
+    .getByRole("heading", { name: "Status mapping", exact: true })
+    .waitFor();
+  for (const label of [
+    "First turn started",
+    "PR handed back for review",
+    "Stopped, uncertain or blocked",
+    "Done",
+  ])
+    await panel.getByLabel(label, { exact: false }).first().waitFor();
+
+  // An ungranted status is marked where it is typed.
+  await panel.getByLabel("First turn started", { exact: true }).fill("1");
+  await panel
+    .getByLabel("First turn started (no grant)", { exact: true })
+    .waitFor();
+  // A status the readiness rule does not accept is refused in the service's words, and the draft stays.
+  await panel.getByLabel("First turn started", { exact: false }).fill("10005");
+  await panel
+    .getByRole("button", { name: "Save status mapping", exact: true })
+    .click();
+  await panel
+    .getByText(/First turn started → 10005: the readiness rule does not accept/)
+    .waitFor();
+  assert.equal(domain.statusMapping(projectId).mapping, null);
+
+  // A granted, accepted status saves.
+  await panel.getByLabel("First turn started", { exact: false }).fill("3");
+  await panel.getByLabel("Done", { exact: false }).fill("10005");
+  await panel
+    .getByRole("region", { name: "Status mapping changes" })
+    .getByText("Done: moves the issue to Jira status 10005.")
+    .waitFor();
+  await captureBrowserEvidence(page, "jira-status-mapping");
+  const saved = commandRequest(page);
+  await panel
+    .getByRole("button", { name: "Save status mapping", exact: true })
+    .click();
+  const mapping = {
+    tracker: "jira",
+    events: {
+      turnStarted: "3",
+      handedBack: null,
+      held: null,
+      done: "10005",
+    },
+  };
+  assert.deepEqual((await saved).postDataJSON().mapping, mapping);
+  await savedOutcome(panel);
+  assert.deepEqual(domain.statusMapping(projectId).mapping, mapping);
+  await page.reload();
+  assert.equal(
+    await page
+      .locator("#status-mapping")
+      .getByLabel("First turn started", { exact: false })
+      .inputValue(),
+    "3",
+  );
+});

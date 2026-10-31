@@ -27,6 +27,7 @@ import { parseRule, ruleLines, savedRule } from "./jira-readiness.js";
 import { ruleText } from "../../src/operator/readiness-text.js";
 import type { ObservationResource } from "./sync-placement.js";
 import { NativeSelect } from "./ui/native-select.js";
+import { JiraStatusMappingPanel } from "./status-mapping-config.js";
 
 type Credential = z.infer<
   typeof issueTrackerCredentialsSchema
@@ -533,6 +534,9 @@ export function JiraSourceTab(
               );
             })}
           </Panel>
+        )}
+        {saved && data.statusMapping && "tracker" in data.statusMapping && (
+          <JiraStatusMappingPanel {...p} view={data.statusMapping} />
         )}
       </div>
       <div className="settings-column">

@@ -166,7 +166,9 @@ test("retained rendered form actions, fields and mounted route controls match do
         ? { projectNodeId: "P1", fieldNodeId: "F1", optionNodeIds: ["O1"] }
         : action === "project.item.add"
           ? { projectNodeId: "P1" }
-          : {}),
+          : action === "issue.status"
+            ? { statusIds: ["S1"] }
+            : {}),
     })),
     requiredChecks: [{ name: "check", appId: 42 }],
   });

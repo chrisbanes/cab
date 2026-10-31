@@ -404,6 +404,13 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   model turns, and deleted the Project with verified cleanup; two earlier attempts failed in the harness's own setup; the passing
   run on the final product code is the fourth. A skipped write, `held`, `done` and a Codex lead turn were not exercised live.
   Evidence: [status mapping live run](evidence/2026-10-21-status-mapping-live.md).
+  The Jira variant (#1321, ADR-1020) has deterministic coverage and no live evidence, so
+  live it stays **Unproved**: the mapping save rules by grant and readiness, the service-only
+  `issue.status` authority, the single-transition write with its four skips, the status-write
+  queue and its limit, Done on closure, `issue.close` narrowed to the mapped done status, and the
+  Jira source tab editor and task notes (`status-mapping-jira-store`, `status-mapping-jira-service`,
+  `jira-issue-delivery-provider`, `operator-api`, `operator-jira-source-browser`,
+  `status-mapping-draft`, `operator-delivery-presentation`).
 - **Task publication** (#1167, ADR-1017, ADR-1018) — **Bounded.** Deterministic tests cover the
   publication caller's authority and readiness exemption, the create's read-back and its refusals, the
   state machine (review, confirm, send, unknown outcome, Link, Abandon, failure), conversion in place and

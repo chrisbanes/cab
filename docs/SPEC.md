@@ -46,8 +46,8 @@ select permitted profiles but cannot create profiles or expand project authority
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
 items; readiness is separate. Jira Cloud imports issues by JQL: a project uses one
-tracker. Comments, label changes and closing on Jira issues are delivered (see the Jira
-delivery paragraph below); Jira status mapping and issue edit or publication are planned and
+tracker. Comments, label changes, closing and status mapping on Jira issues are delivered (see the Jira
+delivery paragraph and the status mapping below); Jira issue edit and publication are planned and
 not implemented.
 A project can link a GitLab checkout and deliver its branches, open, edit, ready,
 discuss and merge its merge requests ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
@@ -2083,15 +2083,18 @@ refusal while a pipeline has not passed is covered by scripted tests only.
 
 On a Jira issue the issue actions use the same lifecycle, granted per Jira project: the target is the
 Jira project ID as the repository, the key's number and the issue ID as the node ID. Only
-`issue.comment`, `issue.labels` and `issue.close` are delivered; every other issue action on a Jira
+`issue.comment`, `issue.labels`, `issue.close` and the service-only `issue.status` of the
+[status mapping](#github-and-completion) are delivered; every other issue action on a Jira
 task is refused as `issue-tracker-delivery-unavailable`. A comment is sent as Atlassian Document Format
 converted from Markdown (paragraphs, hard breaks and code blocks; everything else, including `@name`
 and links, stays literal text, and no mention or media is ever emitted) with a hidden `cab-operation`
 comment property, and is confirmed only when exactly one comment by the credential account carries
 the operation's property and the same text. Labels change in one request and are confirmed by exact
 (case-sensitive) readback; a label containing whitespace is refused. The readiness-label refusal
-applies as for GitHub. Closing is a transition into the one available Done-category status, or is
-refused before any write when the issue is already done or no single such transition exists. It is
+applies as for GitHub. Closing is a transition into the one available Done-category status, or, when the project's Jira
+status mapping names a done status that a Done-category transition reaches, the one transition to
+that status; it is refused before any write when the issue is already done or no single such
+transition exists. It is
 confirmed only when the issue is Done and exactly one status entry in its changelog since preflight,
 made by the credential account, moves it to that status. A rejection of the single request (400, 401,
 403, 404 or 429) is a confirmed failure; any other failure after the request is sent is uncertain,
@@ -2138,12 +2141,15 @@ review record and no restore action exists. Sending needs an open task, a curren
 version and source revision, no unresolved action and an allowed credential activation, but
 not task admission.
 
-A project's **status mapping** reflects cab's work onto one GitHub Project's Status.
-It is operator-owned and versioned, with one mapping per project, bound to one `project`
-selection of the project's source and that Project's single-select field named `Status`
-(`status-mapping.configure`; a source without a `project` selection reads the mapping as
-unavailable and nothing is written). Four events each map to a Status option or to
-nothing: the first turn started (not a draft turn), the PR handed back for operator review,
+A project's **status mapping** reflects cab's work onto one GitHub Project's Status, or onto
+a Jira issue's status. It is operator-owned and versioned, with one mapping per project. A GitHub
+mapping is bound to one `project` selection of the project's source and that Project's
+single-select field named `Status` (`status-mapping.configure`; a source without a `project`
+selection reads the mapping as unavailable and nothing is written). A Jira mapping names target
+status IDs and is bound to the project's Jira source, not to a selection, because JQL selections
+can span Jira projects and status IDs are site-wide; a mapping of the other tracker is refused as
+having no source, and reads as unavailable once the project's source is not Jira. Four events each
+map to a Status option (a Jira status ID) or to nothing: the first turn started (not a draft turn), the PR handed back for operator review,
 the task stopped, uncertain or blocked by a dependency, and the task Done. The service, not
 an agent, writes it as a distinct caller through the same delivery lifecycle, labelled
 "Status mapping" on the task; projects without a mapping and unmapped events create no
@@ -2152,7 +2158,12 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 - **Authority.** Every mapped option must be covered by an `allow` `project.field` grant for
   the exact Project, field and option, and the grant's repository: it covers only that
   repository's issues, so an issue of another repository is denied at write time and shows on
-  the task. A save naming an uncovered option, or one whose only
+  the task. A Jira status is written by `issue.status`, which only the service may submit (agents,
+  the operator and publication are refused, and agents are not offered it). It is granted per Jira
+  project with `statusIds`, which an `issue.status` grant requires and no other grant takes; its
+  target is the Jira project ID, the key's number and the issue ID, and it carries the status
+  the issue must still show. The write checks the task's imported Jira issue and a current
+  membership in the project's JQL selections. A save naming an uncovered option, or one whose only
   grant needs approval, is refused, and the write checks the grant again; a grant revoked before the write is
   denied (`delivery-authority-denied`, or `delivery-authority-stale-or-held` once the write was
   prepared) and shows on the task. Agents and the operator keep the refusal of
@@ -2169,7 +2180,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   done (for example a closed issue a Done-mode source imports, or a Ready task done before the
   mapping was saved) was not worked on under the mapping and writes nothing for Done. Clearing the mapping, rebinding it to another Project or Status field, or a pass while its Project is no longer a source selection forgets what it watched, so a task that finishes in between writes nothing when a mapping returns. An in-flight event may name only an option the
   readiness rule accepts (an `in` set holding it, a `not-in` set leaving it out), checked at save and again at write against the task's stored facts with only
-  that value replaced. A terminal event may name an option that removes readiness, and the
+  that value replaced; for Jira the rule's `status` conditions decide, and a rule with none accepts
+  any granted status. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
   an in-flight Status drops the item from the selection on the next sync and the ordinary
   leave-selection hold applies: cab validates the readiness rule, not filter text.
@@ -2193,6 +2205,21 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   cab last saw it". GitHub has no conditional update, so a move between that read and the
   mutation is an accepted race: readback then shows another option and the action stays
   uncertain.
+- **Jira transition.** Before writing, the Jira writer reads the issue and, in this order,
+  records a skip that sends nothing and is not retried: `provider-issue-status-current` when the
+  issue already has the target status, `provider-issue-status-changed` when its status is not
+  what cab last observed, then, from the issue's transitions to the target,
+  `provider-transition-unavailable` when none and `provider-transition-ambiguous` when several
+  apply. The task shows "Skipped: the issue is already in the mapped status", "the status
+  changed in Jira since cab last saw it", "no available transition reaches the mapped status" or
+  "several transitions reach the mapped status". Otherwise it posts that one transition and
+  confirms it only when a read of the issue shows the target; a rejection of the request (400,
+  401, 403, 404 or 429) is a confirmed failure, and any other failure after it is sent is
+  uncertain, kept across restart and never resent. Jira has no conditional transition, so a move
+  between the read and the request is an accepted race. Checking "already there" first makes the
+  Done write after cab's own `issue.close` a recorded no-op. What cab last observed is its last
+  confirmed write, unless a later source read of the issue while the task was Ready replaced it
+  with the status stored from that read.
 - **No hold.** Status-mapping records are excluded from the task's action blockers. An unproved
   write shows on the task and never holds admission, completion, edits or agent actions. A status
   write still in flight serializes the next one for that task; an unproved one does not, because
@@ -2201,7 +2228,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   delays the task's agent actions or completion checks. Once a newer status write has been sent,
   an older unproved one stays uncertain on the task but is not inspected again.
   A preflight that times out is a `confirmed-failure` that is not retried for that transition, and
-  shutdown can wait up to the status-write limit (30 s) for a hung write.
+  shutdown can wait up to the status-write limit (30 s) for a hung write. A Jira preflight makes two
+  requests of 20 s each, so it exceeds the limit only when both hang.
 
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or

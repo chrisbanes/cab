@@ -20,6 +20,8 @@ import {
   glabReferenceMatchesHost,
 } from "../core/credential-reference.js";
 import {
+  githubStatusMappingSchema,
+  jiraStatusMappingSchema,
   statusMappingEvents,
   statusMappingSchema,
 } from "../core/status-mapping-contracts.js";
@@ -3324,12 +3326,12 @@ export const profileConfigurationSchema = envelope(
     })
     .strict(),
 );
-/** The status mapping with what its editor needs: the Project selections and the granted options. */
-export const statusMappingViewSchema = z
+/** The GitHub status mapping with what its editor needs: the Project selections and the granted options. */
+const githubStatusMappingViewSchema = z
   .object({
     version: revision,
     availability: z.enum(["available", "unavailable"]),
-    mapping: statusMappingSchema.nullable(),
+    mapping: githubStatusMappingSchema.nullable(),
     selections: z
       .array(
         z
@@ -3351,6 +3353,20 @@ export const statusMappingViewSchema = z
       .max(256),
   })
   .strict();
+/** The Jira status mapping: bound to the Jira source, with the statuses an `allow` `issue.status` grant covers. */
+const jiraStatusMappingViewSchema = z
+  .object({
+    tracker: z.literal("jira"),
+    version: revision,
+    availability: z.enum(["available", "unavailable"]),
+    mapping: jiraStatusMappingSchema.nullable(),
+    granted: z.array(text).max(256),
+  })
+  .strict();
+export const statusMappingViewSchema = z.union([
+  jiraStatusMappingViewSchema,
+  githubStatusMappingViewSchema,
+]);
 export const projectConfigurationSchema = envelope(
   z
     .object({
