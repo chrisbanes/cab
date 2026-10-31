@@ -1249,3 +1249,22 @@ test("a source read that still lists the issue open does not end the carried set
     await f.close();
   }
 });
+
+test("a reopen after a carried closure brings the settlement hold back", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    f.setClosedIssue({ state: "open" });
+    f.setIssueOpen(true);
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    f.setIssueOpen(false);
+    f.setClosedIssue(undefined);
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});

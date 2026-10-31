@@ -2442,6 +2442,14 @@ export class DeliveryStore {
     version: number,
     change: "closed" | "reopened-read",
   ): void {
+    // Most Ready flips belong to tasks that never had a cab close: skip the lookups for them.
+    if (
+      change === "reopened-read" &&
+      !this.db
+        .prepare("SELECT 1 FROM delivery_closure_versions WHERE taskId=?")
+        .get(taskId)
+    )
+      return;
     const superseded = this.supersededClosures(taskId, nodeId);
     const operation = this.actions(taskId)
       .filter(
