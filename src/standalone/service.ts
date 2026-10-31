@@ -1130,7 +1130,7 @@ export class StandaloneService {
           ? { adopt: this.options.delivery.adopt }
           : {}),
         issueTrackerFactories: {
-          jira: (_projectId, _policy, instance) =>
+          jira: (projectId, _policy, instance) =>
             new JiraIssueTrackerWriter(
               () =>
                 resolveJiraAccess(
@@ -1139,6 +1139,7 @@ export class StandaloneService {
                     .find((c) => c.instance === instance),
                 ),
               this.options.issueTrackers?.jiraFetcher,
+              statusMappings.jiraDoneStatus(projectId),
             ),
           ...this.options.delivery?.issueTrackerFactories,
         },

@@ -704,7 +704,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   return (
     <>
       {form}
-      {data.statusMapping && (
+      {data.statusMapping && !("tracker" in data.statusMapping) && (
         <StatusMappingPanel
           {...p}
           view={data.statusMapping}

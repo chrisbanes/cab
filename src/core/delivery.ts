@@ -18,6 +18,7 @@ import { transaction, type Database } from "./store.js";
 import { StatusMappingStore } from "./status-mapping.js";
 import {
   isInFlightEvent,
+  isJiraMapping,
   statusMappingEvents,
 } from "./status-mapping-contracts.js";
 import {
@@ -34,6 +35,7 @@ export const actionKinds = [
   "issue.create",
   "project.item.add",
   "project.field",
+  "issue.status",
   "pr.create",
   "pr.edit",
   "pr.ready",
@@ -116,6 +118,8 @@ export const deliveryPolicySchema = z
             projectNodeId: identity.optional(),
             fieldNodeId: identity.optional(),
             optionNodeIds: z.array(identity).optional(),
+            /** The Jira statuses an `issue.status` grant covers. */
+            statusIds: z.array(identity).max(256).optional(),
           })
           .strict()
           .refine(
@@ -244,6 +248,16 @@ export const externalActionSchema = z.discriminatedUnion("kind", [
         .object({ optionNodeId: identity.nullable() })
         .strict()
         .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("issue.status"),
+      // `repositoryId` is the Jira project id, `nodeId` the issue id.
+      target: targetSchema,
+      statusId: identity,
+      // The status the issue must still show: the provider skips the write otherwise (`null` is no value).
+      expected: z.object({ statusId: identity.nullable() }).strict(),
     })
     .strict(),
   z
@@ -386,7 +400,7 @@ export const operatorDeliveryCallerSchema = z
 export type OperatorDeliveryCaller = z.output<
   typeof operatorDeliveryCallerSchema
 >;
-/** The service writing a mapped Project Status for one event; it may submit only that `project.field`. */
+/** The service writing a mapped Project Status or Jira status for one event; it may submit only that `project.field` or `issue.status`. */
 export const serviceDeliveryCallerSchema = z
   .object({
     actor: z.literal("service"),
@@ -881,6 +895,14 @@ export class DeliveryStore {
         approved = this.operatorApprovalCurrent(request, binding);
     } else if (request.operatorReviewId)
       throw Error("Runtime caller cannot use an operator confirmation");
+    if (
+      request.action.kind === "issue.status" &&
+      !isServiceDeliveryCaller(binding)
+    )
+      throw new DomainPolicyError(
+        "forbidden",
+        "Only the status mapping may write an issue status",
+      );
     if (isServiceDeliveryCaller(binding)) {
       this.validateServiceCaller(request, binding);
       // The service cannot obtain an approval, so an approval-mode grant fails closed.
@@ -905,10 +927,12 @@ export class DeliveryStore {
         g.repositoryId === action.target.repositoryId &&
         (action.kind === "project.item.add"
           ? g.projectNodeId === action.projectNodeId
-          : action.kind !== "project.field" ||
-            (g.projectNodeId === action.projectNodeId &&
-              g.fieldNodeId === action.fieldNodeId &&
-              g.optionNodeIds?.includes(action.optionNodeId))),
+          : action.kind === "issue.status"
+            ? g.statusIds?.includes(action.statusId)
+            : action.kind !== "project.field" ||
+              (g.projectNodeId === action.projectNodeId &&
+                g.fieldNodeId === action.fieldNodeId &&
+                g.optionNodeIds?.includes(action.optionNodeId))),
     );
     if (!grant)
       throw new DomainPolicyError(
@@ -1034,7 +1058,7 @@ export class DeliveryStore {
     readiness: z.output<typeof readinessSchema>,
   ): boolean {
     if (isServiceDeliveryCaller(binding))
-      return action.kind === "project.field";
+      return action.kind === "project.field" || action.kind === "issue.status";
     if (!isOperatorPublicationCaller(binding)) return false;
     const ready = this.db
       .prepare("SELECT ready FROM domain_tasks WHERE id=?")
@@ -1129,10 +1153,10 @@ export class DeliveryStore {
       throw refusal("Publication names an issue it did not create");
   }
   /**
-   * A status-mapping write names the mapping's exact Project, field and option for the event, on
-   * the item of a Ready imported task. In-flight events must leave the task Ready; no write can make
-   * a non-Ready task Ready: only a Ready task qualifies, or Done for a done task whose issue is closed,
-   * and then never an option the readiness rule accepts.
+   * A status-mapping write names the mapping's exact Project, field and option (GitHub) or target
+   * status (Jira) for the event, on the item of a Ready imported task. In-flight events must leave
+   * the task Ready; no write can make a non-Ready task Ready: only a Ready task qualifies, or Done
+   * for a done task whose issue is closed, and then never a status the readiness rule accepts.
    */
   private validateServiceCaller(
     request: ExternalActionArguments,
@@ -1142,34 +1166,34 @@ export class DeliveryStore {
       refusal = () =>
         new DomainPolicyError(
           "forbidden",
-          "Status mapping caller only permits its mapped project.field",
+          "Status mapping caller only permits its mapped project.field or issue.status",
         );
     if (
-      action.kind !== "project.field" ||
+      (action.kind !== "project.field" && action.kind !== "issue.status") ||
       request.approval ||
       request.operatorReviewId
     )
       throw refusal();
-    const { version, mapping } = new StatusMappingStore(this.db).current(
-      caller.projectId,
-    );
+    const statuses = new StatusMappingStore(this.db);
+    const { version, mapping } = statuses.current(caller.projectId);
     // A task first seen done was not worked on under the mapping: never written, Ready or not.
-    if (
-      caller.event === "done" &&
-      !new StatusMappingStore(this.db).taskState(caller.taskId).watched
-    )
+    if (caller.event === "done" && !statuses.taskState(caller.taskId).watched)
       throw refusal();
     if (
       !mapping ||
       version !== caller.mappingVersion ||
-      action.optionNodeId !== mapping.events[caller.event] ||
-      action.projectNodeId !== mapping.projectNodeId ||
-      action.fieldNodeId !== mapping.fieldNodeId
+      (action.kind === "issue.status"
+        ? !isJiraMapping(mapping) ||
+          action.statusId !== mapping.events[caller.event]
+        : isJiraMapping(mapping) ||
+          action.optionNodeId !== mapping.events[caller.event] ||
+          action.projectNodeId !== mapping.projectNodeId ||
+          action.fieldNodeId !== mapping.fieldNodeId)
     )
       throw refusal();
     const task = this.db
       .prepare(
-        `SELECT t.projectId, t.ready, t.state, e.externalId AS nodeId, e.containerId AS repositoryId, e.number AS issueNumber, e.labels, e.observedState
+        `SELECT t.projectId, t.ready, t.state, e.provider, e.instance, e.externalId AS nodeId, e.containerId AS repositoryId, e.number AS issueNumber, e.labels, e.observedState, e.observedFields
         FROM domain_tasks t JOIN external_items e ON e.taskId = t.id WHERE t.id = ?`,
       )
       .get(caller.taskId) as
@@ -1177,11 +1201,14 @@ export class DeliveryStore {
           projectId: string;
           ready: number;
           state: string;
+          provider: string;
+          instance: string;
           nodeId: string;
           repositoryId: string;
           issueNumber: number;
           labels: string;
           observedState: string;
+          observedFields: string | null;
         }
       | undefined;
     const membership = task
@@ -1189,7 +1216,7 @@ export class DeliveryStore {
           .prepare(
             `SELECT selectionId, itemId AS itemNodeId, fields AS projectFields FROM source_memberships WHERE projectId = ? AND ${itemIs()}`,
           )
-          .all(task.projectId, ...itemKey(task.nodeId))
+          .all(task.projectId, ...itemKey(task.nodeId, task))
       : [];
     const items = z
       .array(
@@ -1200,45 +1227,69 @@ export class DeliveryStore {
         }),
       )
       .parse(membership);
-    const mapped = items.find((m) => m.selectionId === mapping.selectionId);
     if (
       !task ||
       task.projectId !== caller.projectId ||
       task.state === "cancelled" ||
+      (task.provider === "jira") !== isJiraMapping(mapping) ||
       task.nodeId !== action.target.nodeId ||
       task.repositoryId !== action.target.repositoryId ||
-      task.issueNumber !== action.target.number ||
-      !mapped?.itemNodeId ||
-      mapped.itemNodeId !== action.itemNodeId
+      task.issueNumber !== action.target.number
     )
       throw refusal();
+    // A Jira issue has no Project item: a current membership in any selection of the source qualifies.
+    if (action.kind === "issue.status") {
+      if (!items.length) throw refusal();
+    } else {
+      const mapped = items.find(
+        (m) => !isJiraMapping(mapping) && m.selectionId === mapping.selectionId,
+      );
+      if (!mapped?.itemNodeId || mapped.itemNodeId !== action.itemNodeId)
+        throw refusal();
+    }
     const row = this.db
       .prepare("SELECT readiness FROM project_task_sources WHERE projectId=?")
       .get(caller.projectId) as { readiness: string };
-    const fields = items
-      .flatMap((m) => projectFieldsSchema.parse(JSON.parse(m.projectFields)))
-      .filter(
-        (f) =>
-          !(
-            f.projectNodeId === action.projectNodeId &&
-            f.fieldNodeId === action.fieldNodeId
-          ),
-      );
+    const labels = z.array(z.string()).parse(JSON.parse(task.labels));
+    // Project field values of the other fields; a Jira status has none.
+    const fields =
+      action.kind === "project.field"
+        ? items
+            .flatMap((m) =>
+              projectFieldsSchema.parse(JSON.parse(m.projectFields)),
+            )
+            .filter(
+              (f) =>
+                !(
+                  f.projectNodeId === action.projectNodeId &&
+                  f.fieldNodeId === action.fieldNodeId
+                ),
+            )
+        : [];
     // The stored facts with only the target Status substituted.
     const keepsReady = () =>
       evaluateReadiness(
         readinessSchema.nullable().parse(JSON.parse(row.readiness)),
-        {
-          labels: z.array(z.string()).parse(JSON.parse(task.labels)),
-          fields: [
-            ...fields,
-            {
-              projectNodeId: action.projectNodeId,
-              fieldNodeId: action.fieldNodeId,
-              optionNodeId: action.optionNodeId,
+        action.kind === "issue.status"
+          ? {
+              labels,
+              fields: [],
+              status: action.statusId,
+              selectFields: z
+                .array(z.object({ fieldId: z.string(), optionId: z.string() }))
+                .parse(JSON.parse(task.observedFields ?? "[]")),
+            }
+          : {
+              labels,
+              fields: [
+                ...fields,
+                {
+                  projectNodeId: action.projectNodeId,
+                  fieldNodeId: action.fieldNodeId,
+                  optionNodeId: action.optionNodeId,
+                },
+              ],
             },
-          ],
-        },
       ).satisfied;
     if (task.ready !== 1) {
       // Done on closure: a done task whose issue is observed closed is not Ready and a closed issue
@@ -1249,8 +1300,10 @@ export class DeliveryStore {
         task.observedState !== "closed" ||
         // Skip-if-changed: the Status sent as expected must be the one cab last wrote or saw.
         !closureExpectedHolds(
-          new StatusMappingStore(this.db).taskState(caller.taskId),
-          action.expected,
+          statuses.taskState(caller.taskId),
+          action.kind === "issue.status"
+            ? { optionNodeId: action.expected.statusId }
+            : action.expected,
         ) ||
         keepsReady()
       )
@@ -1769,7 +1822,8 @@ export class DeliveryStore {
       if (
         isServiceDeliveryCaller(record.binding) &&
         observation.state === "confirmed-success" &&
-        record.request.action.kind === "project.field" &&
+        (record.request.action.kind === "project.field" ||
+          record.request.action.kind === "issue.status") &&
         // A late proof of an older write must not replace what a newer one wrote, and a write of a
         // mapping since cleared or rebound must not recreate the state that was forgotten with it.
         record.binding.mappingVersion ===
@@ -1779,7 +1833,9 @@ export class DeliveryStore {
       )
         new StatusMappingStore(this.db).observed(
           record.binding.taskId,
-          record.request.action.optionNodeId,
+          record.request.action.kind === "issue.status"
+            ? record.request.action.statusId
+            : record.request.action.optionNodeId,
         );
       within?.(record);
       return record;
@@ -2451,6 +2507,14 @@ export class DeliveryStore {
         throw new Error("Project field grant requires exact field and options");
       if (grant.action === "project.item.add" && !grant.projectNodeId)
         throw new Error("Project item grant requires an exact Project");
+      if (
+        grant.action === "issue.status"
+          ? !grant.statusIds?.length
+          : grant.statusIds
+      )
+        throw new Error(
+          "Only an issue.status grant takes statusIds, and it requires some",
+        );
     }
     this.db
       .prepare(

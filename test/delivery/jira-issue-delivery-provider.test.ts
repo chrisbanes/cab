@@ -6,6 +6,7 @@ import type {
   ExternalAction,
 } from "../../src/core/delivery.js";
 import { markdownToAdf } from "../../src/core/markdown-adf.js";
+import { StatusSkipRefusal } from "../../src/standalone/issue-tracker.js";
 import { JiraIssueTrackerWriter } from "../../src/standalone/jira-delivery.js";
 import {
   accountId,
@@ -229,13 +230,15 @@ test("labels change in one request and are confirmed by exact readback", async (
   assert.equal((await w.writer.inspectAction(record)).state, "uncertain");
 });
 
-test("the writer delivers comments, labels and closure only", async () => {
+test("the writer delivers comments, labels, closure and mapped statuses only", async () => {
   const w = world();
   const supported = (kind: ExternalAction["kind"]) =>
     w.writer.supportsAction(kind);
   assert.deepEqual(
-    (["issue.comment", "issue.labels", "issue.close"] as const).map(supported),
-    [true, true, true],
+    (
+      ["issue.comment", "issue.labels", "issue.close", "issue.status"] as const
+    ).map(supported),
+    [true, true, true, true],
   );
   for (const kind of [
     "issue.edit",
@@ -402,4 +405,146 @@ test("closed-issue inspection names who made the latest move to the current Done
   assert.equal(external.closedEvent?.closerKind, "other");
   assert.equal(external.closedEvent?.id, "801");
   assert.notEqual(external.closedEvent?.id, own.closedEvent?.id);
+});
+
+const inProgress = { id: "3", name: "In Progress", category: "indeterminate" };
+const toStatus = (
+  statusId: string,
+  expected: string | null,
+): ExternalAction => ({
+  kind: "issue.status",
+  target,
+  statusId,
+  expected: { statusId: expected },
+});
+/** An issue at To Do (1) with one transition to In Progress (3), as a team-managed project offers. */
+const statusWorld = () => {
+  const w = world();
+  w.state.transitions = [{ id: "21", to: inProgress }, ...w.state.transitions];
+  return w;
+};
+const skipped = (w: World, action: ExternalAction, reason: string) =>
+  assert.rejects(
+    w.writer.preflight(action),
+    (e: unknown) => e instanceof StatusSkipRefusal && e.reason === reason,
+  );
+
+test("a mapped status takes the one transition to the target and is confirmed by reading the status back", async () => {
+  const w = statusWorld();
+  const { record, observation } = await perform(w, toStatus("3", "1"));
+  assert.equal(observation.state, "confirmed-success");
+  assert.deepEqual(observation.receipt, { nodeId: "10007", number: 7 });
+  assert.deepEqual(w.writes(), ["POST transitions"]);
+  assert.deepEqual(w.requests.find((r) => r.method === "POST")?.body, {
+    transition: { id: "21" },
+  });
+  assert.deepEqual(record.beforeState, {
+    issueId: "10007",
+    state: "open",
+    transitionId: "21",
+    targetStatusId: "3",
+  });
+  // Two reads before the write (the issue, its transitions), then the one POST.
+  assert.deepEqual(
+    w.requests.slice(0, 3).map((r) => r.method),
+    ["GET", "GET", "POST"],
+  );
+});
+
+test("a mapped status is skipped, with nothing written, when no or several transitions reach it", async () => {
+  const none = statusWorld();
+  await skipped(none, toStatus("10", "1"), "provider-transition-unavailable");
+  const two = statusWorld();
+  two.state.transitions.push({ id: "22", to: inProgress });
+  await skipped(two, toStatus("3", "1"), "provider-transition-ambiguous");
+  for (const w of [none, two]) assert.deepEqual(w.writes(), []);
+});
+
+test("a mapped status is skipped without reading transitions when the issue moved, and when it is already there", async () => {
+  const moved = statusWorld();
+  await skipped(moved, toStatus("3", "10"), "provider-issue-status-changed");
+  await skipped(moved, toStatus("3", null), "provider-issue-status-changed");
+  assert.equal(
+    moved.requests.some((r) => r.url.pathname.endsWith("/transitions")),
+    false,
+  );
+  const there = statusWorld();
+  there.state.status = {
+    id: "3",
+    name: "In Progress",
+    category: "indeterminate",
+  };
+  // Already there reads as current even though cab last saw another status.
+  await skipped(there, toStatus("3", "1"), "provider-issue-status-current");
+  await skipped(there, toStatus("3", "3"), "provider-issue-status-current");
+  for (const w of [moved, there]) assert.deepEqual(w.writes(), []);
+});
+
+test("a mapped status whose request is lost or fails with a server error stays uncertain, and a rejection is definitive", async () => {
+  for (const failure of [{}, { status: 503 }]) {
+    const w = statusWorld();
+    w.state.fail["POST transitions"] = { ...failure, apply: true };
+    const { record, observation } = await perform(w, toStatus("3", "1"));
+    assert.equal(observation.state, "uncertain");
+    // A later readback finds the move the lost response hid.
+    assert.equal(
+      (await w.writer.inspectAction(record)).state,
+      "confirmed-success",
+    );
+    assert.deepEqual(w.writes(), ["POST transitions"]);
+  }
+  for (const status of [400, 403, 404]) {
+    const w = statusWorld();
+    w.state.fail["POST transitions"] = { status };
+    const { observation } = await perform(w, toStatus("3", "1"));
+    assert.equal(observation.state, "confirmed-failure");
+    assert.equal(observation.reason, `provider-http-${status}`);
+  }
+  const limited = statusWorld();
+  limited.state.fail["POST transitions"] = { status: 429 };
+  const { observation } = await perform(limited, toStatus("3", "1"));
+  assert.equal(observation.reason, "provider-http-429");
+  assert.equal(observation.retryable, true);
+  assert.ok((observation.resumeAt ?? 0) > Date.now());
+});
+
+test("a mapped status is not confirmed when the readback shows another status", async () => {
+  const w = statusWorld();
+  w.state.fail["POST transitions"] = { status: 503 };
+  const { record, observation } = await perform(w, toStatus("3", "1"));
+  assert.equal(observation.state, "uncertain");
+  assert.equal((await w.writer.inspectAction(record)).state, "uncertain");
+  w.state.status = { id: "9", name: "Done", category: "done" };
+  assert.equal((await w.writer.inspectAction(record)).state, "uncertain");
+});
+
+test("closure takes the transition to the mapped done status among several Done transitions, else stays ambiguous", async () => {
+  const two = () => {
+    const w = world();
+    w.state.transitions.push({
+      id: "41",
+      to: { id: "10", name: "Won't do", category: "done" },
+    });
+    return w;
+  };
+  const w = two();
+  const writer = new JiraIssueTrackerWriter(
+    () => ({ instance: site, email: "cab@example.test", token: "token" }),
+    w.fetcher,
+    "9",
+  );
+  const record = recordOf(close, await writer.preflight(close));
+  assert.equal(record.beforeState?.transitionId, "31");
+  assert.equal((await writer.performAction(record)).state, "confirmed-success");
+  // A mapped status no Done transition reaches leaves the single-Done-transition rule.
+  const other = two();
+  await assert.rejects(
+    new JiraIssueTrackerWriter(
+      () => ({ instance: site, email: "cab@example.test", token: "token" }),
+      other.fetcher,
+      "5",
+    ).preflight(close),
+    /ambiguous/,
+  );
+  await assert.rejects(two().writer.preflight(close), /ambiguous/);
 });

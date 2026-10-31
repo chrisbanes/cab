@@ -131,6 +131,41 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
   );
 });
 
+test("each Jira status skip reads as its own sentence on a status-mapping write, and an agent's raw reason stays", () => {
+  const line = (reason: string, caller: "service" | "agent" = "service") =>
+    deliveryActionLine({
+      kind: "issue.status",
+      caller,
+      event: caller === "service" ? "turnStarted" : null,
+      state: "confirmed-failure",
+      reason,
+      operationId: "op-1",
+    });
+  const notes = [
+    [
+      "provider-issue-status-changed",
+      "Skipped: the status changed in Jira since cab last saw it.",
+    ],
+    [
+      "provider-issue-status-current",
+      "Skipped: the issue is already in the mapped status.",
+    ],
+    [
+      "provider-transition-unavailable",
+      "Skipped: no available transition reaches the mapped status.",
+    ],
+    [
+      "provider-transition-ambiguous",
+      "Skipped: several transitions reach the mapped status.",
+    ],
+  ] as const;
+  for (const [reason, note] of notes) {
+    assert.match(line(reason), new RegExp(note.replace(/\./g, "\\.")));
+    // An agent's issue.close ambiguity is not a status-mapping skip.
+    assert.match(line(reason, "agent"), new RegExp(reason));
+  }
+});
+
 test("a GitLab merge request is named in GitLab's form and links only over https", () => {
   const url = "https://gitlab.example.com/group/sub/app/-/merge_requests/12";
   const binding = {

@@ -11,7 +11,8 @@ import type {
   ClosedIssueInspection,
   PublishedIssueInspection,
 } from "./github-delivery.js";
-import type { IssueTrackerWriter } from "./issue-tracker.js";
+import { jiraStatusSkipReasons } from "../operator/status-mapping-copy.js";
+import { type IssueTrackerWriter, StatusSkipRefusal } from "./issue-tracker.js";
 import type { resolveJiraAccess } from "./jira-credential.js";
 import { type JiraAccess, JiraFailure, jiraRequest } from "./jira-http.js";
 
@@ -23,6 +24,7 @@ const supported: readonly ExternalAction["kind"][] = [
   "issue.comment",
   "issue.labels",
   "issue.close",
+  "issue.status",
 ];
 
 const numeric = z.string().regex(/^\d{1,20}$/);
@@ -121,7 +123,8 @@ const transitionsSchema = z
 const beforeSchema = z
   .object({
     issueId: numeric,
-    accountId: z.string().min(1),
+    // Absent on a status write, whose readback names no author.
+    accountId: z.string().min(1).optional(),
     state: z.enum(["open", "closed"]),
     transitionId: z.string().optional(),
     targetStatusId: z.string().optional(),
@@ -148,6 +151,8 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
   constructor(
     private readonly access: () => ReturnType<typeof resolveJiraAccess>,
     private readonly fetcher: typeof fetch = fetch,
+    /** The status the project's mapping moves a finished task to: `issue.close` prefers the transition to it. */
+    private readonly mappedDoneStatus: string | null = null,
   ) {}
 
   supportsAction(kind: ExternalAction["kind"]): boolean {
@@ -220,6 +225,8 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
       throw new Error("provider-action-unsupported");
     const access = this.resolved();
     const issue = await this.issue(access, action.target);
+    if (action.kind === "issue.status")
+      return this.statusPreflight(access, issue, action);
     const before: Record<string, string> = {
       issueId: issue.id,
       accountId: await this.accountId(access),
@@ -233,11 +240,13 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
       throw new Error("provider-label-invalid");
     if (action.kind !== "issue.close") return before;
     if (before.state !== "open") throw new Error("provider-issue-not-open");
-    const done = transitionsSchema
-      .parse(await this.request(access, `/issue/${issue.id}/transitions`))
-      .transitions.filter((t) => t.to.statusCategory.key === "done");
-    const [transition] = done;
-    if (done.length !== 1 || !transition)
+    const done = (await this.transitions(access, issue.id)).filter(
+      (t) => t.to.statusCategory.key === "done",
+    );
+    // The mapping's done status, when a Done-category transition reaches it, is the one to take.
+    const mapped = done.filter((t) => t.to.id === this.mappedDoneStatus);
+    const [transition] = mapped.length ? mapped : done;
+    if ((mapped.length || done.length) !== 1 || !transition)
       throw new Error("provider-transition-ambiguous");
     const newest = Math.max(
       0,
@@ -248,6 +257,43 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
       transitionId: transition.id,
       targetStatusId: transition.to.id,
       changelogHighWater: String(newest),
+    };
+  }
+
+  private async transitions(access: JiraAccess, issueId: string) {
+    return transitionsSchema.parse(
+      await this.request(access, `/issue/${issueId}/transitions`),
+    ).transitions;
+  }
+
+  /**
+   * A mapped status write: skipped, with nothing sent, unless the issue is not yet at the target,
+   * still at the status cab last saw, and exactly one transition reaches the target. The skips are
+   * ordered so cab's own closure followed by the Done write reads as already there, not as changed.
+   */
+  private async statusPreflight(
+    access: JiraAccess,
+    issue: z.output<typeof issueSchema>,
+    action: Extract<ExternalAction, { kind: "issue.status" }>,
+  ) {
+    const current = issue.fields.status.id;
+    if (current === action.statusId)
+      throw new StatusSkipRefusal(jiraStatusSkipReasons.current);
+    if (current !== action.expected.statusId)
+      throw new StatusSkipRefusal(jiraStatusSkipReasons.changed);
+    const reaching = (await this.transitions(access, issue.id)).filter(
+      (t) => t.to.id === action.statusId,
+    );
+    const [transition] = reaching;
+    if (!transition)
+      throw new StatusSkipRefusal(jiraStatusSkipReasons.unavailable);
+    if (reaching.length > 1)
+      throw new StatusSkipRefusal(jiraStatusSkipReasons.ambiguous);
+    return {
+      issueId: issue.id,
+      state: isDone(issue) ? "closed" : "open",
+      transitionId: transition.id,
+      targetStatusId: action.statusId,
     };
   }
 
@@ -290,6 +336,7 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
             },
           };
         case "issue.close":
+        case "issue.status":
           return {
             path: `/issue/${before.issueId}/transitions`,
             init: {
@@ -347,7 +394,9 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
             ? await this.labelsReceipt(access, a, before)
             : a.kind === "issue.close"
               ? await this.closeReceipt(access, a, before)
-              : null;
+              : a.kind === "issue.status"
+                ? await this.statusReceipt(access, a, before)
+                : null;
       return actionObservationSchema.parse({
         state: receipt ? "confirmed-success" : "uncertain",
         reason: receipt ? null : "provider-effect-unproved",
@@ -365,6 +414,7 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
     body: string,
     before: Before,
   ) {
+    if (!before.accountId) throw new Error("provider-before-state-invalid");
     const mine: number[] = [];
     for (let seen = 0, page = 0; ; page++) {
       if (page >= maxPages) throw new JiraFailure("page-limit");
@@ -423,6 +473,20 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
       : null;
   }
 
+  /** The issue shows the status the preflight recorded as the target: the one an independent read proves. */
+  private async statusReceipt(
+    access: JiraAccess,
+    a: Extract<ExternalAction, { kind: "issue.status" }>,
+    before: Before,
+  ) {
+    if (before.targetStatusId !== a.statusId)
+      throw new Error("provider-before-state-invalid");
+    const issue = await this.issue(access, a.target, before.issueId);
+    return issue.fields.status.id === a.statusId
+      ? { nodeId: issue.id, number: a.target.number }
+      : null;
+  }
+
   /**
    * The issue is Done and exactly one status history since preflight moved it to the recorded
    * target, made by the credential user.
@@ -432,7 +496,11 @@ export class JiraIssueTrackerWriter implements IssueTrackerWriter {
     a: Extract<ExternalAction, { kind: "issue.close" }>,
     before: Before,
   ) {
-    if (!before.targetStatusId || before.changelogHighWater === undefined)
+    if (
+      !before.accountId ||
+      !before.targetStatusId ||
+      before.changelogHighWater === undefined
+    )
       throw new Error("provider-before-state-invalid");
     const issue = await this.issue(access, a.target, before.issueId);
     const since = (await this.changelog(access, issue.id)).filter(

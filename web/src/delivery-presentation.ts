@@ -145,7 +145,7 @@ const mergeTrainNotes = new Map([
 
 /**
  * One retained delivery action as a line. A status-mapping write is named for what it is, and a
- * write skipped because the Status moved on GitHub says so instead of showing its code. A merge train
+ * write skipped (the Status moved, Jira already shows it, or offers no single transition) says so instead of showing its code. A merge train
  * merge that is pending or dropped is described the same way.
  */
 export const deliveryActionLine = (a: {
@@ -156,4 +156,4 @@ export const deliveryActionLine = (a: {
   reason: string | null;
   operationId: string;
 }) =>
-  `${a.caller === "service" && a.event ? `${statusMappingActionLabel} (${statusEventLabels[a.event]}) · ` : ""}${a.kind}: ${a.state} · ${statusMappingActionNote(a.reason) ?? (a.reason && mergeTrainNotes.get(a.reason)) ?? a.reason ?? "receipt recorded"} · operation ${a.operationId}`;
+  `${a.caller === "service" && a.event ? `${statusMappingActionLabel} (${statusEventLabels[a.event]}) · ` : ""}${a.kind}: ${a.state} · ${(a.caller === "service" ? statusMappingActionNote(a.reason) : null) ?? (a.reason && mergeTrainNotes.get(a.reason)) ?? a.reason ?? "receipt recorded"} · operation ${a.operationId}`;

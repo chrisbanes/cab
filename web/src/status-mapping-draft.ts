@@ -1,11 +1,14 @@
 import {
-  type StatusMapping,
+  type GitHubStatusMapping as StatusMapping,
+  type JiraStatusMapping,
   statusMappingEvents,
 } from "../../src/core/status-mapping-contracts.js";
 import { statusEventLabels } from "../../src/operator/status-mapping-copy.js";
 import type { ProjectConfigurationData, Values } from "./settings-changes.js";
 
-type StatusView = NonNullable<ProjectConfigurationData["statusMapping"]>;
+type AnyStatusView = NonNullable<ProjectConfigurationData["statusMapping"]>;
+export type JiraStatusView = Extract<AnyStatusView, { tracker: "jira" }>;
+type StatusView = Exclude<AnyStatusView, { tracker: "jira" }>;
 export type Field = {
   fieldNodeId: string;
   name: string;
@@ -108,5 +111,37 @@ export function statusMappingPlan(i: {
       i.selectionName,
     ),
     ready: true,
+  };
+}
+
+/** The Jira draft's mapping, or `null` for none: no event names a status ID. */
+export function jiraDraftMapping(v: Values): JiraStatusMapping | null {
+  const events = Object.fromEntries(
+    statusMappingEvents.map((e) => [e, String(v[e] ?? "").trim() || null]),
+  ) as JiraStatusMapping["events"];
+  return Object.values(events).every((o) => o === null)
+    ? null
+    : { tracker: "jira", events };
+}
+
+/** What saving the Jira editor would send, and one line per event whose status ID changed. */
+export function jiraStatusMappingPlan(i: {
+  saved: JiraStatusMapping | null;
+  values: Values;
+}): { mapping: JiraStatusMapping | null; lines: string[] } {
+  const mapping = jiraDraftMapping(i.values);
+  if (!mapping)
+    return { mapping, lines: i.saved ? ["Clears the status mapping."] : [] };
+  return {
+    mapping,
+    lines: statusMappingEvents.flatMap((event) => {
+      const was = i.saved?.events[event] ?? null,
+        now = mapping.events[event];
+      return was === now
+        ? []
+        : [
+            `${statusEventLabels[event]}: ${now ? `moves the issue to Jira status ${now}` : "writes nothing"}.`,
+          ];
+    }),
   };
 }

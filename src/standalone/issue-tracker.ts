@@ -48,3 +48,14 @@ export type IssueTrackerWriterFactory = (
 export type IssueTrackerWriterFactories = Partial<
   Record<IssueTracker, IssueTrackerWriterFactory>
 >;
+
+/**
+ * A status write the tracker skips before sending anything (the issue moved, is already there, or no
+ * single transition reaches the status): the coordinator records `reason` as a confirmed failure
+ * and does not retry it.
+ */
+export class StatusSkipRefusal extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+  }
+}
