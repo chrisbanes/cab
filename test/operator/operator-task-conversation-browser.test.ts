@@ -762,6 +762,33 @@ test("every former History link lands at its place in the conversation", async (
   );
 });
 
+test("a link to a nested delegation lands even when the frame callback runs before the render", async (_t, j) => {
+  const { s, web, page } = await openFixture(j);
+  // The frame callback now runs before React's scheduled render, as it can on a loaded machine.
+  await page.addInitScript(() => {
+    window.requestAnimationFrame = (callback) => {
+      queueMicrotask(() => callback(performance.now()));
+      return 0;
+    };
+  });
+  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  const log = page.getByRole("log", { name: "Task conversation" });
+  await log.getByText("Second: all steps ran.").waitFor();
+  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.nested}`);
+  const delegation = (id: string) =>
+    log.locator(`[data-record-id="delegation:${id}"]`);
+  await landsOn(j, page, delegation(s.nested), "a nested delegation");
+  for (const id of [s.worker, s.nested])
+    assert.equal(
+      await delegation(id)
+        .getByRole("button", { expanded: true })
+        .first()
+        .count(),
+      1,
+      `delegation ${id} is expanded`,
+    );
+});
+
 test("a link to a record beyond the ten-page bound stops at the conversation's top with Load earlier", async (_t, j) => {
   // 560 older notes put the elder delegation 11 pages below the newest.
   const { s, web, page } = await openFixture(j, 560);
