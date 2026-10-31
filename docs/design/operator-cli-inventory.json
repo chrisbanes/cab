@@ -774,7 +774,7 @@
       "retry": "A lost reply then rerun reuses the key; operation get does not read coordination receipts.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). A follow-up after adoption on a completed lead exits 4 (see assignment apply-current)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). Adoption followed by a follow-up on a completed lead is covered by a deterministic test (#935, test/operator/operator-cli-adopt.test.ts)."
     },
     {
       "id": "task draft-turn",
