@@ -1251,16 +1251,21 @@ export class DeliveryStore {
       .prepare("SELECT readiness FROM project_task_sources WHERE projectId=?")
       .get(caller.projectId) as { readiness: string };
     const labels = z.array(z.string()).parse(JSON.parse(task.labels));
-    const fields = items
-      .flatMap((m) => projectFieldsSchema.parse(JSON.parse(m.projectFields)))
-      .filter(
-        (f) =>
-          action.kind === "project.field" &&
-          !(
-            f.projectNodeId === action.projectNodeId &&
-            f.fieldNodeId === action.fieldNodeId
-          ),
-      );
+    // Project field values of the other fields; a Jira status has none.
+    const fields =
+      action.kind === "project.field"
+        ? items
+            .flatMap((m) =>
+              projectFieldsSchema.parse(JSON.parse(m.projectFields)),
+            )
+            .filter(
+              (f) =>
+                !(
+                  f.projectNodeId === action.projectNodeId &&
+                  f.fieldNodeId === action.fieldNodeId
+                ),
+            )
+        : [];
     // The stored facts with only the target Status substituted.
     const keepsReady = () =>
       evaluateReadiness(

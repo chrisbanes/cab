@@ -127,10 +127,9 @@ export function jiraDraftMapping(v: Values): JiraStatusMapping | null {
 /** What saving the Jira editor would send, and one line per event whose status ID changed. */
 export function jiraStatusMappingPlan(i: {
   saved: JiraStatusMapping | null;
-  clearing: boolean;
   values: Values;
 }): { mapping: JiraStatusMapping | null; lines: string[] } {
-  const mapping = i.clearing ? null : jiraDraftMapping(i.values);
+  const mapping = jiraDraftMapping(i.values);
   if (!mapping)
     return { mapping, lines: i.saved ? ["Clears the status mapping."] : [] };
   return {

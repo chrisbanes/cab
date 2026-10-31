@@ -129,7 +129,6 @@ test("the Jira draft maps typed status IDs, and lists one line per changed event
   assert.equal(jiraDraftMapping({ turnStarted: " ", done: "" }), null);
   const plan = jiraStatusMappingPlan({
     saved: savedJira,
-    clearing: false,
     values: { turnStarted: " 3 ", handedBack: "4", held: "", done: "9" },
   });
   assert.deepEqual(plan.mapping, {
@@ -145,21 +144,12 @@ test("the Jira draft maps typed status IDs, and lists one line per changed event
   assert.deepEqual(
     jiraStatusMappingPlan({
       saved: savedJira,
-      clearing: false,
       values: nothing,
     }),
     { mapping: null, lines: ["Clears the status mapping."] },
   );
-  assert.deepEqual(
-    jiraStatusMappingPlan({ saved: null, clearing: false, values: nothing }),
-    { mapping: null, lines: [] },
-  );
-  assert.deepEqual(
-    jiraStatusMappingPlan({
-      saved: savedJira,
-      clearing: true,
-      values: nothing,
-    }),
-    { mapping: null, lines: ["Clears the status mapping."] },
-  );
+  assert.deepEqual(jiraStatusMappingPlan({ saved: null, values: nothing }), {
+    mapping: null,
+    lines: [],
+  });
 });

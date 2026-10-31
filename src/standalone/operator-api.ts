@@ -6467,8 +6467,8 @@ export class OperatorApi {
       return {
         tracker: "jira" as const,
         version: view.version,
-        availability:
-          view.mapping && !mapping ? "available" : view.availability,
+        // A Jira project always has the source the mapping binds to.
+        availability: "available" as const,
         mapping,
         granted: grants.flatMap((g) =>
           g.action === "issue.status" ? (g.statusIds ?? []) : [],
@@ -6476,7 +6476,13 @@ export class OperatorApi {
       };
     return {
       version: view.version,
-      availability: view.mapping && !mapping ? "available" : view.availability,
+      // A mapping left by the other tracker is not shown, so availability is that of no mapping.
+      availability:
+        view.mapping && !mapping
+          ? selections.some((s) => s.kind === "project")
+            ? ("available" as const)
+            : ("unavailable" as const)
+          : view.availability,
       mapping,
       selections: selections.flatMap((s) =>
         s.kind === "project"

@@ -2148,7 +2148,8 @@ single-select field named `Status` (`status-mapping.configure`; a source without
 selection reads the mapping as unavailable and nothing is written). A Jira mapping names target
 status IDs and is bound to the project's Jira source, not to a selection, because JQL selections
 can span Jira projects and status IDs are site-wide; a mapping of the other tracker is refused as
-having no source, and reads as unavailable once the project's source is not Jira. Four events each
+having no source, and the store reads it as unavailable once the project's source is not Jira (the
+editor then shows no mapping, and saving one for the project's tracker replaces it). Four events each
 map to a Status option (a Jira status ID) or to nothing: the first turn started (not a draft turn), the PR handed back for operator review,
 the task stopped, uncertain or blocked by a dependency, and the task Done. The service, not
 an agent, writes it as a distinct caller through the same delivery lifecycle, labelled
@@ -2159,7 +2160,7 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   the exact Project, field and option, and the grant's repository: it covers only that
   repository's issues, so an issue of another repository is denied at write time and shows on
   the task. A Jira status is written by `issue.status`, which only the service may submit (agents,
-  the operator and publication are refused, and agents are not offered it). It is granted per Jira
+  the operator and publication are refused, and an agent's request is denied). It is granted per Jira
   project with `statusIds`, which an `issue.status` grant requires and no other grant takes; its
   target is the Jira project ID, the key's number and the issue ID, and it carries the status
   the issue must still show. The write checks the task's imported Jira issue and a current

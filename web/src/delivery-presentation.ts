@@ -145,7 +145,7 @@ const mergeTrainNotes = new Map([
 
 /**
  * One retained delivery action as a line. A status-mapping write is named for what it is, and a
- * write skipped (the Status moved, or Jira offers no single transition) says so instead of showing its code. A merge train
+ * write skipped (the Status moved, Jira already shows it, or offers no single transition) says so instead of showing its code. A merge train
  * merge that is pending or dropped is described the same way.
  */
 export const deliveryActionLine = (a: {
