@@ -9,7 +9,10 @@ import {
 } from "node:fs";
 import { tmpdir as osTmp } from "node:os";
 import { canonicalMaterial } from "../../src/core/delivery.js";
-import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
+import type {
+  StandaloneService,
+  StandaloneServiceOptions,
+} from "../../src/standalone/service.js";
 import { git as runGit } from "./publication.js";
 import { GitHubHttpDeliveryProvider } from "../../src/standalone/github-delivery.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
@@ -436,6 +439,16 @@ export interface GitLabLink {
   glabExecutable?: string;
 }
 
+/**
+ * A Jira source in place of the fixture's GitHub one: the service's issue-tracker seams, and the setup
+ * that configures the credential and source and returns the imported task's id. The fixture then leaves
+ * the project paused and starts no turn, so the caller configures the rest and unpauses it.
+ */
+export interface JiraSource {
+  issueTrackers: NonNullable<StandaloneServiceOptions["issueTrackers"]>;
+  setup(f: { service: StandaloneService }, projectId: string): Promise<string>;
+}
+
 export async function createReleaseDeliveryFixture(
   mode: "reviewable-pr" | "through-merge" = "reviewable-pr",
   lifecycleOptions: FixtureLifecycleOptions = {},
@@ -445,6 +458,7 @@ export async function createReleaseDeliveryFixture(
   repositoryPath?: string,
   /** Links `repositoryPath` as this GitLab project instead of R1, with these delivery seams. */
   gitlab?: GitLabLink,
+  jira?: JiraSource,
 ) {
   const scripted = scriptedDeliveryProvider();
   const readerFactory: GitHubReaderFactory = () => ({
@@ -489,7 +503,12 @@ export async function createReleaseDeliveryFixture(
     },
     lifecycleOptions,
     () => new ReleaseRuntime(),
-    gitlab?.glabExecutable ? { glabExecutable: gitlab.glabExecutable } : {},
+    {
+      ...(gitlab?.glabExecutable
+        ? { glabExecutable: gitlab.glabExecutable }
+        : {}),
+      ...(jira ? { issueTrackers: jira.issueTrackers } : {}),
+    },
   );
   const projectId = randomUUID(),
     profileId = randomUUID();
@@ -519,35 +538,37 @@ export async function createReleaseDeliveryFixture(
     expectedVersion: 1,
     instructions: "Deliver scoped task",
   });
-  d.execute({
-    type: "github.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    expectedVersion: 1,
-    credentialRef: "env:SYNTHETIC_SOURCE",
-    selections: [
-      {
-        id: "repo",
-        kind: "repository",
-        repositoryId: "R1",
-        owner: "org",
-        name: "repo",
+  if (!jira) {
+    d.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: "env:SYNTHETIC_SOURCE",
+      selections: [
+        {
+          id: "repo",
+          kind: "repository",
+          repositoryId: "R1",
+          owner: "org",
+          name: "repo",
+        },
+      ],
+      readiness: {
+        mode: "any",
+        conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
-    ],
-    readiness: {
-      mode: "any",
-      conditions: [{ kind: "label", operator: "has", name: "ready" }],
-    },
-  });
-  d.execute({
-    type: "github.activate",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    selectionId: "repo",
-    expectedVersion: 2,
-  });
+    });
+    d.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      selectionId: "repo",
+      expectedVersion: 2,
+    });
+  }
   if (gitlab && repositoryPath)
     await d.configureRepositories({
       type: "repositories.configure",
@@ -567,7 +588,12 @@ export async function createReleaseDeliveryFixture(
       ],
     } as never);
   let taskId: string;
-  if (localTask) {
+  if (jira)
+    taskId = await jira.setup(f, projectId).catch(async (error) => {
+      await f.close().catch(() => {});
+      throw error;
+    });
+  else if (localTask) {
     taskId = randomUUID();
     d.execute({
       type: "task.create",
@@ -606,14 +632,15 @@ export async function createReleaseDeliveryFixture(
         ]
       : [],
   );
-  d.execute({
-    type: "project.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    expectedVersion: 2,
-    paused: false,
-  });
+  if (!jira)
+    d.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      paused: false,
+    });
   const waitTurn = async (index = f.runtime.turns) => {
     await until(
       () =>
@@ -641,7 +668,7 @@ export async function createReleaseDeliveryFixture(
       tool,
       arguments: args,
     });
-  await waitTurn(1);
+  if (!jira) await waitTurn(1);
   return Object.assign(f, {
     projectId,
     profileId,
@@ -784,6 +811,8 @@ export async function publicationWorld(
     /** An existing checkout (already linked to its origin) to provision instead of a new repository. */
     source?: string;
     deliveryMode?: "reviewable-pr" | "through-merge";
+    /** The task comes from a Jira source, and the project is left paused. */
+    jira?: JiraSource;
   } = {},
 ) {
   const repositoryId = gitlab?.repositoryId ?? "R1";
@@ -803,6 +832,7 @@ export async function publicationWorld(
     null,
     source,
     gitlab,
+    options.jira,
   );
   f.grant(
     { action: "branch.push", mode },

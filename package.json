@@ -39,6 +39,8 @@
     "task-publication:live": "node test/delivery/github-qualification/live-task-publication.mjs",
     "gitlab-delivery:live": "node test/delivery/gitlab-qualification/live-gitlab-delivery.mjs --live",
     "gitlab-delivery:cleanup": "node test/delivery/gitlab-qualification/cleanup-gitlab-run.mjs --live",
+    "jira-delivery:live": "node test/delivery/jira-qualification/live-jira-delivery.mjs --live",
+    "jira-delivery:cleanup": "node test/delivery/jira-qualification/cleanup-jira-run.mjs --live",
     "network-access:live": "node test/execution/network-access-qualification/live-network.mjs --live --one-attempt",
     "drafting:live": "node test/execution/drafting-qualification/live-drafting.mjs",
     "recovery:live": "node test/execution/recovery-qualification/live-runtime.mjs --live",

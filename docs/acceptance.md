@@ -404,13 +404,20 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   model turns, and deleted the Project with verified cleanup; two earlier attempts failed in the harness's own setup; the passing
   run on the final product code is the fourth. A skipped write, `held`, `done` and a Codex lead turn were not exercised live.
   Evidence: [status mapping live run](evidence/2026-10-21-status-mapping-live.md).
-  The Jira variant (#1321, ADR-1020) has deterministic coverage and no live evidence, so
-  live it stays **Unproved**: the mapping save rules by grant and readiness, the service-only
-  `issue.status` authority, the single-transition write with its four skips, the status-write
-  queue and its limit, Done on closure, `issue.close` narrowed to the mapped done status, and the
-  Jira source tab editor and task notes (`status-mapping-jira-store`, `status-mapping-jira-service`,
-  `jira-issue-delivery-provider`, `operator-api`, `operator-jira-source-browser`,
-  `status-mapping-draft`, `operator-delivery-presentation`).
+  The Jira variant (#1321, ADR-1020) is **Bounded.** Deterministic tests cover the mapping save rules by
+  grant and readiness, the service-only `issue.status` authority, the single-transition write with its
+  four skips, the status-write queue and its limit, Done on closure, `issue.close` narrowed to the mapped
+  done status, and the Jira source tab editor and task notes (`status-mapping-jira-store`,
+  `status-mapping-jira-service`, `jira-issue-delivery-provider`, `operator-api`,
+  `operator-jira-source-browser`, `status-mapping-draft`, `operator-delivery-presentation`). One bounded live
+  run on Jira Cloud and gitlab.com (`jira-delivery-live-harness`, guarded to the fixtures, 15 planned writes,
+  no merge, 0 model turns) imported, held, unblocked and started a task, wrote `turnStarted`, commented,
+  labelled, opened a merge request keyed to the issue, skipped `handedBack` and `done` as recorded
+  no-ops, closed the issue by its one Done transition and deleted what it created, with verified cleanup;
+  the first write attempt failed in the harness's link direction. The run proves one team-managed project with
+  global transitions, so the several-transition and no-transition skips are scripted only, and the handback
+  is settled twice until a settlement survives cab's own close (#1395). Evidence:
+  [Jira delivery live run](evidence/2026-10-31-jira-delivery-live.md).
 - **Task publication** (#1167, ADR-1017, ADR-1018) — **Bounded.** Deterministic tests cover the
   publication caller's authority and readiness exemption, the create's read-back and its refusals, the
   state machine (review, confirm, send, unknown outcome, Link, Abandon, failure), conversion in place and

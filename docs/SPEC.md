@@ -2107,6 +2107,9 @@ are refused. Two limits remain: a Done transition made in the browser, or by Git
 under the same Jira account as cab's credential, cannot be told apart from cab's own; and closing
 keywords or smart commits (such as `#close`) in commit messages are written by the agent, not checked
 by cab, so a transition they cause is an external closure.
+Bounded live evidence: [Jira delivery live run](evidence/2026-10-31-jira-delivery-live.md) on Jira Cloud (a team-managed project
+with global transitions) with the merge request on gitlab.com. It does not prove several-transition or no-transition skips, a
+managed workflow with conditions, or an outside closure.
 
 The operator publishes a local task through three more actions on the same lifecycle,
 sent by the **operator publication caller** and never by an agent or the service
