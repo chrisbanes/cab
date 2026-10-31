@@ -92,6 +92,13 @@ Register browser-dependent cases through `browserSuite` or `browserTest`, with a
 explicit engine for WebKit. Keep non-browser cases independently runnable in mixed
 files; Node 26 service CI deliberately has no browser executables.
 
+Test each layer for what only it can show. Test a server rule once, at the service or
+API level. CLI tests cover argument parsing, exit codes, rendered output and the CLI
+request journal; the exit-code table is tested once, in
+`test/operator/operator-cli-write.test.ts`. Browser tests cover flows and behaviour
+only a browser shows: drafts kept, focus, keyboard, sign-in and navigation. Test
+wording produced by a pure `web/src` function in its presentation test.
+
 Use Node.js from `.nvmrc` and the package manager pinned in `package.json`.
 Run `npm ci`, then `npm run typecheck`, `npm run lint` and `npm run format:check`.
 Locally, run only the suites that cover the change after `npm run build`, for example
