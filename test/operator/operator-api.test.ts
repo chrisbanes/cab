@@ -1,6 +1,10 @@
 import { taskItems } from "../fixtures/inbox-items.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import {
+  insertExternalItem,
+  insertSourceMembership,
+} from "../fixtures/source-rows.js";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -2519,12 +2523,22 @@ test("a task read reports source review, hold and unknown source as source-held"
     ["source-held"],
   );
   f.seedPersistedState((db) => {
-    db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]',NULL,NULL)",
-    ).run(taskId);
-    db.prepare(
-      "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'repo','github','github.com','I1','[]')",
-    ).run(projectId);
+    insertExternalItem(db, {
+      externalId: "I1",
+      taskId,
+      containerId: "R1",
+      containerName: "owner/repo",
+      number: 1,
+      observedTitle: "Imported",
+      observedBody: "Body",
+      observedState: "open",
+      labels: "[]",
+    });
+    insertSourceMembership(db, {
+      projectId,
+      selectionId: "repo",
+      externalId: "I1",
+    });
     db.prepare(
       "INSERT INTO source_reviews VALUES ('github','github.com',?,?,?,?,NULL)",
     ).run("I1", "a".repeat(64), "b".repeat(64), "accept-revised-scope");
