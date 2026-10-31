@@ -34,6 +34,7 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { until } from "../fixtures/until.js";
 
 const password = "browser test operator password";
 
@@ -227,14 +228,6 @@ function command(service: StandaloneService, value: object): unknown {
     actor: "operator",
     ...value,
   } as never);
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 4_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("browser fixture timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 test("Chromium verifies the independent login and guarded browser session", async (_t, journey) => {
@@ -777,7 +770,7 @@ test("authenticated project pause and resume preserve captured instructions whil
   await save(page, taskForm);
   await service.provisionTask(taskId);
 
-  await waitUntil(() => service.domain().assignments(taskId).length === 1);
+  await until(() => service.domain().assignments(taskId).length === 1);
   const assignment = service.domain().assignments(taskId)[0];
   assert.ok(assignment);
   assert.equal(Number(assignment.instructionsRevision), 2);
@@ -793,7 +786,7 @@ test("authenticated project pause and resume preserve captured instructions whil
     2,
     "resuming with unchanged instructions must preserve the captured revision",
   );
-  await waitUntil(() => runtime.turns === 1);
+  await until(() => runtime.turns === 1);
   assert.ok(runtime.prompts[0]?.includes(capturedInstructions));
   assert.equal(
     Number(
@@ -814,7 +807,7 @@ test("authenticated project pause and resume preserve captured instructions whil
   });
   assert.equal(question.success, true, "the fixture records a durable wait");
   runtime.complete("browser-turn-1");
-  await waitUntil(() =>
+  await until(() =>
     service
       .list()
       .some(
@@ -913,7 +906,7 @@ test("authenticated project pause and resume preserve captured instructions whil
     "/runtime/control/instruction-apply",
     "Apply current instructions for the next turn",
   );
-  await waitUntil(() => runtime.turns === 2);
+  await until(() => runtime.turns === 2);
   assert.ok(runtime.prompts[1]?.includes(changedInstructions));
   assert.ok(!runtime.prompts[0]?.includes(changedInstructions));
   assert.equal(
@@ -1070,10 +1063,12 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     }
   ).db;
   fixtureDb
-    .prepare(`UPDATE domain_assignments
+    .prepare(
+      `UPDATE domain_assignments
         SET resultRecipientAssignmentId = NULL,
           resultRecipientDisposition = 'unresolved'
-        WHERE id = ?`)
+        WHERE id = ?`,
+    )
     .run(workerAssignmentId);
   await service.provisionTask(taskId);
   command(service, {
@@ -1083,7 +1078,7 @@ test("operator commands and Chromium runtime controls keep durable readback", as
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() => runtime.turns === 1);
+  await until(() => runtime.turns === 1);
   const leadAssignment = service
     .domain()
     .assignments(taskId)
@@ -1220,7 +1215,7 @@ test("operator commands and Chromium runtime controls keep durable readback", as
   );
 
   runtime.complete("browser-turn-1");
-  await waitUntil(
+  await until(
     () =>
       runtime.turns === 2 &&
       service
@@ -1244,7 +1239,7 @@ test("operator commands and Chromium runtime controls keep durable readback", as
   });
   assert.equal(reported.success, true, reported.text);
   runtime.complete(workerWork.turnId);
-  await waitUntil(
+  await until(
     () =>
       service.coordinationView().readTask(taskId).unresolvedResults.length ===
       1,
@@ -1264,7 +1259,7 @@ test("operator commands and Chromium runtime controls keep durable readback", as
   assert.equal(taskView.unresolvedResults.length, 0);
   assert.equal(taskView.results[0]?.recipientAssignmentId, leadAssignment.id);
 
-  await waitUntil(() => runtime.turns === 3);
+  await until(() => runtime.turns === 3);
   await page.goto(`${origin}/runtime/task/${taskId}`);
 
   const dependencyForm = page.locator(

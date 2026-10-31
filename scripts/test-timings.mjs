@@ -1,26 +1,4 @@
-import { createHash } from "node:crypto";
-import { globSync, readFileSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
-
-export function timingInputDigest() {
-  const files = [
-    ...globSync("{src,test,web,scripts}/**/*").filter(
-      (file) =>
-        statSync(file).isFile() &&
-        file !== "scripts/test-timings.json" &&
-        !file.includes("/__pycache__/") &&
-        !file.endsWith(".pyc"),
-    ),
-    ".nvmrc",
-    "package-lock.json",
-    "package.json",
-    "tsconfig.json",
-  ].sort();
-  const hash = createHash("sha256");
-  for (const file of files)
-    hash.update(file).update("\0").update(readFileSync(file)).update("\0");
-  return hash.digest("hex");
-}
 
 export function profileTimings(document, profile) {
   const weights = document.profiles?.[profile]?.milliseconds;
@@ -56,47 +34,34 @@ export function timingRecord(event, metadata) {
   };
 }
 
-export function measuredProfile(
-  records,
-  files,
-  profile,
-  nodeMajor,
-  inputDigest,
-) {
-  const selected = records.filter(
-    (record) =>
-      record.profile === profile &&
-      Number(record.nodeVersion.split(".")[0].slice(1)) === nodeMajor,
-  );
-  const milliseconds = {};
-  for (const record of selected) {
+export function measuredProfile(records, files, existing, profile, nodeMajor) {
+  const measured = {};
+  for (const record of records) {
+    if (
+      record.profile !== profile ||
+      Number(record.nodeVersion.split(".")[0].slice(1)) !== nodeMajor
+    )
+      continue;
+    // Unsuccessful or invalid receipts keep the file's previous weight.
     if (
       record.passed !== true ||
-      record.inputDigest !== inputDigest ||
       !Number.isFinite(record.milliseconds) ||
       record.milliseconds < 0
     )
-      throw Error(`Unsuccessful or stale timing receipt: ${record.file}`);
-    if (Object.hasOwn(milliseconds, record.file))
+      continue;
+    if (Object.hasOwn(measured, record.file))
       throw Error(`Duplicate timing receipt: ${record.file}`);
-    milliseconds[record.file] = record.milliseconds;
+    measured[record.file] = record.milliseconds;
   }
-  if (
-    JSON.stringify(Object.keys(milliseconds).sort()) !==
-    JSON.stringify([...files].sort())
-  )
-    throw Error(
-      "Timing receipts must cover the complete current source inventory",
-    );
+  const previous = existing?.milliseconds ?? {};
+  const milliseconds = {};
+  for (const file of [...files].sort())
+    if (Object.hasOwn(measured, file)) milliseconds[file] = measured[file];
+    else if (Object.hasOwn(previous, file)) milliseconds[file] = previous[file];
   return {
     measurement:
       "Node outer file test:complete duration, including startup and imports",
     nodeMajor,
-    inputDigest,
-    milliseconds: Object.fromEntries(
-      Object.entries(milliseconds).sort(([a], [b]) =>
-        a < b ? -1 : a > b ? 1 : 0,
-      ),
-    ),
+    milliseconds,
   };
 }

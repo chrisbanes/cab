@@ -12,13 +12,7 @@ import {
   previewRecordedArtifact,
   type PreviewBinding,
 } from "../../src/standalone/task-review.js";
-async function until(check: () => boolean) {
-  for (let n = 0; n < 100; n++) {
-    if (check()) return;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  assert.fail("Production fixture did not reach expected state");
-}
+import { until } from "../fixtures/until.js";
 test("production service creates source, assignment and work captures, and real bound report callback persists attributable metadata", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

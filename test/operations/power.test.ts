@@ -9,6 +9,7 @@ import { mock, test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import { ExecutionState } from "../../src/standalone/state.js";
+import { until } from "../fixtures/until.js";
 
 interface PowerEventCursor {
   version: 1;
@@ -234,18 +235,6 @@ function hasWriterOrCapacity(db: DatabaseSync, workId: string) {
   return writer !== undefined || capacity !== undefined;
 }
 
-function waitUntil(predicate: () => boolean): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const deadline = Date.now() + 1000;
-    const check = () => {
-      if (predicate()) resolve();
-      else if (Date.now() >= deadline) reject(new Error("condition timed out"));
-      else setTimeout(check, 0);
-    };
-    check();
-  });
-}
-
 test("caffeinate holds exactly one idle-sleep assertion only while execution is active", async () => {
   const children: FakeChild[] = [];
   const invocations: Array<{ command: string; args: string[] }> = [];
@@ -453,11 +442,11 @@ test("assertion child failure is visible without releasing execution state", asy
     await power.start();
     await power.executionStarted(active.workId);
     children[0]?.emit("close", 1, null);
-    await waitUntil(() => power.status().assertionFailure !== null);
+    await until(() => power.status().assertionFailure !== null);
     assert.match(power.status().assertionFailure ?? "", /caffeinate.*exited/i);
     assert.equal(hasWriterOrCapacity(db, active.workId), true);
     // Work is still active, so the assertion is restarted with a fresh child.
-    await waitUntil(() => children.length === 2);
+    await until(() => children.length === 2);
   } finally {
     await power.stop();
     db.close();
@@ -584,7 +573,7 @@ test("a new execution racing final assertion release reacquires before its first
     await power.start();
     await power.executionStarted("work-before-idle");
     const ending = power.executionEnded("work-before-idle");
-    await waitUntil(() => children[0]?.killed === 1);
+    await until(() => children[0]?.killed === 1);
     const starting = power.executionStarted("work-after-idle");
     children[0]?.emit("close", 0, "SIGTERM");
     await Promise.all([ending, starting]);
@@ -663,7 +652,7 @@ test("sleep/wake installs the durable admission gate before reconciling active g
   try {
     await power.start();
     const polling = power.poll();
-    await waitUntil(() => reconciliations > 0);
+    await until(() => reconciliations > 0);
     assert.equal(
       state.begin(queued.id),
       false,
@@ -1693,7 +1682,7 @@ test("the sleep/wake listener reports transitions only after it is ready and sto
   assert.equal(children.length, 1, "a running listener is not respawned");
   children[0]?.write("sleep\nwa");
   children[0]?.write("ke\n");
-  await waitUntil(() => seen.length === 2);
+  await until(() => seen.length === 2);
   assert.deepEqual(seen, ["sleep", "wake"]);
   await listener.stop();
   assert.deepEqual(children[0]?.signals, ["SIGTERM"]);
@@ -1772,7 +1761,7 @@ test("a running sleep/wake listener reports exit and malformed output as failure
     const { seen, signals } = signalRecorder();
     await listener.start(signals);
     act(children[0] as ListenerChild);
-    await waitUntil(() => seen.length === 1);
+    await until(() => seen.length === 1);
     assert.match(seen[0] ?? "", reason);
     children[0]?.write("wake\n");
     await new Promise((resolve) => setImmediate(resolve));
@@ -1804,7 +1793,7 @@ test("the macOS source owns its sleep/wake listener", async () => {
   const { seen, signals } = signalRecorder();
   await source.start(signals);
   children[0]?.write("wake\n");
-  await waitUntil(() => seen.length === 1);
+  await until(() => seen.length === 1);
   await source.stop();
   assert.deepEqual(children[0]?.signals, ["SIGTERM"]);
 });

@@ -20,6 +20,7 @@ import {
   hardenedGitEnvironment,
   withHostileGitEnvironment,
 } from "../fixtures/git-environment.js";
+import { until } from "../fixtures/until.js";
 
 const windows = {
   timeoutMs: 2000,
@@ -40,13 +41,6 @@ function script(t: TestContext, body: string) {
 
 const run = (options: Partial<GitRunOptions> & { executable: string }) =>
   runGit({ args: [], ...windows, ...options });
-
-async function until(condition: () => boolean) {
-  const deadline = Date.now() + 2000;
-  while (!condition() && Date.now() < deadline)
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-  assert.ok(condition(), "condition was not reached in time");
-}
 
 test("the runner returns stdout and gives the child only the hardened environment", async (t) => {
   const probe = gitEnvironmentProbe();
@@ -84,6 +78,8 @@ test("a non-zero exit returns its code and stdout", async (t) => {
 });
 
 test("a stalled child is stopped at its deadline and its exit is observed", async (t) => {
+  // Kept strict: a cooperative child exits on SIGTERM and clears the grace timer, so a
+  // SIGKILL here means that exit was missed or the child stopped cooperating.
   const { executable } = script(t, "exec sleep 30");
   const result = await run({ executable, timeoutMs: 20 });
   assert.deepEqual(result, {
@@ -106,6 +102,8 @@ test("output above the cap interrupts the child", async (t) => {
 });
 
 test("an abort after spawn stops the child; an already-aborted signal never spawns", async (t) => {
+  // Kept strict: a cooperative child exits on SIGTERM and clears the grace timer, so a
+  // SIGKILL here means that exit was missed or the child stopped cooperating.
   const started = script(t, 'touch "$(dirname "$0")/started"; exec sleep 30');
   const controller = new AbortController();
   const running = run({

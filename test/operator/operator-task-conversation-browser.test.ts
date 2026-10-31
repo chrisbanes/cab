@@ -578,11 +578,57 @@ const inView = (target: Locator) =>
     const r = e.getBoundingClientRect();
     return r.bottom > 0 && r.top < innerHeight;
   });
-/** Waits for a link's scroll to settle on its target. */
-async function landsOn(page: Page, target: Locator, label: string) {
+/** Records each scroll to an element and when each conversation record first rendered. */
+function trackLanding() {
+  const landing = {
+    scrolls: [] as unknown[],
+    seen: {} as Record<string, number>,
+  };
+  Object.assign(window, { __landing: landing });
+  const stamp = (e: Element) => ({
+    t: Math.round(performance.now()),
+    id: e.id,
+    recordId: e.closest("[data-record-id]")?.getAttribute("data-record-id"),
+    scrollY: Math.round(scrollY),
+  });
+  const scroll = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (...args) {
+    landing.scrolls.push(stamp(this));
+    return scroll.apply(this, args);
+  };
+  new MutationObserver(() => {
+    for (const e of document.querySelectorAll("[data-record-id]")) {
+      const id = e.getAttribute("data-record-id") ?? "";
+      landing.seen[id] ??= Math.round(performance.now());
+    }
+  }).observe(document, { childList: true, subtree: true });
+}
+/** Waits for a link's scroll to settle on its target; a miss reports what the scroll found. */
+async function landsOn(
+  j: BrowserJourney,
+  page: Page,
+  target: Locator,
+  label: string,
+) {
   for (let i = 0; i < 50 && !(await inView(target)); i++)
     await page.waitForTimeout(100);
-  assert.equal(await inView(target), true, label);
+  if (await inView(target)) return;
+  const diagnostic = await page.evaluate(() => ({
+    viewport: { height: innerHeight, width: innerWidth },
+    scrollY,
+    expanded: [
+      ...document.querySelectorAll("[data-record-id^='delegation:']"),
+    ].map((e) => [
+      e.getAttribute("data-record-id"),
+      e.querySelector("button[aria-expanded]")?.getAttribute("aria-expanded"),
+    ]),
+    landing: (window as unknown as { __landing?: unknown }).__landing,
+  }));
+  const rect = await target
+    .evaluate((e) => e.getBoundingClientRect().toJSON())
+    .catch(() => null);
+  await j.capture(page, "link-not-landed");
+  assert.fail(`${label}: ${JSON.stringify({ rect, ...diagnostic })}`);
 }
 async function openFixture(
   j: BrowserJourney,
@@ -605,6 +651,7 @@ async function openFixture(
   j.observe(page);
   page.setDefaultTimeout(5000);
   await stubReadiness(page);
+  await page.addInitScript(trackLanding);
   return { f, s, web, page };
 }
 
@@ -651,11 +698,11 @@ test("every former History link lands at its place in the conversation", async (
     `?assignment=${s.worker}#history`,
   ]) {
     await page.goto(`${web.origin}/app/tasks/${s.taskId}${link}`);
-    await landsOn(page, delegation(s.worker), link);
+    await landsOn(j, page, delegation(s.worker), link);
     await open(s.worker);
   }
   await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.nested}`);
-  await landsOn(page, delegation(s.nested), "a nested delegation");
+  await landsOn(j, page, delegation(s.nested), "a nested delegation");
   await open(s.worker);
   await open(s.nested);
 
@@ -663,13 +710,14 @@ test("every former History link lands at its place in the conversation", async (
   await page.goto(
     `${web.origin}/app/tasks/${s.taskId}?assignment=${s.assignmentId}`,
   );
-  await landsOn(page, page.locator("#conversation-heading"), "the lead");
+  await landsOn(j, page, page.locator("#conversation-heading"), "the lead");
 
   // A request is reached in the conversation when the link names it.
   await page.goto(
     `${web.origin}/app/tasks/${s.taskId}?request=${question.interactionId}#history`,
   );
   await landsOn(
+    j,
     page,
     log.locator(`[data-interaction-id="${question.interactionId}"]`),
     "a request in the conversation",
@@ -679,6 +727,7 @@ test("every former History link lands at its place in the conversation", async (
   reads.length = 0;
   await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.elder}`);
   await landsOn(
+    j,
     page,
     delegation(s.elder),
     "an assignment older than the window",
@@ -702,6 +751,7 @@ test("every former History link lands at its place in the conversation", async (
   await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.elder}`);
   await log.getByText("Elder note from before.").waitFor();
   await landsOn(
+    j,
     page,
     delegation(s.elder),
     "an open assignment older than the window",
@@ -710,6 +760,33 @@ test("every former History link lands at its place in the conversation", async (
     reads.some((url) => url.includes("before=")),
     "read an earlier page",
   );
+});
+
+test("a link to a nested delegation lands even when the frame callback runs before the render", async (_t, j) => {
+  const { s, web, page } = await openFixture(j);
+  // The frame callback now runs before React's scheduled render, as it can on a loaded machine.
+  await page.addInitScript(() => {
+    window.requestAnimationFrame = (callback) => {
+      queueMicrotask(() => callback(performance.now()));
+      return 0;
+    };
+  });
+  await signIn(page, web, `/app/tasks/${s.taskId}`);
+  const log = page.getByRole("log", { name: "Task conversation" });
+  await log.getByText("Second: all steps ran.").waitFor();
+  await page.goto(`${web.origin}/app/tasks/${s.taskId}?assignment=${s.nested}`);
+  const delegation = (id: string) =>
+    log.locator(`[data-record-id="delegation:${id}"]`);
+  await landsOn(j, page, delegation(s.nested), "a nested delegation");
+  for (const id of [s.worker, s.nested])
+    assert.equal(
+      await delegation(id)
+        .getByRole("button", { expanded: true })
+        .first()
+        .count(),
+      1,
+      `delegation ${id} is expanded`,
+    );
 });
 
 test("a link to a record beyond the ten-page bound stops at the conversation's top with Load earlier", async (_t, j) => {
@@ -736,6 +813,7 @@ test("a link to a record beyond the ten-page bound stops at the conversation's t
     /^The conversation of .* is older than the part of the conversation loaded so far\.$/,
   );
   await landsOn(
+    j,
     page,
     page.locator("#conversation-heading"),
     "the conversation's top",

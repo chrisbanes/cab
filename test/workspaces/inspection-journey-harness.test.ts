@@ -25,15 +25,7 @@ import {
 } from "../fixtures/inspection-journey-harness.js";
 import { OperatorFixtureRuntime } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
-
-async function until(check: () => boolean, description: string) {
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for ${description}`);
-}
+import { until } from "../fixtures/until.js";
 
 function privateDirectory(t: TestContext, prefix: string) {
   const directory = mkdtempSync(join(tmpdir(), prefix));

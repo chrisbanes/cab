@@ -5,17 +5,10 @@ import { join } from "node:path";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { createOperatorFixture } from "./operator-web.js";
 import { seedReviewTask } from "./task-review.js";
+import { until } from "./until.js";
+export { until };
 
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
-
-export async function until(check: () => boolean, description: string) {
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for ${description}`);
-}
 
 export function configure(f: Fixture, projectId: string, paused: boolean) {
   const domain = f.service.domain();

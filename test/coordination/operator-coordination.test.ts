@@ -18,6 +18,7 @@ import {
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { until } from "../fixtures/until.js";
 
 const runtime: Runtime = {
   async start() {},
@@ -105,7 +106,7 @@ test("operator status follows a newer queued continuation over completed history
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() => runtime.turns === 1);
+  await until(() => runtime.turns === 1);
   command(service, {
     type: "task.configure",
     projectId,
@@ -113,7 +114,7 @@ test("operator status follows a newer queued continuation over completed history
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() =>
+  await until(() =>
     service
       .turnRequests()
       .some(
@@ -132,7 +133,7 @@ test("operator status follows a newer queued continuation over completed history
     message: "Continue with the latest operator direction.",
   });
   runtime.complete("operator-turn-1");
-  await waitUntil(
+  await until(
     () =>
       service
         .turnRequests()
@@ -286,7 +287,7 @@ test("operator reads retain an active worker turn after applying next-turn revis
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() => runtime.turns === 1);
+  await until(() => runtime.turns === 1);
 
   const assignment = service.domain().assignment(assignmentId);
   assert.equal(assignment.state, "running");
@@ -393,7 +394,7 @@ test("operator reads retain an active worker turn after applying next-turn revis
   );
 
   runtime.complete("operator-turn-1");
-  await waitUntil(
+  await until(
     () =>
       service
         .turnRequests()
@@ -418,15 +419,6 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 4000;
-  while (!predicate()) {
-    if (Date.now() >= deadline)
-      throw new Error("coordination adapter fixture timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 class OperatorRuntime implements Runtime {
@@ -819,7 +811,7 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() => runtime.turns > 0);
+  await until(() => runtime.turns > 0);
   const leadAssignment = service
     .domain()
     .assignments(taskId)
@@ -945,7 +937,7 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
   const answerReceipt = await api.execute(answer);
   const decisionReceipt = await api.execute(decision);
   runtime.complete(leadIntent.turnId);
-  await waitUntil(() =>
+  await until(() =>
     service
       .list()
       .some(
@@ -967,12 +959,12 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
   });
   assert.equal(report.success, true, report.text);
   runtime.complete(workerIntent.turnId);
-  await waitUntil(
+  await until(
     () =>
       service.coordinationView().readTask(taskId).unresolvedResults.length ===
       1,
   );
-  await waitUntil(() =>
+  await until(() =>
     service
       .list()
       .some(

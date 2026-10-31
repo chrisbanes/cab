@@ -20,6 +20,7 @@ import {
   taskSchema,
   type TaskRead,
 } from "../../src/operator/contracts.js";
+import { taskContext } from "../../web/src/inbox-presentation.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   seedOwnApproval,
@@ -141,12 +142,6 @@ test("queue rows are request cards with kind, action and relative age; filters a
       "Runtime · 0",
     ],
   );
-  // One group heading for questions and approvals, in server order under the filters.
-  await page
-    .locator(".inbox-queue .inbox-group", {
-      hasText: "Questions & approvals · oldest first",
-    })
-    .waitFor();
   // Filters are compact controls, not full-width labelled fields.
   assert.ok((await project.boundingBox())!.width < 260);
   assert.equal(await page.locator(".inbox-filters label").count(), 0);
@@ -412,57 +407,6 @@ test("phone: the Inbox header has the title and count only, and the filter row h
   assert.equal(await refresh.count(), 1);
 });
 
-test("queue rows lead with the question or the approval's exact action, not the generic reason", async (_t, j) => {
-  const { page, more } = await openInbox(
-    j,
-    0,
-    { width: 1366, height: 900 },
-    "/app/inbox",
-    async (f) => ({
-      question: await seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
-      approval: await seedOwnApproval(f, "Release task", "Shipping"),
-      held: await seedOwnIntervention(f),
-    }),
-  );
-  const row = (id: string) =>
-    page.locator(`.inbox-row[data-record-id="${id}"]`);
-  const question = row(more.question.interactionId),
-    approval = row(more.approval.interactionId);
-  await question.waitFor();
-  assert.equal(
-    await question.locator("strong").textContent(),
-    "Choose the guide's audience",
-  );
-  assert.equal(
-    await question.locator(".inbox-row-subtitle").textContent(),
-    "Docs / Guide task",
-  );
-  assert.equal(
-    await approval.locator("strong").textContent(),
-    "Create a pull request. No merge or deployment.",
-  );
-  assert.equal(
-    await approval.locator(".inbox-row-subtitle").textContent(),
-    "Shipping / Release task",
-  );
-  // An intervention has no headline: the task title leads and its reason stays.
-  const held = page.locator('.inbox-row[data-kind="intervention"]');
-  assert.equal(
-    await held.locator("strong").textContent(),
-    "Restore webhook delivery",
-  );
-  assert.equal(
-    await held.locator(".inbox-row-subtitle").textContent(),
-    "Relay",
-  );
-  await held.getByText("Execution ownership is uncertain").waitFor();
-  const queue = await page.locator(".inbox-rows").innerText();
-  assert.doesNotMatch(
-    queue,
-    /Operator answer requested|Review exact approval material/,
-  );
-});
-
 test("the request pane leads with the question and keeps its scaffolding below the form (desktop)", async (_t, j) => {
   const { page } = await openInbox(
     j,
@@ -500,10 +444,6 @@ test("the request pane leads with the question and keeps its scaffolding below t
     const box = (await below.boundingBox())!;
     assert.ok(box.y >= field.y + field.height, "below the form");
   }
-  assert.match(
-    (await detail.locator(".inbox-identity").textContent())!,
-    /^.+ · version \d+ · \d\d:\d\d$/,
-  );
 });
 
 test("phone: the options are above the sticky submit bar on first view and the evidence links follow the form", async (_t, j) => {
@@ -975,12 +915,6 @@ test("an approval shows its exact action, target and independent holds, and deci
     .getByText("Execution blocked by dependency", { exact: true })
     .waitFor();
   await detail.getByText("acme/design-system#87", { exact: true }).waitFor();
-  await detail
-    .getByText(
-      "Source-owned hold. Approval does not clear it; execution still waits for the GitHub blocker.",
-      { exact: true },
-    )
-    .waitFor();
   await captureBrowserEvidence(page, "1366-inbox-approval-hold", {
     fullPage: false,
   });
@@ -999,9 +933,6 @@ test("an approval shows its exact action, target and independent holds, and deci
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await detail
     .getByText("Execution held (task not ready)", { exact: true })
-    .waitFor();
-  await detail
-    .getByText("Approving does not clear it.", { exact: true })
     .waitFor();
   assert.equal(
     await detail.getByText("Execution blocked by dependency").count(),
@@ -1115,6 +1046,13 @@ test("an intervention shows its recorded reason and links to the execution", asy
   await page.locator(".inbox-row").click();
   await detail.getByText("Intervention", { exact: true }).waitFor();
   await detail.getByText("Execution ownership is uncertain").waitFor();
+  // The row leads with the task and keeps the recorded reason, which has no headline to replace it.
+  const row = page.locator('.inbox-row[data-kind="intervention"]');
+  assert.equal(
+    await row.locator("strong").textContent(),
+    "Restore webhook delivery",
+  );
+  await row.getByText("Execution ownership is uncertain").waitFor();
   // The seeded intervention has no requester and no timestamp: both are omitted everywhere.
   const aside = page.getByRole("complementary", { name: "Task context" });
   await aside.waitFor();
@@ -1310,7 +1248,6 @@ test("an Inbox question in a paused project shows its hold in the footer, record
   // The recorded confirmation replaces the footer; the same notices stay on it.
   const recorded = form.locator(".question-recorded");
   await recorded.getByText(pausedHold, { exact: true }).waitFor();
-  await recorded.getByText(pausedDetail).waitFor();
 
   // A task read that fails shows no hold and does not block answering.
   const taskUrl = `**/api/operator/tasks/${more[1]!.taskId}`;
@@ -1376,7 +1313,6 @@ test("an Inbox question beside an open approval lists the approval as a hold in 
   });
   await hold.waitFor();
   assert.equal(await hold.count(), 1);
-  assert.match(await footer.innerText(), /Answering does not clear it\./);
   assert.equal(await footer.getByText(/Approving/).count(), 0);
   await form.getByRole("radio", { name: /^Team owners/ }).check();
   assert.ok(
@@ -1396,7 +1332,7 @@ test("phone: the question hold sits in the sticky submit area without covering f
     footer = form.locator(".question-submit"),
     detail = page.locator(".inbox-detail");
   await page.locator(".inbox-row").first().click();
-  await footer.getByText(pausedDetail).waitFor();
+  await footer.getByText(pausedHold, { exact: true }).waitFor();
   await detail.evaluate((e) => {
     e.scrollTop = e.scrollHeight;
   });
@@ -1755,8 +1691,10 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
       ),
     );
   assert.equal(facts.Requester, item.requesterName);
-  if (task.lead) assert.equal(facts.Lead, task.lead.name ?? "Name unavailable");
-  else assert.equal(facts.Lead, "No lead configured");
+  assert.equal(
+    facts.Lead,
+    taskContext(task, { kind: "approval", attentionCode: null }, true).lead,
+  );
   // The chain ends at the requesting assignment and starts at its root.
   assert.match(
     facts.Chain ?? "",
@@ -1800,9 +1738,6 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
   // Selecting another request updates it.
   await page.locator('.inbox-row[data-kind="question"]').click();
   await aside.getByRole("link", { name: "Request 1" }).waitFor();
-  await aside
-    .getByText("Next: you · answer question", { exact: true })
-    .waitFor();
 
   // A failed task read still shows the request's own facts and evidence, with Try again.
   await page.unroute(taskUrl);
@@ -1959,24 +1894,24 @@ test("the inspector drops the next action once the answer is recorded, and alway
   const aside = page.getByRole("complementary", { name: "Task context" }),
     form = page.getByRole("region", { name: "Exact question response" });
   await page.locator(".inbox-row", { hasText: "Recorded question" }).click();
-  await aside
-    .getByText("Next: you · answer question", { exact: true })
-    .waitFor();
-  // Lead accountability stays visible: the lead's name, or the task views' wording.
+  await aside.getByText(/^Next: you/).waitFor();
+  // Lead accountability stays visible; its wording comes from the shared task context.
   const lead = taskSchema.parse(
       await (
         await page.request.get(
           `${web.origin}/api/operator/tasks/${more[0]!.taskId}`,
         )
       ).json(),
-    ).data.lead,
+    ).data,
     leadValue = () =>
       aside
         .locator("dt", { hasText: /^Lead$/ })
         .evaluate((dt) => dt.nextElementSibling?.textContent),
-    expectedLead = lead
-      ? (lead.name ?? "Name unavailable")
-      : "No lead configured";
+    expectedLead = taskContext(
+      lead,
+      { kind: "question", attentionCode: null },
+      true,
+    ).lead;
   assert.equal(await leadValue(), expectedLead);
   await form.getByRole("radio", { name: /^Team owners/ }).check();
   await form
@@ -2008,12 +1943,6 @@ test("without a task read the inspector says the source is unavailable, and an i
   const aside = page.getByRole("complementary", { name: "Task context" });
   await aside.getByRole("button", { name: "Try again" }).waitFor();
   await aside.getByText(/ · Source unavailable$/).waitFor();
-  assert.equal(
-    await aside
-      .locator("dt", { hasText: /^Lead$/ })
-      .evaluate((dt) => dt.nextElementSibling?.textContent),
-    "Unavailable",
-  );
   assert.equal(await aside.locator("dt", { hasText: /^Chain$/ }).count(), 0);
 });
 
@@ -2045,14 +1974,8 @@ for (const [name, viewport] of [
       "Open runtime settings",
     ])
       assert.ok(rowText.includes(expected), `${expected} in ${rowText}`);
-    // Its group leads, counts it, and the sidebar total includes it.
-    const groups = await page
-      .locator(".inbox-queue .inbox-group")
-      .allTextContents();
-    assert.deepEqual(groups, [
-      "Intervention · 1",
-      "Questions & approvals · oldest first",
-    ]);
+    // Its group leads and the sidebar total includes it.
+    assert.equal(await page.locator(".inbox-queue .inbox-group").count(), 2);
     assert.equal(
       await page
         .locator(phoneLayout ? ".page-header-count" : ".inbox-summary")

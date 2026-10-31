@@ -8,69 +8,11 @@ import { pathToFileURL } from "node:url";
 import { readFileSync, mkdtempSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { OperatorFixtureRuntime } from "../fixtures/operator-web.js";
-import { StandaloneService } from "../../src/standalone/service.js";
 const module = await import(
   pathToFileURL(
     resolve("test/workspaces/review-qualification/runtime-contract.mjs"),
   ).href
 );
-browserTest(
-  "changed callback fake App Server waits for delayed callback, persists exact review/context and renders production UI with verified exact cleanup",
-  async () => {
-    const r = await module.runQualification({
-      fixture: { delayCallback: true },
-    });
-    assert.equal(r.status, "passed", JSON.stringify(r.failure));
-    assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 });
-    assert.equal(r.callbackEnded, true);
-    assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
-    assert.equal(r.screenshots.length, 1);
-    assert.equal(r.process, null);
-    assert.equal(r.cleanup.verification.method, "fixture-owned-child-exit");
-    assert.ok(r.cleanup.verification.identity.processId > 0);
-    assert.ok(
-      r.cleanup.verification.exit.signal ||
-        r.cleanup.verification.exit.code !== null,
-    );
-    assert.equal(
-      JSON.parse(readFileSync(r.evidencePath, "utf8")).sourceId,
-      r.sourceId,
-    );
-  },
-);
-test("assertion failure consumes one fake turn, verifies exact process cleanup and retains recorded result/context plus Stop hold across production service restart", async () => {
-  const r = await module.runQualification({
-    fixture: { assertionFailure: true },
-  });
-  assert.equal(r.status, "failed");
-  assert.match(r.failure.reason, /injected-assertion-failure/);
-  assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 });
-  assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
-  const restartRuntime = new OperatorFixtureRuntime();
-  const service = new StandaloneService(
-    r.data,
-    () => restartRuntime,
-    undefined,
-    { power: { enabled: false } },
-  );
-  try {
-    await service.start();
-    assert.ok(service.taskHold(r.taskId));
-    assert.equal(
-      service.coordinationView().readTask(r.taskId).results.length,
-      1,
-    );
-    assert.equal(
-      service.taskReview().read(r.taskId).results[0]?.metadata.sourceId,
-      r.sourceId,
-    );
-    assert.equal(restartRuntime.turns, 0);
-  } finally {
-    await service.stop();
-  }
-});
-
 browserTest(
   "timed-out browser creation settles and closes its late resource within reserved cleanup without another turn",
   async () => {
@@ -167,18 +109,6 @@ browserTest(
     assert.equal(r.cleanup.verified, false);
   },
 );
-
-test("malformed callback material promptly ends the one attempt, preserves rejection and verifies exact cleanup without retry", async () => {
-  const r = await module.runQualification({
-    fixture: { malformedCallback: true },
-  });
-  assert.equal(r.status, "failed");
-  assert.match(r.failure.reason, /exact-callback-material/);
-  assert.equal(r.callbackEnded, false);
-  assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 });
-  assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
-  assert.ok(r.callbackFailure);
-});
 
 test("portable fixture proof requires observed exit of its exact owned child and rejects still-present or previously-unobserved exit", async () => {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {

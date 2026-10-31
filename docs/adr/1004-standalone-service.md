@@ -1,6 +1,6 @@
 ---
 status: accepted
-partially_superseded_by: [ADR-1005, ADR-1006, ADR-1008]
+partially_superseded_by: [ADR-1005, ADR-1008]
 ---
 
 # Build cab as a standalone service without BB
@@ -8,8 +8,7 @@ partially_superseded_by: [ADR-1005, ADR-1006, ADR-1008]
 Superseded in part: [ADR-1005](1005-service-assignment-routing.md) replaces the
 separate task-owner role and lead-only initial allocation;
 [ADR-1008](1008-claude-code-execution-harness.md) adds Claude Code as a second
-execution harness; deferred [ADR-1006](1006-chatgpt-and-native-codex.md) would
-extend private transport for an optional ChatGPT plugin endpoint only.
+execution harness.
 
 cab removes BB and builds its own service. cab owns scheduling,
 execution admission, process supervision, task workspaces, conversation records

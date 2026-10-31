@@ -24,20 +24,12 @@ import {
 } from "../../src/standalone/conversation-history.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { until } from "../fixtures/until.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
-  while (!predicate()) {
-    if (Date.now() >= deadline)
-      throw new Error("conversation history integration timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 interface PlannedTurn {
@@ -117,7 +109,7 @@ class HistoryRuntime implements Runtime {
   }
 
   async waitForTurnStart(afterCount = 0) {
-    await waitUntil(() => this.turnStartCount > afterCount);
+    await until(() => this.turnStartCount > afterCount);
     return this.started.promise;
   }
 
@@ -178,7 +170,7 @@ async function waitForExecutionState(
   state: string,
 ) {
   try {
-    await waitUntil(
+    await until(
       () =>
         service.list().find((item) => item.workId === workId)?.state === state,
     );
@@ -368,7 +360,7 @@ test("persists only the response-bound completed item and survives reopen", asyn
       text: "LATE_OTHER_TURN_CANARY",
     });
     try {
-      await waitUntil(() => countRows(f.root, workId) === 1);
+      await until(() => countRows(f.root, workId) === 1);
     } catch {
       assert.fail(
         `history row was not written; execution=${JSON.stringify(executionState(f.service, workId, runtime.turnStarts))}`,
@@ -496,7 +488,7 @@ test("does not attach an unreturned turn or a response-lost orphan", async () =>
       text: "SELECTED_TURN_CANARY should remain diagnostic.",
     });
     try {
-      await waitUntil(() => countRows(f.root, unboundWorkId) === 1);
+      await until(() => countRows(f.root, unboundWorkId) === 1);
     } catch {
       assert.fail(
         `selected history row was not written; execution=${JSON.stringify(executionState(f.service, unboundWorkId, runtime.turnStarts))}`,
@@ -556,7 +548,7 @@ test("keeps incomplete delta bytes out of SQLite and redacts both turn-start and
   try {
     f.activate();
     const bound = await runtime.waitForTurnStart();
-    await waitUntil(() => countRows(f.root, workId) === 1);
+    await until(() => countRows(f.root, workId) === 1);
     // An omission is a deterministic flush trigger for the batched byte count.
     runtime.emit({
       threadId: bound.threadId,

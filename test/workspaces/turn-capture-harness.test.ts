@@ -21,6 +21,7 @@ import {
   RecordingTurnCaptureRuntime,
   turnCaptureHarnessBudgets,
 } from "../fixtures/turn-capture-harness.js";
+import { until } from "../fixtures/until.js";
 
 async function bounded<T>(
   promise: Promise<T>,
@@ -41,19 +42,6 @@ async function bounded<T>(
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-async function until(
-  check: () => boolean,
-  description: string,
-  timeoutMs = 8000,
-) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`${description} did not settle within ${timeoutMs} ms`);
 }
 
 function sessionCookie(response: Response) {
@@ -614,8 +602,10 @@ test("process-proof-required cleanup rejects bad proof and deletes only after ex
   );
   try {
     const row = database
-      .prepare(`SELECT captureState, payloadJson FROM workspace_turn_captures
-        WHERE taskId = ? AND comparisonId = ?`)
+      .prepare(
+        `SELECT captureState, payloadJson FROM workspace_turn_captures
+        WHERE taskId = ? AND comparisonId = ?`,
+      )
       .get(harness.taskId, capture.comparisonId) as
       | { captureState: string; payloadJson: string }
       | undefined;

@@ -29,10 +29,7 @@ Each area records one of three states:
    with the GitHub integration.
 3. **Operational release:** all A01–A30 and R01–R10, including both PR completion
    modes, real provider access and external-write recovery, plus UI01–UI03, with a
-   reviewed cutover. X01–X08 are deferred after the MVP
-   ([ADR-1006](adr/1006-chatgpt-and-native-codex.md)); they do not gate this release
-   or cutover. Native desktop visibility/handover is separate from the retained
-   Codex App Server execution requirements.
+   reviewed cutover.
 
 Use real SQLite files and deterministic runtime doubles for fault coverage;
 separately test the actual runtime and service/UI. Record exact source/runtime
@@ -171,8 +168,7 @@ keyboard access, readable text and distinguishable task titles.
 
 WI01–WI13 are requirements for post-MVP workspace inspection, tracked in
 [#776](https://github.com/chrisbanes/cab/issues/776). They add nothing to the
-release or cutover gates. Preserve the task workspace behaviour and the pause on
-X01–X08. Recorded evidence is under
+release or cutover gates. Preserve the task workspace behaviour. Recorded evidence is under
 [Task workspace inspection evidence](#task-workspace-inspection-evidence).
 
 | ID | Scenario | Required outcome |
@@ -241,8 +237,9 @@ Each operation below needs a packaged-CLI invocation through the authenticated
 service, its observable output/effect and applicable denial, revision and retry
 cases. The evidence inventory must identify each covered operation and any
 missing coverage; a representative journey cannot qualify omitted commands.
-The [CLI8 inventory](evidence/issue-901-cli8-inventory-2026-10-12.json) records
-each operation's state: those the host live journey ran are passed, except
+The [CLI8 inventory](design/operator-cli-inventory.json) records
+each operation's state (the [dated record](evidence/issue-901-cli8-inventory-2026-10-12.json)
+captures the 2026-10-12 qualification): those the host live journey ran are passed, except
 `assignment apply-current`, which the live journey ran only after a follow-up under
 Stop; adoption followed by a follow-up on a completed lead is covered by a
 deterministic test ([#935](https://github.com/chrisbanes/cab/issues/935)); the rest are
@@ -291,34 +288,6 @@ denial.
 | C5-2 | Codex lead delegates to a Claude worker | The Claude worker's result reaches the Codex lead, which requests completion; each assignment keeps its runtime | Service + Codex + Claude runtime |
 | C5-3 | Stop a running Claude turn; separately, kill the service mid-turn and restart | Stop is observed or the hold stays visible with the writer hold. After the crash, the uncertainty hold is visible, writer and capacity holds remain and no turn starts until explicit recovery resumes the same session once; nothing retries or releases ownership early | Service + Claude runtime |
 | C5-4 | Sandboxed Bash in a Claude turn reads its environment | The subprocess token scrub is qualified, or any residual exposure is recorded as a disclosed limit | Claude runtime |
-
-### ChatGPT and native Codex acceptance
-
-These integrations are deferred until after the standalone MVP
-([ADR-1006](adr/1006-chatgpt-and-native-codex.md)). X01–X08 retain future
-acceptance without reopening completed standalone work or gating MVP release or
-cutover. Neither integration has passed. X01–X05 delivery is paused under
-[epic #734](https://github.com/chrisbanes/cab/issues/734) until the work is
-explicitly reopened and current APIs, scope and dependencies are revalidated.
-
-| ID | Required observable result |
-| --- | --- |
-| X01 | In a disposable local repository/worktree, supported integration creates a main native task with linked, inspectable worker conversations, opens its task/change view and uses the retained cab worktree. Record cab project, native host/thread and workspace identities; saved host project placement/linkage is optional. Unsupported or failed native visibility or handover returns evidence and scope for review; App Server thread creation alone is not a pass. |
-| X02 | Human inspection starts no turn. Explicit handover holds all further cab dispatch for the task before human continuation; explicit return reconciles settled execution and workspace changes and rechecks permissions, revisions and other holds. Restart, stale/replayed actions, idle status and known active execution neither duplicate launch nor implicitly return ownership. Existing recovery holds remain; no physical containment claim is added. |
-| X03 | With the plugin disabled, cab remains fully usable. With it enabled, both web UI and ChatGPT exercise daily task creation/tracking, durable messages, answers and exact-material approvals through the same service rules. Replay/stale inputs, pause, Stop, dependencies and capacity preserve their existing semantics. Setup and recovery may use the web UI. |
-| X04 | Only explicitly enabled projects are available to the connected operator. Tools, components, context, errors and events exclude credentials, private instructions and raw runtime logs. Unauthorised/cross-project requests, project opt-out and access revocation fail closed, including retained UI state and later delivery. |
-| X05 | Guided installation links an authenticated HTTPS MCP endpoint; authorised tools work, invalid/expired/wrong-audience credentials fail and revocation takes effect. Only the plugin and required authentication/discovery surfaces are public; the operator UI and runtime remain private. No automatic endpoint provisioning or hosted relay is required. |
-| X06 | Explicit filtered subscriptions deliver completion, question and approval events. Callback verification/signatures, stable identity across bounded retries, duplicate/out-of-order events, restart, expiry, unsubscribe, opt-out and revocation behave correctly. Inbox/read state survives missing deliveries; webhook receipt is not acknowledgement. Events explain or request input and cannot authorise writes. |
-| X07 | Against the chosen real ChatGPT host, connect the packaged plugin, open project/task navigation and task detail beside a conversation, create a task, send a durable message, answer a question, approve/deny exact material and receive a subscribed event. Verify committed provider/service state and fixture cleanup; host feature gaps are recorded rather than inferred from screenshots or protocol doubles. |
-| X08 | Qualify the assembled native Codex and optional ChatGPT journeys against the release candidate, including identity/ownership after service restart, workspace preservation and plugin subscription/auth state. Reuse still-valid evidence; record source/runtime/host versions, limitations and cleanup. Self-hosted setup and operational restore preserve the new durable records and require relinking/reconciliation when applicable. |
-
-When this work resumes, use real SQLite and deterministic protocol/transport faults
-for negative coverage, then bounded disposable native Codex and ChatGPT journeys.
-Operational backup/restore and reviewed cutover remain required. The implementation
-agent owns validation; do not hand incremental testing to the operator. Composer
-mentions, full admin/recovery parity, historical task import and stronger runtime
-containment are not additional gates. A failed native proof pauses its dependent
-implementation for scope review; it does not silently remove X01/X02.
 
 ## Required evidence by area
 
@@ -536,12 +505,6 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   token scrub is qualified for sandboxed Bash only. Untested surfaces, including
   the launchd-installed service, other platforms and token expiry, remain limits.
   Evidence: [Claude journeys](evidence/issue-827-claude-journeys-2026-10-12.md).
-- **ChatGPT and native Codex** (X01–X08) — **Unproved**, deferred. X01 and X02 stay
-  unproved: the inspected App Server and SDK surfaces expose standalone thread
-  creation but not saved-project placement, linked native workers, project/task
-  navigation or a cab handover and return operation. The finding does not show
-  that such an API can never exist. Evidence:
-  [native feasibility](evidence/x01-native-feasibility.md).
 
 ### Execution control, recovery and access
 
@@ -856,4 +819,4 @@ separately authorised cutover
 then; deferring it from local qualification does not waive that gate or the cutover
 evidence. Technical readiness does not establish deployed operation or a completed
 cutover, and a cutover is not a prerequisite for building or testing the release
-candidate. X01–X08 are deferred and do not block the MVP.
+candidate.

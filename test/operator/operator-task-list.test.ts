@@ -247,13 +247,6 @@ test("catalog pagination fingerprints ordered identity membership and rejects in
   ])
     await assert.rejects(api.readTaskListPage(new URLSearchParams(query)));
 });
-async function until(predicate: () => boolean) {
-  const end = Date.now() + 5000;
-  while (!predicate()) {
-    if (Date.now() > end) throw Error("Fixture timed out");
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 test("normal Stop observation stays Work while Stop with actual uncertainty needs attention", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -317,6 +310,7 @@ import {
   reasonLabels,
 } from "../../web/src/tasks.js";
 import { attentionNext } from "../../src/operator/attention.js";
+import { until } from "../fixtures/until.js";
 test("a complete task aggregate rejects changing membership and repeated page cursors", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

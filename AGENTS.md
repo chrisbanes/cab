@@ -41,15 +41,6 @@ Delivery includes automated service/runtime/UI integration and bounded live vali
 run by the implementation agent; do not hand incremental testing to the user. Preserve
 the installed Haze prototype until a reviewed cutover.
 
-Optional ChatGPT daily operations/events and native Codex visibility/handover (X01–X08)
-are paused under [epic #734](https://github.com/chrisbanes/cab/issues/734) and
-[ADR-1006](docs/adr/1006-chatgpt-and-native-codex.md). Do not plan, probe or implement
-them until Chris explicitly reopens the work; they do not gate MVP release or cutover.
-Codex App Server remains the execution runtime. Preserve existing native feasibility
-evidence, recovery holds and runtime limits. Saved host project placement is optional;
-native visibility/control remains unproved. Prior plans and scope decisions do not
-authorise dispatch while paused.
-
 ## Working conventions
 
 - Use `rg --files` for discovery and `rg` for text searches.
@@ -100,6 +91,13 @@ preserves every test exactly once, including in a checkout with stale build outp
 Register browser-dependent cases through `browserSuite` or `browserTest`, with an
 explicit engine for WebKit. Keep non-browser cases independently runnable in mixed
 files; Node 26 service CI deliberately has no browser executables.
+
+Test each layer for what only it can show. Test a server rule once, at the service or
+API level. CLI tests cover argument parsing, exit codes, rendered output and the CLI
+request journal; the exit-code table is tested once, in
+`test/operator/operator-cli-write.test.ts`. Browser tests cover flows and behaviour
+only a browser shows: drafts kept, focus, keyboard, sign-in and navigation. Test
+wording produced by a pure `web/src` function in its presentation test.
 
 Use Node.js from `.nvmrc` and the package manager pinned in `package.json`.
 Run `npm ci`, then `npm run typecheck`, `npm run lint` and `npm run format:check`.

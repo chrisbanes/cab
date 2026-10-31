@@ -27,7 +27,6 @@ test("file timing receipts ignore individual and nested cases and retain failed 
   const metadata = {
     profile: "service",
     nodeVersion: "v26.9.0",
-    inputDigest: "digest",
   };
   const file = resolve("dist/test/execution/runtime.test.js");
   const data = {
@@ -74,37 +73,78 @@ test("file timing receipts ignore individual and nested cases and retain failed 
   );
 });
 
-test("refreshing weights requires successful current receipts for the complete inventory", () => {
-  const files = ["test/operator/a.test.ts", "test/execution/b.test.ts"];
-  const records = files.map((file, index) => ({
-    file,
-    milliseconds: index + 10,
-    passed: true,
-    profile: "service",
-    nodeVersion: "v26.9.0",
-    inputDigest: "current",
-  }));
-  const measure = (values: unknown[]) =>
-    timings.measuredProfile(values, files, "service", 26, "current");
-  assert.deepEqual(
-    measure([
-      ...records,
-      { ...records[0], profile: "all" },
-      { ...records[0], nodeVersion: "v24.21.0" },
-    ]).milliseconds,
-    {
-      "test/execution/b.test.ts": 11,
-      "test/operator/a.test.ts": 10,
-    },
-  );
+const receipt = (file: string, milliseconds: number, extra = {}) => ({
+  file,
+  milliseconds,
+  passed: true,
+  profile: "service",
+  nodeVersion: "v26.9.0",
+  ...extra,
+});
+const existing = {
+  milliseconds: {
+    "test/execution/b.test.ts": 500,
+    "test/operator/a.test.ts": 400,
+    "test/operator/gone.test.ts": 300,
+  },
+};
+const files = [
+  "test/operator/a.test.ts",
+  "test/execution/b.test.ts",
+  "test/sources/c.test.ts",
+];
+const measure = (records: unknown[]) =>
+  timings.measuredProfile(records, files, existing, "service", 26);
+
+test("a partial receipt set updates only the measured files and keeps the others", () => {
+  const profile = measure([
+    receipt("test/operator/a.test.ts", 10),
+    receipt("test/operator/a.test.ts", 99, { profile: "all" }),
+    receipt("test/operator/a.test.ts", 98, { nodeVersion: "v24.21.0" }),
+  ]);
+  assert.deepEqual(profile.milliseconds, {
+    "test/execution/b.test.ts": 500,
+    "test/operator/a.test.ts": 10,
+  });
+  assert.equal(profile.nodeMajor, 26);
+  assert.deepEqual(Object.keys(profile.milliseconds), [
+    "test/execution/b.test.ts",
+    "test/operator/a.test.ts",
+  ]);
+});
+
+test("refreshing weights prunes files that are no longer in the current list", () => {
+  const profile = measure([
+    receipt("test/sources/c.test.ts", 7),
+    receipt("test/operator/removed.test.ts", 8),
+  ]);
+  assert.deepEqual(profile.milliseconds, {
+    "test/execution/b.test.ts": 500,
+    "test/operator/a.test.ts": 400,
+    "test/sources/c.test.ts": 7,
+  });
+});
+
+test("refreshing weights skips unsuccessful or invalid receipts and keeps the old weight", () => {
   for (const invalid of [
-    records.slice(1),
-    [...records, records[0]],
-    [{ ...records[0], passed: false }, records[1]],
-    [{ ...records[0], passed: "true" }, records[1]],
-    [{ ...records[0], inputDigest: "stale" }, records[1]],
-    [{ ...records[0], milliseconds: -1 }, records[1]],
-    [...records, { ...records[0], file: "test/operator/removed.test.ts" }],
+    receipt("test/operator/a.test.ts", 10, { passed: false }),
+    receipt("test/operator/a.test.ts", 10, { passed: "true" }),
+    receipt("test/operator/a.test.ts", -1),
+    receipt("test/operator/a.test.ts", Number.NaN),
   ])
-    assert.throws(() => measure(invalid));
+    assert.equal(
+      measure([invalid]).milliseconds["test/operator/a.test.ts"],
+      400,
+    );
+});
+
+test("refreshing weights rejects a duplicate receipt for one file", () => {
+  assert.throws(
+    () =>
+      measure([
+        receipt("test/operator/a.test.ts", 10),
+        receipt("test/operator/a.test.ts", 11),
+      ]),
+    /Duplicate timing receipt/,
+  );
 });

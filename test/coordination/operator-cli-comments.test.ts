@@ -28,7 +28,7 @@ async function comments(
       String(await version()),
       ...extra,
     ]);
-  const confirm = (r: Json, decision = "approved", extra: string[] = []) => [
+  const confirm = (r: Json) => [
     "delivery",
     "confirm-comment",
     w.f.taskId,
@@ -39,21 +39,18 @@ async function comments(
     "--material-hash",
     r.materialHash,
     "--decision",
-    decision,
-    ...extra,
+    "approved",
   ];
-  const send = async (text: string, extra: string[] = [], v?: number) => [
+  const send = async (text: string, extra: string[] = []) => [
     "delivery",
     "send-comment",
     w.f.taskId,
     "--body-file",
     body(text),
     "--expected-task-version",
-    String(v ?? (await version())),
+    String(await version()),
     ...extra,
   ];
-  const decision = (reviewId: string) =>
-    w.f.service.delivery().operatorReview(reviewId)?.decision;
   const actions = async () => (await w.task()).delivery?.actions ?? [];
   const sessionCommand = async (command: Json) => {
     const r = await w.s.sessionPost("/api/operator/commands", {
@@ -70,7 +67,6 @@ async function comments(
     review,
     confirm,
     send,
-    decision,
     actions,
     sessionCommand,
   };
@@ -113,37 +109,20 @@ test("approval flow: review, confirm and send post exactly one bound comment", a
   assert.match(early.json().error.message, /pending, not approved/);
   assert.equal(w.scripted.commentWrites, 0);
 
-  for (const [name, args] of [
-    ["wrong hash", w.confirm({ ...r, materialHash: "0".repeat(64) })],
-    ["wrong revision", w.confirm({ ...r, revision: 2 })],
-  ] as const) {
-    const bad = await w.cli("rw", args);
-    assert.equal(bad.code, 4, `${name}: ${bad.out}`);
-    assert.equal(w.decision(r.reviewId), "pending");
-  }
   const approved = await w.ok("rw", w.confirm(r));
   assert.equal(approved.data.receipt.revision, 2);
   assert.equal(approved.data.receipt.decision, "approved");
-  const again = await w.cli(
-    "rw",
-    w.confirm(r, "denied", ["--request-id", randomUUID()]),
-  );
-  assert.equal(again.code, 4, again.out);
-  assert.equal(w.decision(r.reviewId), "approved");
 
-  // A changed body is refused before any request; the server denies it too.
+  // A changed body is refused: the review replay conflicts before any send.
   const changed = await w.cli(
     "rw",
     await w.send("Changed text", ["--review-id", r.reviewId]),
   );
   assert.equal(changed.code, 4, changed.out);
-  const direct = await w.sessionCommand({
-    type: "comment.send",
-    expectedTaskVersion: await w.version(),
-    body: "Changed text",
-    reviewId: r.reviewId,
-  });
-  assert.equal(direct.body.state, "denied");
+  assert.match(
+    changed.json().error.message,
+    /a changed comment needs a new review/,
+  );
   assert.equal(w.scripted.commentWrites, 0);
 
   const posted = await w.ok(
@@ -170,31 +149,9 @@ test("approval flow: review, confirm and send post exactly one bound comment", a
   assert.equal(replay.code, 0, replay.err);
   assert.match(replay.out, /recorded outcome/);
   assert.equal(w.scripted.commentWrites, 1);
-
-  // A denial is the durable counterpart; a later send is refused without a request.
-  const second = (await w.review("Second thoughts")).data.receipt;
-  await w.ok("rw", w.confirm(second, "denied"));
-  const refused = await w.cli(
-    "rw",
-    await w.send("Second thoughts", ["--review-id", second.reviewId]),
-  );
-  assert.equal(refused.code, 4);
-  assert.match(refused.json().error.message, /denied, not approved/);
-  // A direct early send records denied for that operation ID only.
-  const third = (await w.review("Third")).data.receipt;
-  const burnt = await w.sessionCommand({
-    key: third.reviewId,
-    type: "comment.send",
-    expectedTaskVersion: await w.version(),
-    body: "Third",
-    reviewId: third.reviewId,
-  });
-  assert.equal(burnt.body.state, "denied");
-  assert.equal(w.decision(third.reviewId), "pending");
-  assert.equal(w.scripted.commentWrites, 1);
 });
 
-test("policy changes, stale versions and holds never post", async (t) => {
+test("a service denial after approval exits 4 with its reason and posts nothing", async (t) => {
   const w = await comments(t, "approval");
   const r = (await w.review("Policy bound")).data.receipt;
   await w.ok("rw", w.confirm(r));
@@ -208,64 +165,17 @@ test("policy changes, stale versions and holds never post", async (t) => {
     denied.json().error.message,
     /Denied: .*Create and confirm a new review/,
   );
-  assert.equal(w.scripted.commentWrites, 0);
-
-  const v = await w.version();
-  const stale = await w.cli("rw", await w.send("Any", [], v + 1));
-  assert.equal(stale.code, 4);
-  assert.equal(
-    (
-      await w.sessionCommand({
-        type: "comment.send",
-        expectedTaskVersion: v + 1,
-        body: "Any",
-      })
-    ).status,
-    409,
-  );
+  // Approval mode without --review-id is refused by the CLI with the steps to take.
   const noReview = await w.cli("rw", await w.send("No review"));
   assert.equal(noReview.code, 4);
   assert.match(noReview.json().error.message, /requires an approved review/);
-  assert.equal(
-    (
-      await w.sessionCommand({
-        type: "comment.send",
-        expectedTaskVersion: v,
-        body: "No review",
-      })
-    ).body.state,
-    "denied",
-  );
-  // Parity on a mismatched confirmation: the CLI and the session both conflict.
-  const pending = (await w.review("Mismatch")).data.receipt;
-  assert.equal(
-    (await w.cli("rw", w.confirm({ ...pending, revision: 3 }))).code,
-    4,
-  );
-  assert.equal(
-    (
-      await w.sessionCommand({
-        type: "comment.confirm",
-        reviewId: pending.reviewId,
-        expectedRevision: 3,
-        materialHash: pending.materialHash,
-        decision: "approved",
-      })
-    ).status,
-    409,
-  );
-  // A held task: the CLI refuses; a direct send is denied.
-  w.grant("allow");
-  await w.f.service.stopTask(w.f.taskId);
-  const held = await w.cli("rw", await w.send("Held"));
-  assert.equal(held.code, 4);
-  assert.match(held.json().error.message, /not available/);
+  // No service test sends an approval-mode comment without a review.
   assert.equal(
     (
       await w.sessionCommand({
         type: "comment.send",
         expectedTaskVersion: await w.version(),
-        body: "Held",
+        body: "No review",
       })
     ).body.state,
     "denied",

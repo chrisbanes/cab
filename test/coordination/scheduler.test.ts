@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "../fixtures/temp.js";
+import { waitForProcessGone } from "../fixtures/process-gone.js";
 import { join } from "node:path";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { test } from "node:test";
@@ -480,6 +481,7 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
         failureCount: failures.length,
         termGraceMs: 20,
         observationMs: 40,
+        childExitObserved: cancelled[0]?.childExitObserved,
         childExitSignal: cancelled[0]?.childExitSignal,
       })}`,
     );
@@ -494,14 +496,19 @@ test("service stop cancels ready-workspace Git before scheduler settlement and p
         String(submission.error),
         /Turn request is queued until its task workspace is ready/,
       );
-    assert.deepEqual(cancelled, [
-      {
-        operation: "repository-identity",
-        kind: "cancelled",
-        childExitObserved: true,
-        childExitSignal: "SIGKILL",
-      },
-    ]);
+    // The child's exit is reported only when the OS delivers it inside the 40 ms window,
+    // which a loaded machine can miss. The escalation itself is asserted on the child: it
+    // dies, whatever the window saw (the controlled Git ignores SIGTERM, so only SIGKILL
+    // can end it).
+    assert.deepEqual(
+      cancelled.map(({ operation, kind }) => ({ operation, kind })),
+      [{ operation: "repository-identity", kind: "cancelled" }],
+    );
+    assert.equal(
+      cancelled[0]?.childExitSignal,
+      cancelled[0]?.childExitObserved ? "SIGKILL" : null,
+    );
+    await waitForProcessGone(readyEvent.pid);
 
     const database = new DatabaseSync(join(root, "data", "standalone.sqlite"));
     const stored = database

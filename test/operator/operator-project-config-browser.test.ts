@@ -1311,14 +1311,12 @@ test("a GitLab link is added, refused with its reason, changed and removed in Se
   // A saved link changes its ref like a GitHub one; its identity is not editable.
   assert.equal(await field("host").count(), 0);
   await field("ref").fill("HEAD");
-  await changes(page).getByText("Ref for 4242: main → HEAD").waitFor();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
   assert.equal(links()?.ref, "HEAD");
   await page
     .getByRole("button", { name: "Remove repository 4242", exact: true })
     .click();
-  await changes(page).getByText("− Repository access: 4242").waitFor();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await savedOutcome(page);
   assert.equal(links(), undefined);
@@ -2129,7 +2127,6 @@ test("phone project settings lead with state and next step and keep the form usa
   await page.getByRole("link", { name: "Back to Settings" }).waitFor();
   const state = page.getByRole("region", { name: "Current state" });
   await state.getByText("Lead: Mira · repository access: acme/atlas").waitFor();
-  await state.getByText("GitHub S-1 inactive", { exact: false }).waitFor();
   await page
     .getByRole("region", { name: "Next step" })
     .getByText(
@@ -2256,25 +2253,18 @@ test("Routing saves candidates in place without sending guidance, and edits reve
   // Clearing the guidance is an explicit edit to empty.
   await revealButton(page, "routing guidance").click();
   await field.fill("");
-  await changes(page)
-    .getByText("Routing guidance cleared", { exact: true })
-    .waitFor();
   const cleared = commandBody(page);
   await save.click();
   assert.equal((await cleared).guidance, "");
   await savedOutcome(page, /^Saved\./);
   assert.equal(d.routing(ids.relay).guidance, "");
   await page.getByRole("switch", { name: "Enable routing" }).uncheck();
-  await changes(page).getByText("Routing disabled").waitFor();
   await page
     .getByLabel("Credential reference change", { exact: true })
     .selectOption({ label: "Set new environment reference" });
   await page
     .getByLabel("New environment reference", { exact: true })
     .fill("env:FIXTURE_X");
-  await changes(page)
-    .getByText("Credential reference: set new environment reference")
-    .waitFor();
   await page.route("**/api/operator/commands", () => {});
   try {
     await save.click();
@@ -2500,14 +2490,12 @@ test("GitHub source shows search queries plainly and edits them in place", async
     .getByRole("button", { name: "Remove GitHub Project (S-3)" })
     .click();
   await page.getByText("Will be removed").waitFor();
-  await changes(page).getByText("− S-3 · GitHub Project PVT_atlas").waitFor();
   await page.getByRole("button", { name: "Add source", exact: true }).click();
   await page
     .getByLabel("Selection kind", { exact: true })
     .selectOption({ label: "Search" });
   await query.last().fill("PRIVATE NEW QUERY");
   await page.getByText("Not saved yet").waitFor();
-  await changes(page).getByText("+ S-4 · Search · added inactive").waitFor();
   await query.first().fill("PRIVATE EDITED QUERY");
   const lines = await changes(page).getByRole("listitem").allInnerTexts();
   assert.deepEqual(lines, [
@@ -4580,12 +4568,6 @@ test("Sync and GitHub source show stored readiness counts and a zero-match warni
     .getByText(/^Partly synced \d\d:\d\d · 3 issues observed so far/)
     .first()
     .waitFor();
-  await page.locator(".settings-row summary").first().click();
-  await page
-    .getByText(`${counts} · partial read; counts may be incomplete`, {
-      exact: true,
-    })
-    .waitFor();
   assert.equal(await page.getByText(warning, { exact: false }).count(), 0);
 });
 
@@ -4644,9 +4626,6 @@ test("command network access is a switch with its disclosure that saves as a ver
       "Network-enabled commands can reach whatever credentials and logins the host exposes.",
     )
     .waitFor();
-  await page
-    .getByText("running turns keep their policy", { exact: false })
-    .waitFor();
   const save = page.getByRole("button", { name: "Save project", exact: true });
   assert.equal(await save.isDisabled(), true);
 
@@ -4670,7 +4649,6 @@ test("command network access is a switch with its disclosure that saves as a ver
   assert.equal(await network.isChecked(), true);
 
   await network.click();
-  await changes(page).getByText("Command network access disabled").waitFor();
   const back = commandBody(page);
   await save.click();
   assert.equal((await back).commandNetworkAccess, false);

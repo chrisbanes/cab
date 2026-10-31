@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, globSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { browseCommands, writeCommands } from "../../src/cli/commands.js";
 
@@ -60,12 +60,8 @@ type Inventory = {
 };
 
 const evidenceDir = join(root, "docs/evidence");
-const files = readdirSync(evidenceDir).filter((f) =>
-  /^issue-901-cli8-inventory-.*\.json$/.test(f),
-);
-assert.equal(files.length, 1, `one CLI8 inventory file, found: ${files}`);
 const inventory = JSON.parse(
-  readFileSync(join(evidenceDir, files[0] as string), "utf8"),
+  readFileSync(join(root, "docs/design/operator-cli-inventory.json"), "utf8"),
 ) as Inventory;
 const commandRows = inventory.rows.filter((r) => r.kind === "command");
 
@@ -96,25 +92,10 @@ const ranLive = new Set(
     : [],
 );
 const nonEmpty = (s: unknown) => typeof s === "string" && s.trim().length > 0;
-const currentTestFiles = globSync("test/**/*.test.ts", { cwd: root });
-
-/** Historical inventories retain their original paths after suite relocation. */
-function evidencePath(reference: string): string {
-  const exact = join(root, reference);
-  if (existsSync(exact) || !/^test\/.+\.test\.ts$/.test(reference))
-    return exact;
-  const name =
-    basename(reference) === "cli8-journey-harness.test.ts"
-      ? "operator-cli-journey-harness.test.ts"
-      : basename(reference);
-  const matches = currentTestFiles.filter((file) => basename(file) === name);
-  assert.equal(matches.length, 1, `one current test for ${reference}`);
-  return join(root, matches[0] as string);
-}
 
 /** A cited test names the command as adjacent literals, or as its whole key. */
 function namesCommand(testFile: string, command: string) {
-  const text = readFileSync(evidencePath(testFile), "utf8");
+  const text = readFileSync(join(root, testFile), "utf8");
   const quote = "[\"'`]";
   const parts = command.split(" ");
   const adjacent = parts.join(`${quote},\\s*${quote}`);
@@ -181,8 +162,7 @@ test("every row names scenarios, area, existing evidence, a closed state and its
           liveRecord.steps.some((s) => `harness:${s.step}` === e),
           `${at}: ${e} is not a step of ${liveFile}`,
         );
-      else
-        assert.ok(existsSync(evidencePath(e)), `${at}: missing evidence ${e}`);
+      else assert.ok(existsSync(join(root, e)), `${at}: missing evidence ${e}`);
     }
     assert.ok(stateSet.includes(row.state), `${at}: state ${row.state}`);
     assert.ok(

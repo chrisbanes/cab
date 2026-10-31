@@ -213,14 +213,18 @@ async function openPanel(page: Page) {
 /** The drafting run the service holds, once it is running. */
 async function runningRun(f: Awaited<ReturnType<typeof launch>>["f"], nth = 0) {
   let runId = "";
-  await until(() => {
-    const ids = f.service
-      .list()
-      .filter((item) => item.workId.startsWith("drafting:") && item.turnId)
-      .map((item) => item.workId.slice("drafting:".length));
-    runId = ids[nth] ?? "";
-    return Boolean(runId && draftingTurn(f.service, runId));
-  }, 8000);
+  await until(
+    () => {
+      const ids = f.service
+        .list()
+        .filter((item) => item.workId.startsWith("drafting:") && item.turnId)
+        .map((item) => item.workId.slice("drafting:".length));
+      runId = ids[nth] ?? "";
+      return Boolean(runId && draftingTurn(f.service, runId));
+    },
+    "a running drafting turn",
+    8000,
+  );
   return runId;
 }
 

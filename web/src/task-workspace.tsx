@@ -21,6 +21,7 @@ import {
   type ReactNode,
   type SyntheticEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import {
@@ -1463,7 +1464,9 @@ export function TaskWorkspace({
     if (!scope.current || follow !== linkFollow.current) return;
     state.conversationNotice = read.found ? null : miss;
     const selector = read.window && place(read.window);
-    changed();
+    // Commit now: a nested delegation exists only once its parents render open, and a frame
+    // callback that ran first would find no target and fall back to the conversation's top.
+    flushSync(changed);
     requestAnimationFrame(() => {
       if (!scope.current || follow !== linkFollow.current) return;
       const target = selector

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { insertExternalItem } from "../fixtures/source-rows.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -520,11 +521,17 @@ test("upgrade atomically populates only missing retained sources and result inde
 
     new GitHubSourceStore(f.db).migrate();
     f.stores.d.markImportedTask(f.taskId, "imported-node", "repo");
-    f.db
-      .prepare(
-        "INSERT INTO external_items VALUES('github','github.com','imported-node',?,'repo','owner/repo',7,'Observed imported title','- [ ] Observed imported body','open','[]',NULL,NULL)",
-      )
-      .run(f.taskId);
+    insertExternalItem(f.db, {
+      externalId: "imported-node",
+      taskId: f.taskId,
+      containerId: "repo",
+      containerName: "owner/repo",
+      number: 7,
+      observedTitle: "Observed imported title",
+      observedBody: "- [ ] Observed imported body",
+      observedState: "open",
+      labels: "[]",
+    });
     f.db.exec(
       "DELETE FROM task_review_search; DELETE FROM task_review_results; DELETE FROM task_review_contexts; DELETE FROM task_review_sources",
     );

@@ -17,6 +17,7 @@ import {
   seedReviewTask,
   setLinkedRepository,
 } from "../fixtures/task-review.js";
+import { until } from "../fixtures/until.js";
 
 const test = browserSuite("operator-changes-browser");
 
@@ -75,15 +76,6 @@ function sourceRepository(root: string, name: string, baseBranch: string) {
   ).trim();
   git(path, "branch", "unrelated", disconnectedCommit);
   return path;
-}
-
-async function until(check: () => boolean, description: string) {
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for ${description}`);
 }
 
 class ChangesRuntime extends OperatorFixtureRuntime {

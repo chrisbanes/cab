@@ -132,43 +132,6 @@ retention policy does not delete durable safety records or change existing
 result/review evidence contracts. The design defines capture limits, credential
 lifecycle, command semantics and required acceptance evidence.
 
-This does not reopen the deferred ChatGPT integration or change its narrower
-content-access rules.
-
-## Deferred ChatGPT and native Codex integration
-
-Optional ChatGPT daily operations/events and native Codex task visibility/handover
-(X01–X08) are deferred until after the standalone MVP. Planning, feasibility probes
-and implementation are paused under
-[epic #734](https://github.com/chrisbanes/cab/issues/734) until explicit
-reopening and revalidation. They do not gate MVP release or cutover; Codex App
-Server execution and the independently usable web UI remain in scope. The
-following paragraphs retain future integration requirements for individual
-macOS self-hosters.
-
-Both operator interfaces support daily creation/tracking, durable messages, answers
-and approvals; setup and recovery may remain in the web UI. ChatGPT receives only
-explicitly enabled projects' task data, results and interaction material, excluding
-credentials, private instructions and raw runtime logs. Subscribed completion,
-question and approval events explain outcomes or request input; they grant no write
-authority. Self-hosters supply a narrow authenticated HTTPS MCP endpoint using guided
-setup; the operator UI and runtime remain private.
-
-New tasks should appear as a main native Codex task with linked worker conversations.
-Saved host project placement/linkage is optional; tasks belong to cab projects.
-Repository tasks use retained cab worktrees. Inspection
-is allowed without handover; native continuation requires explicit human control,
-holding further cab task dispatch. Explicit return checks settled execution,
-workspace changes and existing admission/ownership holds. Idleness or acknowledgement
-cannot release those holds. Native API, visibility and handover feasibility must be
-proved before future dependent implementation; failed proof returns evidence and integration
-scope for review instead of silently substituting managed threads.
-
-These are deferred requirements, not implemented capabilities. See
-[ADR-1006](adr/1006-chatgpt-and-native-codex.md), the
-[integration design](design/chatgpt-and-native-codex.md) and
-[acceptance additions](acceptance.md#chatgpt-and-native-codex-acceptance).
-
 ## First local-task journey
 
 The operator opens cab, creates a project, links optional repositories,
@@ -1995,8 +1958,7 @@ that reports a subscription gone revokes it. The operator can send a test, turn 
 browser, and revoke any other from Settings, and a revoked browser turns on again. Where
 the platform allows, the page closes a notification once its request leaves the Inbox.
 Delivery is qualified on the host's browser only; phone and other-device delivery is not
-qualified. Subscribed ChatGPT events belong to the
-deferred post-MVP integration and are not an MVP release gate. Credentials must not
+qualified. Credentials must not
 appear in UI payloads or exposed transcripts. The operator login, session and
 request boundary is defined in the [operator UI foundation](design/s04c-operator-ui.md).
 Same-host private HTTPS access through a disposable Tailscale route has passed,

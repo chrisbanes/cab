@@ -76,7 +76,7 @@ Active request selection crosses configured assignment revisions before falling 
 
 Unsafe approval material becomes unavailable and deny-only; altered/redacted material is never approvable. A denial may omit material: the adapter supplies only the immutable retained JSON for that same task and interaction, privately, while preserving the submitted revision, action and target. This reconstruction does not depend on current display redaction, so a matching saved-key replay remains stable after privacy context changes. Client-supplied material is never replaced; approvals still require exposed exact material, and unavailable action or target cannot be substituted. Legacy interactions without retained JSON keep material omitted. Existing policy checks remain authoritative.
 
-Provider timestamps are stored observations; unavailable successful sync/history is explicit. Native structured input is unavailable until qualified; the operator interface neither enables it nor resumes the paused X01-X08 work.
+Provider timestamps are stored observations; unavailable successful sync/history is explicit. Native structured input is unavailable until qualified; the operator interface does not enable it.
 
 ## Client
 

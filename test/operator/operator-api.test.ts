@@ -1,6 +1,10 @@
 import { taskItems } from "../fixtures/inbox-items.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import {
+  insertExternalItem,
+  insertSourceMembership,
+} from "../fixtures/source-rows.js";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -56,9 +60,9 @@ import {
   fixture as nativeFixture,
   generation as nativeGeneration,
   nativeRequest,
-  until as untilNative,
   type RuntimeInternals,
 } from "../fixtures/runtime-retention.js";
+import { until } from "../fixtures/until.js";
 
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
@@ -851,14 +855,6 @@ test("task summaries classify Stop and independent holds by type, not display re
   assert.equal(archivalAfter.execution.holds.stop, true);
   assert.ok(archivalAfter.codes.includes("execution-uncertain"));
 });
-
-async function until(predicate: () => boolean) {
-  const deadline = Date.now() + 4000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw Error("Fixture timed out");
-    await new Promise((r) => setTimeout(r, 2));
-  }
-}
 test("active execution retains its admitted generation while next-turn instructions advance", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -2294,7 +2290,7 @@ test("an answered native question awaiting delivery is cab's, not an operator qu
       params: nativeRequest(work.threadId, work.turnId, "delivery-item"),
     }),
   );
-  await untilNative(
+  await until(
     () => Boolean(coordination.runtimeQuestionByEndpoint(identity)),
     "durable native question",
   );
@@ -2519,12 +2515,22 @@ test("a task read reports source review, hold and unknown source as source-held"
     ["source-held"],
   );
   f.seedPersistedState((db) => {
-    db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]',NULL,NULL)",
-    ).run(taskId);
-    db.prepare(
-      "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'repo','github','github.com','I1','[]')",
-    ).run(projectId);
+    insertExternalItem(db, {
+      externalId: "I1",
+      taskId,
+      containerId: "R1",
+      containerName: "owner/repo",
+      number: 1,
+      observedTitle: "Imported",
+      observedBody: "Body",
+      observedState: "open",
+      labels: "[]",
+    });
+    insertSourceMembership(db, {
+      projectId,
+      selectionId: "repo",
+      externalId: "I1",
+    });
     db.prepare(
       "INSERT INTO source_reviews VALUES ('github','github.com',?,?,?,?,NULL)",
     ).run("I1", "a".repeat(64), "b".repeat(64), "accept-revised-scope");
