@@ -1,6 +1,6 @@
 # UI06 configuration and recovery contract
 
-The React operator provides the setup, configuration and recovery surfaces, served by the existing listener. Existing authenticated HTML editors stay reachable. UI07 (#745) owns final visual/usability parity and removal approval; these surfaces do not qualify release, cutover, real provider access, native structured input or paused X01-X08.
+The React operator provides the setup, configuration and recovery surfaces, served by the existing listener. Existing authenticated HTML editors stay reachable. UI07 (#745) owns final visual/usability parity and removal approval; these surfaces do not qualify release, cutover, real provider access or native structured input.
 
 ## Configuration and receipt behavior
 

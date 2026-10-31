@@ -19,16 +19,6 @@ HTTPS over Tailscale has passed from the fixture host only; independent-device
 reachability, physical sleep/wake and operational host-restart qualification are
 unproved.
 
-## Deferred ChatGPT and native Codex integration
-
-[ADR-1006](../adr/1006-chatgpt-and-native-codex.md) retains optional ChatGPT daily
-operations/events and native Codex visibility/handover as post-MVP requirements,
-paused under [epic #734](https://github.com/chrisbanes/cab/issues/734) until
-explicitly reopened. The MVP uses the private web UI and Codex App Server and does
-not wait for X01–X08. The future plugin would add a narrow authenticated HTTPS MCP
-endpoint; runtime access, existing holds and reviewed cutover remain unchanged. The
-[integration design](chatgpt-and-native-codex.md) preserves the feasibility gaps.
-
 ## Confirmed review decisions
 
 - Use Codex first, with the existing operator login, and qualify Codex App Server

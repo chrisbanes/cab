@@ -232,14 +232,6 @@ each acceptance scenario to its evidence and disposition.
   can remain held for reconciliation. See the
   [execution policy](docs/design/standalone.md#default-execution-policy) and
   [acceptance plan](docs/acceptance.md) for the boundaries and required evidence.
-- **Deferred integrations.** Optional ChatGPT daily operations/events and native Codex
-  task visibility/handover are deferred until after the standalone MVP. Planning,
-  probes and implementation are paused under
-  [epic #734](https://github.com/chrisbanes/cab/issues/734) until Chris explicitly
-  reopens the work; they do not gate release. Their requirements and unproved
-  feasibility evidence are retained in
-  [ADR-1006](docs/adr/1006-chatgpt-and-native-codex.md) and the
-  [integration design](docs/design/chatgpt-and-native-codex.md).
 
 ## Development
 

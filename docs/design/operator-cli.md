@@ -39,8 +39,7 @@ Remote clients use the running service for task controls and diagnostics;
 they cannot restart, upgrade or restore the service itself.
 
 The CLI is an operator interface, separate from assignment-bound coordination
-tools. This work does not reopen the deferred ChatGPT plugin, public MCP endpoint
-or native Codex handover in [ADR-1006](../adr/1006-chatgpt-and-native-codex.md).
+tools.
 
 ## Existing foundations and gaps
 

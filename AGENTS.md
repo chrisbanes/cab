@@ -41,15 +41,6 @@ Delivery includes automated service/runtime/UI integration and bounded live vali
 run by the implementation agent; do not hand incremental testing to the user. Preserve
 the installed Haze prototype until a reviewed cutover.
 
-Optional ChatGPT daily operations/events and native Codex visibility/handover (X01–X08)
-are paused under [epic #734](https://github.com/chrisbanes/cab/issues/734) and
-[ADR-1006](docs/adr/1006-chatgpt-and-native-codex.md). Do not plan, probe or implement
-them until Chris explicitly reopens the work; they do not gate MVP release or cutover.
-Codex App Server remains the execution runtime. Preserve existing native feasibility
-evidence, recovery holds and runtime limits. Saved host project placement is optional;
-native visibility/control remains unproved. Prior plans and scope decisions do not
-authorise dispatch while paused.
-
 ## Working conventions
 
 - Use `rg --files` for discovery and `rg` for text searches.
