@@ -168,6 +168,9 @@ export async function cleanupJiraRun(options: {
     const read = await api(
       `/issue/${options.issue}?fields=summary,labels,project`,
     );
+    // Only an issue that is not there is already cleaned up; any other failure is not an answer.
+    if (read.status !== 200 && read.status !== 404)
+      throw new Error(`issue lookup failed: ${read.status}`);
     candidates = read.status === 200 ? [found.parse(read.json)] : [];
   } else {
     const run = String(options.run);

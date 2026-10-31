@@ -572,6 +572,21 @@ test("when the credential may not delete, cab-ready is removed and read back as 
   assert.equal(f.w.jira.requests.filter((r) => r.method === "PUT").length, 1);
 });
 
+test("a cleanup by issue key treats only a missing issue as done, not an error answer", async (t) => {
+  const f = leftovers(t);
+  const missing = await f.clean({ issue: "KAN-999" });
+  assert.equal(missing.found, 0);
+  assert.equal(missing.cleanup, "verified");
+  for (const status of [401, 403, 500]) {
+    f.w.jira.state.fail.set("GET /issue/:id", { status, count: 1 });
+    await assert.rejects(
+      f.clean({ issue: f.a.key }),
+      new RegExp(`issue lookup failed: ${status}`),
+    );
+  }
+  assert.ok(f.w.jira.find(f.a.key), "nothing was deleted");
+});
+
 test("a cleanup that cannot delete or remove the label reports failure", async (t) => {
   const f = leftovers(t);
   f.w.jira.state.fail.set("DELETE /issue/:id", { status: 500, count: 2 });
