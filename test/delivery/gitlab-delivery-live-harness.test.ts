@@ -483,3 +483,105 @@ test("the cleanup invocation needs --live, exactly one of a run id or an IID, an
     /Refusing execution/,
   );
 });
+
+test("a 429 on the merge, the setup discussion or the setup commit is retried, not refused as a second one-shot write", async (t) => {
+  const w = world(t);
+  const sent: string[] = [];
+  const pending = new Set(["PUT merge", "POST discussion", "POST commit"]);
+  w.remote.state.intercept = (method, path) => {
+    const route = /\/merge$/.test(path)
+      ? "PUT merge"
+      : /\/merge_requests\/\d+\/discussions$/.test(path)
+        ? "POST discussion"
+        : /\/repository\/commits$/.test(path)
+          ? "POST commit"
+          : null;
+    if (method === "GET" || !route) return undefined;
+    sent.push(route);
+    return pending.delete(route) ? limited() : undefined;
+  };
+  const evidence = await w.run({ rateLimit: { sleep: async () => {} } });
+  assert.equal(evidence.failure, undefined);
+  assert.equal(evidence.qualification, "passed");
+  assert.deepEqual(w.guard.denied, []);
+  // Each was sent twice, and the merge reached the instance once.
+  assert.deepEqual(
+    ["PUT merge", "POST discussion", "POST commit"].map(
+      (route) => sent.filter((r) => r === route).length,
+    ),
+    [2, 2, 2],
+  );
+  assert.equal(w.remote.merges.length, 1);
+  assert.equal(w.guard.mergeCount, 1);
+  assert.equal(
+    w.guard.writeCount,
+    16,
+    "the three retried writes still count against the cap",
+  );
+});
+
+test("a merge answered 429 and then lost may still be pending, but one answered only 429 is not", () => {
+  const guard = new GitLabGuard();
+  const log = (status: number | null) =>
+    guard.log.push({ route: "PUT merge", status });
+  assert.equal(guard.mergeMayBePending(), false);
+  log(429);
+  assert.equal(guard.mergeMayBePending(), false);
+  log(null);
+  assert.equal(guard.mergeMayBePending(), true, "the last attempt decides");
+});
+
+test("requests are spaced by the pace even when sent together", async () => {
+  const guard = new GitLabGuard(maxWrites, 40);
+  const starts: number[] = [];
+  const fetcher = guard.fetcher((async () => {
+    starts.push(Date.now());
+    return Response.json({});
+  }) as typeof fetch);
+  const url = `https://gitlab.com/api/v4/projects/${id}`;
+  await Promise.all([fetcher(url), fetcher(url), fetcher(url)]);
+  const gaps = [1, 2].map((i) => Number(starts[i]) - Number(starts[i - 1]));
+  assert.ok(
+    gaps.every((gap) => gap >= 35),
+    String(gaps),
+  );
+});
+
+test("a cleanup leaves a merge request that is locked or queued to merge, and its branch", async (t) => {
+  const w = world(t);
+  const mr = (iid: number, branch: string, fields: object) =>
+    gitLabMergeRequest({
+      id: iid,
+      iid,
+      source_branch: branch,
+      title: `Qualification 20261031090415-5b1c b`,
+      source_project_id: Number(id),
+      target_project_id: Number(id),
+      ...fields,
+    });
+  w.remote.state.mergeRequests.push(
+    mr(7, "cab/queued", { merge_when_pipeline_succeeds: true }),
+    mr(8, "cab/locked", { state: "locked" }),
+    mr(9, "cab/plain", {}),
+  );
+  for (const branch of ["cab/queued", "cab/locked", "cab/plain"])
+    w.remote.state.heads.set(branch, "a".repeat(40));
+  const out = await cleanupGitLabRun({
+    guard: new GitLabGuard(),
+    fetcher: w.remote.fetcher,
+    token: () => envToken,
+    run: "20261031090415-5b1c",
+  });
+  assert.deepEqual(
+    out.cleanupReads.filter((r) => r.resource.startsWith("merge_request")),
+    [
+      { resource: "merge_request !7", result: "pending-merge" },
+      { resource: "merge_request !8", result: "pending-merge" },
+      { resource: "merge_request !9", result: "closed" },
+    ],
+  );
+  assert.deepEqual([...w.remote.state.heads.keys()].sort(), [
+    "cab/locked",
+    "cab/queued",
+  ]);
+});

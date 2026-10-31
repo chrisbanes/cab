@@ -686,7 +686,7 @@ export async function runGitLabQualification(
   evidence.requestCounts = guard.counts;
   evidence.rateLimited = guard.rateLimited.map((r) => ({
     ...r,
-    body: clean(r.body),
+    body: clean(r.body).slice(0, 80),
   }));
   return evidence;
 }

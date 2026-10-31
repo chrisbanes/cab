@@ -8,7 +8,8 @@ export interface RateLimitPolicy {
   /** The most time one request spends waiting across its retries; 60 seconds when omitted. */
   maxTotalDelayMs?: number | undefined;
   /**
-   * The first wait when a 429 names no reset time, doubled for each retry; 15 seconds when omitted.
+   * The first wait when a 429 names no reset time, doubled for each retry; 20 seconds when omitted,
+   * so 20 and 40 seconds fill the default 60 second budget.
    * The Projects, Groups and Users APIs send no rate-limit headers on a 429.
    */
   fallbackDelayMs?: number | undefined;
@@ -23,7 +24,7 @@ export interface RateLimitPolicy {
 const defaults = {
   maxRetries: 3,
   maxTotalDelayMs: 60_000,
-  fallbackDelayMs: 15_000,
+  fallbackDelayMs: 20_000,
 } as const;
 
 /** A wait that ends early, with the signal's reason, when `signal` aborts. */
@@ -53,8 +54,13 @@ export function rateLimitDelayMs(headers: Headers, now: number): number | null {
   const after = headers.get("retry-after")?.trim();
   if (after) {
     if (/^\d{1,9}$/.test(after)) return Number(after) * 1000;
-    const date = Date.parse(after);
-    if (!Number.isNaN(date)) return Math.max(0, date - now);
+    // Only a strict HTTP date: Date.parse also accepts "1.5" and "-5".
+    if (
+      /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(
+        after,
+      )
+    )
+      return Math.max(0, Date.parse(after) - now);
   }
   const reset = headers.get("ratelimit-reset")?.trim();
   if (reset && /^\d{1,12}$/.test(reset))

@@ -14,6 +14,7 @@ const mergeRequest = z.object({
   title: z.string(),
   source_branch: z.string(),
   source_project_id: z.number().int(),
+  merge_when_pipeline_succeeds: z.boolean().nullish(),
 });
 const mergeRequests = z.array(mergeRequest);
 /** The title every merge request of a run carries; only these are ever closed by a cleanup. */
@@ -80,6 +81,10 @@ export async function cleanUp(
   clean: (value: unknown) => string = String,
 ): Promise<{ cleanup: "verified" | "failed"; cleanupReads: CleanupRead[] }> {
   const reads: CleanupRead[] = [];
+  /** Branches under a merge that may still land: they stay with it. */
+  const pendingBranches = new Set<string>(
+    pendingMerge ? [pendingMerge.branch] : [],
+  );
   const attempt = async (resource: string, work: () => Promise<string>) => {
     try {
       reads.push({ resource, result: await work() });
@@ -93,20 +98,27 @@ export async function cleanUp(
   for (const [iid] of guard.requests)
     await attempt(`merge_request !${iid}`, async () => {
       const route = `${base}/merge_requests/${iid}`;
-      const state = async () =>
-        mergeRequest.parse((await api(route)).json).state;
-      const current = await state();
-      if (current !== "opened") return current;
-      if (iid === pendingMerge?.iid) return "pending-merge";
+      const read = async () => mergeRequest.parse((await api(route)).json);
+      const current = await read();
+      // Locked, or queued to merge by someone, is a merge that may still land: leave it open.
+      if (
+        current.state === "locked" ||
+        (current.state === "opened" &&
+          (iid === pendingMerge?.iid || current.merge_when_pipeline_succeeds))
+      ) {
+        pendingBranches.add(current.source_branch);
+        return "pending-merge";
+      }
+      if (current.state !== "opened") return current.state;
       await api(route, { method: "PUT", body: { state_event: "close" } });
-      return state();
+      return (await read()).state;
     });
   for (const branch of guard.branches)
     await attempt(
       `branch ${branch.replace(/^cab\/.*/, "cab/<task>")}`,
       async () => {
         // A branch under a merge that may still land is left with it.
-        if (branch === pendingMerge?.branch) return "pending-merge";
+        if (pendingBranches.has(branch)) return "pending-merge";
         const route = `${base}/repository/branches/${encodeURIComponent(branch)}`;
         if ((await api(route)).status === 200)
           await api(route, { method: "DELETE" });

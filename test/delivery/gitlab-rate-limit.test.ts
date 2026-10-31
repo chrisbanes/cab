@@ -66,6 +66,9 @@ test("a 429 names its wait in Retry-After seconds, an HTTP date, or RateLimit-Re
   assert.equal(delay({ "ratelimit-reset": String(now / 1000 - 5) }), 0);
   assert.equal(delay({}), null);
   assert.equal(delay({ "retry-after": "soon", "ratelimit-reset": "x" }), null);
+  // A decimal or negative value is no wait time (Date.parse alone would read "1.5" as a date).
+  assert.equal(delay({ "retry-after": "1.5" }), null);
+  assert.equal(delay({ "retry-after": "-5" }), null);
 });
 
 test("a 429 is sent again after the wait it asks for, with the same method and body", async () => {
@@ -124,11 +127,11 @@ test("a 429 with no reset time, as the Projects API sends, waits a doubling fall
     ok,
   );
   assert.equal((await send(s)).status, 200);
-  assert.deepEqual(s.waits, [15_000, 30_000]);
+  assert.deepEqual(s.waits, [20_000, 40_000]);
   const capped = script(() => limited());
   assert.equal((await send(capped)).status, 429);
-  // 15 s + 30 s used; the next 60 s would pass the 60 s budget.
-  assert.deepEqual(capped.waits, [15_000, 30_000]);
+  // 20 s + 40 s fill the 60 s budget; the next 80 s would pass it.
+  assert.deepEqual(capped.waits, [20_000, 40_000]);
 });
 
 test("a wait ends when it is cancelled, and nothing is sent after", async () => {

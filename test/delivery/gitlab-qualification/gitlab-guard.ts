@@ -53,7 +53,9 @@ export class GitLabGuard {
     retryAfter: string | null;
     body: string;
   }> = [];
-  private lastSent = 0;
+  private nextSlot = 0;
+  /** The one-shot write the request being checked would spend, released if GitLab answers 429. */
+  private oneShot: "merge" | "discussion" | "commit" | null = null;
   private writes = 0;
   private merges = 0;
   private setupDiscussions = 0;
@@ -88,7 +90,7 @@ export class GitLabGuard {
   }
   /** Whether a merge was sent and no definitive refusal proved it had no effect. */
   mergeMayBePending() {
-    const sent = this.log.find((e) => e.route === "PUT merge");
+    const sent = this.log.filter((e) => e.route === "PUT merge").at(-1);
     return (
       sent !== undefined &&
       !(
@@ -123,15 +125,24 @@ export class GitLabGuard {
         typeof init?.body === "string"
           ? (JSON.parse(init.body) as Record<string, unknown>)
           : {};
+      this.oneShot = null;
       if (method === "GET") this.readAllowed(url);
       else this.writeAllowed(method, url, body);
+      const oneShot = this.oneShot;
       this.count(method, url);
-      const wait = this.lastSent + this.paceMs - Date.now();
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      this.lastSent = Date.now();
+      // Reserve the next slot before waiting, so concurrent requests are spaced too.
+      const slot = Math.max(Date.now(), this.nextSlot);
+      this.nextSlot = slot + this.paceMs;
+      if (slot > Date.now())
+        await new Promise((r) => setTimeout(r, slot - Date.now()));
       const response = await next(input, init);
-      if (response.status === 429)
+      if (response.status === 429) {
         await this.noteRateLimit(method, url, response);
+        // A request answered 429 was not processed: it may be sent again, though the write stays counted.
+        if (oneShot === "merge") this.merges--;
+        if (oneShot === "discussion") this.setupDiscussions--;
+        if (oneShot === "commit") this.setupCommits--;
+      }
       if (method !== "GET") {
         this.done(response.status);
         await this.record(method, url, response);
@@ -140,21 +151,23 @@ export class GitLabGuard {
     }) as typeof fetch;
   }
 
-  /** The route with identifiers removed: `GET /projects/:id/merge_requests/:n/discussions`. */
-  private count(method: string, url: URL) {
-    const shape = url.pathname
+  /** The route with identifiers removed: `GET /projects/:n/merge_requests/:n/discussions`. */
+  private shape(method: string, url: URL) {
+    return `${method} ${url.pathname
       .replace(/\/[0-9]+(?=\/|$)/g, "/:n")
       .replace(/(?<=\/branches\/).+$/, ":branch")
-      .replace(/(?<=\/discussions\/)[0-9a-f]+/, ":id");
-    this.counts[`${method} ${shape}`] =
-      (this.counts[`${method} ${shape}`] ?? 0) + 1;
+      .replace(/(?<=\/discussions\/)[0-9a-f]+/, ":id")}`;
+  }
+  private count(method: string, url: URL) {
+    const key = this.shape(method, url);
+    this.counts[key] = (this.counts[key] ?? 0) + 1;
   }
   private async noteRateLimit(method: string, url: URL, response: Response) {
     const headers = [...response.headers.keys()].filter((name) =>
       /^(ratelimit|retry-after)/.test(name),
     );
     this.rateLimited.push({
-      route: `${method} ${url.pathname.replace(/\/[0-9]+(?=\/|$)/g, "/:n")}`,
+      route: this.shape(method, url),
       headers,
       retryAfter: response.headers.get("retry-after"),
       body: (
@@ -162,7 +175,7 @@ export class GitLabGuard {
           .clone()
           .text()
           .catch(() => "")
-      ).slice(0, 80),
+      ).slice(0, 4096),
     });
   }
 
@@ -244,6 +257,7 @@ export class GitLabGuard {
         this.deny("merge");
       this.spend("PUT merge");
       this.merges++;
+      this.oneShot = "merge";
       return;
     }
     if (method === "POST" && mr?.[2] === "/discussions") {
@@ -253,8 +267,10 @@ export class GitLabGuard {
         Object.keys(body).join() !== "body"
       )
         this.deny("discussion");
+      this.spend("POST discussion");
       this.setupDiscussions++;
-      return this.spend("POST discussion");
+      this.oneShot = "discussion";
+      return;
     }
     if (
       method === "POST" &&
@@ -279,8 +295,10 @@ export class GitLabGuard {
         !String(actions[0]?.file_path).startsWith("qual/")
       )
         this.deny("commit");
+      this.spend("POST commit");
       this.setupCommits++;
-      return this.spend("POST commit");
+      this.oneShot = "commit";
+      return;
     }
     const branch = rest.match(/^\/repository\/branches\/(.+)$/);
     if (method === "DELETE" && branch) {
