@@ -25,6 +25,7 @@ import {
   activeWorkIdsOf,
   startedOf,
 } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 function required<T>(value: T | null | undefined): T {
   assert.ok(value !== undefined && value !== null);
@@ -51,14 +52,6 @@ function deferred<T>() {
     resolve = done;
   });
   return { promise, resolve };
-}
-async function until(condition: () => boolean) {
-  const deadline = Date.now() + 3000;
-  while (!condition()) {
-    if (Date.now() > deadline)
-      throw new Error("Native service condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 2));
-  }
 }
 class NativeRuntime implements Runtime {
   generation = "generation";

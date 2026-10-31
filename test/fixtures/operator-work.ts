@@ -3,13 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { Page } from "playwright";
 import { ExecutionState } from "../../src/standalone/state.js";
 import type { createOperatorFixture } from "./operator-web.js";
-export async function until(predicate: () => boolean, timeoutMs = 5000) {
-  const end = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > end) throw Error("Fixture timed out");
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
+import { until } from "./until.js";
+export { until };
 /** Search, Source and Readiness live in the closed "More filters" disclosure. */
 export async function openMoreFilters(page: Page) {
   await page.locator(".work-more").waitFor();
@@ -87,7 +82,7 @@ export async function seedCatalog(
         .turnRequests()
         .some((r) => r.taskId === id && r.state === "active"),
     );
-    await until(() => f.runtime.turns >= before + 1, 15_000);
+    await until(() => f.runtime.turns >= before + 1, "the next turn", 15_000);
     const request = f.service
       .turnRequests()
       .find((r) => r.taskId === id && r.state === "active");

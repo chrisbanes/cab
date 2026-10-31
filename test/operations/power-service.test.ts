@@ -31,6 +31,7 @@ import {
   runtimesOf,
   startedOf,
 } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 class FakeChild extends EventEmitter {
   killed = 0;
@@ -174,14 +175,6 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 2000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  }
-}
-
 test("standalone service quarantines wake during T4 reconciliation and resumes queued work after the gate clears", async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-power-service-"));
   const data = join(root, "data");
@@ -217,12 +210,12 @@ test("standalone service quarantines wake during T4 reconciliation and resumes q
       "first prompt",
       firstWorkspace,
     );
-    await waitUntil(() => runtime.turns === 1);
-    await waitUntil(() => children.length === 1);
+    await until(() => runtime.turns === 1);
+    await until(() => children.length === 1);
 
     events.wake();
     await inspectionEntered.promise;
-    await waitUntil(() => service.powerStatus()?.admissionHeld === true);
+    await until(() => service.powerStatus()?.admissionHeld === true);
     const queued = await service.submit(
       "second",
       "second prompt",
@@ -237,11 +230,11 @@ test("standalone service quarantines wake during T4 reconciliation and resumes q
     assert.equal(service.powerStatus()?.admissionHeld, true);
 
     inspection.resolve();
-    await waitUntil(() => service.powerStatus()?.admissionHeld === false);
-    await waitUntil(() => runtime.starts === 2);
+    await until(() => service.powerStatus()?.admissionHeld === false);
+    await until(() => runtime.starts === 2);
     firstTurn.resolve();
     await firstSubmission;
-    await waitUntil(() => children[0]?.killed === 1);
+    await until(() => children[0]?.killed === 1);
     assert.equal(service.powerStatus()?.admissionHeld, false);
   } finally {
     firstTurn.resolve();
@@ -379,11 +372,11 @@ test("queued work after a turn waits for a power poll that started after the tur
         state: "queued",
         reason: "Waiting for power-event observation",
       });
-      await waitUntil(() => events.reads > readsBefore);
+      await until(() => events.reads > readsBefore);
       assert.equal(runtime.starts, 1, "not admitted while the poll is running");
 
       read.resolve();
-      await waitUntil(() => runtime.starts === 2);
+      await until(() => runtime.starts === 2);
       assert.equal(service.powerStatus()?.admissionHeld, false);
     },
   );
@@ -395,8 +388,8 @@ test("a sleep/wake seen by the post-turn power poll holds queued work", async ()
       events.wake();
       events.failAdvancement = true;
       await service.submit("second", "second prompt", secondWorkspace);
-      await waitUntil(() => service.powerStatus()?.admissionHeld === true);
-      await waitUntil(
+      await until(() => service.powerStatus()?.admissionHeld === true);
+      await until(
         () =>
           service.powerStatus()?.admissionReason ===
           "Power-event advancement is incomplete or ambiguous",
@@ -417,7 +410,7 @@ test("a post-turn power poll that resumes admission does not deadlock the schedu
       assert.equal(runtime.starts, 1);
       read.resolve();
       // Reconciliation clears the hold and admissionResumed wakes the scheduler.
-      await waitUntil(() => runtime.starts === 2);
+      await until(() => runtime.starts === 2);
       assert.equal(service.powerStatus()?.admissionHeld, false);
     },
   );
@@ -453,11 +446,11 @@ test("a turn ending while admission awaits still requires a later power poll", a
       assert.equal(runtime.starts, 1, "not admitted after a mid-admission end");
       assert.equal(queued().state, "queued");
       assert.equal(queued().reason, "Waiting for power-event observation");
-      await waitUntil(() => events.reads > readsBefore);
+      await until(() => events.reads > readsBefore);
       assert.equal(runtime.starts, 1, "not admitted while the poll is running");
 
       read.resolve();
-      await waitUntil(() => runtime.starts === 2);
+      await until(() => runtime.starts === 2);
     },
   );
 });
@@ -477,11 +470,11 @@ test("a sleep/wake notification after a fresh poll holds queued work until a lat
       events.readGate = read.promise;
       const readsBefore = events.reads;
       await service.submit("second", "second prompt", secondWorkspace);
-      await waitUntil(() => events.reads > readsBefore);
+      await until(() => events.reads > readsBefore);
       assert.equal(runtime.starts, 1, "not admitted before reconciliation");
 
       read.resolve();
-      await waitUntil(() => runtime.starts === 2);
+      await until(() => runtime.starts === 2);
       assert.equal(service.powerStatus()?.admissionHeld, false);
     },
   );
@@ -515,11 +508,11 @@ test("a failed sleep/wake listener explains queued work and power status with it
       await power.poll();
       assert.equal(runtime.starts, 1, "a poll alone cannot release");
       assert.equal(service.powerStatus()?.admissionReason, restartReason);
-      await waitUntil(() => queued().reason === restartReason);
+      await until(() => queued().reason === restartReason);
 
       events.startFailure = undefined;
       await power.poll();
-      await waitUntil(() => runtime.starts === 2);
+      await until(() => runtime.starts === 2);
       assert.equal(service.powerStatus()?.admissionHeld, false);
     },
   );

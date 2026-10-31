@@ -23,6 +23,7 @@ import type {
 } from "../../src/standalone/workspace-comparison.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 type TurnOutcome = "completed" | "failed";
 
@@ -30,19 +31,6 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function until(
-  check: () => boolean,
-  failureMessage = "Turn capture service did not reach the expected state",
-  timeoutMs = 3000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-  }
-  assert.fail(failureMessage);
 }
 
 async function waitForWorkState(

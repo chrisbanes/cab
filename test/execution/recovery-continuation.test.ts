@@ -25,6 +25,7 @@ import {
   archivedResumeMessage,
 } from "../../src/standalone/pre-turn-recovery.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 function deferred() {
   let resolve!: () => void;
@@ -118,13 +119,6 @@ function command(service: StandaloneService, body: Record<string, unknown>) {
   return service
     .domain()
     .execute({ key: randomUUID(), actor: "operator", ...body } as never);
-}
-async function until(predicate: () => boolean, label: string) {
-  const end = Date.now() + 5000;
-  while (!predicate()) {
-    if (Date.now() >= end) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 async function heldFixture(
   preTurn:
@@ -996,9 +990,11 @@ test("completed Stop history survives Resume without becoming a new recovery gat
   try {
     await f.service.resolveHeldExecution(f.receipt);
     internals(f.service)
-      .db.prepare(`INSERT INTO execution_stop_targets
+      .db.prepare(
+        `INSERT INTO execution_stop_targets
       (workId, taskId, threadId, turnId, interruptState, terminalState, requestedAt)
-      VALUES (?, ?, ?, ?, 'acknowledged', 'completed', 1)`)
+      VALUES (?, ?, ?, ?, 'acknowledged', 'completed', 1)`,
+      )
       .run(f.old.workId, f.taskId, f.receipt.threadId, f.receipt.turnId);
     await f.service.stopTask(f.taskId);
     assert.equal(
@@ -1037,14 +1033,11 @@ test("a reconciled Stop target does not answer a later Stop of the successor", a
     await f.service.resolveHeldExecution(f.receipt);
     assert.equal(state.stopTarget(f.old.workId), undefined);
     // Settled history beside the live target must not end the observation early.
-    db.prepare(`INSERT INTO execution_stop_targets
+    db.prepare(
+      `INSERT INTO execution_stop_targets
       (workId, taskId, threadId, turnId, interruptState, terminalState, requestedAt)
-      VALUES (?, ?, ?, ?, 'acknowledged', 'completed', 1)`).run(
-      f.old.workId,
-      f.taskId,
-      f.receipt.threadId,
-      f.receipt.turnId,
-    );
+      VALUES (?, ?, ?, ?, 'acknowledged', 'completed', 1)`,
+    ).run(f.old.workId, f.taskId, f.receipt.threadId, f.receipt.turnId);
 
     f.runtime.holdSuccessor = true;
     await f.service.coordinationView().postOperatorMessage(f.message);

@@ -6,13 +6,8 @@ import { seedReviewTask } from "./task-review.js";
 import { mixedForm } from "./question-data.js";
 import type { QuestionForm } from "../../src/core/question-forms.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
-export async function until(condition: () => boolean, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() > deadline) throw Error("Question fixture timed out");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
+import { until } from "./until.js";
+export { until };
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 /** A configured task whose lead has a running turn; the caller decides how that turn ends. */
 export async function startOwnWork(

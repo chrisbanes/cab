@@ -17,6 +17,7 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { NoTurnRecoveryCommand } from "../../src/standalone/pre-turn-recovery.js";
 import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 class NoTurnRuntime implements Runtime {
   rejectStart = true;
@@ -82,13 +83,6 @@ function command(service: StandaloneService, body: Record<string, unknown>) {
   return service
     .domain()
     .execute({ key: randomUUID(), actor: "operator", ...body } as never);
-}
-async function until(predicate: () => boolean, label: string) {
-  const end = Date.now() + 5000;
-  while (!predicate()) {
-    if (Date.now() > end) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 function required<T>(value: T | undefined | null): T {
   assert.ok(value !== undefined && value !== null);

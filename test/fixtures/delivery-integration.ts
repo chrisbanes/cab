@@ -20,6 +20,8 @@ import {
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "./operator-web.js";
+import { until } from "./until.js";
+export { until };
 
 class ReleaseRuntime extends OperatorFixtureRuntime {
   private readonly generation = randomUUID();
@@ -769,14 +771,6 @@ export async function createReleaseDeliveryFixture(
       }
     },
   });
-}
-
-export async function until(predicate: () => boolean, label: string) {
-  const deadline = Date.now() + 5000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw Error(`Timed out: ${label}`);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
 }
 
 /** A repository with one commit, provisioned for the task as R1, or as the GitLab project when given. */

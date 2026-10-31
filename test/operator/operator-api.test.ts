@@ -60,9 +60,9 @@ import {
   fixture as nativeFixture,
   generation as nativeGeneration,
   nativeRequest,
-  until as untilNative,
   type RuntimeInternals,
 } from "../fixtures/runtime-retention.js";
+import { until } from "../fixtures/until.js";
 
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
@@ -855,14 +855,6 @@ test("task summaries classify Stop and independent holds by type, not display re
   assert.equal(archivalAfter.execution.holds.stop, true);
   assert.ok(archivalAfter.codes.includes("execution-uncertain"));
 });
-
-async function until(predicate: () => boolean) {
-  const deadline = Date.now() + 4000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw Error("Fixture timed out");
-    await new Promise((r) => setTimeout(r, 2));
-  }
-}
 test("active execution retains its admitted generation while next-turn instructions advance", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -2298,7 +2290,7 @@ test("an answered native question awaiting delivery is cab's, not an operator qu
       params: nativeRequest(work.threadId, work.turnId, "delivery-item"),
     }),
   );
-  await untilNative(
+  await until(
     () => Boolean(coordination.runtimeQuestionByEndpoint(identity)),
     "durable native question",
   );

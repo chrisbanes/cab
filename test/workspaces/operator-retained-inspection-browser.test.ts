@@ -17,6 +17,7 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { until } from "../fixtures/until.js";
 
 const test = browserSuite("operator-retained-inspection-browser");
 const digest = (bytes: Uint8Array | string) =>
@@ -25,15 +26,6 @@ const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iY9sAAAAASUVORK5CYII=",
   "base64",
 );
-
-async function until(check: () => boolean, description: string) {
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for ${description}`);
-}
 
 test("production retained result evidence keeps original bytes and opens current files only explicitly", async (_t, j) => {
   const fixture = await j.start("fixture.create", () =>

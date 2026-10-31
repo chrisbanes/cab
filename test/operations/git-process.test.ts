@@ -20,6 +20,7 @@ import {
   hardenedGitEnvironment,
   withHostileGitEnvironment,
 } from "../fixtures/git-environment.js";
+import { until } from "../fixtures/until.js";
 
 const windows = {
   timeoutMs: 2000,
@@ -40,13 +41,6 @@ function script(t: TestContext, body: string) {
 
 const run = (options: Partial<GitRunOptions> & { executable: string }) =>
   runGit({ args: [], ...windows, ...options });
-
-async function until(condition: () => boolean) {
-  const deadline = Date.now() + 2000;
-  while (!condition() && Date.now() < deadline)
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-  assert.ok(condition(), "condition was not reached in time");
-}
 
 test("the runner returns stdout and gives the child only the hardened environment", async (t) => {
   const probe = gitEnvironmentProbe();
