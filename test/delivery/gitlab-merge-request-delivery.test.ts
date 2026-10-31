@@ -47,7 +47,10 @@ test("a draft merge request is created from the task branch only, registered, an
     assert.equal(bound?.observation.nodeId, String(mr.id));
     assert.equal(bound?.observation.number, mr.iid);
     assert.equal(bound?.observation.draft, true);
-    assert.deepEqual(bound?.observation.mergeBlockers, ["pr-draft"]);
+    assert.deepEqual(bound?.observation.mergeBlockers, [
+      "pr-draft",
+      "merge-status-draft_status",
+    ]);
     assertNoToken(w);
   } finally {
     await w.f.close();

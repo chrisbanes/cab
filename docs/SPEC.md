@@ -825,7 +825,8 @@ there is no `file:` GitHub reference. See the
 Each GitLab host has one installation-level credential, set in Settings → GitLab
 credentials through the receipted `code-host-credential.configure` command: `env:NAME`,
 or `glab:<host>` for that same host, which runs
-`glab auth status --hostname <host> --show-token` on every use, with no stdin and an
+`glab auth status --hostname <host> --show-token` whenever a credential is read (delivery keeps the token it
+gets for a few minutes, see the GitLab delivery paragraph below), with no stdin and an
 8-second limit, and parses one token line from its combined output. Reads report the
 kind, whether the credential is usable, a fixed reason when it is not, and the account
 the token acts as (from `GET /api/v4/user`); never the variable name, token or glab
@@ -834,7 +835,8 @@ killed at its 8-second limit or prints a network error, and for cab's own GitLab
 reads when the request fails or exceeds 15 seconds. Those reads, and GitLab branch
 delivery, authenticate with `Authorization: Bearer`, which GitLab accepts for
 personal access tokens and for OAuth tokens such as a glab web login. Fake-host tests
-prove the header; a live host's acceptance of both token kinds is not yet demonstrated. A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
+prove the header, and a bounded live run on gitlab.com accepted both a personal access token and a glab web login
+([evidence](evidence/2026-10-31-gitlab-delivery-live.md)). A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
 environment overrides a stored glab login; Settings and `cab doctor` (GitLab
 credentials) warn when it does, and the account shown is the token's. The credential
 lists GitLab projects for guided setup, shows the account, and is the identity GitLab
@@ -869,7 +871,8 @@ another. A GitLab link must also have an
 a refusal names the link and reason without echoing a path or remote. Branch
 actions (`branch.push`, `branch.force-push`, `branch.adopt`) and merge request actions
 (`pr.create`, `pr.edit`, `pr.ready`, `pr.merge`, `pr.thread.reply`, `pr.thread.resolve`) on a
-GitLab link are delivered to that project with the host's credential, resolved on every use;
+GitLab link are delivered to that project with the host's credential (an `env:` variable is read on every use,
+a `glab:` login's token is kept for up to 5 minutes);
 every other code-host action that names a GitLab link is refused with
 `code-host-delivery-unavailable`, before any provider or Git transport runs. Only merge
 requests inside the linked project are acted on, never a fork's. A host with no usable credential holds the
@@ -2032,6 +2035,23 @@ project; a thread resolves only when the credential user resolved it. GitLab run
 with `/command` in a description or note as the credential user, so a create, edit or reply whose
 text has one is held as `provider-preflight-held` before any write.
 
+A GitLab request that is answered 429 was not processed, so cab sends it again, a write included, after the
+wait the response names: `Retry-After` (seconds, or an HTTP date), otherwise `RateLimit-Reset` (a Unix time)
+against its clock, and otherwise 20 then 40 seconds, because the Projects, Groups and Users APIs send no
+rate-limit headers on a 429. It makes at most 3 retries and waits at most 60 seconds in all for one request,
+and a stopping service ends the waits of delivery requests. Past either bound the 429 is the outcome: a read is unavailable (an
+action's readback stays unproved, and a merge train's evidence is kept), and a write is a definitive
+`provider-http-429`. Only 429 is retried, and credential discovery's GitLab reads wait the same way.
+
+To keep within GitLab.com's per-user request limits, a service reuses a few reads. It keeps a project's identity and
+merge settings for 30 seconds (a merge's preflight reads them fresh), the account a token acts as for 10 minutes,
+and the token a `glab:` login resolved to for 5 minutes, because resolving it runs `glab`, which asks GitLab to
+check the token. A 401 drops the kept token, resolves the login again and sends the request once more, a
+failed Git push or fetch drops it for the next attempt, and configuring the credential again drops it too. A
+`glab auth login` as another account made outside cab can leave delivery acting as the previous account for up to
+those 5 minutes, or until its first 401; Settings and readiness always resolve the login afresh. An `env:` credential is read as it is every time. Merge
+requests, discussions, branches and pipelines are always read fresh, so no decision rests on a kept read.
+
 A GitLab merge is gated on GitLab's own verdict. The merge request reports no merge blocker only when it
 is open, not a draft, its `detailed_merge_status` is exactly `mergeable` and every required check of the
 project's delivery configuration passed on the head commit (the head pipeline, named `pipeline`).
@@ -2056,6 +2076,10 @@ acceptance at any head, as on GitHub. Merging is irreversible and cab has no unm
 action to cancel auto-merge or to take a request off a train: the operator does that in GitLab, and
 cab reconciles the result. While a train merge is pending, completion is held as an action with an
 unknown outcome; the operator's action line describes the pending and dropped train states.
+Bounded live evidence: [GitLab delivery live run](evidence/2026-10-31-gitlab-delivery-live.md) on gitlab.com (Free tier). It
+qualifies push, merge request, ready, handback, pipeline wake, reply and resolve, adoption and the merge. It does not prove a
+self-managed instance's version or settings, merge trains or approvals, and its refused merge rests on a draft, so the
+refusal while a pipeline has not passed is covered by scripted tests only.
 
 On a Jira issue the issue actions use the same lifecycle, granted per Jira project: the target is the
 Jira project ID as the repository, the key's number and the issue ID as the node ID. Only

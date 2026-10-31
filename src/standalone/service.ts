@@ -185,6 +185,7 @@ import type { CodeHostProviderFactories } from "./code-host.js";
 import type { AdoptFunction } from "./git-fetch.js";
 import type { PushFunction } from "./github-delivery.js";
 import { gitLabDeliveryFactory } from "./gitlab-delivery.js";
+import type { RateLimitPolicy } from "./gitlab-http.js";
 import {
   gitLabCredentialExclusions,
   glabEnvironment,
@@ -516,6 +517,8 @@ export interface StandaloneServiceOptions {
     /** Test-only: the HTTPS push and the fetch of an adopted head, in place of Git. */
     push?: PushFunction;
     adopt?: AdoptFunction;
+    /** Test-only: the clock and waits a GitLab 429 is retried with. */
+    rateLimit?: RateLimitPolicy;
     /** Test-only: how long a status-mapping write's provider call may take. */
     statusWriteTimeoutMs?: number;
   };
@@ -820,6 +823,8 @@ export class StandaloneService {
   private readonly maxFallbackBackoffMs: number;
   private generation: ServiceGeneration | undefined;
   private stopPromise: Promise<void> | undefined;
+  /** Ends the waits of GitLab requests being retried after a 429 when the service stops. */
+  private retryWaits: AbortController | undefined;
   private readonly backgroundRuns = new Set<Promise<void>>();
   private readonly generationsByNotification = new WeakMap<
     Promise<BackgroundFailureDiagnostic>,
@@ -1112,6 +1117,8 @@ export class StandaloneService {
             }
           : null;
       };
+      const retryWaits = new AbortController();
+      this.retryWaits = retryWaits;
       const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
         ...(this.options.delivery?.fetcher
           ? { fetcher: this.options.delivery.fetcher }
@@ -1141,6 +1148,11 @@ export class StandaloneService {
             fetcher: this.options.delivery?.fetcher,
             push: this.options.delivery?.push,
             adopt: this.options.delivery?.adopt,
+            // A stopping service ends the waits of requests it would retry.
+            rateLimit: {
+              ...this.options.delivery?.rateLimit,
+              signal: retryWaits.signal,
+            },
           }),
           ...this.options.delivery?.providerFactories,
         },
@@ -2429,6 +2441,7 @@ export class StandaloneService {
   }
 
   stop(): Promise<void> {
+    this.retryWaits?.abort(new Error("service-stopping"));
     const generation = this.generation;
     if (generation) generation.accepting = false;
     if (this.stopPromise) return this.stopPromise;

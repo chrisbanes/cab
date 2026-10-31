@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DomainPolicyError, type DomainStore } from "../core/domain.js";
 import {
@@ -34,6 +35,13 @@ import {
   mergeGateReasons,
 } from "./github-delivery.js";
 import { type GitLabSeams, codeHostToken } from "./gitlab-credentials.js";
+import {
+  type RateLimitPolicy,
+  TtlCache,
+  cacheTtlMs,
+  fetchRateLimited,
+  readJson,
+} from "./gitlab-http.js";
 
 /** A non-2xx response. Only the status is kept: never a body or a header. */
 class GitLabFailure extends Error {
@@ -166,11 +174,20 @@ export interface GitLabDeliveryOptions {
   host: string;
   /** The project's linked GitLab project on `host` for a numeric ID, or null when it is not linked. */
   link: (repositoryId: string) => { projectPath: string } | null;
-  /** The host's code-host credential, resolved on every use; null when it is unusable. */
+  /** The host's code-host credential; null when it is unusable. A `glab:` login's token is kept briefly by the service. */
   token: () => Promise<string | null>;
   fetcher?: typeof fetch | undefined;
   push?: PushFunction | undefined;
   adopt?: AdoptFunction | undefined;
+  /** How a request waits out a 429; see `RateLimitPolicy`. */
+  rateLimit?: RateLimitPolicy | undefined;
+  /** What the service reuses between its providers: the project's settings and the token's account. */
+  cache?: TtlCache | undefined;
+  /**
+   * Called when GitLab answers 401, to forget a credential it kept. When it returns true the request is sent
+   * once more with a fresh credential.
+   */
+  reauthenticate?: (() => boolean) | undefined;
 }
 
 /**
@@ -194,6 +211,17 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       throw new Error("provider-credential-unavailable");
     return token;
   }
+  /** The account the credential acts as; read once per token, since it changes only with the token. */
+  private async account() {
+    const load = async () => userId.parse(await this.get("/user"));
+    if (!this.options.cache) return load();
+    const token = await this.token();
+    return this.options.cache.get(
+      `account|${this.options.host}|${createHash("sha256").update(token).digest("hex")}`,
+      cacheTtlMs.account,
+      load,
+    );
+  }
   /** For Git: a credential that vanished after preflight is an empty token, which the transport reports as not attempted. */
   private transportToken(): Promise<string> {
     return this.token().catch(() => "");
@@ -204,20 +232,40 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     path: string,
     body?: unknown,
   ): Promise<Response> {
-    const token = await this.token();
     const url = new URL(path, this.origin);
     if (url.origin !== this.origin) throw new Error("provider-origin-mismatch");
-    const response = await (this.options.fetcher ?? fetch)(url.href, {
-      method,
-      redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/json",
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    let response: Response;
+    for (let reauthenticated = false; ; ) {
+      const token = await this.token();
+      // A 429 was not processed, so even a write is sent again once the limit clears.
+      response = await fetchRateLimited(
+        this.options.fetcher ?? fetch,
+        url.href,
+        () => ({
+          method,
+          redirect: "manual",
+          signal: AbortSignal.timeout(15_000),
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: "application/json",
+            ...(body === undefined
+              ? {}
+              : { "content-type": "application/json" }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }),
+        this.options.rateLimit,
+      );
+      // A credential kept from before may have been revoked or have expired: resolve it again, once.
+      if (
+        response.status !== 401 ||
+        reauthenticated ||
+        !this.options.reauthenticate?.()
+      )
+        break;
+      reauthenticated = true;
+      await response.body?.cancel().catch(() => {});
+    }
     // A redirect could carry the token to another origin.
     if (
       response.redirected ||
@@ -234,7 +282,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     return response;
   }
   private async get(path: string): Promise<unknown> {
-    return (await this.send("GET", `/api/v4${path}`)).json();
+    return readJson(await this.send("GET", `/api/v4${path}`));
   }
   /** A write whose response is never trusted: an independent read settles it. */
   private async write(
@@ -254,7 +302,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         "GET",
         `/api/v4${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${next}`,
       );
-      rows.push(...z.array(z.unknown()).parse(await response.json()));
+      rows.push(...z.array(z.unknown()).parse(await readJson(response)));
       next = response.headers.get("x-next-page") || null;
       if (next !== null && !/^[1-9][0-9]{0,5}$/.test(next))
         throw new Error("provider-pages-unreadable");
@@ -266,12 +314,18 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
   private async project(repositoryId: string) {
     return (await this.projectInfo(repositoryId)).path_with_namespace;
   }
-  private async projectInfo(repositoryId: string) {
+  /** `fresh` reads the project again: a merge decides on its settings as they are now, not as they were. */
+  private async projectInfo(repositoryId: string, fresh = false) {
     const link = this.options.link(repositoryId);
     if (!link) throw new Error("provider-repository-mismatch");
-    const value = projectSchema.parse(
-      await this.get(`/projects/${repositoryId}`),
-    );
+    const key = `project|${this.options.host}|${repositoryId}`;
+    if (fresh) this.options.cache?.delete(key);
+    const load = async () =>
+      projectSchema.parse(await this.get(`/projects/${repositoryId}`));
+    // The link is compared on every use, so a cached read can never stand in for another project.
+    const value = this.options.cache
+      ? await this.options.cache.get(key, cacheTtlMs.project, load)
+      : await load();
     if (
       String(value.id) !== repositoryId ||
       value.path_with_namespace.toLowerCase() !==
@@ -305,22 +359,31 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           return null;
         }
       },
-      push: async (request) =>
-        (this.options.push ?? pushTaskCommit)({
+      push: async (request) => {
+        const outcome = await (this.options.push ?? pushTaskCommit)({
           ...request,
           host: this.options.host,
           codeHost: "gitlab",
           nameWithOwner: projectPath,
           token: await this.transportToken(),
-        }),
-      adopt: async (request) =>
-        (this.options.adopt ?? adoptOutsideHead)({
+        });
+        // Git does not say why it failed: resolve the credential again for the next attempt.
+        if (["not-attempted", "rejected-remote", "uncertain"].includes(outcome))
+          this.options.reauthenticate?.();
+        return outcome;
+      },
+      adopt: async (request) => {
+        const outcome = await (this.options.adopt ?? adoptOutsideHead)({
           ...request,
           host: this.options.host,
           codeHost: "gitlab",
           nameWithOwner: projectPath,
           token: await this.transportToken(),
-        }),
+        });
+        if (["not-attempted", "fetch-failed"].includes(outcome))
+          this.options.reauthenticate?.();
+        return outcome;
+      },
     };
   }
   private readonly remotes: BranchRemotes = {
@@ -402,7 +465,10 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     if (!isBranchAction(action) && !isChangeRequestAction(action))
       throw new Error("provider-action-unsupported");
     const repositoryId = action.target.repositoryId;
-    const project = await this.projectInfo(repositoryId);
+    const project = await this.projectInfo(
+      repositoryId,
+      action.kind === "pr.merge",
+    );
     const projectPath = project.path_with_namespace;
     const recorded = {
       repositoryPath: `/projects/${repositoryId}`,
@@ -634,7 +700,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       const id = a.target.repositoryId;
       if (a.kind === "pr.merge") return await this.inspectMerge(record, a);
       const marker = `<!-- cab-operation:${record.operationId} -->`;
-      const user = userId.parse(await this.get("/user"));
+      const user = await this.account();
       let receipt: ProviderActionObservation["receipt"] = null;
       if (a.kind === "pr.create") {
         const query = new URLSearchParams({
@@ -911,18 +977,25 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
 
 /**
  * Builds the GitLab provider for a project's repository link on `host`. The credential is the
- * installation's code-host credential for that host, read again on every use; it is only the
+ * installation's code-host credential for that host (an `env:` variable read on every use, a `glab:` login's
+ * token kept for a few minutes, see `cacheTtlMs`); it is only the
  * identity that acts, and the project's delivery grants still decide what may be done.
  */
 export function gitLabDeliveryFactory(
   domain: Pick<DomainStore, "repositoryLinks" | "codeHostCredentials"> &
+    Partial<Pick<DomainStore, "codeHostCredentialEpoch">> &
     Parameters<typeof codeHostToken>[0],
   seams: GitLabSeams & {
     fetcher?: typeof fetch | undefined;
     push?: PushFunction | undefined;
     adopt?: AdoptFunction | undefined;
+    rateLimit?: RateLimitPolicy | undefined;
+    /** Test-only: the clock the service's GitLab reads are kept by. */
+    now?: (() => number) | undefined;
   },
 ): CodeHostProviderFactory {
+  // One memory for the service: each action builds its own provider, and these reads outlive it.
+  const cache = new TtlCache(seams.now);
   return (projectId, _policy, host) =>
     new GitLabHttpDeliveryProvider({
       host,
@@ -939,9 +1012,27 @@ export function gitLabDeliveryFactory(
           ? { projectPath: link.projectPath }
           : null;
       },
-      token: () => codeHostToken(domain, seams, host),
+      // A `glab` login is resolved by running glab, which asks GitLab to check the token, so it is kept
+      // for a few minutes (and dropped on a 401). An `env:` variable is read as it is, every time.
+      token: () => {
+        const ref = domain
+          .codeHostCredentials()
+          .find((c) => c.host === host)?.credentialRef;
+        return ref?.startsWith("glab:")
+          ? cache.get(
+              // A credential configured again, even to the same reference, is resolved again.
+              `token|${host}|${ref}|${domain.codeHostCredentialEpoch?.() ?? 0}`,
+              cacheTtlMs.token,
+              () => codeHostToken(domain, seams, host),
+              (token) => token !== null,
+            )
+          : codeHostToken(domain, seams, host);
+      },
+      reauthenticate: () => cache.drop(`token|${host}|`),
       fetcher: seams.fetcher,
       push: seams.push,
       adopt: seams.adopt,
+      rateLimit: seams.rateLimit,
+      cache,
     });
 }

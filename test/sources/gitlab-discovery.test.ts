@@ -148,10 +148,12 @@ test("failures map to reason codes that never reveal the token or URL", async ()
       if (made instanceof Error) throw made;
       return made;
     });
+    // No retries: a 429 is waited out elsewhere (gitlab-rate-limit.test.ts); here it is just a reason.
     const reader = new GitLabDiscoveryReader(
       "gitlab.example.com",
       token,
       f.fetcher,
+      { maxRetries: 0 },
     );
     assert.equal(await reason(reader.user()), expected);
     assert.equal(f.calls.length, 1, "a 3xx is not followed");
