@@ -1,4 +1,9 @@
 import { sourceCredentialExplanation } from "../../src/standalone/github-source-credential.js";
+import {
+  commandNetworkAppliesNote,
+  commandNetworkDisclosure,
+  projectCommandNetworkLine,
+} from "../../src/operator/command-network-copy.js";
 import { sourceCredentialCopy } from "../../web/src/settings-view.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -138,6 +143,22 @@ test("project and profile change lists name each change without private values",
       "Instructions edited",
     ],
   );
+  assert.deepEqual(
+    projectChanges(
+      { ...c, project: { ...c.project, paused: true } },
+      { name: "Atlas", leadProfileId: mira, paused: false },
+    ),
+    ["Unpause project"],
+  );
+  // The command network switch lists both directions, and only against a loaded setting.
+  const network = (saved: boolean, next: boolean) =>
+    projectChanges(
+      { ...c, commandNetworkAccess: saved },
+      { name: "Atlas", leadProfileId: mira, commandNetworkAccess: next },
+    );
+  assert.deepEqual(network(false, true), ["Command network access enabled"]);
+  assert.deepEqual(network(true, false), ["Command network access disabled"]);
+  assert.deepEqual(network(true, true), []);
   // An unedited reveal adds no line and no command field, and the text is never a line.
   const base = { name: "Atlas", leadProfileId: mira, paused: false };
   assert.deepEqual(projectChanges(c, base, "PRIVATE"), []);
@@ -249,6 +270,13 @@ test("routing lines and command keep guidance out unless edited", () => {
       "OLD",
     ),
     ["Routing guidance cleared"],
+  );
+  assert.deepEqual(
+    routingChanges(
+      { ...c, routing: { ...c.routing, enabled: true } },
+      { enabled: false, candidateProfileIds: [worker] },
+    ),
+    ["Routing disabled"],
   );
   assert.deepEqual(
     routingChanges(
@@ -847,6 +875,24 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   const summary = projectStateSummary(c, null, []);
   assert.equal(summary.state[0], "Lead: Mira · repository access: acme/atlas");
   assert.equal(summary.next, "Nothing needs attention here.");
+  // A source that is saved but not active reads inactive, and an unusable credential is the next step.
+  assert.equal(summary.state[1], "GitHub S-1 active · not synced");
+  assert.equal(summary.state[2], "GitHub S-3 inactive · not synced");
+  const unusable = projectStateSummary(
+    {
+      ...c,
+      source: {
+        ...c.source,
+        credential: { source: "env", usable: false },
+      } as ProjectConfigurationData["source"],
+    },
+    null,
+    [],
+  );
+  assert.equal(
+    unusable.next,
+    "Set or change the credential in GitHub source settings, then preview this source version.",
+  );
   assert.deepEqual(
     holdPills({
       stop: false,
@@ -1157,9 +1203,9 @@ test("the phone summary appends stored counts and points to readiness when nothi
     observations({ ...zero, complete: false }),
     [],
   );
-  assert.match(
-    partial.state[1] ?? "",
-    /partial read; counts may be incomplete$/,
+  assert.equal(
+    partial.state[1],
+    "GitHub S-1 active · partial · 3 observed · 3 open · 0 match label `ready` · partial read; counts may be incomplete",
   );
   assert.equal(partial.next, "Nothing needs attention here.");
   const none = projectStateSummary(c, observations(null), []);
@@ -1370,4 +1416,23 @@ test("source status lines are sentences with the clock label", () => {
     );
   assert.equal(observationLabel(row("unavailable")), "Sync unknown");
   assert.equal(observationLabel(row("complete")), `Synced ${time}`);
+});
+
+test("command network access reads the saved setting, what applies and what it exposes", () => {
+  assert.equal(
+    projectCommandNetworkLine(false),
+    "Command network access is disabled for this project.",
+  );
+  assert.equal(
+    projectCommandNetworkLine(true),
+    "Command network access is enabled for this project's Codex turns; Claude Code turns keep it denied.",
+  );
+  assert.equal(
+    commandNetworkAppliesNote,
+    "Applies to turns admitted after the change; running turns keep their policy.",
+  );
+  assert.equal(
+    commandNetworkDisclosure,
+    "Network-enabled commands can reach whatever credentials and logins the host exposes.",
+  );
 });
