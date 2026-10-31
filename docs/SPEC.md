@@ -2346,12 +2346,14 @@ valid across a task-version change made only by cab's own confirmed `issue.close
 closure and the readiness it removes, while the issue is observed closed. A source read
 that still lists the issue open does not end it once a later read shows the issue
 closed with nothing else changed. Any other task change (a title or description edit, or
-a readiness label or field change, including one in the same read), a closure outside
-cab, an unconfirmed close or a reopen requires a new settlement. The rule is the same for
-GitHub and Jira. Two narrow races stay accepted limits: a reopen and manual re-close that
-both happen before an explicit closure's first proof (the attribution limit below), and,
-for Jira, a person's move to an open status outside the readiness rule that lands just
-before cab's close, because the closure read exempts a status condition.
+a readiness label or field change that moves readiness, including one in the same read),
+a closure outside cab, an unconfirmed close or a reopen requires a new settlement. The
+rule is the same for GitHub and Jira. Three narrow limits stay accepted: a reopen and
+manual re-close that both happen before an explicit closure's first proof (the
+attribution limit below); for Jira, a person's move to an open status outside the
+readiness rule that lands just before cab's close, because the closure read exempts a
+status condition; and a label or field change that leaves the readiness rule satisfied,
+which moves no task version and so is not detected when it coincides with the close.
 
 Only proven own closure permits the retained lead's completion continuation. The
 service obtains a fresh closed-issue snapshot before open-only source reconciliation;
