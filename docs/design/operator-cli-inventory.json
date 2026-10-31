@@ -950,7 +950,7 @@
       "retry": "The journal key and --request-id replay once; operation get reads the assignment.apply receipt.",
       "observation": "real",
       "state": "bounded",
-      "gap": "Ran live before turn 2, but adopting on a completed lead advances it past its result's version, so task follow-up then exits 4 and the lead cannot be resumed (src/core/domain.ts assignment.apply; src/core/coordination.ts resumableResult; test/cli8-journey-harness.test.ts). The live journey adopted after a follow-up under Stop. Recorded for decision, not repaired."
+      "gap": "Ran live before turn 2, but adopting on a completed lead advances it past its result's version, so task follow-up then exits 4 and the lead cannot be resumed (src/core/domain.ts assignment.apply; src/core/coordination.ts resumableResult; test/operator/operator-cli-adopt.test.ts). The live journey adopted after a follow-up under Stop. Recorded for decision, not repaired."
     },
     {
       "id": "inbox list",
