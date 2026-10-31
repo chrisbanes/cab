@@ -2070,6 +2070,13 @@ project; a thread resolves only when the credential user resolved it. GitLab run
 with `/command` in a description or note as the credential user, so a create, edit or reply whose
 text has one is held as `provider-preflight-held` before any write.
 
+A GitLab request that is answered 429 was not processed, so cab sends it again, a write included, after the
+wait the response names: `Retry-After` in seconds, otherwise `RateLimit-Reset` (a Unix time) against its clock,
+and otherwise a doubling wait from 15 seconds, because the Projects, Groups and Users APIs send no rate-limit
+headers on a 429. It makes at most 3 retries and waits at most 60 seconds in all for one request. Past either
+bound the 429 is the outcome: a read is unavailable (an action's readback stays unproved), and a write is a
+definitive `provider-http-429`. Only 429 is retried, and credential discovery's GitLab reads wait the same way.
+
 A GitLab merge is gated on GitLab's own verdict. The merge request reports no merge blocker only when it
 is open, not a draft, its `detailed_merge_status` is exactly `mergeable` and every required check of the
 project's delivery configuration passed on the head commit (the head pipeline, named `pipeline`).

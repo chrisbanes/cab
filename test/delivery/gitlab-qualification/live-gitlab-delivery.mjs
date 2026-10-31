@@ -12,14 +12,16 @@ import { writeFileSync } from "node:fs";
 import { glabToken } from "../../../dist/src/standalone/glab-credential.js";
 import {
   GitLabGuard,
+  livePaceMs,
   liveInvocation,
+  maxWrites,
 } from "../../../dist/test/delivery/gitlab-qualification/gitlab-guard.js";
 import { runGitLabQualification } from "../../../dist/test/delivery/gitlab-qualification/gitlab-journey.js";
 
 const { resultPath } = liveInvocation(process.argv.slice(2), process.env);
 
 const evidence = await runGitLabQualification({
-  guard: new GitLabGuard(),
+  guard: new GitLabGuard(maxWrites, livePaceMs),
   fetcher: fetch,
   source: "/Users/chris/dev/Banes-project",
   credentialRef: "glab:gitlab.com",

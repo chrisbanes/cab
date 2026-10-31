@@ -16,11 +16,16 @@ import {
   adoptOutsideHead,
 } from "../../../src/standalone/git-fetch.js";
 import { pushTaskCommit } from "../../../src/standalone/git-push.js";
+import {
+  type RateLimitPolicy,
+  fetchRateLimited,
+} from "../../../src/standalone/gitlab-http.js";
 import type { PushFunction } from "../../../src/standalone/github-delivery.js";
 import { GitLabHttpDeliveryProvider } from "../../../src/standalone/gitlab-delivery.js";
 import { GitLabDiscoveryReader } from "../../../src/standalone/gitlab-discovery.js";
 import { publicationWorld } from "../../fixtures/delivery-integration.js";
 import { git } from "../../fixtures/publication.js";
+import { cleanUp, harnessApi } from "./gitlab-cleanup.js";
 import { type GitLabGuard, qualificationProject } from "./gitlab-guard.js";
 
 const { host, id: repositoryId, path: projectPath } = qualificationProject;
@@ -47,6 +52,8 @@ export interface GitLabQualificationOptions {
   pause?: () => Promise<void>;
   /** The most polls one wait makes. */
   maxPolls?: number;
+  /** How a 429 is waited out, by the harness's own calls and by the service. */
+  rateLimit?: RateLimitPolicy;
 }
 
 type World = Awaited<ReturnType<typeof publicationWorld>>;
@@ -79,6 +86,10 @@ export interface GitLabEvidence {
   steps: Record<"probe" | "a" | "b", Step[]>;
   writes?: { count: number; merges: number };
   requests?: GitLabGuard["log"];
+  /** Requests sent, by method and route shape. */
+  requestCounts?: GitLabGuard["counts"];
+  /** Each 429 GitLab answered: the rate-limit headers it carried and its text. */
+  rateLimited?: GitLabGuard["rateLimited"];
 }
 
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
@@ -158,30 +169,11 @@ export async function runGitLabQualification(
       result: "passed",
       ...(detail === undefined ? {} : { detail }),
     });
-  const api = async (
-    path: string,
-    init: { method?: string; body?: unknown; token?: string } = {},
-  ) => {
-    const token = init.token ?? credentials.env ?? credentials.glab;
-    assert.ok(token, "harness credential unavailable");
-    const response = await fetcher(`https://${host}${path}`, {
-      method: init.method ?? "GET",
-      redirect: "manual",
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/json",
-        ...(init.body === undefined
-          ? {}
-          : { "content-type": "application/json" }),
-      },
-      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-    });
-    const text = await response.text();
-    return {
-      status: response.status,
-      json: (text ? JSON.parse(text) : null) as unknown,
-    };
-  };
+  const api = harnessApi(
+    fetcher,
+    () => credentials.env ?? credentials.glab,
+    options.rateLimit,
+  );
 
   const temp = realpathSync(mkdtempSync(join(tmpdir(), "cab-gitlab-qual-")));
   const worlds: World[] = [];
@@ -242,6 +234,7 @@ export async function runGitLabQualification(
             fetcher,
             push: guard.guardPush(options.push ?? pushTaskCommit),
             adopt: guard.guardAdopt(options.adopt ?? adoptOutsideHead),
+            ...(options.rateLimit ? { rateLimit: options.rateLimit } : {}),
           },
         },
         { source: clone, deliveryMode: mode },
@@ -407,7 +400,12 @@ export async function runGitLabQualification(
 
       // The probe: both credentials authenticate with Bearer on the account, project and delivery reads.
       try {
-        evidence.probe = await probe(credentials, fetcher, mr);
+        evidence.probe = await probe(
+          credentials,
+          fetcher,
+          mr,
+          options.rateLimit,
+        );
         steps.probe.push({ step: "bearer reads", result: "passed" });
       } catch (error) {
         steps.probe.push({ step: "bearer reads", result: "failed" });
@@ -679,52 +677,17 @@ export async function runGitLabQualification(
     );
   } finally {
     // Cleanup acts only on what the run recorded, and counts toward pass or fail.
-    const cleanup: Array<{ resource: string; result: string }> = [];
-    // Each resource is cleaned on its own, so one failure leaves no other behind.
-    const attempt = async (resource: string, work: () => Promise<string>) => {
-      try {
-        cleanup.push({ resource, result: await work() });
-      } catch (error) {
-        cleanup.push({
-          resource,
-          result: `failed: ${clean(error instanceof Error ? error.message : error)}`,
-        });
-      }
-    };
-    for (const [iid] of guard.requests)
-      await attempt(`merge_request !${iid}`, async () => {
-        const route = `${base}/merge_requests/${iid}`;
-        const state = (): Promise<string> =>
-          api(route).then((r) => shapes.mergeRequest.parse(r.json).state);
-        const current = await state();
-        if (current !== "opened") return current;
-        if (iid === pendingMerge?.iid) return "pending-merge";
-        await api(route, { method: "PUT", body: { state_event: "close" } });
-        return state();
-      });
-    for (const branch of guard.branches)
-      await attempt(
-        `branch ${branch.replace(/^cab\/.*/, "cab/<task>")}`,
-        async () => {
-          // A branch under a merge that may still land is left with it.
-          if (branch === pendingMerge?.branch) return "pending-merge";
-          const route = `${base}/repository/branches/${encodeURIComponent(branch)}`;
-          if ((await api(route)).status === 200)
-            await api(route, { method: "DELETE" });
-          return (await api(route)).status === 404 ? "deleted" : "present";
-        },
-      );
-    evidence.cleanupReads = cleanup;
-    evidence.cleanup = cleanup.every((c) =>
-      ["closed", "merged", "deleted", "pending-merge"].includes(c.result),
-    )
-      ? "verified"
-      : "failed";
+    Object.assign(evidence, await cleanUp(api, guard, pendingMerge, clean));
     for (const w of worlds) await w.f.close().catch(() => {});
     rmSync(temp, { recursive: true, force: true });
   }
   evidence.writes = { count: guard.writeCount, merges: guard.mergeCount };
   evidence.requests = guard.log;
+  evidence.requestCounts = guard.counts;
+  evidence.rateLimited = guard.rateLimited.map((r) => ({
+    ...r,
+    body: clean(r.body),
+  }));
   return evidence;
 }
 
@@ -736,6 +699,7 @@ async function probe(
   credentials: { env: string | undefined; glab: string | undefined },
   fetcher: typeof fetch,
   mr: { number: number; id: number; sha: string },
+  rateLimit?: RateLimitPolicy,
 ): Promise<NonNullable<GitLabEvidence["probe"]>> {
   const policy = { requiredChecks: [] } as unknown as DeliveryPolicy;
   const result = {} as Record<"env" | "glab", CredentialProbe>;
@@ -746,14 +710,19 @@ async function probe(
     if (!token) throw new Error(`probe: ${name} credential unavailable`);
     const status = async (path: string) =>
       (
-        await fetcher(`https://${host}${path}`, {
-          method: "GET",
-          redirect: "manual",
-          headers: { authorization: `Bearer ${token}` },
-        })
+        await fetchRateLimited(
+          fetcher,
+          `https://${host}${path}`,
+          () => ({
+            method: "GET",
+            redirect: "manual",
+            headers: { authorization: `Bearer ${token}` },
+          }),
+          rateLimit,
+        )
       ).status;
     const reads = {} as Record<"user" | "projects" | "delivery", "passed">;
-    const reader = new GitLabDiscoveryReader(host, token, fetcher);
+    const reader = new GitLabDiscoveryReader(host, token, fetcher, rateLimit);
     const { username } = await reader.user();
     reads.user = "passed";
     const { projects } = await reader.projects();
@@ -764,6 +733,7 @@ async function probe(
       link: (id) => (id === repositoryId ? { projectPath } : null),
       token: async () => token,
       fetcher,
+      rateLimit,
     });
     await provider.inspectPr(
       {

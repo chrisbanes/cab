@@ -7,8 +7,13 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { createFakeGlab } from "../fixtures/fake-glab.js";
 import { git } from "../fixtures/publication.js";
-import { scriptedGitLabRemote } from "../fixtures/gitlab-remote.js";
 import {
+  gitLabMergeRequest,
+  scriptedGitLabRemote,
+} from "../fixtures/gitlab-remote.js";
+import { cleanupGitLabRun } from "./gitlab-qualification/gitlab-cleanup.js";
+import {
+  cleanupInvocation,
   GitLabGuard,
   GuardDenied,
   liveInvocation,
@@ -345,4 +350,136 @@ test("the live script refuses to start without the fixture credential, before an
   );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Refusing execution/);
+});
+
+const limited = () =>
+  new Response("Retry later\n", {
+    status: 429,
+    headers: { "retry-after": "30", "ratelimit-limit": "100" },
+  });
+
+test("a 429 mid-run is waited out by the service and the harness, and the run records what GitLab sent", async (t) => {
+  const w = world(t);
+  const waits: number[] = [];
+  let once = 2;
+  w.remote.state.intercept = (method, path) =>
+    method === "GET" && /\/merge_requests\/\d+$/.test(path) && once-- > 0
+      ? limited()
+      : undefined;
+  const evidence = await w.run({
+    rateLimit: { sleep: async (ms) => void waits.push(ms) },
+  });
+  assert.equal(evidence.failure, undefined);
+  assert.equal(evidence.qualification, "passed");
+  assert.deepEqual(waits, [30_000, 30_000]);
+  assert.deepEqual(
+    evidence.rateLimited?.map((r) => [r.headers, r.retryAfter, r.body]),
+    [
+      [["ratelimit-limit", "retry-after"], "30", "Retry later\n"],
+      [["ratelimit-limit", "retry-after"], "30", "Retry later\n"],
+    ],
+  );
+  assert.ok((evidence.requestCounts?.["GET /api/v4/projects/:n"] ?? 0) > 0);
+});
+
+test("cleanup that was blocked can be run again against the run, or one merge request, without a journey", async (t) => {
+  for (const by of ["run", "mr"] as const) {
+    const w = world(t);
+    const noWait = { sleep: async () => {}, maxRetries: 0 };
+    // The writes of cleanup are rate limited and the instance sends plain text, as it did in the live run.
+    w.remote.state.intercept = (method, path) =>
+      (method === "PUT" && /\/merge_requests\/\d+$/.test(path)) ||
+      method === "DELETE"
+        ? limited()
+        : undefined;
+    const first = await w.run({ rateLimit: noWait });
+    assert.equal(first.qualification, "passed");
+    assert.equal(first.cleanup, "failed");
+    const left = w.remote.state.mergeRequests.filter(
+      (m) => m.state === "opened",
+    );
+    assert.equal(left.length, 1);
+    assert.equal(w.remote.state.heads.size, 2);
+    w.remote.state.intercept = undefined;
+    const again = await cleanupGitLabRun({
+      guard: new GitLabGuard(),
+      fetcher: w.remote.fetcher,
+      token: () => envToken,
+      ...(by === "run" ? { run: first.runId } : { mr: Number(left[0]?.iid) }),
+    });
+    assert.equal(again.cleanup, "verified");
+    assert.equal(
+      w.remote.state.mergeRequests.filter((m) => m.state === "opened").length,
+      0,
+    );
+    // The branch of the merged request goes with a run id; one merge request leaves the other's branch.
+    assert.equal(w.remote.state.heads.size, by === "run" ? 0 : 1);
+  }
+});
+
+test("a cleanup touches only a run's own merge requests", async (t) => {
+  const w = world(t);
+  const other = {
+    id: 5,
+    iid: 5,
+    source_branch: "feature/unrelated",
+    title: "Qualification 20260101000000-abcd a",
+  };
+  w.remote.state.mergeRequests.push(
+    gitLabMergeRequest({
+      ...other,
+      source_project_id: Number(id),
+      target_project_id: Number(id),
+    }),
+    gitLabMergeRequest({
+      id: 6,
+      iid: 6,
+      source_branch: "cab/real",
+      title: "Someone's change",
+      source_project_id: Number(id),
+      target_project_id: Number(id),
+    }),
+  );
+  w.remote.state.heads.set("feature/unrelated", "a".repeat(40));
+  w.remote.state.heads.set("cab/real", "b".repeat(40));
+  for (const mr of [{ mr: 5 }, { mr: 6 }, { run: "20260101000000-abcd" }]) {
+    const out = await cleanupGitLabRun({
+      guard: new GitLabGuard(),
+      fetcher: w.remote.fetcher,
+      token: () => envToken,
+      ...mr,
+    });
+    assert.equal(out.found, 0);
+  }
+  assert.deepEqual(
+    w.remote.state.mergeRequests.map((m) => m.state),
+    ["opened", "opened"],
+  );
+  assert.equal(w.remote.state.heads.size, 2);
+  assert.deepEqual(written(w), []);
+});
+
+test("the cleanup invocation needs --live, exactly one of a run id or an IID, and the fixture credential", () => {
+  const env = { CAB_GITLAB_TOKEN: "set" };
+  const run = "20261031090415-5b1c";
+  assert.deepEqual(cleanupInvocation(["--live", "--run", run], env), { run });
+  assert.deepEqual(
+    cleanupInvocation(["--live", "--mr", "2", "--result", "/tmp/r.json"], env),
+    { mr: 2, resultPath: "/tmp/r.json" },
+  );
+  for (const args of [
+    [],
+    ["--run", run],
+    ["--live"],
+    ["--live", "--run", run, "--mr", "2"],
+    ["--live", "--run", "latest"],
+    ["--live", "--mr", "0"],
+    ["--live", "--mr", "2", "extra"],
+    ["--live", "--mr", "2", "--result", "relative.json"],
+  ])
+    assert.throws(() => cleanupInvocation(args, env), /Refusing execution/);
+  assert.throws(
+    () => cleanupInvocation(["--live", "--mr", "2"], {}),
+    /Refusing execution/,
+  );
 });

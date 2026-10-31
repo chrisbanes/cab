@@ -34,6 +34,11 @@ import {
   mergeGateReasons,
 } from "./github-delivery.js";
 import { type GitLabSeams, codeHostToken } from "./gitlab-credentials.js";
+import {
+  type RateLimitPolicy,
+  fetchRateLimited,
+  readJson,
+} from "./gitlab-http.js";
 
 /** A non-2xx response. Only the status is kept: never a body or a header. */
 class GitLabFailure extends Error {
@@ -171,6 +176,8 @@ export interface GitLabDeliveryOptions {
   fetcher?: typeof fetch | undefined;
   push?: PushFunction | undefined;
   adopt?: AdoptFunction | undefined;
+  /** How a request waits out a 429; see `RateLimitPolicy`. */
+  rateLimit?: RateLimitPolicy | undefined;
 }
 
 /**
@@ -207,17 +214,23 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     const token = await this.token();
     const url = new URL(path, this.origin);
     if (url.origin !== this.origin) throw new Error("provider-origin-mismatch");
-    const response = await (this.options.fetcher ?? fetch)(url.href, {
-      method,
-      redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/json",
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    // A 429 was not processed, so even a write is sent again once the limit clears.
+    const response = await fetchRateLimited(
+      this.options.fetcher ?? fetch,
+      url.href,
+      () => ({
+        method,
+        redirect: "manual",
+        signal: AbortSignal.timeout(15_000),
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/json",
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }),
+      this.options.rateLimit,
+    );
     // A redirect could carry the token to another origin.
     if (
       response.redirected ||
@@ -234,7 +247,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     return response;
   }
   private async get(path: string): Promise<unknown> {
-    return (await this.send("GET", `/api/v4${path}`)).json();
+    return readJson(await this.send("GET", `/api/v4${path}`));
   }
   /** A write whose response is never trusted: an independent read settles it. */
   private async write(
@@ -254,7 +267,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         "GET",
         `/api/v4${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${next}`,
       );
-      rows.push(...z.array(z.unknown()).parse(await response.json()));
+      rows.push(...z.array(z.unknown()).parse(await readJson(response)));
       next = response.headers.get("x-next-page") || null;
       if (next !== null && !/^[1-9][0-9]{0,5}$/.test(next))
         throw new Error("provider-pages-unreadable");
@@ -921,6 +934,7 @@ export function gitLabDeliveryFactory(
     fetcher?: typeof fetch | undefined;
     push?: PushFunction | undefined;
     adopt?: AdoptFunction | undefined;
+    rateLimit?: RateLimitPolicy | undefined;
   },
 ): CodeHostProviderFactory {
   return (projectId, _policy, host) =>
@@ -943,5 +957,6 @@ export function gitLabDeliveryFactory(
       fetcher: seams.fetcher,
       push: seams.push,
       adopt: seams.adopt,
+      rateLimit: seams.rateLimit,
     });
 }

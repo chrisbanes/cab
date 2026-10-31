@@ -185,6 +185,7 @@ import type { CodeHostProviderFactories } from "./code-host.js";
 import type { AdoptFunction } from "./git-fetch.js";
 import type { PushFunction } from "./github-delivery.js";
 import { gitLabDeliveryFactory } from "./gitlab-delivery.js";
+import type { RateLimitPolicy } from "./gitlab-http.js";
 import {
   gitLabCredentialExclusions,
   glabEnvironment,
@@ -516,6 +517,8 @@ export interface StandaloneServiceOptions {
     /** Test-only: the HTTPS push and the fetch of an adopted head, in place of Git. */
     push?: PushFunction;
     adopt?: AdoptFunction;
+    /** Test-only: the clock and waits a GitLab 429 is retried with. */
+    rateLimit?: RateLimitPolicy;
     /** Test-only: how long a status-mapping write's provider call may take. */
     statusWriteTimeoutMs?: number;
   };
@@ -1141,6 +1144,7 @@ export class StandaloneService {
             fetcher: this.options.delivery?.fetcher,
             push: this.options.delivery?.push,
             adopt: this.options.delivery?.adopt,
+            rateLimit: this.options.delivery?.rateLimit,
           }),
           ...this.options.delivery?.providerFactories,
         },

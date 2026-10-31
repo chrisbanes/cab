@@ -286,6 +286,8 @@ export function scriptedGitLabRemote(options: { repositoryId: string }) {
               m.source_branch === query.get("source_branch")) &&
             (!query.get("target_branch") ||
               m.target_branch === query.get("target_branch")) &&
+            (!query.get("search") ||
+              m.title.includes(query.get("search") ?? "")) &&
             (!query.get("author_id") ||
               String(m.author.id) === query.get("author_id")),
         ),

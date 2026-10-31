@@ -8,6 +8,8 @@ export const qualificationProject = {
   path: "banes3/Banes-project",
   defaultBranch: "main",
 } as const;
+/** The least time between two requests of a live run, so it stays far below GitLab's per-minute limits. */
+export const livePaceMs = 300;
 /** Provider writes (API writes and Git pushes) one run may make. */
 export const maxWrites = 16;
 
@@ -42,19 +44,38 @@ export class GitLabGuard {
   readonly log: Array<{ route: string; status: number | null }> = [];
   /** Every request, push or fetch the guard refused; a clean run has none. */
   readonly denied: string[] = [];
+  /** Requests sent, by method and route shape, so a rate limit can be traced to what caused it. */
+  readonly counts: Record<string, number> = {};
+  /** Each 429 GitLab answered: the rate-limit headers it carried (names, and the wait it named) and its text. */
+  readonly rateLimited: Array<{
+    route: string;
+    headers: string[];
+    retryAfter: string | null;
+    body: string;
+  }> = [];
+  private lastSent = 0;
   private writes = 0;
   private merges = 0;
   private setupDiscussions = 0;
   private setupCommits = 0;
   /** Merge requests whose merge the guard may let through, each once. */
   private readonly mergeable = new Set<number>();
-  constructor(private readonly limit = maxWrites) {}
+  /** `paceMs` is the least time between two requests, so the run's own rate stays well below GitLab's limits. */
+  constructor(
+    private readonly limit = maxWrites,
+    private readonly paceMs = 0,
+  ) {}
 
   get writeCount() {
     return this.writes;
   }
   get mergeCount() {
     return this.merges;
+  }
+  /** Records a merge request and branch an earlier run created, so a cleanup may close and delete them. */
+  recordExisting(iid: number, id: number, branch: string) {
+    this.requests.set(iid, { id, iid });
+    this.branches.add(branch);
   }
   /** Allows the one merge of this merge request. */
   allowMerge(iid: number) {
@@ -104,13 +125,45 @@ export class GitLabGuard {
           : {};
       if (method === "GET") this.readAllowed(url);
       else this.writeAllowed(method, url, body);
+      this.count(method, url);
+      const wait = this.lastSent + this.paceMs - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      this.lastSent = Date.now();
       const response = await next(input, init);
+      if (response.status === 429)
+        await this.noteRateLimit(method, url, response);
       if (method !== "GET") {
         this.done(response.status);
         await this.record(method, url, response);
       }
       return response;
     }) as typeof fetch;
+  }
+
+  /** The route with identifiers removed: `GET /projects/:id/merge_requests/:n/discussions`. */
+  private count(method: string, url: URL) {
+    const shape = url.pathname
+      .replace(/\/[0-9]+(?=\/|$)/g, "/:n")
+      .replace(/(?<=\/branches\/).+$/, ":branch")
+      .replace(/(?<=\/discussions\/)[0-9a-f]+/, ":id");
+    this.counts[`${method} ${shape}`] =
+      (this.counts[`${method} ${shape}`] ?? 0) + 1;
+  }
+  private async noteRateLimit(method: string, url: URL, response: Response) {
+    const headers = [...response.headers.keys()].filter((name) =>
+      /^(ratelimit|retry-after)/.test(name),
+    );
+    this.rateLimited.push({
+      route: `${method} ${url.pathname.replace(/\/[0-9]+(?=\/|$)/g, "/:n")}`,
+      headers,
+      retryAfter: response.headers.get("retry-after"),
+      body: (
+        await response
+          .clone()
+          .text()
+          .catch(() => "")
+      ).slice(0, 80),
+    });
   }
 
   private readAllowed(url: URL) {
@@ -318,4 +371,40 @@ export function liveInvocation(
       "Refusing execution: require --live [--result ABSOLUTE_PATH], CAB_GITLAB_TOKEN set, and none of GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or OAUTH_TOKEN",
     );
   return { resultPath };
+}
+
+/**
+ * Whether a command line and environment may start a cleanup of an earlier run: `--live`, one of `--run`
+ * (a run id) or `--mr` (a merge request IID), optionally `--result` with an absolute path, and the fixture
+ * credential set.
+ */
+export function cleanupInvocation(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): { run?: string; mr?: number; resultPath?: string } {
+  const value = (flag: string) => {
+    const at = args.indexOf(flag);
+    return at < 0 ? undefined : args[at + 1];
+  };
+  const run = value("--run"),
+    mr = value("--mr"),
+    resultPath = value("--result");
+  const flags = [run, mr, resultPath].filter((v) => v !== undefined).length;
+  if (
+    !args.includes("--live") ||
+    args.length !== 1 + 2 * flags ||
+    (run === undefined) === (mr === undefined) ||
+    (run !== undefined && !/^\d{14}-[0-9a-f]{4}$/.test(run)) ||
+    (mr !== undefined && !/^[1-9][0-9]{0,8}$/.test(mr)) ||
+    (resultPath !== undefined && !isAbsolute(resultPath)) ||
+    !env.CAB_GITLAB_TOKEN
+  )
+    throw new Error(
+      "Refusing execution: require --live and one of --run RUN_ID or --mr IID, optionally --result ABSOLUTE_PATH, with CAB_GITLAB_TOKEN set",
+    );
+  return {
+    ...(run === undefined ? {} : { run }),
+    ...(mr === undefined ? {} : { mr: Number(mr) }),
+    ...(resultPath === undefined ? {} : { resultPath }),
+  };
 }
