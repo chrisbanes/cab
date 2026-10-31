@@ -30,6 +30,10 @@ import {
   withHostileGitEnvironment,
 } from "../fixtures/git-environment.js";
 import {
+  processIsAlive,
+  waitForProcessGone,
+} from "../fixtures/process-gone.js";
+import {
   SqliteWorkspaceBindingStore,
   WorkspaceManager,
   type TaskWorkspaceBinding,
@@ -106,24 +110,6 @@ async function waitForGitEvent(
   throw new Error(
     `Controlled Git fixture did not report the expected event: ${JSON.stringify(controlled.events())}`,
   );
-}
-
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-}
-
-async function waitForProcessGone(pid: number, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  while (processIsAlive(pid)) {
-    if (Date.now() >= deadline)
-      throw new Error(`Git child ${pid} is alive ${timeoutMs}ms after SIGKILL`);
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-  }
 }
 
 async function waitForChildExit(

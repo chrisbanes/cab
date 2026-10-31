@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "../fixtures/temp.js";
+import { waitForProcessGone } from "../fixtures/process-gone.js";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -203,20 +204,6 @@ async function waitForControlledGitEvent(
         })),
     )}`,
   );
-}
-
-async function waitForProcessGone(pid: number, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
-    }
-    if (Date.now() >= deadline)
-      throw new Error(`Git child ${pid} is alive ${timeoutMs}ms after SIGKILL`);
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-  }
 }
 
 async function fixture(
