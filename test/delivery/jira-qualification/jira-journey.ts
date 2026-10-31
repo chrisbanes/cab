@@ -89,6 +89,11 @@ export interface JiraEvidence {
     blocker: { id: string; key: string };
   };
   mergeRequest?: { iid: number };
+  /** The links issue A showed: read directly after the link was made, and in the latest search. */
+  links?: {
+    afterCreate?: ReturnType<typeof linkSummary>;
+    lastSearch?: ReturnType<typeof linkSummary>;
+  };
   /** Polls the harness's own JQL read made before the index showed what the step waited for. */
   polls: Record<string, number>;
   steps: Step[];
@@ -110,6 +115,13 @@ export interface JiraEvidence {
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
 const id = z.string().regex(/^\d{1,20}$/);
 /** The few fields of each response the run reads; anything else is a failure, not a guess. */
+const linkType = z
+  .object({
+    name: z.string().optional(),
+    inward: z.string(),
+    outward: z.string().optional(),
+  })
+  .passthrough();
 const shapes = {
   myself: z.object({ accountId: z.string().min(1) }),
   statuses: z.array(
@@ -131,7 +143,7 @@ const shapes = {
             .array(
               z
                 .object({
-                  type: z.object({ inward: z.string() }).passthrough(),
+                  type: linkType,
                   inwardIssue: z
                     .object({
                       key: z.string(),
@@ -142,6 +154,7 @@ const shapes = {
                       }),
                     })
                     .optional(),
+                  outwardIssue: z.object({ key: z.string() }).optional(),
                 })
                 .passthrough(),
             )
@@ -149,6 +162,19 @@ const shapes = {
         }),
       }),
     ),
+  }),
+  links: z.object({
+    fields: z.object({
+      issuelinks: z.array(
+        z
+          .object({
+            type: linkType,
+            inwardIssue: z.object({ key: z.string() }).optional(),
+            outwardIssue: z.object({ key: z.string() }).optional(),
+          })
+          .passthrough(),
+      ),
+    }),
   }),
   issue: z.object({
     fields: z.object({
@@ -177,6 +203,21 @@ const shapes = {
   branch: z.object({ commit: z.object({ id: sha }) }),
   user: z.object({ id: z.number().int() }),
 };
+
+/** Which way a link reads from an issue, and to which issue: type, direction and other key, nothing else. */
+const linkSummary = (
+  links: Array<{
+    type: z.output<typeof linkType>;
+    inwardIssue?: { key: string } | undefined;
+    outwardIssue?: { key: string } | undefined;
+  }>,
+) =>
+  links.map((l) => ({
+    type: l.type.name ?? "",
+    direction: l.inwardIssue ? ("inward" as const) : ("outward" as const),
+    label: l.inwardIssue ? l.type.inward : (l.type.outward ?? ""),
+    other: l.inwardIssue?.key ?? l.outwardIssue?.key ?? "",
+  }));
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -340,18 +381,33 @@ export async function runJiraQualification(
     const a = await create("a");
     const blocker = await create("blocker");
     evidence.issues = { a, blocker };
-    // "B blocks A": A is the inward ("is blocked by") issue of the link.
+    // "B blocks A": Jira reads `inwardIssue` as the issue that blocks and `outwardIssue` as the one it blocks.
     const linked = await jira("/issueLink", {
       method: "POST",
       body: {
         type: { name: "Blocks" },
-        inwardIssue: { key: a.key },
-        outwardIssue: { key: blocker.key },
+        inwardIssue: { key: blocker.key },
+        outwardIssue: { key: a.key },
       },
     });
     assert.equal(linked.status, 201, "issue-link");
-    const search = async () =>
-      (
+    // A direct read, which the search index cannot lag: A must show B as the issue it "is blocked by".
+    const direct = linkSummary(
+      (await ok(jira, `/issue/${a.id}?fields=issuelinks`, shapes.links)).fields
+        .issuelinks,
+    );
+    evidence.links = { afterCreate: direct };
+    assert.ok(
+      direct.some(
+        (l) =>
+          l.direction === "inward" &&
+          l.label === "is blocked by" &&
+          l.other === blocker.key,
+      ),
+      `link-direction: ${a.key} shows ${JSON.stringify(direct)}`,
+    );
+    const search = async () => {
+      const found = (
         await ok(jira, "/search/jql", shapes.search, {
           method: "POST",
           body: {
@@ -367,6 +423,15 @@ export async function runJiraQualification(
           },
         })
       ).issues;
+      // Kept for the evidence, so a timed-out poll shows what the index returned for A.
+      evidence.links = {
+        ...evidence.links,
+        lastSearch: linkSummary(
+          found.find((i) => i.id === a.id)?.fields.issuelinks ?? [],
+        ),
+      };
+      return found;
+    };
     /** Searches until `done`, with no timing assertion: only the number of polls is recorded. */
     const poll = async (
       name: string,

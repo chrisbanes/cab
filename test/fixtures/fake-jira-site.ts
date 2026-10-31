@@ -19,6 +19,8 @@ interface SiteIssue {
   description: unknown;
   /** The issues this one is blocked by, by id. */
   blockedBy: string[];
+  /** The issues this one blocks, by id. */
+  blocks: string[];
   comments: Array<{
     id: string;
     accountId: string;
@@ -48,10 +50,36 @@ export function fakeJiraSite(host = "banes-team.atlassian.net") {
       string,
       { status: number; count: number; headers?: HeadersInit }
     >(),
+    /** The site reads a link POST the other way round, as a wrongly assumed direction would. */
+    reversedLinks: false,
     issueTypes: [{ id: "10002", name: "Task" }],
   };
   const status = (id: string) =>
     siteStatuses.find((s) => s.id === id) ?? siteStatuses[0];
+  /** The link entry an issue shows for the issue on its other end. */
+  const linked = (id: string, side: "inwardIssue" | "outwardIssue") => {
+    const other = state.issues.get(id);
+    return other
+      ? [
+          {
+            type: {
+              name: "Blocks",
+              inward: "is blocked by",
+              outward: "blocks",
+            },
+            [side]: {
+              id: other.id,
+              key: other.key,
+              fields: {
+                status: {
+                  statusCategory: { key: status(other.status).category },
+                },
+              },
+            },
+          },
+        ]
+      : [];
+  };
   const view = (issue: SiteIssue, fields: string[] = []) => {
     const s = status(issue.status);
     return {
@@ -65,31 +93,10 @@ export function fakeJiraSite(host = "banes-team.atlassian.net") {
         project: { id: "10001", key: "KAN" },
         ...(fields.includes("issuelinks")
           ? {
-              issuelinks: issue.blockedBy.flatMap((id) => {
-                const other = state.issues.get(id);
-                return other
-                  ? [
-                      {
-                        type: {
-                          name: "Blocks",
-                          inward: "is blocked by",
-                          outward: "blocks",
-                        },
-                        inwardIssue: {
-                          id: other.id,
-                          key: other.key,
-                          fields: {
-                            status: {
-                              statusCategory: {
-                                key: status(other.status).category,
-                              },
-                            },
-                          },
-                        },
-                      },
-                    ]
-                  : [];
-              }),
+              issuelinks: [
+                ...issue.blockedBy.flatMap((id) => linked(id, "inwardIssue")),
+                ...issue.blocks.flatMap((id) => linked(id, "outwardIssue")),
+              ],
             }
           : {}),
         ...(issue.priority
@@ -142,6 +149,7 @@ export function fakeJiraSite(host = "banes-team.atlassian.net") {
           (fields.customfield_10045 as { id: string } | undefined)?.id ?? null,
         description: fields.description ?? null,
         blockedBy: [],
+        blocks: [],
         comments: [],
         history: [],
       };
@@ -153,10 +161,16 @@ export function fakeJiraSite(host = "banes-team.atlassian.net") {
         inwardIssue: { key: string };
         outwardIssue: { key: string };
       };
-      const blocked = find(inwardIssue.key);
-      const blocker = find(outwardIssue.key);
+      // As Jira reads it: `inwardIssue` is the issue that blocks and `outwardIssue` the one it blocks.
+      const blocker = find(
+        (state.reversedLinks ? outwardIssue : inwardIssue).key,
+      );
+      const blocked = find(
+        (state.reversedLinks ? inwardIssue : outwardIssue).key,
+      );
       if (!blocked || !blocker) return new Response("{}", { status: 404 });
       blocked.blockedBy.push(blocker.id);
+      blocker.blocks.push(blocked.id);
       return new Response(null, { status: 201 });
     }
     if (request.method === "POST" && path === "/search/jql") {
@@ -276,6 +290,7 @@ export function fakeJiraSite(host = "banes-team.atlassian.net") {
       priority: null,
       description: null,
       blockedBy: [],
+      blocks: [],
       comments: [],
       history: [],
     };

@@ -123,6 +123,11 @@ test("the journey passes on a scripted site, within the write caps, and cleans u
     ],
   );
   assert.equal(evidence.account?.jira, siteAccount);
+  // A "is blocked by" the blocker, as the source reads a dependency.
+  assert.deepEqual(
+    evidence.links?.afterCreate?.map((l) => [l.direction, l.label, l.other]),
+    [["inward", "is blocked by", evidence.issues?.blocker.key]],
+  );
   assert.equal(w.jira.state.issues.size, 0, "both issues deleted");
   assert.equal(w.remote.state.heads.size, 0, "the branch was deleted");
   assert.deepEqual(
@@ -210,6 +215,45 @@ test("search lag is waited out by a bounded poll that records its count; never l
   assert.equal(never.jira.state.issues.size, 0);
   assert.equal(failed.cleanup, "verified");
   assert.deepEqual(never.gitlabGuard.log, []);
+});
+
+test("a link Jira reads the other way round fails at once from a direct read of A, naming the direction, and cleans up", async (t) => {
+  const w = world(t);
+  w.jira.state.reversedLinks = true;
+  const evidence = await w.run();
+  assert.equal(evidence.qualification, "failed");
+  assert.match(String(evidence.failure), /link-direction: KAN-\d+ shows/);
+  // A reads "blocks" B: the outward side, not "is blocked by".
+  assert.deepEqual(
+    evidence.links?.afterCreate?.map((l) => [l.direction, l.label]),
+    [["outward", "blocks"]],
+  );
+  assert.deepEqual(evidence.polls, {}, "no poll was needed to find it");
+  assert.equal(evidence.cleanup, "verified");
+  assert.equal(w.jira.state.issues.size, 0);
+  assert.deepEqual(
+    evidence.requests?.jira.map((r) => r.route),
+    [
+      "POST issue",
+      "POST issue",
+      "POST issueLink",
+      "DELETE issue",
+      "DELETE issue",
+    ],
+  );
+});
+
+test("a poll that times out records what the search showed for A's links", async (t) => {
+  const w = world(t);
+  // The index never catches up past its first, empty view.
+  w.jira.state.searchLag = Number.POSITIVE_INFINITY;
+  const evidence = await w.run({ maxPolls: 2 });
+  assert.match(String(evidence.failure), /Timed out: issues and link indexed/);
+  assert.deepEqual(evidence.links?.lastSearch, []);
+  assert.equal(
+    evidence.links?.afterCreate?.[0]?.other.startsWith("KAN-"),
+    true,
+  );
 });
 
 const limited = () =>
