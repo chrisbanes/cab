@@ -58,7 +58,8 @@ export function rateLimitDelayMs(headers: Headers, now: number): number | null {
     if (
       /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(
         after,
-      )
+      ) &&
+      !Number.isNaN(Date.parse(after))
     )
       return Math.max(0, Date.parse(after) - now);
   }

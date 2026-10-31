@@ -216,7 +216,7 @@ test("a stale clone stops the run before any write", async (t) => {
 test("the guard allows only gitlab.com, project 88319115, recorded resources and the write cap", async () => {
   const response = () =>
     Promise.resolve(Response.json({ id: 1, iid: 1 }, { status: 201 }));
-  const guard = new GitLabGuard(3);
+  const guard = new GitLabGuard(3, 0, 0);
   const seen: string[] = [];
   const next = (async (url: string) => {
     seen.push(String(url));
@@ -584,4 +584,67 @@ test("a cleanup leaves a merge request that is locked or queued to merge, and it
     "cab/locked",
     "cab/queued",
   ]);
+});
+
+test("retries cannot use the writes kept for cleanup", async () => {
+  const guard = new GitLabGuard(6, 0, 3);
+  const project = `/api/v4/projects/${id}`;
+  const fetcher = guard.fetcher(async () =>
+    Response.json({ id: 1, iid: 1 }, { status: 201 }),
+  );
+  const call = (method: string, path: string, body?: unknown) =>
+    fetcher(`https://gitlab.com${path}`, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  await guard.guardPush(async () => "pushed")({
+    host: "gitlab.com",
+    nameWithOwner: projectPath,
+    branch: "cab/x",
+  });
+  await call("POST", `${project}/merge_requests`, {
+    source_branch: "cab/x",
+    target_branch: "main",
+  });
+  // Three of the six writes are kept for cleanup, so a third journey write is the last.
+  assert.equal(guard.writeCount, 2);
+  const resolve = () =>
+    call("PUT", `${project}/merge_requests/1/discussions/ab?resolved=true`, {});
+  await resolve();
+  await assert.rejects(resolve(), (error) => error instanceof GuardDenied);
+  assert.ok(guard.denied.includes("write-cap"));
+  await call("PUT", `${project}/merge_requests/1`, { state_event: "close" });
+  await call("DELETE", `${project}/repository/branches/cab%2Fx`);
+  await call("DELETE", `${project}/repository/branches/cab%2Fx`);
+  assert.equal(guard.writeCount, 6);
+});
+
+test("a cleanup that cannot read a merge request deletes no branch and says so", async (t) => {
+  const w = world(t);
+  const mr = gitLabMergeRequest({
+    id: 11,
+    iid: 11,
+    source_branch: "cab/unread",
+    title: "Qualification 20261031090415-5b1c a",
+    source_project_id: Number(id),
+    target_project_id: Number(id),
+  });
+  w.remote.state.mergeRequests.push(mr);
+  w.remote.state.heads.set("cab/unread", "a".repeat(40));
+  // The list finds it, then reading it for the cleanup is rate limited past the bounds.
+  w.remote.state.intercept = (method, path) =>
+    method === "GET" && /\/merge_requests\/11$/.test(path)
+      ? limited()
+      : undefined;
+  const out = await cleanupGitLabRun({
+    guard: new GitLabGuard(),
+    fetcher: w.remote.fetcher,
+    token: () => envToken,
+    run: "20261031090415-5b1c",
+    rateLimit: { sleep: async () => {}, maxRetries: 0 },
+  });
+  assert.equal(out.cleanup, "failed");
+  assert.ok(w.remote.state.heads.has("cab/unread"));
+  assert.equal(mr.state, "opened");
+  assert.deepEqual(written(w), []);
 });

@@ -82,13 +82,14 @@ export async function cleanUp(
 ): Promise<{ cleanup: "verified" | "failed"; cleanupReads: CleanupRead[] }> {
   const reads: CleanupRead[] = [];
   /** Branches under a merge that may still land: they stay with it. */
-  const pendingBranches = new Set<string>(
-    pendingMerge ? [pendingMerge.branch] : [],
-  );
+  const pendingBranches = new Set<string>();
+  /** A merge request that could not be read may be mid-merge, so no branch is deleted under it. */
+  let unread = false;
   const attempt = async (resource: string, work: () => Promise<string>) => {
     try {
       reads.push({ resource, result: await work() });
     } catch (error) {
+      if (resource.startsWith("merge_request")) unread = true;
       reads.push({
         resource,
         result: `failed: ${clean(error instanceof Error ? error.message : error)}`,
@@ -119,6 +120,7 @@ export async function cleanUp(
       async () => {
         // A branch under a merge that may still land is left with it.
         if (pendingBranches.has(branch)) return "pending-merge";
+        if (unread) return "left: a merge request could not be read";
         const route = `${base}/repository/branches/${encodeURIComponent(branch)}`;
         if ((await api(route)).status === 200)
           await api(route, { method: "DELETE" });

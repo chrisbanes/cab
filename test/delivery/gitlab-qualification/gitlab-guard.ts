@@ -8,6 +8,8 @@ export const qualificationProject = {
   path: "banes3/Banes-project",
   defaultBranch: "main",
 } as const;
+/** The writes cleanup of a full run makes: close journey A's merge request, delete both branches. */
+export const cleanupWrites = 3;
 /** The least time between two requests of a live run, so it stays far below GitLab's per-minute limits. */
 export const livePaceMs = 300;
 /** Provider writes (API writes and Git pushes) one run may make. */
@@ -66,6 +68,8 @@ export class GitLabGuard {
   constructor(
     private readonly limit = maxWrites,
     private readonly paceMs = 0,
+    /** Writes kept for cleanup: a journey write that would leave fewer is refused, so retries cannot starve it. */
+    private readonly cleanupReserve = cleanupWrites,
   ) {}
 
   get writeCount() {
@@ -101,7 +105,9 @@ export class GitLabGuard {
   }
 
   private spend(route: string) {
-    if (this.writes >= this.limit) this.deny("write-cap");
+    const cleanup = route === "PUT merge_request" || route === "DELETE branch";
+    if (this.writes >= this.limit - (cleanup ? 0 : this.cleanupReserve))
+      this.deny("write-cap");
     this.writes++;
     this.log.push({ route, status: null });
   }

@@ -69,6 +69,8 @@ test("a 429 names its wait in Retry-After seconds, an HTTP date, or RateLimit-Re
   // A decimal or negative value is no wait time (Date.parse alone would read "1.5" as a date).
   assert.equal(delay({ "retry-after": "1.5" }), null);
   assert.equal(delay({ "retry-after": "-5" }), null);
+  // The right shape but no real date falls through, never to NaN.
+  assert.equal(delay({ "retry-after": "Xyz, 99 Abc 2026 99:99:99 GMT" }), null);
 });
 
 test("a 429 is sent again after the wait it asks for, with the same method and body", async () => {

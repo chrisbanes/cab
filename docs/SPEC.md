@@ -2074,7 +2074,7 @@ A GitLab request that is answered 429 was not processed, so cab sends it again, 
 wait the response names: `Retry-After` (seconds, or an HTTP date), otherwise `RateLimit-Reset` (a Unix time)
 against its clock, and otherwise 20 then 40 seconds, because the Projects, Groups and Users APIs send no
 rate-limit headers on a 429. It makes at most 3 retries and waits at most 60 seconds in all for one request,
-and a stopping service ends the wait. Past either bound the 429 is the outcome: a read is unavailable (an
+and a stopping service ends the waits of delivery requests. Past either bound the 429 is the outcome: a read is unavailable (an
 action's readback stays unproved, and a merge train's evidence is kept), and a write is a definitive
 `provider-http-429`. Only 429 is retried, and credential discovery's GitLab reads wait the same way.
 
