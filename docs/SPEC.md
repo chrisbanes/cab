@@ -835,7 +835,8 @@ killed at its 8-second limit or prints a network error, and for cab's own GitLab
 reads when the request fails or exceeds 15 seconds. Those reads, and GitLab branch
 delivery, authenticate with `Authorization: Bearer`, which GitLab accepts for
 personal access tokens and for OAuth tokens such as a glab web login. Fake-host tests
-prove the header; a live host's acceptance of both token kinds is not yet demonstrated. A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
+prove the header, and a bounded live run on gitlab.com accepted both a personal access token and a glab web login
+([evidence](evidence/2026-10-31-gitlab-delivery-live.md)). A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
 environment overrides a stored glab login; Settings and `cab doctor` (GitLab
 credentials) warn when it does, and the account shown is the token's. The credential
 lists GitLab projects for guided setup, shows the account, and is the identity GitLab
@@ -2075,6 +2076,10 @@ acceptance at any head, as on GitHub. Merging is irreversible and cab has no unm
 action to cancel auto-merge or to take a request off a train: the operator does that in GitLab, and
 cab reconciles the result. While a train merge is pending, completion is held as an action with an
 unknown outcome; the operator's action line describes the pending and dropped train states.
+Bounded live evidence: [GitLab delivery live run](evidence/2026-10-31-gitlab-delivery-live.md) on gitlab.com (Free tier). It
+qualifies push, merge request, ready, handback, pipeline wake, reply and resolve, adoption and the merge. It does not prove a
+self-managed instance's version or settings, merge trains or approvals, and its refused merge rests on a draft, so the
+refusal while a pipeline has not passed is covered by scripted tests only.
 
 On a Jira issue the issue actions use the same lifecycle, granted per Jira project: the target is the
 Jira project ID as the repository, the key's number and the issue ID as the node ID. Only
