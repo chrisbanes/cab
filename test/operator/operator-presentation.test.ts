@@ -15,6 +15,12 @@ import {
 } from "../../src/operator/runtime-restart-copy.js";
 import { harnessReason } from "../../web/src/execution-runtime.js";
 import {
+  leadFeedbackMode,
+  leadReceivesNotice,
+  leadResumeNotice,
+  leadUnavailableNotice,
+} from "../../web/src/lead-feedback.js";
+import {
   clockLabel,
   codeSentence,
   midSentence,
@@ -213,4 +219,28 @@ test("restart copy is one wording for pending, exhausted and no schedule", () =>
       "The runtime could not be launched",
     ],
   );
+});
+
+test("the reply box has one sentence for each way feedback reaches the lead", () => {
+  assert.equal(
+    leadResumeNotice("Task lead"),
+    "Task lead has completed its assignment and will resume to address this feedback.",
+  );
+  assert.equal(
+    leadReceivesNotice("Task lead"),
+    "Your message reaches Task lead on its next eligible turn.",
+  );
+  assert.equal(
+    leadUnavailableNotice("Task lead"),
+    "Task lead can't receive messages now; your draft stays here.",
+  );
+});
+
+test("the server's feedback mode wins and an older read falls back to the lead's state", () => {
+  for (const mode of ["receives", "resumes", "unavailable"] as const)
+    assert.equal(leadFeedbackMode({ leadFeedback: { mode } }, "running"), mode);
+  for (const state of ["pending", "running"])
+    assert.equal(leadFeedbackMode({}, state), "receives", state);
+  for (const state of ["completed", "held", undefined])
+    assert.equal(leadFeedbackMode({}, state), "unavailable", String(state));
 });
