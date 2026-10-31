@@ -8,8 +8,8 @@ export const qualificationProject = {
   path: "banes3/Banes-project",
   defaultBranch: "main",
 } as const;
-/** The writes cleanup of a full run makes: close journey A's merge request, delete both branches. */
-export const cleanupWrites = 3;
+/** The writes cleanup needs at most: close both merge requests and delete both branches. */
+export const cleanupWrites = 4;
 /** The least time between two requests of a live run, so it stays far below GitLab's per-minute limits. */
 export const livePaceMs = 300;
 /** Provider writes (API writes and Git pushes) one run may make. */
@@ -105,7 +105,8 @@ export class GitLabGuard {
   }
 
   private spend(route: string) {
-    const cleanup = route === "PUT merge_request" || route === "DELETE branch";
+    const cleanup =
+      route === "PUT close merge_request" || route === "DELETE branch";
     if (this.writes >= this.limit - (cleanup ? 0 : this.cleanupReserve))
       this.deny("write-cap");
     this.writes++;
@@ -246,7 +247,12 @@ export class GitLabGuard {
         (body.state_event !== undefined && body.state_event !== "close")
       )
         this.deny("merge-request-edit");
-      return this.spend("PUT merge_request");
+      // Only a plain close is cleanup, so an edit cannot use the writes kept for it.
+      return this.spend(
+        keys.join() === "state_event"
+          ? "PUT close merge_request"
+          : "PUT merge_request",
+      );
     }
     if (method === "PUT" && mr?.[2] === "/merge") {
       if (

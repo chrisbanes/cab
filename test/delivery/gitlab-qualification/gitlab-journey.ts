@@ -621,7 +621,9 @@ export async function runGitLabQualification(
           .at(-1)?.state;
       for (
         let n = 0;
-        mergeState() === "uncertain" && n < (options.maxPolls ?? 60);
+        mergeState() === "uncertain" &&
+        guard.denied.length === 0 &&
+        n < (options.maxPolls ?? 60);
         n++
       ) {
         await (options.pause ? options.pause() : sleep(10_000));
@@ -675,6 +677,9 @@ export async function runGitLabQualification(
     evidence.failure = clean(
       String(error instanceof Error ? error.message : error),
     );
+    // A refusal by the guard is the cause when a product call ended unproved because of it.
+    if (guard.denied.length)
+      evidence.failure += ` [guard refused: ${[...new Set(guard.denied)].join(", ")}]`;
   } finally {
     // Cleanup acts only on what the run recorded, and counts toward pass or fail.
     Object.assign(evidence, await cleanUp(api, guard, pendingMerge, clean));

@@ -124,7 +124,7 @@ test("both journeys pass on a scripted gitlab.com, within the write cap, and cle
       "POST merge_requests",
       "POST commit",
       "PUT merge",
-      "PUT merge_request",
+      "PUT close merge_request",
       "DELETE branch",
       "DELETE branch",
     ],
@@ -484,10 +484,10 @@ test("the cleanup invocation needs --live, exactly one of a run id or an IID, an
   );
 });
 
-test("a 429 on the merge, the setup discussion or the setup commit is retried, not refused as a second one-shot write", async (t) => {
-  const w = world(t);
+/** Answers 429 once to the first send of each named write; returns what was sent. */
+function limitWrites(w: ReturnType<typeof world>, routes: string[]) {
   const sent: string[] = [];
-  const pending = new Set(["PUT merge", "POST discussion", "POST commit"]);
+  const pending = new Set(routes);
   w.remote.state.intercept = (method, path) => {
     const route = /\/merge$/.test(path)
       ? "PUT merge"
@@ -500,24 +500,45 @@ test("a 429 on the merge, the setup discussion or the setup commit is retried, n
     sent.push(route);
     return pending.delete(route) ? limited() : undefined;
   };
+  return sent;
+}
+
+test("a 429 on the merge or the setup discussion is retried, not refused as a second one-shot write", async (t) => {
+  const w = world(t);
+  const sent = limitWrites(w, ["PUT merge", "POST discussion"]);
   const evidence = await w.run({ rateLimit: { sleep: async () => {} } });
   assert.equal(evidence.failure, undefined);
   assert.equal(evidence.qualification, "passed");
   assert.deepEqual(w.guard.denied, []);
   // Each was sent twice, and the merge reached the instance once.
   assert.deepEqual(
-    ["PUT merge", "POST discussion", "POST commit"].map(
+    ["PUT merge", "POST discussion"].map(
       (route) => sent.filter((r) => r === route).length,
     ),
-    [2, 2, 2],
+    [2, 2],
   );
   assert.equal(w.remote.merges.length, 1);
   assert.equal(w.guard.mergeCount, 1);
   assert.equal(
     w.guard.writeCount,
-    16,
-    "the three retried writes still count against the cap",
+    15,
+    "two retried writes still count against the cap",
   );
+});
+
+test("retries past the journey's share of the cap fail the run but leave cleanup its writes", async (t) => {
+  const w = world(t);
+  limitWrites(w, ["PUT merge", "POST discussion", "POST commit"]);
+  const evidence = await w.run({ rateLimit: { sleep: async () => {} } });
+  assert.equal(evidence.qualification, "failed");
+  assert.match(String(evidence.failure), /guard refused: write-cap/);
+  assert.equal(evidence.cleanup, "verified");
+  assert.equal(
+    w.remote.state.mergeRequests.filter((m) => m.state === "opened").length,
+    0,
+  );
+  assert.equal(w.remote.state.heads.size, 0);
+  assert.ok(w.guard.writeCount <= maxWrites);
 });
 
 test("a merge answered 429 and then lost may still be pending, but one answered only 429 is not", () => {
