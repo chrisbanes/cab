@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { harness } from "../fixtures/cli-harness.js";
+import { completedLead, until } from "../fixtures/completed-lead.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { seedInstructionHistory } from "../fixtures/instruction-history.js";
-import { startCliService } from "../fixtures/operator-cli.js";
+import { startCliOperator, startCliService } from "../fixtures/operator-cli.js";
 import { captureNativeResult } from "../fixtures/retained-evidence.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
@@ -297,4 +298,49 @@ test("apply-current with a stale version names the current version", async (t) =
   assert.equal(error.outcome, "not-applied");
   assert.equal(error.request.type, "assignment.apply");
   assert.equal(databaseDigest(s.f), before);
+});
+
+// #935: adopting corrected instructions on a completed lead keeps it resumable.
+test("adopting current instructions on a completed lead keeps the follow-up", async (t) => {
+  const o = await startCliOperator(t);
+  const { task } = await completedLead(o.s.f, "CLI8 adoption");
+  const lead = task.assignmentId;
+  const profileId = String(o.d.assignment(lead).profileId);
+  o.d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    expectedVersion: Number(o.d.profile(profileId).version),
+    summary: "Corrected",
+  });
+  const version = () => String(Number(o.d.assignment(lead).version));
+  let r = await o.cli("rw", [
+    "assignment",
+    "apply-current",
+    lead,
+    "--expected-version",
+    version(),
+  ]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(
+    Number(o.d.assignment(lead).profileRevision),
+    Number(o.d.profile(profileId).version),
+  );
+  r = await o.cli("rw", [
+    "task",
+    "follow-up",
+    task.taskId,
+    "--expected-version",
+    version(),
+    "--message-file",
+    o.file("follow-up.md", "Repeat the check."),
+  ]);
+  assert.equal(r.code, 0, r.out);
+  await until(() => o.d.assignment(lead).state === "running", "resumed turn");
+  r = await o.cli("ro", ["assignment", "instructions", lead]);
+  assert.equal(
+    r.json().data.execution.profileRevision,
+    Number(o.d.profile(profileId).version),
+  );
 });

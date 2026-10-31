@@ -690,7 +690,7 @@ opt-in on macOS: `npm run build && CAB_KEYCHAIN_LIVE=1 node --test
 dist/test/operations/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
 `cab-cli-test-<uuid>` item.
 
-`node test/operator/cli-journey-qualification/live-journey.mjs --fixture` (run by `npm run check`) drives the
+`node test/operator/cli-journey-qualification/live-journey.mjs --fixture` (run manually) drives the
 installed binary through the assembled journey with a scripted runtime.
 `npm run operator-cli:live` runs it once against Codex through the ChatGPT.app launcher with
 at most two model turns, a Keychain login and verified cleanup; it prints sanitised

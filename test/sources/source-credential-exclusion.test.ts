@@ -393,6 +393,7 @@ test("source-only production factory previews, imports, fails closed and recover
     0,
     "preview does not import",
   );
+  assert.equal(f.service.domain().discoveryCredentialReference(), null);
   await f.service.refreshGitHub();
   const imported = f.service.githubSources().issue("I_1");
   assert.ok(imported);

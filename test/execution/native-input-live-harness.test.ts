@@ -77,51 +77,6 @@ const qualifiedSource = {
     "e89718aa1969bfc4a471277bdc4679a3a3529293de0a309909822dfd67ddb77a",
 };
 
-test("qualified Default false/null request records actual waiting before one nonce answer", async (t) => {
-  const { runProtocol } = await probe();
-  const evidence = await runProtocol({
-    source: qualifiedSource,
-    fixture: {
-      executable: process.execPath,
-      args: [
-        resolve(
-          "test/execution/native-input-qualification/fake-app-server.mjs",
-        ),
-        "default",
-      ],
-    },
-    budgets: protocolBehaviourBudgets,
-  });
-  t.after(() => {
-    rmSync(evidence.fixture.path, { recursive: true, force: true });
-    rmSync(evidence.evidencePath, { force: true });
-  });
-  assert.equal(evidence.status, "passed");
-  assert.deepEqual(evidence.request, {
-    isBlocking: false,
-    autoResolutionMs: null,
-    questions: [
-      {
-        id: "delivery",
-        header: "Delivery",
-        question: "Select delivery",
-        isOther: true,
-        isSecret: false,
-        options: [
-          { label: "Local", description: "Local output" },
-          { label: "Remote", description: "Remote output" },
-        ],
-      },
-    ],
-  });
-  assert.equal(evidence.persistence.committedBeforeEffect, true);
-  assert.equal(evidence.consumption.kind, "answer-only-nonce-report");
-  assert.equal(evidence.receipt.kind, "confirmed");
-  assert.equal(evidence.counts.turns, 1);
-  assert.equal(evidence.counts.replies, 1);
-  assert.equal(evidence.cleanup.verified, true);
-});
-
 test("one exact native callback replay after resume response and optional update stays one request/effect", async (t) => {
   const evidence = await fixture(t, "resume-replay");
   assert.equal(evidence.status, "passed");

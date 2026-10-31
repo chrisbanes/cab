@@ -942,8 +942,7 @@
         "test/operator/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "harness:assignment-apply-current",
-        "docs/evidence/issue-901-cli8-live-2026-10-12.json",
-        "test/operator/operator-cli-journey-harness.test.ts"
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Rebinds an assignment to the current instruction revisions (boundIsCurrent) for the next turn; never rewrites an active turn.",
       "denial": "A read-only credential exits 3 with the digest unchanged; a revoked profile exits 4 policy-denied; an unknown assignment exits 2; a missing --expected-version exits 2 with no request.",
