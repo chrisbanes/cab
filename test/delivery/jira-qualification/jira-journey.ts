@@ -23,18 +23,14 @@ import { git } from "../../fixtures/publication.js";
 import {
   cleanUp,
   harnessApi,
+  type CleanupRead,
   type HarnessApi,
 } from "../gitlab-qualification/gitlab-cleanup.js";
 import {
   type GitLabGuard,
   qualificationProject,
 } from "../gitlab-qualification/gitlab-guard.js";
-import {
-  type JiraRateLimit,
-  cleanUpJira,
-  jiraApi,
-  type CleanupRead,
-} from "./jira-cleanup.js";
+import { type JiraRateLimit, cleanUpJira, jiraApi } from "./jira-cleanup.js";
 import {
   type JiraGuard,
   qualificationSite,
@@ -897,7 +893,7 @@ export async function runJiraQualification(
       headers: Object.fromEntries(
         Object.entries(r.headers).map(([k, v]) => [k, clean(v)]),
       ),
-      body: clean(r.body).slice(0, 200),
+      body: clean(r.body),
     }));
   evidence.rateLimited = {
     jira: redact(jiraGuard.rateLimited),

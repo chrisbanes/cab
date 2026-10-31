@@ -588,7 +588,11 @@ export async function createReleaseDeliveryFixture(
       ],
     } as never);
   let taskId: string;
-  if (jira) taskId = await jira.setup(f, projectId);
+  if (jira)
+    taskId = await jira.setup(f, projectId).catch(async (error) => {
+      await f.close().catch(() => {});
+      throw error;
+    });
   else if (localTask) {
     taskId = randomUUID();
     d.execute({

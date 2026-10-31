@@ -49,8 +49,6 @@ export function fakeJiraSite(host = "banes-team.atlassian.net") {
       { status: number; count: number; headers?: HeadersInit }
     >(),
     issueTypes: [{ id: "10002", name: "Task" }],
-    /** The link direction Jira reads the POST in; false reverses it. */
-    linkInwardIsBlocked: true,
   };
   const status = (id: string) =>
     siteStatuses.find((s) => s.id === id) ?? siteStatuses[0];
@@ -155,12 +153,8 @@ export function fakeJiraSite(host = "banes-team.atlassian.net") {
         inwardIssue: { key: string };
         outwardIssue: { key: string };
       };
-      const blocked = find(
-        (state.linkInwardIsBlocked ? inwardIssue : outwardIssue).key,
-      );
-      const blocker = find(
-        (state.linkInwardIsBlocked ? outwardIssue : inwardIssue).key,
-      );
+      const blocked = find(inwardIssue.key);
+      const blocker = find(outwardIssue.key);
       if (!blocked || !blocker) return new Response("{}", { status: 404 });
       blocked.blockedBy.push(blocker.id);
       return new Response(null, { status: 201 });

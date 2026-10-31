@@ -6,6 +6,7 @@ import {
   runLabel,
   summaryPattern,
 } from "./jira-guard.js";
+import type { CleanupRead } from "../gitlab-qualification/gitlab-cleanup.js";
 
 const { projectId } = qualificationSite;
 const { host } = qualificationSite;
@@ -77,8 +78,6 @@ export function jiraApi(
     }
   };
 }
-
-export type CleanupRead = { resource: string; result: string };
 
 const labelsOf = z.object({
   fields: z.object({ labels: z.array(z.string()) }),
