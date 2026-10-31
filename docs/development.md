@@ -59,17 +59,20 @@ Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
 their engine. Missing compiled tests, unknown suites/options and empty shards
 fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence
 directory (set `CAB_TEST_EVIDENCE_DIR` to keep it after the run); CI uploads these with
-the synthetic evidence. Refresh a profile from a successful
-complete run, or all its shards, using:
+the synthetic evidence. Refresh a profile from the evidence of a run, or any of
+its shards, using:
 
 ```sh
 node scripts/update-test-timings.mjs chromium 24 /path/to/evidence
 ```
 
 Use `all 24` or `service 26` for the other profiles. Keep receipts from one run
-separate from other runs. The updater rejects missing, duplicate, unsuccessful or
-stale receipts and requires every current source test file. Its input digest
-covers runtime, test, web and runner inputs; changing these requires new receipts.
+separate from other runs. The updater merges the receipts over the profile's
+existing weights: a measured file takes its new weight, a current file without a
+successful receipt keeps its old weight, and weights for files no longer in
+`test/` are dropped. It skips unsuccessful or invalid receipts and rejects a
+duplicate receipt for one file. A stale weight only unbalances shards; the runner
+falls back to the median for a file without one.
 Committed initial weights are measured locally; hosted CI receipts can refresh
 them as runner performance changes.
 

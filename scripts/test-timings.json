@@ -3,7 +3,6 @@
     "all": {
       "measurement": "Node outer file test:complete duration, including startup and imports",
       "nodeMajor": 24,
-      "inputDigest": "9e5048ed041903ae101f891289da02593b1025c5281456ebe0e3350a3380f72d",
       "milliseconds": {
         "test/coordination/assignment-prompts.test.ts": 945,
         "test/coordination/capture-observer.test.ts": 52,
@@ -261,7 +260,6 @@
     "chromium": {
       "measurement": "Node outer file test:complete duration, including startup and imports",
       "nodeMajor": 24,
-      "inputDigest": "9e5048ed041903ae101f891289da02593b1025c5281456ebe0e3350a3380f72d",
       "milliseconds": {
         "test/coordination/assignment-prompts.test.ts": 960,
         "test/coordination/capture-observer.test.ts": 53,
@@ -519,7 +517,6 @@
     "service": {
       "measurement": "Node outer file test:complete duration, including startup and imports",
       "nodeMajor": 26,
-      "inputDigest": "9e5048ed041903ae101f891289da02593b1025c5281456ebe0e3350a3380f72d",
       "milliseconds": {
         "test/coordination/assignment-prompts.test.ts": 1087,
         "test/coordination/capture-observer.test.ts": 56,
