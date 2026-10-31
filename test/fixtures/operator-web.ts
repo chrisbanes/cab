@@ -313,7 +313,15 @@ export async function createOperatorFixture<
         routingClient,
         ...(delivery ? { delivery } : {}),
         ...(readerFactory
-          ? { issueTrackers: { readerFactories: { github: readerFactory } } }
+          ? {
+              issueTrackers: {
+                ...serviceOptions.issueTrackers,
+                readerFactories: {
+                  ...serviceOptions.issueTrackers?.readerFactories,
+                  github: readerFactory,
+                },
+              },
+            }
           : {}),
       },
     );

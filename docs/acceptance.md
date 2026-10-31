@@ -410,7 +410,10 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   queue and its limit, Done on closure, `issue.close` narrowed to the mapped done status, and the
   Jira source tab editor and task notes (`status-mapping-jira-store`, `status-mapping-jira-service`,
   `jira-issue-delivery-provider`, `operator-api`, `operator-jira-source-browser`,
-  `status-mapping-draft`, `operator-delivery-presentation`).
+  `status-mapping-draft`, `operator-delivery-presentation`). The bounded live harness
+  (`npm run jira-delivery:live`, guarded to the fixture Jira project and GitLab project, 15 planned
+  writes and no merge, with re-runnable cleanup by run ID through `npm run jira-delivery:cleanup`) is covered
+  against scripted sites by `jira-delivery-live-harness`; it has not been run live.
 - **Task publication** (#1167, ADR-1017, ADR-1018) — **Bounded.** Deterministic tests cover the
   publication caller's authority and readiness exemption, the create's read-back and its refusals, the
   state machine (review, confirm, send, unknown outcome, Link, Abandon, failure), conversion in place and

@@ -732,3 +732,37 @@ test("the refused merge of a draft does not depend on how fast the pipeline runs
     evidence.steps.b.some((s) => s.step === "merge refused while a draft"),
   );
 });
+
+test("a cleanup closes a run's merge request whose title leads with a Jira issue key", async (t) => {
+  const w = world(t);
+  const run = "20261031090415-5b1c";
+  const keyed = (iid: number, title: string) =>
+    gitLabMergeRequest({
+      id: iid,
+      iid,
+      source_branch: `cab/KAN-${iid}-task`,
+      title,
+      source_project_id: Number(id),
+      target_project_id: Number(id),
+    });
+  w.remote.state.mergeRequests.push(
+    keyed(21, `KAN-21 Qualification ${run} a`),
+    keyed(22, `Draft: KAN-22 Qualification ${run} a`),
+    keyed(23, `KAN-23 Something else ${run}`),
+  );
+  for (const iid of [21, 22, 23])
+    w.remote.state.heads.set(`cab/KAN-${iid}-task`, "a".repeat(40));
+  const out = await cleanupGitLabRun({
+    guard: new GitLabGuard(),
+    fetcher: w.remote.fetcher,
+    token: () => envToken,
+    run,
+  });
+  assert.equal(out.cleanup, "verified");
+  assert.equal(out.found, 2);
+  assert.deepEqual(
+    w.remote.state.mergeRequests.map((m) => m.state),
+    ["closed", "closed", "opened"],
+  );
+  assert.deepEqual([...w.remote.state.heads.keys()], ["cab/KAN-23-task"]);
+});

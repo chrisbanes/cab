@@ -17,8 +17,9 @@ const mergeRequest = z.object({
   merge_when_pipeline_succeeds: z.boolean().nullish(),
 });
 const mergeRequests = z.array(mergeRequest);
-/** The title every merge request of a run carries; only these are ever closed by a cleanup. */
-const runTitle = /^(?:Draft: )?Qualification (\d{14}-[0-9a-f]{4}) [ab]$/;
+/** The title every merge request of a run carries; only these are ever closed by a cleanup. A merge request for a Jira task also leads with the issue key. */
+const runTitle =
+  /^(?:Draft: )?(?:[A-Z][A-Z0-9_]*-\d+ )?Qualification (\d{14}-[0-9a-f]{4}) [ab]$/;
 
 export type HarnessApi = (
   path: string,
