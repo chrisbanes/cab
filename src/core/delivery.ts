@@ -2478,6 +2478,14 @@ export class DeliveryStore {
           "UPDATE delivery_closure_versions SET version=? WHERE operationId=?",
         )
         .run(version + 1, operation.operationId);
+    // Another change moved the task past the chain: a new chain starts here, so only a settlement
+    // made after that change can ride it.
+    else
+      this.db
+        .prepare(
+          "UPDATE delivery_closure_versions SET baseVersion=?, version=? WHERE operationId=?",
+        )
+        .run(version, version + 1, operation.operationId);
   }
   /** The settled version differs from the current one only by cab's own confirmed close, with the issue observed closed. */
   private closureCarriesSettlement(

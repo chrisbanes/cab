@@ -1299,3 +1299,37 @@ test("a settlement made while a lagging listing shows the closed issue open surv
     await f.close();
   }
 });
+
+test("a replacement settlement after another change survives a later lagging close cycle", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    f.setSourceTitle("Edited after the close");
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    const delivery = f.service.delivery();
+    await f.service.settleHandback({
+      actor: "operator",
+      key: randomUUID(),
+      taskId: f.taskId,
+      expectedTaskVersion: Number(f.domain.task(f.taskId).version),
+      expectedDeliveryRevision: delivery.delivery(f.taskId)?.revision ?? 0,
+      expectedPolicyVersion: delivery.configuration(f.projectId).version,
+      repositoryId: "R1",
+      prNumber: 7,
+      expectedPrNodeId: "P7",
+      expectedHeadSha: f.getPr().headSha,
+      decision: "accepted",
+    });
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    // The listing lags (shows the issue open), then catches up: only the closure's own bumps.
+    f.setIssueOpen(undefined);
+    await f.service.refreshGitHub();
+    f.setIssueOpen(false);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
