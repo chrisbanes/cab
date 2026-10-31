@@ -119,7 +119,7 @@ export const deliveryPolicySchema = z
             fieldNodeId: identity.optional(),
             optionNodeIds: z.array(identity).optional(),
             /** The Jira statuses an `issue.status` grant covers. */
-            statusIds: z.array(identity).optional(),
+            statusIds: z.array(identity).max(256).optional(),
           })
           .strict()
           .refine(

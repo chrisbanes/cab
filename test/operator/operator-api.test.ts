@@ -4346,3 +4346,64 @@ test("a Jira project's status mapping is read with its granted statuses, saved w
     granted: ["10003", "10005"],
   });
 });
+
+test("the Jira view lists each granted status once, however many grants repeat it", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const projectId = randomUUID();
+  const domain = f.service.domain();
+  domain.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Mapped",
+    leadProfileId: null,
+  });
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    key: randomUUID(),
+    actor: "operator",
+    issueTracker: "jira",
+    instance: "example.atlassian.net",
+    credential: {
+      siteRef: "env:FIXTURE_JIRA_SITE",
+      emailRef: "env:FIXTURE_JIRA_EMAIL",
+      tokenRef: "env:FIXTURE_JIRA_TOKEN",
+    },
+  });
+  domain.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: 1,
+    instance: "example.atlassian.net",
+    selections: [{ id: "S-1", kind: "jql", jql: "project = KAN" }],
+    readiness: null,
+  });
+  const ids = Array.from({ length: 256 }, (_, i) => String(i + 1));
+  domain.execute({
+    type: "delivery.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: f.service.delivery().configuration(projectId).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: ["10001", "10002"].map((repositoryId) => ({
+      action: "issue.status" as const,
+      repositoryId,
+      mode: "allow" as const,
+      statusIds: ids,
+    })),
+    requiredChecks: [],
+  });
+  const view = (
+    await new OperatorApi(f.service, [f.directory]).readProjectConfiguration(
+      projectId,
+    )
+  ).data.statusMapping;
+  assert.ok(view && "tracker" in view);
+  assert.deepEqual(view.granted, ids);
+});

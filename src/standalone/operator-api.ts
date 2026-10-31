@@ -6470,9 +6470,13 @@ export class OperatorApi {
         // A Jira project always has the source the mapping binds to.
         availability: "available" as const,
         mapping,
-        granted: grants.flatMap((g) =>
-          g.action === "issue.status" ? (g.statusIds ?? []) : [],
-        ),
+        granted: [
+          ...new Set(
+            grants.flatMap((g) =>
+              g.action === "issue.status" ? (g.statusIds ?? []) : [],
+            ),
+          ),
+        ],
       };
     return {
       version: view.version,

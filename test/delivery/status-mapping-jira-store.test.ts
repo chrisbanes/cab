@@ -604,3 +604,33 @@ test("a task that is not Ready is written only for Done on a closed issue, again
     f.db.close();
   }
 });
+
+test("a Jira status is paired with the newest read of it in any project, and only a member project sees it", () => {
+  const f = setup();
+  try {
+    const other = randomUUID();
+    f.domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: other,
+      name: "B",
+      leadProfileId: null,
+    });
+    const read = f.sources.membershipRead(f.projectId, "20001");
+    assert.ok(read && read.readAt !== null);
+    assert.equal(f.sources.membershipRead(other, "20001"), null);
+    // Another project reads the same issue later: its newer read is the one the shared status came from.
+    f.db
+      .prepare(
+        "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields, itemId, readAt, missedReads) VALUES (?, 'S-9', 'jira', ?, '20001', '[]', NULL, ?, 0)",
+      )
+      .run(other, instance, read.readAt + 1000);
+    assert.equal(
+      f.sources.membershipRead(f.projectId, "20001")?.readAt,
+      read.readAt + 1000,
+    );
+  } finally {
+    f.db.close();
+  }
+});

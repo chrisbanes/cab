@@ -3360,7 +3360,7 @@ const jiraStatusMappingViewSchema = z
     version: revision,
     availability: z.enum(["available", "unavailable"]),
     mapping: jiraStatusMappingSchema.nullable(),
-    granted: z.array(text).max(256),
+    granted: z.array(text).max(256 * 256),
   })
   .strict();
 export const statusMappingViewSchema = z.union([
