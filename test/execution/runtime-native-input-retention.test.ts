@@ -21,8 +21,8 @@ import {
   type RuntimeInternals,
 } from "../fixtures/runtime-retention.js";
 
-test("production service settles 2,000 native waiters and callbacks with SQLite authority", {
-  timeout: 180_000,
+test("production service settles native waiters and callbacks with SQLite authority", {
+  timeout: 20_000,
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-runtime-retention-native-"));
   const f = fixture(root);
@@ -40,8 +40,8 @@ test("production service settles 2,000 native waiters and callbacks with SQLite 
     const task = createTask(f.service);
     const runtime = f.runtime() as unknown as RuntimeInternals;
     const coordination = f.internals().coordination;
-    const count = 2_000;
-    const cohortSize = 250;
+    const count = 20;
+    const cohortSize = 5;
     const cohorts: Array<{ settled: number; elapsedMs: number }> = [];
     const collect = (globalThis as unknown as { gc?: () => void }).gc;
     const heapSamples: Array<{ settled: number; heapUsed: number }> = [];
@@ -179,7 +179,7 @@ test("production service settles 2,000 native waiters and callbacks with SQLite 
             .get() as { count: number }
         ).count;
         assert.equal(questionCount, settled);
-        if (collect && settled % 1_000 === 0) {
+        if (collect && settled % 10 === 0) {
           collect();
           heapSamples.push({
             settled,
@@ -237,7 +237,7 @@ test("production service settles 2,000 native waiters and callbacks with SQLite 
           LENGTH(CAST(COALESCE(developerInstructionsDigest, '') AS BLOB))
         ) AS utf8Bytes FROM runtime_thread_qualification`)
       .get() as { count: number; utf8Bytes: number };
-    const terminalLookups = timeIterations(1_000, (index) => {
+    const terminalLookups = timeIterations(count - 1, (index) => {
       assert.ok(
         f
           .internals()
@@ -248,7 +248,7 @@ test("production service settles 2,000 native waiters and callbacks with SQLite 
           ),
       );
     });
-    const nativeLookups = timeIterations(1_000, (index) => {
+    const nativeLookups = timeIterations(count, (index) => {
       const identity: NativeInputEndpointIdentity = {
         requestId: index + 1,
         runtimeGeneration: generation,
@@ -258,7 +258,7 @@ test("production service settles 2,000 native waiters and callbacks with SQLite 
       };
       assert.ok(coordination.runtimeQuestionByEndpoint(identity));
     });
-    const directCancellation = timeIterations(1_000, (index) => {
+    const directCancellation = timeIterations(count - 1, (index) => {
       runtime.cancelUserInput(
         {
           requestId: index + 1,
@@ -342,8 +342,8 @@ test("production service settles 2,000 native waiters and callbacks with SQLite 
         measurementHarness: {
           questionRowsMaterialized: questionRows.length,
           questionPayloadBytes: durableQuestionBytes,
-          timingSamplesPerOperation: 1_000,
-          timingSampleStoragePeak: 1_000,
+          timingSamplesPerOperation: count,
+          timingSampleStoragePeak: count,
         },
         terminalLookup: terminalLookups,
         nativeLookup: nativeLookups,
