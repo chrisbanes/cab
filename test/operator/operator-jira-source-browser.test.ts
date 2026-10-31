@@ -405,11 +405,10 @@ test("a Jira status mapping is typed on the Jira tab, marks an ungranted status,
   await savedOutcome(panel);
   assert.deepEqual(domain.statusMapping(projectId).mapping, mapping);
   await page.reload();
-  assert.equal(
-    await page
-      .locator("#status-mapping")
-      .getByLabel("First turn started", { exact: false })
-      .inputValue(),
-    "3",
+  // The saved status loads into the editor once the configuration is read.
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLInputElement>("#status-mapping input")
+        ?.value === "3",
   );
 });
