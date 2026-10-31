@@ -416,7 +416,8 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   no-ops, closed the issue by its one Done transition and deleted what it created, with verified cleanup;
   the first write attempt failed in the harness's link direction. The run proves one team-managed project with
   global transitions, so the several-transition and no-transition skips are scripted only, and the handback
-  is settled twice until a settlement survives cab's own close (#1395). Evidence:
+  was settled twice in the recorded run. A settlement now survives cab's own confirmed close, so the harness
+  settles once; the scripted site covers that, and a single-settlement live run has not been made. Evidence:
   [Jira delivery live run](evidence/2026-10-31-jira-delivery-live.md).
 - **Task publication** (#1167, ADR-1017, ADR-1018) — **Bounded.** Deterministic tests cover the
   publication caller's authority and readiness exemption, the create's read-back and its refusals, the

@@ -1104,3 +1104,232 @@ test("a confirmed merge keeps its successful receipt when the follow-up refresh 
     await f.close();
   }
 });
+
+const closedOk = {
+  state: "confirmed-success" as const,
+  reason: null,
+  receipt: { nodeId: "I1", number: 1, issueClosed: true },
+};
+/** Registers and settles the PR once, then has the lead close the issue; the source reads closed after the close. */
+async function settleThenClose(
+  f: Fixture,
+  outcome: Parameters<Fixture["setActionOutcome"]>[0] = closedOk,
+  beforeClose: () => void = () => {},
+) {
+  await registerFixturePr(f);
+  await settleFixturePr(f);
+  const settled = Number(f.domain.task(f.taskId).version);
+  beforeClose();
+  f.setActionOutcome(outcome);
+  f.onInspection(() => f.setIssueOpen(false));
+  await closeFixtureIssue(f);
+  f.onInspection(undefined);
+  return settled;
+}
+/** The closure-hold notice starts a fresh lead turn once the current one ends; completion is requested there. */
+async function requestCompletionAfterClose(f: Fixture) {
+  const next = f.turns.length;
+  f.turns.at(-1)?.release();
+  const deadline = Date.now() + 5000;
+  while (f.turns.length === next) {
+    if (Date.now() > deadline) throw new Error("No notice turn started");
+    await f.service.refreshGitHub();
+    await new Promise<void>((r) => setTimeout(r, 5));
+  }
+  return f.call("cab_request_completion", { reviewedResultIds: [] }, next);
+}
+function blockers(f: Fixture) {
+  return f.service
+    .delivery()
+    .completionBlockers(f.taskId, Number(f.domain.task(f.taskId).version));
+}
+const awaitingSettlement = "reviewable-pr-awaiting-current-settlement";
+
+test("a settlement survives cab's own confirmed issue close and completes without settling again", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    const settled = await settleThenClose(f);
+    await f.service.refreshGitHub();
+    assert.notEqual(Number(f.domain.task(f.taskId).version), settled);
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    assert.equal((await requestCompletionAfterClose(f)).success, true);
+    await settleInto(f, "done");
+  } finally {
+    await f.close();
+  }
+});
+
+for (const change of [
+  "a readiness label lost in the closure read",
+  "a title edit in the closure read",
+] as const)
+  test(`a settlement does not survive ${change}`, async () => {
+    const f = await deliveryFixture("reviewable-pr", true);
+    try {
+      await settleThenClose(f, closedOk, () =>
+        change.includes("label")
+          ? f.setSourceLabels([])
+          : f.setSourceTitle("Edited after settlement"),
+      );
+      await f.service.refreshGitHub();
+      assert.ok(blockers(f).includes(awaitingSettlement));
+    } finally {
+      await f.close();
+    }
+  });
+
+test("a title edit after a carried closure brings the settlement hold back", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    f.setSourceTitle("Edited after the close");
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a settlement does not survive a closure made outside cab", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    f.setIssueOpen(false);
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+  } finally {
+    await f.close();
+  }
+});
+
+for (const outcome of [
+  { state: "uncertain", reason: "unproved", receipt: null },
+  { state: "confirmed-failure", reason: "refused", receipt: null },
+] as const)
+  test(`a settlement does not survive a ${outcome.state} issue close`, async () => {
+    const f = await deliveryFixture("reviewable-pr", true);
+    try {
+      await settleThenClose(f, outcome);
+      await f.service.refreshGitHub();
+      assert.ok(blockers(f).includes(awaitingSettlement));
+      if (outcome.state === "uncertain") {
+        // The sync saw the closure before it was proved: proof then carries it.
+        f.setInspectOutcome(closedOk);
+        await f.service.refreshGitHub();
+        assert.ok(
+          !blockers(f).includes(awaitingSettlement),
+          String(blockers(f)),
+        );
+      }
+    } finally {
+      await f.close();
+    }
+  });
+
+test("a source read that still lists the issue open does not end the carried settlement", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    f.setActionOutcome(closedOk);
+    // The default listing shows the issue open after the close, so each refresh flaps readiness.
+    const closed = await closeFixtureIssue(f);
+    assert.equal(closed.success, true, closed.text);
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    f.setIssueOpen(false);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+    assert.equal((await requestCompletionAfterClose(f)).success, true);
+    await settleInto(f, "done");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a reopen after a carried closure brings the settlement hold back", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    f.setClosedIssue({ state: "open" });
+    f.setIssueOpen(true);
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    f.setIssueOpen(false);
+    f.setClosedIssue(undefined);
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a settlement made while a lagging listing shows the closed issue open survives the rest of the closure chain", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    f.setActionOutcome(closedOk);
+    assert.equal((await closeFixtureIssue(f)).success, true);
+    await f.service.refreshGitHub();
+    const delivery = f.service.delivery();
+    await f.service.settleHandback({
+      actor: "operator",
+      key: randomUUID(),
+      taskId: f.taskId,
+      expectedTaskVersion: Number(f.domain.task(f.taskId).version),
+      expectedDeliveryRevision: delivery.delivery(f.taskId)?.revision ?? 0,
+      expectedPolicyVersion: delivery.configuration(f.projectId).version,
+      repositoryId: "R1",
+      prNumber: 7,
+      expectedPrNodeId: "P7",
+      expectedHeadSha: f.getPr().headSha,
+      decision: "accepted",
+    });
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    f.setIssueOpen(false);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
+
+test("a replacement settlement after another change survives a later lagging close cycle", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await settleThenClose(f);
+    await f.service.refreshGitHub();
+    f.setSourceTitle("Edited after the close");
+    await f.service.refreshGitHub();
+    assert.ok(blockers(f).includes(awaitingSettlement));
+    const delivery = f.service.delivery();
+    await f.service.settleHandback({
+      actor: "operator",
+      key: randomUUID(),
+      taskId: f.taskId,
+      expectedTaskVersion: Number(f.domain.task(f.taskId).version),
+      expectedDeliveryRevision: delivery.delivery(f.taskId)?.revision ?? 0,
+      expectedPolicyVersion: delivery.configuration(f.projectId).version,
+      repositoryId: "R1",
+      prNumber: 7,
+      expectedPrNodeId: "P7",
+      expectedHeadSha: f.getPr().headSha,
+      decision: "accepted",
+    });
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    // The listing lags (shows the issue open), then catches up: only the closure's own bumps.
+    f.setIssueOpen(undefined);
+    await f.service.refreshGitHub();
+    f.setIssueOpen(false);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});
