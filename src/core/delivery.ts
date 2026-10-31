@@ -2434,7 +2434,8 @@ export class DeliveryStore {
    * Called from the Ready bump in `updateReadiness`, before its UPDATE, with the pre-bump `version`.
    * A settlement survives a version change only when every bump since it is one of cab's own
    * `issue.close` (the closure removing Ready, or a read that lags it); any other bump moves
-   * the task version without moving this row, so the match breaks.
+   * the task version without moving this row, so the match breaks. A later closure-classified flip
+   * then restarts the chain, which only a settlement made after the break can ride.
    */
   carryClosureVersionWithinTransaction(
     taskId: string,
