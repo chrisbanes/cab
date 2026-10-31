@@ -748,6 +748,9 @@ export class DeliveryStore {
     CREATE TABLE IF NOT EXISTS delivery_attempts (
       operationId TEXT NOT NULL REFERENCES delivery_actions(operationId), attempt INTEGER NOT NULL,
       beforeJson TEXT NOT NULL, observationJson TEXT, PRIMARY KEY(operationId,attempt));
+    CREATE TABLE IF NOT EXISTS delivery_closure_versions (
+      operationId TEXT PRIMARY KEY REFERENCES delivery_actions(operationId),
+      taskId TEXT NOT NULL REFERENCES domain_tasks(id), baseVersion INTEGER NOT NULL, version INTEGER NOT NULL);
     `);
   }
   transaction<T>(run: () => T): T {
@@ -2321,7 +2324,12 @@ export class DeliveryStore {
       binding.settlement.headSha !== binding.observation.headSha ||
       binding.settlement.policyVersion !== policy.version ||
       (taskVersion !== undefined &&
-        binding.settlement.taskVersion !== taskVersion)
+        binding.settlement.taskVersion !== taskVersion &&
+        !this.closureCarriesSettlement(
+          taskId,
+          binding.settlement.taskVersion,
+          taskVersion,
+        ))
     )
       reasons.push("reviewable-pr-awaiting-current-settlement");
     return [...new Set(reasons)];
@@ -2409,12 +2417,8 @@ export class DeliveryStore {
   ownsConfirmedClosure(taskId: string, nodeId: string): boolean {
     return !!this.ownClosureOperation(taskId, nodeId);
   }
-  /** The latest confirmed operation that closed the issue, unless a reopen superseded it. */
-  ownClosureOperation(
-    taskId: string,
-    nodeId: string,
-  ): DeliveryActionRecord | undefined {
-    const superseded = new Set(
+  private supersededClosures(taskId: string, nodeId: string): Set<string> {
+    return new Set(
       (
         this.db
           .prepare(
@@ -2425,6 +2429,77 @@ export class DeliveryStore {
         }[]
       ).map((row) => row.operationId),
     );
+  }
+  /**
+   * Called from the Ready bump in `updateReadiness`, before its UPDATE, with the pre-bump `version`.
+   * A settlement survives a version change only when every bump since it is one of cab's own
+   * `issue.close` (the closure removing Ready, or a read that lags it); any other bump moves
+   * the task version without moving this row, so the match breaks.
+   */
+  carryClosureVersionWithinTransaction(
+    taskId: string,
+    nodeId: string,
+    version: number,
+    change: "closed" | "reopened-read",
+  ): void {
+    const superseded = this.supersededClosures(taskId, nodeId);
+    const operation = this.actions(taskId)
+      .filter(
+        (a) =>
+          a.request.action.kind === "issue.close" &&
+          a.request.action.target.nodeId === nodeId &&
+          ["attempting", "uncertain", "confirmed-success"].includes(a.state) &&
+          a.beforeState?.state === "open" &&
+          !superseded.has(a.operationId),
+      )
+      .at(-1);
+    if (!operation) return;
+    const row = this.db
+      .prepare(
+        "SELECT version FROM delivery_closure_versions WHERE operationId=?",
+      )
+      .get(operation.operationId) as { version: number } | undefined;
+    if (!row) {
+      if (change === "closed")
+        this.db
+          .prepare("INSERT INTO delivery_closure_versions VALUES (?,?,?,?)")
+          .run(operation.operationId, taskId, version, version + 1);
+    } else if (row.version === version)
+      this.db
+        .prepare(
+          "UPDATE delivery_closure_versions SET version=? WHERE operationId=?",
+        )
+        .run(version + 1, operation.operationId);
+  }
+  /** The settled version differs from the current one only by cab's own confirmed close, with the issue observed closed. */
+  private closureCarriesSettlement(
+    taskId: string,
+    settledVersion: number,
+    version: number,
+  ): boolean {
+    const item = this.db
+      .prepare(
+        "SELECT externalId, observedState FROM external_items WHERE taskId=?",
+      )
+      .get(taskId) as { externalId: string; observedState: string } | undefined;
+    if (item?.observedState !== "closed") return false;
+    const operation = this.ownClosureOperation(taskId, item.externalId);
+    if (operation?.request.action.kind !== "issue.close") return false;
+    const row = this.db
+      .prepare(
+        "SELECT baseVersion, version FROM delivery_closure_versions WHERE operationId=?",
+      )
+      .get(operation.operationId) as
+      | { baseVersion: number; version: number }
+      | undefined;
+    return row?.baseVersion === settledVersion && row.version === version;
+  }
+  /** The latest confirmed operation that closed the issue, unless a reopen superseded it. */
+  ownClosureOperation(
+    taskId: string,
+    nodeId: string,
+  ): DeliveryActionRecord | undefined {
+    const superseded = this.supersededClosures(taskId, nodeId);
     const binding = this.delivery(taskId);
     // Any recorded observation counts: a reopened issue leaves the merged PR's closed list.
     const mergedClosure = (prNodeId: string) =>

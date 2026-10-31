@@ -2341,6 +2341,15 @@ PR-dependent completion inspect GitHub freshly and revalidate local revisions af
 the await. Changed heads invalidate settlement and wake the retained lead. New
 comment/review/check identities also wake it; unchanged polls are deduplicated.
 
+A settlement is bound to the PR head, the policy version and the task version. It stays
+valid across a task-version change made only by cab's own confirmed `issue.close`: the
+closure and the readiness it removes, while the issue is observed closed. A source read
+that still lists the issue open does not end it once a later read shows the issue
+closed with nothing else changed. Any other task change (a title or description edit, or
+a readiness label or field change, including one in the same read), a closure outside
+cab, an unconfirmed close or a reopen requires a new settlement. The rule is the same for
+GitHub and Jira.
+
 Only proven own closure permits the retained lead's completion continuation. The
 service obtains a fresh closed-issue snapshot before open-only source reconciliation;
 merge attribution requires the exact PR in GitHub's latest ClosedEvent, and explicit

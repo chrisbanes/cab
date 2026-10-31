@@ -837,15 +837,13 @@ export async function runJiraQualification(
         .completionBlockers(f.taskId, Number(domain.task(f.taskId).version))
         .includes("reviewable-pr-awaiting-current-settlement"),
     );
-    const settle = () =>
-      f.service.settleHandback({
-        ...f.settlement(),
-        repositoryId,
-        prNumber: iid,
-        expectedPrNodeId: String(request.id),
-        expectedHeadSha: workspaceCommit,
-      });
-    await settle();
+    await f.service.settleHandback({
+      ...f.settlement(),
+      repositoryId,
+      prNumber: iid,
+      expectedPrNodeId: String(request.id),
+      expectedHeadSha: workspaceCommit,
+    });
     await f.waitTurn(2);
     const high = Math.max(
       0,
@@ -872,9 +870,8 @@ export async function runJiraQualification(
     evidence.prerequisites["changelog ids increase and carry accountId"] =
       "passed";
     assert.equal((await jiraIssue(a.id)).fields.status.id, status.done);
-    // The closure took A out of Ready, which changes the task version the settlement is bound to, and the
-    // source read that follows changes it again: the operator settles the handback once more, now
-    // current, and the lead takes the pending events in a new turn before it can complete.
+    // The closure takes A out of Ready and moves the task version, but the settlement stays current:
+    // the version moved only by cab's own close. The lead takes the pending events in a new turn.
     await poll(
       "A done indexed",
       (issues) =>
@@ -882,12 +879,11 @@ export async function runJiraQualification(
     );
     await f.service.refreshGitHub();
     assert.ok(
-      f.service
+      !f.service
         .delivery()
         .completionBlockers(f.taskId, Number(domain.task(f.taskId).version))
         .includes("reviewable-pr-awaiting-current-settlement"),
     );
-    await settle();
     await f.terminal(2);
     await f.waitTurn(3);
     const completion = await f.call(

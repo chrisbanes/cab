@@ -18,7 +18,12 @@ import type {
 } from "../../src/standalone/codex.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { jiraIssue, json } from "../fixtures/fake-jira.js";
-import { fakeJiraIssue, issueId, target } from "../fixtures/fake-jira-issue.js";
+import {
+  fakeJiraIssue,
+  issueId,
+  otherAccountId,
+  target,
+} from "../fixtures/fake-jira-issue.js";
 import { databaseOf, startedOf } from "../fixtures/service-internals.js";
 import { tmpdir } from "../fixtures/temp.js";
 
@@ -97,16 +102,19 @@ async function fixture(
     transition(DONE, "Done", "done"),
   ];
   let hold: Promise<void> | undefined;
+  /** A search that has not caught up with a change: it answers this status instead of the live one. */
+  let lagging: typeof jira.state.status | undefined;
   const fetcher: typeof fetch = async (input, init) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith("/jql/parse")) return json({ queries: [{ query: "q" }] });
     if (path.endsWith("/search/jql")) {
-      const status = jira.state.status;
+      const status = lagging ?? jira.state.status;
       return json({
         issues: [
           jiraIssue(7, {
             done: status.category === "done",
             status: { id: status.id, name: status.name },
+            fields: { labels: jira.state.labels },
           }),
         ],
       });
@@ -331,6 +339,64 @@ async function fixture(
       return f.service;
     },
     domain,
+    lagSearch: (value: typeof lagging) => {
+      lagging = value;
+    },
+    /** Ends the running lead turn and waits until the service records it completed. */
+    endTurn: async () => {
+      const ended = turns.at(-1);
+      waiter?.();
+      const until = Date.now() + 5000;
+      while (
+        !f.service
+          .list()
+          .some((i) => i.turnId === ended?.turnId && i.state === "completed")
+      ) {
+        if (Date.now() > until) throw new Error("Turn did not end");
+        await later();
+      }
+    },
+    /** Waits for the turn after `count` turns to run. */
+    nextTurn: async (count: number) => {
+      const until = Date.now() + 5000;
+      while (
+        !turns[count] ||
+        !f.service
+          .list()
+          .some(
+            (i) => i.turnId === turns[count]?.turnId && i.state === "running",
+          )
+      ) {
+        if (Date.now() > until) throw new Error("Next turn did not start");
+        await later();
+      }
+    },
+    /** The operator accepts the registered PR at the task's current version. */
+    settle: () =>
+      f.service.settleHandback({
+        actor: "operator",
+        key: randomUUID(),
+        taskId,
+        expectedTaskVersion: Number(domain().task(taskId).version),
+        expectedDeliveryRevision:
+          f.service.delivery().delivery(taskId)?.revision ?? 0,
+        expectedPolicyVersion: f.service.delivery().configuration(projectId)
+          .version,
+        repositoryId: "R1",
+        prNumber: 7,
+        expectedPrNodeId: "P7",
+        expectedHeadSha: pr.headSha,
+        decision: "accepted",
+      }),
+    close: () =>
+      call("cab_external_action", {
+        operationId: randomUUID(),
+        action: { kind: "issue.close", target, reviewedResultIds: [] },
+      }),
+    blockers: () =>
+      f.service
+        .delivery()
+        .completionBlockers(taskId, Number(domain().task(taskId).version)),
     holdPosts: (value: Promise<void> | undefined) => {
       hold = value;
     },
@@ -637,4 +703,74 @@ test("a task can be Ready while blocked: it is written as held, and readiness is
   assert.equal(held.state, "confirmed-success");
   assert.deepEqual(f.posted(), [PROGRESS, TODO]);
   assert.equal(f.domain().task(f.taskId).ready, 1);
+});
+
+async function settleThenClose(t: Parameters<typeof fixture>[0]) {
+  const f = await fixture(t);
+  await f.registerPr();
+  await f.endTurn();
+  await f.settle();
+  await f.nextTurn(1);
+  // The mapped In Progress write lands within the readiness rule, then the lead closes the issue.
+  await f.run();
+  assert.ok(!f.blockers().includes(awaitingSettlement));
+  return f;
+}
+const awaitingSettlement = "reviewable-pr-awaiting-current-settlement";
+
+test("a settlement survives cab's own confirmed close of a Jira issue and completes without settling again", async (t) => {
+  const f = await settleThenClose(t);
+  const closed = await f.close();
+  assert.equal(closed.success, true, closed.text);
+  await f.service.refreshGitHub();
+  assert.equal(f.jira.state.status.id, DONE);
+  assert.ok(!f.blockers().includes(awaitingSettlement), String(f.blockers()));
+  // The closure-hold notice starts the lead's next turn, where it requests completion.
+  await f.endTurn();
+  await f.nextTurn(2);
+  assert.equal(
+    (await f.call("cab_request_completion", { reviewedResultIds: [] })).success,
+    true,
+  );
+  await f.endTurn();
+  const until = Date.now() + 5000;
+  while (f.domain().task(f.taskId).state !== "done") {
+    if (Date.now() > until) throw new Error("Task did not complete");
+    await later();
+  }
+});
+
+test("a Jira settlement does not survive a readiness label lost in the closure read", async (t) => {
+  const f = await settleThenClose(t);
+  // The label goes with the close, so the closure read lacks it.
+  f.jira.state.labels = [];
+  assert.equal((await f.close()).success, true);
+  await f.service.refreshGitHub();
+  assert.ok(f.blockers().includes(awaitingSettlement));
+});
+
+test("a Jira settlement does not survive a person's move to Done without a cab close", async (t) => {
+  const f = await settleThenClose(t);
+  f.jira.state.writer = otherAccountId;
+  f.jira.state.status = { id: DONE, name: "Done", category: "done" };
+  f.jira.state.history.push({
+    id: "700",
+    accountId: otherAccountId,
+    items: [{ field: "status", to: DONE }],
+  });
+  await f.service.refreshGitHub();
+  assert.equal(f.domain().task(f.taskId).ready, 0);
+  assert.ok(f.blockers().includes(awaitingSettlement));
+});
+
+test("a Jira settlement waits out a search that lags the close, then needs no new settlement", async (t) => {
+  const f = await settleThenClose(t);
+  const before = f.jira.state.status;
+  f.lagSearch(before);
+  assert.equal((await f.close()).success, true);
+  await f.service.refreshGitHub();
+  assert.ok(f.blockers().includes(awaitingSettlement));
+  f.lagSearch(undefined);
+  await f.service.refreshGitHub();
+  assert.ok(!f.blockers().includes(awaitingSettlement), String(f.blockers()));
 });
