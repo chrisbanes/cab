@@ -84,6 +84,9 @@ test("a non-zero exit returns its code and stdout", async (t) => {
 });
 
 test("a stalled child is stopped at its deadline and its exit is observed", async (t) => {
+  // Kept strict: a cooperative child exits on SIGTERM, so a SIGKILL escalation here is a
+  // regression. A prompt exit clears the grace timer, so load does not widen the window
+  // (0 failures in 60 loaded iterations of this file on the base commit).
   const { executable } = script(t, "exec sleep 30");
   const result = await run({ executable, timeoutMs: 20 });
   assert.deepEqual(result, {
@@ -106,6 +109,9 @@ test("output above the cap interrupts the child", async (t) => {
 });
 
 test("an abort after spawn stops the child; an already-aborted signal never spawns", async (t) => {
+  // Kept strict: a cooperative child exits on SIGTERM, so a SIGKILL escalation here is a
+  // regression. A prompt exit clears the grace timer, so load does not widen the window
+  // (0 failures in 60 loaded iterations of this file on the base commit).
   const started = script(t, 'touch "$(dirname "$0")/started"; exec sleep 30');
   const controller = new AbortController();
   const running = run({
