@@ -1,7 +1,7 @@
 {
   "version": 1,
   "issue": 901,
-  "record": "docs/evidence/issue-901-cli8-inventory-2026-10-12.json",
+  "record": "https://github.com/chrisbanes/cab/blob/e0979727bf15d8d167e06bb7e345496b23cd7a19/docs/evidence/issue-901-cli8-inventory-2026-10-12.json",
   "states": {
     "passed": "Real evidence: the operation ran through the installed CLI against the authenticated service in a journey cited from a dated live record (a harness step or an issue-901-cli8-live json), with its observable effect and applicable denial, revision and retry cases; synthetic fixtures alone never qualify.",
     "bounded": "Covered only by deterministic or synthetic fixtures (fixture runtime, scripted or fake GitHub, seeded recovery facts, in-process or packed CLI, loopback or a throwaway-certificate TLS proxy) or by an earlier live observation, or real evidence limited by a recorded defect; the gap states the bound.",
