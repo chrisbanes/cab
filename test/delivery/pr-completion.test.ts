@@ -1268,3 +1268,34 @@ test("a reopen after a carried closure brings the settlement hold back", async (
     await f.close();
   }
 });
+
+test("a settlement made while a lagging listing shows the closed issue open survives the rest of the closure chain", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    await registerFixturePr(f);
+    await settleFixturePr(f);
+    f.setActionOutcome(closedOk);
+    assert.equal((await closeFixtureIssue(f)).success, true);
+    await f.service.refreshGitHub();
+    const delivery = f.service.delivery();
+    await f.service.settleHandback({
+      actor: "operator",
+      key: randomUUID(),
+      taskId: f.taskId,
+      expectedTaskVersion: Number(f.domain.task(f.taskId).version),
+      expectedDeliveryRevision: delivery.delivery(f.taskId)?.revision ?? 0,
+      expectedPolicyVersion: delivery.configuration(f.projectId).version,
+      repositoryId: "R1",
+      prNumber: 7,
+      expectedPrNodeId: "P7",
+      expectedHeadSha: f.getPr().headSha,
+      decision: "accepted",
+    });
+    assert.ok(!blockers(f).includes(awaitingSettlement));
+    f.setIssueOpen(false);
+    await f.service.refreshGitHub();
+    assert.ok(!blockers(f).includes(awaitingSettlement), String(blockers(f)));
+  } finally {
+    await f.close();
+  }
+});

@@ -2500,7 +2500,13 @@ export class DeliveryStore {
       .get(operation.operationId) as
       | { baseVersion: number; version: number }
       | undefined;
-    return row?.baseVersion === settledVersion && row.version === version;
+    // The row advances one bump at a time, so every version from baseVersion to version is the closure's.
+    return (
+      row !== undefined &&
+      row.baseVersion <= settledVersion &&
+      settledVersion <= row.version &&
+      row.version === version
+    );
   }
   /** The latest confirmed operation that closed the issue, unless a reopen superseded it. */
   ownClosureOperation(
