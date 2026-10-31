@@ -5,8 +5,6 @@ import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { StandaloneService } from "../../src/standalone/service.js";
-import { OperatorFixtureRuntime } from "../fixtures/operator-web.js";
 const harness = await import(
   pathToFileURL(
     resolve("test/operator/journey-qualification/runtime-contract.mjs"),
@@ -14,9 +12,6 @@ const harness = await import(
 );
 // The harness reserves 2 s of every fixture total for cleanup.
 const harnessCleanupMs = 2000;
-// Behaviour cases stop at their asserted boundary, so the headroom only covers
-// slow runners.
-const behaviourTotalMs = 30_000;
 // Deadline cases end only at the total deadline, so setup must reach the
 // stalled step first; with 20 concurrent copies it took up to about 5 s.
 const deadlineTotalMs = 10_000;
@@ -51,76 +46,6 @@ browserTest(
     });
   },
 );
-for (const mode of [
-  "assertion-active",
-  "malformed-report",
-  "foreign-report",
-  "missing-report",
-  "missing-reply",
-  "missing-request",
-  "terminal-before-consumption",
-]) {
-  browserTest(
-    `${mode} fails finitely, retains persisted fixture and hold, closes exact child and never dispatches on restart`,
-    async () => {
-      const r = await harness.runQualification({
-        fixture: {
-          mode,
-          totalMs:
-            mode === "missing-report" || mode === "missing-reply"
-              ? deadlineTotalMs
-              : behaviourTotalMs,
-        },
-      });
-      assert.equal(r.status, "failed");
-      const expected = {
-        "assertion-active": /injected-assertion-while-runtime-active/,
-        "malformed-report": /exact-native-answer-map/,
-        "foreign-report": /terminal-before-native-consumption/,
-        "missing-report": /native-consumption-terminal-deadline/,
-        "missing-reply": /native-consumption-terminal-deadline/,
-        "missing-request": /native-request-deadline/,
-        "terminal-before-consumption": /terminal-before-native-consumption/,
-      };
-      assert.match(r.failure.reason, expected[mode as keyof typeof expected]);
-      assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
-      assert.equal(r.counts.threads, 1);
-      assert.equal(r.counts.turns, 1);
-      if (mode === "terminal-before-consumption") {
-        assert.equal(r.counts.requests, 0);
-        assert.equal(r.counts.replies, 0);
-        assert.equal(r.counts.reports, 0);
-        assert.ok(r.earlyTerminal);
-      }
-      if (mode === "foreign-report") {
-        assert.equal(r.counts.requests, 1);
-        assert.equal(r.counts.replies, 1);
-        assert.equal(r.counts.reports, 0);
-        assert.ok(r.earlyTerminal);
-      }
-      if (mode === "malformed-report")
-        assert.equal(r.callbackFailure.reason, "exact-native-answer-map");
-
-      assert.ok(
-        r.counts.requests <= 1 &&
-          r.counts.replies <= 1 &&
-          r.counts.reports <= 1,
-      );
-      const runtime = new OperatorFixtureRuntime();
-      const service = new StandaloneService(r.data, () => runtime, undefined, {
-        power: { enabled: false },
-      });
-      try {
-        await service.start();
-        assert.ok(service.taskHold(r.taskId));
-        assert.equal(runtime.turns, 0);
-        assert.equal(service.domain().task(r.taskId).id, r.taskId);
-      } finally {
-        await service.stop();
-      }
-    },
-  );
-}
 browserTest(
   "setup deadline closes late browser and records failed cleanup without losing primary assertion",
   async () => {

@@ -31,6 +31,7 @@ import {
 import { ServiceLog } from "../../src/standalone/service-log.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 function deferred<T = void>(): {
   promise: Promise<T>;
@@ -44,14 +45,6 @@ function deferred<T = void>(): {
     reject = rej;
   });
   return { promise, resolve, reject };
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  }
 }
 
 async function rejectionReason(promise: Promise<unknown>): Promise<unknown> {
@@ -362,9 +355,7 @@ test("power polling failures are fatal while known incomplete power history rema
       await heldService.start();
       assert.equal(heldService.powerStatus()?.admissionHeld, true);
       fireInterval(intervals, 5000);
-      await waitUntil(
-        () => serviceAccess(heldService).backgroundRuns.size === 0,
-      );
+      await until(() => serviceAccess(heldService).backgroundRuns.size === 0);
       assert.equal(heldService.powerStatus()?.admissionHeld, true);
       assert.equal(heldDiagnostics.length, 0);
     } finally {
@@ -631,7 +622,7 @@ test("GitHub reader failures remain durable incomplete-source evidence and direc
         0,
       );
       fireInterval(intervals, 1000);
-      await waitUntil(() => serviceAccess(service).backgroundRuns.size === 0);
+      await until(() => serviceAccess(service).backgroundRuns.size === 0);
       assert.equal(diagnostics.length, 0);
       const access = serviceAccess(service);
       access.refreshGitHub = async () => {
@@ -897,7 +888,7 @@ test("repeated synthetic timer-clear failures keep a late callback fatal signal 
       serviceAccess(service).refreshGitHub = () => poll.promise;
       const notification = service.waitForBackgroundFailure();
       fireInterval(intervals, 1000);
-      await waitUntil(() => serviceAccess(service).backgroundRuns.size === 1);
+      await until(() => serviceAccess(service).backgroundRuns.size === 1);
 
       // A synthetic early timer-clear error lets the already-started poll
       // reject after multiple manual stop attempts. Normal stops coalesce and
@@ -949,7 +940,7 @@ test("repeated synthetic timer-clear failures keep a late callback fatal signal 
         await rejectionReason(service.waitForBackgroundShutdown(notification)),
         undefined,
       );
-      await waitUntil(() => serviceAccess(service).backgroundRuns.size === 0);
+      await until(() => serviceAccess(service).backgroundRuns.size === 0);
       assert.equal(diagnostics.length, 2);
       assert.equal(diagnostics[1]?.incident, 2);
       assert.equal(diagnostics[1]?.operation, "github-poll");
@@ -1188,7 +1179,7 @@ test("an operator fatal notification already latched before its wait closes the 
         "background-failure",
       );
       await listener.stop();
-      await waitUntil(() => serviceAccess(service).stopPromise === undefined);
+      await until(() => serviceAccess(service).stopPromise === undefined);
       await service.stop();
       auth.close();
       assert.equal(process.exitCode, 1);
@@ -1699,7 +1690,7 @@ test("production operator CLI handles SIGTERM first, then joins fatal shutdown a
       });
       await listenerStarted.promise;
       const signalBaseline = process.listenerCount("SIGTERM");
-      await waitUntil(() => process.listenerCount("SIGTERM") > signalBaseline);
+      await until(() => process.listenerCount("SIGTERM") > signalBaseline);
       const service = await cliService.promise;
       fireInterval(intervals, 1000);
       process.emit("SIGTERM");
@@ -1820,7 +1811,7 @@ test("production serve CLI exits successfully on a normal SIGTERM", async () => 
         };
         return service;
       });
-      await waitUntil(() => process.listenerCount("SIGTERM") > signalBaseline);
+      await until(() => process.listenerCount("SIGTERM") > signalBaseline);
       process.emit("SIGTERM");
       await command;
       assert.equal(process.exitCode, 0);
@@ -1877,7 +1868,7 @@ test("serve and operator CLIs record shutdown failures as sanitised structured l
         },
         new ServiceLog((line) => void lines.push(line)),
       );
-      await waitUntil(() => process.listenerCount("SIGTERM") > baseline);
+      await until(() => process.listenerCount("SIGTERM") > baseline);
       process.emit("SIGTERM");
       await command;
       assert.equal(process.exitCode, 1);
@@ -1917,7 +1908,7 @@ test("serve and operator CLIs record shutdown failures as sanitised structured l
         },
         new ServiceLog((line) => void lines.push(line)),
       );
-      await waitUntil(() => process.listenerCount("SIGTERM") > baseline);
+      await until(() => process.listenerCount("SIGTERM") > baseline);
       process.emit("SIGTERM");
       await command;
       assert.equal(process.exitCode, 1);
@@ -1973,7 +1964,7 @@ test("production serve CLI joins a fatal failure that arrives after SIGTERM wins
         };
         return service;
       });
-      await waitUntil(() => process.listenerCount("SIGTERM") > signalBaseline);
+      await until(() => process.listenerCount("SIGTERM") > signalBaseline);
       const activeService = service;
       assert.ok(activeService);
       fireInterval(intervals, 1000);

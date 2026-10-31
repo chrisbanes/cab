@@ -284,6 +284,9 @@ explicitly available host credential.
 
 ## Command surface
 
+The [command inventory](operator-cli-inventory.json) records each command's
+qualification state and evidence; a test keeps it equal to the command registry.
+
 Command names follow cab's domain: task, assignment, agent profile and
 execution. There is no workflow graph or new assignment-stage system.
 Provide a packaged `cab` executable usable outside this repository, keeping

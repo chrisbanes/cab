@@ -1,6 +1,6 @@
 import { globSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { measuredProfile, timingInputDigest } from "./test-timings.mjs";
+import { measuredProfile } from "./test-timings.mjs";
 
 const [profile, major, root, ...extra] = process.argv.slice(2);
 if (
@@ -25,9 +25,9 @@ const document = JSON.parse(readFileSync(path, "utf8"));
 document.profiles[profile] = measuredProfile(
   records,
   files,
+  document.profiles[profile],
   profile,
   Number(major),
-  timingInputDigest(),
 );
 writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`);
 console.log(

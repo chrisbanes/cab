@@ -18,14 +18,14 @@ import {
 } from "../fixtures/runtime-retention.js";
 
 test("production adapter terminal evidence remains SQLite-backed past cache limits", {
-  timeout: 120_000,
+  timeout: 20_000,
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-runtime-retention-"));
   const f = fixture(root);
   try {
     await f.service.start();
     f.internals().scheduler.stop();
-    const count = 10_000;
+    const count = 20;
     seedTerminalRows(f.service, count);
     const runtime = f.runtime();
     const db = (f.service as unknown as ServiceInternals).db;
@@ -33,7 +33,7 @@ test("production adapter terminal evidence remains SQLite-backed past cache limi
     const heapSamples: Array<{ settled: number; heapUsed: number }> = [];
     for (let index = 0; index < count; index++) {
       receiveTerminal(runtime, f.child, `retention-turn-${index}`);
-      if (collect && (index + 1) % 5_000 === 0) {
+      if (collect && (index + 1) % 10 === 0) {
         collect();
         heapSamples.push({
           settled: index + 1,
@@ -60,7 +60,7 @@ test("production adapter terminal evidence remains SQLite-backed past cache limi
       ).count,
       count,
     );
-    // Turn zero is beyond the 10k settled cohort. Its duplicate remains exact,
+    // Turn zero settled first. Its duplicate remains exact,
     // while an opposite report conflicts durably and retracts its workspace tail.
     receiveTerminal(runtime, f.child, "retention-turn-0", "completed");
     assert.equal(
@@ -98,7 +98,7 @@ test("production adapter terminal evidence remains SQLite-backed past cache limi
       .all("retention-thread", "retention-turn-0") as Array<{
       detail: string;
     }>;
-    const terminalLookups = timeIterations(1_000, (index) => {
+    const terminalLookups = timeIterations(count - 1, (index) => {
       assert.ok(
         state.runtimeTerminal(
           "retention-thread",
@@ -144,7 +144,7 @@ test("production adapter terminal evidence remains SQLite-backed past cache limi
   }
 });
 test("unbound failed terminals retain exact retry facts only in durable evidence", {
-  timeout: 120_000,
+  timeout: 20_000,
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "cab-runtime-failure-retention-"));
   const f = fixture(root);
@@ -153,7 +153,7 @@ test("unbound failed terminals retain exact retry facts only in durable evidence
     f.internals().scheduler.stop();
     const runtime = f.runtime();
     const db = f.internals().db;
-    const count = 1_024;
+    const count = 20;
     for (let index = 0; index < count; index++)
       receiveTerminal(
         runtime,

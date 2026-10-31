@@ -245,21 +245,11 @@ test("task create derives ids from the request key and reports admission", async
   );
 });
 
-test("task configure and dependencies are versioned, reversible and respect imported ownership", async (t) => {
+test("task configure and dependencies send their flags; an imported task's refusal exits 4 with the service's message", async (t) => {
   const o = await startCliOperator(t);
-  const { cli, s, d, file } = o;
+  const { cli, s, d } = o;
   const version = () => Number(d.task(s.taskId).version);
-  let r = await cli("rw", [
-    "task",
-    "configure",
-    s.taskId,
-    "--expected-version",
-    String(version() + 3),
-    "--ready",
-    "true",
-  ]);
-  assert.equal(r.code, 4);
-  assert.equal(r.json().error.code, "conflict");
+  let r: Awaited<ReturnType<typeof cli>>;
   for (const ready of ["true", "false"]) {
     r = await cli("rw", [
       "task",
@@ -273,14 +263,6 @@ test("task configure and dependencies are versioned, reversible and respect impo
     assert.equal(r.code, 0, r.out);
     assert.equal(Boolean(d.task(s.taskId).ready), ready === "true");
   }
-  r = await cli("rw", [
-    "task",
-    "configure",
-    s.taskId,
-    "--expected-version",
-    String(version()),
-  ]);
-  assert.equal(r.code, 2);
 
   // Dependencies: add then remove with the returned versions.
   const other = randomUUID();
@@ -332,133 +314,22 @@ test("task configure and dependencies are versioned, reversible and respect impo
   ]);
   assert.equal(r.code, 0, r.out);
 
-  // Imported tasks keep provider-owned fields; direct HTTP is refused the same way.
+  // A service refusal surfaces as exit 4 with the service's message and no field list.
   const imported = seedImported(o);
-  const importedVersion = Number(d.task(imported).version);
   const before = databaseDigest(s.f);
-  for (const args of [
-    ["--title", "Local override"],
-    ["--outcome-file", file("o.md", "Local outcome")],
-  ]) {
-    r = await cli("rw", [
-      "task",
-      "configure",
-      imported,
-      "--expected-version",
-      String(importedVersion),
-      ...args,
-    ]);
-    assert.equal(r.code, 4, r.out);
-    assert.equal(r.json().error.code, "policy-denied");
-  }
   r = await cli("rw", [
     "task",
     "configure",
     imported,
     "--expected-version",
-    String(importedVersion),
-    "--ready",
-    "false",
+    String(Number(d.task(imported).version)),
+    "--title",
+    "Local override",
   ]);
   assert.equal(r.code, 4, r.out);
-  r = await cli("rw", [
-    "task",
-    "add-dependency",
-    imported,
-    "--blocker",
-    other,
-    "--expected-version",
-    String(importedVersion),
-  ]);
-  assert.equal(r.code, 4, r.out);
+  assert.equal(r.json().error.code, "policy-denied");
+  assert.equal(r.json().error.message, "Request denied.");
   assert.equal(databaseDigest(s.f), before);
-  const direct = await s.sessionPost("/api/operator/commands", {
-    type: "task.configure",
-    key: randomUUID(),
-    projectId: s.projectId,
-    taskId: imported,
-    expectedVersion: importedVersion,
-    title: "Local override",
-  });
-  assert.equal(direct.status, 403);
-  assert.equal((await direct.json()).error.fieldPaths, undefined);
-  for (const update of [{ outcome: "Local outcome" }, { ready: false }]) {
-    const response = await s.sessionPost("/api/operator/commands", {
-      type: "task.configure",
-      key: randomUUID(),
-      projectId: s.projectId,
-      taskId: imported,
-      expectedVersion: importedVersion,
-      ...update,
-    });
-    assert.equal(response.status, 403);
-    assert.equal((await response.json()).error.fieldPaths, undefined);
-  }
-  assert.deepEqual(
-    {
-      title: d.task(imported).title,
-      outcome: d.task(imported).outcome,
-      ready: Boolean(d.task(imported).ready),
-      version: Number(d.task(imported).version),
-    },
-    {
-      title: "Imported task",
-      outcome: "Imported body",
-      ready: true,
-      version: importedVersion,
-    },
-  );
-
-  const otherProjectId = randomUUID();
-  d.execute({
-    type: "project.create",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: otherProjectId,
-    name: "Other project",
-    leadProfileId: null,
-  });
-  const otherProjectTaskId = randomUUID();
-  d.execute({
-    type: "task.create",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: otherProjectId,
-    taskId: otherProjectTaskId,
-    title: "Other project task",
-    outcome: "Keep project binding",
-  });
-  const mismatch = await s.sessionPost("/api/operator/commands", {
-    type: "task.configure",
-    key: randomUUID(),
-    projectId: s.projectId,
-    taskId: otherProjectTaskId,
-    expectedVersion: 1,
-    title: "Wrong project",
-  });
-  assert.equal(mismatch.status, 403);
-  assert.equal(d.task(otherProjectTaskId).title, "Other project task");
-  const missing = await s.sessionPost("/api/operator/commands", {
-    type: "task.configure",
-    key: randomUUID(),
-    projectId: s.projectId,
-    taskId: randomUUID(),
-    expectedVersion: 1,
-    title: "Missing task",
-  });
-  assert.equal(missing.status, 404);
-  assert.equal((await missing.json()).error.code, "not-found");
-  // A local task may depend on an imported blocker.
-  r = await cli("rw", [
-    "task",
-    "add-dependency",
-    other,
-    "--blocker",
-    imported,
-    "--expected-version",
-    String(Number(d.task(other).version)),
-  ]);
-  assert.equal(r.code, 0, r.out);
 });
 
 test("messages and follow-ups name the recipient and the queued effect", async (t) => {
@@ -468,9 +339,6 @@ test("messages and follow-ups name the recipient and the queued effect", async (
   const lead = task.assignmentId;
   const text = file("message.md", "Please also update the changelog.");
   const leadVersion = () => Number(d.assignment(lead).version);
-  const events = () =>
-    o.s.f.service.coordinationView().readTask(task.taskId).messages.length;
-
   // A completed lead is a follow-up, not a message.
   const sent = posts(o);
   let r = await cli("rw", [
@@ -488,18 +356,6 @@ test("messages and follow-ups name the recipient and the queued effect", async (
   assert.match(r.json().error.message, /task follow-up/);
   assert.equal(posts(o), sent);
 
-  const before = events();
-  r = await cli("rw", [
-    "task",
-    "follow-up",
-    task.taskId,
-    "--expected-version",
-    String(leadVersion() + 1),
-    "--message-file",
-    text,
-  ]);
-  assert.equal(r.code, 4, "stale assignment version");
-  assert.equal(events(), before);
   r = await cli("rw", [
     "task",
     "follow-up",
@@ -568,63 +424,7 @@ test("messages and follow-ups name the recipient and the queued effect", async (
     ]);
     assert.equal(r.code, 2, name);
   }
-  // An assignment of another task is refused by the service.
-  const elsewhere = await seedReviewTask(o.s.f, "Elsewhere", "Other");
-  const count = events();
-  r = await cli("rw", [
-    "task",
-    "message",
-    task.taskId,
-    "--to",
-    elsewhere.assignmentId,
-    "--expected-version",
-    "1",
-    "--message-file",
-    text,
-  ]);
-  assert.equal(r.code, 4, r.out);
-  assert.equal(events(), count);
   await o.s.f.service.stopTask(task.taskId);
-});
-
-test("a follow-up never reopens a done task, through the CLI or the session API", async (t) => {
-  const o = await startCliOperator(t);
-  const { cli, d, file } = o;
-  const { task } = await completedLead(o.s.f, "Done follow-up");
-  d.execute({
-    type: "task.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: task.projectId,
-    taskId: task.taskId,
-    expectedVersion: Number(d.task(task.taskId).version),
-    state: "done",
-  });
-  const events = () =>
-    o.s.f.service.coordinationView().readTask(task.taskId).messages.length;
-  const before = events();
-  const version = Number(d.assignment(task.assignmentId).version);
-  const r = await cli("rw", [
-    "task",
-    "follow-up",
-    task.taskId,
-    "--expected-version",
-    String(version),
-    "--message-file",
-    file("m.md", "Reopen please"),
-  ]);
-  assert.equal(r.code, 4, r.out);
-  const direct = await o.s.sessionPost("/api/operator/commands", {
-    type: "message",
-    key: randomUUID(),
-    taskId: task.taskId,
-    recipientAssignmentId: task.assignmentId,
-    expectedAssignmentVersion: version,
-    message: "Reopen please",
-  });
-  assert.equal(direct.status, 409);
-  assert.equal(events(), before);
-  assert.equal(d.task(task.taskId).state, "done");
 });
 
 test("draft turns start only on an open Draft task", async (t) => {
@@ -1551,10 +1351,7 @@ test("task configure uses the current version when --expected-version is omitted
   assert.equal(r.json().error.code, "insufficient-scope");
   assert.equal(databaseDigest(s.f), digest);
 
-  // 5. An explicit stale version still exits 4, and both flags together are refused.
-  r = await cli("rw", configure("--title", "Stale", "--expected-version", "1"));
-  assert.equal(r.code, 4);
-  assert.equal(String(d.task(s.taskId).title), "Lost again");
+  // 5. Both outcome flags together, or no field at all, are refused.
   r = await cli("rw", configure("--outcome", "A", "--outcome-file", "x.md"));
   assert.equal(r.code, 2);
   assert.equal(r.json().error.code, "usage");

@@ -177,6 +177,41 @@ test("approval-mode operator comment requires distinct exact durable review and 
       decision: "approved",
     }),
   );
+  // A send through the API before confirmation is denied and leaves the review pending.
+  const reviewState = (id: string) =>
+    f.service.delivery().operatorReview(id)?.decision;
+  const early = await api.execute({ ...send(f), reviewId: review.reviewId });
+  assert.equal(early.kind === "delivery" && early.state, "denied");
+  assert.equal(reviewState(review.reviewId), "pending");
+  // On the review's own operation the denial is that operation's alone; the review stays usable.
+  const other = send(f, "Another reviewed comment"),
+    otherReview = await api.execute({
+      type: "comment.review",
+      key: randomUUID(),
+      taskId: f.taskId,
+      operationId: other.key,
+      expectedTaskVersion: other.expectedTaskVersion,
+      body: other.body,
+    });
+  if (otherReview.kind !== "comment-review") assert.fail("review absent");
+  const burnt = await api.execute({ ...other, reviewId: otherReview.reviewId });
+  assert.equal(burnt.kind === "delivery" && burnt.state, "denied");
+  assert.equal(reviewState(otherReview.reviewId), "pending");
+  assert.equal(f.effects.length, 0);
+  assert.equal(
+    (
+      await api.execute({
+        type: "comment.confirm",
+        key: randomUUID(),
+        taskId: f.taskId,
+        reviewId: otherReview.reviewId,
+        expectedRevision: otherReview.revision,
+        materialHash: otherReview.materialHash,
+        decision: "denied",
+      })
+    ).kind,
+    "comment-review",
+  );
   const confirm = {
     type: "comment.confirm",
     key: randomUUID(),
@@ -188,6 +223,12 @@ test("approval-mode operator comment requires distinct exact durable review and 
   };
   const approved = await api.execute(confirm);
   assert.deepEqual(await api.execute(confirm), approved);
+  // A decided review cannot be re-decided the other way.
+  await assert.rejects(
+    api.execute({ ...confirm, key: randomUUID(), decision: "denied" }),
+    { status: 409 },
+  );
+  assert.equal(reviewState(review.reviewId), "approved");
   const result = await api.execute({ ...command, reviewId: review.reviewId });
   assert.equal(result.kind, "delivery");
   if (result.kind === "delivery")

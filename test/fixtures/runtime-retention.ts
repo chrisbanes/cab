@@ -10,6 +10,8 @@ import type { RuntimeSpawnContext } from "../../src/standalone/service.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
 import { startedOf } from "./service-internals.js";
+import { until } from "./until.js";
+export { until };
 
 export const generation = "retention-generation";
 const processIdentity: RuntimeProcessIdentity = {
@@ -327,18 +329,6 @@ export function nativeRequest(
       },
     ],
   };
-}
-
-export async function until(
-  predicate: () => boolean,
-  description: string,
-): Promise<void> {
-  const deadline = Date.now() + 2_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline)
-      throw new Error(`Timed out waiting for ${description}`);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
 }
 
 export function createNativeWork(

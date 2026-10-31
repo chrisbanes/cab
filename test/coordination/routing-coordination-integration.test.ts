@@ -33,20 +33,12 @@ import type {
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
 import { startedOf } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
-  while (!predicate()) {
-    if (Date.now() >= deadline)
-      throw new Error("integration condition timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 class CoordinationRuntime implements Runtime {
@@ -113,7 +105,7 @@ class CoordinationRuntime implements Runtime {
   }
 
   async waitForTurnNumber(turn: number) {
-    await waitUntil(() => this.turns >= turn);
+    await until(() => this.turns >= turn);
     await this.entered.get(turn)?.promise;
   }
 
@@ -517,7 +509,7 @@ test("a committed initial routing assignment is not inferred again after restart
   );
   const f = await routedFixture(client);
   try {
-    await waitUntil(
+    await until(
       () => f.service.domain().routingOperations(f.taskId).length === 1,
     );
     assert.equal(client.requests.length, 1);
@@ -547,7 +539,7 @@ test("capacity waiting preserves the routing-selected candidate", async () => {
   );
   const f = await routedFixture(client, { fillCapacity: true });
   try {
-    await waitUntil(
+    await until(
       () => f.service.domain().routingOperations(f.taskId).length === 1,
     );
     assert.equal(client.requests.length, 1);
@@ -561,7 +553,7 @@ test("capacity waiting preserves the routing-selected candidate", async () => {
       f.service.domain().assignment(String(routed.assignmentId)).state,
       "pending",
     );
-    await waitUntil(() =>
+    await until(() =>
       f.service.list().some((item) => item.state === "capacity-waiting"),
     );
     const request = f.service
@@ -619,7 +611,7 @@ test("a first turn waiting for capacity is re-captured at a newer assignment ver
   );
   const f = await routedFixture(client, { fillCapacity: true });
   try {
-    await waitUntil(
+    await until(
       () => f.service.domain().routingOperations(f.taskId).length === 1,
     );
     const route = f.service.domain().routingOperations(f.taskId)[0];
@@ -629,7 +621,7 @@ test("a first turn waiting for capacity is re-captured at a newer assignment ver
       .turnRequests()
       .find((item) => item.taskId === f.taskId);
     assert.ok(request);
-    await waitUntil(() =>
+    await until(() =>
       f.service
         .list()
         .some(
@@ -658,7 +650,7 @@ test("a first turn waiting for capacity is re-captured at a newer assignment ver
     );
     // The turn never started, so admission re-captures and re-binds it at version 2.
     f.runtime.complete(1);
-    await waitUntil(() =>
+    await until(() =>
       f.service
         .list()
         .some(
@@ -770,7 +762,7 @@ test("a delayed routing response cannot dispatch after the task brief changes", 
       ready: true,
     });
 
-    await waitUntil(() => client.requests.length === 1);
+    await until(() => client.requests.length === 1);
     command(service, {
       type: "task.configure",
       actor: "operator",
@@ -779,7 +771,7 @@ test("a delayed routing response cannot dispatch after the task brief changes", 
       expectedVersion: 2,
       outcome: "Ship the revised parser brief.",
     });
-    await waitUntil(() => client.requests.length === 2);
+    await until(() => client.requests.length === 2);
     const firstRequest = client.requests[0];
     assert.ok(firstRequest);
     firstResponse.resolve(routeResponse(firstRequest, workerProfileId));
@@ -892,7 +884,7 @@ test("a Stop committed after routing still blocks scheduler admission", async ()
       ready: true,
     });
 
-    await waitUntil(() => stopped);
+    await until(() => stopped);
     assert.equal(service.domain().routingOperations(taskId).length, 1);
     assert.equal(
       service.domain().assignments(taskId)[0]?.profileId,
@@ -926,7 +918,7 @@ test("revision, routing, candidate and hold changes stale an in-flight recommend
     );
     const f = await routedFixture(client);
     try {
-      await waitUntil(() => client.requests.length === 1);
+      await until(() => client.requests.length === 1);
       switch (change) {
         case "task-revision":
           command(f.service, {
@@ -1017,7 +1009,7 @@ test("revision, routing, candidate and hold changes stale an in-flight recommend
       const firstRequest = client.requests[0];
       assert.ok(firstRequest);
       firstResponse.resolve(routeResponse(firstRequest, f.workerProfileId));
-      await waitUntil(
+      await until(
         () =>
           row(
             f.service,
@@ -1079,7 +1071,7 @@ async function interceptedRouting(
       diagnostics.push(event);
     },
   });
-  await waitUntil(() => client.requests.length === 1);
+  await until(() => client.requests.length === 1);
   const domain = f.service.domain();
   domain.recordRouting = intercept(domain.recordRouting.bind(domain));
   const firstRequest = client.requests[0];
@@ -1147,7 +1139,7 @@ test("routing stale classification follows the typed domain error, not its messa
       throw scenario.error;
     });
     try {
-      await waitUntil(() => t.attempt()?.status === "stale");
+      await until(() => t.attempt()?.status === "stale");
       assert.equal(t.attempt()?.staleReason, scenario.staleReason);
       assert.equal(t.f.service.backgroundFailureObserved(), false);
       assert.equal(t.f.service.domain().assignments(t.f.taskId).length, 0);
@@ -1162,8 +1154,8 @@ test("a plain error with stale-looking wording is a background failure, not stal
     throw new Error("stale held candidate revision already assigned");
   });
   try {
-    await waitUntil(() => t.f.service.backgroundFailureObserved());
-    await waitUntil(() => t.diagnostics.length === 1);
+    await until(() => t.f.service.backgroundFailureObserved());
+    await until(() => t.diagnostics.length === 1);
     assert.equal(t.diagnostics[0]?.errorCode, "unexpected-background-failure");
     await t.f.service.waitForBackgroundShutdown();
     assert.deepEqual(persistedRouting(t.f.root), {
@@ -1192,8 +1184,8 @@ test("a selected profile outside the unchanged candidate set fails loudly withou
   );
   leadProfileId = t.f.leadProfileId;
   try {
-    await waitUntil(() => t.f.service.backgroundFailureObserved());
-    await waitUntil(() => t.diagnostics.length === 1);
+    await until(() => t.f.service.backgroundFailureObserved());
+    await until(() => t.diagnostics.length === 1);
     assert.equal(t.diagnostics[0]?.errorCode, "unexpected-background-failure");
     await t.f.service.waitForBackgroundShutdown();
     assert.deepEqual(persistedRouting(t.f.root), {
@@ -1233,7 +1225,7 @@ test("a real record-time stale race throws the typed error and stays stale", asy
   projectId = t.f.projectId;
   taskId = t.f.taskId;
   try {
-    await waitUntil(() => t.attempt()?.status === "stale");
+    await until(() => t.attempt()?.status === "stale");
     assert.ok(thrown instanceof DomainStaleDispositionError);
     assert.equal(t.f.service.backgroundFailureObserved(), false);
     assert.equal(t.f.service.domain().routingOperations(taskId).length, 0);
@@ -1512,7 +1504,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
     assert.ok(delegated);
     childAssignmentId = String(delegated.id);
     const childWorkId = `assignment:${childAssignmentId}:initial`;
-    await waitUntil(() =>
+    await until(() =>
       service.turnRequests().some((item) => item.workId === childWorkId),
     );
     assert.equal(
@@ -1575,7 +1567,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
     );
 
     runtime.complete(2);
-    await waitUntil(
+    await until(
       () =>
         service.list().find((intent) => intent.workId === childWorkId)
           ?.state === "completed",
@@ -1653,7 +1645,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
     db.close();
 
     await service.start();
-    await waitUntil(() =>
+    await until(() =>
       service
         .turnRequests()
         .some(
@@ -1779,7 +1771,7 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
     );
 
     runtime.complete(4);
-    await waitUntil(
+    await until(
       () =>
         service.list().find((item) => item.workId === deliveredWorkId)
           ?.state === "completed",
@@ -2038,7 +2030,7 @@ test("a Stop after delegation commit leaves the child pending without dispatch",
       arguments: { profileId: workerProfileId, brief: "Created before Stop." },
     });
     assert.equal(response.success, true);
-    await waitUntil(() => stopped);
+    await until(() => stopped);
     assert.ok(service.taskHold(taskId));
     assert.equal(
       service.domain().assignment(childAssignmentId).state,
@@ -2125,14 +2117,16 @@ test("restart leaves legacy inbox events for a completed recipient undelivered",
     });
     assert.equal(result.success, true);
     runtime.complete(1);
-    await waitUntil(
+    await until(
       () => service.domain().assignment(leadAssignmentId).state === "completed",
     );
     const legacyEventId = randomUUID();
     const db = (service as unknown as { db: DatabaseSync }).db;
-    db.prepare(`INSERT INTO coordination_inbox_events
+    db.prepare(
+      `INSERT INTO coordination_inbox_events
       (eventId, taskId, recipientAssignmentId, eventType, payload)
-      VALUES (?, ?, ?, 'operator-message', ?)`).run(
+      VALUES (?, ?, ?, 'operator-message', ?)`,
+    ).run(
       legacyEventId,
       taskId,
       leadAssignmentId,
@@ -2347,7 +2341,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
       paused: true,
     });
     runtime.complete(3);
-    await waitUntil(() =>
+    await until(() =>
       service
         .list()
         .some((item) => item.turnId === "turn-3" && item.state === "completed"),
@@ -2436,7 +2430,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
     const freshRequestId = freshCompletion.text.split(" ").at(-1) ?? "";
     assert.match(freshRequestId, /^[0-9a-f-]{36}$/i);
     runtime.complete(4);
-    await waitUntil(() =>
+    await until(() =>
       service
         .list()
         .some((item) => item.turnId === "turn-4" && item.state === "completed"),
@@ -2625,7 +2619,7 @@ test("restart acknowledges the exact lead inbox batch before finalizing a comple
       };
     };
     runtime.complete(1);
-    await waitUntil(() =>
+    await until(() =>
       service
         .list()
         .some((item) => item.workId === workId && item.state === "completed"),
@@ -2844,7 +2838,7 @@ test("a result-free turn gets one durable reporting repair then holds", async ()
     await runtime.waitForTurnNumber(2);
     assert.match(runtime.prompts[1] ?? "", /Reporting repair/);
     runtime.complete(2);
-    await waitUntil(
+    await until(
       () =>
         service
           .domain()

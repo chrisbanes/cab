@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { insertExternalItem } from "../fixtures/source-rows.js";
 import { DomainStore } from "../../src/core/domain.js";
 import {
   type IssueSnapshot,
@@ -315,8 +316,18 @@ test("an existing database gains the observed status column once, keeping its ro
     taskId TEXT NOT NULL UNIQUE, containerId TEXT NOT NULL,
     containerName TEXT NOT NULL, number INTEGER NOT NULL,
     observedTitle TEXT NOT NULL, observedBody TEXT NOT NULL, observedState TEXT NOT NULL,
-    labels TEXT NOT NULL, PRIMARY KEY(provider, instance, externalId));
-    INSERT INTO external_items VALUES ('github','github.com','I_1','t1','R_1','org/repo',1,'T','B','open','[]');`);
+    labels TEXT NOT NULL, PRIMARY KEY(provider, instance, externalId));`);
+  insertExternalItem(db, {
+    externalId: "I_1",
+    taskId: "t1",
+    containerId: "R_1",
+    containerName: "org/repo",
+    number: 1,
+    observedTitle: "T",
+    observedBody: "B",
+    observedState: "open",
+    labels: "[]",
+  });
   new GitHubSourceStore(db).migrate();
   new GitHubSourceStore(db).migrate();
   assert.deepEqual(

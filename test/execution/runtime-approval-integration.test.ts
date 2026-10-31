@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmpdir } from "../fixtures/temp.js";
+import { until } from "../fixtures/until.js";
 import { CodexRuntime } from "../../src/standalone/codex.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 
@@ -200,18 +201,6 @@ function childOf(
 ): ChildProcessWithoutNullStreams | undefined {
   return (runtime as unknown as { child?: ChildProcessWithoutNullStreams })
     .child;
-}
-
-async function waitUntil(
-  predicate: () => boolean,
-  timeoutMs: number,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline)
-      throw new Error("bounded observation timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 function runtimeFailure(
@@ -428,7 +417,11 @@ test("malformed identity holds the active production execution and denial-pipe f
           },
         ]);
       } else {
-        await waitUntil(() => runtimeFailure(runtime) !== undefined, 2_000);
+        await until(
+          () => runtimeFailure(runtime) !== undefined,
+          "the runtime to report the denial-pipe failure",
+          2_000,
+        );
         assert.equal(runtimeFailure(runtime)?.code, "EPIPE");
       }
       await service.stop();

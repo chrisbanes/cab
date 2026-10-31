@@ -9,16 +9,9 @@ import {
   type GenerationMode,
   NoTurnRuntime,
 } from "../fixtures/recovery-generations.js";
+import { until } from "../fixtures/until.js";
 
 type World = Awaited<ReturnType<typeof cliGeneration>>;
-
-async function until(predicate: () => boolean, label: string) {
-  const end = Date.now() + 5000;
-  while (!predicate()) {
-    if (Date.now() > end) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 const turns = (w: World) =>
   w.runtime instanceof NoTurnRuntime
     ? w.runtime.turnInvocations.length

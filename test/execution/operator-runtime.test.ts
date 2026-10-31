@@ -11,6 +11,7 @@ import type { Runtime } from "../../src/standalone/codex.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import type { RuntimeProcessIdentity } from "../../src/standalone/recovery-types.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { until } from "../fixtures/until.js";
 
 const runtime: Runtime = {
   async start() {},
@@ -115,14 +116,6 @@ class RecoveryEvidenceRuntime implements Runtime {
 
   finish(turnId: string, status: "completed" | "failed") {
     this.outcomes.get(turnId)?.resolve(status);
-  }
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("runtime fixture timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
   }
 }
 
@@ -460,7 +453,7 @@ test("runtime details distinguish selected, queued, and running assignments acro
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() => heldRuntime.turns === 1);
+  await until(() => heldRuntime.turns === 1);
   command(service, {
     type: "task.configure",
     projectId: projectA,
@@ -468,7 +461,7 @@ test("runtime details distinguish selected, queued, and running assignments acro
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() =>
+  await until(() =>
     service
       .turnRequests()
       .some(
@@ -694,7 +687,7 @@ test("task runtime detail keeps stop and writer holds visible after Resume", asy
     expectedVersion: 1,
     paused: false,
   });
-  await waitUntil(() => heldRuntime.turns > 0);
+  await until(() => heldRuntime.turns > 0);
 
   const routes = runtimeOperatorRoutes(service);
   const taskRoute = routes.find(
@@ -859,7 +852,7 @@ test("task and assignment recovery views render every scoped record without impl
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() => runtime.turns === 1);
+  await until(() => runtime.turns === 1);
 
   await service.stopTask(taskId);
   const firstRecord = service
@@ -883,7 +876,7 @@ test("task and assignment recovery views render every scoped record without impl
   });
   runtime.finish(firstTurnId, "failed");
   await service.resumeTask(taskId);
-  await waitUntil(() => runtime.turns === 2);
+  await until(() => runtime.turns === 2);
   await service.stopTask(taskId);
 
   const records = service

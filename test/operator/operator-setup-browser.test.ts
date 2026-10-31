@@ -20,6 +20,7 @@ import {
 } from "../fixtures/setup-browser.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
 import { git } from "../fixtures/setup-home.js";
+import { until } from "../fixtures/until.js";
 import {
   outcomeMessages,
   savedOutcome,
@@ -1707,6 +1708,13 @@ async function linkedReadyCheck(
       if (body.type === "github.preview") steps.push("preview");
     }
   });
+  // Import issues reads the private values once it shows; a read that lands after a save
+  // elsewhere re-reads the configuration, which drops an outcome of the older version.
+  const privateReads: string[] = [];
+  s.page.on("response", (r) => {
+    if (r.url().endsWith("/private-values"))
+      privateReads.push(new URL(r.url()).pathname);
+  });
   await addRepository(s.page);
   // Create records the gh credential only once step 3 has read the login.
   await s.page
@@ -1719,6 +1727,7 @@ async function linkedReadyCheck(
     gh,
     sent,
     steps,
+    privateReads,
     previews: () => sent.filter((c) => c.type === "github.preview"),
     panel: created.ready.getByRole("region", { name: "Import issues" }),
     importButton: created.ready.getByRole("button", {
@@ -1854,6 +1863,14 @@ test("Setup's ready check offers Refresh again for an unconfirmed refresh withou
 test("Setup's ready check reviews a source saved elsewhere before importing again", async (_t, journey) => {
   const t = await linkedReadyCheck(journey);
   await t.importButton.waitFor();
+  // Save elsewhere only after the panel's own read, so only Review changes re-reads.
+  await until(
+    () =>
+      t.privateReads.includes(
+        `/api/operator/projects/${t.projectId}/private-values`,
+      ),
+    "the Import issues private read",
+  );
   await new OperatorApi(t.f.service, [t.f.directory]).execute({
     type: "github.configure",
     key: randomUUID(),

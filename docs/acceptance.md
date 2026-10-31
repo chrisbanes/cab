@@ -237,8 +237,9 @@ Each operation below needs a packaged-CLI invocation through the authenticated
 service, its observable output/effect and applicable denial, revision and retry
 cases. The evidence inventory must identify each covered operation and any
 missing coverage; a representative journey cannot qualify omitted commands.
-The [CLI8 inventory](evidence/issue-901-cli8-inventory-2026-10-12.json) records
-each operation's state: those the host live journey ran are passed, except
+The [CLI8 inventory](design/operator-cli-inventory.json) records
+each operation's state (the [dated record](evidence/issue-901-cli8-inventory-2026-10-12.json)
+captures the 2026-10-12 qualification): those the host live journey ran are passed, except
 `assignment apply-current`, which the live journey ran only after a follow-up under
 Stop; adoption followed by a follow-up on a completed lead is covered by a
 deterministic test ([#935](https://github.com/chrisbanes/cab/issues/935)); the rest are

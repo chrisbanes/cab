@@ -21,6 +21,7 @@ import type {
 import type { StandaloneService } from "../../src/standalone/service.js";
 import { databaseDigest } from "./database-digest.js";
 import { loginCli, startCliService } from "./operator-cli.js";
+import { until } from "./until.js";
 
 /** Copied from no-turn-recovery.test.ts: thread start fails before any turn invocation. */
 export class NoTurnRuntime implements Runtime {
@@ -201,13 +202,6 @@ function command(service: StandaloneService, body: Record<string, unknown>) {
   return service
     .domain()
     .execute({ key: randomUUID(), actor: "operator", ...body } as never);
-}
-async function until(predicate: () => boolean, label: string) {
-  const end = Date.now() + 5000;
-  while (!predicate()) {
-    if (Date.now() > end) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 function required<T>(value: T | undefined | null): T {
   assert.ok(value !== undefined && value !== null, "missing fixture evidence");

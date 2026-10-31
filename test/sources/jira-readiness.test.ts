@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { insertExternalItem } from "../fixtures/source-rows.js";
 import type { z } from "zod";
 import { DomainStore } from "../../src/core/domain.js";
 import type { jiraReadinessSchema } from "../../src/core/github-source-contracts.js";
@@ -306,8 +307,21 @@ test("an existing database gains the observed fields column once, keeping its ro
     taskId TEXT NOT NULL UNIQUE, containerId TEXT NOT NULL,
     containerName TEXT NOT NULL, number INTEGER NOT NULL,
     observedTitle TEXT NOT NULL, observedBody TEXT NOT NULL, observedState TEXT NOT NULL,
-    labels TEXT NOT NULL, observedStatus TEXT, PRIMARY KEY(provider, instance, externalId));
-    INSERT INTO external_items VALUES ('jira','${instance}','10001','t1','10000','ABC',1,'T','B','open','[]','{"id":"1","name":"To Do","categoryKey":"new"}');`);
+    labels TEXT NOT NULL, observedStatus TEXT, PRIMARY KEY(provider, instance, externalId));`);
+  insertExternalItem(db, {
+    provider: "jira",
+    instance,
+    externalId: "10001",
+    taskId: "t1",
+    containerId: "10000",
+    containerName: "ABC",
+    number: 1,
+    observedTitle: "T",
+    observedBody: "B",
+    observedState: "open",
+    labels: "[]",
+    observedStatus: '{"id":"1","name":"To Do","categoryKey":"new"}',
+  });
   new GitHubSourceStore(db).migrate();
   new GitHubSourceStore(db).migrate();
   assert.deepEqual(

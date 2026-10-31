@@ -1,21 +1,11 @@
-import {
-  seedOwnQuestion,
-  until as questionUntil,
-} from "../fixtures/questions.js";
+import { seedOwnQuestion } from "../fixtures/questions.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { mixedForm, mixedAnswers } from "../fixtures/question-data.js";
-async function until(condition: () => boolean) {
-  const deadline = Date.now() + 5000;
-  while (!condition()) {
-    if (Date.now() > deadline)
-      throw Error("Full question service condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
+import { until } from "../fixtures/until.js";
 for (const hold of ["none", "pause", "stop"] as const)
   test(`full own-tool question after successful terminal records exact >16k group behind ${hold} hold`, async () => {
     const f = await createOperatorFixture();
@@ -138,7 +128,7 @@ test("ordinary same-assignment continuation delivers before answer to original r
       expectedVersion: 3,
       paused: false,
     });
-    await questionUntil(() => f.runtime.turns === 2, 15_000);
+    await until(() => f.runtime.turns === 2, "second turn", 15_000);
     assert.ok(f.runtime.prompts[1]?.includes("Ordinary unrelated follow-up"));
     f.service.domain().execute({
       type: "project.configure",
@@ -159,7 +149,7 @@ test("ordinary same-assignment continuation delivers before answer to original r
     });
     assert.equal(waiting.success, true, waiting.text);
     f.runtime.complete(2);
-    await questionUntil(
+    await until(
       () =>
         f.service.list().filter((w) => w.state === "completed").length === 2,
     );
@@ -186,7 +176,7 @@ test("ordinary same-assignment continuation delivers before answer to original r
       expectedVersion: 5,
       paused: false,
     });
-    await questionUntil(() => f.runtime.turns === 3, 15_000);
+    await until(() => f.runtime.turns === 3, "third turn", 15_000);
     assert.ok(
       f.runtime.prompts[2]?.includes(JSON.stringify(mixedAnswers)),
       JSON.stringify({
@@ -205,7 +195,7 @@ test("ordinary same-assignment continuation delivers before answer to original r
       paused: true,
     });
     f.runtime.complete(3);
-    await questionUntil(
+    await until(
       () =>
         f.service.list().filter((w) => w.state === "completed").length === 3,
     );

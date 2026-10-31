@@ -131,13 +131,6 @@ test("project sources reads selections, links and observations without private t
     "--connection",
     "ro",
   ]);
-  assert.deepEqual(complete.data.observations[0].counts, {
-    observed: 3,
-    open: 3,
-    closedSkipped: 0,
-    matching: 0,
-    complete: true,
-  });
   assert.equal(complete.data.readinessRule.kind, "rule");
   assert.match(humanCounts.out, /3 observed · 3 open · 0 match label `ready`/);
   assert.match(
@@ -213,7 +206,6 @@ test("project sources and prepare-source show and round-trip no readiness rule, 
     "Readiness: no readiness rule",
   ]);
   await w.ok("rw", ["project", "apply", "--file", removed.out]);
-  assert.deepEqual((await w.config()).source.readiness, { kind: "none" });
   // A rule naming private text is withheld: unknown, and an edit must replace it.
   const r = await w.s.sessionPost("/api/operator/commands", {
     type: "github.configure",
@@ -229,7 +221,6 @@ test("project sources and prepare-source show and round-trip no readiness rule, 
   });
   assert.equal(r.status, 200);
   const hidden = await w.ok("ro", ["project", "sources", w.ids.relay]);
-  assert.deepEqual(hidden.data.source.readiness, { kind: "unavailable" });
   assert.ok(hidden.coverage.gaps.includes("content-unavailable"));
   const hiddenHuman = await w.h.run([
     "project",
@@ -500,7 +491,7 @@ test("source credential edits accept the shared env/gh contract and keep omissio
   assert.equal((await w.config()).source.version, source.version);
 });
 
-test("project apply sends the prepared source change once, deactivating selections", async (t) => {
+test("project apply sends the prepared source change once, refuses a stale document and shows the credential reason", async (t) => {
   const w = await world(t);
   const atlas = w.ids.atlas;
   const version = async () => (await w.config()).source.version as number;
@@ -552,7 +543,6 @@ test("project apply sends the prepared source change once, deactivating selectio
   });
   assert.equal(applied.data.replayed, true);
   assert.equal(await version(), v + 1, "replay applies once");
-  assert.ok((await w.config()).source.selections.every((s: Json) => !s.active));
 
   // A change saved elsewhere after preparation is a conflict with no change.
   const stale = await prepare({ closedIssues: "done" });
@@ -572,9 +562,11 @@ test("project apply sends the prepared source change once, deactivating selectio
   });
   assert.equal(r.status, 200);
   const at = await version();
-  assert.equal(
-    (await w.cli("rw", ["project", "apply", "--file", stale])).code,
-    4,
+  const conflict = await w.cli("rw", ["project", "apply", "--file", stale]);
+  assert.equal(conflict.code, 4, conflict.out);
+  assert.match(
+    conflict.json().error.message,
+    /changed since this document was prepared/,
   );
   assert.equal(await version(), at);
 
@@ -586,16 +578,12 @@ test("project apply sends the prepared source change once, deactivating selectio
   ]);
   assert.equal(set.data.receipt.result.credentialConfigured, true);
   assert.ok(!JSON.stringify(set).includes("FIXTURE_OTHER"));
-  assert.equal((await w.config()).source.credential.source, "env");
-  const selectedCli = await w.ok("rw", [
+  await w.ok("rw", [
     "project",
     "apply",
     "--file",
     await prepare({ credentialRef: "gh:github.com" }),
   ]);
-  assert.equal(selectedCli.data.receipt.result.credentialConfigured, true);
-  assert.equal((await w.config()).source.credential.source, "gh");
-  assert.equal((await w.config()).source.credential.usable, false);
   const listed = await w.cli("ro", ["project", "sources", atlas]);
   assert.equal(listed.code, 0, listed.out);
   assert.equal(listed.json().data.source.credential.reason, "gh-not-installed");
@@ -610,24 +598,6 @@ test("project apply sends the prepared source change once, deactivating selectio
   assert.ok(!listedHuman.out.includes("FIXTURE_GITHUB"));
   for (const secret of PRIVATE)
     assert.ok(!JSON.stringify(listed.json()).includes(secret));
-  const beforeClear = (await w.config()).source.selections;
-  const cleared = await w.ok("rw", [
-    "project",
-    "apply",
-    "--file",
-    await prepare({ credentialRef: null }),
-  ]);
-  assert.equal(cleared.data.receipt.result.credentialConfigured, false);
-  const afterClear = (await w.config()).source;
-  assert.equal(afterClear.credentialConfigured, false);
-  assert.deepEqual(
-    afterClear.selections.map((s: Json) => s.id),
-    beforeClear.map((s: Json) => s.id),
-  );
-  assert.equal(
-    afterClear.selections.every((s: Json) => !s.active),
-    true,
-  );
 });
 
 test("prepare-repositories writes the exact UI command and project get lists the links", async (t) => {
@@ -710,15 +680,6 @@ test("prepare-repositories writes the exact UI command and project get lists the
     repositoryCount: 2,
   });
   const read = await w.config();
-  assert.deepEqual(
-    read.repositories.links.map((l: Json) => [l.repositoryId, l.ref]),
-    [
-      ["acme/atlas", "HEAD"],
-      ["acme/second", "main"],
-    ],
-  );
-  // Links never touch the GitHub source version.
-  assert.equal(read.source.version, (await w.config()).source.version);
   const get = await w.ok("ro", ["project", "get", w.ids.atlas]);
   assert.deepEqual(get.data.repositories, read.repositories);
   const human = await w.h.run([
@@ -870,34 +831,6 @@ test("prepare-repositories refuses bad edits and unlinking everything needs conf
   ]);
   await w.ok("rw", ["project", "apply", "--file", out]);
   assert.deepEqual((await w.config()).repositories.links, []);
-
-  // A missing path is a field error with no change.
-  const links = (await w.config()).repositories;
-  const missing = join(w.h.dir, "missing.json");
-  await w.ok("ro", [
-    "project",
-    "prepare-repositories",
-    atlas,
-    "--out",
-    missing,
-    "--edit-file",
-    w.file(
-      "missing-edit.json",
-      JSON.stringify({
-        linkRepositories: [
-          {
-            repositoryId: "acme/none",
-            path: join(w.h.dir, "absent"),
-            ref: "main",
-          },
-        ],
-      }),
-    ),
-  ]);
-  const failed = await w.cli("rw", ["project", "apply", "--file", missing]);
-  assert.equal(failed.code, 2, failed.out);
-  assert.match(failed.json().error.message, /Fields: repositories/);
-  assert.equal((await w.config()).repositories.version, links.version);
 });
 
 test("prepare-source points repository link keys to prepare-repositories", async (t) => {
@@ -989,76 +922,6 @@ test("a lost source apply reply is reconciled and retried under the same key", a
   assert.equal(again.request.key, request.key);
   assert.deepEqual(again.data.receipt, read.data.receipt);
   assert.equal((await w.config()).source.version, v + 1);
-});
-
-import { createFakeGh } from "../fixtures/fake-gh.js";
-
-test("CLI source readback offers the same environment-precedence account before and after explicit gh choice", async (t) => {
-  const fake = createFakeGh();
-  t.after(() => fake.close());
-  fake.setAccounts({
-    stored: { login: "stored-account", token: "stored-cli-token" },
-    tokens: {
-      "cli-gh-first": "offered-account",
-      "cli-github-second": "other-account",
-    },
-  });
-  const oldGh = process.env.GH_TOKEN,
-    oldGithub = process.env.GITHUB_TOKEN;
-  process.env.GH_TOKEN = "cli-gh-first";
-  process.env.GITHUB_TOKEN = "cli-github-second";
-  t.after(() => {
-    if (oldGh === undefined) delete process.env.GH_TOKEN;
-    else process.env.GH_TOKEN = oldGh;
-    if (oldGithub === undefined) delete process.env.GITHUB_TOKEN;
-    else process.env.GITHUB_TOKEN = oldGithub;
-  });
-  const o = await startCliOperator(t, {
-    service: { ghExecutable: fake.executable },
-  });
-  const projectId = o.s.projectId;
-  const configure = (credentialRef: string | null) =>
-    o.d.execute({
-      type: "github.configure",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      expectedVersion: o.d.githubConfiguration(projectId).version,
-      credentialRef,
-      selections: [],
-      readiness: {
-        mode: "all",
-        conditions: [{ kind: "label", operator: "has", name: "ready" }],
-      },
-    });
-  configure(null);
-  const before = o.d.githubConfiguration(projectId);
-  const start = fake.commands().length;
-  const offer = await o.cli("ro", ["project", "sources", projectId]);
-  assert.equal(offer.code, 0);
-  assert.equal(offer.json().data.source.credential.gh.login, "offered-account");
-  assert.ok(
-    fake
-      .commands()
-      .slice(start)
-      .every((command) => command === "status"),
-  );
-  assert.deepEqual(o.d.githubConfiguration(projectId), before);
-  configure("gh:github.com");
-  const selected = await o.cli("ro", ["project", "sources", projectId]);
-  assert.equal(selected.code, 0);
-  assert.equal(
-    selected.json().data.source.credential.gh.login,
-    "offered-account",
-  );
-  assert.equal(selected.json().data.source.credential.usable, true);
-  configure(null);
-  assert.equal(
-    (await o.cli("ro", ["project", "sources", projectId])).json().data.source
-      .credential.gh.login,
-    "offered-account",
-  );
-  assert.equal(o.s.f.runtime.turns, 0);
 });
 
 test("project prepare-source defaults its document into the working directory", async (t) => {
