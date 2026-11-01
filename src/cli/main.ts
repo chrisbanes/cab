@@ -700,7 +700,7 @@ async function run(
         : new Date(identity.credential.expiresAt ?? 0).toISOString();
     return {
       ...session.result,
-      data: identity,
+      data: { ...identity, accessMode: session.accessMode },
       human: [
         `Connection:   ${session.name}`,
         `URL:          ${session.url}`,

@@ -2010,7 +2010,8 @@ export class LocalOperatorHttp {
             origin: this.auth.origin,
           },
           credential,
-          accessMode: token?.startsWith("cab_local_") ? "local" : "token",
+          // Token identities must retain the strict API-v1 shape used by installed clients.
+          ...(token?.startsWith("cab_local_") ? { accessMode: "local" } : {}),
         });
       } else if (method === "POST") {
         const body = await readJson(request, path === "/api/operator/commands");
