@@ -54,7 +54,11 @@ export function harness(t: After, overrides: Partial<CliDeps> = {}) {
         err += c;
       });
     const code = await main(args, {
-      env: { CAB_CLI_CONFIG_DIR: configDir },
+      // Automatic discovery must never reach the host installation from a fixture.
+      env: {
+        CAB_CLI_CONFIG_DIR: configDir,
+        CAB_LOCAL_STATE: join(dir, "local-state"),
+      },
       stdin: new PassThrough() as unknown as NodeJS.ReadStream,
       stdout,
       stderr: stderr as unknown as NodeJS.WriteStream,

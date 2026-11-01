@@ -158,6 +158,27 @@ Initialize a separate operator password with
 access or an HTTPS origin for a separately managed private transport. Use a
 canonical origin without a trailing slash. The server still binds only to
 `127.0.0.1`; it does not configure Tailscale Serve.
+After starting `operator`, use the live service as the same OS account:
+
+```sh
+node dist/src/cli/main.js auth status --local --local-state /absolute/private/cab-data
+node dist/src/cli/main.js project list --local --local-state /absolute/private/cab-data
+node dist/src/cli/main.js connection local development --local-state /absolute/private/cab-data
+node dist/src/cli/main.js connection use development
+```
+
+No token, Keychain or separate CLI login is needed. Without a saved selection the
+CLI automatically discovers the default data directory, or `CAB_LOCAL_STATE`.
+Existing selected token connections remain restricted and never fall back. The
+service-managed `DATA_DIR.local-access` sidecar must stay private (directory 0700,
+file 0600), beside rather than inside the data directory. Do not copy it into a
+task workspace or snapshot. Restart rotates it without a new CLI login; stale or
+unsafe state fails with a repair instruction. Local login/logout explain
+OS-account access; logout cannot disable that access. Browser login remains
+password-based. This trusts all processes under that OS account; the managed
+assignment guard is not process isolation. Installed-service discovery/lifecycle
+integration remains outstanding in the sibling of #1413.
+
 Sessions are in-memory and reset on restart. The [command boundary](design/s04a-command-boundary.md)
 describes domain commands and admission records; the [operator UI design](design/s04c-operator-ui.md)
 describes the authenticated web boundary and its UI limits.
@@ -337,7 +358,7 @@ command is not recognised), then `Fix: Run 'cab --help'.`.
    apply. A replay of a key applied from another machine reads as `null`. Exit codes:
    2 invalid input, 3 authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
-   outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--output` and `--help` are always accepted, and `--version` and `--help` are answered before any command. Every
+   outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--local`, `--local-state`, `--output` and `--help` are always accepted (local state requires explicit local selection or adoption), and `--version` and `--help` are answered before any command. Every
    human error of the operator commands ends with one `Fix:` line on stderr
    (`src/cli/remedy.ts`). `service` and `snapshot` print their usage errors (the
    message, their own command lines and the same line) but keep their own lifecycle

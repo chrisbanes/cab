@@ -636,9 +636,9 @@ test("auth login defaults to the local connection and says where the token comes
   assert.deepEqual(readdirSyncSafe(bad.configDir), []);
   assert.deepEqual(bad.fetches, []);
 
-  // 2. A missing --url is a usage error with the acceptance sentence and no side effects.
+  // 2. Explicit token setup still requires --url; an empty configuration now attempts local discovery.
   const none = harness(t);
-  for (const extra of [[], ["--connection", "home"]]) {
+  for (const extra of [["--connection", "home"]]) {
     r = await none.run(["auth", "login", ...extra]);
     assert.equal(r.code, 2);
     assert.match(r.err, /\(usage\)/);
@@ -648,6 +648,10 @@ test("auth login defaults to the local connection and says where the token comes
     assert.equal(r.json().error.code, "usage");
     assert.equal(r.json().error.message, sentence("http://127.0.0.1:8787"));
   }
+  r = await none.run(["auth", "login"]);
+  assert.equal(r.code, 3);
+  assert.match(r.err, /Local access unavailable/);
+  assert.ok(!r.err.includes(sentence("http://127.0.0.1:8787")));
   assert.deepEqual(none.fetches, []);
   assert.deepEqual(readdirSyncSafe(none.configDir), []);
 
@@ -1451,6 +1455,7 @@ const builtinCommands = [
   "auth login",
   "auth status",
   "auth logout",
+  "connection local",
   "connection list",
   "connection use",
   "connection remove",

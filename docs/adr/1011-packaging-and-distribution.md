@@ -78,6 +78,12 @@ sequence is `npm install -g @chrisbanes/cab@<version>` then
 `cab service upgrade [--connection NAME]`, which stages the running package before it
 stops the job. The tarball's bundled-Node channel is unchanged.
 
+Shared startup also creates protected local CLI material beside the data directory,
+outside data snapshots. Foreground clients can use it under the same OS account
+without Keychain or a token login. Installed-service record discovery, default
+connection adoption and lifecycle integration of this mode remain outstanding in
+the sibling of #1413; the current install/upgrade token workflow is unchanged.
+
 Data, auth and snapshots stay under `~/Library/Application Support/cab/`, logs
 under `~/Library/Logs/cab/`, separate from the npm installation and development
 builds. `cab service uninstall` stops and removes the service while keeping that

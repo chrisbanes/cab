@@ -1255,6 +1255,36 @@ or shell wrapper. Before bootstrap, inspect and lint the exact plist:
 /usr/bin/plutil -p /absolute/private/launch-agents/com.example.cab.plist
 ```
 
+### Foreground local CLI access
+
+The shared startup path creates installation-bound local CLI material at
+`DATA_DIR.local-access/connection.json`, outside snapshots and task workspaces.
+With a foreground `operator` server running under the same OS account:
+
+```sh
+cab auth status --local --local-state /absolute/private/cab-data
+cab project list --local --local-state /absolute/private/cab-data
+cab connection local foreground --local-state /absolute/private/cab-data
+cab connection use foreground
+```
+
+This grants supported CLI read/write authority through live HTTP; it needs no
+token or Keychain login. Keep the sidecar directory 0700 and its file 0600,
+owned by the service account, with real private parent paths. Restart publishes
+fresh material without a new login. Missing, unsafe, malformed, stale or
+wrong-installation material fails with a repair instruction. Never copy it into
+workspaces, snapshots or support output. Local logout explains OS-account access
+and cannot disable it. Existing selected token connections retain their scope,
+expiry, revocation and logout; adopting an existing connection is deliberate,
+checks its installation and preserves prior config/token/file on failure.
+
+The browser still requires its password; local CLI access retains all route,
+revision, receipt, approval and hold checks. It trusts the OS account, without
+process isolation; managed assignments are refused before local reads or HTTP.
+Installed-service record discovery and lifecycle integration remain outstanding
+in the sibling of #1413. The installation and upgrade instructions above retain
+their existing token workflow until that integration ships.
+
 ### Start, inspect, restart and stop by hand
 
 Run these commands in the logged-in user's GUI launchd domain, using the exact

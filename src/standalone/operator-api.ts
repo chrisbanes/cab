@@ -801,7 +801,7 @@ export class OperatorApi {
         add = (...items: string[]) => {
           for (const value of items) values.push([null, value]);
         };
-      add(...this.controlPaths);
+      add(...this.controlPaths, ...this.service.localAccessExclusions());
       const claude = d.claudeTokenReference();
       add(...this.service.providerCredentialExclusions().redactions);
       if (claude) add(...claudeTokenExclusions(claude).redactions);

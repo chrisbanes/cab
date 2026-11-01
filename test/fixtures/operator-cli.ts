@@ -140,6 +140,7 @@ export async function serveCli<F extends Fixture>(
       {
         routes,
         credentials: f.service.operatorCredentials(),
+        localAccess: f.service.localAccess(),
         ...(options.push ? { push: options.push } : {}),
         web: new OperatorWebBoundary(
           bundle,
