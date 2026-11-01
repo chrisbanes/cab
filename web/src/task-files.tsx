@@ -1458,6 +1458,9 @@ export function TaskFiles({
           data-preview-key={previewKey}
           data-committed-preview-key={activeTab?.previewKey ?? ""}
           data-preview-status={previewResource.state.status}
+          data-preview-current={Boolean(
+            activeTab && activeTab.previewKey === previewKey,
+          )}
           data-mobile-hidden={state.mobileView === "list"}
         >
           {activeTab && (

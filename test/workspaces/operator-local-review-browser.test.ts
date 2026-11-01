@@ -490,8 +490,20 @@ async function openFile(page: Page, name: RegExp) {
   };
   page.on("response", onResponse);
   try {
-    await files.getByRole("button", { name }).click();
-    const ready = files.getByRole("toolbar", { name: "Source presentation" });
+    const file = files
+      .locator(".file-entry")
+      .and(files.getByRole("button", { name }));
+    const title = await file.getAttribute("title");
+    assert.ok(title, "the requested explorer file has a scoped path");
+    await file.click();
+    const ready = files
+      .locator('.file-reading-area[data-preview-current="true"]')
+      .filter({
+        has: page
+          .locator('.file-tab-open[aria-current="page"]')
+          .and(page.getByTitle(title, { exact: true })),
+      })
+      .getByRole("toolbar", { name: "Source presentation" });
     const unavailable = files.getByText(/^Preview is /);
     const failed = files
       .getByRole("alert")
@@ -2212,5 +2224,39 @@ test("a comparison settling during a file click keeps the file under the pointer
   } finally {
     release.resolve();
     await page.mouse.up();
+  }
+});
+
+test("an existing preview cannot satisfy a file click that did not select its target", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await openFile(page, /diff\.txt/);
+  const file = page
+    .locator("#files .file-entry")
+    .filter({ hasText: "review.txt" });
+  await file.evaluate((element) =>
+    element.addEventListener("click", (event) => event.stopPropagation(), {
+      once: true,
+    }),
+  );
+  // Bound this deliberately suppressed activation; normal journeys retain their 15-second wait.
+  page.setDefaultTimeout(500);
+  try {
+    await assert.rejects(openFile(page, /review\.txt/), /did not become ready/);
+    assert.equal(
+      await page.getByRole("button", { name: "Line 1: keep" }).count(),
+      1,
+    );
+    assert.equal(
+      await page.getByRole("button", { name: "Line 1: first" }).count(),
+      0,
+    );
+  } finally {
+    page.setDefaultTimeout(15_000);
   }
 });
