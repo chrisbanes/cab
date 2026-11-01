@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Page, type Request } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -10,6 +10,7 @@ import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { clockLabel } from "../../src/operator/clock-label.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { until } from "../fixtures/until.js";
 import {
   noPageOverflow,
   unpairedBadges,
@@ -1508,14 +1509,28 @@ test("the request pane shows kind, position, identities and a sticky response ba
   // The first workspace read can land after the first Inbox read and make the Inbox reread once
   // more, so which side of the click that reread falls on depends on load. Each Inbox read that
   // completes from the click on may bring one task reread, and nothing else may.
-  let inboxReads = 0;
+  let inboxReads = 0,
+    inboxInFlight = 0;
+  const isInbox = (url: string) =>
+    new URL(url).pathname === "/api/operator/inbox";
+  page.on("request", (r) => {
+    if (isInbox(r.url())) inboxInFlight++;
+  });
+  const settled = (r: Request) => {
+    if (isInbox(r.url())) inboxInFlight--;
+  };
+  page.on("requestfinished", settled);
+  page.on("requestfailed", settled);
   page.on("response", (r) => {
-    if (new URL(r.url()).pathname === "/api/operator/inbox" && r.ok())
-      inboxReads++;
+    if (isInbox(r.url()) && r.ok()) inboxReads++;
   });
   const rows = page.locator(".inbox-row"),
     detail = page.getByRole("region", { name: "Selected request" });
   await rows.nth(3).waitFor();
+  // A read counted before the click whose result commits after it still rereads the task, so
+  // every started Inbox read finishes and renders before the count is taken.
+  await until(() => inboxInFlight === 0, "no Inbox read in flight");
+  await settle(page);
   const inboxReadsBeforeClick = inboxReads;
   await page.locator('.inbox-row[data-kind="approval"]').click();
   await detail

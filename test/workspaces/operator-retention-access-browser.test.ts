@@ -287,8 +287,9 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     await page.waitForFunction(
       (n) =>
         document.querySelectorAll("[role=log] [data-record-id]").length > n ||
-        !Array.from(document.querySelectorAll("button")).some(
-          (b) => b.textContent === "Load earlier",
+        // The button reads "Loading earlier…" while the page is read; only its absence ends paging.
+        !Array.from(document.querySelectorAll("button")).some((b) =>
+          ["Load earlier", "Loading earlier…"].includes(b.textContent ?? ""),
         ),
       before,
     );
