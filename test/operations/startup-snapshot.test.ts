@@ -615,6 +615,7 @@ function schemaDigest(data: string): string {
 const SCHEMA_PINS: Record<number, string> = {
   1: "70a7b6cd96317bf46d0857b2816ad74bf84046906c740923689c885c68d31d4f",
   2: "ee099e33a7150ba0bd23bdd3f46636e8847878b6c436b0919b6292d14dbc6476",
+  3: "27824170c346f251b4e2c42b751994100e0e51d4b0089a8885259155acdb38b4",
 };
 
 test("the migration level matches the schema this build creates", async () => {
