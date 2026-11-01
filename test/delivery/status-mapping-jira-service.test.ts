@@ -85,6 +85,8 @@ const pr: PrDeliveryObservation = {
 async function fixture(
   t: { after: (fn: () => void | Promise<void>) => void },
   statusWriteTimeoutMs?: number,
+  closedIssues: "skip" | "done" = "skip",
+  handedBackTarget = REVIEW,
 ) {
   for (const key of Object.keys(names) as (keyof typeof names)[]) {
     const previous = process.env[names[key]];
@@ -102,6 +104,7 @@ async function fixture(
     transition(DONE, "Done", "done"),
   ];
   let hold: Promise<void> | undefined;
+  let postReached: (() => void) | undefined;
   /** A search that has not caught up with a change: it answers this status instead of the live one. */
   let lagging: typeof jira.state.status | undefined;
   const fetcher: typeof fetch = async (input, init) => {
@@ -119,8 +122,10 @@ async function fixture(
         ],
       });
     }
-    if (hold && init?.method === "POST" && path.endsWith("/transitions"))
+    if (hold && init?.method === "POST" && path.endsWith("/transitions")) {
+      postReached?.();
       await hold;
+    }
     return jira.fetcher(input, init);
   };
   const root = mkdtempSync(join(tmpdir(), "cab-jira-status-"));
@@ -233,11 +238,21 @@ async function fixture(
     projectId,
     expectedVersion: 1,
     instance: site,
+    closedIssues,
     selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
     readiness: {
       mode: "all",
       conditions: [
-        { kind: "status", operator: "in", statusIds: [TODO, PROGRESS, REVIEW] },
+        {
+          kind: "status",
+          operator: "in",
+          statusIds: [
+            TODO,
+            PROGRESS,
+            REVIEW,
+            ...(handedBackTarget === DONE ? [DONE] : []),
+          ],
+        },
         { kind: "label", operator: "has", name: "ready" },
       ],
     },
@@ -278,7 +293,7 @@ async function fixture(
     key: randomUUID(),
     projectId,
     expectedVersion: 1,
-    mapping: mapping(),
+    mapping: mapping({ handedBack: handedBackTarget }),
   });
   await f.service.provisionTask(taskId);
   domain().execute({
@@ -397,6 +412,10 @@ async function fixture(
       f.service
         .delivery()
         .completionBlockers(taskId, Number(domain().task(taskId).version)),
+    postBarrier: () =>
+      new Promise<void>((resolve) => {
+        postReached = resolve;
+      }),
     holdPosts: (value: Promise<void> | undefined) => {
       hold = value;
     },
@@ -773,4 +792,128 @@ test("a Jira settlement waits out a search that lags the close, then needs no ne
   f.lagSearch(undefined);
   await f.service.refreshGitHub();
   assert.ok(!f.blockers().includes(awaitingSettlement), String(f.blockers()));
+});
+
+const closureStore = (f: Awaited<ReturnType<typeof fixture>>) =>
+  f.service.githubSources().forTracker({ provider: "jira", instance: site });
+
+for (const current of [false, true])
+  test(`external Done before status preflight records current=${current}, without POST or premature completion`, async (t) => {
+    const f = await fixture(t, undefined, "done", current ? DONE : REVIEW);
+    await f.run();
+    f.jira.state.status = { id: DONE, name: "Done", category: "done" };
+    await f.registerPr();
+    await f.run();
+    assert.deepEqual(f.posted(), [PROGRESS]);
+    assert.equal(
+      f.writes()[1]?.observation?.reason,
+      current
+        ? "provider-issue-status-current"
+        : "provider-issue-status-changed",
+    );
+    await f.service.refreshGitHub();
+    assert.equal(f.domain().task(f.taskId).state, "open");
+    assert.equal(closureStore(f).hold(issueId)?.reason, "closed");
+    // A delivered result is not runtime terminal settlement.
+    const result = await f.call("cab_report_result", { summary: "Work done" });
+    assert.equal(result.success, true, result.text);
+    await f.service.refreshGitHub();
+    assert.equal(f.domain().task(f.taskId).state, "open");
+    await f.endTurn();
+    await f.service.refreshGitHub();
+    assert.equal(f.domain().task(f.taskId).state, "done");
+    assert.ok(closureStore(f).providerCompletion(f.taskId));
+  });
+
+for (const finalDone of [false, true])
+  test(`external Done after preflight permits one racing POST and converges to final Done=${finalDone}`, async (t) => {
+    const f = await fixture(t, undefined, "done");
+    await f.run();
+    let release = () => {};
+    f.holdPosts(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    t.after(() => release());
+    const reached = f.postBarrier();
+    await f.registerPr();
+    const run = f.run();
+    await reached;
+    assert.ok(
+      f.jira.requests.some(
+        (r) => r.url.pathname.endsWith("/transitions") && r.method === "GET",
+      ),
+    );
+    assert.deepEqual(f.posted(), [PROGRESS]);
+    f.jira.state.status = { id: DONE, name: "Done", category: "done" };
+    if (finalDone) f.jira.state.fail["POST transitions"] = { status: 400 };
+    assert.equal(f.domain().task(f.taskId).state, "open");
+    release();
+    await run;
+    f.holdPosts(undefined);
+    assert.deepEqual(f.posted(), [PROGRESS, REVIEW]);
+    await f.run();
+    assert.deepEqual(f.posted(), [PROGRESS, REVIEW]);
+    assert.equal(f.writes()[1]?.request.action.kind, "issue.status");
+    assert.equal(f.writes()[1]?.observation?.receipt?.issueClosed, undefined);
+    assert.equal(
+      f.service.delivery().ownClosureOperation(f.taskId, issueId),
+      undefined,
+    );
+    assert.equal(closureStore(f).providerCompletion(f.taskId), undefined);
+    await f.endTurn();
+    await f.service.refreshGitHub();
+    assert.equal(f.domain().task(f.taskId).state, finalDone ? "done" : "open");
+    assert.equal(
+      Boolean(closureStore(f).providerCompletion(f.taskId)),
+      finalDone,
+    );
+  });
+
+test("uncertain status POST remains non-holding and is not resent across restart with external closure", async (t) => {
+  const f = await fixture(t, undefined, "done");
+  await f.run();
+  await f.registerPr();
+  f.jira.state.fail["POST transitions"] = { apply: true };
+  await f.run();
+  assert.equal(f.writes()[1]?.state, "uncertain");
+  assert.deepEqual(f.posted(), [PROGRESS, REVIEW]);
+  await f.endTurn();
+  f.jira.state.status = { id: DONE, name: "Done", category: "done" };
+  delete f.jira.state.fail["POST transitions"];
+  await f.restart();
+  await f.run();
+  assert.deepEqual(f.posted(), [PROGRESS, REVIEW]);
+  assert.equal(f.writes()[1]?.state, "uncertain");
+  assert.equal(f.domain().task(f.taskId).state, "done");
+  assert.ok(closureStore(f).providerCompletion(f.taskId));
+});
+
+test("confirmed own Jira closure stays distinct until a later pinned event supersedes it", async (t) => {
+  const f = await fixture(t, undefined, "done");
+  assert.equal((await f.close()).success, true);
+  await f.service.refreshGitHub();
+  assert.equal(closureStore(f).providerCompletion(f.taskId), undefined);
+  f.jira.state.history.push({
+    id: "999",
+    accountId: otherAccountId,
+    items: [{ field: "status", to: DONE }],
+  });
+  await f.service.refreshGitHub();
+  assert.equal(
+    f.service.delivery().ownClosureOperation(f.taskId, issueId),
+    undefined,
+  );
+  assert.equal(closureStore(f).hold(issueId)?.reason, "closed");
+  assert.equal(f.domain().task(f.taskId).state, "open");
+  assert.equal(closureStore(f).providerCompletion(f.taskId), undefined);
+  assert.equal(
+    (await f.call("cab_report_result", { summary: "Safe stop" })).success,
+    true,
+  );
+  await f.endTurn();
+  await f.service.refreshGitHub();
+  assert.equal(f.domain().task(f.taskId).state, "done");
+  assert.ok(closureStore(f).providerCompletion(f.taskId));
 });

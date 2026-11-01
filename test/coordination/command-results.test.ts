@@ -128,6 +128,7 @@ const cases = {
     alreadyActive: false,
   },
   "jira.configure": {
+    closedIssues: "skip",
     version: 2,
     instance: "example.atlassian.net",
     selections: [{ id: "S-1", kind: "jql", jql: "project = ABC" }],
@@ -558,4 +559,20 @@ test("keeps result variants correlated with their command key", () => {
     result: task,
   };
   assert.equal(taskOutcome.type, "task.configure");
+});
+
+test("historical Jira configuration receipts keep their original shape", () => {
+  const { closedIssues: _, ...legacy } = cases["jira.configure"];
+  assert.deepEqual(
+    parseDomainCommandOutcome("jira.configure", legacy).result,
+    legacy,
+  );
+  assert.throws(() => parseFreshDomainCommandOutcome("jira.configure", legacy));
+  assert.equal(
+    parseFreshDomainCommandOutcome("jira.configure", {
+      ...legacy,
+      closedIssues: "done",
+    }).result.closedIssues,
+    "done",
+  );
 });
