@@ -16,6 +16,7 @@ const mainOnly = [
   "auth login",
   "auth status",
   "auth logout",
+  "connection local",
   "connection list",
   "connection use",
   "connection remove",

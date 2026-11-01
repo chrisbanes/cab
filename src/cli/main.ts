@@ -1,10 +1,17 @@
 #!/usr/bin/env node
+import {
+  defaultLocalState,
+  readLocalAccess,
+  localOrigin,
+  LocalAccessError,
+} from "../operator/local-access.js";
 import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { readinessSchema } from "../operator/readiness.js";
 import {
+  type CliIdentity,
   operatorCredentialTokenSchema,
   taskSchema,
 } from "../operator/contracts.js";
@@ -72,6 +79,7 @@ export const EXIT: Record<string, [number, string]> = {
   "managed-assignment": [3, "authentication"],
   "credential-store-unavailable": [3, "authentication"],
   "service-identity-changed": [3, "authentication"],
+  "local-access-unavailable": [3, "authentication"],
   "output-exists": [2, "usage"],
   "output-failed": [2, "usage"],
   conflict: [4, "conflict"],
@@ -91,7 +99,7 @@ export const EXIT: Record<string, [number, string]> = {
 
 /** Login copy and defaults, kept together so the help layout can move them. */
 const AUTH_LOGIN_USAGE =
-  "auth login --url ORIGIN [--connection NAME] [--token-file PATH]";
+  "auth login [--url ORIGIN] [--connection NAME] [--token-file PATH]";
 const DEFAULT_CONNECTION = "local";
 /** The loopback origin `service install` serves on by default. */
 const DEFAULT_ORIGIN = "http://127.0.0.1:8787";
@@ -113,6 +121,7 @@ export const BUILTIN_USAGE = new Map([
   ["auth login", AUTH_LOGIN_USAGE],
   ["auth status", "auth status [--connection NAME]"],
   ["auth logout", "auth logout [--connection NAME]"],
+  ["connection local", "connection local NAME [--local-state DATA_DIR]"],
   ["connection list", "connection list"],
   ["connection use", "connection use NAME"],
   ["connection remove", "connection remove NAME"],
@@ -139,6 +148,8 @@ const indented = (lines: Iterable<string>) =>
   [...lines].map((line) => `  ${line}\n`).join("");
 
 const OPTIONS_HELP = `Options:
+  --local               Same-OS-account local read/write access
+  --local-state DATA_DIR  Custom foreground data directory (with --local)
   --output human|json   Result format (default human)
   --limit N             Page size, 1-200 (default 50; some reads cap lower)
   --cursor TOKEN        Continue from the More: line of the previous page
@@ -189,7 +200,17 @@ dispatches work; continue with a new task message after replacement. Adoption
 here records evidence and is unrelated to assignment apply-current.`;
 
 /** The prose notes that name an area's commands. */
+const LOCAL_ACCESS_NOTE = `Local access: cab auth status --local --local-state /absolute/private/cab-data
+uses this OS account with read/write CLI authority, without a token or Keychain.
+Saved token selections keep their scope, expiry and logout; they never fall back.
+cab connection local NAME --local-state DATA_DIR deliberately saves local access
+after checking the installation. Local login/logout explain OS-account access;
+logout cannot disable it. This does not isolate same-account processes.
+Installed-service discovery and lifecycle integration remain outstanding.`;
+
 const AREA_NOTES: Record<string, string[]> = {
+  auth: [LOCAL_ACCESS_NOTE],
+  connection: [LOCAL_ACCESS_NOTE],
   task: [TASK_NOTE],
   question: [TASK_NOTE],
   approval: [TASK_NOTE],
@@ -220,6 +241,9 @@ ${areasLine()}
 
 Options:
   --connection NAME     Use this saved connection
+  --local               Use same-OS-account local read/write access
+  --local-state DATA_DIR  Select a foreground data directory (with --local)
+                         Example: cab auth status --local --local-state /private/cab/data
   --output human|json   Result format (default human)
   --help [--all]        Show help
   --version             Show the installed version
@@ -276,6 +300,8 @@ const defaultDeps = (): CliDeps => ({
 
 /** Every option of the operator commands. */
 export const OPTIONS = {
+  local: { type: "boolean" },
+  "local-state": { type: "string" },
   connection: { type: "string" },
   url: { type: "string" },
   "token-file": { type: "string" },
@@ -437,7 +463,30 @@ export async function main(
       deps.stdout.write(help);
       return 0;
     }
-    const result = await run(positionals, values, deps);
+    if (
+      values.local &&
+      (values.url !== undefined || values["token-file"] !== undefined)
+    )
+      throw new CliError(
+        "usage",
+        "--local cannot be combined with token login options.",
+      );
+    if (values.local && values.connection !== undefined)
+      throw new CliError("usage", "Choose --local or --connection, not both.");
+    if (
+      values["local-state"] !== undefined &&
+      !values.local &&
+      positionals.slice(0, 2).join(" ") !== "connection local"
+    )
+      throw new CliError(
+        "usage",
+        "--local-state requires --local or connection local.",
+      );
+    const result = await run(positionals, values, {
+      ...deps,
+      forceLocal: values.local,
+      localState: values["local-state"],
+    });
     if (result.streamed) return 0;
     if (json)
       deps.stdout.write(
@@ -564,9 +613,80 @@ async function run(
   const declared = declaredOptions(key);
   if (!declared) throw new CliError("usage", "Unknown command.");
   rejectUnusedFlags(values, declared);
+  if (key === "connection local") {
+    expectArgs(positionals, 3);
+    rejectManaged(deps.env);
+    const parsedName = connectionNameSchema.safeParse(argument);
+    if (!parsedName.success)
+      throw new CliError(
+        "usage",
+        "NAME must be a connection name (letters, digits, . _ -).",
+      );
+    const name = parsedName.data;
+    const state = resolve(values["local-state"] ?? defaultLocalState());
+    const session = await connect(
+      config,
+      undefined,
+      { ...deps, forceLocal: true, localState: state },
+      ["cli.identity"],
+    );
+    const current = await config.read();
+    const prior = current.connections[name];
+    if (
+      prior &&
+      prior.installationId !== session.identity.service.installationId
+    )
+      throw new CliError(
+        "service-identity-changed",
+        "Adoption must bind the existing connection's installation. The prior connection has been preserved.",
+      );
+    current.connections[name] = {
+      url: session.url,
+      installationId: session.identity.service.installationId,
+      credential: { kind: "local", state },
+    };
+    await config.write(current);
+    return {
+      ...session.result,
+      connection: name,
+      data: {
+        connection: name,
+        accessMode: "local",
+        service: session.result.service,
+      },
+      human: `Connection ${name} now uses local read/write access to ${session.url} through this OS account. Its previous server token and token file have not been changed.`,
+    };
+  }
   if (key === "auth login") {
     expectArgs(positionals, 2);
     rejectManaged(deps.env);
+    if (values.url === undefined && values["token-file"] === undefined) {
+      const current = await config.read();
+      let local =
+        deps.forceLocal ||
+        (requested === undefined &&
+          current.default === undefined &&
+          !Object.keys(current.connections).length);
+      if (!local) {
+        try {
+          local =
+            config.select(current, requested).connection.credential?.kind ===
+            "local";
+        } catch (error) {
+          if (!(error instanceof CliError)) throw error;
+        }
+      }
+      if (local) {
+        const session = await connect(config, requested, deps, [
+          "cli.identity",
+        ]);
+        return {
+          ...session.result,
+          data: { accessMode: "local", service: session.result.service },
+          human: `Local access to ${session.url} uses this OS account with read/write authority; no token or separate login is needed.`,
+        };
+      }
+    }
     return login(config, values, deps);
   }
   if (key === "auth status") {
@@ -574,13 +694,17 @@ async function run(
     rejectManaged(deps.env);
     const session = await connect(config, requested, deps, []);
     const { identity } = session;
-    const expires = new Date(identity.credential.expiresAt).toISOString();
+    const expires =
+      identity.credential.expiresAt === null
+        ? "never (OS-account access)"
+        : new Date(identity.credential.expiresAt ?? 0).toISOString();
     return {
       ...session.result,
-      data: identity,
+      data: { ...identity, accessMode: session.accessMode },
       human: [
         `Connection:   ${session.name}`,
         `URL:          ${session.url}`,
+        `Access mode:  ${session.accessMode}`,
         `Installation: ${identity.service.installationId}`,
         `Credential:   ${identity.credential.name} (${identity.credential.scope}), expires ${expires}`,
         `API:          version ${identity.apiVersion}`,
@@ -589,8 +713,22 @@ async function run(
   }
   if (key === "auth logout") {
     expectArgs(positionals, 2);
+    rejectManaged(deps.env);
     const current = await config.read();
-    const { name, connection } = config.select(current, requested);
+    const { name, connection } = await selectConnection(
+      config,
+      current,
+      requested,
+      deps,
+    );
+    if (connection.credential?.kind === "local") {
+      const session = await connect(config, requested, deps, []);
+      return {
+        ...session.result,
+        data: { connection: name, accessMode: "local", loggedOut: false },
+        human: `Local access to ${session.url} is provided by this OS account. Logout does not disable OS-account access; no token was removed.`,
+      };
+    }
     if (
       connection.credential?.kind === "keychain" &&
       deps.platform === "darwin"
@@ -601,8 +739,14 @@ async function run(
     await config.write(current);
     return {
       connection: name,
-      data: { connection: name, loggedOut: true },
-      human: `Removed the local credential for ${name}. The server credential stays active until it is revoked in Settings or expires.`,
+      data: {
+        connection: name,
+        accessMode: "token",
+        url: connection.url,
+        installationId: connection.installationId,
+        loggedOut: true,
+      },
+      human: `Token access to ${name} (${connection.url}): removed the local credential. The server credential stays active until it is revoked in Settings or expires.`,
     };
   }
   if (key === "connection list") {
@@ -615,6 +759,7 @@ async function run(
         url: c.url,
         installationId: c.installationId,
         credential: c.credential?.kind ?? null,
+        accessMode: c.credential?.kind === "local" ? "local" : "token",
         default: current.default === name,
       }));
     return {
@@ -623,7 +768,7 @@ async function run(
         ? rows
             .map(
               (r) =>
-                `${r.default ? "*" : " "} ${r.name}  ${r.url}  ${r.credential ?? "logged out"}`,
+                `${r.default ? "*" : " "} ${r.name}  ${r.url}  ${r.accessMode}  ${r.credential ?? "logged out"}`,
             )
             .join("\n")
         : "No connections. Run 'cab auth login'.",
@@ -747,9 +892,11 @@ export function operatorConnection(
   return {
     async origin() {
       rejectManaged(deps.env);
-      const { name, connection } = config.select(
+      const { name, connection } = await selectConnection(
+        config,
         await config.read(),
         requested,
+        deps,
       );
       await loadToken(name, connection, deps);
       return connection.url;
@@ -777,31 +924,127 @@ export function operatorConnection(
   };
 }
 
+async function localMaterial(state: string, deps: CliDeps) {
+  rejectManaged(deps.env);
+  try {
+    return await readLocalAccess(state, deps.uid);
+  } catch (error) {
+    if (error instanceof LocalAccessError)
+      throw new CliError("local-access-unavailable", error.message);
+    throw error;
+  }
+}
+
+async function selectConnection(
+  config: ConnectionConfig,
+  current: CliConfig,
+  requested: string | undefined,
+  deps: CliDeps,
+) {
+  rejectManaged(deps.env);
+  const fallback =
+    requested === undefined &&
+    current.default === undefined &&
+    Object.keys(current.connections).length === 0;
+  if (deps.forceLocal || fallback) {
+    const state = resolve(
+      deps.localState ?? deps.env.CAB_LOCAL_STATE ?? defaultLocalState(),
+    );
+    const material = await localMaterial(state, deps);
+    return {
+      name: "local",
+      connection: {
+        url: material.origin,
+        installationId: material.installationId,
+        credential: { kind: "local" as const, state },
+      },
+    };
+  }
+  const selected = config.select(current, requested);
+  if (selected.connection.credential?.kind === "local") {
+    const material = await localMaterial(
+      selected.connection.credential.state,
+      deps,
+    );
+    if (material.installationId !== selected.connection.installationId)
+      throw new CliError(
+        "service-identity-changed",
+        "Local state belongs to a different installation. The saved connection has not been changed.",
+      );
+    return {
+      ...selected,
+      connection: { ...selected.connection, url: material.origin },
+    };
+  }
+  return selected;
+}
+
 async function connect(
   config: ConnectionConfig,
   requested: string | undefined,
   deps: CliDeps,
   capabilities: readonly string[],
 ) {
-  const { name, connection } = config.select(await config.read(), requested);
+  rejectManaged(deps.env);
+  const { name, connection } = await selectConnection(
+    config,
+    await config.read(),
+    requested,
+    deps,
+  );
   const token = await loadToken(name, connection, deps);
+  const accessMode =
+    connection.credential?.kind === "local" ? "local" : "token";
   const client = new ServiceClient(
     connectionOrigin(connection.url),
     token,
     deps.fetch,
     deps.signal,
   );
-  const identity = await client.identity(capabilities);
+  let identity: CliIdentity;
+  try {
+    identity = await client.identity(capabilities);
+  } catch (error) {
+    if (
+      accessMode === "local" &&
+      error instanceof CliError &&
+      error.code === "credential-invalid"
+    )
+      throw new CliError(
+        "local-access-unavailable",
+        "The service refused stale or wrong-installation local material. Restart the intended service and check --local-state DATA_DIR.",
+      );
+    if (
+      accessMode === "local" &&
+      error instanceof CliError &&
+      error.code === "unavailable"
+    )
+      throw new CliError(
+        error.code,
+        "The selected local service is unavailable or its material is stale.",
+        {
+          ...error.extra,
+          fix: "Restart the intended service and check --local --local-state DATA_DIR; no other connection was tried.",
+        },
+      );
+    throw error;
+  }
   if (identity.service.installationId !== connection.installationId)
     throw new CliError(
       "service-identity-changed",
-      `The service at ${connection.url} is a different installation than when ${name} logged in. Run 'cab auth login' again if this is expected.`,
+      accessMode === "local"
+        ? `The service at ${connection.url} does not match the selected local installation. Check --local-state DATA_DIR.`
+        : `The service at ${connection.url} is a different installation than when ${name} logged in. Run 'cab auth login' again if this is expected.`,
       {
-        fix: `If the reinstall is expected, run 'cab auth login --connection ${name} --url ${connection.url}'; otherwise check the URL with 'cab connection list'.`,
+        fix:
+          accessMode === "local"
+            ? "Check the selected data directory and restart the intended service. Adopt another installation under a new connection name with cab connection local NAME --local-state DATA_DIR."
+            : `If the reinstall is expected, run 'cab auth login --connection ${name} --url ${connection.url}'; otherwise check the URL with 'cab connection list'.`,
       },
     );
   return {
     name,
+    accessMode,
     url: connection.url,
     client,
     identity,
@@ -811,13 +1054,31 @@ async function connect(
         installationId: identity.service.installationId,
         origin: identity.service.origin,
         apiVersion: identity.apiVersion,
+        url: connection.url,
+        accessMode,
       },
     },
   };
 }
 
 async function loadToken(name: string, connection: Connection, deps: CliDeps) {
+  rejectManaged(deps.env);
   const credential = connection.credential;
+  if (credential?.kind === "local") {
+    const material = await localMaterial(credential.state, deps);
+    if (material.installationId !== connection.installationId)
+      throw new CliError(
+        "service-identity-changed",
+        "Local material belongs to a different installation. Check --local-state; adopt a new connection deliberately.",
+      );
+    if (material.origin !== connection.url)
+      throw new CliError(
+        "local-access-unavailable",
+        "The local endpoint changed during resolution. Retry against the restarted service.",
+      );
+    localOrigin(connection.url);
+    return material.secret;
+  }
   if (!credential)
     throw new CliError(
       "credential-not-found",
@@ -1037,9 +1298,11 @@ async function login(
       installationId: identity.service.installationId,
       origin: identity.service.origin,
       apiVersion: identity.apiVersion,
+      accessMode: "token",
+      url: origin,
     },
-    data: identity,
-    human: `Logged in to ${name} (${origin}) as ${identity.credential.name} (${identity.credential.scope}); expires ${new Date(identity.credential.expiresAt).toISOString()}.\n${nextLine(await doctorCommandFor(config, name, deps))}`,
+    data: { ...identity, accessMode: "token" },
+    human: `Logged in to ${name} (${origin}) as ${identity.credential.name} (${identity.credential.scope}); expires ${new Date(identity.credential.expiresAt ?? 0).toISOString()}.\n${nextLine(await doctorCommandFor(config, name, deps))}`,
   };
 }
 

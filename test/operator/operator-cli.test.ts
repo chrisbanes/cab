@@ -152,6 +152,8 @@ test("login, status and task get through a token file against the live service",
     installationId: s.f.service.operatorCredentials().installationId(),
     origin: s.authOrigin,
     apiVersion: 1,
+    url: s.origin,
+    accessMode: "token",
   });
   assert.equal(envelope.data.task.id, s.taskId);
   assert.equal(typeof envelope.observedAt, "number");
@@ -636,9 +638,9 @@ test("auth login defaults to the local connection and says where the token comes
   assert.deepEqual(readdirSyncSafe(bad.configDir), []);
   assert.deepEqual(bad.fetches, []);
 
-  // 2. A missing --url is a usage error with the acceptance sentence and no side effects.
+  // 2. Explicit token setup still requires --url; an empty configuration now attempts local discovery.
   const none = harness(t);
-  for (const extra of [[], ["--connection", "home"]]) {
+  for (const extra of [["--connection", "home"]]) {
     r = await none.run(["auth", "login", ...extra]);
     assert.equal(r.code, 2);
     assert.match(r.err, /\(usage\)/);
@@ -648,6 +650,10 @@ test("auth login defaults to the local connection and says where the token comes
     assert.equal(r.json().error.code, "usage");
     assert.equal(r.json().error.message, sentence("http://127.0.0.1:8787"));
   }
+  r = await none.run(["auth", "login"]);
+  assert.equal(r.code, 3);
+  assert.match(r.err, /Local access unavailable/);
+  assert.ok(!r.err.includes(sentence("http://127.0.0.1:8787")));
   assert.deepEqual(none.fetches, []);
   assert.deepEqual(readdirSyncSafe(none.configDir), []);
 
@@ -1368,9 +1374,9 @@ test("defaults name a runnable command for auth and cursor failures", async (t) 
 
   // No saved connection at all.
   let r = await h.run(["task", "get", s.taskId]);
-  assert.equal(r.code, 2);
-  assert.match(r.err, /\(connection-not-found\)/);
-  assert.match(fix(r.err), /cab auth login --connection NAME --url ORIGIN/);
+  assert.equal(r.code, 3);
+  assert.match(r.err, /\(local-access-unavailable\)/);
+  assert.match(fix(r.err), /--local.*--local-state/);
 
   // A revoked credential.
   const revoked = await s.issue("read", "revoked");
@@ -1451,6 +1457,7 @@ const builtinCommands = [
   "auth login",
   "auth status",
   "auth logout",
+  "connection local",
   "connection list",
   "connection use",
   "connection remove",

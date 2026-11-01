@@ -1,3 +1,4 @@
+import type { LocalAccess } from "../operator/local-access.js";
 import { cabFaviconSvg, cabMarkSvg } from "../operator/brand.js";
 import {
   questionCommandRawLimit,
@@ -828,6 +829,7 @@ type OperatorHttpOptions = {
   routes?: OperatorRouteRegistry;
   web?: OperatorWebBoundary;
   credentials?: OperatorCredentialStore;
+  localAccess?: LocalAccess | undefined;
   /** Opt-in browser push; absent, the notification routes answer 404. */
   push?: OperatorPush;
 };
@@ -1224,6 +1226,7 @@ export class LocalOperatorHttp {
   private readonly secureCookie: boolean;
   private readonly web: OperatorWebBoundary | undefined;
   private readonly credentials: OperatorCredentialStore | undefined;
+  private readonly localAccess: LocalAccess | undefined;
   private readonly push: OperatorPush | undefined;
 
   constructor(
@@ -1232,6 +1235,7 @@ export class LocalOperatorHttp {
     options: OperatorHttpOptions = {},
   ) {
     this.web = options.web;
+    this.localAccess = options.localAccess;
     this.credentials = options.credentials;
     this.push = options.push;
     this.routes = options.routes ?? new OperatorRouteRegistry();
@@ -1556,6 +1560,12 @@ export class LocalOperatorHttp {
     const address = server.address();
     if (!address || typeof address === "string")
       throw new Error("Unexpected operator UI address");
+    try {
+      await this.localAccess?.publish(`http://127.0.0.1:${address.port}`);
+    } catch (error) {
+      await this.stop();
+      throw error;
+    }
     this.push?.start();
     return address.port;
   }
@@ -1956,8 +1966,18 @@ export class LocalOperatorHttp {
     const token = /^Bearer ([^\s]+)$/.exec(
       String(request.headers.authorization),
     )?.[1];
-    const verify = (): VerifiedOperatorCredential | undefined =>
-      token === undefined ? undefined : credentials.verify(token);
+    const verify = ():
+      | (Omit<VerifiedOperatorCredential, "expiresAt"> & {
+          expiresAt: number | null;
+        })
+      | undefined =>
+      token === undefined
+        ? undefined
+        : token.startsWith("cab_local_")
+          ? this.localAccess?.verify(token)
+            ? this.localAccess.credential()
+            : undefined
+          : credentials.verify(token);
     const credential = verify();
     if (!credential) {
       deny(401, "credential-invalid");
@@ -1990,6 +2010,8 @@ export class LocalOperatorHttp {
             origin: this.auth.origin,
           },
           credential,
+          // Token identities must retain the strict API-v1 shape used by installed clients.
+          ...(token?.startsWith("cab_local_") ? { accessMode: "local" } : {}),
         });
       } else if (method === "POST") {
         const body = await readJson(request, path === "/api/operator/commands");

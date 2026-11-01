@@ -9,10 +9,102 @@ import { ServiceClient } from "../../src/cli/transport.js";
 import { cliCapabilities } from "../../src/operator/contracts.js";
 import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
+import { harness } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 import { tmpdir } from "../fixtures/temp.js";
 
 const DAY = 24 * 60 * 60 * 1000;
+
+// Freeze the separately installed API-v1 client's strict identity shape from
+// 34748252, including non-null token expiry. Do not derive it from the new schema.
+const legacyIdentitySchema = z
+  .object({
+    apiVersion: z.number().int().positive().safe(),
+    capabilities: z.array(z.string().max(64)).max(64),
+    service: z
+      .object({ installationId: z.uuid(), origin: z.string().max(2048) })
+      .strict(),
+    credential: z
+      .object({
+        id: z.uuid(),
+        name: z
+          .string()
+          .min(1)
+          .max(64)
+          .refine(
+            (value) =>
+              ![...value].some(
+                (c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
+              ),
+          ),
+        scope: z.enum(["read", "read-write"]),
+        createdAt: z.number().int().nonnegative().safe(),
+        expiresAt: z.number().int().nonnegative().safe(),
+      })
+      .strict(),
+  })
+  .strict();
+
+test("token identity retains the legacy strict API-v1 response and token lifecycle", async (t) => {
+  const s = await startCliService(t),
+    h = harness(t);
+  const store = s.f.service.operatorCredentials();
+  for (const scope of ["read", "read-write"] as const) {
+    const issued = await s.issue(scope, `legacy-${scope}`, 1);
+    const response = await s.bearer(issued.token, "/api/operator/cli");
+    assert.equal(response.status, 200);
+    const body: unknown = await response.json();
+    const identity = legacyIdentitySchema.parse(body);
+    assert.equal(identity.credential.scope, scope);
+    assert.equal(
+      identity.credential.expiresAt - identity.credential.createdAt,
+      DAY,
+    );
+    assert.equal(
+      legacyIdentitySchema.safeParse({ ...identity, accessMode: "token" })
+        .success,
+      false,
+    );
+
+    const login = await h.run([
+      "auth",
+      "login",
+      "--connection",
+      scope,
+      "--url",
+      s.origin,
+      "--token-file",
+      h.tokenFile(issued.token),
+    ]);
+    assert.equal(login.code, 0, login.err);
+    const status = await h.run([
+      "auth",
+      "status",
+      "--connection",
+      scope,
+      "--output",
+      "json",
+    ]);
+    assert.equal(status.code, 0, status.err);
+    assert.equal(status.json().data.accessMode, "token");
+    assert.equal(status.json().service.accessMode, "token");
+    const human = await h.run(["auth", "status", "--connection", scope]);
+    assert.equal(human.code, 0, human.err);
+    assert.match(human.out, /Access mode: +token/);
+
+    store.revoke(issued.credential.id);
+    const revoked = await s.bearer(issued.token, "/api/operator/cli");
+    assert.equal(revoked.status, 401);
+    assert.equal((await revoked.json()).error.code, "credential-invalid");
+    const expired = store.issue(
+      { name: `expired-${scope}`, scope, expiresInDays: 1 },
+      Date.now() - 2 * DAY,
+    );
+    const denied = await s.bearer(expired.token, "/api/operator/cli");
+    assert.equal(denied.status, 401);
+    assert.equal((await denied.json()).error.code, "credential-invalid");
+  }
+});
 
 test("command transport retains only validated source credential refusal metadata", async () => {
   const command = JSON.stringify({ type: "github.preview" });

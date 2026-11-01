@@ -3,6 +3,8 @@ import type { Coverage, Pagination } from "./browse.js";
 
 export type CliDeps = {
   env: NodeJS.ProcessEnv;
+  localState?: string | undefined;
+  forceLocal?: boolean | undefined;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WritableStream;
   stderr: NodeJS.WriteStream;
@@ -28,7 +30,13 @@ export type Result = {
   human: string;
   data: unknown;
   connection?: string;
-  service?: { installationId: string; origin: string; apiVersion: number };
+  service?: {
+    installationId: string;
+    origin: string;
+    apiVersion: number;
+    accessMode?: string;
+    url?: string;
+  };
   pagination?: Pagination;
   coverage?: Coverage;
   /** The receipt identity of a write: service installation, scope, type and key. */
@@ -46,6 +54,8 @@ export type RequestIdentity = {
 
 /** Every flag the CLI accepts; a command reads only the ones it documents. */
 export type Values = {
+  local?: boolean | undefined;
+  "local-state"?: string | undefined;
   connection?: string | undefined;
   url?: string | undefined;
   "token-file"?: string | undefined;

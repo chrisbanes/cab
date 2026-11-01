@@ -76,6 +76,8 @@ export const DEFAULT_FIX: Record<string, string> = {
   "connection-not-found": `Run 'cab auth login --connection NAME --url ORIGIN'; ${LIST}.`,
   "not-found":
     "Check the ID against the matching list command, for example 'cab task list'.",
+  "local-access-unavailable":
+    "Start the intended local service, check private state permissions, and select it with --local --local-state DATA_DIR.",
   "credential-invalid": `The service refused the credential (expired or revoked); ${LOGIN}.`,
   "credential-not-found":
     "Run 'cab auth login' to store a credential for this connection.",

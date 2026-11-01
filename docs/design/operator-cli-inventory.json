@@ -96,6 +96,23 @@
       "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
+      "id": "connection local",
+      "kind": "command",
+      "area": "auth/connection",
+      "scenarios": ["CLI01", "CLI02"],
+      "evidence": [
+        "test/operator/operator-cli-local-access.test.ts",
+        "docs/evidence/issue-1413-local-access-2026-11-01.md"
+      ],
+      "effect": "Validates protected local state and live installation identity before saving a local reference; does not revoke or remove the old token.",
+      "denial": "Managed assignments, invalid state and installation mismatch fail before saving.",
+      "revision": "Existing connection installation identity must match; failure leaves prior configuration intact.",
+      "retry": "No server mutation; repeat deliberate local adoption after correcting the selected state.",
+      "observation": "real",
+      "state": "bounded",
+      "gap": "Real foreground HTTP/SQLite qualification and production read/write/restart/doctor smoke completed on 942501802141d9244e3b8bed351bca4b2e09f8c3, with evidence committed in 109122ef64dd55701b5617ca4d28bafbae3f47af. Installed-service discovery/lifecycle remains in the sibling slice; second-machine private HTTPS qualification remains outstanding."
+    },
+    {
       "id": "connection list",
       "kind": "command",
       "area": "auth/connection",

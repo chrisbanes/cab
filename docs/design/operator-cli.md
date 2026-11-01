@@ -19,7 +19,9 @@ code reviews are deferred; this release does not require complete web UI parity.
 Support clients on the service host and on another trusted machine over the
 existing private network. Both use the running service API.
 
-External clients use dedicated, revocable operator credentials with selectable
+Same-OS-account clients use protected, installation-bound local access with read/write
+authority through the live HTTP API. Remote and deliberately restricted local
+connections use dedicated, revocable operator credentials with selectable
 read-only or read/write access. Writes retain the service's existing policy and
 admission checks. The authenticated web UI creates and revokes these credentials,
 revealing a newly created token once. CLI login accepts the token through secure
@@ -224,6 +226,49 @@ adoption are deliberately irreversible; revoke, pause or restore instead.
 
 ## Authentication and authority
 
+Local and token access share the bearer authentication path and the existing route
+and command authority. Local access grants read/write CLI authority, never browser
+sessions or session-only routes. Browser password, cookie, Origin and CSRF checks,
+command revisions, receipts, exact approvals and execution holds are unchanged.
+
+Shared service startup creates a fresh 256-bit local capability bound to the
+persistent installation ID, in an owner-only `DATA_DIR.local-access/connection.json`
+beside the data directory. This sidecar is outside snapshots and task workspaces.
+The listener publishes its actual numeric loopback origin only after binding.
+Restart replaces the generation secret without requiring login; a stopped or
+incomplete service fails explicitly. Unsafe material or paths must be repaired
+before use: ownership, private modes, regular-file status, hard links, size,
+symlink components and path substitution are checked. Missing, malformed or stale
+state never triggers token provisioning or another target. Local secrets and paths
+join managed environment exclusions and diagnostic redaction; this is same-account
+trust, with no claim of isolation from another process under that account.
+
+Resolution preserves `--connection`, `CAB_CONNECTION`, saved default and sole saved
+connection, in that order. Ambiguity, invalid selection, missing token, scope,
+expiry, revocation, logout or service failure never falls back. Only when no
+connection resolves does discovery use `CAB_LOCAL_STATE` (a data directory) or
+`~/Library/Application Support/cab/data`. No directory or port scanning occurs.
+Installed-service record discovery and lifecycle adoption remain outstanding in
+the sibling of #1413; existing installation/token setup remains unchanged.
+
+`--local` deliberately selects local access ahead of saved/environment selection;
+it cannot be combined with `--connection` or token-login options.
+`--local-state DATA_DIR` selects a custom foreground data directory and requires
+`--local`, except on `cab connection local NAME --local-state DATA_DIR`.
+That command validates the material and live installation before atomically saving
+a local reference. Replacing an existing connection requires the same installation.
+Failure preserves the old config and credential. Success neither revokes its old
+server token nor removes its Keychain entry or operator-owned token file.
+
+Local `auth login|logout` explain OS-account read/write access without requesting
+a token or claiming logout disables it. Token login/logout retain their meaning.
+Auth identity and connection output identify access mode; local identity reports
+`expiresAt: null`. Status reports the resolved client URL and installation, with
+the configured service origin separately available in JSON. Material is sent only
+to canonical `http://127.0.0.1:PORT`; DNS names, remote origins and all redirects
+are rejected. The client never opens the service database. Managed assignments
+are refused before local material is read or authenticated HTTP is attempted.
+
 Use a dedicated bearer-token authentication path over the same service command
 and read layer. Preserve browser cookie, Origin and CSRF protections; adding CLI
 authentication must not make browser-session writes exempt from those checks.
@@ -296,7 +341,7 @@ Node.js version and package tooling; distribution follows
 
 | Area | First-release operations |
 | --- | --- |
-| `auth`, `connection` | Login, status, logout; select/list/remove local connections |
+| `auth`, `connection` | Login, status, logout; select/list/remove named connections; deliberately adopt local access |
 | `project` | List/get/create; inspect and prepare/apply supported configuration, instructions, routing and source settings |
 | `profile` | List/get/create; inspect revisions; prepare/apply supported fields and restore earlier content as a new revision |
 | `task` | List/search/get/create/configure; dependencies; existing task controls, messages, follow-up and draft turns |

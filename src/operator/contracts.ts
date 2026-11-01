@@ -4414,6 +4414,7 @@ export const pushTestResultSchema = z
   .strict();
 export const cliIdentitySchema = z
   .object({
+    accessMode: z.enum(["token", "local"]).optional(),
     apiVersion: z.number().int().positive().safe(),
     capabilities: z.array(z.string().max(64)).max(64),
     service: z
@@ -4425,7 +4426,7 @@ export const cliIdentitySchema = z
         name: operatorCredentialNameSchema,
         scope: operatorCredentialScopeSchema,
         createdAt: time,
-        expiresAt: time,
+        expiresAt: time.nullable(),
       })
       .strict(),
   })

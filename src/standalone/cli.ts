@@ -227,6 +227,7 @@ export async function main(
         {
           routes,
           credentials: service.operatorCredentials(),
+          localAccess: service.localAccess(),
           push,
           web: new OperatorWebBoundary(bundle, api, readiness),
         },

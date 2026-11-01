@@ -187,6 +187,25 @@ release or cutover gates. Preserve the task workspace behaviour. Recorded eviden
 | WI12 | Inspect a draft and send, retry a confirmed failure, or reconcile an uncertain submission | One logical review containing the exact comments and summary reaches the named accountable lead with a receipt. Confirmed failures preserve editable drafts; unknown outcomes retain the original operation for reconciliation without duplicate delivery. No GitHub call, approval, readiness/completion change, merge authority or hold release occurs. |
 | WI13 | Navigate among files, diffs and exact result evidence while drafting on desktop, phone and keyboard | Draft content and anchors survive navigation/refresh under session privacy rules. Sent feedback remains inspectable with its original context. Existing contextual feedback is preserved; no unrelated thread-resolution or retraction workflow is introduced. |
 
+### Local operator access acceptance
+
+Foreground qualification uses the real HTTP service and SQLite: no saved token
+or Keychain, an automatic read and representative write, restart without login,
+explicit custom state and deliberate adoption. Compatibility covers selected
+localhost read-only, expired, revoked and logged-out tokens; explicit/environment/
+default/sole selection and ambiguity never trigger local fallback. Failed
+adoption preserves configuration, server token and operator-owned token file.
+Focused checks cover protected regular files, ownership/modes, symlink and path
+substitution, malformed/missing/stale/wrong-installation material, numeric loopback
+only, redirects, managed refusal before reads/HTTP, and diagnostic redaction.
+Shared route/session/CSRF, revision, receipt, approval and hold tests remain the
+authority evidence. This is same-OS-account trust, not process isolation.
+
+Installed-service discovery and lifecycle integration remain outstanding in the
+sibling of #1413. Foreground evidence does not qualify that integration, npm
+publication, a production deployment or cutover. The required final-head `check`
+CI context remains a merge gate even when local checks pass.
+
 ### Operator CLI acceptance
 
 CLI01–CLI06 qualify the operator CLI release under

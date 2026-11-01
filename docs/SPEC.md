@@ -84,7 +84,18 @@ qualified on a published package. The existing bundled-Node tarball is an option
 The accepted [operator CLI design](design/operator-cli.md) and
 [ADR-1010](adr/1010-operator-cli.md) specify an additional operator interface for
 external agents and terminal users. Its authentication foundation and read-only
-browsing are implemented: Settings issues, lists, rotates and revokes CLI credentials,
+browsing are implemented. Shared service startup now creates protected,
+installation-bound local access material beside the data directory, outside
+snapshots and task workspaces. Foreground CLI clients under the service OS account
+can automatically read and write through the live HTTP API without token login or
+Keychain. `--local --local-state DATA_DIR` selects a custom foreground installation;
+`connection local NAME` deliberately adopts it after live identity validation.
+Saved token selection, scope, expiry, revocation and logout retain priority and
+never fall back on failure. Local access preserves route, session, CSRF, revision,
+receipt, approval and hold rules; managed assignments are refused before secret
+reads or authenticated HTTP. This trusts the OS account and claims no process
+isolation. Installed-service discovery and lifecycle integration remain outstanding
+in the sibling of #1413. Settings issues, lists, rotates and revokes CLI credentials,
 and the packaged `cab` executable supports `auth login|status|logout`,
 `connection list|use|remove`, project and profile list/get/instructions/revisions,
 task list/search/get/messages, assignment get/history/instructions, result

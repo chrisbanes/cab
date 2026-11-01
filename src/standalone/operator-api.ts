@@ -801,7 +801,8 @@ export class OperatorApi {
         add = (...items: string[]) => {
           for (const value of items) values.push([null, value]);
         };
-      add(...this.controlPaths);
+      // Local secrets have pattern redaction; rotation must not change retained review policy.
+      add(...this.controlPaths, this.service.localAccess()?.directory ?? "");
       const claude = d.claudeTokenReference();
       add(...this.service.providerCredentialExclusions().redactions);
       if (claude) add(...claudeTokenExclusions(claude).redactions);

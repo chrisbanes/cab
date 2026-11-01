@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import {
   operatorCredentialTokenSchema,
@@ -42,6 +42,15 @@ const credentialRefSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("keychain"), account: connectionNameSchema })
     .strict(),
   z.object({ kind: z.literal("token-file"), path: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("local"),
+      state: z
+        .string()
+        .min(1)
+        .refine((value) => isAbsolute(value) && resolve(value) === value),
+    })
+    .strict(),
 ]);
 export type CredentialRef = z.infer<typeof credentialRefSchema>;
 const connectionSchema = z

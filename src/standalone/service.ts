@@ -1,3 +1,4 @@
+import { LocalAccess, localAccessDirectory } from "../operator/local-access.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   issueCurrentBodyLimit,
@@ -879,6 +880,18 @@ export class StandaloneService {
       );
   }
 
+  private localAccessState: LocalAccess | undefined;
+
+  localAccess(): LocalAccess | undefined {
+    return this.localAccessState;
+  }
+  localAccessExclusions(): string[] {
+    return [
+      localAccessDirectory(this.dataDir),
+      ...(this.localAccessState?.exclusions() ?? []),
+    ];
+  }
+
   async start(): Promise<void> {
     if (this.db || this.owner)
       throw new Error("Service already started or shutdown is incomplete");
@@ -926,6 +939,10 @@ export class StandaloneService {
       new Store(db).ensureHost("standalone-codex");
       const workspaceComparisons = new SqliteWorkspaceComparisonStore(db);
       const operatorCredentials = new OperatorCredentialStore(db);
+      this.localAccessState = await LocalAccess.create(
+        this.dataDir,
+        operatorCredentials.installationId(),
+      );
       const operatorPush = new OperatorPushStore(db);
       const conversationHistory = new ConversationHistoryStore(db);
       let diagnostics: ExecutionDiagnosticsStore | undefined;
@@ -1357,7 +1374,11 @@ export class StandaloneService {
             ...claude.names,
             ...github.names,
           ],
-          values: [...claude.values, ...github.values],
+          values: [
+            ...this.localAccessExclusions(),
+            ...claude.values,
+            ...github.values,
+          ],
         };
       });
       const spawnEnvironment = {
@@ -1369,7 +1390,11 @@ export class StandaloneService {
               process.env,
               [...deliveryCredentialNames(), ...claude.names, ...github.names],
               process.env,
-              [...claude.values, ...github.values],
+              [
+                ...this.localAccessExclusions(),
+                ...claude.values,
+                ...github.values,
+              ],
             ),
           );
           runtimeSpawnSnapshot = snapshot;
@@ -2390,6 +2415,7 @@ export class StandaloneService {
         this.dataDir,
         this.canonicalDataDir,
         ...(this.options.failureRedactionPaths ?? []),
+        ...this.localAccessExclusions(),
         ...secretEnvironmentValues(),
         ...providerCredentialExclusions(domain).redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
@@ -4383,7 +4409,11 @@ export class StandaloneService {
       taskVersion: Number(task.version),
       visibility: this.taskWorkspaceVisibility(taskId),
       ...(binding ? { binding } : {}),
-      controlPaths: [this.dataDir, process.env.CAB_OPERATOR_AUTH_FILE ?? ""],
+      controlPaths: [
+        this.dataDir,
+        localAccessDirectory(this.dataDir),
+        process.env.CAB_OPERATOR_AUTH_FILE ?? "",
+      ],
     };
   }
 
@@ -8787,6 +8817,7 @@ export class StandaloneService {
         this.canonicalDataDir,
         ...managedPaths,
         ...additionalPaths,
+        ...this.localAccessExclusions(),
         ...secretEnvironmentValues(),
         ...this.providerCredentialExclusions().redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
