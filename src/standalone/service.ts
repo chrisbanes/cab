@@ -7163,6 +7163,22 @@ export class StandaloneService {
     const roleContext = leadBinding
       ? "Assignment role: project lead. You are accountable for coordinating this task, reviewing its results, and deciding whether to request completion."
       : "Assignment role: project assignee. The project lead remains accountable for coordinating this task and reviewing its results before completion. Report your result and durable next action through cab.";
+    const project = domain.project(projectId);
+    const profileIds = new Set([
+      ...(project.leadProfileId ? [String(project.leadProfileId)] : []),
+      ...domain.routingCandidates(projectId).map((p) => String(p.profileId)),
+    ]);
+    const coordinationContext = JSON.stringify({
+      taskId: binding.taskId,
+      projectId,
+      assignmentId: binding.assignmentId,
+      leadProfileId: project.leadProfileId,
+      permittedProfiles: [...profileIds]
+        .map((id) => domain.profile(id))
+        .filter((p) => !p.revoked)
+        .map((p) => ({ id: p.id, name: p.name, summary: p.summary })),
+      deliveryPolicy: this.delivery().publicConfiguration(projectId),
+    });
     const capture = (() => {
       try {
         return this.taskReview().contextForWork(
@@ -7191,7 +7207,10 @@ export class StandaloneService {
       ...(request.draftTurn
         ? [{ name: "draft-turn" as const, text: draftTurnInstruction }]
         : []),
-      { name: "role", text: roleContext },
+      {
+        name: "role",
+        text: `${roleContext}\nCurrent cab coordination context (JSON): ${coordinationContext}\nProfile summaries describe suitability, not authority. cab tools enforce current permissions. Ask operator questions through cab_ask_question, never native asynchronous input tools.`,
+      },
       {
         name: "review-references",
         text: `Captured review references (JSON): ${reviewReferences}`,

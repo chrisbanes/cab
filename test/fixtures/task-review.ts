@@ -114,6 +114,7 @@ export function seedTaskResult(
     db.prepare(
       "UPDATE execution_intents SET state='completed' WHERE workId=?",
     ).run(workId);
+    c.recordSuccessfulTerminal(workId);
   });
   return { resultId, workId };
 }

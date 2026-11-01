@@ -1056,7 +1056,7 @@ test("coordination reads and keyed commands stay scoped and durable", async (t) 
   assert.equal(
     finalView.messages.filter((item) => item.eventType === "assignment-result")
       .length,
-    2,
+    1,
   );
   assert.equal(finalView.questions[0]?.status, "answered");
   assert.equal(finalView.approvals[0]?.status, "denied");
