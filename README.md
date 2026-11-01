@@ -238,13 +238,8 @@ each acceptance scenario to its evidence and disposition.
 ## Development
 
 Use the Node and npm versions pinned in [`.nvmrc`](.nvmrc) and
-`packageManager` in [`package.json`](package.json). Node 26 is tested for
-compatibility: `node26-service-*` jobs run service coverage on PRs and main pushes;
-`node26-full-compatibility` runs the complete build and Chromium/WebKit suite on
-nightlies requiring validation, manual runs and release tags. Both use the latest 26.x; 26.9.0 has
-[local evidence](docs/evidence/node-26-compatibility-2026-10-09.md). Node 26 is not
-the deployment baseline. `engines.node` is `>=24` as permissive metadata; later
-majors are not qualified.
+`packageManager` in [`package.json`](package.json); see the
+[development reference](docs/development.md) for supported runtimes and CI.
 
 ```sh
 npm ci

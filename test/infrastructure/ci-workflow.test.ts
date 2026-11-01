@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 const { ciFailures } = (await import(
   pathToFileURL(resolve("scripts/check-ci-results.mjs")).href
 )) as {
-  ciFailures(jobs: unknown, full: boolean, run?: boolean): string[];
+  ciFailures(jobs: unknown, run?: boolean): string[];
 };
 const { previousNightlyRun, nightlyChanged, docsOnly } = (await import(
   pathToFileURL(resolve("scripts/check-changes.mjs")).href
@@ -171,57 +171,44 @@ test("pull requests skip checks only when every change is untested documentation
       doc,
     );
 });
-function successful(full: boolean) {
-  return {
-    changes: { result: "success" },
-    quality: { result: "success" },
-    suites: { result: "success" },
-    "service-node26": { result: full ? "skipped" : "success" },
-    "compatibility-node26": { result: full ? "success" : "skipped" },
-  };
-}
-test("aggregate check accepts complete PR and compatibility runs", () => {
-  assert.deepEqual(ciFailures(successful(false), false), []);
-  assert.deepEqual(ciFailures(successful(true), true), []);
+const successful = {
+  changes: { result: "success" },
+  quality: { result: "success" },
+  suites: { result: "success" },
+};
+test("aggregate check accepts a complete run", () => {
+  assert.deepEqual(ciFailures(successful), []);
 });
 test("unchanged nightly and documentation-only skips require a successful change gate and every test job skipped", () => {
   const skipped = Object.fromEntries(
-    Object.keys(successful(true)).map((name) => [
+    Object.keys(successful).map((name) => [
       name,
       { result: name === "changes" ? "success" : "skipped" },
     ]),
   );
-  for (const full of [true, false]) {
-    assert.deepEqual(ciFailures(skipped, full, false), []);
-    for (const name of Object.keys(skipped)) {
-      assert.ok(
-        ciFailures({ ...skipped, [name]: { result: "failure" } }, full, false)
-          .length,
-      );
-      const missing = { ...skipped };
-      delete missing[name];
-      assert.ok(ciFailures(missing, full, false).length);
-    }
+  assert.deepEqual(ciFailures(skipped, false), []);
+  for (const name of Object.keys(skipped)) {
+    assert.ok(
+      ciFailures({ ...skipped, [name]: { result: "failure" } }, false).length,
+    );
+    const missing = { ...skipped };
+    delete missing[name];
+    assert.ok(ciFailures(missing, false).length);
   }
 });
 test("failed, cancelled, missing and unexpectedly skipped applicable jobs cannot pass check", () => {
-  for (const full of [false, true]) {
-    const expected = successful(full);
-    for (const [name, entry] of Object.entries(expected)) {
-      if (entry.result !== "success") continue;
-      for (const result of ["failure", "cancelled", "skipped", "pending"])
-        assert.ok(
-          ciFailures({ ...expected, [name]: { result } }, full).length,
-          `${name} ${result}`,
-        );
-      const missing: Record<string, { result: string }> = { ...expected };
-      delete missing[name];
-      assert.ok(ciFailures(missing, full).length);
-    }
-    assert.ok(
-      ciFailures({ ...expected, extra: { result: "success" } }, full).length,
-    );
+  const expected = successful;
+  for (const name of Object.keys(expected)) {
+    for (const result of ["failure", "cancelled", "skipped", "pending"])
+      assert.ok(
+        ciFailures({ ...expected, [name]: { result } }).length,
+        `${name} ${result}`,
+      );
+    const missing: Record<string, { result: string }> = { ...expected };
+    delete missing[name];
+    assert.ok(ciFailures(missing).length);
   }
-  assert.ok(ciFailures(null, false).length);
-  assert.ok(ciFailures([], false).length);
+  assert.ok(ciFailures({ ...expected, extra: { result: "success" } }).length);
+  assert.ok(ciFailures(null).length);
+  assert.ok(ciFailures([]).length);
 });

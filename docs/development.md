@@ -4,13 +4,9 @@ For the product overview, see the [README](../README.md). For macOS service
 operations and backup/restore, see the [operations procedure](operations/standalone-macos.md).
 
 Use the Node version in [`.nvmrc`](../.nvmrc) and the npm version in
-`packageManager` (`package.json`).
-Node 26 compatibility jobs use the latest 26.x: `node26-service-*` covers PRs and
-main pushes; `node26-full-compatibility` covers the complete build and browser suite
-on nightly, manual and release-tag runs, as described below. Version 26.9.0 has
-[local evidence](evidence/node-26-compatibility-2026-10-09.md) but is not the default
-baseline. `engines.node` is `>=24` as permissive metadata; Node 25, 27 and later
-majors are not qualified.
+`packageManager` (`package.json`). CI runs every job on that version.
+`engines.node` is `>=26` as permissive metadata; Node 27 and later majors are not
+qualified.
 
 ```sh
 npm ci
@@ -33,8 +29,8 @@ without restoring TypeScript caches.
 Tests include deterministic scheduler, supervision, recovery, power and
 service-integration fixtures, coordination, routing, inbox, interaction and
 completion tests, and the operator auth, HTTP and browser tests. CI
-builds once and runs eight test jobs on PRs and main pushes: six Node 24 Chromium
-jobs and two Node 26 service jobs. Coordination, sources, delivery, operations and
+builds once and runs eight test jobs: six Chromium suite jobs and two service jobs
+without browser executables. Coordination, sources, delivery, operations and
 infrastructure share one lane; workspaces has one lane; execution and operator
 have two shards each. Logical suites remain separate directories even when they
 share a CI lane. Runtime retention tests are split by terminal events, threads and
@@ -55,8 +51,8 @@ Daily CI at 05:00 UTC skips the build and tests only when the previous scheduled
 run on the same branch completed successfully on the same commit. Changed commits,
 first nights and failed, cancelled or unfinished previous runs execute all checks;
 a history lookup failure fails CI. Manual workflow runs always
-run the complete checks. Nightly, manual and release-tag runs include WebKit on
-Node 24 and the complete suite and build on Node 26. These triggers become available when the
+run the complete checks. Nightly, manual and release-tag suite jobs add WebKit.
+These triggers become available when the
 workflow reaches the default branch. Local `npm run check` continues to run all
 tests and both browsers. For focused checks after building, use:
 

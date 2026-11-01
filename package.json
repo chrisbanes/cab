@@ -8,7 +8,7 @@
     "url": "git+https://github.com/chrisbanes/cab.git"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "packageManager": "npm@12.2.1",
   "bin": {
