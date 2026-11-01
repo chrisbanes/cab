@@ -24,6 +24,7 @@ import {
 } from "./settings.js";
 import { clockLabel } from "./presentation.js";
 import { parseRule, ruleLines, savedRule } from "./jira-readiness.js";
+import { closedIssueLabels } from "./settings-changes.js";
 import { ruleText } from "../../src/operator/readiness-text.js";
 import type { ObservationResource } from "./sync-placement.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -266,6 +267,7 @@ export function JiraSourceTab(
       : {
           expectedVersion: String(data.source.version),
           instance: saved ? String(data.source.instance ?? "") : "",
+          closedIssues: saved ? data.source.closedIssues : "skip",
           jql: loadedJql,
           readinessMode: rule?.mode ?? "all",
           readiness: savedRuleLines,
@@ -359,6 +361,8 @@ export function JiraSourceTab(
                     projectId,
                     expectedVersion: data.source.version,
                     instance,
+                    closedIssues:
+                      d.values.closedIssues === "done" ? "done" : "skip",
                     selections: lines.map((jql, i) => ({
                       id: `S-${i + 1}`,
                       kind: "jql",
@@ -444,6 +448,23 @@ export function JiraSourceTab(
                   </p>
                 </>
               )}
+              <DraftField
+                draft={d}
+                field="closedIssues"
+                label="Closed Jira issues"
+              >
+                {Object.entries(closedIssueLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </DraftField>
+              <p className="metadata muted">
+                Treat closure as Done marks the task closed on Jira once its
+                work has stopped and source checks allow completion. Task
+                history is kept. Switching to Skip reopens tasks completed by
+                Jira closure.
+              </p>
               <div className="settings-actions">
                 <Button
                   type="button"

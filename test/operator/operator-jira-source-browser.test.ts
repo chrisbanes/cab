@@ -79,6 +79,15 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
 
   // Bad JQL is refused by Jira with its own words and nothing is saved.
   const source = page.getByRole("region", { name: "Jira source" });
+  const closedIssues = page.getByLabel("Closed Jira issues");
+  assert.equal(await closedIssues.inputValue(), "skip");
+  await closedIssues.focus();
+  await page.keyboard.press("d");
+  await closedIssues.selectOption("done");
+  assert.equal(
+    await closedIssues.evaluate((el) => el === document.activeElement),
+    true,
+  );
   await page.getByLabel("Jira site").selectOption(site);
   await page.getByLabel("JQL queries, one per line").fill("BAD =");
   await page.getByRole("button", { name: "Save Jira source" }).click();
@@ -87,6 +96,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     .first()
     .waitFor();
   assert.equal(f.service.domain().jiraConfiguration(projectId), null);
+  assert.equal(await closedIssues.inputValue(), "done");
 
   // Good JQL previews its matches, then saves, and a refresh shows the last sync.
   await page.getByLabel("JQL queries, one per line").fill("project = ABC");
@@ -95,6 +105,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
   const saved = commandRequest(page);
   await page.getByRole("button", { name: "Save Jira source" }).click();
   const command = (await saved).postDataJSON();
+  assert.equal(command.closedIssues, "done");
   assert.deepEqual(command.selections, [
     { id: "S-1", kind: "jql", jql: "project = ABC" },
   ]);
@@ -106,6 +117,54 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     await page.getByLabel("JQL queries, one per line").inputValue(),
     "project = ABC",
   );
+  assert.equal(await closedIssues.inputValue(), "done");
+  await page
+    .getByLabel("JQL queries, one per line")
+    .fill("project = ABC AND labels = ready");
+  const edited = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/operator/commands") &&
+      r.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save Jira source" }).click();
+  assert.equal((await edited).status(), 200);
+  await page.reload();
+  await page.getByLabel("JQL queries, one per line").waitFor();
+  assert.equal(await closedIssues.inputValue(), "done");
+  // The ordinary Jira settings route mounts the same control as the setup route.
+  await page.goto(
+    `${web.origin}/app/projects/${projectId}/settings?tab=github`,
+  );
+  await page.getByLabel("JQL queries, one per line").waitFor();
+  assert.equal(await closedIssues.inputValue(), "done");
+  await closedIssues.selectOption("skip");
+  const switched = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/operator/commands") &&
+      r.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save Jira source" }).click();
+  assert.equal((await switched).status(), 200);
+  await page.reload();
+  await page.getByLabel("JQL queries, one per line").waitFor();
+  assert.equal(await closedIssues.inputValue(), "skip");
+  await closedIssues.selectOption("done");
+  const latest = f.service.domain().jiraConfiguration(projectId)!;
+  f.service.domain().execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: latest.version,
+    instance: site,
+    selections: latest.selections,
+  });
+  await page.getByRole("button", { name: "Save Jira source" }).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  assert.equal(await closedIssues.inputValue(), "done");
+  await page.reload();
+  await page.getByLabel("JQL queries, one per line").waitFor();
+  assert.equal(await closedIssues.inputValue(), "skip");
   // A query saved elsewhere across lines stays one selection in the editor.
   f.service.domain().execute({
     type: "jira.configure",
