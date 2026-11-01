@@ -96,8 +96,10 @@ and relevant log excerpts are retained with the delivery record.
 
 The original diagnostic candidate `5c4644e7c0b1d06e978140140815a369c2408e0b`
 is preserved as an ancestor. The current changes repair forward, retain two
-purposeful cases instead of three, and add no production code. `npm ci` and browser
-installation remain valid with unchanged pinned dependencies. Initial targeted
+purposeful cases instead of three, and add no production code. `npm ci` remains
+valid with unchanged pinned dependencies. The browser installer failed to create
+its cache lock inside the sandbox; the successful browser runs used existing
+installed binaries. No successful installation is claimed. Initial targeted
 calibration passed all three selected cases (historical, guarded and original),
 with zero skips. The guard-removal negative control failed as expected.
 
