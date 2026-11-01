@@ -1175,10 +1175,7 @@ before.
 ### Build and authenticate from a checkout
 
 Use the Node.js version in `.nvmrc` and the npm version in `packageManager`
-(`package.json`). Node.js `26.9.0` has passed the checks
-and the fixture service/operator journey
-([evidence](../evidence/node-26-compatibility-2026-10-09.md)) but is not the
-deployment baseline; later majors are not qualified. Build from a reviewed
+(`package.json`); later majors are not qualified. Build from a reviewed
 checkout and keep the Node executable and compiled CLI at stable absolute paths that remain
 available to the logged-in user:
 
