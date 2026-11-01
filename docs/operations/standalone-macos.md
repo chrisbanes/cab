@@ -975,10 +975,10 @@ cab snapshot verify "$STATE/snapshots/manual-<date>"
 `npm run operations -- backup|verify|restore` runs the same operations.
 
 The snapshot is a private directory containing only `standalone.sqlite` and a
-strict `manifest.json` commit marker. Node's SQLite backup API (qualified on
-Node 24.21.0 and 26.9.0) captures the whole database without table-specific
-export. The manifest records the creating Node version as provenance; snapshots
-from Node 24 or later verify and restore on any supported runtime. Verification
+strict `manifest.json` commit marker. Node's SQLite backup API captures the
+whole database without table-specific export. The manifest records the creating
+Node version as provenance; snapshots from Node 24 or later, including those made
+before Node 26 became the minimum, verify and restore on any supported runtime. Verification
 checks SQLite integrity, schema version/fingerprint, database bytes, and a deterministic
 typed logical-content digest. A database owner lock is required; no process ID
 or timestamp is treated as ownership evidence. The owner must already be a
@@ -1065,7 +1065,7 @@ personal instance. A local build is for testing and evidence; it is not the Haze
 cutover and must not take over projects the prototype owns. Cite the commit with
 any evidence it produces.
 
-Run it from a checkout on an Apple silicon Mac with any Node 24 or later:
+Run it from a checkout on an Apple silicon Mac with any Node 26 or later:
 
 ```sh
 node scripts/package-release.mjs build COMMIT
@@ -1175,10 +1175,7 @@ before.
 ### Build and authenticate from a checkout
 
 Use the Node.js version in `.nvmrc` and the npm version in `packageManager`
-(`package.json`). Node.js `26.9.0` has passed the checks
-and the fixture service/operator journey
-([evidence](../evidence/node-26-compatibility-2026-10-09.md)) but is not the
-deployment baseline; later majors are not qualified. Build from a reviewed
+(`package.json`); later majors are not qualified. Build from a reviewed
 checkout and keep the Node executable and compiled CLI at stable absolute paths that remain
 available to the logged-in user:
 
