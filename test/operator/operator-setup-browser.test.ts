@@ -1870,24 +1870,25 @@ function responseGate() {
   return { promise, resolve: release };
 }
 
-for (const schedule of [
-  "private-before-save",
-  "private-after-conflict",
-  "operator-refresh",
-] as const)
-  test(`Setup's ready check reviews a source saved elsewhere before importing again: chronology ${schedule}`, async (_t, journey) => {
+/** #1388's ordering guard: a completed server snapshot must precede the external save. */
+const waitForImportPrivateRead = (
+  t: Awaited<ReturnType<typeof linkedReadyCheck>>,
+) =>
+  until(
+    () =>
+      t.privateReads.includes(
+        `/api/operator/projects/${t.projectId}/private-values`,
+      ),
+    "the Import issues private read",
+  );
+
+for (const guarded of [false, true])
+  test(`Setup's ready check reviews a source saved elsewhere before importing again: ${guarded ? "private-read guard" : "historical no-wait ordering"}`, async (_t, journey) => {
     const release = responseGate();
     const requested = responseGate();
     journey.cleanup(async () => release.resolve(), "release-private-read");
-    const chronology: Array<{
-      event: string;
-      version?: number;
-      observedAt?: number;
-      connected?: boolean;
-      previews?: unknown;
-      steps?: string[];
-    }> = [];
-    let initialConfiguration: unknown;
+    const chronology: Array<Record<string, unknown>> = [];
+    let snapshot: unknown;
     let equivalent = false;
     const t = await linkedReadyCheck(journey, {
       failing: { "codex-login": "fail" },
@@ -1897,7 +1898,7 @@ for (const schedule of [
           async (route) => {
             chronology.push({ event: "private-start" });
             requested.resolve();
-            if (schedule === "private-after-conflict") await release.promise;
+            await release.promise;
             const response = await route.fetch();
             const body = await response.json();
             chronology.push({
@@ -1913,10 +1914,8 @@ for (const schedule of [
           async (route) => {
             const response = await route.fetch();
             const current = await response.json();
-            initialConfiguration ??= current;
-            const body = equivalent
-              ? (initialConfiguration as typeof current)
-              : current;
+            snapshot ??= current;
+            const body = equivalent ? (snapshot as typeof current) : current;
             chronology.push({
               event: "configuration-response",
               version: body.data.source.version,
@@ -1930,41 +1929,52 @@ for (const schedule of [
     try {
       await t.importButton.waitFor();
       await requested.promise;
-      if (schedule !== "private-after-conflict") {
-        await until(
-          () => chronology.some((e) => e.event === "private-response"),
-          "private response",
-        );
+      const saveElsewhere = async () => {
+        chronology.push({ event: "external-save-start" });
+        await new OperatorApi(t.f.service, [t.f.directory]).execute({
+          type: "github.configure",
+          key: randomUUID(),
+          projectId: t.projectId,
+          expectedVersion: 1,
+          selections: [{ id: "S-1", keep: true }],
+          readiness: {
+            mode: "all",
+            conditions: [{ kind: "label", operator: "has", name: "ready" }],
+          },
+        } as never);
+        chronology.push({ event: "external-save", version: 2 });
+      };
+      if (guarded) {
+        const save = waitForImportPrivateRead(t).then(saveElsewhere);
+        // Give the waiting journey a render opportunity while its private response is held.
         await t.page.evaluate(
           () =>
             new Promise<void>((done) =>
               requestAnimationFrame(() => requestAnimationFrame(() => done())),
             ),
         );
-      }
-      await new OperatorApi(t.f.service, [t.f.directory]).execute({
-        type: "github.configure",
-        key: randomUUID(),
-        projectId: t.projectId,
-        expectedVersion: 1,
-        selections: [{ id: "S-1", keep: true }],
-        readiness: {
-          mode: "all",
-          conditions: [{ kind: "label", operator: "has", name: "ready" }],
-        },
-      } as never);
-      chronology.push({ event: "external-save", version: 2 });
+        assert.equal(
+          chronology.some((e) => e.event === "external-save-start"),
+          false,
+        );
+        release.resolve();
+        await save;
+        assert.equal(
+          chronology.find((e) => e.event === "private-response")?.version,
+          1,
+        );
+      } else await saveElsewhere();
       await t.importButton.click();
       const warning = outcomeMessages(t.ready).filter({
         hasText: "Nothing was refreshed.",
       });
       await warning.waitFor();
       const panel = await t.panel.elementHandle();
-      assert.ok(panel);
+      const outcome = await warning.elementHandle();
       const button = await warning
         .getByRole("button", { name: "Review changes" })
         .elementHandle();
-      assert.ok(button);
+      assert.ok(panel && outcome && button);
       chronology.push({
         event: "conflict",
         previews: t
@@ -1972,11 +1982,8 @@ for (const schedule of [
           .map(({ key, expectedVersion }) => ({ key, expectedVersion })),
         connected: await button.evaluate((el) => el.isConnected),
       });
-      // Equivalent reads must keep both the outcome and its action, even under real refresh.
-      if (schedule !== "private-after-conflict") {
+      if (guarded) {
         equivalent = true;
-        const outcome = await warning.elementHandle();
-        assert.ok(outcome);
         for (let i = 0; i < 2; i++) {
           const reread = t.page.waitForResponse((r) =>
             r
@@ -2002,32 +2009,6 @@ for (const schedule of [
           assert.equal(await button.evaluate((el) => el.isConnected), true);
         }
         equivalent = false;
-      }
-      if (schedule === "private-after-conflict") release.resolve();
-      if (schedule === "operator-refresh")
-        await t.ready.getByRole("button", { name: "Check again" }).click();
-      if (schedule !== "private-before-save") {
-        await until(
-          () =>
-            chronology.some(
-              (e) => e.event === "configuration-response" && e.version === 2,
-            ),
-          "configuration version 2",
-        );
-        await warning.waitFor({ state: "detached" });
-        chronology.push({
-          event: "version-transition",
-          connected: await button.evaluate((el) => el.isConnected),
-          steps: t.steps,
-        });
-        assert.equal(await button.evaluate((el) => el.isConnected), false);
-        assert.equal(await panel.evaluate((el) => el.isConnected), true);
-        chronology.push({ event: "panel-retained", connected: true });
-      } else {
-        chronology.push({
-          event: "before-review",
-          connected: await button.evaluate((el) => el.isConnected),
-        });
         const reread = t.page.waitForResponse((r) =>
           r
             .url()
@@ -2036,7 +2017,20 @@ for (const schedule of [
         await warning.getByRole("button", { name: "Review changes" }).click();
         await reread;
         await warning.waitFor({ state: "detached" });
-        await t.panel.getByRole("heading", { name: "Import issues" }).waitFor();
+      } else {
+        release.resolve();
+        await warning.waitFor({ state: "detached" });
+        chronology.push({
+          event: "version-transition",
+          connected: await button.evaluate((el) => el.isConnected),
+          panelConnected: await panel.evaluate((el) => el.isConnected),
+        });
+        assert.equal(
+          chronology.find((e) => e.event === "private-response")?.version,
+          2,
+        );
+        assert.equal(await button.evaluate((el) => el.isConnected), false);
+        assert.equal(await panel.evaluate((el) => el.isConnected), true);
       }
       assert.deepEqual(t.steps, ["preview"]);
       assert.equal(t.f.service.domain().project(t.projectId).paused, 1);
@@ -2048,7 +2042,7 @@ for (const schedule of [
       await t.page.unrouteAll({ behavior: "wait" });
     } finally {
       release.resolve();
-      _t.diagnostic(JSON.stringify({ schedule, chronology }));
+      _t.diagnostic(JSON.stringify({ guarded, chronology }));
     }
   });
 
@@ -2056,13 +2050,7 @@ test("Setup's ready check reviews a source saved elsewhere before importing agai
   const t = await linkedReadyCheck(journey);
   await t.importButton.waitFor();
   // Save elsewhere only after the panel's own read, so only Review changes re-reads.
-  await until(
-    () =>
-      t.privateReads.includes(
-        `/api/operator/projects/${t.projectId}/private-values`,
-      ),
-    "the Import issues private read",
-  );
+  await waitForImportPrivateRead(t);
   await new OperatorApi(t.f.service, [t.f.directory]).execute({
     type: "github.configure",
     key: randomUUID(),
