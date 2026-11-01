@@ -59,6 +59,10 @@ export class SchedulerStore {
       this.db.exec(
         `CREATE INDEX IF NOT EXISTS turn_requests_${column}_sequence ON turn_requests(${column}, sequence)`,
       );
+    // Conversation archival looks up continuations by predecessor on every sweep.
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS turn_requests_previousWorkId ON turn_requests(previousWorkId)",
+    );
     const columns = this.db
       .prepare("PRAGMA table_info(turn_requests)")
       .all() as Array<{ name: string }>;
