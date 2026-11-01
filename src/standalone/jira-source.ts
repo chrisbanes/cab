@@ -131,6 +131,8 @@ export class JiraSourceReader {
     fieldIds: readonly string[] = [],
   ): Promise<SelectionSnapshot> {
     const issues: IssueSnapshot[] = [];
+    // Stamped on each issue: a read that overlaps a status write must not look newer than it.
+    const startedAt = Date.now();
     try {
       const access = this.resolved();
       const fields = [...searchFields, "issuelinks", ...fieldIds];
@@ -146,7 +148,10 @@ export class JiraSourceReader {
           token,
         );
         for (const issue of result.issues)
-          issues.push(snapshot(access.instance, issue, fieldIds));
+          issues.push({
+            ...snapshot(access.instance, issue, fieldIds),
+            projectReadAt: startedAt,
+          });
         token = result.nextPageToken;
         if (!token) return { complete: true, issues, reason: null };
         if (tokens.has(token)) throw new JiraFailure("malformed");

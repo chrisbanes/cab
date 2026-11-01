@@ -1,6 +1,10 @@
 import { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import {
+  insertExternalItem,
+  insertSourceMembership,
+} from "../fixtures/source-rows.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -1305,13 +1309,23 @@ test("mounted reference and placement fields have unique associated controls", a
   });
   d.markImportedTask(second, "I_SECOND", "R_SECOND");
   f.seedPersistedState((db) => {
-    db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I_SECOND',?,'R_SECOND','owner/repo',2,'Second','Body','open','[]',NULL,NULL)",
-    ).run(second);
+    insertExternalItem(db, {
+      externalId: "I_SECOND",
+      taskId: second,
+      containerId: "R_SECOND",
+      containerName: "owner/repo",
+      number: 2,
+      observedTitle: "Second",
+      observedBody: "Body",
+      observedState: "open",
+      labels: "[]",
+    });
     for (const projectId of [ids.projectId, target])
-      db.prepare(
-        "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'selection','github','github.com','I_SECOND','[]')",
-      ).run(projectId);
+      insertSourceMembership(db, {
+        projectId,
+        selectionId: "selection",
+        externalId: "I_SECOND",
+      });
   });
   const web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
@@ -1581,7 +1595,9 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
       ? { projectNodeId: "P1", fieldNodeId: "F1", optionNodeIds: ["O1"] }
       : action === "project.item.add"
         ? { projectNodeId: "P1" }
-        : {}),
+        : action === "issue.status"
+          ? { statusIds: ["S1"] }
+          : {}),
   }));
   d.execute({
     type: "delivery.configure",

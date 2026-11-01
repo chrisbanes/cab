@@ -16,19 +16,12 @@ import type {
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { tmpdir } from "../fixtures/temp.js";
+import { until } from "../fixtures/until.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function waitUntil(predicate: () => boolean, label = "condition") {
-  const deadline = Date.now() + 5000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`timed out: ${label}`);
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 /** A scripted runtime without diagnostic members: each turn waits for `complete`. */
@@ -202,7 +195,7 @@ test("the submitted assignment prompt matches the first-turn layout", async () =
   const f = await fixture(runtime);
   try {
     f.activate();
-    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await until(() => runtime.prompts.length === 1, "turn start");
     // Only the source id varies.
     assert.equal(
       runtime.prompts[0]?.replace(
@@ -227,7 +220,7 @@ async function finishTurn(
   outcome: "completed" | "failed" = "completed",
 ) {
   runtime.complete(turnId, outcome);
-  await waitUntil(
+  await until(
     () => f.store().execution(f.workId)?.finishedAt != null,
     "capture finished",
   );
@@ -254,7 +247,7 @@ test("inputs are recorded before submission and equal the submitted bytes", asyn
         .map((i) => i.name);
     };
     f.activate();
-    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await until(() => runtime.prompts.length === 1, "turn start");
     assert.deepEqual(atStart, [
       "request",
       "role",
@@ -312,10 +305,10 @@ test("a resumed turn records unchanged instructions as not sent and submits only
   const f = await fixture(runtime);
   try {
     f.activate();
-    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await until(() => runtime.prompts.length === 1, "turn start");
     await finishTurn(f, runtime, "turn-1");
     // The turn reported no result, so its repair turn resumes the same thread.
-    await waitUntil(() => runtime.prompts.length === 2, "second turn start");
+    await until(() => runtime.prompts.length === 2, "second turn start");
     const prompt = runtime.prompts[1] ?? "";
     const next = f.service
       .list()
@@ -381,7 +374,7 @@ test("events bind to the exact turn, buffer until bound and count late arrivals"
       });
     };
     f.activate();
-    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await until(() => runtime.prompts.length === 1, "turn start");
     await runtime.tool?.({
       threadId: "thread-1",
       turnId: "turn-1",
@@ -475,7 +468,7 @@ test("early-event overflow and an unsupported runtime are explicit", async () =>
         });
     };
     f.activate();
-    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await until(() => runtime.prompts.length === 1, "turn start");
     await finishTurn(f, runtime, "turn-1");
     const execution = f.store().execution(f.workId);
     assert.deepEqual(
@@ -490,7 +483,7 @@ test("early-event overflow and an unsupported runtime are explicit", async () =>
   const g = await fixture(bare);
   try {
     g.activate();
-    await waitUntil(() => bare.prompts.length === 1, "turn start");
+    await until(() => bare.prompts.length === 1, "turn start");
     await finishTurn(g, bare, "turn-1");
     const execution = g.store().execution(g.workId);
     assert.equal(execution?.eventSource, "unsupported");
@@ -520,7 +513,7 @@ test("baseline capture records only the execution and its gap", async () => {
       diagnosticCapture: "baseline",
     });
     f.activate();
-    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await until(() => runtime.prompts.length === 1, "turn start");
     assert.equal(runtime.diagnostic !== undefined, true);
     runtime.emit({
       kind: "turn",
@@ -529,7 +522,7 @@ test("baseline capture records only the execution and its gap", async () => {
       status: "completed",
     });
     runtime.complete("turn-1");
-    await waitUntil(() => f.intent().state === "completed", "completed");
+    await until(() => f.intent().state === "completed", "completed");
     const execution = f.store().execution(f.workId);
     assert.equal(execution?.mode, "baseline");
     assert.deepEqual(
@@ -556,7 +549,7 @@ test("a failing diagnostic store never changes the execution outcome", async () 
   let controlTool: unknown;
   try {
     c.activate();
-    await waitUntil(() => control.prompts.length === 1, "turn start");
+    await until(() => control.prompts.length === 1, "turn start");
     controlTool = await control.tool?.({
       threadId: "thread-1",
       turnId: "turn-1",
@@ -576,7 +569,7 @@ test("a failing diagnostic store never changes the execution outcome", async () 
         `CREATE TRIGGER fail_${table} BEFORE INSERT ON ${table} BEGIN SELECT RAISE(ABORT, 'diagnostic fault'); END`,
       );
     f.activate();
-    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await until(() => runtime.prompts.length === 1, "turn start");
     const tool = await runtime.tool?.({
       threadId: "thread-1",
       turnId: "turn-1",
@@ -586,7 +579,7 @@ test("a failing diagnostic store never changes the execution outcome", async () 
     });
     assert.deepEqual(tool, controlTool);
     runtime.complete("turn-1");
-    await waitUntil(() => f.intent().state === "completed", "completed");
+    await until(() => f.intent().state === "completed", "completed");
     assert.deepEqual(f.intent(), { state: "completed", reason: null });
     const normal = (p?: string) => p?.replace(/"sourceId":"[0-9a-f-]{36}"/, "");
     assert.equal(normal(runtime.prompts[0]), normal(control.prompts[0]));
@@ -610,10 +603,10 @@ test("restart marks unfinished capture interrupted and the timer prunes expired 
   });
   try {
     f.activate();
-    await waitUntil(() => runtime.prompts.length === 1, "turn start");
+    await until(() => runtime.prompts.length === 1, "turn start");
     assert.ok(f.store().inputs(f.workId).length > 0);
     now += 2000;
-    await waitUntil(
+    await until(
       () => f.store().inputs(f.workId).length === 0,
       "expired rows pruned",
     );
@@ -645,7 +638,7 @@ test("an unexpected request is recorded while its hold is unchanged", async () =
   const f = await fixture(runtime);
   try {
     f.activate();
-    await waitUntil(() => f.intent().state === "running", "running");
+    await until(() => f.intent().state === "running", "running");
     runtime.unexpected?.({
       method: "item/tool/requestUserInput",
       threadId: "thread-1",

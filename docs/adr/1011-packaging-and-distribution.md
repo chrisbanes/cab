@@ -115,8 +115,8 @@ There is no rollback between cab versions. Migrations are forward-only and run
 on start, so upgrades fix forward. A failed upgrade leaves the job stopped and
 reports the verified snapshot and logs; recovery is a fixed release and another
 upgrade. The snapshot is for disaster recovery through `restore` into a new data
-directory, not a way back to an older version: an older binary refuses data a newer
-release started, before it writes anything. This does not change the cutover's
+directory, not a way back to an older version: a binary refuses data at a higher
+migration level than it applies, before it writes anything. This does not change the cutover's
 return path to the Haze prototype controller.
 
 ## Implementation state
@@ -130,7 +130,8 @@ version has been published: that needs the npm-side trusted-publisher configurat
 and a tag push owned by [#1328](https://github.com/chrisbanes/cab/issues/1328), and
 the lifecycle is not qualified on a published package. The service takes and verifies the pre-migration snapshot
 on start, in either service mode, and `service upgrade` takes none of its own.
-The package version is the release identity: a database whose recorded release
-(`startup-state.json` in the data directory) is older than the running release, or
-unrecorded, is snapshotted before any migration; equal versions take none. Shared app configuration is deferred with ADR-1019. Delivery scope and
+Pending migrations, not the package version, trigger it: the database records the
+migration level its last completed start reached, and one below the running build's
+(or unrecorded) is snapshotted before any migration; an equal level takes none,
+whatever the version. Shared app configuration is deferred with ADR-1019. Delivery scope and
 qualification are owned by [#1267](https://github.com/chrisbanes/cab/issues/1267).

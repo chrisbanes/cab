@@ -96,6 +96,17 @@ async function assertFirstScreen(page: Page, targets: Locator[]) {
   await noPageOverflow(page);
 }
 
+/** The conversation the link scrolled to is in view; the link lands on its newest entry, not the page top. */
+async function settleOn(page: Page, target: Locator) {
+  await settle(page);
+  const box = await target.boundingBox();
+  const height = await page.evaluate(() => innerHeight);
+  assert.ok(
+    box && box.y < height && box.y + box.height > 0,
+    JSON.stringify(box),
+  );
+}
+
 const seedFourCriteria = (f: Fixture) =>
   seedReviewTask(
     f,
@@ -128,6 +139,8 @@ async function openEvidence(page: Page) {
   await card.and(page.locator("[open]")).waitFor();
   const record = card.getByText("Unit tests").first();
   await record.waitFor();
+  // The card opens beneath its summary, which can sit at the foot of the first screen.
+  await record.evaluate((e) => e.scrollIntoView({ block: "center" }));
   assert.equal(
     await inFirstViewport(page, record),
     true,
@@ -242,23 +255,13 @@ for (const [label, viewport] of [
     let interactions = 0;
     await link.click();
     interactions++;
-    await s.page.waitForURL(new RegExp(`/app/tasks/${s.taskId}#history`));
-    const history = s.page.getByRole("tab", { name: "History", exact: true });
-    assert.equal(await history.getAttribute("aria-selected"), "true");
-    // The link names the task's History, which lists the seeded result's recorded capture.
-    const named = s.page.locator("#task-panel-history");
-    await named
-      .getByText(/^assignment-result · /)
-      .first()
-      .waitFor();
-    assert.equal(
-      await inFirstViewport(
-        s.page,
-        named.getByText("Captured context").first(),
-      ),
-      true,
-      "the History panel is in view",
-    );
+    await s.page.waitForURL(new RegExp(`/app/tasks/${s.taskId}#conversation`));
+    const overview = s.page.getByRole("tab", { name: "Overview", exact: true });
+    assert.equal(await overview.getAttribute("aria-selected"), "true");
+    // The link names the task's conversation, which shows the seeded result with its assignment.
+    const named = s.page.locator("#conversation");
+    await named.getByText(/Result: Keyboard support ready/).waitFor();
+    await settleOn(s.page, named.getByRole("log"));
     await noPageOverflow(s.page);
     assert.equal(interactions, 1);
   });

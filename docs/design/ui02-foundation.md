@@ -32,9 +32,9 @@ Each semicolon-separated control is individually retained at the listed destinat
 | /runtime/task/:id | /runtime/control/stop | stop request and observation | Retained Runtime task page | no |
 | /runtime/task/:id | /runtime/control/resume | explicit resume | Retained Runtime task page | no |
 | /runtime/assignment/:id | read | generation; holds; advanced recovery evidence | Assignment recovery | read subset |
-| /app/tasks/:id | message | message recipient; exact version; durable message | Task reply card; History tab assignment rows | yes |
+| /app/tasks/:id | message | message recipient; exact version; durable message | Task reply card; delegated assignment sub-conversation header | yes |
 | /app/tasks/:id | result.recipient | unresolved results; destination reconciliation | Task decision card | yes |
-| /app/tasks/:id | read | retained captured history; omissions; results | Task History tab | yes |
+| /app/tasks/:id | read | retained captured history; omissions; results | Task conversation | yes |
 | /app/tasks/:id | question.answer | plain question and exact revision answer | Inbox and task request view | yes |
 | /app/tasks/:id | approval.decide | retained exact material; approve; deny | Task request view | yes |
 | /login | /login | password sign-in | Sign-in | yes |
@@ -76,8 +76,8 @@ Active request selection crosses configured assignment revisions before falling 
 
 Unsafe approval material becomes unavailable and deny-only; altered/redacted material is never approvable. A denial may omit material: the adapter supplies only the immutable retained JSON for that same task and interaction, privately, while preserving the submitted revision, action and target. This reconstruction does not depend on current display redaction, so a matching saved-key replay remains stable after privacy context changes. Client-supplied material is never replaced; approvals still require exposed exact material, and unavailable action or target cannot be substituted. Legacy interactions without retained JSON keep material omitted. Existing policy checks remain authoritative.
 
-Provider timestamps are stored observations; unavailable successful sync/history is explicit. Native structured input is unavailable until qualified; the operator interface neither enables it nor resumes the paused X01-X08 work.
+Provider timestamps are stored observations; unavailable successful sync/history is explicit. Native structured input is unavailable until qualified; the operator interface does not enable it.
 
 ## Client
 
-The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, which links Execution (`/runtime/task/:id`) and, from its History tab, the retained task page (`/task/:id`, Edit task and review source). First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.
+The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, which links Execution (`/runtime/task/:id`) and, from its inspector, the retained task page (`/task/:id`, Edit task and review source). First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.

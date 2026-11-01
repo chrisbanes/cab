@@ -20,20 +20,12 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { until } from "../fixtures/until.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
-  while (!predicate()) {
-    if (Date.now() >= deadline)
-      throw new Error("coordination view fixture timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 class ViewRuntime implements Runtime {
@@ -198,7 +190,7 @@ async function fixture(
     expectedVersion: 1,
     ready: true,
   });
-  await waitUntil(() => runtime.turns > 0);
+  await until(() => runtime.turns > 0);
   const leadAssignment = service
     .domain()
     .assignments(taskId)
@@ -220,7 +212,7 @@ async function fixture(
     .assignments(taskId)
     .find((assignment) => assignment.profileId === workerProfileId);
   assert.ok(workerAssignment);
-  await waitUntil(() =>
+  await until(() =>
     service
       .turnRequests()
       .some((request) => request.assignmentId === workerAssignment.id),
@@ -270,7 +262,7 @@ test("coordination routing view exposes only the bounded provider failure code",
     },
   });
   try {
-    await waitUntil(() => {
+    await until(() => {
       const attempts = f.service.coordinationView().readTask(f.taskId)
         .routing.attempts;
       return attempts.some((operation) => operation.attempts.length > 0);
@@ -333,10 +325,10 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
     );
     assert.equal(f.runtime.turns, 1);
     f.runtime.complete(1);
-    await waitUntil(() =>
+    await until(() =>
       f.service.list().some((item) => item.state === "completed"),
     );
-    await waitUntil(() => f.runtime.turns >= 2);
+    await until(() => f.runtime.turns >= 2);
     const workerRequest = f.service
       .turnRequests()
       .find((request) => request.assignmentId === f.workerAssignmentId);
@@ -361,7 +353,7 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
       true,
     );
     f.runtime.complete(2);
-    await waitUntil(() =>
+    await until(() =>
       f.service
         .list()
         .some(
@@ -636,8 +628,8 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
       view.readTask(f.taskId).messages.map((message) => message.eventId),
       inserted,
     );
-    await waitUntil(() => runtime.turns > 0);
-    await waitUntil(() => runtime.resumed.includes(f.threadId));
+    await until(() => runtime.turns > 0);
+    await until(() => runtime.resumed.includes(f.threadId));
     assert.equal(
       service
         .turnRequests()

@@ -331,3 +331,22 @@ test("single-select values map by option ID; a null, list or other shape is no v
     ],
   );
 });
+
+test("every issue is stamped with when the read began, so a read overlapping a write never looks newer than it", async () => {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { reader: r } = reader(async () => {
+    await held;
+    return json({ issues: [jiraIssue(1)] });
+  });
+  const before = Date.now();
+  const pending = r.readSelection(selection);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const resolvedAt = Date.now();
+  release();
+  const snapshot = await pending;
+  const stamp = snapshot.issues[0]?.projectReadAt;
+  assert.ok(stamp !== undefined && stamp >= before && stamp < resolvedAt);
+});

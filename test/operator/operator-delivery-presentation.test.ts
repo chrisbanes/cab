@@ -105,11 +105,65 @@ test("a status-mapping write is named and a skipped one says why, while agent ac
     }),
     "Status mapping (PR handed back for review) · project.field: confirmed-failure · Skipped: Status changed on GitHub since cab last saw it. · operation op-1",
   );
+  // A GitLab merge train merge is described, not shown as a code.
+  assert.equal(
+    deliveryActionLine({
+      ...base,
+      kind: "pr.merge",
+      state: "uncertain",
+      reason: "provider-merge-train-pending",
+    }),
+    "pr.merge: uncertain · On the GitLab merge train; waits until it merges or drops out. · operation op-1",
+  );
+  assert.match(
+    deliveryActionLine({
+      ...base,
+      kind: "pr.merge",
+      state: "confirmed-failure",
+      reason: "provider-merge-train-dropped",
+    }),
+    /Dropped from the GitLab merge train; nothing was merged\./,
+  );
   // The same code on an agent action keeps its raw reason.
   assert.match(
     deliveryActionLine({ ...base, reason: "provider-http-404" }),
     /provider-http-404/,
   );
+});
+
+test("each Jira status skip reads as its own sentence on a status-mapping write, and an agent's raw reason stays", () => {
+  const line = (reason: string, caller: "service" | "agent" = "service") =>
+    deliveryActionLine({
+      kind: "issue.status",
+      caller,
+      event: caller === "service" ? "turnStarted" : null,
+      state: "confirmed-failure",
+      reason,
+      operationId: "op-1",
+    });
+  const notes = [
+    [
+      "provider-issue-status-changed",
+      "Skipped: the status changed in Jira since cab last saw it.",
+    ],
+    [
+      "provider-issue-status-current",
+      "Skipped: the issue is already in the mapped status.",
+    ],
+    [
+      "provider-transition-unavailable",
+      "Skipped: no available transition reaches the mapped status.",
+    ],
+    [
+      "provider-transition-ambiguous",
+      "Skipped: several transitions reach the mapped status.",
+    ],
+  ] as const;
+  for (const [reason, note] of notes) {
+    assert.match(line(reason), new RegExp(note.replace(/\./g, "\\.")));
+    // An agent's issue.close ambiguity is not a status-mapping skip.
+    assert.match(line(reason, "agent"), new RegExp(reason));
+  }
 });
 
 test("a GitLab merge request is named in GitLab's form and links only over https", () => {

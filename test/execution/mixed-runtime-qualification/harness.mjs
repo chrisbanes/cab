@@ -26,6 +26,8 @@ export const FACETS = {
   crash: { claude: 3, codex: 0 },
   // #1336: a profile skill plugin, and a subagent under Stop and under a service crash.
   "claude-skill": { claude: 2, codex: 0 },
+  // #1336: a Codex lead runs a skill of its profile's plugin; no Claude turn.
+  "codex-skill": { claude: 0, codex: 2 },
   "claude-subagent-stop": { claude: 1, codex: 0 },
   "claude-subagent-crash": { claude: 3, codex: 0 },
 };

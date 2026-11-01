@@ -9,11 +9,7 @@ import {
 } from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
 import { StartAgainAction, taskChangedEvent } from "./task-restart.js";
-import {
-  CommandNetworkLine,
-  ExecutionNotices,
-  PolicyDisclosure,
-} from "./execution-notice.js";
+import { CommandNetworkLine, PolicyDisclosure } from "./execution-notice.js";
 import { executionSummary } from "./execution-runtime.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {
@@ -25,10 +21,10 @@ import {
   type ReactNode,
   type SyntheticEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import {
-  assignmentHistorySchema,
   executionHarnessLabels,
   type CommandReceipt,
   type OperatorCommand,
@@ -99,6 +95,17 @@ import {
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
 import { AssignmentRows, openDisclosures, showSection } from "./task-detail.js";
 import { TaskInspector } from "./task-inspector.js";
+import {
+  type RequestPlaces,
+  TaskConversation,
+  useTaskTimeline,
+} from "./task-conversation.js";
+import {
+  conversationTree,
+  hasDelegation,
+  type TimelineEntry,
+  type TimelineWindow,
+} from "./task-conversation-model.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
   type TaskHeaderReport,
@@ -107,7 +114,9 @@ import {
   taskHeaderReport,
 } from "./task-header.js";
 import {
+  type ConversationTarget,
   type TaskTab,
+  conversationTarget,
   tabForLocation,
   tabForSection,
   tabIds,
@@ -124,7 +133,6 @@ import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
-type History = z.infer<typeof assignmentHistorySchema>["data"];
 const sectionIds = [
   "decisions",
   "brief",
@@ -135,7 +143,6 @@ const sectionIds = [
   "context",
   "changes",
   "local-review",
-  "history",
   "reply",
 ];
 /** The section a tab opens at when a link names no section. */
@@ -144,7 +151,6 @@ const tabSections: Record<TaskTab, string> = {
   files: "files",
   changes: "changes",
   review: "local-review",
-  history: "history",
 };
 const sourceGap =
   "Retained source body and checklist coverage are unavailable. Source fields are retained only up to 16,000 characters; private or missing material may also be unavailable. Consult the external source or ask the lead.";
@@ -157,7 +163,9 @@ const linkedCard = (p: URLSearchParams) =>
       : p.has("source")
         ? "brief"
         : null;
-const overviewCards = ["brief", "result-evidence", "assignments"];
+const overviewCards = ["brief", "result-evidence", "assignments", "context"];
+/** Overview sections that sit in the inspector's fold. */
+const inspectorSections = ["brief", "assignments", "context"];
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** One tab's panel: always mounted, hidden unless its tab is open. */
 function TabPanel({
@@ -181,6 +189,30 @@ function TabPanel({
       {children}
     </div>
   );
+}
+/**
+ * Keeps a restored reading position while late content lays out above it, until the reader
+ * scrolls or types or a moment passes; returns the function that ends the hold.
+ */
+function holdReadingAnchor(anchor: { id: string; y: number }) {
+  const inputs = ["wheel", "touchstart", "keydown", "pointerdown"];
+  const observer = new ResizeObserver(() => {
+    const el = [
+      ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
+    ].find(
+      (e) => e.dataset.recordId === anchor.id && !e.closest("[data-pinned]"),
+    );
+    if (el) scrollBy(0, el.getBoundingClientRect().top - anchor.y);
+  });
+  const stop = () => {
+    observer.disconnect();
+    clearTimeout(timer);
+    for (const type of inputs) removeEventListener(type, stop);
+  };
+  const timer = setTimeout(stop, 1500);
+  observer.observe(document.documentElement);
+  for (const type of inputs) addEventListener(type, stop, { passive: true });
+  return stop;
 }
 function ChecklistCoverage({
   source,
@@ -206,25 +238,6 @@ function ChecklistCoverage({
       </p>
     );
   return null;
-}
-function TurnOmission({
-  omission,
-  state,
-  changed,
-}: {
-  omission: History["turnOmissions"][number];
-  state: TaskWorkspaceState;
-  changed: () => void;
-}) {
-  return (
-    <Disclosure
-      id={`turn-omission:${omission.workId}:${omission.threadId}:${omission.turnId}`}
-      title={`${date(omission.createdAt)} · retained turn omission · ${omission.assignmentId} · ${omission.turnId}`}
-      text={`Early buffer limit (early-buffer-limit). Work ${omission.workId}; assignment ${omission.assignmentId}; thread ${omission.threadId}; turn ${omission.turnId}. Captured turn content is unavailable.`}
-      state={state}
-      changed={changed}
-    />
-  );
 }
 const date = (n: number) => new Date(n < 1e12 ? n * 1000 : n).toLocaleString();
 function Literal({ text }: { text: string | null | undefined }) {
@@ -416,19 +429,18 @@ export function TaskWorkspace({
   };
   const [, render] = useState(0),
     changed = () => render((n) => n + 1);
-  const [histories, setHistory] = useState<Record<string, History>>({}),
-    [historyErrors, setHistoryErrors] = useState<Record<string, string>>({}),
-    [sendingNow, setPending] = useState(false),
+  const [sendingNow, setPending] = useState(false),
     [updates, setUpdates] = useState(false);
   // A write sent before the page was left may still be in flight when it is reopened.
   const pending = sendingNow || Boolean(auxSend.sending);
-  const historyRequests = useRef(new Map<string, number>());
-  const invalidateHistory = (clear = true) => {
-    for (const [id, revision] of historyRequests.current)
-      historyRequests.current.set(id, revision + 1);
-    if (clear) setHistory({});
-  };
   const replyInFlight = useRef<string | null>(null);
+  const leaving = useRef(false),
+    urlRequest = useRef<string | null | undefined>(undefined),
+    appendedSeen = useRef(0),
+    holdReading = useRef<() => void>(() => {}),
+    pendingLink = useRef<ConversationTarget | null>(null),
+    linkFollow = useRef(0),
+    followLink = useRef<(link: ConversationTarget) => void>(() => {});
   const scope = useRef(true),
     anchor = useRef<{ id: string; y: number } | null>(null),
     anchorElement = useRef<HTMLElement | null>(null),
@@ -436,7 +448,6 @@ export function TaskWorkspace({
     first = useRef(true),
     restoreReadingFocus = useRef(true),
     capturedFocus = useRef<HTMLElement | null>(null),
-    capturedHistoryFocus = useRef(false),
     material = useRef<string | null>(null);
   const params = new URLSearchParams((path.split("?")[1] ?? "").split("#")[0]);
   const selectedPath = useRef<string | null>(null);
@@ -465,11 +476,15 @@ export function TaskWorkspace({
       // remounts the page with the operator's own choice kept.
       const named =
         params.get("section") ?? (path.split("#")[1] || location.hash.slice(1));
-      if (named === "brief" || named === "assignments")
+      if (named === "brief" || named === "assignments" || named === "context")
         state.overview.add(named);
+      // The inspector's fold holds the cards a link can name; a phone opens it closed otherwise.
+      if (
+        inspectorSections.includes(named) ||
+        ["record", "result", "source", "evidence"].some((p) => params.has(p))
+      )
+        state.inspectorOpen = true;
       if (named === "result-evidence") state.overview.add("evidence");
-      if (params.has("assignment"))
-        state.expanded.add(params.get("assignment") ?? "");
       // Exact inspection links; the service still enforces scope and exclusions.
       const rawPath = params.get("path");
       // An exact link is never normalized into a different path.
@@ -601,23 +616,46 @@ export function TaskWorkspace({
     }
   }, [resource.state.data, resource.state.error, resource.state.status]);
 
+  /**
+   * On Overview the bottom is the newest conversation entry with the composer beneath it: the
+   * composer is docked on a wide screen and ends the page on a phone. How far the page must
+   * scroll to get there is positive when the newest entry or the composer is below the view.
+   */
+  const toBottom = () => {
+    const end = document.getElementById("conversation-end"),
+      composer = document.getElementById("reply");
+    if (state.tab === "overview" && end && composer) {
+      const e = end.getBoundingClientRect(),
+        c = composer.getBoundingClientRect();
+      return Math.max(e.bottom - c.top, c.bottom - innerHeight);
+    }
+    return document.documentElement.scrollHeight - innerHeight - scrollY;
+  };
+  // Scrolled past the conversation, into the inspector, the operator is reading elsewhere.
+  const atBottom = () =>
+    toBottom() <= 64 &&
+    (state.tab !== "overview" ||
+      (document.getElementById("conversation-end")?.getBoundingClientRect()
+        .bottom ?? 1) > 0);
+  /** Scrolls to the newest conversation entry with the composer fully below it. */
+  const followLatest = () => {
+    // Following the bottom ends a hold on a restored position.
+    holdReading.current();
+    scrollBy(0, Math.max(0, toBottom()));
+  };
   const capture = () => {
-    if (
-      restoreReadingFocus.current &&
-      state.focusRecord &&
-      capturedHistoryFocus.current &&
-      capturedFocus.current &&
-      !capturedFocus.current.isConnected &&
-      document.activeElement === document.body
-    )
-      return;
-    bottom.current =
-      innerHeight + scrollY >= document.documentElement.scrollHeight - 64;
+    if (leaving.current) return;
+    bottom.current = atBottom();
+    // The pinned attention card never moves, so it cannot anchor the reading position.
     const visible = [
       ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
     ].filter((e) => {
       const bounds = e.getBoundingClientRect();
-      return bounds.bottom > 80 && bounds.top < innerHeight;
+      return (
+        bounds.bottom > 80 &&
+        bounds.top < innerHeight &&
+        !e.closest("[data-pinned]")
+      );
     });
     const el = visible.find(
       (e) => !visible.some((child) => child !== e && e.contains(child)),
@@ -627,14 +665,11 @@ export function TaskWorkspace({
       ? { id: el.dataset.recordId ?? "", y: el.getBoundingClientRect().top }
       : null;
     state.scrollY = scrollY;
-    state.historyAnchor = anchor.current;
+    state.readingAnchor = anchor.current;
     capturedFocus.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    capturedHistoryFocus.current = Boolean(
-      capturedFocus.current?.closest("#history"),
-    );
     state.focusHref =
       capturedFocus.current instanceof HTMLAnchorElement
         ? capturedFocus.current.getAttribute("href")
@@ -648,7 +683,7 @@ export function TaskWorkspace({
         ...history.state,
         taskWorkspaceReading: {
           scrollY: state.scrollY,
-          historyAnchor: state.historyAnchor,
+          readingAnchor: state.readingAnchor,
           focusRecord: state.focusRecord,
           tab: state.tab,
         },
@@ -658,7 +693,6 @@ export function TaskWorkspace({
   };
   const refresh = () => {
     capture();
-    invalidateHistory();
     resource.refresh();
   };
   /**
@@ -670,7 +704,7 @@ export function TaskWorkspace({
     state.tabScroll[state.tab] = scrollY;
     anchor.current = null;
     anchorElement.current = null;
-    state.historyAnchor = null;
+    state.readingAnchor = null;
     bottom.current = false;
     state.tab = tab;
     // Show the panel now so a caller can scroll to or focus what it holds; the render agrees.
@@ -688,7 +722,7 @@ export function TaskWorkspace({
           ...history.state,
           taskWorkspaceReading: {
             ...history.state?.taskWorkspaceReading,
-            historyAnchor: null,
+            readingAnchor: null,
             focusRecord: null,
             tab,
             scrollY: state.scrollY,
@@ -735,8 +769,14 @@ export function TaskWorkspace({
         (event.target as Element | null)?.closest(
           event.type === "submit" ? ".sidebar .search-work" : 'a[href^="/app"]',
         )
-      )
+      ) {
         captureRef.current();
+        // The reading saved on leaving stands: a read that lands while the route changes must not replace it.
+        leaving.current = true;
+        setTimeout(() => {
+          leaving.current = false;
+        }, 500);
+      }
     };
     const intentionalFocus = (event: FocusEvent) => {
       const target = event.target;
@@ -770,6 +810,7 @@ export function TaskWorkspace({
           }),
         };
       }
+      holdReading.current();
       sourceRequest.current++;
       sourceRead.current = null;
       if (state.sourceObservation === "pending") {
@@ -796,10 +837,33 @@ export function TaskWorkspace({
         : null) ?? record?.querySelector<HTMLElement>("summary,button,a")
     );
   };
+  // The conversation reads with the task: each task read re-reads the newest page.
+  const timeline = useTaskTimeline({
+    client,
+    taskId,
+    cache: state.conversation,
+    setCache: (value) => {
+      state.conversation = value;
+    },
+    taskRead: resource.state.data,
+    running: new Set(
+      data?.assignments
+        .filter((a) => a.state === "running")
+        .map((a) => a.assignmentId),
+    ),
+    beforeApply: (first) => {
+      // Opening a task shows its header and decisions first; the conversation is followed from there.
+      if (first) bottom.current = false;
+      else captureRef.current();
+    },
+  });
   const layoutPath = useRef(path);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: history DOM insertion must restore the previously captured reading anchor.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversation DOM insertion must restore the previously captured reading anchor.
   useLayoutEffect(() => {
     if (!data) return;
+    // New conversation entries count as updates, like a changed result or message.
+    const appended = timeline.appended !== appendedSeen.current;
+    appendedSeen.current = timeline.appended;
     if (layoutPath.current !== path) {
       layoutPath.current = path;
       const saved = history.state?.taskWorkspaceReading;
@@ -807,9 +871,9 @@ export function TaskWorkspace({
         // Restoring keeps the saved entry as it is.
         if (tabIds.includes(saved.tab)) selectTab(saved.tab, false);
         state.scrollY = saved.scrollY;
-        state.historyAnchor = saved.historyAnchor;
+        state.readingAnchor = saved.readingAnchor;
         state.focusRecord = saved.focusRecord;
-        anchor.current = saved.historyAnchor;
+        anchor.current = saved.readingAnchor;
         restoreReadingFocus.current = true;
         scrollTo(0, saved.scrollY);
       } else {
@@ -823,11 +887,14 @@ export function TaskWorkspace({
               ? (linkedCard(p) ?? tabSections.overview)
               : tabSections[tab]));
         selectTab(tab);
-        const target = document.getElementById(id);
-        if (target) {
-          showSection(target);
+        // A link into the conversation waits for the conversation to be read.
+        const link = conversationTarget(path);
+        if (link) pendingLink.current = link;
+        const target = link ? null : document.getElementById(id);
+        if (target || link) {
+          if (target) showSection(target);
           anchor.current = null;
-          state.historyAnchor = null;
+          state.readingAnchor = null;
           bottom.current = false;
           state.scrollY = scrollY;
           restoreReadingFocus.current = false;
@@ -861,6 +928,7 @@ export function TaskWorkspace({
         record = p.get("record") ?? p.get("request"),
         section = p.get("section");
       const fragment = path.split("#")[1] || location.hash.slice(1),
+        link = conversationTarget(path, location.hash),
         linked =
           record || section
             ? null
@@ -875,7 +943,9 @@ export function TaskWorkspace({
             : linked
               ? document.getElementById(linked)
               : null;
-      if (target && state.scrollY === 0) {
+      // A link into the conversation waits for the conversation to be read.
+      if (link && state.scrollY === 0) pendingLink.current = link;
+      if (!link && target && state.scrollY === 0) {
         // A Search record can sit in a closed card; only its first arrival opens it, so a
         // Back or Forward keeps the operator's choice.
         if (record && !state.recordRevealed) {
@@ -883,203 +953,57 @@ export function TaskWorkspace({
           openDisclosures(target);
         }
         // A linked record or section opens on the tab whose panel holds it, unless the link
-        // names its tab (`?request=…#history` is that request's History).
+        // names its tab (`?record=…&section=files` is that tab's section).
         const tab = target.closest<HTMLElement>(".task-panel")?.dataset.tab,
           named = Boolean(section || path.split("#")[1] || location.hash);
         if (tab && !(record && named)) selectTab(tab as TaskTab);
-        if (section && !state.focusRecord && !state.historyAnchor)
+        if (section && !state.focusRecord && !state.readingAnchor)
           showSection(target);
         else target.scrollIntoView();
-      } else scrollTo(0, state.scrollY);
+      } else {
+        scrollTo(0, state.scrollY);
+        if (state.readingAnchor && !link)
+          holdReading.current = holdReadingAnchor(state.readingAnchor);
+      }
       if (state.focusRecord)
         readingFocusTarget()?.focus({ preventScroll: true });
       return;
     }
-    if (bottom.current) scrollTo(0, document.documentElement.scrollHeight);
-    else {
-      const a = anchor.current ?? state.historyAnchor,
-        captured = anchorElement.current,
-        // Review contexts nest a second element with the same record id, so the first match can be the wrong one.
-        el = !a
-          ? null
-          : captured?.isConnected && captured.dataset.recordId === a.id
-            ? captured
-            : [
-                ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
-              ].find((el) => el.dataset.recordId === a.id);
+    const a = anchor.current ?? state.readingAnchor,
+      captured = anchorElement.current,
+      // Review contexts nest a second element with the same record id, so the first match can be the wrong one.
+      // A request's card is pinned and shares its id with its conversation entry, which anchors.
+      el = !a
+        ? null
+        : captured?.isConnected && captured.dataset.recordId === a.id
+          ? captured
+          : [
+              ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
+            ].find(
+              (el) =>
+                el.dataset.recordId === a.id && !el.closest("[data-pinned]"),
+            );
+    if (bottom.current) {
+      // The conversation's newest entry is in view with the page's other columns, so hold the
+      // reading position first, then follow what arrived.
+      if (state.tab === "overview") {
+        if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
+        if (appended) followLatest();
+        setUpdates(false);
+      } else followLatest();
+    } else {
       if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
-      if (newMaterial) setUpdates(true);
+      if (newMaterial || appended) setUpdates(true);
     }
-  }, [data, histories, state, path]);
-  const loadHistory = useCallback(
-    async (
-      id: string,
-      before?: number,
-      beforeOmission?: number,
-      keepShown = false,
-    ) => {
-      const current = client.captureAuthenticationScope();
-      const revision = (historyRequests.current.get(id) ?? 0) + 1;
-      historyRequests.current.set(id, revision);
-      const owned = () =>
-        scope.current &&
-        current() &&
-        historyRequests.current.get(id) === revision;
-      if (!keepShown)
-        setHistory((old) => {
-          const next = { ...old };
-          delete next[id];
-          return next;
-        });
-      try {
-        const itemDepth =
-          (state.historyPages[id]?.length ?? 0) + (before ? 1 : 0);
-        const omissionDepth =
-          (state.omissionHistoryPages[id]?.length ?? 0) +
-          (beforeOmission ? 1 : 0);
-        const pages: number[] = [],
-          omissionPages: number[] = [],
-          values: History[] = [],
-          itemValues: History[] = [],
-          omissionValues: History[] = [];
-        let boundary: number | undefined, omissionBoundary: number | undefined;
-        let itemActive = true,
-          omissionActive = true;
-        for (let page = 0; page <= Math.max(itemDepth, omissionDepth); page++) {
-          if (!owned()) return;
-          const query = new URLSearchParams();
-          if (boundary !== undefined)
-            query.set("beforeSequence", String(boundary));
-          if (omissionBoundary !== undefined)
-            query.set("beforeOmissionSequence", String(omissionBoundary));
-          const value = (
-            await client.read(
-              `/api/operator/assignments/${id}/history${query.size ? `?${query}` : ""}`,
-              assignmentHistorySchema,
-            )
-          ).data;
-          if (!owned()) return;
-          values.push(value);
-          boundary = undefined;
-          omissionBoundary = undefined;
-          if (itemActive && page <= itemDepth) {
-            itemValues.push(value);
-            if (
-              page < itemDepth &&
-              value.omittedItemCount &&
-              value.items.length
-            ) {
-              boundary = value.items[0]!.sequence;
-              pages.push(boundary);
-            } else itemActive = false;
-          }
-          if (omissionActive && page <= omissionDepth) {
-            omissionValues.push(value);
-            if (
-              page < omissionDepth &&
-              value.omittedTurnCount &&
-              value.turnOmissions.length
-            ) {
-              omissionBoundary = value.turnOmissions[0]!.sequence;
-              omissionPages.push(omissionBoundary);
-            } else omissionActive = false;
-          }
-          if (!itemActive && !omissionActive) break;
-        }
-        if (!owned()) return;
-        const recent = values[0];
-        if (!recent) return;
-        if (
-          values.some(
-            (value) => value.visibilityRevision !== recent.visibilityRevision,
-          )
-        ) {
-          setHistory((old) => {
-            if (!owned()) return old;
-            const next = { ...old };
-            delete next[id];
-            return next;
-          });
-          throw Error(
-            "History visibility changed while loading retained pages",
-          );
-        }
-        const items = itemValues
-          .flatMap((value) => value.items)
-          .filter(
-            (item, i, all) =>
-              all.findIndex(
-                (other) =>
-                  other.workId === item.workId && other.itemId === item.itemId,
-              ) === i,
-          )
-          .sort((a, b) => a.sequence - b.sequence);
-        state.historyPages[id] = pages;
-        state.omissionHistoryPages[id] = omissionPages;
-        setHistory((old) =>
-          owned()
-            ? {
-                ...old,
-                [id]: {
-                  ...recent,
-                  items,
-                  turnOmissions: omissionValues
-                    .flatMap((value) => value.turnOmissions)
-                    .filter(
-                      (item, i, all) =>
-                        all.findIndex(
-                          (other) =>
-                            other.workId === item.workId &&
-                            other.threadId === item.threadId &&
-                            other.turnId === item.turnId,
-                        ) === i,
-                    )
-                    .sort(
-                      (a, b) =>
-                        a.createdAt - b.createdAt || a.sequence - b.sequence,
-                    ),
-                  omittedItemCount:
-                    itemValues.at(-1)?.omittedItemCount ??
-                    recent.omittedItemCount,
-                  omittedTurnCount:
-                    omissionValues.at(-1)?.omittedTurnCount ??
-                    recent.omittedTurnCount,
-                },
-              }
-            : old,
-        );
-        setHistoryErrors((old) => (owned() ? { ...old, [id]: "" } : old));
-      } catch (e) {
-        if (owned()) {
-          setHistory((old) => {
-            if (!owned()) return old;
-            const next = { ...old };
-            delete next[id];
-            return next;
-          });
-          setHistoryErrors((old) =>
-            owned()
-              ? {
-                  ...old,
-                  [id]: e instanceof Error ? e.message : "Unavailable",
-                }
-              : old,
-          );
-        }
-      }
-    },
-    [client, state],
-  );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pending/error invalidates the current history ownership before any late batch can publish.
+  }, [data, state, path, timeline.window]);
+  // A link into the conversation is followed once the task and the conversation have been read.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the link is read from its ref; the reads and the path are the triggers.
   useEffect(() => {
-    // A timer poll never publishes pending, so only an explicit read clears what is shown.
-    if (resource.state.pending || resource.state.error) {
-      invalidateHistory(resource.state.pending);
-      return;
-    }
-    for (const a of data?.assignments ?? [])
-      void loadHistory(a.assignmentId, undefined, undefined, true);
-  }, [data, loadHistory, resource.state.pending, resource.state.error]);
+    const link = pendingLink.current;
+    if (!link || !data || !(timeline.window || timeline.error)) return;
+    pendingLink.current = null;
+    followLink.current(link);
+  }, [data, path, timeline.window, timeline.error]);
   async function command(input: OperatorCommand) {
     if (pending) return;
     if (
@@ -1385,12 +1309,26 @@ export function TaskWorkspace({
     lead = data.assignments.find((a) => a.assignmentId === leadId),
     leadName = data.lead?.name ?? "Project lead",
     leadMode = leadFeedbackMode(data, lead?.state);
-  const requestId = params.get("request"),
+  // A link naming a request puts its form in the attention card; moving it is the operator's choice.
+  const linkedRequest = params.get("request");
+  if (urlRequest.current !== linkedRequest) {
+    urlRequest.current = linkedRequest;
+    state.cardRequest = linkedRequest;
+    if (linkedRequest && state.inlineAnswer === linkedRequest)
+      state.inlineAnswer = null;
+  }
+  const requestId = state.cardRequest,
     openRequests = [...data.questions, ...data.approvals].filter(
       (q) => q.status === "open",
     ),
     nextActor = taskNextActor(data),
-    inView = openRequests.find((q) => q.interactionId === requestId),
+    attentionCollapsed =
+      (openRequests.length > 0 || nextActor.operator) &&
+      state.attentionCollapsed &&
+      !requestId,
+    inView = openRequests.find(
+      (q) => q.interactionId === (state.inlineAnswer ?? requestId),
+    ),
     deciding = inView?.kind === "approval" ? inView.interactionId : null,
     // Any status: a decided approval stays in view, read only, until the operator leaves it.
     reviewing = data.approvals.find((a) => a.interactionId === requestId);
@@ -1402,6 +1340,184 @@ export function TaskWorkspace({
       data.assignments.find(
         (a) => a.assignmentId === request?.requestingAssignmentId,
       )?.name ?? null
+    );
+  };
+  // One form per request: in the attention card or in the conversation, never both.
+  const requestPlaces: RequestPlaces = {
+    inline: state.inlineAnswer,
+    card: requestId,
+    status: (id) =>
+      [...data.questions, ...data.approvals].find((q) => q.interactionId === id)
+        ?.status,
+    answerHere: (id) => {
+      state.inlineAnswer = id;
+      if (state.cardRequest === id) state.cardRequest = null;
+      changed();
+    },
+    answerInCard: (id) => {
+      state.cardRequest = id;
+      state.inlineAnswer = null;
+      state.attentionCollapsed = false;
+      changed();
+    },
+    form: (id) => {
+      const approval = data.approvals.find((a) => a.interactionId === id);
+      return approval ? (
+        <ApprovalReview
+          client={client}
+          session={session}
+          taskId={taskId}
+          approval={approval}
+          requesterName={requesterOf(id)}
+          onChanged={refreshAll}
+        />
+      ) : data.questions.some((q) => q.interactionId === id) ? (
+        <QuestionResponse
+          client={client}
+          session={session}
+          taskId={taskId}
+          interactionId={id}
+          states={questionStates}
+          onRecorded={refreshAll}
+          observedAt={resource.state.fetchedAt}
+          requesterName={requesterOf(id)}
+        />
+      ) : null;
+    },
+  };
+  const assignmentFacts = (a: (typeof data.assignments)[number]) => {
+    const execution = executionSummary(a);
+    return (
+      <>
+        <p>
+          Assignment {a.assignmentId} · profile revision {a.profileRevision} ·
+          instructions revision {a.instructionsRevision}
+        </p>
+        <p>Supplied responsibility / brief</p>
+        <Literal text={a.brief} />
+        <p>
+          {`Requester assignment: ${a.requesterAssignmentId ?? "Not recorded"}; result destination: ${a.resultDestination ?? "Unavailable"}; resolved recipient: ${a.resultRecipientAssignmentId ?? "Unavailable"} (${a.resultRecipientDisposition ?? "Unknown disposition"}).`}
+        </p>
+        <p>
+          Execution: {execution.line}
+          {a.executionGeneration
+            ? ` · work ${a.executionGeneration.workId} · request sequence ${a.executionGeneration.requestSequence} · assignment version ${a.executionGeneration.assignmentVersion} · profile revision ${a.executionGeneration.profileRevision} · instructions revision ${a.executionGeneration.instructionsRevision}`
+            : " · not yet admitted"}
+          .
+        </p>
+        {execution.note && <p className="metadata muted">{execution.note}</p>}
+        <p>
+          Recorded wait / execution reason:{" "}
+          {a.waitReason ?? "No recorded wait reason; unknown"}.
+        </p>
+        <details>
+          <summary>
+            Effective execution policy ·{" "}
+            {executionHarnessLabels[execution.harness]}
+          </summary>
+          {execution.harness === "codex" && (
+            <CommandNetworkLine generation={a.executionGeneration} />
+          )}
+          <PolicyDisclosure harness={execution.harness} workspace={workspace} />
+        </details>
+        {data.results
+          .filter((r) => r.assignmentId === a.assignmentId)
+          .map((r) => (
+            <p key={r.resultId}>
+              <ActionLink
+                href={`/app/tasks/${taskId}?section=review&assignment=${a.assignmentId}&result=${r.resultId}`}
+              >
+                Open exact assignment result {r.resultId}
+              </ActionLink>
+            </p>
+          ))}
+      </>
+    );
+  };
+  // Opens an assignment's delegation, with those above it, so its entries are in view.
+  const expandDelegations = (assignmentId: string) => {
+    const chain = new Set<string>();
+    for (
+      let a = data.assignments.find((x) => x.assignmentId === assignmentId);
+      a &&
+      a.assignmentId !== data.leadAssignmentId &&
+      !chain.has(a.assignmentId);
+      a = data.assignments.find(
+        (x) => x.assignmentId === a?.requesterAssignmentId,
+      )
+    ) {
+      chain.add(a.assignmentId);
+      state.expanded.add(`c:delegation:${a.assignmentId}`);
+    }
+  };
+  // Reads older pages for a conversation record (at most ten), then scrolls to the selector
+  // `place` returns for the window that holds it, after opening what hides it. A record still
+  // missing leaves the page at the conversation's top, which says so and offers Load earlier.
+  const goToRecord = async (
+    miss: NonNullable<TaskWorkspaceState["conversationNotice"]>,
+    found: (window: TimelineWindow) => boolean,
+    place: (window: TimelineWindow) => string,
+  ) => {
+    const follow = ++linkFollow.current;
+    const read = await timeline.loadUntil(found);
+    // A newer link, or leaving the task, ends this one.
+    if (!scope.current || follow !== linkFollow.current) return;
+    state.conversationNotice = read.found ? null : miss;
+    const selector = read.window && place(read.window);
+    // Commit now: a nested delegation exists only once its parents render open, and a frame
+    // callback that ran first would find no target and fall back to the conversation's top.
+    flushSync(changed);
+    requestAnimationFrame(() => {
+      if (!scope.current || follow !== linkFollow.current) return;
+      const target = selector
+        ? document.querySelector<HTMLElement>(selector)
+        : null;
+      if (target) showSection(target);
+      else reveal("conversation");
+    });
+  };
+  // An assignment's place in the conversation: its delegation, with those above it, open.
+  const openAssignment = (id: string) => {
+    expandDelegations(id);
+    if (id === data.leadAssignmentId) {
+      linkFollow.current++;
+      state.conversationNotice = null;
+      changed();
+      return requestAnimationFrame(() => reveal("conversation"));
+    }
+    const name = data.assignments.find((a) => a.assignmentId === id)?.name;
+    void goToRecord(
+      {
+        subject: `The conversation of ${name ?? "this assignment"}`,
+        kind: "assignment",
+        id,
+      },
+      (w) =>
+        hasDelegation(
+          conversationTree(w.entries, data.assignments, leadId ?? null),
+          id,
+          true,
+        ),
+      () => `[data-record-id="delegation:${CSS.escape(id)}"]`,
+    );
+  };
+  followLink.current = (link) => {
+    if (link.kind === "assignment") return openAssignment(link.id);
+    if (link.kind === "latest") {
+      linkFollow.current++;
+      state.conversationNotice = null;
+      changed();
+      return requestAnimationFrame(followLatest);
+    }
+    const isRequest = (e: TimelineEntry) =>
+      e.kind === "request" && e.interactionId === link.id;
+    void goToRecord(
+      { subject: "That request", kind: "request", id: link.id },
+      (w) => w.entries.some(isRequest),
+      (w) => {
+        expandDelegations(w.entries.find(isRequest)?.assignmentId ?? "");
+        return `[data-interaction-id="${CSS.escape(link.id)}"]`;
+      },
     );
   };
   async function refreshSource() {
@@ -1515,7 +1631,7 @@ export function TaskWorkspace({
     ? `${newestViewed >= 0 ? `${data.results.length - newestViewed - 1} new result(s)` : "Newer results unknown; no retained viewed result ordering"}; ${sourceObservation === "pending" ? "source comparison pending" : sourceObservation === "unknown" ? "source comparison unknown; current source state unavailable" : review.viewed.sourceId !== latestSource?.sourceId ? "source requirements changed" : "source unchanged"}`
     : "No viewing baseline. Comparison with previously viewed material is unknown.";
   // Each collapsed Overview card keeps its content mounted; its toggle is the one writer of
-  // `state.overview`, so a poll, a refresh or "Collapse all history" never opens or closes one.
+  // `state.overview`, so a poll or a refresh never opens or closes one.
   const overviewCard = (id: OverviewCard) => ({
     open: state.overview.has(id),
     onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => {
@@ -1887,9 +2003,9 @@ export function TaskWorkspace({
         {updates && (
           <Button
             onClick={() => {
-              // The latest messages are at the end of History.
-              selectTab("history");
-              scrollTo(0, document.documentElement.scrollHeight);
+              // The newest entry is at the end of the Overview's conversation.
+              selectTab("overview");
+              followLatest();
               setUpdates(false);
             }}
           >
@@ -1903,9 +2019,26 @@ export function TaskWorkspace({
                 id="decisions"
                 className="workspace-attention decision-card"
                 data-attention={openRequests.length > 0 || undefined}
+                data-pinned
+                data-collapsed={attentionCollapsed || undefined}
                 aria-label="Pending requests and holds"
               >
                 <h3 className="sr-only">Decisions and holds</h3>
+                {(openRequests.length > 0 || nextActor.operator) && (
+                  <button
+                    type="button"
+                    className="attention-banner"
+                    aria-expanded={!attentionCollapsed}
+                    onClick={() => {
+                      state.attentionCollapsed = !attentionCollapsed;
+                      changed();
+                    }}
+                  >
+                    {openRequests.length > 0
+                      ? `${count(openRequests.length, "decision")} waiting on you`
+                      : "Waiting on you"}
+                  </button>
+                )}
                 {reviewing ? (
                   <ApprovalReview
                     client={client}
@@ -1963,16 +2096,38 @@ export function TaskWorkspace({
                           {q.materialHash ?? "Unavailable"}
                         </p>
                       )}
-                      <ActionLink
-                        variant="secondary"
-                        href={`/app/tasks/${taskId}?request=${q.interactionId}`}
-                      >
-                        {q.kind === "approval"
-                          ? "Review material & decide"
-                          : "Answer question"}
-                      </ActionLink>
+                      {state.inlineAnswer === q.interactionId ? (
+                        <>
+                          <p role="status">Answering in the conversation.</p>
+                          <Button
+                            variant="secondary"
+                            onClick={() =>
+                              requestPlaces.answerInCard(q.interactionId)
+                            }
+                          >
+                            Answer here instead
+                          </Button>
+                        </>
+                      ) : (
+                        <ActionLink
+                          variant="secondary"
+                          href={`/app/tasks/${taskId}?request=${q.interactionId}`}
+                        >
+                          {q.kind === "approval"
+                            ? "Review material & decide"
+                            : "Answer question"}
+                        </ActionLink>
+                      )}
                     </div>
                   ))}
+                {state.inlineAnswer &&
+                  !openRequests.some(
+                    (q) => q.interactionId === state.inlineAnswer,
+                  ) && (
+                    <p role="status">
+                      No longer waiting; see the conversation.
+                    </p>
+                  )}
                 {data.completionRequests
                   .filter((r) => r.status === "pending")
                   .map((r) => (
@@ -2082,128 +2237,210 @@ export function TaskWorkspace({
                   assignments={data.assignments}
                 />
               </section>
-              <section id="review">
-                <h3 className="section-heading">Latest result</h3>
-                {state.selectedResult && !selected && (
-                  <p role="alert">
-                    Exact selected result is unavailable. A newer result is not
-                    substituted.
-                  </p>
+              <TaskConversation
+                client={client}
+                taskId={taskId}
+                data={data}
+                state={state}
+                changed={changed}
+                timeline={timeline}
+                requests={requestPlaces}
+                following={!updates}
+                openChanges={() => selectTab("changes")}
+                messageAssignment={(assignment) => (
+                  <AssignmentMessage
+                    client={client}
+                    session={session}
+                    taskId={taskId}
+                    assignment={assignment}
+                    onChanged={refreshAll}
+                  />
                 )}
-                {selected ? (
-                  <div data-record-id={selected.resultId}>
-                    <p className="metadata muted">
-                      R{data.results.indexOf(selected) + 1} ·{" "}
-                      <ShortId value={selected.resultId} /> · assignment{" "}
-                      <ShortId value={selected.assignmentId} /> · work revision{" "}
-                      {selected.workRevision} · {date(selected.createdAt)}
-                    </p>
-                    <Literal text={selected.summary} />
-                    <p className="metadata">
-                      <ActionLink
-                        variant="secondary"
-                        href={`/app/tasks/${taskId}?section=changes&result=${selected.resultId}`}
-                      >
-                        {meta?.metadata.changes
-                          ? `Changes · ${meta.metadata.changes.files.length} ${meta.metadata.changes.files.length === 1 ? "file" : "files"}`
-                          : "Changes"}
-                      </ActionLink>
-                    </p>
-                    {meta ? (
-                      <CriteriaRows
-                        data={data}
-                        resultId={selected.resultId}
-                        sourceId={meta.metadata.sourceId}
-                        ask={ask}
-                        more={criteriaMore(
-                          `${selected.resultId}:${meta.metadata.sourceId}`,
-                        )}
-                      />
-                    ) : (
-                      <p>
-                        No structured review evidence was supplied for this
-                        result.
+              />
+              {reply}
+            </div>
+            <TaskInspector
+              data={data}
+              deciding={deciding}
+              selectResult={(resultId) => {
+                state.selectedResult = resultId;
+                changed();
+                requestAnimationFrame(() => reveal("review"));
+              }}
+              open={
+                state.inspectorOpen ?? matchMedia("(min-width: 1024px)").matches
+              }
+              onToggle={(open) => {
+                if (state.inspectorOpen === open) return;
+                state.inspectorOpen = open;
+                changed();
+              }}
+              latest={
+                <>
+                  <section id="review">
+                    <h3 className="section-heading">Latest result</h3>
+                    {state.selectedResult && !selected && (
+                      <p role="alert">
+                        Exact selected result is unavailable. A newer result is
+                        not substituted.
                       </p>
                     )}
-                    <Button
-                      variant="secondary"
-                      onClick={() =>
-                        ask(
-                          {
-                            resultId: selected.resultId,
-                            workId: selected.workId,
-                            ...(meta?.metadata.sourceId
-                              ? { sourceId: meta.metadata.sourceId }
-                              : {}),
-                          },
-                          `result ${selected.resultId}`,
-                        )
-                      }
-                    >
-                      Ask lead about result
-                    </Button>
-                  </div>
-                ) : (
-                  !state.selectedResult && <p>No result recorded.</p>
-                )}
-                {/* A viewing reference needs a result to view; a lost response stays checkable. */}
-                {data.results.length > 0 && (
-                  <>
-                    <p className="metadata muted">{changes}</p>
-                    <Button
-                      variant="secondary"
-                      data-unconfirmed-control="review.view"
-                      onClick={() =>
-                        void command({
-                          type: "review.view",
-                          key: crypto.randomUUID(),
-                          taskId,
-                          sourceId: state.selectedSource
-                            ? (source?.sourceId ?? null)
-                            : selected
-                              ? (meta?.metadata.sourceId ?? null)
-                              : (source?.sourceId ?? null),
-                          resultIds: selected ? [selected.resultId] : [],
-                        })
-                      }
-                      disabled={
-                        Boolean(state.selectedResult && !selected) ||
-                        Boolean(state.selectedSource && !source) ||
-                        Boolean(unconfirmed)
-                      }
-                    >
-                      Set viewing reference
-                    </Button>
-                  </>
-                )}
-                {unconfirmedCheck("review.view")}
-                {data.results.length > 0 && (
-                  <p>
-                    Viewing records availability only; it does not approve work
-                    or clear holds. Retained records may be incomplete.
-                  </p>
-                )}
-                <label htmlFor="retained-result-revision">
-                  Result revision{" "}
-                  <NativeSelect
-                    id="retained-result-revision"
-                    className="control"
-                    value={state.selectedResult ?? ""}
-                    onChange={(e) => {
-                      state.selectedResult = e.target.value || null;
-                      changed();
-                    }}
-                  >
-                    <option value="">Latest result</option>
-                    {data.results.map((r, i) => (
-                      <option key={r.resultId} value={r.resultId}>
-                        R{i + 1}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </label>
-              </section>
-              {reply}
+                    {selected ? (
+                      <div data-record-id={selected.resultId}>
+                        <p className="metadata muted">
+                          R{data.results.indexOf(selected) + 1} ·{" "}
+                          <ShortId value={selected.resultId} /> · assignment{" "}
+                          <ShortId value={selected.assignmentId} /> · work
+                          revision {selected.workRevision} ·{" "}
+                          {date(selected.createdAt)}
+                        </p>
+                        <Literal text={selected.summary} />
+                        <p className="metadata">
+                          <ActionLink
+                            variant="secondary"
+                            href={`/app/tasks/${taskId}?section=changes&result=${selected.resultId}`}
+                          >
+                            {meta?.metadata.changes
+                              ? `Changes · ${meta.metadata.changes.files.length} ${meta.metadata.changes.files.length === 1 ? "file" : "files"}`
+                              : "Changes"}
+                          </ActionLink>
+                        </p>
+                        {meta ? (
+                          <CriteriaRows
+                            data={data}
+                            resultId={selected.resultId}
+                            sourceId={meta.metadata.sourceId}
+                            ask={ask}
+                            more={criteriaMore(
+                              `${selected.resultId}:${meta.metadata.sourceId}`,
+                            )}
+                          />
+                        ) : (
+                          <p>
+                            No structured review evidence was supplied for this
+                            result.
+                          </p>
+                        )}
+                        <Button
+                          variant="secondary"
+                          onClick={() =>
+                            ask(
+                              {
+                                resultId: selected.resultId,
+                                workId: selected.workId,
+                                ...(meta?.metadata.sourceId
+                                  ? { sourceId: meta.metadata.sourceId }
+                                  : {}),
+                              },
+                              `result ${selected.resultId}`,
+                            )
+                          }
+                        >
+                          Ask lead about result
+                        </Button>
+                      </div>
+                    ) : (
+                      !state.selectedResult && <p>No result recorded.</p>
+                    )}
+                    {/* A viewing reference needs a result to view; a lost response stays checkable. */}
+                    {data.results.length > 0 && (
+                      <>
+                        <p className="metadata muted">{changes}</p>
+                        <Button
+                          variant="secondary"
+                          data-unconfirmed-control="review.view"
+                          onClick={() =>
+                            void command({
+                              type: "review.view",
+                              key: crypto.randomUUID(),
+                              taskId,
+                              sourceId: state.selectedSource
+                                ? (source?.sourceId ?? null)
+                                : selected
+                                  ? (meta?.metadata.sourceId ?? null)
+                                  : (source?.sourceId ?? null),
+                              resultIds: selected ? [selected.resultId] : [],
+                            })
+                          }
+                          disabled={
+                            Boolean(state.selectedResult && !selected) ||
+                            Boolean(state.selectedSource && !source) ||
+                            Boolean(unconfirmed)
+                          }
+                        >
+                          Set viewing reference
+                        </Button>
+                      </>
+                    )}
+                    {unconfirmedCheck("review.view")}
+                    {data.results.length > 0 && (
+                      <p>
+                        Viewing records availability only; it does not approve
+                        work or clear holds. Retained records may be incomplete.
+                      </p>
+                    )}
+                    <label htmlFor="retained-result-revision">
+                      Result revision{" "}
+                      <NativeSelect
+                        id="retained-result-revision"
+                        className="control"
+                        value={state.selectedResult ?? ""}
+                        onChange={(e) => {
+                          state.selectedResult = e.target.value || null;
+                          changed();
+                        }}
+                      >
+                        <option value="">Latest result</option>
+                        {data.results.map((r, i) => (
+                          <option key={r.resultId} value={r.resultId}>
+                            R{i + 1}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </label>
+                  </section>
+                  {selected && (
+                    <section id="result-evidence">
+                      <details
+                        className="overview-disclosure"
+                        {...overviewCard("evidence")}
+                      >
+                        <summary>
+                          <h3 className="section-heading">Evidence</h3>
+                          <span className="metadata muted">
+                            {evidenceSummary}
+                          </span>
+                        </summary>
+                        <div>
+                          {meta && (
+                            <ReviewEvidence
+                              data={data}
+                              resultId={selected.resultId}
+                              sourceId={meta.metadata.sourceId}
+                              ask={ask}
+                            />
+                          )}
+                          <RetainedResultEvidence
+                            key={selected.resultId}
+                            client={client}
+                            session={session}
+                            taskId={taskId}
+                            resultId={selected.resultId}
+                            state={state.retained(selected.resultId)}
+                            changed={changed}
+                            openCurrent={(scope, filePath) => {
+                              state.files.openCurrentFile(scope, filePath);
+                              changed();
+                              requestAnimationFrame(() => reveal("files"));
+                            }}
+                          />
+                        </div>
+                      </details>
+                    </section>
+                  )}
+                </>
+              }
+            >
               <section id="brief">
                 <details
                   className="overview-disclosure"
@@ -2302,43 +2539,6 @@ export function TaskWorkspace({
                   </label>
                 </details>
               </section>
-              {selected && (
-                <section id="result-evidence">
-                  <details
-                    className="overview-disclosure"
-                    {...overviewCard("evidence")}
-                  >
-                    <summary>
-                      <h3 className="section-heading">Evidence</h3>
-                      <span className="metadata muted">{evidenceSummary}</span>
-                    </summary>
-                    <div>
-                      {meta && (
-                        <ReviewEvidence
-                          data={data}
-                          resultId={selected.resultId}
-                          sourceId={meta.metadata.sourceId}
-                          ask={ask}
-                        />
-                      )}
-                      <RetainedResultEvidence
-                        key={selected.resultId}
-                        client={client}
-                        session={session}
-                        taskId={taskId}
-                        resultId={selected.resultId}
-                        state={state.retained(selected.resultId)}
-                        changed={changed}
-                        openCurrent={(scope, filePath) => {
-                          state.files.openCurrentFile(scope, filePath);
-                          changed();
-                          requestAnimationFrame(() => reveal("files"));
-                        }}
-                      />
-                    </div>
-                  </details>
-                </section>
-              )}
               <section id="assignments">
                 <details
                   className="overview-disclosure"
@@ -2352,29 +2552,83 @@ export function TaskWorkspace({
                   </summary>
                   <AssignmentRows
                     assignments={data.assignments}
-                    reveal={reveal}
-                    open={(id) => {
-                      state.chronological = false;
-                      state.expanded.add(id);
+                    facts={assignmentFacts}
+                    factsOpen={(id) => state.expanded.has(`c:facts:${id}`)}
+                    onFactsToggle={(id, open) => {
+                      if (open === state.expanded.has(`c:facts:${id}`)) return;
+                      if (open) state.expanded.add(`c:facts:${id}`);
+                      else state.expanded.delete(`c:facts:${id}`);
                       changed();
                     }}
+                    open={openAssignment}
                   />
                 </details>
               </section>
-              <p className="metadata muted task-pointer">
-                Captured conversations, earlier results and delivery evidence
-                are in History, Changes and Review.
+              <section id="context">
+                <details
+                  className="overview-disclosure"
+                  {...overviewCard("context")}
+                >
+                  <summary>
+                    <h3 className="section-heading">Captured context</h3>
+                  </summary>
+                  <p>
+                    Captured preparation records distinguish supplied material
+                    from current configuration. Availability is not proof that
+                    an agent read it.
+                  </p>
+                  {!!review?.contextsOmittedCount && (
+                    <p role="status">
+                      Partial captured context coverage:{" "}
+                      {review.contextsOmittedCount} retained preparation records
+                      are not shown.
+                    </p>
+                  )}
+                  {review?.contexts.length ? (
+                    review.contexts.map((c) => (
+                      <div key={c.captureId} data-record-id={c.captureId}>
+                        <p>
+                          Supplier {c.supplier} · assignment {c.assignmentId}{" "}
+                          revision {c.assignmentVersion} ·{" "}
+                          {c.workId ?? "assignment creation"} · captured{" "}
+                          {date(c.createdAt)}
+                        </p>
+                        <p>
+                          Profile revision {c.profileRevision}; instructions
+                          revision {c.instructionsRevision}; source{" "}
+                          {c.sourceId ?? "unavailable"}
+                        </p>
+                        <Disclosure
+                          id={c.captureId}
+                          title="Captured brief"
+                          text={c.brief}
+                          state={state}
+                          changed={changed}
+                        />
+                      </div>
+                    ))
+                  ) : (
+                    <p>
+                      No retained context capture for this legacy task. Current
+                      settings are not reconstructed as history.
+                    </p>
+                  )}
+                  {data.assignments.map((a) => (
+                    <p key={a.assignmentId}>
+                      Current assignment {a.assignmentId}: profile revision{" "}
+                      {a.currentProfileRevision}, instructions revision{" "}
+                      {a.currentInstructionsRevision}
+                    </p>
+                  ))}
+                </details>
+              </section>
+              <p className="metadata">
+                {/* Server-rendered page outside the app shell: a plain anchor loads it as a document. */}
+                <a href={`/task/${encodeURIComponent(taskId)}`}>
+                  Edit task and review source
+                </a>
               </p>
-            </div>
-            <TaskInspector
-              data={data}
-              deciding={deciding}
-              selectResult={(resultId) => {
-                state.selectedResult = resultId;
-                changed();
-                requestAnimationFrame(() => reveal("review"));
-              }}
-            />
+            </TaskInspector>
           </div>
         </TabPanel>
         <TabPanel tab="files" active={state.tab}>
@@ -2421,328 +2675,6 @@ export function TaskWorkspace({
         </TabPanel>
         <TabPanel tab="review" active={state.tab}>
           <LocalReviewPanel />
-        </TabPanel>
-        <TabPanel tab="history" active={state.tab}>
-          <p className="metadata">
-            {/* Server-rendered page outside the app shell: a plain anchor loads it as a document. */}
-            <a href={`/task/${encodeURIComponent(taskId)}`}>
-              Edit task and review source
-            </a>
-          </p>
-          <section id="context">
-            <h3 className="section-heading">Captured context</h3>
-            <p>
-              Captured preparation records distinguish supplied material from
-              current configuration. Availability is not proof that an agent
-              read it.
-            </p>
-            {!!review?.contextsOmittedCount && (
-              <p role="status">
-                Partial captured context coverage: {review.contextsOmittedCount}{" "}
-                retained preparation records are not shown.
-              </p>
-            )}
-            {review?.contexts.length ? (
-              review.contexts.map((c) => (
-                <div key={c.captureId} data-record-id={c.captureId}>
-                  <p>
-                    Supplier {c.supplier} · assignment {c.assignmentId} revision{" "}
-                    {c.assignmentVersion} · {c.workId ?? "assignment creation"}{" "}
-                    · captured {date(c.createdAt)}
-                  </p>
-                  <p>
-                    Profile revision {c.profileRevision}; instructions revision{" "}
-                    {c.instructionsRevision}; source{" "}
-                    {c.sourceId ?? "unavailable"}
-                  </p>
-                  <Disclosure
-                    id={c.captureId}
-                    title="Captured brief"
-                    text={c.brief}
-                    state={state}
-                    changed={changed}
-                  />
-                </div>
-              ))
-            ) : (
-              <p>
-                No retained context capture for this legacy task. Current
-                settings are not reconstructed as history.
-              </p>
-            )}
-            {data.assignments.map((a) => (
-              <p key={a.assignmentId}>
-                Current assignment {a.assignmentId}: profile revision{" "}
-                {a.currentProfileRevision}, instructions revision{" "}
-                {a.currentInstructionsRevision}
-              </p>
-            ))}
-          </section>
-          <section id="history">
-            <h3 className="section-heading">
-              Assignments and retained history
-            </h3>
-            <div className="task-actions">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  for (const a of data.assignments)
-                    state.expanded.add(a.assignmentId);
-                  for (const h of Object.values(histories)) {
-                    for (const i of h.items)
-                      state.expanded.add(`${i.workId}:${i.itemId}`);
-                    for (const i of h.turnOmissions)
-                      state.expanded.add(
-                        `turn-omission:${i.workId}:${i.threadId}:${i.turnId}`,
-                      );
-                  }
-                  changed();
-                }}
-              >
-                Expand all history
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  state.expanded.clear();
-                  changed();
-                }}
-              >
-                Collapse all history
-              </Button>
-              <Button
-                variant="secondary"
-                aria-pressed={state.chronological}
-                onClick={() => {
-                  state.chronological = !state.chronological;
-                  changed();
-                }}
-              >
-                Chronological view
-              </Button>
-            </div>
-            <p>
-              Source-faithful captured text; no generated summaries or
-              full-transcript promise. Redaction and retention can omit content.
-            </p>
-            {state.chronological ? (
-              <div>
-                {Object.values(histories)
-                  .flatMap((h) => [...h.items, ...h.turnOmissions])
-                  .sort((a, b) => {
-                    const time = a.createdAt - b.createdAt;
-                    if (time) return time;
-                    const aOmission = "reason" in a,
-                      bOmission = "reason" in b;
-                    return aOmission === bOmission
-                      ? a.sequence - b.sequence
-                      : aOmission
-                        ? 1
-                        : -1;
-                  })
-                  .map((i) =>
-                    "reason" in i ? (
-                      <TurnOmission
-                        key={`turn-omission:${i.workId}:${i.threadId}:${i.turnId}`}
-                        omission={i}
-                        state={state}
-                        changed={changed}
-                      />
-                    ) : (
-                      <Disclosure
-                        key={`${i.workId}:${i.itemId}`}
-                        id={`${i.workId}:${i.itemId}`}
-                        title={`${date(i.createdAt)} · ${i.assignmentId} · ${i.lifecycle}`}
-                        text={
-                          i.text ??
-                          `Omitted: ${i.omissionReason ?? "unavailable"}`
-                        }
-                        state={state}
-                        changed={changed}
-                      />
-                    ),
-                  )}
-              </div>
-            ) : (
-              data.assignments.map((a) => {
-                const execution = executionSummary(a);
-                return (
-                  <details
-                    key={a.assignmentId}
-                    data-record-id={a.assignmentId}
-                    open={state.expanded.has(a.assignmentId)}
-                    onToggle={(e) => {
-                      if (e.currentTarget.open)
-                        state.expanded.add(a.assignmentId);
-                      else state.expanded.delete(a.assignmentId);
-                      changed();
-                    }}
-                  >
-                    <summary>
-                      {a.name ?? "Assignment"} · {a.state} · version {a.version}
-                    </summary>
-                    <p>
-                      Assignment {a.assignmentId} · profile revision{" "}
-                      {a.profileRevision} · instructions revision{" "}
-                      {a.instructionsRevision}
-                    </p>
-                    <p>Supplied responsibility / brief</p>
-                    <Literal text={a.brief} />
-                    <p>
-                      {`Requester assignment: ${a.requesterAssignmentId ?? "Not recorded"}; result destination: ${a.resultDestination ?? "Unavailable"}; resolved recipient: ${a.resultRecipientAssignmentId ?? "Unavailable"} (${a.resultRecipientDisposition ?? "Unknown disposition"}).`}
-                    </p>
-                    <p>
-                      Execution: {execution.line}
-                      {a.executionGeneration
-                        ? ` · work ${a.executionGeneration.workId} · request sequence ${a.executionGeneration.requestSequence} · assignment version ${a.executionGeneration.assignmentVersion} · profile revision ${a.executionGeneration.profileRevision} · instructions revision ${a.executionGeneration.instructionsRevision}`
-                        : " · not yet admitted"}
-                      .
-                    </p>
-                    {execution.note && (
-                      <p className="metadata muted">{execution.note}</p>
-                    )}
-                    <p>
-                      Recorded wait / execution reason:{" "}
-                      {a.waitReason ?? "No recorded wait reason; unknown"}.
-                    </p>
-                    <ExecutionNotices assignment={a} />
-                    <details>
-                      <summary>
-                        Effective execution policy ·{" "}
-                        {executionHarnessLabels[execution.harness]}
-                      </summary>
-                      {execution.harness === "codex" && (
-                        <CommandNetworkLine
-                          generation={a.executionGeneration}
-                        />
-                      )}
-                      <PolicyDisclosure
-                        harness={execution.harness}
-                        workspace={workspace}
-                      />
-                    </details>
-                    {data.results
-                      .filter((r) => r.assignmentId === a.assignmentId)
-                      .map((r) => (
-                        <p key={r.resultId}>
-                          <ActionLink
-                            href={`/app/tasks/${taskId}?section=review&assignment=${a.assignmentId}&result=${r.resultId}`}
-                          >
-                            Open exact assignment result {r.resultId}
-                          </ActionLink>
-                        </p>
-                      ))}
-                    {(a.state === "pending" || a.state === "running") &&
-                      a.assignmentId !== data.leadAssignmentId && (
-                        <AssignmentMessage
-                          client={client}
-                          session={session}
-                          taskId={taskId}
-                          assignment={a}
-                          onChanged={refreshAll}
-                        />
-                      )}
-                    {historyErrors[a.assignmentId] && (
-                      <p role="alert">
-                        History refresh failed: {historyErrors[a.assignmentId]}.
-                        Unvalidated history is hidden; retry to read current
-                        material.
-                      </p>
-                    )}
-                    <p className="literal-preview">
-                      {histories[a.assignmentId]?.items
-                        .at(-1)
-                        ?.text?.slice(0, 500) ??
-                        "Recent captured text unavailable"}
-                    </p>
-                    {histories[a.assignmentId]?.omittedItemCount ? (
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          capture();
-                          void loadHistory(
-                            a.assignmentId,
-                            histories[a.assignmentId]?.items[0]?.sequence,
-                          );
-                        }}
-                      >
-                        Load earlier retained history (
-                        {histories[a.assignmentId]?.omittedItemCount})
-                      </Button>
-                    ) : null}
-                    {histories[a.assignmentId]?.omittedTurnCount ? (
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          capture();
-                          void loadHistory(
-                            a.assignmentId,
-                            undefined,
-                            histories[a.assignmentId]?.turnOmissions[0]
-                              ?.sequence,
-                          );
-                        }}
-                      >
-                        Load earlier retained turn omissions (
-                        {histories[a.assignmentId]?.omittedTurnCount})
-                      </Button>
-                    ) : null}
-                    {histories[a.assignmentId]?.items.map((i) => (
-                      <Disclosure
-                        key={`${i.workId}:${i.itemId}`}
-                        id={`${i.workId}:${i.itemId}`}
-                        title={`${date(i.createdAt)} · ${i.lifecycle} · ${i.itemId}`}
-                        text={
-                          i.text ??
-                          `Omitted: ${i.omissionReason ?? "unavailable"}`
-                        }
-                        state={state}
-                        changed={changed}
-                      />
-                    ))}
-                    {histories[a.assignmentId]?.turnOmissions.map((i) => (
-                      <TurnOmission
-                        key={`turn-omission:${i.workId}:${i.threadId}:${i.turnId}`}
-                        omission={i}
-                        state={state}
-                        changed={changed}
-                      />
-                    ))}
-                    <Button
-                      variant="secondary"
-                      onClick={() => void loadHistory(a.assignmentId)}
-                    >
-                      Refresh captured history
-                    </Button>
-                  </details>
-                );
-              })
-            )}
-            {data.messages.map((m) => (
-              <div key={m.eventId} data-record-id={m.eventId}>
-                <p>
-                  {m.eventType}
-                  {m.requester
-                    ? ` · requested by ${m.requester === "assignment" ? "agent" : "operator"}`
-                    : ""}{" "}
-                  · {m.deliveryState} · {date(m.createdAt)}
-                </p>
-                <Literal text={m.text} />
-                {m.questionAnswers &&
-                  Object.entries(m.questionAnswers).map(([id, a]) => (
-                    <div key={id}>
-                      <p>
-                        Question {id}: {a.optionIds.join(", ")}
-                      </p>
-                      <Literal text={a.text} />
-                    </div>
-                  ))}
-                {m.reference && (
-                  <p>Exact feedback reference: {JSON.stringify(m.reference)}</p>
-                )}
-              </div>
-            ))}
-          </section>
         </TabPanel>
       </article>
     </LocalReviewProvider>

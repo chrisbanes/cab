@@ -122,6 +122,7 @@ import {
   type RuntimeTurnPolicy,
   type RuntimeTurnSettings,
 } from "./codex.js";
+import { SkillScopeError } from "./codex-skills.js";
 import {
   type CodexHome,
   codexHomeFor,
@@ -185,6 +186,7 @@ import type { CodeHostProviderFactories } from "./code-host.js";
 import type { AdoptFunction } from "./git-fetch.js";
 import type { PushFunction } from "./github-delivery.js";
 import { gitLabDeliveryFactory } from "./gitlab-delivery.js";
+import type { RateLimitPolicy } from "./gitlab-http.js";
 import {
   gitLabCredentialExclusions,
   glabEnvironment,
@@ -212,9 +214,9 @@ import type {
 import { resolveOnPath } from "./executable-path.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
 import {
+  MIGRATION_LEVEL,
   protectBeforeMigration,
-  recordStartedRelease,
-  releaseVersion,
+  recordMigrationLevel,
   type StartupSnapshotOptions,
 } from "./startup-snapshot.js";
 import {
@@ -516,6 +518,8 @@ export interface StandaloneServiceOptions {
     /** Test-only: the HTTPS push and the fetch of an adopted head, in place of Git. */
     push?: PushFunction;
     adopt?: AdoptFunction;
+    /** Test-only: the clock and waits a GitLab 429 is retried with. */
+    rateLimit?: RateLimitPolicy;
     /** Test-only: how long a status-mapping write's provider call may take. */
     statusWriteTimeoutMs?: number;
   };
@@ -637,6 +641,8 @@ interface Started {
   diagnostics: ExecutionDiagnosticsStore | undefined;
   /** Status reads use it without spawning anything. */
   claude: RuntimeSpawnContext["claude"];
+  /** See `StandaloneService.gitLabCredentialRestartRequired`. */
+  gitLabRestartRequired: () => boolean;
 }
 
 /** Whether any work ever started on the task: a task that did is no longer a local draft to publish. */
@@ -819,6 +825,8 @@ export class StandaloneService {
   private readonly maxFallbackBackoffMs: number;
   private generation: ServiceGeneration | undefined;
   private stopPromise: Promise<void> | undefined;
+  /** Ends the waits of GitLab requests being retried after a 429 when the service stops. */
+  private retryWaits: AbortController | undefined;
   private readonly backgroundRuns = new Set<Promise<void>>();
   private readonly generationsByNotification = new WeakMap<
     Promise<BackgroundFailureDiagnostic>,
@@ -896,12 +904,12 @@ export class StandaloneService {
       return value;
     };
     try {
-      // Before the database is opened for writing: an older release's data is
+      // Before the database is opened for writing: data with migrations pending is
       // snapshotted and verified under the held owner lock, or startup is refused.
-      const release = this.options.startupSnapshot?.release ?? releaseVersion();
+      const level = this.options.startupSnapshot?.level ?? MIGRATION_LEVEL;
       const startupState = await protectBeforeMigration(dataDirectory, {
         ...this.options.startupSnapshot,
-        release,
+        level,
       });
       const rawDb = new DatabaseSync(database);
       this.db = rawDb;
@@ -1111,6 +1119,8 @@ export class StandaloneService {
             }
           : null;
       };
+      const retryWaits = new AbortController();
+      this.retryWaits = retryWaits;
       const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
         ...(this.options.delivery?.fetcher
           ? { fetcher: this.options.delivery.fetcher }
@@ -1122,7 +1132,7 @@ export class StandaloneService {
           ? { adopt: this.options.delivery.adopt }
           : {}),
         issueTrackerFactories: {
-          jira: (_projectId, _policy, instance) =>
+          jira: (projectId, _policy, instance) =>
             new JiraIssueTrackerWriter(
               () =>
                 resolveJiraAccess(
@@ -1131,6 +1141,7 @@ export class StandaloneService {
                     .find((c) => c.instance === instance),
                 ),
               this.options.issueTrackers?.jiraFetcher,
+              statusMappings.jiraDoneStatus(projectId),
             ),
           ...this.options.delivery?.issueTrackerFactories,
         },
@@ -1140,6 +1151,11 @@ export class StandaloneService {
             fetcher: this.options.delivery?.fetcher,
             push: this.options.delivery?.push,
             adopt: this.options.delivery?.adopt,
+            // A stopping service ends the waits of requests it would retry.
+            rateLimit: {
+              ...this.options.delivery?.rateLimit,
+              signal: retryWaits.signal,
+            },
           }),
           ...this.options.delivery?.providerFactories,
         },
@@ -1625,6 +1641,17 @@ export class StandaloneService {
         conversationHistory,
         diagnostics,
         claude,
+        gitLabRestartRequired: () => {
+          const { names, values } = gitLabCredentialExclusions(
+            domain.codeHostCredentials().map((c) => c.credentialRef),
+          );
+          const snapshot = runtimeSpawnSnapshot ?? {};
+          const held = Object.values(snapshot);
+          return (
+            names.some((name) => snapshot[name] !== undefined) ||
+            values.some((value) => held.includes(value))
+          );
+        },
       };
       // Boot-time failures begin their schedule only now that attempts can be admitted.
       for (const harness of [...this.runtimeUnavailableSince.keys()])
@@ -1656,7 +1683,7 @@ export class StandaloneService {
           ).unref(),
         );
       }
-      recordStartedRelease(dataDirectory, startupState, release);
+      recordMigrationLevel(db, dataDirectory, startupState, level);
     } catch (error) {
       generation.accepting = false;
       this.abortRuntimeRestarts();
@@ -2430,6 +2457,7 @@ export class StandaloneService {
   }
 
   stop(): Promise<void> {
+    this.retryWaits?.abort(new Error("service-stopping"));
     const generation = this.generation;
     if (generation) generation.accepting = false;
     if (this.stopPromise) return this.stopPromise;
@@ -2860,6 +2888,14 @@ export class StandaloneService {
   /** The persisted harness of a bound work, or null before binding. */
   bindingHarness(workId: string): ExecutionHarness | null {
     return this.started().state.taskBinding(workId)?.harness ?? null;
+  }
+
+  /**
+   * Whether a configured GitLab credential's variable or value is in the environment the
+   * running runtimes inherited. A boolean only; they keep it until the service restarts.
+   */
+  gitLabCredentialRestartRequired(): boolean {
+    return this.started().gitLabRestartRequired();
   }
 
   /** Booleans and a closed state only; the token value never leaves this method. */
@@ -7880,7 +7916,15 @@ export class StandaloneService {
               previous.threadId,
             ),
           );
-        await guard(runtime.resumeThread(previous.threadId, tools));
+        // Settings or not, the runtime scopes the thread's skills to what its profile enables.
+        await guard(
+          runtime.resumeThread(
+            previous.threadId,
+            tools,
+            this.turnSettings(request),
+            workspace,
+          ),
+        );
         threadId = previous.threadId;
       } else {
         if (state.get(intent.id).state !== "submitting")
@@ -8251,7 +8295,8 @@ export class StandaloneService {
       if (state.get(intent.id).state !== "held")
         state.hold(
           intent.id,
-          error instanceof PreviousCodexHomeError
+          error instanceof PreviousCodexHomeError ||
+            error instanceof SkillScopeError
             ? error.message
             : `Runtime submission or observation uncertain: ${String(error)}`,
         );

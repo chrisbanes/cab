@@ -29,6 +29,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
 import {
+  compareReleaseVersions,
   defaultServiceHost,
   daemonVerifyCommand,
   ghTokenStorage,
@@ -902,11 +903,11 @@ function verifySnapshot(path: string) {
 /** The state file a service writes into its data directory (src/standalone/startup-snapshot.ts). */
 function writeStartupState(
   f: { stateDir: string },
-  state: { release: string | null; snapshot?: object },
+  state: { snapshot?: object },
 ) {
   writeFileSync(
     join(f.stateDir, "data", "startup-state.json"),
-    JSON.stringify({ format: "cab-startup-state-v1", ...state }),
+    JSON.stringify({ format: "cab-startup-state-v2", ...state }),
     { mode: 0o600 },
   );
 }
@@ -914,8 +915,8 @@ function writeStartupState(
 /** Stands in for the service: its first start takes, verifies and records the pre-migration snapshot. */
 function serviceSnapshotsOnStart(
   f: { stateDir: string; snapshots: string; launchd: FakeLaunchd },
-  from: string,
-  to: string,
+  from: number,
+  to: number,
 ) {
   f.launchd.onBootstrap = async () => {
     if (existsSync(join(f.stateDir, "data", "startup-state.json"))) return;
@@ -925,7 +926,6 @@ function serviceSnapshotsOnStart(
     );
     await createSnapshot(join(f.stateDir, "data"), path);
     writeStartupState(f, {
-      release: from,
       snapshot: { from, to, path, verifiedAt: new Date().toISOString() },
     });
   };
@@ -933,7 +933,7 @@ function serviceSnapshotsOnStart(
 
 test("upgrade stops, re-renders, starts and checks readiness in order, reporting the service's snapshot", async (t) => {
   const f = await installed(t);
-  serviceSnapshotsOnStart(f, "0.1.0", "0.2.0");
+  serviceSnapshotsOnStart(f, 1, 2);
   const oldLogs = f.record().configuration.stdoutPath;
   const result = await f.upgrade();
   assert.equal(result.code, 0, result.stderr);
@@ -954,7 +954,7 @@ test("upgrade stops, re-renders, starts and checks readiness in order, reporting
     { id: "codex-login", status: "pass" },
     { id: "claude-token", status: "not-configured" },
   ]);
-  assert.match(basename(report.snapshot), /^startup\.0\.1\.0-to-0\.2\.0\./);
+  assert.match(basename(report.snapshot), /^startup\.1-to-2\./);
   assert.equal(verifySnapshot(report.snapshot), 0);
   assert.equal(f.record().version, "0.2.0");
   assert.equal(f.record().plistSha256, sha256(f.activation));
@@ -971,7 +971,7 @@ test("upgrade stops, re-renders, starts and checks readiness in order, reporting
 
 test("an upgrade failing at start leaves the job stopped and reports the service's snapshot", async (t) => {
   const f = await installed(t);
-  serviceSnapshotsOnStart(f, "0.1.0", "0.2.0");
+  serviceSnapshotsOnStart(f, 1, 2);
   f.launchd.failBootstrap = true;
   const result = await f.upgrade();
   assert.equal(result.code, 1);
@@ -989,8 +989,8 @@ test("an upgrade failing at start leaves the job stopped and reports the service
   f.launchd.clock += 60_000;
   const retry = await f.upgrade();
   assert.equal(retry.code, 0, retry.stderr);
-  // The retried start reuses the verified snapshot, and the upgrade still reports it.
-  assert.equal(retry.report.snapshot, report.snapshot);
+  // The retried start reuses the verified snapshot, which the failed attempt already reported.
+  assert.equal(retry.report.snapshot, null);
   assert.equal(readdirSync(f.snapshots).length, 1);
   assert.equal(f.launchd.jobs.size, 1);
   assert.equal(existsSync(f.activation), true);
@@ -998,7 +998,7 @@ test("an upgrade failing at start leaves the job stopped and reports the service
 
 test("an upgrade failing readiness boots out the new job and removes the activation", async (t) => {
   const f = await installed(t);
-  serviceSnapshotsOnStart(f, "0.1.0", "0.2.0");
+  serviceSnapshotsOnStart(f, 1, 2);
   f.setChecks([{ id: "codex-login", status: "fail" }]);
   const result = await f.upgrade();
   assert.equal(result.code, 1);
@@ -1095,17 +1095,13 @@ test("an upgrade whose service refuses to start without a snapshot reports none 
   assert.deepEqual(readdirSync(f.snapshots), []);
 });
 
-test("an upgrade to the release the service last started reports no snapshot", async (t) => {
+test("an upgrade whose start had no pending migrations reports no snapshot", async (t) => {
   const f = await installed(t);
-  const stale = join(
-    f.snapshots,
-    "startup.0.1.0-to-0.2.0.20260101T000000000Z-0000",
-  );
+  const stale = join(f.snapshots, "startup.1-to-2.20260101T000000000Z-0000");
   writeStartupState(f, {
-    release: "0.2.0",
     snapshot: {
-      from: "0.1.0",
-      to: "0.2.0",
+      from: 1,
+      to: 2,
       path: stale,
       verifiedAt: new Date().toISOString(),
     },
@@ -1113,6 +1109,32 @@ test("an upgrade to the release the service last started reports no snapshot", a
   const result = await f.upgrade();
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.report.snapshot, null);
+});
+
+test("release versions compare by semantic-version precedence", () => {
+  const ordered = [
+    "0.1.0",
+    "0.1.1-live.980",
+    "0.1.1",
+    "0.2.0",
+    "1.0.0-alpha",
+    "1.0.0-alpha.1",
+    "1.0.0-alpha.beta",
+    "1.0.0-beta",
+    "1.0.0-beta.2",
+    "1.0.0-beta.11",
+    "1.0.0-rc.1",
+    "1.0.0",
+  ];
+  for (const [index, left] of ordered.entries())
+    for (const [other, right] of ordered.entries())
+      assert.equal(
+        Math.sign(compareReleaseVersions(left, right)),
+        Math.sign(index - other),
+        `${left} vs ${right}`,
+      );
+  assert.equal(compareReleaseVersions("1.0.0+a", "1.0.0+b"), 0);
+  assert.throws(() => compareReleaseVersions("1.0", "1.0.0"), /semantic/);
 });
 
 test("upgrade refuses an older release before stopping anything", async (t) => {

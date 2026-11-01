@@ -735,9 +735,9 @@ export function AssignmentRecovery(
                   </a>,
                   <a
                     key="c"
-                    href={`/app/tasks/${data.taskId}?assignment=${p.assignmentId}#history`}
+                    href={`/app/tasks/${data.taskId}?assignment=${p.assignmentId}`}
                   >
-                    Captured assignment history
+                    Assignment conversation
                   </a>,
                   <a key="d" href={inspect}>
                     Task detail

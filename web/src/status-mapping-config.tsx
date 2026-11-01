@@ -6,6 +6,8 @@ import {
   statusMappingBoundary,
   statusEventLabels,
   statusMappingCaveat,
+  jiraStatusMappingBoundary,
+  jiraStatusMappingCaveat,
 } from "../../src/operator/status-mapping-copy.js";
 import {
   statusMappingEvents,
@@ -13,6 +15,8 @@ import {
 } from "../../src/core/status-mapping-contracts.js";
 import {
   type FieldRead,
+  type JiraStatusView,
+  jiraStatusMappingPlan,
   statusFieldNodeId,
   statusMappingPlan,
 } from "./status-mapping-draft.js";
@@ -32,7 +36,10 @@ import {
 } from "./settings.js";
 import type { Values } from "./settings-changes.js";
 
-type StatusView = NonNullable<ProjectConfigurationData["statusMapping"]>;
+type StatusView = Exclude<
+  NonNullable<ProjectConfigurationData["statusMapping"]>,
+  { tracker: "jira" }
+>;
 const fieldErrorPath = (event: StatusMappingEvent) => `mapping.events.${event}`;
 
 export function StatusMappingPanel(
@@ -287,6 +294,123 @@ export function StatusMappingPanel(
         )}
       </Panel>
       <Aside title="Status mapping boundary" items={statusMappingBoundary} />
+    </>
+  );
+}
+
+/** The Jira status mapping: four typed status IDs, as in the readiness editor. */
+export function JiraStatusMappingPanel(p: TabProps & { view: JiraStatusView }) {
+  const { view, projectId } = p,
+    d = useDraft(p.drafts, `status-mapping.configure:${projectId}`),
+    saved = view.mapping,
+    initial: Values = {
+      expectedVersion: String(view.version),
+      ...Object.fromEntries(
+        statusMappingEvents.map((e) => [e, saved?.events[e] ?? ""]),
+      ),
+    };
+  useLoadedDraft(d, initial, p.loadedAt, view);
+  const granted = new Set(view.granted),
+    plan = jiraStatusMappingPlan({ saved, values: d.values }),
+    lines = plan.lines;
+  const command = {
+    type: "status-mapping.configure",
+    key: d.values.key,
+    projectId,
+    expectedVersion: Number(d.values.expectedVersion),
+    mapping: plan.mapping,
+  };
+  const errorPaths = Object.keys(d.errors).filter(
+    (k) => k.startsWith("mapping") && !k.startsWith("mapping.events."),
+  );
+  return (
+    <>
+      <Panel
+        id="status-mapping"
+        title="Status mapping"
+        description={
+          saved
+            ? "Moves the issue's Jira status from cab's work events"
+            : "Not set · cab does not change the issue's Jira status"
+        }
+      >
+        <form
+          onSubmit={(e) =>
+            void submitDraft(
+              e,
+              d,
+              p.client,
+              p.session,
+              command,
+              p.refreshConfiguration,
+              {},
+            )
+          }
+        >
+          <fieldset className="settings-rows" disabled={locked(d)}>
+            <legend className="sr-only">Jira status ID for each event</legend>
+            {statusMappingEvents.map((event) => {
+              const chosen = String(d.values[event] ?? "").trim();
+              return (
+                <div className="settings-row" key={event}>
+                  <DraftField
+                    draft={d}
+                    field={event}
+                    errorField={fieldErrorPath(event)}
+                    label={`${statusEventLabels[event]}${chosen && !granted.has(chosen) ? " (no grant)" : ""}`}
+                  />
+                  <p className="metadata muted">{statusEventHints[event]}</p>
+                </div>
+              );
+            })}
+            <p className="metadata muted">
+              Type a Jira status ID, as in the readiness rule. Leave an event
+              empty to write nothing for it.
+            </p>
+          </fieldset>
+          {errorPaths.length > 0 && (
+            <ul className="body error-text" role="alert">
+              {errorPaths.map((k) => (
+                <li key={k}>{d.errors[k]}</li>
+              ))}
+            </ul>
+          )}
+          <section
+            className="settings-changes"
+            aria-label="Status mapping changes"
+          >
+            <h3 className="small-heading">
+              Status mapping changes{lines.length ? ` · ${lines.length}` : ""}
+            </h3>
+            {lines.length ? (
+              <ul className="body">
+                {lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="metadata muted">
+                No changes yet. Save is available once something changes.
+              </p>
+            )}
+          </section>
+          <DraftOutcome
+            draft={d}
+            client={p.client}
+            session={p.session}
+            label="Save status mapping"
+            saveDisabled={lines.length === 0}
+            discard={() => reloadDraft(d, initial)}
+            refresh={p.refreshConfiguration}
+            review={() => d.adoptLatest(view.version, initial)}
+            caveat={jiraStatusMappingCaveat}
+          />
+        </form>
+      </Panel>
+      <Aside
+        title="Status mapping boundary"
+        items={jiraStatusMappingBoundary}
+      />
     </>
   );
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -104,4 +105,44 @@ test("Settings adds a glab credential, warns on an override, switches to a varia
   assert.equal((await cleared).postDataJSON().credentialRef, null);
   await section.getByText("GitLab credentials · not configured").waitFor();
   assert.deepEqual(f.service.domain().codeHostCredentials(), []);
+});
+
+test("Settings says a restart is needed once a running runtime has inherited the credential", async (_t, journey) => {
+  const previous = process.env.GITLAB_TOKEN;
+  journey.cleanup(async () => {
+    if (previous === undefined) delete process.env.GITLAB_TOKEN;
+    else process.env.GITLAB_TOKEN = previous;
+  }, "restore-GITLAB_TOKEN");
+  // In the environment when the service starts, so the runtimes inherit it.
+  process.env.GITLAB_TOKEN = "glpat-inherited-browser-311";
+  const glab = createFakeGlab();
+  journey.cleanup(async () => glab.close(), "fake-glab.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    glabExecutable: glab.executable,
+    gitlab: reader,
+  });
+  const section = page.getByRole("region", { name: "GitLab credentials" });
+  const restart = section.getByText(
+    "Restart the service so running runtimes exclude this credential.",
+  );
+  await section.getByText("GitLab credentials · not configured").waitFor();
+  assert.equal(await restart.count(), 0);
+  f.service.domain().execute({
+    actor: "operator",
+    key: randomUUID(),
+    type: "code-host-credential.configure",
+    codeHost: "gitlab",
+    host,
+    credentialRef: `glab:${host}`,
+  } as never);
+  await page.reload();
+  await restart.waitFor();
+  assert.equal(
+    (await page.locator("body").innerText()).includes(
+      "glpat-inherited-browser-311",
+    ),
+    false,
+  );
 });

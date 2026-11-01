@@ -23,7 +23,6 @@ import {
   DraftField,
   DraftOutcome,
   Panel,
-  key,
   locked,
   reloadDraft,
   submitDraft,
@@ -49,8 +48,12 @@ import {
   SourceHeading,
   sourceDetails,
 } from "./source-names.js";
+import {
+  useDropMatchedEdits,
+  useSettingsRows,
+  withKeys,
+} from "./settings-rows.js";
 import { Alert } from "./ui/alert.js";
-import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import {
   ProjectFieldOptions,
@@ -62,9 +65,6 @@ import {
 import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
 import { StatusMappingPanel } from "./status-mapping-config.js";
 import type { ObservationResource } from "./sync-placement.js";
-
-const withKeys = (rows: object[]) =>
-  JSON.stringify(rows.map((r) => ({ ...r, rowKey: key() })));
 
 export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const { data, projectId } = p,
@@ -115,31 +115,16 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const holdSave =
     known === undefined &&
     selections.some((r) => r.keep && !r.removed && typeof r.query === "string");
-  // An edit that now equals the saved value (another writer saved the same) is no edit: drop it
-  // so the form is clean and later reads apply.
-  const equalsSaved = (r: SourceRow) =>
-    r.keep &&
-    typeof r.query === "string" &&
-    known?.searches.find((x) => x.id === r.id)?.query === r.query;
-  const matchedSaved =
-    (d.phase === "editing" ||
-      d.phase === "conflict" ||
-      d.phase === "rejected") &&
-    selections.some(equalsSaved);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: act when a read makes an edit equal.
-  useEffect(() => {
-    if (!matchedSaved) return;
-    d.set(
-      "selections",
-      JSON.stringify(
-        selections.map((r) => {
-          if (!equalsSaved(r)) return r;
-          const { query: _v, queryBase: _b, ...rest } = r;
-          return rest;
-        }),
-      ),
-    );
-  }, [matchedSaved, known]);
+  useDropMatchedEdits(
+    d,
+    "selections",
+    "query",
+    (r) =>
+      r.keep &&
+      typeof r.query === "string" &&
+      known?.searches.find((x) => x.id === r.id)?.query === r.query,
+    known,
+  );
   const lines = sourceChanges(data.source, v, known),
     stale = staleSourceRows(data.source, v),
     duplicates = duplicateSourceIds(v),
@@ -182,148 +167,25 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
       d.notice = `Loaded the latest version. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed or replaced elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
     d.set("selections", rows.selections);
   };
-  const setRows = (field: string, rows: SourceRow[]) =>
-    d.set(field, JSON.stringify(rows));
-  const update = (
-    field: string,
-    index: number,
-    patch: SourceRow | undefined,
-    /** The row without the patch's keys, when the patch is undefined (an edit reverted). */
-    reverted?: SourceRow,
-  ) => {
-    const rows = parseRows(v[field]);
-    rows[index] = patch ? { ...rows[index], ...patch } : (reverted ?? {});
-    setRows(field, rows);
-  };
-  /** Undoing a removal drops the marker, so the row reads exactly as it was loaded. */
-  const toggleRemoved = (field: string, index: number) => {
-    const rows = parseRows(v[field]);
-    const { removed, ...rest } = rows[index] ?? {};
-    rows[index] = removed ? rest : { ...rest, removed: true };
-    setRows(field, rows);
-  };
-  const drop = (field: string, index: number) =>
-    setRows(
-      field,
-      parseRows(v[field]).filter((_, i) => i !== index),
-    );
-  const add = (field: string, row: SourceRow) =>
-    setRows(field, [...parseRows(v[field]), { ...row, rowKey: key() }]);
-  const rowError = (field: string, index: number, name: string) => {
-    const path = field === "conditions" ? "readiness.conditions" : field;
-    return (
-      d.errors[path] ||
-      d.errors[`${path}.${index}.${name}`] ||
-      d.errors[`${path}.${name}`]
-    );
-  };
-  const input = (
-    field: string,
-    index: number,
-    name: string,
-    label: string,
-    /** What shows until the operator edits the field. */
-    fallback = "",
-    /** Replaces the plain row update, for a saved value that tracks its baseline. */
-    change?: (value: string) => void,
-  ) => (
-    <label className="field body" htmlFor={`source-${field}-${index}-${name}`}>
-      {label}
-      <Input
-        className="control"
-        id={`source-${field}-${index}-${name}`}
-        aria-label={label}
-        aria-invalid={Boolean(rowError(field, index, name))}
-        aria-describedby={
-          rowError(field, index, name) ? `source-${field}-error` : undefined
-        }
-        value={String(parseRows(v[field])[index]?.[name] ?? fallback)}
-        onChange={(e) =>
-          change
-            ? change(e.target.value)
-            : update(field, index, { [name]: e.target.value })
-        }
-      />
-    </label>
-  );
-  /** A saved private value, editable once read; otherwise unavailable with a way to read it again. */
-  const savedValue = (
-    field: string,
-    index: number,
-    name: "query",
-    label: string,
-    unavailable: string,
-    baseline: string | undefined,
-  ) => {
-    const row = parseRows(v[field])[index];
-    const edited = typeof row?.[name] === "string";
-    // The text an edit started from; typing it back removes the edit, so the row is kept again.
-    const base = edited ? String(row?.[`${name}Base`] ?? "") : baseline;
-    if (baseline !== undefined || edited)
-      return (
-        <>
-          {input(field, index, name, label, baseline ?? "", (value) => {
-            const {
-              [name]: _value,
-              [`${name}Base`]: _base,
-              ...rest
-            } = row ?? {};
-            update(
-              field,
-              index,
-              value === (baseline ?? base ?? "")
-                ? undefined
-                : { [name]: value, [`${name}Base`]: base ?? "" },
-              rest,
-            );
-          })}
-          {edited && baseline !== undefined && baseline !== base && (
-            <p className="metadata muted" role="status">
-              This was changed elsewhere since you started editing. Saving
-              replaces it.
-            </p>
-          )}
-          {edited &&
-            baseline === undefined &&
-            !priv.state.pending &&
-            (priv.state.error !== null || privateData !== undefined) && (
-              <p className="body error-text" role="alert">
-                Couldn't check whether this changed elsewhere.{" "}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  aria-label={`Try again to check the ${label.toLowerCase()} for ${String(row?.id ?? "")}`}
-                  onClick={priv.refresh}
-                >
-                  Try again
-                </Button>
-              </p>
-            )}
-        </>
-      );
-    return (
-      <div className="field body">
-        <span>{label}</span>
-        <p className="metadata muted">
-          {priv.state.pending ? `Loading ${label.toLowerCase()}…` : unavailable}
-        </p>
-        <div>
-          <Button
-            type="button"
-            variant="secondary"
-            aria-label={`Try again to load the ${label.toLowerCase()} for ${String(parseRows(v[field])[index]?.id ?? "")}`}
-            aria-busy={priv.state.pending || undefined}
-            aria-disabled={priv.state.pending || undefined}
-            onClick={() => {
-              if (!priv.state.pending) priv.refresh();
-            }}
-          >
-            Try again
-          </Button>
-        </div>
-      </div>
-    );
-  };
+  const {
+    setRows,
+    update,
+    toggleRemoved,
+    drop,
+    add,
+    rowError,
+    input,
+    savedValue,
+  } = useSettingsRows({
+    draft: d,
+    priv,
+    privateRead: privateData !== undefined,
+    controlId: (field, index, name) => `source-${field}-${index}-${name}`,
+    errorId: (field) => `source-${field}-error`,
+    errorPath: (field) =>
+      field === "conditions" ? "readiness.conditions" : field,
+    rowName: "id",
+  });
   const errorText = (prefix: string, id: string, text: string): ReactNode =>
     Object.keys(d.errors).some((k) => k.startsWith(prefix)) && (
       <p id={id} className="body error-text" role="alert">
@@ -842,7 +704,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   return (
     <>
       {form}
-      {data.statusMapping && (
+      {data.statusMapping && !("tracker" in data.statusMapping) && (
         <StatusMappingPanel
           {...p}
           view={data.statusMapping}

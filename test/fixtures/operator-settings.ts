@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { insertExternalItem, insertSourceMembership } from "./source-rows.js";
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -209,13 +210,23 @@ export function seedImportedConflict(
   });
   f.service.domain().markImportedTask(taskId, nodeId, "R_PLACEMENT");
   f.seedPersistedState((db) => {
-    db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com',?,?,'R_PLACEMENT','owner/repo',?,'Imported','Body','open','[]',NULL,NULL)",
-    ).run(nodeId, taskId, issueNumber);
+    insertExternalItem(db, {
+      externalId: nodeId,
+      taskId,
+      containerId: "R_PLACEMENT",
+      containerName: "owner/repo",
+      number: issueNumber,
+      observedTitle: "Imported",
+      observedBody: "Body",
+      observedState: "open",
+      labels: "[]",
+    });
     for (const projectId of projectIds)
-      db.prepare(
-        "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'selection','github','github.com',?,'[]')",
-      ).run(projectId, nodeId);
+      insertSourceMembership(db, {
+        projectId,
+        selectionId: "selection",
+        externalId: nodeId,
+      });
   });
 }
 

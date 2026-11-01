@@ -76,7 +76,6 @@ why meant reassembling it across tabs, so the task view was hard to read.
   installation limits.
 - `cab logs` and the CLI history commands are unchanged; the CLI remains the full
   diagnostic view.
-- `docs/SPEC.md`, `design/DESIGN.md` and `docs/acceptance.md` describe the target. The
-  route crosswalks in `docs/design/ui02-foundation.md`, `ui06-configuration.md` and
-  `ui08-foundation.md`, and the user flows, describe the built History tab until the
-  conversation view ships and they are revised with it.
+- `docs/SPEC.md`, `design/DESIGN.md`, `docs/acceptance.md`, the route crosswalks in
+  `docs/design/ui02-foundation.md`, `ui06-configuration.md` and `ui08-foundation.md`,
+  and the user flows describe the conversation view as built.

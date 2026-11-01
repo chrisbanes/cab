@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "../fixtures/temp.js";
+import { waitForProcessGone } from "../fixtures/process-gone.js";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -203,20 +204,6 @@ async function waitForControlledGitEvent(
         })),
     )}`,
   );
-}
-
-async function waitForProcessGone(pid: number, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
-    }
-    if (Date.now() >= deadline)
-      throw new Error(`Git child ${pid} is alive ${timeoutMs}ms after SIGKILL`);
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-  }
 }
 
 async function fixture(
@@ -1446,6 +1433,7 @@ test("uncertain archive status keeps its archival hold across restart", async (t
   const failures: Parameters<
     NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
   >[0][] = [];
+  const failureObservedAt: number[] = [];
   const serviceOptions = {
     createInitialAssignment: false,
     workspaceManager: {
@@ -1453,8 +1441,10 @@ test("uncertain archive status keeps its archival hold across restart", async (t
       gitTimeoutMs: { "archive-status": 400 },
       gitTerminationGraceMs: 20,
       gitTerminationObservationMs: 40,
-      gitFailureObserver: (failure: (typeof failures)[number]) =>
-        failures.push(failure),
+      gitFailureObserver: (failure: (typeof failures)[number]) => {
+        failures.push(failure);
+        failureObservedAt.push(Date.now());
+      },
     },
   };
   const f = await fixture(serviceOptions, [
@@ -1553,17 +1543,34 @@ test("uncertain archive status keeps its archival hold across restart", async (t
       1,
     );
     const result = await archival;
-    const elapsedMs = Date.now() - ready.atMs;
-    assert.ok(elapsedMs < 400 + 20 + 40 + 500, `settled in ${elapsedMs}ms`);
+    const settledAt = Date.now();
+    const readyAt = ready.atMs;
+    const observedAt = failureObservedAt.at(-1);
+    const elapsedMs = settledAt - readyAt;
+    // Emitted before the bounds, so a failing run names the segment that overran: the Git
+    // timeout and cancellation (ready to failure observed) or the settle work after it.
     t.diagnostic(
       `bounded-git-archive-evidence ${JSON.stringify({
         readyToSettleMs: elapsedMs,
+        readyToFailureObservedMs:
+          observedAt === undefined ? null : observedAt - readyAt,
+        failureObservedToSettledMs:
+          observedAt === undefined ? null : settledAt - observedAt,
         configuredTimeoutMs: 400,
         termGraceMs: 20,
         observationMs: 40,
+        childExitObserved: failures.at(-1)?.childExitObserved,
         childExitSignal: failures.at(-1)?.childExitSignal,
       })}`,
     );
+    // The strict bound protects the timeout and cancellation. The settle work after it
+    // (persisting the held binding, the scheduler wake) varies with load, so it only has to
+    // finish well before a hang would.
+    assert.ok(
+      observedAt !== undefined && observedAt - readyAt < 400 + 20 + 40 + 500,
+      `Git timeout observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
+    );
+    assert.ok(elapsedMs < 5_000, `archival settled in ${elapsedMs}ms`);
     assert.equal(result.outcome, "retained");
     assert.equal(archiveWakeCount, 1);
     if (result.outcome === "retained") {
@@ -1571,12 +1578,20 @@ test("uncertain archive status keeps its archival hold across restart", async (t
       assert.equal(result.binding.gitUncertain, true);
       assert.match(result.reason, /timed-out during archive-status/);
     }
-    assert.deepEqual(failures.at(-1), {
-      operation: "archive-status",
-      kind: "timed-out",
-      childExitObserved: true,
-      childExitSignal: "SIGKILL",
-    });
+    // The child's exit is reported only when the OS delivers it inside the 40 ms window,
+    // which a loaded machine can miss. The escalation itself is asserted on the child: it
+    // dies, whatever the window saw (the controlled Git ignores SIGTERM, so only SIGKILL
+    // can end it).
+    const failure = failures.at(-1);
+    assert.deepEqual(
+      { operation: failure?.operation, kind: failure?.kind },
+      { operation: "archive-status", kind: "timed-out" },
+    );
+    assert.equal(
+      failure?.childExitSignal,
+      failure?.childExitObserved ? "SIGKILL" : null,
+    );
+    await waitForProcessGone(ready.pid);
     assert.equal(existsSync(repositoryBinding.workspacePath), true);
     assert.equal(
       (
@@ -1703,6 +1718,7 @@ test("service stop settles direct workspace provisioning before database close",
     NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
   >[0][] = [];
   const databaseOpenAtFailure: boolean[] = [];
+  const failureObservedAt: number[] = [];
   let observingService: StandaloneService | undefined;
   const f = await fixture({
     workspaceManager: {
@@ -1712,6 +1728,7 @@ test("service stop settles direct workspace provisioning before database close",
       gitTerminationObservationMs: 40,
       gitFailureObserver: (failure) => {
         failures.push(failure);
+        failureObservedAt.push(Date.now());
         const db = (observingService as unknown as { db?: DatabaseSync })?.db;
         databaseOpenAtFailure.push(db?.isOpen ?? false);
       },
@@ -1750,26 +1767,50 @@ test("service stop settles direct workspace provisioning before database close",
         event === "ready" && operation === "repository-identity",
     );
     assert.ok(ready.atMs !== undefined);
-    const [binding] = await Promise.all([provisioning, f.service.stop()]);
-    const elapsedMs = Date.now() - ready.atMs;
-    assert.ok(elapsedMs < 20 + 40 + 800, `settled in ${elapsedMs}ms`);
+    const [binding, stopSettledAt] = await Promise.all([
+      provisioning,
+      f.service.stop().then(() => Date.now()),
+    ]);
+    const readyAt = ready.atMs;
+    const observedAt = failureObservedAt.at(-1);
+    const elapsedMs = stopSettledAt - readyAt;
+    // Emitted before the bounds, so a failing run names the segment that overran: the Git
+    // cancellation (ready to failure observed) or the service teardown after it.
     t.diagnostic(
       `service-provision-stop-evidence ${JSON.stringify({
         readyToSettleMs: elapsedMs,
+        readyToFailureObservedMs:
+          observedAt === undefined ? null : observedAt - readyAt,
+        failureObservedToSettledMs:
+          observedAt === undefined ? null : stopSettledAt - observedAt,
         termGraceMs: 20,
         observationMs: 40,
+        childExitObserved: failures.at(-1)?.childExitObserved,
         childExitSignal: failures.at(-1)?.childExitSignal,
         databaseOpenAtChildExit: databaseOpenAtFailure.at(-1),
       })}`,
     );
+    // The strict bound protects cancellation; teardown after it only has to finish well
+    // before the 30 s Git timeout would have.
+    assert.ok(
+      observedAt !== undefined && observedAt - readyAt < 20 + 40 + 800,
+      `Git cancellation observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
+    );
+    assert.ok(elapsedMs < 5_000, `service stop settled in ${elapsedMs}ms`);
     assert.equal(binding.state, "held");
     assert.equal(binding.gitUncertain, true);
-    assert.deepEqual(failures.at(-1), {
-      operation: "repository-identity",
-      kind: "cancelled",
-      childExitObserved: true,
-      childExitSignal: "SIGKILL",
-    });
+    // Exit is reported only if the OS delivers it inside the 40 ms window; the child is
+    // asserted gone instead (the controlled Git ignores SIGTERM, so only SIGKILL ends it).
+    const failure = failures.at(-1);
+    assert.deepEqual(
+      { operation: failure?.operation, kind: failure?.kind },
+      { operation: "repository-identity", kind: "cancelled" },
+    );
+    assert.equal(
+      failure?.childExitSignal,
+      failure?.childExitObserved ? "SIGKILL" : null,
+    );
+    await waitForProcessGone(ready.pid);
     assert.deepEqual(databaseOpenAtFailure, [true]);
     assert.equal(
       controlled
@@ -2020,6 +2061,7 @@ test("service stop cancels startup workspace recovery and settles before databas
     NonNullable<WorkspaceManagerOptions["gitFailureObserver"]>
   >[0][] = [];
   const databaseOpenAtFailure: boolean[] = [];
+  const failureObservedAt: number[] = [];
   let observingService: StandaloneService | undefined;
   const serviceOptions = {
     createInitialAssignment: false,
@@ -2030,6 +2072,7 @@ test("service stop cancels startup workspace recovery and settles before databas
       gitTerminationObservationMs: 40,
       gitFailureObserver: (failure: (typeof failures)[number]) => {
         failures.push(failure);
+        failureObservedAt.push(Date.now());
         const db = (observingService as unknown as { db?: DatabaseSync })?.db;
         databaseOpenAtFailure.push(db?.isOpen ?? false);
       },
@@ -2102,20 +2145,29 @@ test("service stop cancels startup workspace recovery and settles before databas
               reject(
                 new Error("Startup recovery stop exceeded its cleanup bound"),
               ),
-            1500,
+            5_000,
           );
         }),
       ]);
     } finally {
       if (timeout) clearTimeout(timeout);
     }
-    const elapsedMs = Date.now() - ready.atMs;
-    assert.ok(elapsedMs < 20 + 40 + 800, `settled in ${elapsedMs}ms`);
+    const settledAt = Date.now();
+    const readyAt = ready.atMs;
+    const observedAt = failureObservedAt.at(-1);
+    const elapsedMs = settledAt - readyAt;
+    // Emitted before the bounds, so a failing run names the segment that overran: the Git
+    // cancellation (ready to failure observed) or the startup and stop work after it.
     t.diagnostic(
       `startup-recovery-stop-evidence ${JSON.stringify({
         readyToSettleMs: elapsedMs,
+        readyToFailureObservedMs:
+          observedAt === undefined ? null : observedAt - readyAt,
+        failureObservedToSettledMs:
+          observedAt === undefined ? null : settledAt - observedAt,
         termGraceMs: 20,
         observationMs: 40,
+        childExitObserved: failures.at(-1)?.childExitObserved,
         childExitSignal: failures.at(-1)?.childExitSignal,
         databaseOpenAtChildExit: databaseOpenAtFailure.at(-1),
         startupOutcome: results[0]?.status,
@@ -2130,13 +2182,29 @@ test("service stop cancels startup workspace recovery and settles before databas
             : undefined,
       })}`,
     );
+    // The strict bound protects cancellation; the startup and stop work after it only has
+    // to finish well before the 30 s Git timeout would have.
+    assert.ok(
+      observedAt !== undefined && observedAt - readyAt < 20 + 40 + 800,
+      `Git cancellation observed ${observedAt === undefined ? "never" : observedAt - readyAt}ms after ready`,
+    );
+    assert.ok(
+      elapsedMs < 5_000,
+      `startup recovery stop settled in ${elapsedMs}ms`,
+    );
     assert.equal(results[0]?.status, "rejected");
-    assert.deepEqual(failures.at(-1), {
-      operation: "repository-identity",
-      kind: "cancelled",
-      childExitObserved: true,
-      childExitSignal: "SIGKILL",
-    });
+    // Exit is reported only if the OS delivers it inside the 40 ms window; the child is
+    // asserted gone instead (the controlled Git ignores SIGTERM, so only SIGKILL ends it).
+    const failure = failures.at(-1);
+    assert.deepEqual(
+      { operation: failure?.operation, kind: failure?.kind },
+      { operation: "repository-identity", kind: "cancelled" },
+    );
+    assert.equal(
+      failure?.childExitSignal,
+      failure?.childExitObserved ? "SIGKILL" : null,
+    );
+    await waitForProcessGone(ready.pid);
     assert.deepEqual(databaseOpenAtFailure, [true]);
     assert.equal(results[1]?.status, "fulfilled");
     assert.equal(runtimeFactoryCalls, 0);

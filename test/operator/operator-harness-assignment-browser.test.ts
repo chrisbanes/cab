@@ -172,17 +172,11 @@ for (const [name, viewport] of [
       ))
       assert.ok(box >= 44 || viewport === desktop, `link height ${box}`);
 
-    await worker.getByRole("button").first().click();
-    const details = page.locator(
-      `#history details[data-record-id="${ids.workerId}"]`,
-    );
+    const details = worker.locator("details.assignment-facts");
+    await details.locator("> summary").click();
     await details
       .getByText(/^Execution: Claude · sonnet · high · work /)
       .waitFor();
-    assert.equal(
-      await details.getByRole("link", { name: "Edit profile" }).count(),
-      1,
-    );
     await details.getByText("Effective execution policy · Claude").click();
     await details
       .getByText(
@@ -227,7 +221,7 @@ for (const [name, viewport] of [
     await captureBrowserEvidence(page, `${name}-recovery-harness`);
   });
 
-test("Codex assignment history states the command network access each turn was admitted with", async (_t, journey) => {
+test("Codex assignment facts state the command network access each turn was admitted with", async (_t, journey) => {
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
   );
@@ -246,8 +240,8 @@ test("Codex assignment history states the command network access each turn was a
   const disclosure =
     "Network-enabled commands can reach whatever credentials and logins the host exposes.";
   const line = (text: string) =>
-    page.locator("#history").getByText(text, { exact: true }).first();
-  // The history details stay collapsed, so the lines are attached rather than visible.
+    page.locator("#assignments").getByText(text, { exact: true }).first();
+  // The assignment facts stay collapsed, so the lines are attached rather than visible.
   const attached = { state: "attached" } as const;
 
   await signIn(page, web, `/app/tasks/${ids.taskId}`);
@@ -258,7 +252,7 @@ test("Codex assignment history states the command network access each turn was a
   await line(disclosure).waitFor(attached);
   assert.equal(
     await page
-      .locator("#history")
+      .locator("#assignments")
       .getByText("Admitted with command network access enabled.")
       .count(),
     0,
@@ -274,9 +268,9 @@ test("Codex assignment history states the command network access each turn was a
   await openOverviewCard(page, "assignments");
   await line("Admitted with command network access enabled.").waitFor(attached);
   // Claude turns always deny it, so they carry no turn line of their own.
-  const claude = page.locator(
-    `#history details[data-record-id="${ids.workerId}"]`,
-  );
+  const claude = page.locator("#assignments .assignment-row", {
+    hasText: "Claude worker",
+  });
   await claude.waitFor(attached);
   assert.equal(
     await claude.getByText(/Admitted with command network access/).count(),

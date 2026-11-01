@@ -31,10 +31,12 @@ const reasonCopy: Record<
   "glab-not-installed": "glab is not installed for the service",
   "glab-not-signed-in":
     "glab is not signed in to this host · run glab auth login",
+  "glab-unreachable": "glab could not reach this host",
   "glab-unreadable": "the glab login could not be read",
   unauthorized: "GitLab rejected the credential",
   forbidden: "the credential cannot read this host",
   "rate-limited": "GitLab's rate limit was reached",
+  unreachable: "this GitLab host could not be reached",
   unreadable: "GitLab could not be read",
 };
 
@@ -139,6 +141,11 @@ export function GitLabCredentialsSection(p: SettingsProps) {
           )}
         </article>
       ))}
+      {status.state.data?.data.restartRequired && (
+        <p className="metadata" role="status">
+          Restart the service so running runtimes exclude this credential.
+        </p>
+      )}
       {!credentials && (
         <p className="metadata">
           {status.state.error ? "Status unavailable" : "Loading"}

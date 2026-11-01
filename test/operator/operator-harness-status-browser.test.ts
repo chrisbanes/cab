@@ -686,7 +686,7 @@ for (const [name, viewport] of [
       claudeEnabled,
     );
     for (const [runtime, count] of [
-      ["Codex", 3],
+      ["Codex", 4],
       ["Claude", 16],
     ] as const) {
       const row = runtimeRow(page, runtime),

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DomainPolicyError, type DomainStore } from "../core/domain.js";
 import {
@@ -26,13 +27,21 @@ import type {
 } from "./code-host.js";
 import { type AdoptFunction, adoptOutsideHead } from "./git-fetch.js";
 import { pushTaskCommit } from "./git-push.js";
-import type {
-  AdoptionContext,
-  PrIdentity,
-  PublicationContext,
-  PushFunction,
+import {
+  type AdoptionContext,
+  type PrIdentity,
+  type PublicationContext,
+  type PushFunction,
+  mergeGateReasons,
 } from "./github-delivery.js";
 import { type GitLabSeams, codeHostToken } from "./gitlab-credentials.js";
+import {
+  type RateLimitPolicy,
+  TtlCache,
+  cacheTtlMs,
+  fetchRateLimited,
+  readJson,
+} from "./gitlab-http.js";
 
 /** A non-2xx response. Only the status is kept: never a body or a header. */
 class GitLabFailure extends Error {
@@ -60,6 +69,8 @@ const mergeRequestSchema = z.object({
   ...mergeRequestFields,
   state: z.enum(["opened", "locked", "merged", "closed"]),
   diff_refs: z.object({ base_sha: sha.nullable() }).nullable(),
+  detailed_merge_status: z.string().nullish(),
+  merge_when_pipeline_succeeds: z.boolean().nullish(),
   head_pipeline: z
     .object({
       id: z.number().int(),
@@ -88,6 +99,18 @@ const discussionSchema = z.object({
   individual_note: z.boolean(),
   notes: z.array(noteSchema).min(1),
 });
+/** The project settings that decide how a merge request may merge. */
+const projectSchema = z.object({
+  id: z.number().int(),
+  path_with_namespace: z.string(),
+  squash_option: z.string().nullish(),
+  merge_trains_enabled: z.boolean().nullish(),
+});
+/** A merge train car's status; only the status is read. */
+const trainCarSchema = z.object({ status: z.string() });
+/** A car still holding the merge request in the train. */
+const trainPending = ["idle", "fresh", "stale", "merging"];
+const trainPendingReason = "provider-merge-train-pending";
 type Discussion = z.output<typeof discussionSchema>;
 type MergeRequest = z.output<typeof mergeRequestSchema>;
 
@@ -130,6 +153,7 @@ type ChangeRequestAction = Extract<
       | "pr.create"
       | "pr.edit"
       | "pr.ready"
+      | "pr.merge"
       | "pr.thread.reply"
       | "pr.thread.resolve";
   }
@@ -138,6 +162,7 @@ const changeRequestKinds: readonly string[] = [
   "pr.create",
   "pr.edit",
   "pr.ready",
+  "pr.merge",
   "pr.thread.reply",
   "pr.thread.resolve",
 ];
@@ -149,11 +174,20 @@ export interface GitLabDeliveryOptions {
   host: string;
   /** The project's linked GitLab project on `host` for a numeric ID, or null when it is not linked. */
   link: (repositoryId: string) => { projectPath: string } | null;
-  /** The host's code-host credential, resolved on every use; null when it is unusable. */
+  /** The host's code-host credential; null when it is unusable. A `glab:` login's token is kept briefly by the service. */
   token: () => Promise<string | null>;
   fetcher?: typeof fetch | undefined;
   push?: PushFunction | undefined;
   adopt?: AdoptFunction | undefined;
+  /** How a request waits out a 429; see `RateLimitPolicy`. */
+  rateLimit?: RateLimitPolicy | undefined;
+  /** What the service reuses between its providers: the project's settings and the token's account. */
+  cache?: TtlCache | undefined;
+  /**
+   * Called when GitLab answers 401, to forget a credential it kept. When it returns true the request is sent
+   * once more with a fresh credential.
+   */
+  reauthenticate?: (() => boolean) | undefined;
 }
 
 /**
@@ -177,6 +211,17 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       throw new Error("provider-credential-unavailable");
     return token;
   }
+  /** The account the credential acts as; read once per token, since it changes only with the token. */
+  private async account() {
+    const load = async () => userId.parse(await this.get("/user"));
+    if (!this.options.cache) return load();
+    const token = await this.token();
+    return this.options.cache.get(
+      `account|${this.options.host}|${createHash("sha256").update(token).digest("hex")}`,
+      cacheTtlMs.account,
+      load,
+    );
+  }
   /** For Git: a credential that vanished after preflight is an empty token, which the transport reports as not attempted. */
   private transportToken(): Promise<string> {
     return this.token().catch(() => "");
@@ -187,20 +232,40 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     path: string,
     body?: unknown,
   ): Promise<Response> {
-    const token = await this.token();
     const url = new URL(path, this.origin);
     if (url.origin !== this.origin) throw new Error("provider-origin-mismatch");
-    const response = await (this.options.fetcher ?? fetch)(url.href, {
-      method,
-      redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/json",
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    let response: Response;
+    for (let reauthenticated = false; ; ) {
+      const token = await this.token();
+      // A 429 was not processed, so even a write is sent again once the limit clears.
+      response = await fetchRateLimited(
+        this.options.fetcher ?? fetch,
+        url.href,
+        () => ({
+          method,
+          redirect: "manual",
+          signal: AbortSignal.timeout(15_000),
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: "application/json",
+            ...(body === undefined
+              ? {}
+              : { "content-type": "application/json" }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }),
+        this.options.rateLimit,
+      );
+      // A credential kept from before may have been revoked or have expired: resolve it again, once.
+      if (
+        response.status !== 401 ||
+        reauthenticated ||
+        !this.options.reauthenticate?.()
+      )
+        break;
+      reauthenticated = true;
+      await response.body?.cancel().catch(() => {});
+    }
     // A redirect could carry the token to another origin.
     if (
       response.redirected ||
@@ -217,7 +282,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     return response;
   }
   private async get(path: string): Promise<unknown> {
-    return (await this.send("GET", `/api/v4${path}`)).json();
+    return readJson(await this.send("GET", `/api/v4${path}`));
   }
   /** A write whose response is never trusted: an independent read settles it. */
   private async write(
@@ -237,7 +302,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         "GET",
         `/api/v4${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${next}`,
       );
-      rows.push(...z.array(z.unknown()).parse(await response.json()));
+      rows.push(...z.array(z.unknown()).parse(await readJson(response)));
       next = response.headers.get("x-next-page") || null;
       if (next !== null && !/^[1-9][0-9]{0,5}$/.test(next))
         throw new Error("provider-pages-unreadable");
@@ -247,11 +312,20 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
   }
   /** The project the link names, confirmed by the API; its path is the one Git uses. */
   private async project(repositoryId: string) {
+    return (await this.projectInfo(repositoryId)).path_with_namespace;
+  }
+  /** `fresh` reads the project again: a merge decides on its settings as they are now, not as they were. */
+  private async projectInfo(repositoryId: string, fresh = false) {
     const link = this.options.link(repositoryId);
     if (!link) throw new Error("provider-repository-mismatch");
-    const value = z
-      .object({ id: z.number().int(), path_with_namespace: z.string() })
-      .parse(await this.get(`/projects/${repositoryId}`));
+    const key = `project|${this.options.host}|${repositoryId}`;
+    if (fresh) this.options.cache?.delete(key);
+    const load = async () =>
+      projectSchema.parse(await this.get(`/projects/${repositoryId}`));
+    // The link is compared on every use, so a cached read can never stand in for another project.
+    const value = this.options.cache
+      ? await this.options.cache.get(key, cacheTtlMs.project, load)
+      : await load();
     if (
       String(value.id) !== repositoryId ||
       value.path_with_namespace.toLowerCase() !==
@@ -259,7 +333,7 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       !isGitLabProjectPath(value.path_with_namespace)
     )
       throw new Error("provider-repository-mismatch");
-    return value.path_with_namespace;
+    return value;
   }
   private remoteFor(repositoryId: string, projectPath: string): BranchRemote {
     return {
@@ -285,22 +359,31 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
           return null;
         }
       },
-      push: async (request) =>
-        (this.options.push ?? pushTaskCommit)({
+      push: async (request) => {
+        const outcome = await (this.options.push ?? pushTaskCommit)({
           ...request,
           host: this.options.host,
           codeHost: "gitlab",
           nameWithOwner: projectPath,
           token: await this.transportToken(),
-        }),
-      adopt: async (request) =>
-        (this.options.adopt ?? adoptOutsideHead)({
+        });
+        // Git does not say why it failed: resolve the credential again for the next attempt.
+        if (["not-attempted", "rejected-remote", "uncertain"].includes(outcome))
+          this.options.reauthenticate?.();
+        return outcome;
+      },
+      adopt: async (request) => {
+        const outcome = await (this.options.adopt ?? adoptOutsideHead)({
           ...request,
           host: this.options.host,
           codeHost: "gitlab",
           nameWithOwner: projectPath,
           token: await this.transportToken(),
-        }),
+        });
+        if (["not-attempted", "fetch-failed"].includes(outcome))
+          this.options.reauthenticate?.();
+        return outcome;
+      },
     };
   }
   private readonly remotes: BranchRemotes = {
@@ -375,14 +458,18 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
   }
   async preflight(
     action: ExternalAction,
-    _policy: DeliveryPolicy,
+    policy: DeliveryPolicy,
     publication?: PublicationContext,
     adoption?: AdoptionContext,
   ): ReturnType<CodeHostDeliveryProvider["preflight"]> {
     if (!isBranchAction(action) && !isChangeRequestAction(action))
       throw new Error("provider-action-unsupported");
     const repositoryId = action.target.repositoryId;
-    const projectPath = await this.project(repositoryId);
+    const project = await this.projectInfo(
+      repositoryId,
+      action.kind === "pr.merge",
+    );
+    const projectPath = project.path_with_namespace;
     const recorded = {
       repositoryPath: `/projects/${repositoryId}`,
       projectPath,
@@ -443,6 +530,34 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         threadNodeId: thread.nodeId,
         latestCommentNodeId: thread.latestCommentNodeId,
         isResolved: thread.isResolved,
+      };
+    }
+    if (action.kind === "pr.merge") {
+      const observation = await this.observe(
+        project,
+        {
+          repositoryId,
+          prNumber: action.target.number,
+          expectedPrNodeId: action.target.nodeId,
+          expectedHeadSha: action.target.expectedHeadSha,
+        },
+        policy,
+      );
+      if (
+        observation.headSha !== action.target.expectedHeadSha ||
+        observation.baseRef !== action.target.baseRef ||
+        observation.headRef !== action.target.headRef
+      )
+        throw new Error("provider-head-changed");
+      if (
+        observation.mergeBlockers.length ||
+        !observation.allowedMethods.includes(action.method)
+      )
+        throw new Error("provider-merge-gates-held");
+      return {
+        ...recorded,
+        headSha: observation.headSha,
+        mergeTrain: project.merge_trains_enabled === true,
       };
     }
     const mr = await this.targetMergeRequest(action.target);
@@ -514,6 +629,22 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
             await response.body?.cancel().catch(() => {});
           }
           break;
+        case "pr.merge": {
+          const train = record.beforeState?.mergeTrain === true;
+          // The sha makes GitLab refuse a head that moved; auto_merge false keeps cab from queueing a merge.
+          await this.write(
+            train ? "POST" : "PUT",
+            train
+              ? `/projects/${id}/merge_trains/merge_requests/${a.target.number}`
+              : `${requests}/${a.target.number}/merge`,
+            {
+              sha: a.target.expectedHeadSha,
+              squash: a.method === "squash",
+              auto_merge: false,
+            },
+          );
+          break;
+        }
         case "pr.thread.reply":
           await this.write(
             "POST",
@@ -567,8 +698,9 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       throw new Error("provider-action-unsupported");
     try {
       const id = a.target.repositoryId;
+      if (a.kind === "pr.merge") return await this.inspectMerge(record, a);
       const marker = `<!-- cab-operation:${record.operationId} -->`;
-      const user = userId.parse(await this.get("/user"));
+      const user = await this.account();
       let receipt: ProviderActionObservation["receipt"] = null;
       if (a.kind === "pr.create") {
         const query = new URLSearchParams({
@@ -653,17 +785,92 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
     } catch {
       return {
         state: "uncertain",
-        reason: "provider-readback-unavailable",
+        // A failed read must not forget that the train was seen holding the merge.
+        reason:
+          record.observation?.reason === trainPendingReason
+            ? trainPendingReason
+            : "provider-readback-unavailable",
         receipt: null,
       };
     }
   }
+  /** A merge's outcome: merged, held by the merge train, dropped from it, or unproved. */
+  private async inspectMerge(
+    record: DeliveryActionRecord,
+    a: Extract<ExternalAction, { kind: "pr.merge" }>,
+  ): Promise<ProviderActionObservation> {
+    const train = record.beforeState?.mergeTrain === true;
+    // The car is read before the merge request, so a car that merged in between shows as merged, never as dropped.
+    const car = train
+      ? await this.get(
+          `/projects/${a.target.repositoryId}/merge_trains/merge_requests/${a.target.number}`,
+        ).then(
+          (v) => trainCarSchema.parse(v).status,
+          (error) => {
+            if (error instanceof GitLabFailure && error.status === 404)
+              return null;
+            throw error;
+          },
+        )
+      : null;
+    // A head that moved is read, not refused: pushing to the branch is how GitLab drops a request from the train.
+    const mr = await this.boundMergeRequest(a.target);
+    if (
+      mr.source_branch !== a.target.headRef ||
+      mr.target_branch !== a.target.baseRef
+    )
+      throw new Error("provider-head-changed");
+    if (mr.state === "merged") {
+      if (mr.sha !== a.target.expectedHeadSha)
+        throw new Error("provider-head-changed");
+      return {
+        state: "confirmed-success",
+        reason: null,
+        receipt: {
+          nodeId: String(mr.id),
+          number: mr.iid,
+          headSha: mr.sha,
+          merged: true,
+        },
+      };
+    }
+    const uncertain = (reason: string) => ({
+      state: "uncertain" as const,
+      reason,
+      receipt: null,
+    });
+    // GitLab reports a request on a train as auto-merge set, so the car decides before that flag does.
+    if (car !== null && trainPending.includes(car))
+      return uncertain(trainPendingReason);
+    // Dropped is concluded only for a merge the train was seen holding, whatever auto-merge says since.
+    if (train && record.observation?.reason === trainPendingReason)
+      return {
+        state: "confirmed-failure",
+        reason: "provider-merge-train-dropped",
+        receipt: null,
+      };
+    return uncertain(
+      mr.merge_when_pipeline_succeeds
+        ? "provider-auto-merge-set"
+        : "provider-effect-unproved",
+    );
+  }
   async inspectPr(
     identity: PrIdentity,
-    _policy: DeliveryPolicy,
+    policy: DeliveryPolicy,
+  ): Promise<PrDeliveryObservation> {
+    return this.observe(
+      await this.projectInfo(identity.repositoryId),
+      identity,
+      policy,
+    );
+  }
+  private async observe(
+    project: z.output<typeof projectSchema>,
+    identity: PrIdentity,
+    policy: DeliveryPolicy,
   ): Promise<PrDeliveryObservation> {
     const id = identity.repositoryId;
-    await this.project(id);
     const mr = await this.boundMergeRequest({
       repositoryId: id,
       nodeId: identity.expectedPrNodeId,
@@ -699,6 +906,48 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
         a.kind.localeCompare(b.kind) || a.nodeId.localeCompare(b.nodeId),
     );
     reviewThreads.sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+    const checks: PrDeliveryObservation["checks"] = pipeline
+      ? [
+          {
+            name: "pipeline",
+            appId: null,
+            sha: pipeline.sha,
+            status: pipelineStatus(pipeline.status),
+            nodeId: String(pipeline.id),
+            updatedAt:
+              pipeline.finished_at ?? pipeline.started_at ?? "unproved",
+          },
+        ]
+      : [];
+    // The project's merge method decides the commit shape; rebase is a separate API cab does not call.
+    const allowedMethods: PrDeliveryObservation["allowedMethods"] = [
+      ...(project.squash_option === "always" ? [] : (["merge"] as const)),
+      ...(project.squash_option === "never" ? [] : (["squash"] as const)),
+    ];
+    // GitLab's own verdict covers approvals, discussions and pipelines; cab's required checks still apply.
+    const mergeBlockers = mergeGateReasons({
+      draft: mr.draft,
+      merged: mr.state === "merged",
+      state: mr.state === "opened" ? "OPEN" : "CLOSED",
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      queue: false,
+      reviewDecision: null,
+      unresolvedThreads: false,
+      headSha: mr.sha,
+      baseSha: mr.diff_refs.base_sha,
+      strict: false,
+      deployments: [],
+      requiredEnvironments: [],
+      checks,
+      requiredChecks: policy.requiredChecks,
+      unsupportedRules: [],
+      allowedMethods,
+    });
+    if (mr.detailed_merge_status !== "mergeable")
+      mergeBlockers.push(
+        `merge-status-${mr.detailed_merge_status ?? "unproved"}`,
+      );
     return prObservationSchema.parse({
       repositoryId: id,
       nodeId: String(mr.id),
@@ -716,43 +965,37 @@ export class GitLabHttpDeliveryProvider implements CodeHostDeliveryProvider {
       draft: mr.draft,
       merged: mr.state === "merged",
       reviewDecision: null,
-      checks: pipeline
-        ? [
-            {
-              name: "pipeline",
-              appId: null,
-              sha: pipeline.sha,
-              status: pipelineStatus(pipeline.status),
-              nodeId: String(pipeline.id),
-              updatedAt:
-                pipeline.finished_at ?? pipeline.started_at ?? "unproved",
-            },
-          ]
-        : [],
+      checks,
       feedback,
       reviewThreads,
-      // Merging a merge request is not delivered yet (#1315).
-      mergeBlockers: ["merge-unsupported"],
+      mergeBlockers,
       closedIssueNodeIds: [],
-      allowedMethods: [],
+      allowedMethods,
     });
   }
 }
 
 /**
  * Builds the GitLab provider for a project's repository link on `host`. The credential is the
- * installation's code-host credential for that host, read again on every use; it is only the
+ * installation's code-host credential for that host (an `env:` variable read on every use, a `glab:` login's
+ * token kept for a few minutes, see `cacheTtlMs`); it is only the
  * identity that acts, and the project's delivery grants still decide what may be done.
  */
 export function gitLabDeliveryFactory(
   domain: Pick<DomainStore, "repositoryLinks" | "codeHostCredentials"> &
+    Partial<Pick<DomainStore, "codeHostCredentialEpoch">> &
     Parameters<typeof codeHostToken>[0],
   seams: GitLabSeams & {
     fetcher?: typeof fetch | undefined;
     push?: PushFunction | undefined;
     adopt?: AdoptFunction | undefined;
+    rateLimit?: RateLimitPolicy | undefined;
+    /** Test-only: the clock the service's GitLab reads are kept by. */
+    now?: (() => number) | undefined;
   },
 ): CodeHostProviderFactory {
+  // One memory for the service: each action builds its own provider, and these reads outlive it.
+  const cache = new TtlCache(seams.now);
   return (projectId, _policy, host) =>
     new GitLabHttpDeliveryProvider({
       host,
@@ -769,9 +1012,27 @@ export function gitLabDeliveryFactory(
           ? { projectPath: link.projectPath }
           : null;
       },
-      token: () => codeHostToken(domain, seams, host),
+      // A `glab` login is resolved by running glab, which asks GitLab to check the token, so it is kept
+      // for a few minutes (and dropped on a 401). An `env:` variable is read as it is, every time.
+      token: () => {
+        const ref = domain
+          .codeHostCredentials()
+          .find((c) => c.host === host)?.credentialRef;
+        return ref?.startsWith("glab:")
+          ? cache.get(
+              // A credential configured again, even to the same reference, is resolved again.
+              `token|${host}|${ref}|${domain.codeHostCredentialEpoch?.() ?? 0}`,
+              cacheTtlMs.token,
+              () => codeHostToken(domain, seams, host),
+              (token) => token !== null,
+            )
+          : codeHostToken(domain, seams, host);
+      },
+      reauthenticate: () => cache.drop(`token|${host}|`),
       fetcher: seams.fetcher,
       push: seams.push,
       adopt: seams.adopt,
+      rateLimit: seams.rateLimit,
+      cache,
     });
 }

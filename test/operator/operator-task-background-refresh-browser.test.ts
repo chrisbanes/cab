@@ -10,10 +10,9 @@ import {
 } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
-import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("task-background-refresh-browser");
 
-test("a task workspace timer poll keeps history, position and status quiet; explicit Refresh still shows progress", async (_t, j) => {
+test("a task workspace timer poll keeps the conversation, position and status quiet; explicit Refresh still shows progress", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -51,18 +50,19 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   await page.goto(`${web.origin}/app/tasks/${a.taskId}?result=${r.resultId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  const history = page.locator("#history");
+  const conversation = page.locator("#conversation");
   const marker = (n: number | string) =>
-    history.getByText(`Retained marker ${n}`, { exact: true });
-  await marker(2).first().waitFor({ state: "attached" });
-  // The polls below run while History is the open tab.
-  await openTaskTab(page, "History");
-  await page
-    .getByRole("button", { name: "Expand all history", exact: true })
+    conversation.getByText(`Retained marker ${n}`, { exact: true });
+  // The worker's entries sit in its delegation, opened to read them.
+  await conversation
+    .locator(`[data-record-id="delegation:${r.assignmentId}"]`)
+    .getByRole("button")
+    .first()
     .click();
+  await marker(2).first().waitFor();
   await page.waitForLoadState("networkidle");
   const status = page.locator(".resource-status");
-  const openCount = () => page.locator("#history details[open]").count();
+  const openCount = () => conversation.locator(".conv-entry").count();
   const refresh = page.getByRole("button", {
     name: "Refresh task",
     exact: true,
@@ -71,12 +71,10 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   const opened = await openCount(),
     shown = await marker(2).count();
   assert.ok(shown > 0);
-  const unavailable = page.getByText("Recent captured text unavailable"),
-    unavailableCount = await unavailable.count();
   assert.ok(opened >= 3);
-  // Reading position inside the captured-context section, where record ids nest.
+  // Reading position inside the conversation, where record ids nest.
   await page
-    .locator("#context")
+    .locator("#conversation h3")
     .evaluate((el) =>
       scrollTo(0, el.getBoundingClientRect().top + scrollY - 90),
     );
@@ -84,15 +82,15 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   assert.ok(scrolled > 0);
   const refreshTop = await top();
 
-  // 1. An unchanged poll changes nothing visible, even while its history revalidates.
+  // 1. An unchanged poll changes nothing visible, even while its conversation revalidates.
   await watchDom(page);
   const taskRead = await holdResponse(
     page,
     `**/api/operator/tasks/${a.taskId}*`,
   );
-  const historyRead = await holdResponse(
+  const timelineRead = await holdResponse(
     page,
-    `**/api/operator/assignments/${r.assignmentId}/history*`,
+    `**/api/operator/tasks/${a.taskId}/timeline*`,
   );
   await page.clock.runFor(15000);
   await taskRead.entered;
@@ -102,19 +100,18 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   assert.equal(await top(), refreshTop);
   assert.deepEqual((await observedDom(page))?.changes, []);
   taskRead.release();
-  await historyRead.entered;
+  await timelineRead.entered;
   assert.equal(await marker(2).count(), shown);
   assert.equal(await openCount(), opened);
-  historyRead.release();
+  timelineRead.release();
   await settleReads(page);
   const quiet = await observedDom(page);
   assert.equal(quiet?.statusSeen, false);
   assert.deepEqual(quiet?.changes, []);
-  assert.equal(await unavailable.count(), unavailableCount);
   assert.equal(await top(), refreshTop);
   assert.equal(await page.evaluate(() => scrollY), scrolled);
   await taskRead.stop();
-  await historyRead.stop();
+  await timelineRead.stop();
 
   // 2. A failed poll discloses itself and keeps the last good content.
   const failing = await failResponses(
@@ -142,14 +139,9 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
     .getByText("Refreshing. Showing the last fetched data.", { exact: true })
     .first()
     .waitFor();
-  // The result stays mounted on Overview, behind the History tab.
   assert.equal(
     await page
-      .getByRole("heading", {
-        name: "Latest result",
-        exact: true,
-        includeHidden: true,
-      })
+      .getByRole("heading", { name: "Latest result", exact: true })
       .count(),
     1,
   );
@@ -160,26 +152,32 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
     () => document.querySelector(".resource-status") === null,
   );
 
-  // 4. A late history answer cannot replace a newer one.
+  // 4. A late conversation answer cannot replace a newer one.
   const late = await holdResponse(
     page,
-    `**/api/operator/assignments/${r.assignmentId}/history*`,
+    `**/api/operator/tasks/${a.taskId}/timeline*`,
   );
   await refresh.click();
   await late.entered;
   addHistory("NEW");
   await refresh.click();
-  await marker("NEW").first().waitFor({ state: "attached" });
+  await marker("NEW").first().waitFor();
   late.release();
   await page.waitForLoadState("networkidle");
   assert.ok((await marker("NEW").count()) > 0);
 
-  // 5. History that a poll cannot revalidate is hidden rather than kept.
+  // 5. A conversation that a poll cannot revalidate keeps its last validated entries, says
+  // they may be out of date, and Retry reads it again.
   const unreadable = await failResponses(
     page,
-    `**/api/operator/assignments/${r.assignmentId}/history*`,
+    `**/api/operator/tasks/${a.taskId}/timeline*`,
   );
   await page.clock.runFor(15000);
-  await marker(2).first().waitFor({ state: "detached" });
+  await page.getByText(/^The conversation could not be refreshed/).waitFor();
+  assert.ok((await marker(2).count()) > 0);
   await unreadable.stop();
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await page
+    .getByText(/^The conversation could not be refreshed/)
+    .waitFor({ state: "detached" });
 });

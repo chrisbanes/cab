@@ -105,11 +105,13 @@ owns delivery scope and status.
   operator CLI does not offer it.
 - **Status mapping.** A project can map four of cab's work events (first turn
   started, PR handed back, stopped or blocked, Done) to options of its linked GitHub
-  Project's Status, set on the GitHub source tab. The service writes them through the
-  delivery lifecycle under `allow` Project field grants, only for tasks already Ready (or Done once the issue is closed),
-  and skips a write when the card moved on GitHub since cab last saw it. The
-  operator CLI cannot edit the mapping; the writes show on the task and never hold it
-  ([ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
+  Project's Status, set on the GitHub source tab, or to Jira status IDs, set on the Jira
+  source tab. The service writes them through the delivery lifecycle under `allow` grants
+  (`project.field` for GitHub, `issue.status` for Jira), only for tasks already Ready (or
+  Done once the issue is closed), and skips a write when the card or issue moved since cab
+  last saw it; on Jira it also skips when the issue is already there or not exactly one
+  transition reaches the status. The operator CLI cannot edit the mapping; the writes
+  show on the task and never hold it ([ADR-1017](docs/adr/1017-non-agent-readiness-writes.md)).
 - **Publish to GitHub.** The operator can turn a never-started local task into a GitHub
   issue from task detail or the CLI (`delivery publish-review|publish-confirm|publish-send`),
   choosing a linked repository, or an unfiltered GitHub Project, after seeing the
@@ -128,7 +130,7 @@ owns delivery scope and status.
   captured context and separate local and GitHub replies. Search covers permitted
   retained tasks, decisions and results, with historical navigation and preserved
   return state.
-- **Assignment history.** Assignment pages show captured assistant messages for the
+- **Assignment conversation.** The task conversation shows captured assistant messages for the
   exact task, assignment and runtime turn. Only completed, sanitized text is
   retained; unfinished messages show progress metadata and omitted text is labelled.
   Known private instructions, credential values and control paths are redacted before
@@ -152,8 +154,8 @@ owns delivery scope and status.
 - **Operations.** `cab service install`, `upgrade` and `uninstall` manage a
   per-user macOS LaunchAgent bound to an unpacked release; upgrade stops the job,
   starts the new release and checks readiness, and a failure leaves the job
-  stopped. The service itself takes and verifies a snapshot before it migrates
-  data an older release wrote, and refuses to start without one. `service install --mode daemon` is an opt-in LaunchDaemon that starts at
+  stopped. The service itself takes and verifies a snapshot before it applies
+  pending migrations to existing data, and refuses to start without one. `service install --mode daemon` is an opt-in LaunchDaemon that starts at
   boot and prints the `sudo` steps to install it; its real-host behavior is unproved. `cab snapshot create|verify|restore` provides offline database
   backup, verification and restore
   ([standalone operations](docs/operations/standalone-macos.md)).
@@ -232,14 +234,6 @@ each acceptance scenario to its evidence and disposition.
   can remain held for reconciliation. See the
   [execution policy](docs/design/standalone.md#default-execution-policy) and
   [acceptance plan](docs/acceptance.md) for the boundaries and required evidence.
-- **Deferred integrations.** Optional ChatGPT daily operations/events and native Codex
-  task visibility/handover are deferred until after the standalone MVP. Planning,
-  probes and implementation are paused under
-  [epic #734](https://github.com/chrisbanes/cab/issues/734) until Chris explicitly
-  reopens the work; they do not gate release. Their requirements and unproved
-  feasibility evidence are retained in
-  [ADR-1006](docs/adr/1006-chatgpt-and-native-codex.md) and the
-  [integration design](docs/design/chatgpt-and-native-codex.md).
 
 ## Development
 

@@ -6,18 +6,20 @@ import type {
   StatusMappingStore,
   StatusMappingTaskState,
 } from "../core/status-mapping.js";
-import type {
-  StatusMapping,
-  StatusMappingEvent,
+import {
+  isJiraMapping,
+  type StatusMapping,
+  type StatusMappingEvent,
 } from "../core/status-mapping-contracts.js";
 import type { DeliveryCoordinator } from "./delivery.js";
 import type { ExecutionState } from "./state.js";
 
-type StatusMappingFields = {
-  projectNodeId: string;
-  fieldNodeId: string;
-  optionNodeId: string;
-}[];
+/** What the mapping last read of a task's status: the item (the issue itself for Jira) and the value, with when. */
+interface ObservedStatus {
+  itemNodeId: string;
+  value: string | null;
+  readAt: number | null;
+}
 
 export interface StatusMappingFacts {
   domain: DomainStore;
@@ -144,6 +146,10 @@ export class StatusMappingWriter {
             mapping,
             taskId,
             String(imported.nodeId),
+            this.sources.forTracker({
+              provider: String(imported.provider),
+              instance: String(imported.instance),
+            }),
           );
         } catch {
           // One task's failure leaves it to the next pass and does not stop the others.
@@ -169,6 +175,7 @@ export class StatusMappingWriter {
     mapping: StatusMapping,
     taskId: string,
     nodeId: string,
+    sources: GitHubSourceStore,
   ): Promise<void> {
     const { domain, deliveryStore, state: execution } = this.facts;
     // The mapping changed while this pass waited: its tasks are left to the next pass, under the new one.
@@ -194,21 +201,13 @@ export class StatusMappingWriter {
       state = this.mappings.taskState(taskId);
     }
     const option = event === "none" ? null : mapping.events[event];
-    const issue = this.sources.issue(nodeId);
+    const issue = sources.issue(nodeId);
     const item = issue
-      ? this.sources.membershipItem(projectId, mapping.selectionId, nodeId)
+      ? this.observation(sources, projectId, mapping, nodeId)
       : null;
     // While the task is Ready, a newer read of the item is what cab last observed.
     if (ready && item && (item.readAt ?? 0) > (state.observedAt ?? 0)) {
-      this.mappings.observed(
-        taskId,
-        item.projectFields.find(
-          (f) =>
-            f.projectNodeId === mapping.projectNodeId &&
-            f.fieldNodeId === mapping.fieldNodeId,
-        )?.optionNodeId ?? null,
-        item.readAt ?? Date.now(),
-      );
+      this.mappings.observed(taskId, item.value, item.readAt ?? Date.now());
       state = this.mappings.taskState(taskId);
     }
     // Done on closure: a done task whose issue is observed closed is not Ready but may still be
@@ -221,26 +220,35 @@ export class StatusMappingWriter {
       state.observedAt !== null;
     // A task first seen done was not worked on under the mapping: no Done write, Ready or not.
     const writable = (ready && (event !== "done" || state.watched)) || closing;
-    const request = (operationId: string) => ({
-      operationId,
-      action: {
-        kind: "project.field" as const,
-        target: {
-          repositoryId: String(issue?.repositoryId),
-          number: Number(issue?.issueNumber),
-          nodeId,
-        },
-        projectNodeId: mapping.projectNodeId,
-        itemNodeId: item?.itemNodeId ?? "",
-        fieldNodeId: mapping.fieldNodeId,
-        optionNodeId: option ?? "",
-        expected: {
-          optionNodeId: closing
-            ? state.observedOptionNodeId
-            : this.lastObserved(mapping, state, item),
-        },
-      },
-    });
+    const request = (operationId: string) => {
+      const target = {
+        repositoryId: String(issue?.repositoryId),
+        number: Number(issue?.issueNumber),
+        nodeId,
+      };
+      const expected = closing
+        ? state.observedOptionNodeId
+        : this.lastObserved(state, item);
+      return {
+        operationId,
+        action: isJiraMapping(mapping)
+          ? {
+              kind: "issue.status" as const,
+              target,
+              statusId: option ?? "",
+              expected: { statusId: expected },
+            }
+          : {
+              kind: "project.field" as const,
+              target,
+              projectNodeId: mapping.projectNodeId,
+              itemNodeId: item?.itemNodeId ?? "",
+              fieldNodeId: mapping.fieldNodeId,
+              optionNodeId: option ?? "",
+              expected: { optionNodeId: expected },
+            },
+      };
+    };
     const caller = (event: StatusMappingEvent) => ({
       actor: "service" as const,
       purpose: "status-mapping" as const,
@@ -285,25 +293,50 @@ export class StatusMappingWriter {
     await this.submit(request(operationId), caller(event));
   }
 
+  /** The task's status as the mapping's tracker last read it, or `null` when the issue has no item to write. */
+  private observation(
+    sources: GitHubSourceStore,
+    projectId: string,
+    mapping: StatusMapping,
+    nodeId: string,
+  ): ObservedStatus | null {
+    if (isJiraMapping(mapping)) {
+      const read = sources.membershipRead(projectId, nodeId);
+      return (
+        read && {
+          itemNodeId: nodeId,
+          value: read.statusId,
+          readAt: read.readAt,
+        }
+      );
+    }
+    const item = sources.membershipItem(projectId, mapping.selectionId, nodeId);
+    return (
+      item && {
+        itemNodeId: item.itemNodeId,
+        readAt: item.readAt,
+        value:
+          item.projectFields.find(
+            (f) =>
+              f.projectNodeId === mapping.projectNodeId &&
+              f.fieldNodeId === mapping.fieldNodeId,
+          )?.optionNodeId ?? null,
+      }
+    );
+  }
+
   /**
    * The Status cab last observed on the item: its last confirmed write, unless this item
    * was read after it (a partial read leaves an unread item's fields alone), else the stored
    * membership value (`null` is no value).
    */
   private lastObserved(
-    mapping: StatusMapping,
     state: StatusMappingTaskState,
-    item: { projectFields: StatusMappingFields; readAt: number | null } | null,
+    item: ObservedStatus | null,
   ): string | null {
     if (state.observedAt !== null && !((item?.readAt ?? 0) > state.observedAt))
       return state.observedOptionNodeId;
-    return (
-      item?.projectFields.find(
-        (f) =>
-          f.projectNodeId === mapping.projectNodeId &&
-          f.fieldNodeId === mapping.fieldNodeId,
-      )?.optionNodeId ?? null
-    );
+    return item?.value ?? null;
   }
 
   private async submit(

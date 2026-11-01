@@ -1,61 +1,27 @@
 ---
-status: accepted
+status: rejected
 ---
 
-# Add optional ChatGPT operations and native Codex tasks after the MVP
+# Do not build ChatGPT operations or native Codex tasks
 
-Both integrations are deferred until after the standalone MVP. Planning,
-feasibility probes and implementation are paused under
-[epic #734](https://github.com/chrisbanes/cab/issues/734) until Chris
-explicitly reopens the work and current APIs, requirements and dependencies are
-revalidated. Saved ChatGPT/Codex project placement is optional.
+cab will not add an optional ChatGPT plugin with subscribed events, nor present its
+tasks as native Codex tasks with human handover and return. The work was deferred
+after the MVP and is now withdrawn; its delivery issues under
+[epic #734](https://github.com/chrisbanes/cab/issues/734) are closed as not planned.
 
-The standalone MVP retains its web UI, Codex App Server execution, GitHub delivery,
-A01–A30/R01–R10 acceptance and operational recovery/reviewed cutover. X01–X08
-remain deferred acceptance and do not block MVP release or cutover. No unproved
-evidence is relabelled as passing. The contracts below describe the retained future
-capability, not MVP obligations or implemented behaviour.
+Native visibility and handover depend on a host API that does not exist: the
+inspected App Server and SDK surfaces expose standalone threads, not linked native
+workers, task navigation or an ownership handover
+([native feasibility](../evidence/x01-native-feasibility.md)). cab now runs more
+than one execution harness ([ADR-1008](1008-claude-code-execution-harness.md)), so a
+Codex-only view would cover part of its work, and the
+[task conversation view](1022-task-conversation-view.md) already makes worker
+conversations inspectable in cab.
 
-## Retained integration requirements
+The ChatGPT plugin would require a public authenticated HTTPS endpoint, OAuth,
+revocation and signed event delivery, widening ADR-1004's private transport, to add
+a second daily-operations interface beside the web UI and the
+[Mac app](1019-mac-app-channel.md).
 
-cab remains usable independently by individual self-hosters, initially on
-macOS. Its web UI and an optional ChatGPT plugin both support daily task operations:
-creation, tracking, durable messages, questions and approvals. Setup and recovery
-may remain in the web UI. cab retains projects, policy, scheduling, durable
-coordination and execution supervision; the plugin is another operator interface.
-
-ChatGPT access is enabled explicitly per cab project. Expose task content,
-results and interaction material, excluding credentials, private instructions and
-raw runtime logs. Subscribed completion, question and approval events are required
-for the future integration. Events explain outcomes or request input; they do not
-grant write authority. Exact reviewed approval material and existing admission checks
-continue to govern actions.
-
-Self-hosters enabling ChatGPT supply a reachable, authenticated HTTPS MCP endpoint.
-Expose only the plugin API and keep the operator UI and runtime private. Provide
-plugin packaging, guided deployment/authentication setup and connection checks;
-automatic public endpoint provisioning and a cab-hosted relay are outside
-this decision. This amends ADR-1004's private-transport scope only for the optional
-plugin endpoint, without changing runtime access or authentication.
-
-New tasks should appear as one main native Codex task with linked, inspectable
-worker conversations. Saved host project placement/linkage is optional; tasks
-belong to cab projects. Repository tasks default to retained cab
-task worktrees. Human inspection does not transfer ownership. Continuing work in
-Codex requires explicit handover; cab holds further task dispatch. Explicit
-return requires settled-execution and changed-workspace checks before cab
-reacquires control. Neither idleness nor operator acknowledgement releases existing
-crash, Stop, failure or uncertainty holds. No physical process containment is added.
-
-Native visibility and safe handover remain unproved. App Server
-thread creation alone does not establish these capabilities. The project-aware app
-tools available inside Codex do not establish a supported standalone service API.
-When the work resumes, qualify a disposable native integration before dependent
-implementation. If the proof fails, return its evidence and integration-scope
-consequences to Chris; do not silently accept managed threads as a substitute.
-
-These are deferred requirements, not implemented capabilities. Existing
-standalone qualification and reviewed cutover remain required. Importing historical
-Codex tasks, team/RBAC administration and a new execution machine are not included.
-See the [integration design](../design/chatgpt-and-native-codex.md) and
-[acceptance additions](../acceptance.md#chatgpt-and-native-codex-acceptance).
+A future need, such as remote notifications or chat control, starts from a new
+decision rather than reviving this one.

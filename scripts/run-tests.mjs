@@ -1,9 +1,20 @@
 import { spawn } from "node:child_process";
-import { existsSync, globSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  globSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { profileTimings } from "./test-timings.mjs";
-import { availableParallelism, constants } from "node:os";
+import { availableParallelism, constants, tmpdir } from "node:os";
 import {
   createTestEvidenceDirectory,
   writeTestEvidence,
@@ -268,6 +279,78 @@ export async function recordRunnerEvidence(result, name, evidenceRoot) {
   }
 }
 
+const runRootPattern = /^cab-run-[A-Za-z0-9]{6}$/;
+
+export function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // Only ESRCH proves the owner is gone; EPERM and anything else keeps the directory.
+    return error?.code !== "ESRCH";
+  }
+}
+
+export function createRunTempRoot(base) {
+  const root = mkdtempSync(join(base, "cab-run-"));
+  // Rename so a concurrent sweep never reads a partial pid.
+  writeFileSync(join(root, "owner.pid.tmp"), String(process.pid));
+  renameSync(join(root, "owner.pid.tmp"), join(root, "owner.pid"));
+  return root;
+}
+
+/** Removes the pid file last, so a partial removal stays recognisable and is retried by the next sweep. */
+function removeRunTempRoot(root) {
+  for (const name of readdirSync(root))
+    if (name !== "owner.pid")
+      rmSync(join(root, name), { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true });
+}
+
+/** Removes per-run roots whose recorded owner has exited; keeps anything it cannot prove stale. */
+export function sweepStaleRunTempRoots(base, alive = pidAlive) {
+  let entries;
+  try {
+    entries = readdirSync(base, { withFileTypes: true });
+  } catch (error) {
+    process.stderr.write(`Stale test temp sweep skipped: ${error.message}\n`);
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !runRootPattern.test(entry.name)) continue;
+    const root = join(base, entry.name);
+    try {
+      if (lstatSync(root).uid !== process.getuid()) continue;
+      const file = join(root, "owner.pid");
+      if (!lstatSync(file).isFile()) continue;
+      const text = readFileSync(file, "utf8");
+      if (!/^[1-9]\d*$/.test(text) || alive(Number(text))) continue;
+      removeRunTempRoot(root);
+    } catch (error) {
+      // A root without an owner file is mid-creation or foreign: keep it quietly.
+      if (error?.code !== "ENOENT")
+        process.stderr.write(
+          `Stale test temp ${root} kept: ${error.message}\n`,
+        );
+    }
+  }
+}
+
+/** Runs `body` with a per-run temp root that is removed however the body ends. */
+export async function withRunTempRoot(base, body) {
+  sweepStaleRunTempRoots(base);
+  const root = createRunTempRoot(base);
+  try {
+    return await body(root);
+  } finally {
+    try {
+      removeRunTempRoot(root);
+    } catch (error) {
+      process.stderr.write(`Test temp ${root} not removed: ${error.message}\n`);
+    }
+  }
+}
+
 export function discoverTestFiles(root = ".") {
   const files = globSync("test/**/*.test.ts", { cwd: root })
     .sort()
@@ -376,6 +459,14 @@ export function selectTestFiles(files, options, timings = {}) {
 }
 
 async function main() {
+  // shortcut: TMPDIR is the POSIX temp root; Windows is not a supported test platform.
+  await withRunTempRoot(realpathSync(tmpdir()), (root) => {
+    process.env.TMPDIR = root;
+    return runSelected();
+  });
+}
+
+async function runSelected() {
   const options = parseTestOptions(process.argv.slice(2));
   const preflight = options.preflight;
   const files = preflight

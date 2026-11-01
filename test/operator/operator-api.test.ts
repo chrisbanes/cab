@@ -1,6 +1,10 @@
 import { taskItems } from "../fixtures/inbox-items.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import {
+  insertExternalItem,
+  insertSourceMembership,
+} from "../fixtures/source-rows.js";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -56,9 +60,9 @@ import {
   fixture as nativeFixture,
   generation as nativeGeneration,
   nativeRequest,
-  until as untilNative,
   type RuntimeInternals,
 } from "../fixtures/runtime-retention.js";
+import { until } from "../fixtures/until.js";
 
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
@@ -851,14 +855,6 @@ test("task summaries classify Stop and independent holds by type, not display re
   assert.equal(archivalAfter.execution.holds.stop, true);
   assert.ok(archivalAfter.codes.includes("execution-uncertain"));
 });
-
-async function until(predicate: () => boolean) {
-  const deadline = Date.now() + 4000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw Error("Fixture timed out");
-    await new Promise((r) => setTimeout(r, 2));
-  }
-}
 test("active execution retains its admitted generation while next-turn instructions advance", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -1877,31 +1873,41 @@ test("polled task list, project and Inbox reads redact stored workspace paths wi
     [...new Set(paths)].sort(),
   );
   const d = f.service.domain();
-  d.execute({
-    type: "task.configure",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: ids.projectId,
-    taskId: ids.taskId,
-    expectedVersion: Number(d.task(ids.taskId).version),
-    title: `Safe title ${paths.join(" ")}`,
-  });
   const starts = () =>
     controlled.events().filter((e) => e.event === "start").length;
-  const baseline = starts();
-  assert.ok(baseline > 0);
   const api = new OperatorApi(f.service, [f.directory]);
-  const reads = [
-    await api.readTaskListPage(),
-    await api.readProject(ids.projectId),
-    await api.readInbox(),
-  ].map((read) => JSON.stringify(read));
-  assert.equal(starts(), baseline);
-  for (const read of reads) {
-    assert.match(read, /Safe title/);
-    for (const path of paths) assert.ok(!read.includes(path), path);
+  // A title holds 512 characters and the paths grow with the temp root, so cover them in rounds.
+  const rounds: string[][] = [[]];
+  for (const path of paths) {
+    const round = rounds.at(-1) as string[];
+    if (round.length && [...round, path].join(" ").length > 400)
+      rounds.push([path]);
+    else round.push(path);
   }
-  assert.match(reads[2]!, new RegExp(ids.interactionId));
+  for (const round of rounds) {
+    d.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: ids.projectId,
+      taskId: ids.taskId,
+      expectedVersion: Number(d.task(ids.taskId).version),
+      title: `Safe title ${round.join(" ")}`,
+    });
+    const baseline = starts();
+    assert.ok(baseline > 0);
+    const reads = [
+      await api.readTaskListPage(),
+      await api.readProject(ids.projectId),
+      await api.readInbox(),
+    ].map((read) => JSON.stringify(read));
+    assert.equal(starts(), baseline);
+    for (const read of reads) {
+      assert.match(read, /Safe title/);
+      for (const path of paths) assert.ok(!read.includes(path), path);
+    }
+    assert.match(reads[2]!, new RegExp(ids.interactionId));
+  }
 });
 
 test("history supplements captured privacy with external auth and GitHub values while retaining omissions and revisions", async (t) => {
@@ -2284,7 +2290,7 @@ test("an answered native question awaiting delivery is cab's, not an operator qu
       params: nativeRequest(work.threadId, work.turnId, "delivery-item"),
     }),
   );
-  await untilNative(
+  await until(
     () => Boolean(coordination.runtimeQuestionByEndpoint(identity)),
     "durable native question",
   );
@@ -2509,12 +2515,22 @@ test("a task read reports source review, hold and unknown source as source-held"
     ["source-held"],
   );
   f.seedPersistedState((db) => {
-    db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]',NULL,NULL)",
-    ).run(taskId);
-    db.prepare(
-      "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'repo','github','github.com','I1','[]')",
-    ).run(projectId);
+    insertExternalItem(db, {
+      externalId: "I1",
+      taskId,
+      containerId: "R1",
+      containerName: "owner/repo",
+      number: 1,
+      observedTitle: "Imported",
+      observedBody: "Body",
+      observedState: "open",
+      labels: "[]",
+    });
+    insertSourceMembership(db, {
+      projectId,
+      selectionId: "repo",
+      externalId: "I1",
+    });
     db.prepare(
       "INSERT INTO source_reviews VALUES ('github','github.com',?,?,?,?,NULL)",
     ).run("I1", "a".repeat(64), "b".repeat(64), "accept-revised-scope");
@@ -2582,7 +2598,7 @@ test("profile configuration reads and writes a validated execution runtime", asy
     runtime,
   );
 });
-test("profile skills reject missing plugins, unknown skills and a harness that loads none", async (t) => {
+test("profile skills reject missing plugins and unknown skills, and follow the profile across runtimes", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const ids = await seed(f);
@@ -2643,26 +2659,22 @@ test("profile skills reject missing plugins, unknown skills and a harness that l
     ),
     ["skills.plugins.0.path"],
   );
-  // Codex loads no profile skills yet, so it cannot enable any.
-  assert.deepEqual(
-    await fieldsOf(
-      configure({
-        skills: { plugins: [{ path: plugin, skills: ["probe-skill"] }] },
-      }),
-    ),
-    ["skills"],
-  );
   assert.equal(f.service.domain().profile(ids.profileId).version, 1);
+  // Both harnesses load profile skills: the Codex profile saves them, and they follow it across runtimes.
   const skills = { plugins: [{ path: plugin, skills: ["probe-skill"] }] };
-  await api.execute(configure({ runtime: claude, skills }) as never);
+  await api.execute(configure({ skills }) as never);
+  assert.deepEqual(f.service.domain().profileRuntime(ids.profileId), {
+    harness: "codex",
+  });
   assert.deepEqual(
     (await api.readProfileConfiguration(ids.profileId)).data.skills,
     skills,
   );
-  // Moving the profile back to Codex while skills remain is refused too.
+  await api.execute(configure({ runtime: claude }, 2) as never);
+  await api.execute(configure({ runtime: { harness: "codex" } }, 3) as never);
   assert.deepEqual(
-    await fieldsOf(configure({ runtime: { harness: "codex" } }, 2)),
-    ["skills"],
+    (await api.readProfileConfiguration(ids.profileId)).data.skills,
+    skills,
   );
 });
 test("task reads report the persisted binding harness of each execution generation", async (t) => {
@@ -4208,4 +4220,190 @@ test("the status mapping is read with its Project selections and granted options
   unreadable = false;
   assert.equal((await save(null, 3)).kind, "configuration");
   assert.equal((await read())?.mapping, null);
+});
+
+test("a Jira project's status mapping is read with its granted statuses, saved without reading GitHub, and refused in Jira words", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const projectId = randomUUID();
+  const domain = f.service.domain();
+  domain.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Mapped",
+    leadProfileId: null,
+  });
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    key: randomUUID(),
+    actor: "operator",
+    issueTracker: "jira",
+    instance: "example.atlassian.net",
+    credential: {
+      siteRef: "env:FIXTURE_JIRA_SITE",
+      emailRef: "env:FIXTURE_JIRA_EMAIL",
+      tokenRef: "env:FIXTURE_JIRA_TOKEN",
+    },
+  });
+  domain.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: 1,
+    instance: "example.atlassian.net",
+    selections: [{ id: "S-1", kind: "jql", jql: "project = KAN" }],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "status", operator: "in", statusIds: ["10003"] }],
+    },
+  });
+  const grants = (statusIds: string[]) =>
+    domain.execute({
+      type: "delivery.configure",
+      key: randomUUID(),
+      actor: "operator",
+      projectId,
+      expectedVersion: f.service.delivery().configuration(projectId).version,
+      mode: "reviewable-pr",
+      credentialRef: null,
+      grants: [
+        {
+          action: "issue.status",
+          repositoryId: "10001",
+          mode: "allow",
+          statusIds,
+        },
+      ],
+      requiredChecks: [],
+    });
+  grants(["10003", "10005"]);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const read = async () =>
+    (await api.readProjectConfiguration(projectId)).data.statusMapping;
+  assert.deepEqual(await read(), {
+    tracker: "jira",
+    version: 1,
+    availability: "available",
+    mapping: null,
+    granted: ["10003", "10005"],
+  });
+  const mapping = (events: Record<string, string | null>) => ({
+    tracker: "jira" as const,
+    events: {
+      turnStarted: null,
+      handedBack: null,
+      held: null,
+      done: null,
+      ...events,
+    },
+  });
+  const refused = async (value: ReturnType<typeof mapping>) => {
+    try {
+      await api.execute({
+        type: "status-mapping.configure",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: 1,
+        mapping: value,
+      });
+    } catch (error) {
+      assert.ok(error instanceof OperatorApiError);
+      return error;
+    }
+    return assert.fail("expected a refusal");
+  };
+  // The in-flight status the readiness rule does not accept is refused in words naming it.
+  const unaccepted = await refused(mapping({ turnStarted: "10005" }));
+  assert.equal(unaccepted.status, 400);
+  assert.deepEqual(unaccepted.fieldPaths, ["mapping.events.turnStarted"]);
+  assert.match(
+    unaccepted.publicMessage ?? "",
+    /First turn started → 10005: the readiness rule does not accept this status/,
+  );
+  const ungranted = await refused(mapping({ held: "10004" }));
+  assert.deepEqual(ungranted.fieldPaths, ["mapping.events.held"]);
+  assert.match(
+    ungranted.publicMessage ?? "",
+    /no issue status grant covers this status/,
+  );
+  assert.equal((await read())?.version, 1);
+  const receipt = await api.execute({
+    type: "status-mapping.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    mapping: mapping({ held: "10003", done: "10005" }),
+  });
+  assert.equal(receipt.kind, "configuration");
+  assert.deepEqual(await read(), {
+    tracker: "jira",
+    version: 2,
+    availability: "available",
+    mapping: mapping({ held: "10003", done: "10005" }),
+    granted: ["10003", "10005"],
+  });
+});
+
+test("the Jira view lists each granted status once, however many grants repeat it", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const projectId = randomUUID();
+  const domain = f.service.domain();
+  domain.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Mapped",
+    leadProfileId: null,
+  });
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    key: randomUUID(),
+    actor: "operator",
+    issueTracker: "jira",
+    instance: "example.atlassian.net",
+    credential: {
+      siteRef: "env:FIXTURE_JIRA_SITE",
+      emailRef: "env:FIXTURE_JIRA_EMAIL",
+      tokenRef: "env:FIXTURE_JIRA_TOKEN",
+    },
+  });
+  domain.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: 1,
+    instance: "example.atlassian.net",
+    selections: [{ id: "S-1", kind: "jql", jql: "project = KAN" }],
+    readiness: null,
+  });
+  const ids = Array.from({ length: 256 }, (_, i) => String(i + 1));
+  domain.execute({
+    type: "delivery.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: f.service.delivery().configuration(projectId).version,
+    mode: "reviewable-pr",
+    credentialRef: null,
+    grants: ["10001", "10002"].map((repositoryId) => ({
+      action: "issue.status" as const,
+      repositoryId,
+      mode: "allow" as const,
+      statusIds: ids,
+    })),
+    requiredChecks: [],
+  });
+  const view = (
+    await new OperatorApi(f.service, [f.directory]).readProjectConfiguration(
+      projectId,
+    )
+  ).data.statusMapping;
+  assert.ok(view && "tracker" in view);
+  assert.deepEqual(view.granted, ids);
 });

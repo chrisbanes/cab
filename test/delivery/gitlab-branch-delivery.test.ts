@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
@@ -8,7 +7,6 @@ import {
   gitlabWorld,
   host,
   projectPath,
-  repositoryId,
   token,
 } from "../fixtures/gitlab-delivery.js";
 
@@ -169,71 +167,6 @@ test("a host without a usable credential holds the push before any request or Gi
     assert.deepEqual(w.pushes, []);
     assert.equal(w.adopts.length, 0);
     assert.deepEqual(w.remote.requests, []);
-  } finally {
-    await w.f.close();
-  }
-});
-
-test("a merge stays unavailable on a GitLab link until it is implemented", async (t) => {
-  const w = await gitlabWorld(t);
-  try {
-    w.f.grant(
-      { action: "branch.push", mode: "allow" },
-      { action: "pr.create", mode: "allow" },
-      { action: "pr.merge", mode: "allow" },
-    );
-    const delivery = w.f.service.delivery();
-    w.f.service.domain().execute({
-      type: "delivery.configure",
-      actor: "operator",
-      key: randomUUID(),
-      projectId: w.f.projectId,
-      expectedVersion: delivery.configuration(w.f.projectId).version,
-      mode: "through-merge",
-      credentialRef: null,
-      grants: delivery.configuration(w.f.projectId).grants,
-      requiredChecks: [{ name: "pipeline" }],
-    });
-    const sha = w.commit("one.txt");
-    assert.equal((await w.push(sha)).success, true);
-    const headRef = String(branchOf(w)?.branch);
-    const created = await w.createPr(headRef, sha);
-    assert.equal(created.success, true, created.text);
-    const mr = w.remote.state.mergeRequests[0];
-    assert.ok(mr);
-    const registered = await w.f.call("cab_register_pr", {
-      repositoryId,
-      prNumber: mr.iid,
-      expectedPrNodeId: String(mr.id),
-      expectedHeadSha: sha,
-    });
-    assert.equal(registered.success, true, registered.text);
-    const requests = w.remote.requests.length;
-    const refused = await w.f.call("cab_external_action", {
-      operationId: randomUUID(),
-      action: {
-        kind: "pr.merge",
-        target: {
-          repositoryId,
-          number: mr.iid,
-          nodeId: String(mr.id),
-          baseRef: "main",
-          headRef,
-          expectedHeadSha: sha,
-        },
-        method: "squash",
-        reviewedResultIds: [],
-      },
-    });
-    assert.equal(refused.success, false);
-    assert.match(refused.text, /code-host-delivery-unavailable/);
-    assert.equal(w.remote.requests.length, requests);
-    assertNoToken(w);
-    // The operator's task read carries no token either.
-    const read = await new OperatorApi(w.f.service, [w.f.directory]).readTask(
-      w.f.taskId,
-    );
-    assert.equal(JSON.stringify(read).includes(token), false);
   } finally {
     await w.f.close();
   }

@@ -46,12 +46,11 @@ select permitted profiles but cannot create profiles or expand project authority
 Local tasks are built in. GitHub.com repository issues and GitHub Projects are the
 first external sources. Import the selected backlog, excluding PRs and draft
 items; readiness is separate. Jira Cloud imports issues by JQL: a project uses one
-tracker. Comments, label changes and closing on Jira issues are delivered (see the Jira
-delivery paragraph below); Jira status mapping and issue edit or publication are planned and
+tracker. Comments, label changes, closing and status mapping on Jira issues are delivered (see the Jira
+delivery paragraph and the status mapping below); Jira issue edit and publication are planned and
 not implemented.
-GitLab merge request merging is planned and not implemented; a project can link a
-GitLab checkout and deliver its branches and open, edit, ready and discuss its merge
-requests ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
+A project can link a GitLab checkout and deliver its branches, open, edit, ready,
+discuss and merge its merge requests ([ADR-1020](adr/1020-code-hosts-and-issue-trackers.md)). Linear, GitHub Enterprise,
 a plugin marketplace, multiple execution machines, team/RBAC administration and
 migration of old live runs are outside the first release. Source interfaces follow
 concrete integrations.
@@ -132,43 +131,6 @@ instruction redaction; historical gaps remain explicit. The diagnostic payload
 retention policy does not delete durable safety records or change existing
 result/review evidence contracts. The design defines capture limits, credential
 lifecycle, command semantics and required acceptance evidence.
-
-This does not reopen the deferred ChatGPT integration or change its narrower
-content-access rules.
-
-## Deferred ChatGPT and native Codex integration
-
-Optional ChatGPT daily operations/events and native Codex task visibility/handover
-(X01–X08) are deferred until after the standalone MVP. Planning, feasibility probes
-and implementation are paused under
-[epic #734](https://github.com/chrisbanes/cab/issues/734) until explicit
-reopening and revalidation. They do not gate MVP release or cutover; Codex App
-Server execution and the independently usable web UI remain in scope. The
-following paragraphs retain future integration requirements for individual
-macOS self-hosters.
-
-Both operator interfaces support daily creation/tracking, durable messages, answers
-and approvals; setup and recovery may remain in the web UI. ChatGPT receives only
-explicitly enabled projects' task data, results and interaction material, excluding
-credentials, private instructions and raw runtime logs. Subscribed completion,
-question and approval events explain outcomes or request input; they grant no write
-authority. Self-hosters supply a narrow authenticated HTTPS MCP endpoint using guided
-setup; the operator UI and runtime remain private.
-
-New tasks should appear as a main native Codex task with linked worker conversations.
-Saved host project placement/linkage is optional; tasks belong to cab projects.
-Repository tasks use retained cab worktrees. Inspection
-is allowed without handover; native continuation requires explicit human control,
-holding further cab task dispatch. Explicit return checks settled execution,
-workspace changes and existing admission/ownership holds. Idleness or acknowledgement
-cannot release those holds. Native API, visibility and handover feasibility must be
-proved before future dependent implementation; failed proof returns evidence and integration
-scope for review instead of silently substituting managed threads.
-
-These are deferred requirements, not implemented capabilities. See
-[ADR-1006](adr/1006-chatgpt-and-native-codex.md), the
-[integration design](design/chatgpt-and-native-codex.md) and
-[acceptance additions](acceptance.md#chatgpt-and-native-codex-acceptance).
 
 ## First local-task journey
 
@@ -353,7 +315,7 @@ readiness reports a missing target or a replaced link without naming paths. Code
 refreshes the login through the link and keeps it
 ([evidence](evidence/codex-auth-link-refresh-2026-10-30.md)). Agent shell commands keep
 the service user's `HOME`, and Codex subagents, plugins and skill dependency
-installation are disabled. A Codex conversation started under the previous home is not
+installation are disabled. Codex gets plugin skills only from its profile's plugins. A Codex conversation started under the previous home is not
 resumed: admission refuses the request, naming "Started under the previous Codex home; restart
 the task" in its revision refusal, before it holds a writer, capacity or recovery
 state, and the runtime refuses the resume before any App Server request.
@@ -537,7 +499,7 @@ is promised exactly-once effects.
 verification and restore. `cab service install|upgrade|uninstall` manages a
 per-user LaunchAgent bound to an unpacked release: upgrade stops the job, then starts
 the new release and checks readiness; the service takes and verifies a snapshot
-before it migrates data an older release wrote, and refuses to start if it cannot.
+before it applies pending migrations to existing data, and refuses to start if it cannot.
 Upgrade refuses a release older than the installed one. A failed
 upgrade leaves the job stopped with no automatic rollback. `service install --mode daemon`
 is the opt-in route to starting at boot before login: it prepares a LaunchDaemon that
@@ -881,11 +843,18 @@ there is no `file:` GitHub reference. See the
 Each GitLab host has one installation-level credential, set in Settings → GitLab
 credentials through the receipted `code-host-credential.configure` command: `env:NAME`,
 or `glab:<host>` for that same host, which runs
-`glab auth status --hostname <host> --show-token` on every use, with no stdin and a
-bounded time, and parses one token line from its combined output. Reads report the
+`glab auth status --hostname <host> --show-token` whenever a credential is read (delivery keeps the token it
+gets for a few minutes, see the GitLab delivery paragraph below), with no stdin and an
+8-second limit, and parses one token line from its combined output. Reads report the
 kind, whether the credential is usable, a fixed reason when it is not, and the account
 the token acts as (from `GET /api/v4/user`); never the variable name, token or glab
-output. A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
+output. A host that does not answer is reported as unreachable: for glab when it is
+killed at its 8-second limit or prints a network error, and for cab's own GitLab
+reads when the request fails or exceeds 15 seconds. Those reads, and GitLab branch
+delivery, authenticate with `Authorization: Bearer`, which GitLab accepts for
+personal access tokens and for OAuth tokens such as a glab web login. Fake-host tests
+prove the header, and a bounded live run on gitlab.com accepted both a personal access token and a glab web login
+([evidence](evidence/2026-10-31-gitlab-delivery-live.md)). A `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or `OAUTH_TOKEN` in the service
 environment overrides a stored glab login; Settings and `cab doctor` (GitLab
 credentials) warn when it does, and the account shown is the token's. The credential
 lists GitLab projects for guided setup, shows the account, and is the identity GitLab
@@ -896,22 +865,33 @@ the project and its numeric ID from the discovered list, verifies the chosen che
 `origin` against the host and project path, and records the link in the same atomic
 `project.create`; a GitLab-only project records no GitHub source credential. GitLab
 credential names and values, including every value glab has resolved, are excluded
-like source credentials, with the same limits: a reference added after start needs a
-restart before running Codex spawns exclude it, and agents may still reach a glab
-login or config file on the host.
+like source credentials. Helper, `gh`, `glab` and Claude turn environments apply a
+changed credential at once. A running Codex runtime keeps the environment it was
+spawned with, so when it inherited a configured credential's variable or value,
+Settings (GitLab credentials and Readiness) and `cab doctor` report that the service
+needs a restart, and the notice clears after it. Agents may still reach a glab login
+or config file on the host. A configured GitLab credential that fails, or a `glab`
+login shadowed by `GITLAB_TOKEN`, fails the readiness check and so blocks
+`cab service upgrade`, as a failing configured GitHub discovery credential does; an
+unconfigured one does not.
 
 Settings present each project's repository links and GitHub discovery sources as
 separate sections. Repository links are project configuration, not part of any
 source: each link records its code host and host name (GitHub on `github.com`, or
 GitLab on a configured host with the project's full path and numeric ID), and links
 change through one versioned, receipted `repositories.configure` command that
-verifies every checkout before anything is recorded. A GitLab link must also have an
+verifies every checkout before anything is recorded. Settings, `project prepare-repositories`
+and the API each add GitHub and GitLab links, change a link's ref (and, in Settings, its
+local path) and remove links through that command; a saved link's code host, host, project
+path and project ID are its identity, so changing one means removing the link and adding
+another. A GitLab link must also have an
 `origin` remote on its host whose full project path matches, case-insensitively, and
 a refusal names the link and reason without echoing a path or remote. Branch
 actions (`branch.push`, `branch.force-push`, `branch.adopt`) and merge request actions
-(`pr.create`, `pr.edit`, `pr.ready`, `pr.thread.reply`, `pr.thread.resolve`) on a GitLab link
-are delivered to that project with the host's credential, resolved on every use;
-`pr.merge` and every other code-host action that names a GitLab link is refused with
+(`pr.create`, `pr.edit`, `pr.ready`, `pr.merge`, `pr.thread.reply`, `pr.thread.resolve`) on a
+GitLab link are delivered to that project with the host's credential (an `env:` variable is read on every use,
+a `glab:` login's token is kept for up to 5 minutes);
+every other code-host action that names a GitLab link is refused with
 `code-host-delivery-unavailable`, before any provider or Git transport runs. Only merge
 requests inside the linked project are acted on, never a fork's. A host with no usable credential holds the
 action as `provider-preflight-held`, with no request and no Git. Saving the
@@ -934,7 +914,7 @@ the runtime of each assignment and each runtime's effective policy, and sets the
 Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` reference
 without showing it.
 
-A Claude profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)):
+A profile may list skill plugins ([ADR-1021](adr/1021-profile-skill-plugins-and-subagents.md)):
 absolute plugin directories on the service host, each with the names of its skills the
 profile enables, set in the profile settings or with `cab profile prepare --skills-file`.
 The directory needs a `.claude-plugin/plugin.json` manifest and a `SKILL.md` for each
@@ -948,7 +928,13 @@ regular files, read off the coordinating event loop) and records the digests wit
 turn, readable in the execution detail without paths. A plugin tree that is missing,
 unreadable, holds a symbolic link or special file, or exceeds 2000 files, 16 MiB or 12
 levels of depth makes the work wait visibly with a reason that names no path, and never
-runs without it. Claude may start subagents with its `Agent` tool: their tool calls
+runs without it. The same list serves a Codex profile: the digests are recorded the same
+way, Codex receives each plugin's `skills/` directory as a skills root, and each Codex
+thread runs with only its profile's enabled skills (other profiles' plugins, the plugin's
+other skills, the bundled skills and repository skills are disabled for it; a profile that enables none sees no plugin skills). cab re-sends the scope before each later
+turn of a conversation, but a plugin directory that joins the process during a running
+turn can reach that turn; skills are instructions to the agent, not a boundary, and a
+disabled skill's file stays readable. Claude may start subagents with its `Agent` tool: their tool calls
 follow the same policy, sandbox and recovery boundary as the main agent and are recorded
 with the subagent that made them, and their prose is not shown as the lead's conversation.
 cab refuses isolation, model, effort and mode overrides in a subagent call; the settings of a
@@ -956,10 +942,11 @@ named agent definition, including a plugin's, are untested. Plugin hooks are
 switched off with Claude Code managed settings, which an organisation's managed-settings
 tier can replace, so the guarantee is qualified for a personal login only. Background
 subagents are untested against Stop and resume, and a turn resumed after a crash during a
-subagent did not complete in two attempts (not diagnosed). Codex does not receive profile skills yet, so a
-profile on Codex cannot enable any, and Codex subagents stay disabled. The Claude
-journeys are recorded in
-[docs/evidence/skill-plugin-journeys-2026-10-30.md](evidence/skill-plugin-journeys-2026-10-30.md).
+subagent did not complete in two attempts (not diagnosed). Codex subagents stay
+disabled. The journeys are recorded in
+[Claude](evidence/skill-plugin-journeys-2026-10-30.md) and
+[Codex](evidence/codex-skill-journeys-2026-10-30.md), and the Codex scoping proof in
+[docs/evidence/codex-skill-scope-probes-2026-10-30.md](evidence/codex-skill-scope-probes-2026-10-30.md).
 
 The operator enables or disables each execution runtime for the installation in
 Settings → Runtime or with `cab runtime enable|disable`
@@ -1275,7 +1262,8 @@ A question or approval is answerable from the attention card or from its place i
 conversation, with one shared request state. Tool activity shows each command's
 summary and exit status, with bounded redacted output on request; consecutive calls
 are grouped with a failure count, file changes open the Changes tab, and cab's own
-coordination calls appear as the records they produce.
+coordination calls appear as the records they produce. A pending or running delegated
+assignment takes a durable message from its sub-conversation header.
 
 Preserve the task, assignment and conversation hierarchy: the task retains the
 outcome and accountable lead, assignments identify delegated responsibility, and
@@ -1288,7 +1276,12 @@ that no tool ran. This presentation adds no terminal, embedded browser or
 complete-transcript capability.
 
 Every entry point that opens a task (Overview, List/Board, Inbox, Search, recovery
-links and assignment links) reaches the same task workspace at `/app/tasks/:id`.
+links and assignment links) reaches the same task workspace at `/app/tasks/:id`. There
+is no History tab: a link that names the conversation (`#conversation`), an assignment
+(`?assignment=`) or a request (`?request=` with `#conversation`) opens the Overview at
+that place, reading earlier pages first when it is not in the part already loaded, and
+`?section=context` opens Captured context in the inspector. A link keeps working in the
+former forms `#history` and `?section=history`.
 Preserve visible actionable requests, reading position, disclosure choices and
 unfinished replies as the task updates. Existing execution, recovery and
 exact-material approval controls remain reachable.
@@ -1984,8 +1977,7 @@ that reports a subscription gone revokes it. The operator can send a test, turn 
 browser, and revoke any other from Settings, and a revoked browser turns on again. Where
 the platform allows, the page closes a notification once its request leaves the Inbox.
 Delivery is qualified on the host's browser only; phone and other-device delivery is not
-qualified. Subscribed ChatGPT events belong to the
-deferred post-MVP integration and are not an MVP release gate. Credentials must not
+qualified. Credentials must not
 appear in UI payloads or exposed transcripts. The operator login, session and
 request boundary is defined in the [operator UI foundation](design/s04c-operator-ui.md).
 Same-host private HTTPS access through a disposable Tailscale route has passed,
@@ -2059,20 +2051,68 @@ Readback finds exactly one merge request or note carrying the operation marker, 
 credential user, with the exact text, draft status, head commit and branches in the linked
 project; a thread resolves only when the credential user resolved it. GitLab runs a line starting
 with `/command` in a description or note as the credential user, so a create, edit or reply whose
-text has one is held as `provider-preflight-held` before any write. Merging, approvals and
-GitLab merge gates are not implemented, so a merge request always reports `merge-unsupported`.
+text has one is held as `provider-preflight-held` before any write.
+
+A GitLab request that is answered 429 was not processed, so cab sends it again, a write included, after the
+wait the response names: `Retry-After` (seconds, or an HTTP date), otherwise `RateLimit-Reset` (a Unix time)
+against its clock, and otherwise 20 then 40 seconds, because the Projects, Groups and Users APIs send no
+rate-limit headers on a 429. It makes at most 3 retries and waits at most 60 seconds in all for one request,
+and a stopping service ends the waits of delivery requests. Past either bound the 429 is the outcome: a read is unavailable (an
+action's readback stays unproved, and a merge train's evidence is kept), and a write is a definitive
+`provider-http-429`. Only 429 is retried, and credential discovery's GitLab reads wait the same way.
+
+To keep within GitLab.com's per-user request limits, a service reuses a few reads. It keeps a project's identity and
+merge settings for 30 seconds (a merge's preflight reads them fresh), the account a token acts as for 10 minutes,
+and the token a `glab:` login resolved to for 5 minutes, because resolving it runs `glab`, which asks GitLab to
+check the token. A 401 drops the kept token, resolves the login again and sends the request once more, a
+failed Git push or fetch drops it for the next attempt, and configuring the credential again drops it too. A
+`glab auth login` as another account made outside cab can leave delivery acting as the previous account for up to
+those 5 minutes, or until its first 401; Settings and readiness always resolve the login afresh. An `env:` credential is read as it is every time. Merge
+requests, discussions, branches and pipelines are always read fresh, so no decision rests on a kept read.
+
+A GitLab merge is gated on GitLab's own verdict. The merge request reports no merge blocker only when it
+is open, not a draft, its `detailed_merge_status` is exactly `mergeable` and every required check of the
+project's delivery configuration passed on the head commit (the head pipeline, named `pipeline`).
+Otherwise the observation lists `pr-not-open`, `pr-draft`, `check-<name>-unproved` or
+`merge-status-<status>` (`merge-status-unproved` when GitLab reports none), so GitLab's approval,
+pipeline and discussion rules apply through its verdict. Approvals are not read (`reviewDecision`
+stays null), and a merged results pipeline is not a `pipeline` check because its commit is the merge
+ref. The merge methods follow the project's squash setting: `merge` unless it is `always`,
+`squash` unless it is `never`, and never `rebase`; the project's merge method decides the commit
+shape. The merge is held as `provider-preflight-held` when a blocker or the method refuses it or the
+head moved. The store alone allows it in through-merge mode and only at the commit cab last pushed to
+the task branch, and the request carries that commit as `sha`, so GitLab refuses a head that moved.
+cab never sets auto-merge: every merge sends `auto_merge: false`. When the project uses merge trains,
+the request is added to the train instead and the action stays unproved as `provider-merge-train-pending`
+while a car holds it (`idle`, `fresh`, `stale` or `merging`). A later read settles it as merged, or as
+`provider-merge-train-dropped` when the car is gone, merged without the merge request being merged,
+or the head moved (a push takes the request off the train); dropped is concluded only for a merge the
+train was seen holding, and a failed read keeps that evidence. GitLab reports a request on a train as
+auto-merge set, so the car decides before that flag does. A merge request with
+auto-merge set by someone else stays unproved as `provider-auto-merge-set`. A merged merge request is
+acceptance at any head, as on GitHub. Merging is irreversible and cab has no unmerge or revert, and no
+action to cancel auto-merge or to take a request off a train: the operator does that in GitLab, and
+cab reconciles the result. While a train merge is pending, completion is held as an action with an
+unknown outcome; the operator's action line describes the pending and dropped train states.
+Bounded live evidence: [GitLab delivery live run](evidence/2026-10-31-gitlab-delivery-live.md) on gitlab.com (Free tier). It
+qualifies push, merge request, ready, handback, pipeline wake, reply and resolve, adoption and the merge. It does not prove a
+self-managed instance's version or settings, merge trains or approvals, and its refused merge rests on a draft, so the
+refusal while a pipeline has not passed is covered by scripted tests only.
 
 On a Jira issue the issue actions use the same lifecycle, granted per Jira project: the target is the
 Jira project ID as the repository, the key's number and the issue ID as the node ID. Only
-`issue.comment`, `issue.labels` and `issue.close` are delivered; every other issue action on a Jira
+`issue.comment`, `issue.labels`, `issue.close` and the service-only `issue.status` of the
+[status mapping](#github-and-completion) are delivered; every other issue action on a Jira
 task is refused as `issue-tracker-delivery-unavailable`. A comment is sent as Atlassian Document Format
 converted from Markdown (paragraphs, hard breaks and code blocks; everything else, including `@name`
 and links, stays literal text, and no mention or media is ever emitted) with a hidden `cab-operation`
 comment property, and is confirmed only when exactly one comment by the credential account carries
 the operation's property and the same text. Labels change in one request and are confirmed by exact
 (case-sensitive) readback; a label containing whitespace is refused. The readiness-label refusal
-applies as for GitHub. Closing is a transition into the one available Done-category status, or is
-refused before any write when the issue is already done or no single such transition exists. It is
+applies as for GitHub. Closing is a transition into the one available Done-category status, or, when the project's Jira
+status mapping names a done status that a Done-category transition reaches, the one transition to
+that status; it is refused before any write when the issue is already done or no single such
+transition exists. It is
 confirmed only when the issue is Done and exactly one status entry in its changelog since preflight,
 made by the credential account, moves it to that status. A rejection of the single request (400, 401,
 403, 404 or 429) is a confirmed failure; any other failure after the request is sent is uncertain,
@@ -2085,6 +2125,9 @@ are refused. Two limits remain: a Done transition made in the browser, or by Git
 under the same Jira account as cab's credential, cannot be told apart from cab's own; and closing
 keywords or smart commits (such as `#close`) in commit messages are written by the agent, not checked
 by cab, so a transition they cause is an external closure.
+Bounded live evidence: [Jira delivery live run](evidence/2026-10-31-jira-delivery-live.md) on Jira Cloud (a team-managed project
+with global transitions) with the merge request on gitlab.com. It does not prove several-transition or no-transition skips, a
+managed workflow with conditions, or an outside closure.
 
 The operator publishes a local task through three more actions on the same lifecycle,
 sent by the **operator publication caller** and never by an agent or the service
@@ -2119,12 +2162,16 @@ review record and no restore action exists. Sending needs an open task, a curren
 version and source revision, no unresolved action and an allowed credential activation, but
 not task admission.
 
-A project's **status mapping** reflects cab's work onto one GitHub Project's Status.
-It is operator-owned and versioned, with one mapping per project, bound to one `project`
-selection of the project's source and that Project's single-select field named `Status`
-(`status-mapping.configure`; a source without a `project` selection reads the mapping as
-unavailable and nothing is written). Four events each map to a Status option or to
-nothing: the first turn started (not a draft turn), the PR handed back for operator review,
+A project's **status mapping** reflects cab's work onto one GitHub Project's Status, or onto
+a Jira issue's status. It is operator-owned and versioned, with one mapping per project. A GitHub
+mapping is bound to one `project` selection of the project's source and that Project's
+single-select field named `Status` (`status-mapping.configure`; a source without a `project`
+selection reads the mapping as unavailable and nothing is written). A Jira mapping names target
+status IDs and is bound to the project's Jira source, not to a selection, because JQL selections
+can span Jira projects and status IDs are site-wide; a mapping of the other tracker is refused as
+having no source, and the store reads it as unavailable once the project's source is not Jira (the
+editor then shows no mapping, and saving one for the project's tracker replaces it). Four events each
+map to a Status option (a Jira status ID) or to nothing: the first turn started (not a draft turn), the PR handed back for operator review,
 the task stopped, uncertain or blocked by a dependency, and the task Done. The service, not
 an agent, writes it as a distinct caller through the same delivery lifecycle, labelled
 "Status mapping" on the task; projects without a mapping and unmapped events create no
@@ -2133,7 +2180,12 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
 - **Authority.** Every mapped option must be covered by an `allow` `project.field` grant for
   the exact Project, field and option, and the grant's repository: it covers only that
   repository's issues, so an issue of another repository is denied at write time and shows on
-  the task. A save naming an uncovered option, or one whose only
+  the task. A Jira status is written by `issue.status`, which only the service may submit (agents,
+  the operator and publication are refused, and an agent's request is denied). It is granted per Jira
+  project with `statusIds`, which an `issue.status` grant requires and no other grant takes; its
+  target is the Jira project ID, the key's number and the issue ID, and it carries the status
+  the issue must still show. The write checks the task's imported Jira issue and a current
+  membership in the project's JQL selections. A save naming an uncovered option, or one whose only
   grant needs approval, is refused, and the write checks the grant again; a grant revoked before the write is
   denied (`delivery-authority-denied`, or `delivery-authority-stale-or-held` once the write was
   prepared) and shows on the task. Agents and the operator keep the refusal of
@@ -2150,7 +2202,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   done (for example a closed issue a Done-mode source imports, or a Ready task done before the
   mapping was saved) was not worked on under the mapping and writes nothing for Done. Clearing the mapping, rebinding it to another Project or Status field, or a pass while its Project is no longer a source selection forgets what it watched, so a task that finishes in between writes nothing when a mapping returns. An in-flight event may name only an option the
   readiness rule accepts (an `in` set holding it, a `not-in` set leaving it out), checked at save and again at write against the task's stored facts with only
-  that value replaced. A terminal event may name an option that removes readiness, and the
+  that value replaced; for Jira the rule's `status` conditions decide, and a rule with none accepts
+  any granted status. A terminal event may name an option that removes readiness, and the
   ordinary readiness-lost hold then applies on the next sync. A Project filter that excludes
   an in-flight Status drops the item from the selection on the next sync and the ordinary
   leave-selection hold applies: cab validates the readiness rule, not filter text.
@@ -2174,6 +2227,21 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   cab last saw it". GitHub has no conditional update, so a move between that read and the
   mutation is an accepted race: readback then shows another option and the action stays
   uncertain.
+- **Jira transition.** Before writing, the Jira writer reads the issue and, in this order,
+  records a skip that sends nothing and is not retried: `provider-issue-status-current` when the
+  issue already has the target status, `provider-issue-status-changed` when its status is not
+  what cab last observed, then, from the issue's transitions to the target,
+  `provider-transition-unavailable` when none and `provider-transition-ambiguous` when several
+  apply. The task shows "Skipped: the issue is already in the mapped status", "the status
+  changed in Jira since cab last saw it", "no available transition reaches the mapped status" or
+  "several transitions reach the mapped status". Otherwise it posts that one transition and
+  confirms it only when a read of the issue shows the target; a rejection of the request (400,
+  401, 403, 404 or 429) is a confirmed failure, and any other failure after it is sent is
+  uncertain, kept across restart and never resent. Jira has no conditional transition, so a move
+  between the read and the request is an accepted race. Checking "already there" first makes the
+  Done write after cab's own `issue.close` a recorded no-op. What cab last observed is its last
+  confirmed write, unless a later source read of the issue while the task was Ready replaced it
+  with the status stored from that read.
 - **No hold.** Status-mapping records are excluded from the task's action blockers. An unproved
   write shows on the task and never holds admission, completion, edits or agent actions. A status
   write still in flight serializes the next one for that task; an unproved one does not, because
@@ -2182,7 +2250,8 @@ records ([ADR-1017](adr/1017-non-agent-readiness-writes.md)).
   delays the task's agent actions or completion checks. Once a newer status write has been sent,
   an older unproved one stays uncertain on the task but is not inspected again.
   A preflight that times out is a `confirmed-failure` that is not retried for that transition, and
-  shutdown can wait up to the status-write limit (30 s) for a hung write.
+  shutdown can wait up to the status-write limit (30 s) for a hung write. A Jira preflight makes two
+  requests of 20 s each, so it exceeds the limit only when both hang.
 
 Agents never push. Task commit publication is two grantable actions per repository,
 `branch.push` (fast-forward) and `branch.force-push` (force-with-lease), each `allow` or
@@ -2289,6 +2358,20 @@ end successfully and pass all existing gates. Operator settlement and final
 PR-dependent completion inspect GitHub freshly and revalidate local revisions after
 the await. Changed heads invalidate settlement and wake the retained lead. New
 comment/review/check identities also wake it; unchanged polls are deduplicated.
+
+A settlement is bound to the PR head, the policy version and the task version. It stays
+valid across a task-version change made only by cab's own confirmed `issue.close`: the
+closure and the readiness it removes, while the issue is observed closed. A source read
+that still lists the issue open does not end it once a later read shows the issue
+closed with nothing else changed. Any other task change (a title or description edit, or
+a readiness label or field change that moves readiness, including one in the same read),
+a closure outside cab, an unconfirmed close or a reopen requires a new settlement. The
+rule is the same for GitHub and Jira. Three narrow limits stay accepted: a reopen and
+manual re-close that both happen before an explicit closure's first proof (the
+attribution limit below); for Jira, a person's move to an open status outside the
+readiness rule that lands just before cab's close, because the closure read exempts a
+status condition; and a label or field change that leaves the readiness rule satisfied,
+which moves no task version and so is not detected when it coincides with the close.
 
 Only proven own closure permits the retained lead's completion continuation. The
 service obtains a fresh closed-issue snapshot before open-only source reconciliation;

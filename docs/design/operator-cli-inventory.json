@@ -1,37 +1,36 @@
 {
   "version": 1,
   "issue": 901,
-  "date": "2026-10-12",
-  "candidate": "eda2733e (live run and code); later commits change only evidence, documentation, the inventory guard and tests",
+  "record": "https://github.com/chrisbanes/cab/blob/e0979727bf15d8d167e06bb7e345496b23cd7a19/docs/evidence/issue-901-cli8-inventory-2026-10-12.json",
   "states": {
-    "passed": "Real evidence at the code candidate: the operation ran through the installed CLI against the authenticated service in a journey cited from a dated live record (a harness step or an issue-901-cli8-live json), with its observable effect and applicable denial, revision and retry cases; synthetic fixtures alone never qualify.",
-    "bounded": "Covered only by deterministic or synthetic fixtures (fixture runtime, scripted or fake GitHub, seeded recovery facts, in-process or packed CLI, loopback or a throwaway-certificate TLS proxy) or by a live observation at an earlier candidate, or real evidence limited by a recorded defect; the gap states the bound.",
-    "unproved": "No test at this candidate invokes the operation through the CLI against the authenticated service; the gap states the missing check."
+    "passed": "Real evidence: the operation ran through the installed CLI against the authenticated service in a journey cited from a dated live record (a harness step or an issue-901-cli8-live json), with its observable effect and applicable denial, revision and retry cases; synthetic fixtures alone never qualify.",
+    "bounded": "Covered only by deterministic or synthetic fixtures (fixture runtime, scripted or fake GitHub, seeded recovery facts, in-process or packed CLI, loopback or a throwaway-certificate TLS proxy) or by an earlier live observation, or real evidence limited by a recorded defect; the gap states the bound.",
+    "unproved": "No test invokes the operation through the CLI against the authenticated service; the gap states the missing check."
   },
   "scenarios": {
     "CLI01": {
       "state": "unproved",
-      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) ran the packed binary installed outside the checkout, with Keychain and token-file logins, investigated the failed task (search, result, execution inputs with the submitted digest, logs, bound instructions), compared current settings and prepared the profile diff. Missing: the second privately connected machine over verified HTTPS; the TLS-proxy and redirect checks are same-host fixtures only. Unproved: prerequisite unavailable (no second trusted machine was granted)."
+      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, Codex, 2 turns) ran the packed binary installed outside the checkout, with Keychain and token-file logins, investigated the failed task (search, result, execution inputs with the submitted digest, logs, bound instructions), compared current settings and prepared the profile diff. Missing: the second privately connected machine over verified HTTPS; the TLS-proxy and redirect checks are same-host fixtures only. Unproved: prerequisite unavailable (no second trusted machine was granted)."
     },
     "CLI02": {
       "state": "bounded",
-      "basis": "Renewed CLI1 Chromium suite at the candidate (UI creation, metadata listing, one-time reveal, rotation before revocation, revocation readback, verifier-only storage, Origin and CSRF), renewed route-wide scope denial fixtures, and in the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): session-issued credentials, read-only CLI apply exit 3 and direct POST 403 insufficient-scope with the database digest unchanged, revocation during logs --follow exit 3, local logout leaving the server credential active until revoked (200 then 401), bearer 403 on /runtime/control and session-only credential routes. Scope: one host on loopback. Bounded: UI provisioning is qualified by the Chromium suite against a loopback fixture service, not on this live run."
+      "basis": "Renewed CLI1 Chromium suite (UI creation, metadata listing, one-time reveal, rotation before revocation, revocation readback, verifier-only storage, Origin and CSRF), renewed route-wide scope denial fixtures, and in the host live journey (issue-901-cli8-live-2026-10-12.json, Codex, 2 turns): session-issued credentials, read-only CLI apply exit 3 and direct POST 403 insufficient-scope with the database digest unchanged, revocation during logs --follow exit 3, local logout leaving the server credential active until revoked (200 then 401), bearer 403 on /runtime/control and session-only credential routes. Scope: one host on loopback. Bounded: UI provisioning is qualified by the Chromium suite against a loopback fixture service, not on this live run."
     },
     "CLI03": {
       "state": "bounded",
-      "basis": "In the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): exact profile apply creating revision 2 and an identical replay returning the same receipt, a rename through the session command route between prepare and apply exiting 4 with the digest unchanged, a dropped reply exiting 6 then operation get recorded and the rerun replaying with one version bump, and explicit adoption (boundIsCurrent false then true) before the next turn. Renewed CLI3 fixtures cover assignment creation between prepare and apply, identical UUIDs in distinct scopes and restoration. Bounded: adoption on a completed lead blocks its follow-up (recorded finding), and routing, capacity and creation writes are fixture-only."
+      "basis": "In the host live journey (issue-901-cli8-live-2026-10-12.json, Codex, 2 turns): exact profile apply creating revision 2 and an identical replay returning the same receipt, a rename through the session command route between prepare and apply exiting 4 with the digest unchanged, a dropped reply exiting 6 then operation get recorded and the rerun replaying with one version bump, and explicit adoption (boundIsCurrent false then true) before the next turn. Renewed CLI3 fixtures cover assignment creation between prepare and apply, identical UUIDs in distinct scopes and restoration. Bounded: adoption followed by a follow-up on a completed lead is covered by a deterministic test (#935), not the live journey, and routing, capacity and creation writes are fixture-only."
     },
     "CLI04": {
       "state": "bounded",
-      "basis": "Stop, follow-up and Resume ran through the installed binary in the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns). Answers, approvals, recovery and staged comment review/confirm/send rely on the renewed CLI4-CLI6 fixtures (scripted GitHub dispatcher, seeded recovery facts, fixture runtime); they establish no real provider effect or independent recovery fact."
+      "basis": "Stop, follow-up and Resume ran through the installed binary in the host live journey (issue-901-cli8-live-2026-10-12.json, Codex, 2 turns). Answers, approvals, recovery and staged comment review/confirm/send rely on the renewed CLI4-CLI6 fixtures (scripted GitHub dispatcher, seeded recovery facts, fixture runtime); they establish no real provider effect or independent recovery fact."
     },
     "CLI05": {
       "state": "bounded",
-      "basis": "Renewed CLI7 deterministic suites at the candidate cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write is covered by deterministic fixtures only."
+      "basis": "Renewed CLI7 deterministic suites cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write is covered by deterministic fixtures only."
     },
     "CLI06": {
       "state": "unproved",
-      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) identified the submitted inputs (digest match), commandExecution and dynamicToolCall items with the ensemble_report_result tool record, observed ENSEMBLE_MANAGED_ASSIGNMENT=1 in the Codex tool shell, and drove correction, adoption and one follow-up turn; deterministic boundary evidence is renewed. Missing: the private-remote half of the journey. Unproved: prerequisite unavailable (no second trusted machine was granted)."
+      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, Codex, 2 turns) identified the submitted inputs (digest match), commandExecution and dynamicToolCall items with the ensemble_report_result tool record, observed ENSEMBLE_MANAGED_ASSIGNMENT=1 in the Codex tool shell, and drove correction, adoption and one follow-up turn; deterministic boundary evidence is renewed. Missing: the private-remote half of the journey. Unproved: prerequisite unavailable (no second trusted machine was granted)."
     }
   },
   "rows": [
@@ -41,8 +40,8 @@
       "area": "auth/connection",
       "scenarios": ["CLI01", "CLI02"],
       "evidence": [
-        "test/operator-cli.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/operator/operator-cli.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "harness:login-keychain",
         "harness:login-token-file",
@@ -54,7 +53,7 @@
       "retry": "n/a: login is not a receipted mutation; re-running replaces the local connection.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "auth status",
@@ -62,8 +61,8 @@
       "area": "auth/connection",
       "scenarios": ["CLI01", "CLI02"],
       "evidence": [
-        "test/operator-cli.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/operator/operator-cli.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "harness:auth-status",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -74,7 +73,7 @@
       "retry": "n/a: read; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "auth logout",
@@ -82,8 +81,8 @@
       "area": "auth/connection",
       "scenarios": ["CLI01", "CLI02"],
       "evidence": [
-        "test/operator-cli.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/operator/operator-cli.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "harness:auth-logout",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -94,7 +93,7 @@
       "retry": "n/a: local; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "connection list",
@@ -102,7 +101,7 @@
       "area": "auth/connection",
       "scenarios": ["CLI01", "CLI02"],
       "evidence": [
-        "test/operator-cli.test.ts",
+        "test/operator/operator-cli.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "harness:connection-list",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -113,7 +112,7 @@
       "retry": "n/a: local; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "connection use",
@@ -121,7 +120,7 @@
       "area": "auth/connection",
       "scenarios": ["CLI01", "CLI02"],
       "evidence": [
-        "test/operator-cli.test.ts",
+        "test/operator/operator-cli.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "harness:connection-use",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -132,7 +131,7 @@
       "retry": "n/a: local; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "connection remove",
@@ -140,7 +139,7 @@
       "area": "auth/connection",
       "scenarios": ["CLI01", "CLI02"],
       "evidence": [
-        "test/operator-cli.test.ts",
+        "test/operator/operator-cli.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "harness:connection-remove",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -151,7 +150,7 @@
       "retry": "n/a: local; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "project list",
@@ -159,9 +158,9 @@
       "area": "project",
       "scenarios": ["CLI01"],
       "evidence": [
-        "test/operator-cli-browse.test.ts",
-        "test/operator-cli-packed.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/operator/operator-cli-browse.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Lists projects with id, name, lead profile, paused state and version plus the runtime line, in a coverage envelope; JSON data equals the bearer API read.",
@@ -178,9 +177,9 @@
       "area": "project",
       "scenarios": ["CLI01"],
       "evidence": [
-        "test/operator-cli-browse.test.ts",
-        "test/operator-diagnostic-capture.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/operator/operator-cli-browse.test.ts",
+        "test/operator/operator-diagnostic-capture.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Shows one project's name, version, paused state, lead, instructions revision, diagnostic-capture mode, routing availability and source counts.",
@@ -197,8 +196,8 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-assignment.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/coordination/operator-cli-assignment.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Reads the current or --revision N project instruction text with credential values, control paths and credential references redacted (gap content-redacted).",
@@ -215,7 +214,7 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-inventory.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Lists project instruction revisions with the current marker.",
@@ -232,10 +231,10 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-source.test.ts",
-        "test/operator-cli-source-activation.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/sources/operator-cli-source.test.ts",
+        "test/sources/operator-cli-source-activation.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Shows source selections, readiness, link and source version without query, filter, checkout path or reference name; a partial read is evidence-gap.",
@@ -252,8 +251,8 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-routing-capacity.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/coordination/operator-cli-routing-capacity.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md"
       ],
       "effect": "Reads the global and per-project concurrency limits with a coverage envelope.",
@@ -270,8 +269,8 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-change.test.ts",
-        "test/operator-cli-config-journey.test.ts",
+        "test/workspaces/operator-cli-change.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "harness:project-prepare",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -282,7 +281,7 @@
       "retry": "n/a: prepare is local and sends no request.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "project prepare-create",
@@ -290,8 +289,8 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-change.test.ts",
-        "test/operator-cli-config-journey.test.ts",
+        "test/workspaces/operator-cli-change.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md"
       ],
       "effect": "Writes a creation document for a paused project with revision-1 text and the given lead; sends no write.",
@@ -308,11 +307,11 @@
       "area": "project",
       "scenarios": ["CLI02", "CLI03"],
       "evidence": [
-        "test/operator-cli-change.test.ts",
-        "test/operator-cli-config-journey.test.ts",
-        "test/operator-cli-routing-capacity.test.ts",
-        "test/operator-cli-source.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
+        "test/workspaces/operator-cli-change.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
+        "test/coordination/operator-cli-routing-capacity.test.ts",
+        "test/sources/operator-cli-source.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "docs/evidence/issue-897-cli4-2026-10-12.md",
         "harness:project-apply-lost-response",
@@ -325,7 +324,7 @@
       "retry": "Replaying the identical document applies once; a lost reply exits 6 and operation get reads it recorded; a fresh process or service restart reuses the key with one version bump; one UUID in three scopes selects only its own receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "project prepare-routing",
@@ -333,7 +332,7 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-routing-capacity.test.ts",
+        "test/coordination/operator-cli-routing-capacity.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md"
       ],
       "effect": "Writes a routing change document (enabled, candidates, replace-only guidance, --credential-ref env:NAME or none) whose diff shows only proposed text; sends no write.",
@@ -350,8 +349,8 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-source.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
+        "test/sources/operator-cli-source.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Writes a github.configure change document from a strict edit file (kept rows as {id, keep: true}, new ids above every saved id, no private query resent); sends no write.",
@@ -367,7 +366,7 @@
       "kind": "command",
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
-      "evidence": ["test/operator-cli-source.test.ts"],
+      "evidence": ["test/sources/operator-cli-source.test.ts"],
       "effect": "Writes a repositories.configure change document from a strict edit file (kept links as {codeHost, host, repositoryId, ref} without their path); sends no write.",
       "denial": "n/a: prepare sends no write; empty edit, unknown, duplicate or already linked repositories, removing every link without confirmUnlinkAll, unknown fields, malformed JSON and a symlinked edit file exit 2 with no document.",
       "revision": "A stale --expected-version exits 4; an unnamed saved link exits 4; the command equals the web UI repositoryCommand for the same edit.",
@@ -382,8 +381,8 @@
       "area": "project",
       "scenarios": ["CLI02", "CLI03"],
       "evidence": [
-        "test/operator-cli-source-activation.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
+        "test/sources/operator-cli-source-activation.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Records github.preview after a complete provider read and activates only that selection; no tasks are imported and no sync is proved.",
@@ -400,8 +399,8 @@
       "area": "project",
       "scenarios": ["CLI02", "CLI03"],
       "evidence": [
-        "test/operator-cli-source-activation.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
+        "test/sources/operator-cli-source-activation.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Records github.place, moving a conflicting task to a listed project; neither starts work nor grants repository access.",
@@ -418,9 +417,9 @@
       "area": "project",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-routing-capacity.test.ts",
-        "test/operator-cli-config-journey.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/coordination/operator-cli-routing-capacity.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md"
       ],
       "effect": "Writes a capacity change document (global and per-project limits, default clears an override) recording expectedCurrent; sends no write.",
@@ -437,8 +436,8 @@
       "area": "project",
       "scenarios": ["CLI02", "CLI03"],
       "evidence": [
-        "test/operator-cli-routing-capacity.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/coordination/operator-cli-routing-capacity.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md"
       ],
       "effect": "Applies the reviewed limits as saved configuration under the capacity.configure receipt (scope system:capacity).",
@@ -455,8 +454,8 @@
       "area": "profile",
       "scenarios": ["CLI01"],
       "evidence": [
-        "test/operator-cli-browse.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/operator/operator-cli-browse.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Lists agent profiles with id, name, revoked state, version and summary plus the runtime line, in a coverage envelope.",
@@ -473,8 +472,8 @@
       "area": "profile",
       "scenarios": ["CLI01", "CLI06"],
       "evidence": [
-        "test/operator-cli-browse.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/operator/operator-cli-browse.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:profile-get",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -485,7 +484,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "profile instructions",
@@ -493,8 +492,8 @@
       "area": "profile",
       "scenarios": ["CLI01", "CLI03", "CLI06"],
       "evidence": [
-        "test/operator-cli-assignment.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/coordination/operator-cli-assignment.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:profile-instructions",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -505,7 +504,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "profile revisions",
@@ -513,8 +512,8 @@
       "area": "profile",
       "scenarios": ["CLI01", "CLI03", "CLI06"],
       "evidence": [
-        "test/operator-cli-assignment.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/coordination/operator-cli-assignment.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:profile-revisions",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -525,7 +524,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "profile prepare",
@@ -533,8 +532,8 @@
       "area": "profile",
       "scenarios": ["CLI01", "CLI03", "CLI06"],
       "evidence": [
-        "test/operator-cli-change.test.ts",
-        "test/operator-cli-config-journey.test.ts",
+        "test/workspaces/operator-cli-change.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "harness:profile-prepare",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -545,7 +544,7 @@
       "retry": "n/a: prepare is local.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). --restore-revision is covered by deterministic fixtures only."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). --restore-revision is covered by deterministic fixtures only."
     },
     {
       "id": "profile prepare-create",
@@ -553,8 +552,8 @@
       "area": "profile",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-change.test.ts",
-        "test/operator-cli-config-journey.test.ts",
+        "test/workspaces/operator-cli-change.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md"
       ],
       "effect": "Writes a creation document for a profile with revision-1 text; sends no write.",
@@ -571,8 +570,8 @@
       "area": "profile",
       "scenarios": ["CLI02", "CLI03", "CLI06"],
       "evidence": [
-        "test/operator-cli-change.test.ts",
-        "test/operator-cli-config-journey.test.ts",
+        "test/workspaces/operator-cli-change.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "harness:profile-apply",
         "harness:profile-apply-replay",
@@ -587,7 +586,7 @@
       "retry": "Re-applying the same document replays one receipt; a lost reply exits 6, operation get reads it and the rerun reuses the key; one UUID in distinct scopes stays distinct.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task list",
@@ -595,8 +594,8 @@
       "area": "task",
       "scenarios": ["CLI01", "CLI06"],
       "evidence": [
-        "test/operator-cli-browse.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/operator/operator-cli-browse.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:task-list",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -607,7 +606,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task search",
@@ -615,7 +614,7 @@
       "area": "task",
       "scenarios": ["CLI01", "CLI06"],
       "evidence": [
-        "test/operator-cli-browse.test.ts",
+        "test/operator/operator-cli-browse.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:task-search",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -626,7 +625,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task get",
@@ -634,10 +633,10 @@
       "area": "task",
       "scenarios": ["CLI01", "CLI06"],
       "evidence": [
-        "test/operator-cli.test.ts",
-        "test/operator-cli-browse.test.ts",
-        "test/operator-cli-task-control.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/operator/operator-cli.test.ts",
+        "test/operator/operator-cli-browse.test.ts",
+        "test/coordination/operator-cli-task-control.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "harness:task-get",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -648,7 +647,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task messages",
@@ -656,7 +655,7 @@
       "area": "task",
       "scenarios": ["CLI01"],
       "evidence": [
-        "test/operator-cli-browse.test.ts",
+        "test/operator/operator-cli-browse.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Pages a task's messages (50 up to 200) equal to the task get slices, with instruction redaction kept.",
@@ -673,8 +672,8 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI03"],
       "evidence": [
-        "test/operator-cli-task.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
+        "test/coordination/operator-cli-task.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Creates a task as a draft (saved) or, when ready in an unpaused configured project, queues work (a dispatching effect); ids derive from the request key.",
@@ -691,8 +690,8 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI03"],
       "evidence": [
-        "test/operator-cli-task.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
+        "test/coordination/operator-cli-task.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Changes a task's title, outcome or readiness (--ready true then false reverses) as saved configuration.",
@@ -709,8 +708,8 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI03"],
       "evidence": [
-        "test/operator-cli-task.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
+        "test/coordination/operator-cli-task.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Adds a blocker to a task and returns the new version as saved configuration.",
@@ -727,8 +726,8 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI03"],
       "evidence": [
-        "test/operator-cli-task.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
+        "test/coordination/operator-cli-task.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Removes a blocker from a task and returns the new version; the reverse of add-dependency.",
@@ -745,8 +744,8 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI04", "CLI06"],
       "evidence": [
-        "test/operator-cli-task.test.ts",
-        "test/operator-cli-recovery-journey.test.ts",
+        "test/coordination/operator-cli-task.test.ts",
+        "test/execution/operator-cli-recovery-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Queues an addressed message for a running recipient's next eligible turn (coordination receipt); admits no work itself.",
@@ -763,8 +762,8 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI04", "CLI06"],
       "evidence": [
-        "test/operator-cli-task.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
+        "test/coordination/operator-cli-task.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md",
         "harness:task-follow-up",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -775,14 +774,17 @@
       "retry": "A lost reply then rerun reuses the key; operation get does not read coordination receipts.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). A follow-up after adoption on a completed lead exits 4 (see assignment apply-current)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). Adoption followed by a follow-up on a completed lead is covered by a deterministic test (#935, test/operator/operator-cli-adopt.test.ts)."
     },
     {
       "id": "task draft-turn",
       "kind": "command",
       "area": "task",
       "scenarios": ["CLI02", "CLI04"],
-      "evidence": ["test/operator-cli-task.test.ts", "test/draft-turn.test.ts"],
+      "evidence": [
+        "test/coordination/operator-cli-task.test.ts",
+        "test/coordination/draft-turn.test.ts"
+      ],
       "effect": "Queues one read-only turn of the project lead on an open Draft task (effect queued); the task stays not Ready and the lead stays pending.",
       "denial": "A read-only credential exits 3; a Ready, Done or Cancelled task, a missing or revoked lead, a held lead and a draft turn already queued exit 4 with the reason and nothing sent.",
       "revision": "A stale task --expected-version exits 4 with no event.",
@@ -797,8 +799,8 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-task-control.test.ts",
-        "test/task-restart.test.ts"
+        "test/coordination/operator-cli-task-control.test.ts",
+        "test/execution/task-restart.test.ts"
       ],
       "effect": "Queues a request that was refused before it ran again at the current revisions in the same workspace (effect queued); the refusal stays in the history and nothing is sent to the lead.",
       "denial": "A task with nothing refused, a source hold, a held assignment, a cut-off submission or any execution that may have run exits 4 with the reason and the recovery that applies, and nothing is sent.",
@@ -814,8 +816,8 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-task-control.test.ts",
-        "test/task-restart.test.ts"
+        "test/coordination/operator-cli-task-control.test.ts",
+        "test/execution/task-restart.test.ts"
       ],
       "effect": "Replaces every assignment's conversation and queues a fresh first turn for the project lead in the same workspace (effect queued); it cannot be undone and the old conversations and workspace stay readable.",
       "denial": "A task that is not open and Ready, has queued, running or unresolved work, or has a task, Stop, source or assignment hold exits 4 with the reason and nothing recorded.",
@@ -831,10 +833,10 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-task-control.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
-        "test/operator-cli-http.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/coordination/operator-cli-task-control.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
+        "test/operator/operator-cli-http.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md",
         "harness:task-stop",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -845,7 +847,7 @@
       "retry": "A lost Stop then rerun replays the receipt; the keyless retained form and the receipted command share one hold; the output reports whether Stop is in effect.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task resume",
@@ -853,10 +855,10 @@
       "area": "task",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-task-control.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
-        "test/operator-cli-http.test.ts",
-        "test/operator-cli-recovery-journey.test.ts",
+        "test/coordination/operator-cli-task-control.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
+        "test/operator/operator-cli-http.test.ts",
+        "test/execution/operator-cli-recovery-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md",
         "docs/evidence/issue-899-cli6-2026-10-12.md",
         "harness:task-resume",
@@ -868,7 +870,7 @@
       "retry": "A lost Resume then rerun replays the old receipt and reports Stop not in effect with new --request-id advice.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "assignment get",
@@ -876,8 +878,8 @@
       "area": "assignment",
       "scenarios": ["CLI01", "CLI03", "CLI06"],
       "evidence": [
-        "test/operator-cli-assignment.test.ts",
-        "test/operator-cli-recovery.test.ts",
+        "test/coordination/operator-cli-assignment.test.ts",
+        "test/execution/operator-cli-recovery.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:assignment-get",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -888,7 +890,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "assignment history",
@@ -896,7 +898,7 @@
       "area": "assignment",
       "scenarios": ["CLI01", "CLI03"],
       "evidence": [
-        "test/operator-cli-assignment.test.ts",
+        "test/coordination/operator-cli-assignment.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Pages an assignment's history (50 then the rest by token) with older-history-omitted; general history keeps instruction redaction.",
@@ -913,10 +915,10 @@
       "area": "assignment",
       "scenarios": ["CLI01", "CLI03", "CLI06"],
       "evidence": [
-        "test/operator-cli-assignment.test.ts",
-        "test/operator-cli-adopt.test.ts",
-        "test/operator-cli-change.test.ts",
-        "test/operator-cli-config-journey.test.ts",
+        "test/coordination/operator-cli-assignment.test.ts",
+        "test/operator/operator-cli-adopt.test.ts",
+        "test/workspaces/operator-cli-change.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:assignment-instructions",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -927,7 +929,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "assignment apply-current",
@@ -935,12 +937,11 @@
       "area": "assignment",
       "scenarios": ["CLI02", "CLI03", "CLI06"],
       "evidence": [
-        "test/operator-cli-adopt.test.ts",
-        "test/operator-cli-config-journey.test.ts",
+        "test/operator/operator-cli-adopt.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "harness:assignment-apply-current",
-        "docs/evidence/issue-901-cli8-live-2026-10-12.json",
-        "test/cli8-journey-harness.test.ts"
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Rebinds an assignment to the current instruction revisions (boundIsCurrent) for the next turn; never rewrites an active turn.",
       "denial": "A read-only credential exits 3 with the digest unchanged; a revoked profile exits 4 policy-denied; an unknown assignment exits 2; a missing --expected-version exits 2 with no request.",
@@ -948,7 +949,7 @@
       "retry": "The journal key and --request-id replay once; operation get reads the assignment.apply receipt.",
       "observation": "real",
       "state": "bounded",
-      "gap": "Ran live before turn 2, but adopting on a completed lead advances it past its result's version, so task follow-up then exits 4 and the lead cannot be resumed (src/core/domain.ts assignment.apply; src/core/coordination.ts resumableResult; test/cli8-journey-harness.test.ts). The live journey adopted after a follow-up under Stop. Recorded for decision, not repaired."
+      "gap": "Ran live before turn 2, after a follow-up under Stop. Adoption followed by a follow-up on a completed lead is covered by a deterministic test (#935, test/operator/operator-cli-adopt.test.ts), not the live journey."
     },
     {
       "id": "inbox list",
@@ -956,8 +957,8 @@
       "area": "inbox/question/approval",
       "scenarios": ["CLI01", "CLI04"],
       "evidence": [
-        "test/operator-cli-attention.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/coordination/operator-cli-attention.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Lists question, approval and intervention items with ids and revisions; --kind and --project filter on the server; --limit pages through More:.",
@@ -974,7 +975,7 @@
       "area": "inbox/question/approval",
       "scenarios": ["CLI01", "CLI04"],
       "evidence": [
-        "test/operator-cli-attention.test.ts",
+        "test/coordination/operator-cli-attention.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Shows a question form with bounds, options, recommended and preselected marked as information only, and the answers-file shape.",
@@ -991,8 +992,8 @@
       "area": "inbox/question/approval",
       "scenarios": ["CLI01", "CLI04"],
       "evidence": [
-        "test/operator-cli-attention.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
+        "test/coordination/operator-cli-attention.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Shows an approval's exact action, target, material, hash, revision and task holds.",
@@ -1009,8 +1010,8 @@
       "area": "inbox/question/approval",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-attention.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
+        "test/coordination/operator-cli-attention.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Answers a question (question.form.answer for Ensemble forms, question.answer for plain) with the session API's receipt shape.",
@@ -1027,8 +1028,8 @@
       "area": "inbox/question/approval",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-attention.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
+        "test/coordination/operator-cli-attention.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Approves or denies exact reviewed material (action, target, hash, revision); the decision is final and shares the task holds.",
@@ -1059,9 +1060,9 @@
       "area": "execution/logs",
       "scenarios": ["CLI01", "CLI05", "CLI06"],
       "evidence": [
-        "test/operator-cli-execution.test.ts",
-        "test/operator-cli-inventory.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/execution/operator-cli-execution.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md",
         "docs/evidence/issue-900-cli7-live-2026-10-11.json",
         "harness:execution-list",
@@ -1073,7 +1074,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "execution get",
@@ -1081,8 +1082,8 @@
       "area": "execution/logs",
       "scenarios": ["CLI01", "CLI05", "CLI06"],
       "evidence": [
-        "test/operator-cli-execution.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/execution/operator-cli-execution.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md",
         "docs/evidence/issue-900-cli7-live-2026-10-11.json",
         "harness:execution-get",
@@ -1094,7 +1095,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "execution inputs",
@@ -1102,8 +1103,8 @@
       "area": "execution/logs",
       "scenarios": ["CLI01", "CLI05", "CLI06"],
       "evidence": [
-        "test/operator-cli-execution.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/execution/operator-cli-execution.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md",
         "docs/evidence/issue-900-cli7-live-2026-10-11.json",
         "harness:execution-inputs",
@@ -1115,7 +1116,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "logs",
@@ -1123,9 +1124,9 @@
       "area": "execution/logs",
       "scenarios": ["CLI01", "CLI02", "CLI05", "CLI06"],
       "evidence": [
-        "test/operator-cli-execution.test.ts",
-        "test/operator-cli-follow.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/execution/operator-cli-execution.test.ts",
+        "test/coordination/operator-cli-follow.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md",
         "docs/evidence/issue-900-cli7-live-2026-10-11.json",
         "harness:logs",
@@ -1138,7 +1139,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "doctor",
@@ -1146,8 +1147,8 @@
       "area": "execution/logs",
       "scenarios": ["CLI05"],
       "evidence": [
-        "test/operator-cli-doctor.test.ts",
-        "test/operator-cli-inventory.test.ts"
+        "test/operator/operator-cli-doctor.test.ts",
+        "test/operator/operator-cli-inventory.test.ts"
       ],
       "effect": "Reads the service-side readiness checks (Codex executable and login, git, GitHub discovery, Claude token, runtime harness, data and auth paths); JSON data equals the bearer GET of /api/operator/readiness and carries no secret value or path.",
       "denial": "n/a: read-only; a service that does not advertise diagnostics.read exits 7 after identity only (a pre-readiness service that does advertise it answers not-found), managed-assignment context exits 3 with no request, and a failing check still exits 0.",
@@ -1163,9 +1164,9 @@
       "area": "recovery",
       "scenarios": ["CLI01", "CLI04"],
       "evidence": [
-        "test/operator-cli-recovery.test.ts",
-        "test/operator-cli-recovery-journey.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/execution/operator-cli-recovery.test.ts",
+        "test/execution/operator-cli-recovery-journey.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-899-cli6-2026-10-12.md"
       ],
       "effect": "Shows an assignment's recovery eligibility, holds, process identity, reason, witnesses, observations and a per-path table with blockers and required inputs.",
@@ -1182,8 +1183,8 @@
       "area": "recovery",
       "scenarios": ["CLI01", "CLI04"],
       "evidence": [
-        "test/operator-cli-recovery-write.test.ts",
-        "test/operator-cli-recovery-journey.test.ts",
+        "test/execution/operator-cli-recovery-write.test.ts",
+        "test/execution/operator-cli-recovery-journey.test.ts",
         "docs/evidence/issue-899-cli6-2026-10-12.md"
       ],
       "effect": "Writes a 0600 ensemble.cli.recovery/v1 document for one of the five paths (no-turn or pre-turn adopt and recover, conversation-replace) from the recovery read plus a strict evidence file; sends nothing.",
@@ -1200,8 +1201,8 @@
       "area": "recovery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-recovery-write.test.ts",
-        "test/operator-cli-recovery-journey.test.ts",
+        "test/execution/operator-cli-recovery-write.test.ts",
+        "test/execution/operator-cli-recovery-journey.test.ts",
         "docs/evidence/issue-899-cli6-2026-10-12.md"
       ],
       "effect": "Submits a prepared document as a receipted recovery.* command (saved or completed); it resumes nothing and dispatches no work, and adoption, recovery and replacement are irreversible.",
@@ -1218,7 +1219,7 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI01", "CLI06"],
       "evidence": [
-        "test/operator-cli-evidence.test.ts",
+        "test/workspaces/operator-cli-evidence.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:result-list",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -1229,7 +1230,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "result get",
@@ -1237,7 +1238,7 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI01", "CLI06"],
       "evidence": [
-        "test/operator-cli-evidence.test.ts",
+        "test/workspaces/operator-cli-evidence.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
         "harness:result-get",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -1248,7 +1249,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "result evidence",
@@ -1256,7 +1257,7 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI01"],
       "evidence": [
-        "test/operator-cli-evidence.test.ts",
+        "test/workspaces/operator-cli-evidence.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Writes a retained evidence item's exact bytes (BOM and CRLF preserved) to a new 0600 --out file after digest and size verification.",
@@ -1273,9 +1274,9 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI01"],
       "evidence": [
-        "test/operator-cli-evidence.test.ts",
-        "test/operator-artifact-source.test.ts",
-        "test/operator-cli-inventory.test.ts",
+        "test/workspaces/operator-cli-evidence.test.ts",
+        "test/workspaces/operator-artifact-source.test.ts",
+        "test/operator/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md"
       ],
       "effect": "Writes a retained artifact (source retained, or a still-matching recorded workspace file) to a new 0600 file after x-ensemble-sha256 verification.",
@@ -1292,9 +1293,9 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI01", "CLI04"],
       "evidence": [
-        "test/operator-cli-delivery.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/delivery/operator-cli-delivery.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Shows delivery mode, policy version, PR state and checks, actions, comment policy and bound issue; JSON equals the session task read's delivery.",
@@ -1311,8 +1312,8 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-delivery.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
+        "test/delivery/operator-cli-delivery.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Runs the receipted installation-wide delivery.refresh and post-reads delivery (outcome complete, or partial with evidence-gap when the provider read fails); an uncertain comment is read back.",
@@ -1343,8 +1344,8 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-comments.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
+        "test/coordination/operator-cli-comments.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Records a pending comment review (id, revision 1, hash, target) and posts nothing.",
@@ -1361,8 +1362,8 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-comments.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
+        "test/coordination/operator-cli-comments.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Approves or denies the exact reviewed comment (revision 2); the decision is final.",
@@ -1379,9 +1380,9 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-comments.test.ts",
-        "test/operator-cli-delivery.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
+        "test/coordination/operator-cli-comments.test.ts",
+        "test/delivery/operator-cli-delivery.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-897-cli4-2026-10-12.md"
       ],
       "effect": "Posts the approved comment once through the provider with the operation marker; the receipt state decides exit 0, 4 or 6.",
@@ -1398,8 +1399,8 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-delivery.test.ts",
-        "test/operator-cli-inventory.test.ts"
+        "test/delivery/operator-cli-delivery.test.ts",
+        "test/operator/operator-cli-inventory.test.ts"
       ],
       "effect": "Records a pending review of publishing a local task as a GitHub issue (target, text, labels, Project fields, predicted selection and Ready) and creates nothing.",
       "denial": "A read-only credential exits 3; an unavailable task or target exits 4 with the reason and nothing sent.",
@@ -1415,8 +1416,8 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-delivery.test.ts",
-        "test/operator-cli-inventory.test.ts"
+        "test/delivery/operator-cli-delivery.test.ts",
+        "test/operator/operator-cli-inventory.test.ts"
       ],
       "effect": "Approves or denies the exact reviewed publication (revision 2); the decision is final.",
       "denial": "A read-only credential exits 3; a wrong hash or revision, a decided review, or a changed task, grant or target exits 4 with the decision unchanged.",
@@ -1432,8 +1433,8 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-delivery.test.ts",
-        "test/operator-cli-inventory.test.ts"
+        "test/delivery/operator-cli-delivery.test.ts",
+        "test/operator/operator-cli-inventory.test.ts"
       ],
       "effect": "Creates the issue once through the provider (then the Project item and readiness fields) and converts the task to the issue's imported task; the receipt state decides what was done.",
       "denial": "A read-only credential exits 3; a send before approval, after a denial or on a started task exits 4 before any request.",
@@ -1449,8 +1450,8 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-delivery.test.ts",
-        "test/operator-cli-inventory.test.ts"
+        "test/delivery/operator-cli-delivery.test.ts",
+        "test/operator/operator-cli-inventory.test.ts"
       ],
       "effect": "Accepts a named issue as an unknown create when it carries the create's marker and exact text, then finishes the publication.",
       "denial": "A read-only credential exits 3; an issue without the marker, or a create whose outcome is known, exits 4 and changes nothing.",
@@ -1466,8 +1467,8 @@
       "area": "result/artifact/delivery",
       "scenarios": ["CLI02", "CLI04"],
       "evidence": [
-        "test/operator-cli-delivery.test.ts",
-        "test/operator-cli-inventory.test.ts"
+        "test/delivery/operator-cli-delivery.test.ts",
+        "test/operator/operator-cli-inventory.test.ts"
       ],
       "effect": "Gives up on an unknown create and returns the task to local; GitHub may still have created the issue.",
       "denial": "A read-only credential exits 3; a publication whose create is known exits 4.",
@@ -1483,8 +1484,8 @@
       "area": "execution/logs",
       "scenarios": ["CLI05"],
       "evidence": [
-        "test/operator-cli-runtime.test.ts",
-        "test/operator-cli-inventory.test.ts"
+        "test/operator/operator-cli-runtime.test.ts",
+        "test/operator/operator-cli-inventory.test.ts"
       ],
       "effect": "Lists each execution runtime's saved setting, its state (Available, Unavailable, or Not enabled with Disabled in Settings or the missing executable) and the tasks bound to it, in a coverage envelope.",
       "denial": "n/a: read-only with a read credential.",
@@ -1492,35 +1493,35 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Added with #989 after the CLI8 candidate. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+      "gap": "Added with #989 after the CLI8 live journey. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "runtime enable",
       "kind": "command",
       "area": "execution/logs",
       "scenarios": ["CLI02", "CLI03"],
-      "evidence": ["test/operator-cli-runtime.test.ts"],
+      "evidence": ["test/operator/operator-cli-runtime.test.ts"],
       "effect": "Saves the runtime as enabled under the runtime.configure receipt (scope system:runtime:<harness>) and starts it in the running service.",
       "denial": "Refused with exit 4 and nothing saved while the runtime's executable is not on the service PATH; the shared command route denies read credentials.",
       "revision": "n/a: no version; the setting is last-writer-wins and toggles are serialised per runtime in the service",
       "retry": "A replayed request key returns the stored receipt and brings the live runtime to the saved setting again.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Added with #989 after the CLI8 candidate. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+      "gap": "Added with #989 after the CLI8 live journey. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "runtime disable",
       "kind": "command",
       "area": "execution/logs",
       "scenarios": ["CLI02", "CLI03"],
-      "evidence": ["test/operator-cli-runtime.test.ts"],
+      "evidence": ["test/operator/operator-cli-runtime.test.ts"],
       "effect": "Saves the runtime as disabled; new admissions stop at once, running turns finish and the runtime stops once none remain.",
       "denial": "A read-only credential exits 3; disabling a runtime that bound tasks use exits 4 without --yes and states the count.",
       "revision": "n/a: no version; the bound-task count is checked server-side when the command arrives",
       "retry": "A replayed request key returns the stored receipt without asking to confirm again.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Added with #989 after the CLI8 candidate. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+      "gap": "Added with #989 after the CLI8 live journey. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "operation get",
@@ -1528,14 +1529,14 @@
       "area": "operation",
       "scenarios": ["CLI03", "CLI04"],
       "evidence": [
-        "test/operator-cli-write.test.ts",
-        "test/operator-cli-config-journey.test.ts",
-        "test/operator-cli-adopt.test.ts",
-        "test/operator-cli-recovery-write.test.ts",
-        "test/operator-cli-routing-capacity.test.ts",
-        "test/operator-cli-source.test.ts",
-        "test/operator-cli-source-activation.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/operator/operator-cli-write.test.ts",
+        "test/operator/operator-cli-config-journey.test.ts",
+        "test/operator/operator-cli-adopt.test.ts",
+        "test/execution/operator-cli-recovery-write.test.ts",
+        "test/coordination/operator-cli-routing-capacity.test.ts",
+        "test/sources/operator-cli-source.test.ts",
+        "test/sources/operator-cli-source-activation.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "docs/evidence/issue-897-cli4-2026-10-12.md",
         "docs/evidence/issue-899-cli6-2026-10-12.md",
@@ -1548,7 +1549,7 @@
       "retry": "The same UUID in other scopes reads each scope's own receipt or not-recorded; a lost reply is reconciled by reading, or by a same-key rerun.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "project prepare diagnosticCapture",
@@ -1556,7 +1557,7 @@
       "area": "project",
       "scenarios": ["CLI03", "CLI05"],
       "evidence": [
-        "test/operator-diagnostic-capture.test.ts",
+        "test/operator/operator-diagnostic-capture.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md"
       ],
       "effect": "project prepare --diagnostic-capture enhanced|baseline adds the mode to the one project.configure command, previewed as a field change; apply sets it and project get reads it back. Omitting the flag leaves the mode alone, and the current mode is refused as no change.",
@@ -1573,9 +1574,9 @@
       "area": "auth/connection",
       "scenarios": ["CLI02"],
       "evidence": [
-        "test/operator-cli-credentials-browser.test.ts",
-        "test/operator-credentials.test.ts",
-        "test/operator-cli-http.test.ts",
+        "test/operator/operator-cli-credentials-browser.test.ts",
+        "test/operations/operator-credentials.test.ts",
+        "test/operator/operator-cli-http.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md"
       ],
       "effect": "An authenticated session creates and lists named credentials with scope, creation, expiry and last-use metadata, reveals the token once, rotates by issuing a replacement before revoking the old credential and revokes with service readback.",
@@ -1592,11 +1593,11 @@
       "area": "auth/connection",
       "scenarios": ["CLI02"],
       "evidence": [
-        "test/operator-cli-http.test.ts",
-        "test/operator-cli-operate-journey.test.ts",
-        "test/operator-cli-source-delivery-journey.test.ts",
-        "test/operator-operations.test.ts",
-        "test/operator-recovery-commands.test.ts",
+        "test/operator/operator-cli-http.test.ts",
+        "test/operator/operator-cli-operate-journey.test.ts",
+        "test/delivery/operator-cli-source-delivery-journey.test.ts",
+        "test/operations/operator-operations.test.ts",
+        "test/execution/operator-recovery-commands.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "docs/evidence/issue-897-cli4-2026-10-12.md",
         "docs/evidence/issue-898-cli5-2026-10-11.md",
@@ -1611,7 +1612,7 @@
       "retry": "n/a: a denied command leaves no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "remote authority boundary",
@@ -1619,8 +1620,8 @@
       "area": "auth/connection",
       "scenarios": ["CLI02", "CLI06"],
       "evidence": [
-        "test/operator-cli-http.test.ts",
-        "test/operator-recovery-commands.test.ts",
+        "test/operator/operator-cli-http.test.ts",
+        "test/execution/operator-recovery-commands.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "docs/evidence/issue-898-cli5-2026-10-11.md",
         "docs/evidence/issue-899-cli6-2026-10-12.md",
@@ -1633,7 +1634,7 @@
       "retry": "n/a: a denied route leaves no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
+      "gap": "Real host journey in the CLI8 live record: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "verified HTTPS transport and redirect rejection",
@@ -1641,8 +1642,8 @@
       "area": "auth/connection",
       "scenarios": ["CLI01", "CLI02"],
       "evidence": [
-        "test/operator-cli.test.ts",
-        "test/operator-cli-packed.test.ts",
+        "test/operator/operator-cli.test.ts",
+        "test/operations/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md"
       ],
       "effect": "Remote origins must be HTTPS and verified by system trust or NODE_EXTRA_CA_CERTS; a redirect is rejected (exit 5) and the credential is never forwarded to another origin; the CLI imports no service or SQLite code.",

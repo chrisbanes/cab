@@ -1,10 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  type ChildProcess,
-  execFile,
-  spawn,
-  spawnSync,
-} from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -216,8 +211,33 @@ const capture = () => {
   };
 };
 
+/** Stops the services, then removes the sandbox even when stopping failed; reports every failure. */
+async function teardownSandbox(
+  launchd: { stopAll(): Promise<void> },
+  dir: string,
+  remove: typeof rmSync,
+) {
+  const errors: unknown[] = [];
+  try {
+    await launchd.stopAll();
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    remove(dir, { recursive: true, force: true });
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length)
+    throw new AggregateError(errors, "sandbox teardown failed");
+}
+
 /** One sandbox: a HOME, STATE, an isolated npm prefix, a fake `codex` and the spawning launchd. */
-async function sandbox(t: { after(fn: () => unknown): void }) {
+async function sandbox(
+  t: { after(fn: () => unknown): void },
+  remove: typeof rmSync = rmSync,
+) {
   const dir = mkdtempSync(join(tmpdir(), "cab-npm-lifecycle-"));
   chmodSync(dir, 0o700);
   const home = join(dir, "home");
@@ -235,10 +255,7 @@ async function sandbox(t: { after(fn: () => unknown): void }) {
     { mode: 0o755 },
   );
   const launchd = new SpawningLaunchd(home, codexDir);
-  t.after(async () => {
-    await launchd.stopAll();
-    rmSync(dir, { recursive: true, force: true });
-  });
+  t.after(() => teardownSandbox(launchd, dir, remove));
   const stateDir = join(home, "Library", "Application Support", "cab");
   const options: ServiceOptions = {
     stateDir,
@@ -433,10 +450,8 @@ test("a service installed from a global npm package keeps running from its own c
       assert.equal(s.launchd.jobs.get(LABEL)?.child.pid, pid);
       assert.equal((await fetch(`${s.origin}/app`)).status, 200);
       assert.equal(await assetStatus(s.origin), 200);
-      const state = JSON.parse(
-        readFileSync(join(s.stateDir, "data", "startup-state.json"), "utf8"),
-      );
-      assert.equal(state.release, "0.1.0");
+      // A fresh directory has nothing to snapshot or record.
+      assert.ok(!existsSync(join(s.stateDir, "data", "startup-state.json")));
       // A restart of the recorded job, with the package gone, needs only the staged files.
       const target = `gui/${s.host.uid}/${LABEL}`;
       await s.host.launchctl(["bootout", target]);
@@ -451,7 +466,7 @@ test("a service installed from a global npm package keeps running from its own c
   );
 
   await t.test(
-    "upgrade from the new package reaches readiness on its version with a verified snapshot",
+    "upgrade from the new package reaches readiness on its version, with no pending migrations and so no snapshot",
     async () => {
       const reinstalled = await installGlobal(s.prefix, b.tarball, s.home);
       const upgraded = await s.upgrade(reinstalled);
@@ -463,17 +478,9 @@ test("a service installed from a global npm package keeps running from its own c
           (check: { status: string }) => check.status !== "fail",
         ),
       );
-      assert.equal(typeof report.snapshot, "string");
-      assert.equal(
-        spawnSync(
-          join(s.prefix, "bin", "cab"),
-          ["snapshot", "verify", report.snapshot],
-          {
-            env: { PATH: process.env.PATH ?? "", HOME: s.home },
-          },
-        ).status,
-        0,
-      );
+      // The same code at a new version applies no migration.
+      assert.equal(report.snapshot, null);
+      assert.deepEqual(readdirSync(join(s.stateDir, "snapshots")), []);
       assert.ok(existsSync(stageA), "the old stage stays");
       assert.equal(s.record().version, "0.2.0");
       assert.equal((await fetch(`${s.origin}/app`)).status, 200);
@@ -593,3 +600,51 @@ test("the packaged CLI works against a service with no local server files", asyn
 });
 
 const realNode = () => realpathSync(process.execPath);
+
+test("sandbox teardown removes the directory when stopping the services fails", async () => {
+  const hooks: Array<() => unknown> = [];
+  const t = { after: (fn: () => unknown) => void hooks.push(fn) };
+  const stopFailure = new Error("stop failed");
+
+  const stopping = await sandbox(t);
+  stopping.launchd.stopAll = async () => {
+    throw stopFailure;
+  };
+  assert.ok(existsSync(stopping.dir));
+  await assert.rejects(async () => hooks[0]?.(), stopFailure);
+  assert.equal(existsSync(stopping.dir), false);
+
+  const removeFailure = new Error("remove failed");
+  const both = await sandbox(t, () => {
+    throw removeFailure;
+  });
+  both.launchd.stopAll = async () => {
+    throw stopFailure;
+  };
+  try {
+    await assert.rejects(
+      async () => hooks[1]?.(),
+      (error) =>
+        error instanceof AggregateError &&
+        error.errors.length === 2 &&
+        error.errors.includes(stopFailure) &&
+        error.errors.includes(removeFailure),
+    );
+  } finally {
+    rmSync(both.dir, { recursive: true, force: true });
+  }
+
+  let stopped = false;
+  const removing = await sandbox(t, () => {
+    throw removeFailure;
+  });
+  removing.launchd.stopAll = async () => {
+    stopped = true;
+  };
+  try {
+    await assert.rejects(async () => hooks[2]?.(), removeFailure);
+    assert.equal(stopped, true);
+  } finally {
+    rmSync(removing.dir, { recursive: true, force: true });
+  }
+});

@@ -5,20 +5,12 @@ import { draftProposalToolName } from "../../src/standalone/drafting.js";
 import { draftingTurn, seedDraftingProject } from "../fixtures/drafting.js";
 import { startedOf } from "../fixtures/service-internals.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { until } from "../fixtures/until.js";
 
 const proposal = {
   title: "Publish a keyboard guide",
   outcome: "Publish the guide.\nDone: reviewed and checked examples.",
 };
-
-async function until(check: () => boolean, description: string) {
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for ${description}`);
-}
 
 async function session(origin: string, password: string) {
   const first = await fetch(`${origin}/api/operator/session`);

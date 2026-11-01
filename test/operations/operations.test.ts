@@ -41,6 +41,7 @@ import {
   verifySnapshot,
 } from "../../src/standalone/operations.js";
 import { publishedOf } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 const digest = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
@@ -127,16 +128,6 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function waitUntil(
-  predicate: () => boolean | Promise<boolean>,
-): Promise<void> {
-  const deadline = Date.now() + 5000;
-  while (!(await predicate())) {
-    if (Date.now() >= deadline) throw new Error("operations fixture timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 class OperationsJourneyRuntime implements Runtime {
@@ -959,8 +950,8 @@ test("restored public state reconciles exact execution evidence before one eligi
       expectedVersion: 1,
       ready: true,
     });
-    await waitUntil(() => sourceRuntime.turns === 1);
-    await waitUntil(
+    await until(() => sourceRuntime.turns === 1);
+    await until(
       () =>
         sourceService?.coordinationView().readTask(routedTaskId).questions
           .length === 1,
@@ -979,7 +970,7 @@ test("restored public state reconciles exact execution evidence before one eligi
       message: "Preserve this operator message in the snapshot.",
     });
     sourceRuntime.finish("turn-1", "failed");
-    await waitUntil(
+    await until(
       () =>
         sourceService
           ?.list()
@@ -997,9 +988,9 @@ test("restored public state reconciles exact execution evidence before one eligi
       externalWorkspace,
     );
     void direct.catch(() => {});
-    await waitUntil(() => sourceRuntime.turns === 2);
+    await until(() => sourceRuntime.turns === 2);
     sourceRuntime.finish("turn-2", "failed");
-    await waitUntil(
+    await until(
       () =>
         sourceService
           ?.list()
@@ -1191,7 +1182,7 @@ test("restored public state reconciles exact execution evidence before one eligi
     assert.equal(restoredRuntime.turns, 0);
 
     await restoredService.provisionTask(admissionTaskId);
-    await waitUntil(
+    await until(
       async () =>
         (await restoredService?.taskWorkspace(admissionTaskId))?.state ===
         "ready",
@@ -1199,11 +1190,11 @@ test("restored public state reconciles exact execution evidence before one eligi
     assert.equal(restoredService.taskHold(admissionTaskId), "Task stopped");
     assert.equal(restoredRuntime.turns, 0);
     await restoredService.resumeTask(admissionTaskId);
-    await waitUntil(() => restoredRuntime.turns === 1);
+    await until(() => restoredRuntime.turns === 1);
     assert.equal(restoredRuntime.turns, 1);
     restoredRuntime.finish("turn-1", "completed");
     const admissionService = restoredService;
-    await waitUntil(() =>
+    await until(() =>
       admissionService
         .list()
         .some(

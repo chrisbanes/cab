@@ -545,7 +545,7 @@ export function QuestionResponse({
                 id={conversationId}
                 variant="secondary"
                 onFocus={evidenceFocus(conversationId)}
-                href={`/app/tasks/${taskId}?assignment=${data.requestingAssignmentId}#history`}
+                href={`/app/tasks/${taskId}?assignment=${data.requestingAssignmentId}`}
               >
                 Requesting conversation
               </ActionLink>
@@ -554,7 +554,7 @@ export function QuestionResponse({
               id={evidenceId}
               variant="secondary"
               onFocus={evidenceFocus(evidenceId)}
-              href={`/app/tasks/${taskId}?request=${interactionId}#history`}
+              href={`/app/tasks/${taskId}?request=${interactionId}#conversation`}
             >
               Question evidence
             </ActionLink>

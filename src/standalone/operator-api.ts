@@ -32,7 +32,10 @@ import {
   withinRedactionLimits,
 } from "../core/redaction-limits.js";
 import { StatusMappingRefusal } from "../core/status-mapping.js";
-import type { StatusMapping } from "../core/status-mapping-contracts.js";
+import {
+  isJiraMapping,
+  type GitHubStatusMapping,
+} from "../core/status-mapping-contracts.js";
 import { statusMappingRefusalSentence } from "../operator/status-mapping-copy.js";
 import {
   type DomainCommand,
@@ -60,10 +63,8 @@ import {
   questionFormSchema,
 } from "../core/question-forms.js";
 import {
-  defaultProfileRuntime,
   executionHarnessLabels,
   executionIntentStateSchema,
-  noProfileSkills,
 } from "../core/execution-runtime.js";
 import { skillFieldErrors } from "./skill-plugins.js";
 import {
@@ -200,7 +201,7 @@ import {
   parseTimelineCursor,
   serializeTimelineKey,
   timelineRank,
-} from "./timeline-key.js";
+} from "../operator/timeline-key.js";
 import {
   ResetUnavailableError,
   StartAgainUnavailableError,
@@ -3445,7 +3446,7 @@ export class OperatorApi {
           projectId: String(task.projectId),
           projectName: summary.project.name,
           taskTitle: summary.title,
-          evidence: `/app/tasks/${taskId}#history`,
+          evidence: `/app/tasks/${taskId}#conversation`,
         };
         const attentionCode = interventionCode(summary.attention.codes);
         if (attentionCode)
@@ -3504,7 +3505,7 @@ export class OperatorApi {
                   : "Operator answer requested",
             attentionCode: delivering ? "question-delivery" : null,
             destination: `/app/tasks/${taskId}?request=${q.interactionId}`,
-            conversation: `/app/tasks/${taskId}?assignment=${q.requestingAssignmentId}#history`,
+            conversation: `/app/tasks/${taskId}?assignment=${q.requestingAssignmentId}`,
           });
         }
         if (this.requireTask(taskId).version !== task.version)
@@ -6345,7 +6346,12 @@ export class OperatorApi {
           availability:
             this.service.routingAvailability(projectId).reason ?? "available",
         },
-        statusMapping: this.statusMappingView(projectId, g.selections, active),
+        statusMapping: this.statusMappingView(
+          projectId,
+          g.selections,
+          active,
+          Boolean(jira),
+        ),
         repositories: {
           version: links.version,
           links: links.links.map((r) => ({
@@ -6405,7 +6411,7 @@ export class OperatorApi {
    * Reads the Project's single-select fields afresh and requires the mapped field to be the one
    * named `Status` and every mapped option to belong to it. Returns the options' names.
    */
-  private async verifyStatusField(mapping: StatusMapping) {
+  private async verifyStatusField(mapping: GitHubStatusMapping) {
     const read = await this.readDiscoveryProjectFields(
       new URLSearchParams({ project: mapping.projectNodeId }),
     );
@@ -6439,18 +6445,49 @@ export class OperatorApi {
         );
     return new Map(field.options.map((o) => [o.optionNodeId, o.name]));
   }
-  /** The saved status mapping, its Project selections and the options the delivery grants allow. */
+  /** The saved status mapping with what its editor needs: Project selections and granted options (GitHub), or granted statuses (Jira). */
   private statusMappingView(
     projectId: string,
     selections: ReturnType<DomainStore["githubConfiguration"]>["selections"],
     active: string[],
+    jira: boolean,
   ) {
     const d = this.domain(),
-      view = d.statusMapping(projectId);
+      view = d.statusMapping(projectId),
+      grants = this.service
+        .delivery()
+        .configuration(projectId)
+        .grants.filter((g) => g.mode === "allow");
+    // A mapping left by the other tracker is not shown: this editor starts afresh and replaces it.
+    const mapping =
+      view.mapping && isJiraMapping(view.mapping) === jira
+        ? view.mapping
+        : null;
+    if (jira)
+      return {
+        tracker: "jira" as const,
+        version: view.version,
+        // A Jira project always has the source the mapping binds to.
+        availability: "available" as const,
+        mapping,
+        granted: [
+          ...new Set(
+            grants.flatMap((g) =>
+              g.action === "issue.status" ? (g.statusIds ?? []) : [],
+            ),
+          ),
+        ],
+      };
     return {
       version: view.version,
-      availability: view.availability,
-      mapping: view.mapping,
+      // A mapping left by the other tracker is not shown, so availability is that of no mapping.
+      availability:
+        view.mapping && !mapping
+          ? selections.some((s) => s.kind === "project")
+            ? ("available" as const)
+            : ("unavailable" as const)
+          : view.availability,
+      mapping,
       selections: selections.flatMap((s) =>
         s.kind === "project"
           ? [
@@ -6462,23 +6499,17 @@ export class OperatorApi {
             ]
           : [],
       ),
-      granted: this.service
-        .delivery()
-        .configuration(projectId)
-        .grants.flatMap((g) =>
-          g.action === "project.field" &&
-          g.mode === "allow" &&
-          g.projectNodeId &&
-          g.fieldNodeId
-            ? [
-                {
-                  projectNodeId: g.projectNodeId,
-                  fieldNodeId: g.fieldNodeId,
-                  optionNodeIds: g.optionNodeIds ?? [],
-                },
-              ]
-            : [],
-        ),
+      granted: grants.flatMap((g) =>
+        g.action === "project.field" && g.projectNodeId && g.fieldNodeId
+          ? [
+              {
+                projectNodeId: g.projectNodeId,
+                fieldNodeId: g.fieldNodeId,
+                optionNodeIds: g.optionNodeIds ?? [],
+              },
+            ]
+          : [],
+      ),
     };
   }
   async readRuntimeSettings() {
@@ -7037,9 +7068,15 @@ export class OperatorApi {
   }
   /** Configured GitLab hosts with each credential's kind, usability and account. */
   async readCodeHostCredentials() {
+    const credentials = await readCodeHostCredentials(
+      this.domain(),
+      this.setup,
+    );
     return codeHostCredentialsSchema.parse({
       data: {
-        credentials: await readCodeHostCredentials(this.domain(), this.setup),
+        // After the reads, so a token glab resolved just now is counted.
+        restartRequired: this.service.gitLabCredentialRestartRequired(),
+        credentials,
       },
       observedAt: Date.now(),
     });
@@ -8286,7 +8323,9 @@ export class OperatorApi {
         const command = { ...c, actor: "operator" as const };
         // An exact replay returns its recorded receipt whatever GitHub shows now.
         const names =
-          c.mapping && this.domain().recordedCommand(command) === undefined
+          c.mapping &&
+          !isJiraMapping(c.mapping) &&
+          this.domain().recordedCommand(command) === undefined
             ? await this.verifyStatusField(c.mapping)
             : new Map<string, string>();
         let raw: Awaited<ReturnType<typeof this.executeDomain>>;
@@ -8305,6 +8344,7 @@ export class OperatorApi {
                 names.get(error.optionNodeId ?? "") ??
                   error.optionNodeId ??
                   "that option",
+                c.mapping && isJiraMapping(c.mapping) ? "jira" : "github",
               ),
             );
           throw domainApiError(error) ?? error;
@@ -8327,28 +8367,14 @@ export class OperatorApi {
         c.type === "github.configure" ||
         c.type === "github.place"
       ) {
-        // Skill plugins must exist, and only a harness that loads them may enable any.
+        // Skill plugins must exist and be loadable; both harnesses receive them.
         if (
           (c.type === "profile.create" || c.type === "profile.configure") &&
-          (c.skills || (c.type === "profile.configure" && c.runtime)) &&
+          c.skills &&
           this.domain().recordedCommand({ ...c, actor: "operator" }) ===
             undefined
         ) {
-          const d = this.domain();
-          const harness = (
-            c.runtime ??
-            (c.type === "profile.configure"
-              ? d.profileRuntime(c.profileId)
-              : defaultProfileRuntime(d.enabledRuntimes()))
-          ).harness;
-          const skills =
-            c.skills ??
-            (c.type === "profile.configure"
-              ? d.profileSkills(c.profileId)
-              : noProfileSkills);
-          if (harness !== "claude" && skills.plugins.length > 0)
-            throw new OperatorApiError(400, "invalid-input", ["skills"]);
-          const fields = c.skills ? await skillFieldErrors(c.skills) : [];
+          const fields = await skillFieldErrors(c.skills);
           if (fields.length > 0)
             throw new OperatorApiError(400, "invalid-input", fields);
         }

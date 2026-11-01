@@ -18,6 +18,7 @@ import {
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
+import { until } from "../fixtures/until.js";
 
 const test = browserSuite("operator-neutral-copy-browser");
 const reason = "Unexpected runtime request denied: claude/canUseTool:Bash";
@@ -32,14 +33,6 @@ class UnexpectedClaudeRuntime extends ClaudeShapedFixtureRuntime {
   }
   deny(method: string) {
     this.unexpected?.({ method });
-  }
-}
-
-async function until(predicate: () => boolean, what: string) {
-  const deadline = Date.now() + 5000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw Error(what);
-    await new Promise((r) => setTimeout(r, 20));
   }
 }
 
@@ -156,11 +149,13 @@ for (const [name, viewport] of [
 
     await openOverviewCard(page, "assignments");
     const row = page.locator(".assignment-row", { hasText: "Claude work" });
-    await row.getByText(reason, { exact: false }).waitFor();
-    await row.getByRole("button").first().click();
-    const details = page.locator(
-      `#history details[data-record-id="${workerId}"]`,
-    );
+    await row
+      .locator("td")
+      .last()
+      .getByText(reason, { exact: false })
+      .waitFor();
+    const details = row.locator("details.assignment-facts");
+    await details.locator("> summary").click();
     await details
       .getByText(`Recorded wait / execution reason: ${reason}.`)
       .waitFor();

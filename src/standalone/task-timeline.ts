@@ -9,7 +9,7 @@ import {
   compareTimelineKeys,
   serializeTimelineKey,
   type TimelineKey,
-} from "./timeline-key.js";
+} from "../operator/timeline-key.js";
 
 /** One entry before its common fields are added: where it sorts and what it says. */
 export interface TimelineCandidate {

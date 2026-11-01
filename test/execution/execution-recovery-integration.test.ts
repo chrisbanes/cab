@@ -24,6 +24,7 @@ import {
   publishedOf,
   unpublish,
 } from "../fixtures/service-internals.js";
+import { until } from "../fixtures/until.js";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -34,15 +35,6 @@ function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3000;
-  while (!predicate()) {
-    if (Date.now() >= deadline)
-      throw new Error("integration condition timed out");
-    await new Promise<void>((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 class IntegrationRuntime implements Runtime {
@@ -122,7 +114,7 @@ class IntegrationRuntime implements Runtime {
   }
 
   async waitForTurnNumber(turn: number): Promise<void> {
-    await waitUntil(() => this.turns >= turn);
+    await until(() => this.turns >= turn);
     const entry = this.entered.get(turn);
     if (!entry)
       throw new Error(`Turn ${turn} has not entered terminal observation`);
@@ -325,10 +317,10 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
       "Synthetic worker child",
       parent.assignmentId,
     );
-    await waitUntil(() =>
+    await until(() =>
       first.turnRequests().some((request) => request.workId === child.workId),
     );
-    await waitUntil(() =>
+    await until(() =>
       first.list().some((intent) => intent.workId === child.workId),
     );
     assert.equal(
@@ -361,10 +353,10 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
       profileId,
       "Independent worker task",
     );
-    await waitUntil(() =>
+    await until(() =>
       first.turnRequests().some((request) => request.workId === worker.workId),
     );
-    await waitUntil(() =>
+    await until(() =>
       first.list().some((intent) => intent.workId === worker.workId),
     );
     const waitingWorker = first
@@ -433,7 +425,7 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
     await recovered.resumeTask(child.taskId);
     await restartRuntime.waitForTurnNumber(1);
     restartRuntime.complete(1);
-    await waitUntil(
+    await until(
       () =>
         recovered?.list().find((intent) => intent.workId === continuationId)
           ?.state === "completed",
@@ -462,7 +454,7 @@ test("integrates yielding, pause, Stop, restart reconciliation and exact recover
       /Assignment role: project assignee/,
     );
     restartRuntime.complete(2);
-    await waitUntil(
+    await until(
       () =>
         recovered?.list().find((intent) => intent.workId === worker.workId)
           ?.state === "completed",

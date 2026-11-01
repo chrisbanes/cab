@@ -4,6 +4,7 @@ import type {
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import { CommitGate } from "./commit-gate.js";
+import type { ConversationCache } from "./task-conversation-model.js";
 import type { TaskTab } from "./task-tabs.js";
 import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
@@ -19,7 +20,7 @@ type FeedbackReference = z.infer<typeof feedbackReferenceSchema>;
 type WorkspaceDirectory = z.infer<typeof workspaceDirectoryReadSchema>["data"];
 type WorkspacePreview = z.infer<typeof workspacePreviewReadSchema>["data"];
 
-export type OverviewCard = "brief" | "evidence" | "assignments";
+export type OverviewCard = "brief" | "evidence" | "assignments" | "context";
 
 export type RangePin = "start" | "end" | null;
 
@@ -300,7 +301,22 @@ export class TaskWorkspaceState {
   overview = new Set<OverviewCard>();
   /** Results (by result and source) whose "N more" criteria are open; the operator's own toggle writes it. */
   criteriaOpen = new Set<string>();
-  chronological = false;
+  /** The record a link named that the loaded conversation did not hold, or null. */
+  conversationNotice: {
+    subject: string;
+    kind: "assignment" | "request";
+    id: string;
+  } | null = null;
+  /** The conversation's retained window, kept while the task is open; it is read again on arrival. */
+  conversation: ConversationCache | null = null;
+  /** The request whose single form is in the conversation; the attention card holds the rest. */
+  inlineAnswer: string | null = null;
+  /** The request whose form is in the attention card: the linked one, or the operator's choice. */
+  cardRequest: string | null = null;
+  /** The inspector's fold; null follows the screen: open beside the conversation, closed above it on a phone. */
+  inspectorOpen: boolean | null = null;
+  /** The phone banner's collapsed attention card; it opens on arrival so the first screen holds the decision. */
+  attentionCollapsed = false;
   get sourceObservation() {
     return this.reply.sourceObservation;
   }
@@ -359,11 +375,9 @@ export class TaskWorkspaceState {
   /** The open tab and each tab's own scroll offset, kept while the task is open. */
   tab: TaskTab = "overview";
   tabScroll: Partial<Record<TaskTab, number>> = {};
-  historyPages: Record<string, number[]> = {};
-  omissionHistoryPages: Record<string, number[]> = {};
   focusRecord: string | null = null;
   focusHref: string | null = null;
-  historyAnchor: { id: string; y: number } | null = null;
+  readingAnchor: { id: string; y: number } | null = null;
   selectionInitialized = false;
   /** A linked record's closed card was opened once; a Back or Forward remount never reopens it. */
   recordRevealed = false;

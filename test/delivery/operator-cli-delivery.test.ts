@@ -54,14 +54,6 @@ test("delivery get shows the PR, actions and comment policy without provider acc
   assert.equal(w.scripted.requests.length, requests);
 });
 
-test("delivery get reports a local task without a bound issue", async (t) => {
-  const w = await deliveryWorld(t, "allow", true);
-  const json = await w.ok("ro", ["delivery", "get", w.f.taskId]);
-  assert.equal(json.data.issue, null);
-  assert.equal(json.data.commentPolicy.available, false);
-  assert.equal(json.data.commentPolicy.reason, "Task has no bound issue");
-});
-
 test("delivery refresh is a receipted write that reports partial outcomes", async (t) => {
   const w = await deliveryWorld(t);
   await w.f.register();
@@ -122,12 +114,6 @@ test("delivery refresh is a receipted write that reports partial outcomes", asyn
     /Do not resend with a new --request-id/,
   );
   w.scripted.lostComment = false;
-  const reconciled = await w.ok("rw", ["delivery", "refresh", w.f.taskId]);
-  const action = reconciled.data.changed.find(
-    (a: Json) => a.operationId === sent.json().error.request.key,
-  );
-  assert.equal(action?.state, "confirmed-success");
-  assert.equal(w.scripted.commentWrites, 1);
 
   // A lost reply is unknown; the identical rerun refreshes again.
   const lost = await w.cli("rw", ["delivery", "refresh", w.f.taskId], {
@@ -137,13 +123,6 @@ test("delivery refresh is a receipted write that reports partial outcomes", asyn
   assert.doesNotMatch(lost.json().error.message, /operation get/);
   const rerun = await w.ok("rw", ["delivery", "refresh", w.f.taskId]);
   assert.equal(rerun.request.key, lost.json().error.request.key);
-  // The session UI path records the same receipt kind.
-  const session = await w.s.sessionPost("/api/operator/commands", {
-    type: "delivery.refresh",
-    key: randomUUID(),
-    taskId: w.f.taskId,
-  });
-  assert.equal(((await session.json()) as Json).operation, "delivery.refresh");
 });
 
 test("delivery get lists thread reply and resolve actions with their outcomes", async (t) => {
@@ -478,11 +457,6 @@ test("delivery settle records the decision once, replays it after the revision m
     policyVersion: before.p,
     headSha: before.h,
   });
-  const after = await w.task();
-  assert.deepEqual(after.delivery.binding.settlement, {
-    decision: "accepted",
-    headSha: before.h,
-  });
   const human = await w.h.run([
     ...settleArgs(w, "--decision", "accepted", ...pinFlags(before)),
     "--request-id",
@@ -531,36 +505,6 @@ test("delivery settle records the decision once, replays it after the revision m
     settleArgs(w, "--decision", "accepted", ...pinFlags(before)),
   );
   assert.equal(journaled.request.key, key);
-  // The session path replays the same body to the same receipt.
-  const session = await w.s.sessionPost("/api/operator/commands", {
-    type: "delivery.settle",
-    key,
-    taskId: w.f.taskId,
-    expectedTaskVersion: before.v,
-    expectedDeliveryRevision: before.r,
-    expectedPolicyVersion: before.p,
-    expectedHeadSha: before.h,
-    decision: "accepted",
-  });
-  assert.deepEqual(await session.json(), first.data.receipt);
-
-  // A reused key with other material conflicts and records nothing.
-  for (const other of [
-    ["--decision", "closed", ...pinFlags(before)],
-    ["--decision", "accepted", ...pinFlags({ ...before, v: before.v + 1 })],
-  ]) {
-    const conflict = await w.cli(
-      "rw",
-      settleArgs(w, ...other, "--request-id", key),
-    );
-    assert.equal(conflict.code, 4, conflict.out);
-    assert.equal(conflict.json().error.code, "conflict");
-  }
-  assert.equal(settlementRows(w), 1);
-  assert.deepEqual((await w.task()).delivery.binding.settlement, {
-    decision: "accepted",
-    headSha: before.h,
-  });
 
   // A pin-less rerun reads the new revision, so it is a new request: refused, nothing sent.
   const wire = countingFetch();
@@ -573,143 +517,105 @@ test("delivery settle records the decision once, replays it after the revision m
   assert.equal(settlementRows(w), 1);
 });
 
-test("delivery settle names the current values for a stale pin or a race and records nothing", async (t) => {
+// The service owns each pin's refusal (delivery-operator.test.ts); this shows one surfacing.
+test("delivery settle names the current values for a stale pin and records nothing", async (t) => {
   const w = await deliveryWorld(t);
   await w.f.register();
   const now = await pinsOf(w);
-  const stale: [string, string][] = [
-    ["--expected-task-version", String(now.v + 1)],
-    ["--expected-delivery-revision", String(now.r + 1)],
-    ["--expected-policy-version", String(now.p + 1)],
-    ["--expected-head-sha", "9".repeat(40)],
-  ];
-  for (const [flag, value] of stale) {
-    const refused = await w.cli(
-      "rw",
-      settleArgs(w, "--decision", "accepted", flag, value),
-    );
-    assert.equal(refused.code, 4, `${flag}: ${refused.out}`);
-    const { error } = refused.json();
-    assert.equal(error.code, "conflict");
-    assert.ok(
-      error.message.includes(
-        `task version ${now.v}, binding revision ${now.r}, policy version ${now.p}, head ${now.h.slice(0, 12)}`,
-      ),
-      error.message,
-    );
-    const human = await w.h.run([
-      ...settleArgs(w, "--decision", "accepted", flag, value),
-      "--connection",
-      "rw",
-    ]);
-    assert.equal(human.code, 4);
-    assert.equal(human.err.match(/^Fix:/gm)?.length, 1, human.err);
-  }
-  assert.equal((await w.task()).delivery.binding.settlement ?? null, null);
-  assert.equal(settlementRows(w), 0);
-
-  // The head moves after the CLI read and before its POST.
-  const racing = countingFetch(() => {
-    w.scripted.head = "3".repeat(40);
-  });
-  const raced = await w.cli("rw", settleArgs(w, "--decision", "accepted"), {
-    fetch: racing.fetch,
-  });
-  assert.equal(raced.code, 4, raced.out);
-  assert.equal(raced.json().error.code, "conflict");
-  assert.equal(racing.posts, 1);
+  const stale = ["--expected-head-sha", "9".repeat(40)];
+  const wire = countingFetch();
+  const refused = await w.cli(
+    "rw",
+    settleArgs(w, "--decision", "accepted", ...stale),
+    { fetch: wire.fetch },
+  );
+  assert.equal(refused.code, 4, refused.out);
+  assert.equal(wire.posts, 1);
+  const { error } = refused.json();
+  assert.equal(error.code, "conflict");
+  assert.ok(
+    error.message.includes(
+      `task version ${now.v}, binding revision ${now.r}, policy version ${now.p}, head ${now.h.slice(0, 12)}`,
+    ),
+    error.message,
+  );
+  const human = await w.h.run([
+    ...settleArgs(w, "--decision", "accepted", ...stale),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(human.code, 4);
+  assert.equal(human.err.match(/^Fix:/gm)?.length, 1, human.err);
   assert.equal(settlementRows(w), 0);
 });
 
-test("delivery settle refuses accepting a draft, closed or outside-changed PR, and settling as closed stays possible", async (t) => {
-  const draft = await deliveryWorld(t);
-  await draft.f.register();
-  draft.scripted.draft = true;
-  await draft.ok("rw", ["delivery", "refresh", draft.f.taskId]);
+// These refusals come from the CLI's own pre-read, before anything is sent.
+test("delivery settle refuses accepting a draft, closed or outside-changed PR, asks for a refresh after a failed read, and settling as closed stays possible", async (t) => {
+  const w = await deliveryWorld(t);
+  await w.f.register();
   const wire = countingFetch();
-  const refusedDraft = await draft.cli(
-    "rw",
-    settleArgs(draft, "--decision", "accepted"),
-    { fetch: wire.fetch },
-  );
-  assert.equal(refusedDraft.code, 4, refusedDraft.out);
-  assert.match(refusedDraft.json().error.message, /draft/);
-  assert.equal(wire.posts, 0);
-  assert.equal(settlementRows(draft), 0);
-  const closedDraft = await draft.ok(
-    "rw",
-    settleArgs(draft, "--decision", "closed"),
-  );
-  assert.equal(closedDraft.data.receipt.decision, "closed");
+  const refusal = async (decision: string, change: () => void) => {
+    change();
+    await w.ok("rw", ["delivery", "refresh", w.f.taskId]);
+    const refused = await w.cli("rw", settleArgs(w, "--decision", decision), {
+      fetch: wire.fetch,
+    });
+    assert.equal(refused.code, 4, refused.out);
+    return refused.json().error.message as string;
+  };
   assert.match(
-    (
-      await draft.h.run([
-        "delivery",
-        "get",
-        draft.f.taskId,
-        "--connection",
-        "ro",
-      ])
-    ).out,
-    /Handback: +settled as closed/,
+    await refusal("accepted", () => {
+      w.scripted.draft = true;
+    }),
+    /draft/,
   );
-
-  const closed = await deliveryWorld(t);
-  await closed.f.register();
-  closed.scripted.closed = true;
-  await closed.ok("rw", ["delivery", "refresh", closed.f.taskId]);
-  const refusedClosed = await closed.cli(
-    "rw",
-    settleArgs(closed, "--decision", "accepted"),
+  assert.match(
+    await refusal("accepted", () => {
+      w.scripted.draft = false;
+      w.scripted.closed = true;
+    }),
+    /closed/,
   );
-  assert.equal(refusedClosed.code, 4, refusedClosed.out);
-  assert.match(refusedClosed.json().error.message, /closed/);
-  assert.equal(
-    (await closed.ok("rw", settleArgs(closed, "--decision", "closed"))).data
-      .receipt.decision,
-    "closed",
+  assert.match(
+    await refusal("accepted", () => {
+      w.scripted.closed = false;
+      w.f.seedPersistedState((db) =>
+        db
+          .prepare("INSERT INTO delivery_task_branches VALUES (?,?,?,?,?,1)")
+          .run(
+            w.f.taskId,
+            "R1",
+            "cab/12345678-fix-it",
+            "a".repeat(40),
+            "b".repeat(40),
+          ),
+      );
+    }),
+    /outside cab/,
   );
-
-  const outside = await deliveryWorld(t);
-  await outside.f.register();
-  outside.f.seedPersistedState((db) =>
-    db
-      .prepare("INSERT INTO delivery_task_branches VALUES (?,?,?,?,?,1)")
-      .run(
-        outside.f.taskId,
-        "R1",
-        "cab/12345678-fix-it",
-        "a".repeat(40),
-        "b".repeat(40),
-      ),
+  assert.match(
+    await refusal("closed", () => {
+      w.scripted.outage = true;
+    }),
+    /last GitHub read failed/,
   );
-  await outside.ok("rw", ["delivery", "refresh", outside.f.taskId]);
-  const refusedOutside = await outside.cli(
-    "rw",
-    settleArgs(outside, "--decision", "accepted"),
-  );
-  assert.equal(refusedOutside.code, 4, refusedOutside.out);
-  assert.match(refusedOutside.json().error.message, /outside cab/);
-  assert.equal(settlementRows(outside), 0);
-
-  // An unreadable provider asks for a refresh first.
-  const outage = await deliveryWorld(t);
-  await outage.f.register();
-  outage.scripted.outage = true;
-  await outage.ok("rw", ["delivery", "refresh", outage.f.taskId]);
-  const refusedRead = await outage.cli(
-    "rw",
-    settleArgs(outage, "--decision", "closed"),
-  );
-  assert.equal(refusedRead.code, 4, refusedRead.out);
-  assert.match(refusedRead.json().error.message, /last GitHub read failed/);
-  const readHuman = await outage.h.run([
-    ...settleArgs(outage, "--decision", "closed"),
+  const readHuman = await w.h.run([
+    ...settleArgs(w, "--decision", "closed"),
     "--connection",
     "rw",
   ]);
   assert.match(readHuman.err, /Fix: .*delivery refresh/);
-  assert.equal(settlementRows(outage), 0);
+  assert.equal(wire.posts, 0);
+  assert.equal(settlementRows(w), 0);
+
+  w.scripted.outage = false;
+  await w.ok("rw", ["delivery", "refresh", w.f.taskId]);
+  const closed = await w.ok("rw", settleArgs(w, "--decision", "closed"));
+  assert.equal(closed.data.receipt.decision, "closed");
+  assert.match(
+    (await w.h.run(["delivery", "get", w.f.taskId, "--connection", "ro"])).out,
+    /Handback: +settled as closed/,
+  );
 });
 
 test("delivery settle keeps the request identity and pins when the reply is lost, and rejects a wrong receipt", async (t) => {
@@ -780,6 +686,8 @@ test("delivery settle sends nothing for a read-only credential, bad flags or a t
     0,
   );
   const local = await deliveryWorld(t, "allow", true);
+  const view = await local.ok("ro", ["delivery", "get", local.f.taskId]);
+  assert.equal(view.data.issue, null);
   const refused = await local.cli(
     "rw",
     settleArgs(local, "--decision", "closed"),

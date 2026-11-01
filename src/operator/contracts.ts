@@ -20,6 +20,8 @@ import {
   glabReferenceMatchesHost,
 } from "../core/credential-reference.js";
 import {
+  githubStatusMappingSchema,
+  jiraStatusMappingSchema,
   statusMappingEvents,
   statusMappingSchema,
 } from "../core/status-mapping-contracts.js";
@@ -1913,6 +1915,18 @@ export const assignmentHistorySchema = envelope(
 const timelineKey = z
   .string()
   .regex(/^[0-9]{1,16}\.[0-9]{1,2}\.[0-9]{1,16}\.[\w-]{1,96}$/);
+export const timelineGapReasons = [
+  "size-limit",
+  "item-limit",
+  "active-turn-limit",
+  "turn-ended",
+  "missing-text",
+  "redaction-unavailable",
+  "early-buffer-limit",
+  "tool-activity-expired",
+  "tool-activity-not-captured",
+  "tool-activity-incomplete",
+] as const;
 const timelineEntryBase = {
   entryId: z.string().regex(/^[\w-]{1,96}$/),
   key: timelineKey,
@@ -2014,18 +2028,7 @@ export const taskTimelineSchema = envelope(
               .object({
                 ...timelineEntryBase,
                 kind: z.literal("gap"),
-                reason: z.enum([
-                  "size-limit",
-                  "item-limit",
-                  "active-turn-limit",
-                  "turn-ended",
-                  "missing-text",
-                  "redaction-unavailable",
-                  "early-buffer-limit",
-                  "tool-activity-expired",
-                  "tool-activity-not-captured",
-                  "tool-activity-incomplete",
-                ]),
+                reason: z.enum(timelineGapReasons),
                 detail: z
                   .object({
                     workId: safeText,
@@ -3323,12 +3326,12 @@ export const profileConfigurationSchema = envelope(
     })
     .strict(),
 );
-/** The status mapping with what its editor needs: the Project selections and the granted options. */
-export const statusMappingViewSchema = z
+/** The GitHub status mapping with what its editor needs: the Project selections and the granted options. */
+const githubStatusMappingViewSchema = z
   .object({
     version: revision,
     availability: z.enum(["available", "unavailable"]),
-    mapping: statusMappingSchema.nullable(),
+    mapping: githubStatusMappingSchema.nullable(),
     selections: z
       .array(
         z
@@ -3350,6 +3353,20 @@ export const statusMappingViewSchema = z
       .max(256),
   })
   .strict();
+/** The Jira status mapping: bound to the Jira source, with the statuses an `allow` `issue.status` grant covers. */
+const jiraStatusMappingViewSchema = z
+  .object({
+    tracker: z.literal("jira"),
+    version: revision,
+    availability: z.enum(["available", "unavailable"]),
+    mapping: jiraStatusMappingSchema.nullable(),
+    granted: z.array(text).max(256 * 256),
+  })
+  .strict();
+export const statusMappingViewSchema = z.union([
+  jiraStatusMappingViewSchema,
+  githubStatusMappingViewSchema,
+]);
 export const projectConfigurationSchema = envelope(
   z
     .object({
@@ -4016,10 +4033,12 @@ export const gitLabCredentialReasons = [
   "missing-credential",
   "glab-not-installed",
   "glab-not-signed-in",
+  "glab-unreachable",
   "glab-unreadable",
   "unauthorized",
   "forbidden",
   "rate-limited",
+  "unreachable",
   "unreadable",
 ] as const;
 const gitLabCredentialBase = {
@@ -4034,6 +4053,8 @@ const gitLabCredentialBase = {
 export const codeHostCredentialsSchema = envelope(
   z
     .object({
+      /** A running runtime inherited a GitLab credential; a service restart drops it. */
+      restartRequired: z.boolean(),
       credentials: z
         .array(
           z.discriminatedUnion("state", [

@@ -57,20 +57,36 @@ npm run test:built -- --profile=service
 browser-dependent cases while retaining service assertions in mixed test files.
 Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
 their engine. Missing compiled tests, unknown suites/options and empty shards
-fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence directory;
-CI uploads these with the synthetic evidence. Refresh a profile from a successful
-complete run, or all its shards, using:
+fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence
+directory (set `CAB_TEST_EVIDENCE_DIR` to keep it after the run); CI uploads these with
+the synthetic evidence. Refresh a profile from the evidence of a run, or any of
+its shards, using:
 
 ```sh
 node scripts/update-test-timings.mjs chromium 24 /path/to/evidence
 ```
 
 Use `all 24` or `service 26` for the other profiles. Keep receipts from one run
-separate from other runs. The updater rejects missing, duplicate, unsuccessful or
-stale receipts and requires every current source test file. Its input digest
-covers runtime, test, web and runner inputs; changing these requires new receipts.
+separate from other runs. The updater merges the receipts over the profile's
+existing weights: a measured file takes its new weight, a current file without a
+successful receipt keeps its old weight, and weights for files no longer in
+`test/` are dropped. It skips unsuccessful or invalid receipts and rejects a
+duplicate receipt for one file. A stale weight only unbalances shards; the runner
+falls back to the median for a file without one.
 Committed initial weights are measured locally; hosted CI receipts can refresh
 them as runner performance changes.
+
+`test:built` and `check` run the tests under a per-run `cab-run-*` directory in the
+OS temp root, passed to the test process tree as `TMPDIR`, so fixtures that call
+`os.tmpdir()` place their large sandboxes there. The runner removes the directory
+when the run ends, including after a failure, a timeout or a forwarded SIGTERM or
+SIGINT. At the next start it removes `cab-run-*` directories of the current user
+whose recorded owner process has exited, which covers a runner killed outright;
+directories with a live, missing or unreadable owner are kept. Test evidence
+outlives the run only when `CAB_TEST_EVIDENCE_DIR` is set, as in CI. Harnesses run
+directly (the `*:live` commands) and `node --test` invocations bypass the runner and
+manage their own temp directories. The per-run override applies to POSIX `TMPDIR`
+only.
 
 Real App Server
 qualification is separate and runs only when requested explicitly, for example
@@ -674,7 +690,7 @@ opt-in on macOS: `npm run build && CAB_KEYCHAIN_LIVE=1 node --test
 dist/test/operations/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
 `cab-cli-test-<uuid>` item.
 
-`node test/operator/cli-journey-qualification/live-journey.mjs --fixture` (run by `npm run check`) drives the
+`node test/operator/cli-journey-qualification/live-journey.mjs --fixture` (run manually) drives the
 installed binary through the assembled journey with a scripted runtime.
 `npm run operator-cli:live` runs it once against Codex through the ChatGPT.app launcher with
 at most two model turns, a Keychain login and verified cleanup; it prints sanitised

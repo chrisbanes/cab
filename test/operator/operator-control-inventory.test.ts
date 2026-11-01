@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import {
+  insertExternalItem,
+  insertSourceMembership,
+} from "../fixtures/source-rows.js";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
@@ -120,15 +124,27 @@ test("retained rendered form actions, fields and mounted route controls match do
     leadProfileId: null,
   });
   f.seedPersistedState((db) => {
-    db.prepare(
-      "INSERT INTO external_items VALUES ('github','github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]',NULL,NULL)",
-    ).run(importedId);
-    db.prepare(
-      "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'repo','github','github.com','I1','[]')",
-    ).run(projectId);
-    db.prepare(
-      "INSERT INTO source_memberships (projectId, selectionId, provider, instance, externalId, fields) VALUES (?,'repo','github','github.com','I1','[]')",
-    ).run(otherProject);
+    insertExternalItem(db, {
+      externalId: "I1",
+      taskId: importedId,
+      containerId: "R1",
+      containerName: "owner/repo",
+      number: 1,
+      observedTitle: "Imported",
+      observedBody: "Body",
+      observedState: "open",
+      labels: "[]",
+    });
+    insertSourceMembership(db, {
+      projectId,
+      selectionId: "repo",
+      externalId: "I1",
+    });
+    insertSourceMembership(db, {
+      projectId: otherProject,
+      selectionId: "repo",
+      externalId: "I1",
+    });
     db.prepare(
       "INSERT INTO source_reviews VALUES ('github','github.com',?,?,?,?,NULL)",
     ).run("I1", "a".repeat(64), "b".repeat(64), "accept-revised-scope");
@@ -150,7 +166,9 @@ test("retained rendered form actions, fields and mounted route controls match do
         ? { projectNodeId: "P1", fieldNodeId: "F1", optionNodeIds: ["O1"] }
         : action === "project.item.add"
           ? { projectNodeId: "P1" }
-          : {}),
+          : action === "issue.status"
+            ? { statusIds: ["S1"] }
+            : {}),
     })),
     requiredChecks: [{ name: "check", appId: 42 }],
   });

@@ -44,10 +44,11 @@ import type {
   CodeHostDeliveryProvider,
   CodeHostProviderFactories,
 } from "./code-host.js";
-import type {
-  IssueTracker,
-  IssueTrackerWriter,
-  IssueTrackerWriterFactories,
+import {
+  type IssueTracker,
+  type IssueTrackerWriter,
+  type IssueTrackerWriterFactories,
+  StatusSkipRefusal,
 } from "./issue-tracker.js";
 
 /** The unresolved review threads a lead can reply to or resolve, capped with an omitted count. */
@@ -477,7 +478,8 @@ export class DeliveryCoordinator {
       // the mapped write expected: nothing is written.
       if (
         error instanceof IssueChangedRefusal ||
-        error instanceof ProjectFieldChangedRefusal
+        error instanceof ProjectFieldChangedRefusal ||
+        error instanceof StatusSkipRefusal
       )
         return this.store.recordObservation(record.operationId, {
           state: "confirmed-failure",

@@ -4,11 +4,13 @@ import {
   gitLabHostSchema,
   gitLabRepositoryId,
 } from "../core/repository-links.js";
+import { type RateLimitPolicy, fetchRateLimited } from "./gitlab-http.js";
 
 export type GitLabFailureReason =
   | "unauthorized"
   | "forbidden"
   | "rate-limited"
+  | "unreachable"
   | "unreadable";
 /** A failed GitLab read. The message is the reason code only, never a token or URL. */
 export class GitLabDiscoveryFailure extends Error {
@@ -36,9 +38,12 @@ export class GitLabDiscoveryReader {
     host: string,
     private readonly token: string,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly rateLimit?: RateLimitPolicy,
   ) {
     const parsed = gitLabHostSchema.safeParse(host);
-    if (!parsed.success) throw new GitLabDiscoveryFailure("unreadable");
+    // fetch rejects an invalid header value; that is an unreadable token, not an unreachable host.
+    if (!parsed.success || !/^[\x21-\x7e]{1,4096}$/.test(token))
+      throw new GitLabDiscoveryFailure("unreadable");
     this.api = `https://${parsed.data}/api/v4`;
   }
 
@@ -48,14 +53,24 @@ export class GitLabDiscoveryReader {
   ): Promise<{ value: T; next: string | null }> {
     let response: Response;
     try {
-      response = await this.fetcher(`${this.api}${path}`, {
-        method: "GET",
-        redirect: "manual",
-        signal: AbortSignal.timeout(15_000),
-        headers: { "private-token": this.token, accept: "application/json" },
-      });
+      response = await fetchRateLimited(
+        this.fetcher,
+        `${this.api}${path}`,
+        () => ({
+          method: "GET",
+          redirect: "manual",
+          signal: AbortSignal.timeout(15_000),
+          // Bearer takes OAuth tokens (a glab login) as well as personal access tokens.
+          headers: {
+            authorization: `Bearer ${this.token}`,
+            accept: "application/json",
+          },
+        }),
+        this.rateLimit,
+      );
     } catch {
-      throw new GitLabDiscoveryFailure("unreadable");
+      // A network error or the timeout; never the error text, which may carry the URL.
+      throw new GitLabDiscoveryFailure("unreachable");
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});

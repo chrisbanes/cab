@@ -1,5 +1,4 @@
 import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
-import { useEffect } from "react";
 import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
@@ -11,7 +10,6 @@ import {
   repositoryCommand,
   repositoryRowsFrom,
   staleRepositoryRows,
-  type SourceRow,
   type Values,
 } from "./settings-changes.js";
 import {
@@ -20,7 +18,6 @@ import {
   DraftCheck,
   DraftOutcome,
   Panel,
-  key,
   locked,
   reloadDraft,
   submitDraft,
@@ -29,11 +26,14 @@ import {
   useLoadedDraft,
   usePrivateValues,
 } from "./settings.js";
+import {
+  useDropMatchedEdits,
+  useSettingsRows,
+  withKeys,
+} from "./settings-rows.js";
 import { Alert } from "./ui/alert.js";
-import { Input } from "./ui/input.js";
-
-const withKeys = (rows: object[]) =>
-  JSON.stringify(rows.map((r) => ({ ...r, rowKey: key() })));
+import { NativeSelect } from "./ui/native-select.js";
+import { codeHostName, type CodeHost } from "./delivery-presentation.js";
 
 /** The project's repository links: the checkouts workspaces, delivery and setup use. */
 export function RepositoryTab(p: TabProps) {
@@ -76,32 +76,17 @@ export function RepositoryTab(p: TabProps) {
     repositories.some(
       (r) => r.keep && !r.removed && typeof r.path === "string",
     );
-  // An edit that now equals the saved value (another writer saved the same) is no edit: drop it
-  // so the form is clean and later reads apply.
-  const equalsSaved = (r: SourceRow) =>
-    r.keep &&
-    typeof r.path === "string" &&
-    known?.links.find((x) => x.repositoryId === r.repositoryId)?.path ===
-      r.path;
-  const matchedSaved =
-    (d.phase === "editing" ||
-      d.phase === "conflict" ||
-      d.phase === "rejected") &&
-    repositories.some(equalsSaved);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: act when a read makes an edit equal.
-  useEffect(() => {
-    if (!matchedSaved) return;
-    d.set(
-      "repositories",
-      JSON.stringify(
-        repositories.map((r) => {
-          if (!equalsSaved(r)) return r;
-          const { path: _v, pathBase: _b, ...rest } = r;
-          return rest;
-        }),
-      ),
-    );
-  }, [matchedSaved, known]);
+  useDropMatchedEdits(
+    d,
+    "repositories",
+    "path",
+    (r) =>
+      r.keep &&
+      typeof r.path === "string" &&
+      known?.links.find((x) => x.repositoryId === r.repositoryId)?.path ===
+        r.path,
+    known,
+  );
   const lines = repositoryChanges(data.repositories, v, known),
     removesAll = removesAllAccess(data.repositories, v),
     stale = staleRepositoryRows(data.repositories, v),
@@ -121,130 +106,32 @@ export function RepositoryTab(p: TabProps) {
       d.notice = `Loaded the latest version. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed or replaced elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
     d.set("repositories", rows.repositories);
   };
-  const setRows = (rows: SourceRow[]) => {
-    d.set("repositories", JSON.stringify(rows));
-    if (rows.some((r) => !r.removed)) d.set("removeAll", false);
-  };
-  const update = (
-    index: number,
-    patch: SourceRow | undefined,
-    /** The row without the patch's keys, when the patch is undefined (an edit reverted). */
-    reverted?: SourceRow,
-  ) => {
-    const rows = parseRows(v.repositories);
-    rows[index] = patch ? { ...rows[index], ...patch } : (reverted ?? {});
-    setRows(rows);
-  };
-  /** Undoing a removal drops the marker, so the row reads exactly as it was loaded. */
-  const toggleRemoved = (index: number) => {
-    const rows = parseRows(v.repositories);
-    const { removed, ...rest } = rows[index] ?? {};
-    rows[index] = removed ? rest : { ...rest, removed: true };
-    setRows(rows);
-  };
-  const drop = (index: number) =>
-    setRows(parseRows(v.repositories).filter((_, i) => i !== index));
-  const rowError = (index: number, name: string) =>
-    d.errors.repositories ||
-    d.errors[`repositories.${index}.${name}`] ||
-    d.errors[`repositories.${name}`];
-  const input = (
-    index: number,
-    name: string,
-    label: string,
-    /** What shows until the operator edits the field. */
-    fallback = "",
-    /** Replaces the plain row update, for a saved value that tracks its baseline. */
-    change?: (value: string) => void,
-  ) => (
-    <label className="field body" htmlFor={`repository-${index}-${name}`}>
-      {label}
-      <Input
-        className="control"
-        id={`repository-${index}-${name}`}
-        aria-label={label}
-        aria-invalid={Boolean(rowError(index, name))}
-        aria-describedby={
-          rowError(index, name) ? "repository-error" : undefined
-        }
-        value={String(parseRows(v.repositories)[index]?.[name] ?? fallback)}
-        onChange={(e) =>
-          change
-            ? change(e.target.value)
-            : update(index, { [name]: e.target.value })
-        }
-      />
-    </label>
-  );
-  /** A saved local path, editable once read; otherwise unavailable with a way to read it again. */
-  const savedPath = (index: number, baseline: string | undefined) => {
-    const row = parseRows(v.repositories)[index];
-    const edited = typeof row?.path === "string";
-    // The text an edit started from; typing it back removes the edit, so the row is kept again.
-    const base = edited ? String(row?.pathBase ?? "") : baseline;
-    const label = "Local repository path";
-    const id = String(row?.repositoryId ?? "");
-    if (baseline !== undefined || edited)
-      return (
-        <>
-          {input(index, "path", label, baseline ?? "", (value) => {
-            const { path: _value, pathBase: _base, ...rest } = row ?? {};
-            update(
-              index,
-              value === (baseline ?? base ?? "")
-                ? undefined
-                : { path: value, pathBase: base ?? "" },
-              rest,
-            );
-          })}
-          {edited && baseline !== undefined && baseline !== base && (
-            <p className="metadata muted" role="status">
-              This was changed elsewhere since you started editing. Saving
-              replaces it.
-            </p>
-          )}
-          {edited &&
-            baseline === undefined &&
-            !priv.state.pending &&
-            (priv.state.error !== null || privateData !== undefined) && (
-              <p className="body error-text" role="alert">
-                Couldn't check whether this changed elsewhere.{" "}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  aria-label={`Try again to check the local repository path for ${id}`}
-                  onClick={priv.refresh}
-                >
-                  Try again
-                </Button>
-              </p>
-            )}
-        </>
-      );
-    return (
-      <div className="field body">
-        <span>{label}</span>
-        <p className="metadata muted">
-          {priv.state.pending
-            ? "Loading local repository path…"
-            : "Local path unavailable"}
-        </p>
-        <div>
-          <Button
-            type="button"
-            variant="secondary"
-            aria-label={`Try again to load the local repository path for ${id}`}
-            aria-busy={priv.state.pending || undefined}
-            aria-disabled={priv.state.pending || undefined}
-            onClick={() => {
-              if (!priv.state.pending) priv.refresh();
-            }}
-          >
-            Try again
-          </Button>
-        </div>
-      </div>
-    );
+  const edit = useSettingsRows({
+    draft: d,
+    priv,
+    privateRead: privateData !== undefined,
+    controlId: (_, index, name) => `repository-${index}-${name}`,
+    errorId: () => "repository-error",
+    rowName: "repositoryId",
+    onRows: (next) => {
+      if (next.some((r) => !r.removed)) d.set("removeAll", false);
+    },
+  });
+  /** A new row's identity fields differ by host, so a switch starts them over. */
+  const setCodeHost = (index: number, gitlab: boolean) => {
+    const next = parseRows(v.repositories);
+    const {
+      codeHost: _c,
+      host: _h,
+      projectPath: _p,
+      ...rest
+    } = next[index] ?? {};
+    next[index] = {
+      ...rest,
+      repositoryId: "",
+      ...(gitlab ? { codeHost: "gitlab", host: "", projectPath: "" } : {}),
+    };
+    edit.setRows("repositories", next);
   };
   return (
     <form
@@ -308,7 +195,9 @@ export function RepositoryTab(p: TabProps) {
                       <div className="settings-row-heading">
                         <div>
                           <h3 className="small-heading">{name}</h3>
-                          <p className="metadata muted">GitHub · github.com</p>
+                          <p className="metadata muted">
+                            {codeHostName(r.codeHost as CodeHost)} · {r.host}
+                          </p>
                         </div>
                         {r.removed && (
                           <StatusBadge tone="warning">
@@ -318,7 +207,7 @@ export function RepositoryTab(p: TabProps) {
                         <Button
                           type="button"
                           variant="secondary"
-                          onClick={() => toggleRemoved(i)}
+                          onClick={() => edit.toggleRemoved("repositories", i)}
                         >
                           {r.removed
                             ? `Undo remove repository ${name}`
@@ -331,7 +220,7 @@ export function RepositoryTab(p: TabProps) {
                         <Button
                           type="button"
                           variant="secondary"
-                          onClick={() => drop(i)}
+                          onClick={() => edit.drop("repositories", i)}
                         >
                           Remove new repository {name}
                         </Button>
@@ -339,17 +228,77 @@ export function RepositoryTab(p: TabProps) {
                     )}
                     {!r.removed && (
                       <div className="settings-fields">
-                        {!r.keep &&
-                          input(i, "repositoryId", "Linked repository ID")}
-                        {input(i, "ref", "Linked repository ref")}
-                        {r.keep
-                          ? savedPath(
+                        {!r.keep && (
+                          <>
+                            <label
+                              className="field body"
+                              htmlFor={`repository-${i}-codeHost`}
+                            >
+                              Code host
+                              <NativeSelect
+                                className="control"
+                                id={`repository-${i}-codeHost`}
+                                aria-label="Code host"
+                                value={
+                                  r.codeHost === "gitlab" ? "gitlab" : "github"
+                                }
+                                onChange={(e) =>
+                                  setCodeHost(i, e.target.value === "gitlab")
+                                }
+                              >
+                                <option value="github">GitHub</option>
+                                <option value="gitlab">GitLab</option>
+                              </NativeSelect>
+                            </label>
+                            {r.codeHost === "gitlab" && (
+                              <>
+                                {edit.input(
+                                  "repositories",
+                                  i,
+                                  "host",
+                                  "GitLab host",
+                                )}
+                                {edit.input(
+                                  "repositories",
+                                  i,
+                                  "projectPath",
+                                  "GitLab project path",
+                                )}
+                              </>
+                            )}
+                            {edit.input(
+                              "repositories",
                               i,
+                              "repositoryId",
+                              r.codeHost === "gitlab"
+                                ? "GitLab project ID"
+                                : "Linked repository ID",
+                            )}
+                          </>
+                        )}
+                        {edit.input(
+                          "repositories",
+                          i,
+                          "ref",
+                          "Linked repository ref",
+                        )}
+                        {r.keep
+                          ? edit.savedValue(
+                              "repositories",
+                              i,
+                              "path",
+                              "Local repository path",
+                              "Local path unavailable",
                               known?.links.find(
                                 (x) => x.repositoryId === r.repositoryId,
                               )?.path,
                             )
-                          : input(i, "path", "New local repository path")}
+                          : edit.input(
+                              "repositories",
+                              i,
+                              "path",
+                              "New local repository path",
+                            )}
                       </div>
                     )}
                   </div>
@@ -360,15 +309,11 @@ export function RepositoryTab(p: TabProps) {
                   type="button"
                   variant="secondary"
                   onClick={() =>
-                    setRows([
-                      ...repositories,
-                      {
-                        repositoryId: "",
-                        path: "",
-                        ref: "main",
-                        rowKey: key(),
-                      },
-                    ])
+                    edit.add("repositories", {
+                      repositoryId: "",
+                      path: "",
+                      ref: "main",
+                    })
                   }
                 >
                   Add repository
@@ -382,7 +327,9 @@ export function RepositoryTab(p: TabProps) {
                   className="body error-text"
                   role="alert"
                 >
-                  Check linked repository IDs, paths and refs.
+                  {Object.values(d.errors).find((e) =>
+                    /^Repository \d+: /.test(e),
+                  ) ?? "Check linked repository IDs, paths and refs."}
                 </p>
               )}
             </fieldset>
@@ -413,7 +360,7 @@ export function RepositoryTab(p: TabProps) {
           <Aside
             title="Repository boundary"
             items={[
-              "Repository links are project configuration: workspaces, delivery and setup read them. Only GitHub on github.com is supported.",
+              "Repository links are project configuration: workspaces, delivery and setup read them. Links are GitHub on github.com or GitLab on a host you name.",
               "Readiness never grants repository access, and saving here neither imports nor activates any source.",
             ]}
           />

@@ -219,25 +219,28 @@ release. It then runs these stages:
    seconds.
 2. `render`: renders, lints and records the new plist, with new log files.
 3. `start`: `launchctl bootstrap`. The starting service takes and verifies the
-   [startup snapshot](#startup-snapshot) before it migrates, or refuses to start.
+   [startup snapshot](#startup-snapshot) before it applies pending migrations, or
+   refuses to start.
 4. `health`: waits up to 120 seconds for `/app`.
 5. `readiness`: reads readiness until no check reports Fail, for up to 120
    seconds. Not configured is accepted, so an unused GitHub discovery, GitLab
    credential or Claude does not block it. A configured GitLab credential that
-   fails, or a `glab` login shadowed by `GITLAB_TOKEN`, does block it. The identity check confirms the same installation.
+   fails, or a `glab` login shadowed by `GITLAB_TOKEN`, does block it, as a failing configured GitHub discovery credential does. The identity check confirms the same installation.
 
-On success it prints the version, the startup snapshot (null when this start
-needed none, as when it reloads the release that last started), log paths and each readiness
-status. On a failure from `stop` onward it leaves the job stopped: it boots out
+On success it prints the version, the startup snapshot, log paths and each readiness
+status. The snapshot is null when this start had no pending migrations, as when it
+reloads the release that last started or the new release applies none, and when a retry
+reuses the snapshot a failed attempt took, which that attempt already reported. On a
+failure from `stop` onward it leaves the job stopped: it boots out
 the new job if it started, with its exit confirmed, and removes the LaunchAgent
 so nothing starts at login. It keeps the install record and prints
 `{"ok":false,"operation":"upgrade","stage",…,"jobStopped","snapshot","logs"}`.
 `jobStopped` is false only when a process exit could not be confirmed. There is
 no rollback command. Recover by running `upgrade` again, with a fixed release or
 the same one once the cause is fixed, or restore the reported snapshot (see
-[Offline snapshot and restore](#offline-snapshot-and-restore)). An older release
-refuses data a newer release started, so going back to an older release needs that
-restore.
+[Offline snapshot and restore](#offline-snapshot-and-restore)). A build
+refuses data at a higher migration level than it applies, so going back to an older
+release needs that restore.
 
 Upgrade refuses a [LaunchDaemon](#launchdaemon-mode) install at its first check,
 before it stops anything; that section gives the switch-back procedure.
@@ -643,8 +646,11 @@ the service environment overrides the stored login, and `cab doctor` reports it 
 a failed GitLab credentials check: unset it, or choose an environment variable
 reference. A [LaunchDaemon](#launchdaemon-mode) cannot read a keychain-backed glab
 login before login; use a login glab keeps in its config file, or an environment
-variable. A credential added after the service started needs a restart before new
-Codex spawns exclude it.
+variable. A host that does not answer is reported as unreachable (glab within 8
+seconds), not as signed out. A credential added or changed after the service started
+applies at once to helper, `gh`, `glab` and Claude turn environments; a running Codex
+runtime that inherited its variable or value keeps it, and `cab doctor` and Settings
+report that a restart is needed until the service restarts.
 
 ### GitHub discovery credential
 
@@ -919,28 +925,37 @@ held until those snapshots are deleted.
 
 ## Startup snapshot
 
-Whenever the service starts against an existing database that an older release last
-started, or that no release recorded, it takes and verifies an offline snapshot
-before anything migrates, while it holds the data directory's exclusive owner lock.
-The snapshot is `STATE/snapshots/startup.<from>-to-<to>.<UTC time>-<id>`, in a
+Whenever the service starts against an existing database with migrations pending, it
+takes and verifies an offline snapshot before anything migrates, while it holds the data
+directory's exclusive owner lock. Pending is decided by the migration level, not the
+package version: the build has a `MIGRATION_LEVEL` (`src/standalone/startup-snapshot.ts`),
+and the database records, in its `startup_migration_level` table, the level its last
+completed start reached. A lower recorded level (or none, for data an earlier build wrote)
+is pending; an equal level takes no snapshot, so two builds of one version snapshot each
+other's data only when the newer one raises the level, and a version change alone takes
+none. A developer bumps the level with any schema change, and for a data-only migration
+too, which no test can detect; a guard test pins the schema each level creates and fails
+until the level is bumped for a schema change.
+The snapshot is `STATE/snapshots/startup.<from>-to-<to>.<UTC time>-<id>` (the levels), in a
 private directory beside the data directory (`0700`, owned by the service account;
 the service creates it and refuses to start if it is anything else). If creating or
 verifying the snapshot fails, the service refuses to start and the database stays
 unmigrated; a partial snapshot is never reused or deleted, and the next start takes a
-new one. `STATE/data/startup-state.json` records the release that last completed
-startup and the verified snapshot for the latest release change, so repeated or
-interrupted starts reuse that snapshot rather than taking another. The same applies
-to a LaunchDaemon. A fresh data directory takes no snapshot. A directory restored
-from a snapshot has no recorded release, so its first start takes one more.
+new one. The level is recorded only after every migration has run, so an interrupted start
+leaves the old level. `STATE/data/startup-state.json` (format `cab-startup-state-v2`) records
+the verified snapshot for the latest level change, so repeated or interrupted starts reuse it
+rather than taking another; a state file of the earlier release-keyed format is accepted
+and rewritten, but names no snapshot to reuse. The same applies to a LaunchDaemon. A fresh
+data directory takes no snapshot. The level lives in the database, so a directory restored
+from a snapshot already at the current level takes none either; a snapshot from before a
+migration is behind the build and is snapshotted again.
 
-The release is the package version and compares by semantic-version precedence:
-builds of one version take no snapshot of each other's data. A service refuses to
-start, before it writes anything, on a database that a newer release last started or
-whose schema it does not support. The refusal reaches the launchd log as a
-`StartupRefusedError` with a stable `code` (`startup-release-newer`,
-`startup-schema-newer`, `startup-snapshot-failed`, `startup-snapshot-directory`,
-`startup-state-invalid`, `startup-database-invalid`), and `service upgrade` reports
-the stage and logs, so a refusal is readable with no service endpoint running.
+A service refuses to start, before it writes anything, on a database at a higher migration
+level than the build applies, or whose schema version it does not support. The refusal
+reaches the launchd log as a `StartupRefusedError` with a stable `code`
+(`startup-schema-newer`, `startup-snapshot-failed`, `startup-snapshot-directory`,
+`startup-state-invalid`, `startup-database-invalid`), and `service upgrade` reports the
+stage and logs, so a refusal is readable with no service endpoint running.
 
 ## Offline snapshot and restore
 

@@ -284,6 +284,24 @@ export function effectiveOwnClosure(
       WHERE ${sameItem("s", "d")} AND s.operationId = d.operationId))`;
 }
 
+/**
+ * Whether the rule held apart from the closure itself. Closing moves a Jira status to Done, and a
+ * sync may have stored it before this runs, so a status condition cannot count against a closure
+ * made through the tracker's own status.
+ * shortcut: a mixed any-mode rule whose only satisfier was the status reads as unmet (the pre-close status is not kept), which holds the task; revisit if it matters.
+ */
+function closureReadinessProof(
+  rule: Readiness | null,
+  facts: Parameters<typeof evaluateReadiness>[1],
+  hasStatus: boolean,
+): boolean {
+  const readiness = evaluateReadiness(rule, facts);
+  return (
+    readiness.satisfied ||
+    (hasStatus && readiness.unmet.every((c) => c.kind === "status"))
+  );
+}
+
 export function sourceTextDigest(title: string, body: string): string {
   return createHash("sha256")
     .update(JSON.stringify([title, body]))
@@ -387,6 +405,36 @@ export class GitHubSourceStore {
     return row?.observedStatus === undefined || row.observedStatus === null
       ? null
       : String(row.observedStatus);
+  }
+
+  /**
+   * For a tracker whose items have no Project item (Jira): the tracker status stored for the issue
+   * and when it was read, or `null` when the issue has no membership in the project. The status is
+   * shared by every project that reads the issue, so its time is the newest read in any of them.
+   */
+  membershipRead(
+    projectId: string,
+    nodeId: string,
+  ): { readAt: number | null; statusId: string | null } | null {
+    const member = this.db
+      .prepare(
+        `SELECT 1 FROM source_memberships WHERE projectId = ? AND ${itemIs()}`,
+      )
+      .get(projectId, ...this.key(nodeId));
+    if (!member) return null;
+    const row = this.db
+      .prepare(
+        `SELECT MAX(readAt) AS readAt FROM source_memberships WHERE ${itemIs()}`,
+      )
+      .get(...this.key(nodeId)) as Row;
+    const status = this.observedStatus(nodeId);
+    return {
+      readAt: row.readAt === null ? null : Number(row.readAt),
+      statusId:
+        status === null
+          ? null
+          : observedStatusSchema.parse(JSON.parse(status) as unknown).id,
+    };
   }
 
   memberships(nodeId: string): Row[] {
@@ -1316,19 +1364,11 @@ export class GitHubSourceStore {
         )
         .get(...this.key(snapshot.nodeId)) as Row;
       const facts = this.readinessFacts({ ...issue, ...observed, projectId });
-      const readiness = evaluateReadiness(rule, {
-        labels: snapshot.labels,
-        fields: facts.fields,
-        status: facts.status,
-        selectFields: facts.selectFields,
-      });
-      // Closing moves a Jira status to Done, and a sync may have stored it before this runs, so a
-      // status condition cannot count against a closure made through the tracker's own status.
-      // shortcut: a mixed any-mode rule whose only satisfier was the status reads as unmet (the pre-close status is not kept), which holds the task; revisit if it matters.
-      const readinessProof =
-        readiness.satisfied ||
-        (snapshot.status !== undefined &&
-          readiness.unmet.every((c) => c.kind === "status"));
+      const readinessProof = closureReadinessProof(
+        rule,
+        { ...facts, labels: snapshot.labels },
+        snapshot.status !== undefined,
+      );
       const hold = priorHold;
       if (
         readinessProof &&
@@ -1527,12 +1567,37 @@ export class GitHubSourceStore {
             ? "withdrawn"
             : "readiness-lost",
       );
-    if (Number(row.ready) !== Number(ready))
+    if (Number(row.ready) !== Number(ready)) {
+      const { version } = this.db
+        .prepare("SELECT version FROM domain_tasks WHERE id = ?")
+        .get(taskId) as { version: number };
+      // The readiness the closure itself removed, were the issue still open.
+      const change =
+        closed &&
+        Number(row.ready) === 1 &&
+        memberships > 0 &&
+        closureReadinessProof(
+          parseRule(config.readiness),
+          facts,
+          external.observedStatus != null,
+        )
+          ? "closed"
+          : !closed && ready
+            ? "reopened-read"
+            : undefined;
+      if (change)
+        new DeliveryStore(this.db).carryClosureVersionWithinTransaction(
+          taskId,
+          nodeId,
+          version,
+          change,
+        );
       this.db
         .prepare(
           "UPDATE domain_tasks SET ready = ?, readinessRule = ?, version = version + 1 WHERE id = ?",
         )
         .run(Number(ready), String(config.readiness), taskId);
+    }
     // Stamp only: approval bindings compare the task version, which Ready alone moves.
     else if (row.readinessRule !== config.readiness)
       this.db

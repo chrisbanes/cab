@@ -84,14 +84,18 @@ const draftButton = (page: Page) =>
 /** The one drafting run the service holds, once it is running. */
 async function runningRun(f: Fixture, nth = 0) {
   let runId = "";
-  await until(() => {
-    const ids = f.service
-      .list()
-      .filter((item) => item.workId.startsWith("drafting:") && item.turnId)
-      .map((item) => item.workId.slice("drafting:".length));
-    runId = ids[nth] ?? "";
-    return Boolean(runId && draftingTurn(f.service, runId));
-  }, 8000);
+  await until(
+    () => {
+      const ids = f.service
+        .list()
+        .filter((item) => item.workId.startsWith("drafting:") && item.turnId)
+        .map((item) => item.workId.slice("drafting:".length));
+      runId = ids[nth] ?? "";
+      return Boolean(runId && draftingTurn(f.service, runId));
+    },
+    "a running drafting turn",
+    8000,
+  );
   return runId;
 }
 
@@ -442,7 +446,11 @@ for (const [name, viewport] of viewports) {
     await page
       .getByLabel("Project", { exact: true })
       .selectOption(other.projectId);
-    await until(() => commands("drafting.stop").length === 2, 15000);
+    await until(
+      () => commands("drafting.stop").length === 2,
+      "two stop commands",
+      15000,
+    );
     const stops = commands("drafting.stop");
     assert.equal(stops[0]?.key, stops[1]?.key);
     await until(() => f.service.readDrafting(runId)?.state === "stopping");
@@ -450,6 +458,7 @@ for (const [name, viewport] of viewports) {
     f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
     await until(
       () => f.service.readDrafting(runId)?.state === "discarded",
+      "the drafting run to be discarded",
       20000,
     );
   });
@@ -480,13 +489,18 @@ for (const [name, viewport] of viewports) {
       dispatchEvent(new PopStateEvent("popstate"));
     });
     await page.getByLabel("Rough idea").waitFor({ state: "detached" });
-    await until(() => commands("drafting.stop").length === 2, 15000);
+    await until(
+      () => commands("drafting.stop").length === 2,
+      "two stop commands",
+      15000,
+    );
     const stops = commands("drafting.stop");
     assert.equal(stops[0]?.key, stops[1]?.key);
     await until(() => f.service.readDrafting(runId)?.state === "stopping");
     f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
     await until(
       () => f.service.readDrafting(runId)?.state === "discarded",
+      "the drafting run to be discarded",
       30000,
     );
   });
@@ -515,6 +529,7 @@ for (const [name, viewport] of viewports) {
     f.runtime.fail(Number(draftingTurn(f.service, runId)?.turnId.slice(-1)));
     await until(
       () => f.service.readDrafting(runId)?.state === "discarded",
+      "the drafting run to be discarded",
       30000,
     );
   });

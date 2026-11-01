@@ -10,6 +10,7 @@ type Call = {
   url: string;
   method: string;
   token: string | null;
+  privateToken: string | null;
   redirect: string | undefined;
 };
 function fake(respond: (call: Call, index: number) => Response) {
@@ -18,7 +19,8 @@ function fake(respond: (call: Call, index: number) => Response) {
     calls.push({
       url: String(input),
       method: init?.method ?? "GET",
-      token: new Headers(init?.headers).get("private-token"),
+      token: new Headers(init?.headers).get("authorization"),
+      privateToken: new Headers(init?.headers).get("private-token"),
       redirect: init?.redirect,
     });
     return respond(calls.at(-1) as Call, calls.length - 1);
@@ -58,10 +60,30 @@ test("user sends the token only as a header to the host's API and never follows 
     {
       url: "https://gitlab.example.com/api/v4/user",
       method: "GET",
-      token,
+      token: `Bearer ${token}`,
+      privateToken: null,
       redirect: "manual",
     },
   ]);
+});
+
+test("an OAuth-shaped token is sent as the same Authorization header for user and projects", async () => {
+  const oauth = "gloas-fake-oauth-shaped-canary";
+  const f = fake((call) =>
+    json(call.url.endsWith("/user") ? { username: "fake-user" } : []),
+  );
+  const reader = new GitLabDiscoveryReader(
+    "gitlab.example.com",
+    oauth,
+    f.fetcher,
+  );
+  await reader.user();
+  await reader.projects();
+  assert.equal(f.calls.length, 2);
+  for (const call of f.calls) {
+    assert.equal(call.token, `Bearer ${oauth}`);
+    assert.equal(call.privateToken, null);
+  }
 });
 
 test("projects follow x-next-page, drop projects without a default branch and stop at ten pages", async () => {
@@ -113,7 +135,12 @@ test("failures map to reason codes that never reveal the token or URL", async ()
     [() => new Response("{}", { status: 500 }), "unreadable"],
     [() => new Response("not json", { status: 200 }), "unreadable"],
     [() => json({ username: 7 }), "unreadable"],
-    [() => new Error(`connect failed with ${token}`), "unreadable"],
+    [() => new Error(`connect failed with ${token}`), "unreachable"],
+    [() => new TypeError("fetch failed"), "unreachable"],
+    [
+      () => new DOMException("The operation timed out.", "TimeoutError"),
+      "unreachable",
+    ],
   ];
   for (const [outcome, expected] of cases) {
     const f = fake(() => {
@@ -121,16 +148,24 @@ test("failures map to reason codes that never reveal the token or URL", async ()
       if (made instanceof Error) throw made;
       return made;
     });
+    // No retries: a 429 is waited out elsewhere (gitlab-rate-limit.test.ts); here it is just a reason.
     const reader = new GitLabDiscoveryReader(
       "gitlab.example.com",
       token,
       f.fetcher,
+      { maxRetries: 0 },
     );
     assert.equal(await reason(reader.user()), expected);
     assert.equal(f.calls.length, 1, "a 3xx is not followed");
   }
+  // A token that cannot be a header value is not a host failure.
+  for (const bad of ["", "a\nb", "tökén"])
+    assert.throws(
+      () => new GitLabDiscoveryReader("gitlab.example.com", bad),
+      (e) => e instanceof GitLabDiscoveryFailure && e.reason === "unreadable",
+    );
   assert.throws(
     () => new GitLabDiscoveryReader("github.com", token),
-    GitLabDiscoveryFailure,
+    (e) => e instanceof GitLabDiscoveryFailure && e.reason === "unreadable",
   );
 });

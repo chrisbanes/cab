@@ -175,8 +175,8 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     const u = new URL(url);
     return u.pathname === `/api/operator/tasks/${a.taskId}`
       ? "task"
-      : u.pathname === `/api/operator/assignments/${a.assignmentId}/history`
-        ? `history:item=${u.searchParams.get("beforeSequence") ?? "recent"}:omission=${u.searchParams.get("beforeOmissionSequence") ?? "recent"}`
+      : u.pathname === `/api/operator/tasks/${a.taskId}/timeline`
+        ? `timeline:before=${u.searchParams.get("before") ?? "newest"}`
         : null;
   };
   page.on("request", (request) => {
@@ -271,22 +271,29 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     });
   }
   await page.getByLabel("Editable reply").fill("Retained exact old draft");
-  await openTaskTab(page, "History");
-  await page
-    .getByRole("button", { name: "Expand all history", exact: true })
-    .click();
-  const omissionRecords = page.locator('[data-record-id^="turn-omission:"]');
-  assert.equal(await omissionRecords.count(), 200);
-  await page
-    .getByRole("button", {
-      name: "Load earlier retained turn omissions (71)",
-      exact: true,
-    })
-    .click();
-  const oldRecord = page.locator(
-    `[data-record-id="turn-omission:${a.old.workId}:${a.old.workId}:${a.old.workId}"]`,
-  );
-  await oldRecord.waitFor();
+  // The conversation pages back through every retained turn omission, newest page first.
+  const log = page.getByRole("log", { name: "Task conversation" });
+  const omissionRecords = log.locator(".conv-gap", {
+    hasText: "capture buffer",
+  });
+  const loadEarlier = page.getByRole("button", {
+    name: "Load earlier",
+    exact: true,
+  });
+  await loadEarlier.waitFor();
+  while ((await loadEarlier.count()) > 0) {
+    const before = await log.locator("[data-record-id]").count();
+    await loadEarlier.evaluate((el) => (el as HTMLButtonElement).click());
+    await page.waitForFunction(
+      (n) =>
+        document.querySelectorAll("[role=log] [data-record-id]").length > n ||
+        // The button reads "Loading earlier…" while the page is read; only its absence ends paging.
+        !Array.from(document.querySelectorAll("button")).some((b) =>
+          ["Load earlier", "Loading earlier…"].includes(b.textContent ?? ""),
+        ),
+      before,
+    );
+  }
   assert.equal(await omissionRecords.count(), 271);
   assert.equal(
     new Set(
@@ -296,46 +303,32 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     ).size,
     271,
   );
-  await page
-    .getByRole("button", { name: "Expand all history", exact: true })
-    .click();
-  if (counterpart) {
-    await page
-      .getByRole("button", { name: "Chronological view", exact: true })
-      .click();
-    assert.equal(await omissionRecords.count(), 271);
-    assert.equal(
-      await page
-        .locator(`[data-record-id="${a.old.workId}:single-item"]`)
-        .count(),
-      0,
-    );
-    await page
-      .getByRole("button", { name: "Chronological view", exact: true })
-      .click();
-  }
+  // The oldest retained turn omission is the reading position kept through every update below.
+  const oldId = await omissionRecords.first().getAttribute("data-record-id");
+  assert.ok(oldId);
+  const oldRecord = log.locator(`[data-record-id="${oldId}"]`);
   await oldRecord.scrollIntoViewIfNeeded();
-  await oldRecord.locator("summary").focus();
+  await oldRecord.getByRole("button", { name: /^Details/ }).focus();
   const y = await oldRecord.evaluate((el) => el.getBoundingClientRect().top);
   const inspectReading = ({
-    itemId,
     oldId,
     expectedY,
   }: {
-    itemId: string;
     oldId: string;
     expectedY: number;
   }) => {
-    const items = document.querySelectorAll(`[data-record-id="${itemId}"]`);
+    const items = [
+      ...document.querySelectorAll("[role=log] .conv-agent"),
+    ].filter((e) => e.textContent?.includes("Only retained item"));
     const omissions = [
-      ...document.querySelectorAll('[data-record-id^="turn-omission:"]'),
-    ];
+      ...document.querySelectorAll("[role=log] .conv-gap"),
+    ].filter((e) => e.textContent?.includes("capture buffer"));
     const old = document.querySelector(`[data-record-id="${oldId}"]`);
     const draft = (
       document.querySelector("#workspace-reply") as HTMLTextAreaElement | null
     )?.value;
     const top = old?.getBoundingClientRect().top;
-    const focused = old?.querySelector("summary") === document.activeElement;
+    const focused = old?.querySelector("button") === document.activeElement;
     const snapshot = {
       items: items.length,
       omissions: omissions.length,
@@ -358,11 +351,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
       reading: history.state?.taskWorkspaceReading ?? null,
     };
   };
-  const readingArgs = {
-    itemId: `${a.old.workId}:single-item`,
-    oldId: `turn-omission:${a.old.workId}:${a.old.workId}:${a.old.workId}`,
-    expectedY: y,
-  };
+  const readingArgs = { oldId, expectedY: y };
   const readingDiagnostic = async (phase: string, expectedY = y) => {
     lastReading = await page.evaluate(inspectReading, {
       ...readingArgs,
@@ -378,11 +367,13 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   };
   const waitReading = async (phase: string) => {
     try {
-      await page.waitForFunction(({ itemId, oldId, expectedY }) => {
-        const items = document.querySelectorAll(`[data-record-id="${itemId}"]`);
+      await page.waitForFunction(({ oldId, expectedY }) => {
+        const items = [
+          ...document.querySelectorAll("[role=log] .conv-agent"),
+        ].filter((e) => e.textContent?.includes("Only retained item"));
         const omissions = [
-          ...document.querySelectorAll('[data-record-id^="turn-omission:"]'),
-        ];
+          ...document.querySelectorAll("[role=log] .conv-gap"),
+        ].filter((e) => e.textContent?.includes("capture buffer"));
         const old = document.querySelector(`[data-record-id="${oldId}"]`);
         const draft = (
           document.querySelector(
@@ -398,7 +389,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
           draft === "Retained exact old draft" &&
           top !== undefined &&
           Math.abs(top - expectedY) < 4 &&
-          old?.querySelector("summary") === document.activeElement
+          old?.querySelector("button") === document.activeElement
         );
       }, readingArgs);
     } catch (error) {
@@ -452,17 +443,17 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   await page
     .getByRole("button", { name: "Refresh task", exact: true })
     .evaluate((el) => (el as HTMLButtonElement).click());
-  const singleItem = page.locator(
-    `[data-record-id="${a.old.workId}:single-item"]`,
-  );
-  await singleItem.waitFor({ state: "attached" });
+  const singleItem = log.locator(".conv-agent", {
+    hasText: "Only retained item",
+  });
+  await singleItem.waitFor();
   await readingDiagnostic("header-attached");
   let snapshot = await waitReading("header-settled");
   if (!counterpart) {
-    // Drive the real production timer: its poll keeps the validated history shown while it revalidates.
-    // The poll can request history before the task. When the task's one-time route then finishes
-    // last, Playwright sees no routes left and continues the held history request itself; this
-    // lowest-priority pass-through keeps the route list non-empty.
+    // Drive the real production timer: its poll keeps the validated conversation shown while it
+    // revalidates. A one-time route on the task read can finish last, and Playwright then sees no
+    // routes left and continues a held request itself; this lowest-priority pass-through keeps the
+    // route list non-empty.
     await page.route(`**/api/operator/**`, (route) => route.fallback());
     let releaseTask!: () => void;
     const heldTask = new Promise<void>((resolve) => {
@@ -480,19 +471,19 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
       },
       { times: 1 },
     );
-    let releaseHistory!: () => void;
-    const heldHistory = new Promise<void>((resolve) => {
-      releaseHistory = resolve;
+    let releaseTimeline!: () => void;
+    const heldTimeline = new Promise<void>((resolve) => {
+      releaseTimeline = resolve;
     });
-    const historyEntered = page.waitForRequest(
+    const timelineEntered = page.waitForRequest(
       (request) =>
         new URL(request.url()).pathname ===
-        `/api/operator/assignments/${a.assignmentId}/history`,
+        `/api/operator/tasks/${a.taskId}/timeline`,
     );
     await page.route(
-      `**/api/operator/assignments/${a.assignmentId}/history**`,
+      `**/api/operator/tasks/${a.taskId}/timeline**`,
       async (route) => {
-        await heldHistory;
+        await heldTimeline;
         await route.continue();
       },
       { times: 1 },
@@ -503,19 +494,19 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
       assert.equal(
         await singleItem.count(),
         1,
-        "a pending timer poll keeps the validated history visible",
+        "a pending timer poll keeps the validated conversation visible",
       );
       await readingDiagnostic("timer-pending");
     } finally {
       releaseTask();
     }
     try {
-      await historyEntered;
+      await timelineEntered;
       assert.equal(await singleItem.count(), 1);
-      await readingDiagnostic("overlap-history-pending");
+      await readingDiagnostic("overlap-timeline-pending");
       await page.clock.fastForward(15000);
     } finally {
-      releaseHistory();
+      releaseTimeline();
     }
     snapshot = await waitReading("timer-settled");
     stage("timer-settled");
@@ -530,7 +521,6 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   }
   assert.ok(snapshot);
   stage("validation-label-begin");
-  await openTaskTab(page, "Overview");
   await page
     .getByText("Checked an earlier head than the current pull request head", {
       exact: false,
@@ -555,61 +545,38 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     fullPage: false,
   });
   stage("validation-capture-complete");
-  stage("history-expand-begin");
-  await openTaskTab(page, "History");
-  await page
-    .getByRole("button", { name: "Expand all history", exact: true })
-    .click();
-  stage("history-expand-complete");
-  stage("history-scroll-begin");
+  stage("conversation-scroll-begin");
   await oldRecord.scrollIntoViewIfNeeded();
-  stage("history-scroll-complete");
-  stage("history-capture-begin");
-  await captureBrowserEvidence(page, "1366-independent-omission-pages", {
+  stage("conversation-scroll-complete");
+  stage("conversation-capture-begin");
+  await captureBrowserEvidence(page, "1366-conversation-omission-pages", {
     fullPage: false,
   });
-  stage("history-capture-complete");
-  stage("chronological-begin");
-  await page
-    .getByRole("button", { name: "Chronological view", exact: true })
-    .click();
-  assert.equal(await omissionRecords.count(), 272);
-  assert.equal(
-    new Set(
-      await omissionRecords.evaluateAll((els) =>
-        els.map((el) => el.getAttribute("data-record-id")),
-      ),
-    ).size,
-    272,
-  );
-  await page
-    .getByRole("button", { name: "Chronological view", exact: true })
-    .click();
-  stage("chronological-complete");
+  stage("conversation-capture-complete");
   await page.setViewportSize({ width: 390, height: 844 });
   stage("phone-scroll-begin");
   await oldRecord.scrollIntoViewIfNeeded();
   stage("phone-scroll-complete");
   stage("phone-capture-begin");
-  await captureBrowserEvidence(page, "390-independent-omission-pages", {
+  await captureBrowserEvidence(page, "390-conversation-omission-pages", {
     fullPage: false,
   });
   stage("phone-capture-complete");
   const phoneReadingY = await oldRecord.evaluate(
     (el) => el.getBoundingClientRect().top,
   );
-  let releaseHeadHistory!: () => void, headHistoryEntered!: () => void;
-  const headHistory = new Promise<void>((resolve) => {
-    releaseHeadHistory = resolve;
+  let releaseHeadTimeline!: () => void, headTimelineEntered!: () => void;
+  const headTimeline = new Promise<void>((resolve) => {
+    releaseHeadTimeline = resolve;
   });
-  const headHistoryArrival = new Promise<void>((resolve) => {
-    headHistoryEntered = resolve;
+  const headTimelineArrival = new Promise<void>((resolve) => {
+    headTimelineEntered = resolve;
   });
   await page.route(
-    `**/api/operator/assignments/${a.assignmentId}/history**`,
+    `**/api/operator/tasks/${a.taskId}/timeline**`,
     async (route) => {
-      headHistoryEntered();
-      await headHistory;
+      headTimelineEntered();
+      await headTimeline;
       await route.continue();
     },
     { times: 1 },
@@ -620,18 +587,19 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     await page
       .getByRole("button", { name: "Refresh task", exact: true })
       .evaluate((el) => (el as HTMLButtonElement).click());
-    await headHistoryArrival;
-    // The result is on Overview, behind the open History tab.
+    await headTimelineArrival;
     await page
       .locator("#result-evidence")
       .getByText(/Historical check:.*Head comparison unknown/)
       .waitFor({ state: "attached" });
+    // An explicit Refresh keeps the validated conversation while the new read is pending.
     const gap = await page.evaluate(
-      ({ itemId }) => ({
-        items: document.querySelectorAll(`[data-record-id="${itemId}"]`).length,
-        omissions: document.querySelectorAll(
-          '[data-record-id^="turn-omission:"]',
+      ({ oldId }) => ({
+        items: [...document.querySelectorAll("[role=log] .conv-agent")].filter(
+          (e) => e.textContent?.includes("Only retained item"),
         ).length,
+        omissions: document.querySelectorAll("[role=log] .conv-gap").length,
+        old: document.querySelectorAll(`[data-record-id="${oldId}"]`).length,
         draft: (
           document.querySelector(
             "#workspace-reply",
@@ -640,28 +608,31 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
       }),
       readingArgs,
     );
-    assert.equal(gap.items, 0);
-    assert.equal(gap.omissions, 0);
+    assert.equal(gap.items, 1);
+    assert.ok(gap.omissions >= 272);
+    assert.equal(gap.old, 1);
     assert.equal(gap.draft, "Retained exact old draft");
     j.diagnostics.push(
       JSON.stringify({
-        phase: "bound-head-label-ready-history-held",
+        phase: "bound-head-label-ready-timeline-held",
         snapshot: gap,
         requests: [...readingRequests],
       }),
     );
   } finally {
-    releaseHeadHistory();
+    releaseHeadTimeline();
   }
   try {
     await page.waitForFunction(
-      ({ itemId, oldId }) => {
-        const items = document.querySelectorAll(`[data-record-id="${itemId}"]`),
+      ({ oldId }) => {
+        const items = [
+            ...document.querySelectorAll("[role=log] .conv-agent"),
+          ].filter((e) => e.textContent?.includes("Only retained item")),
           omissions = [
-            ...document.querySelectorAll('[data-record-id^="turn-omission:"]'),
-          ],
+            ...document.querySelectorAll("[role=log] .conv-gap"),
+          ].filter((e) => e.textContent?.includes("capture buffer")),
           old = document.querySelector(`[data-record-id="${oldId}"]`),
-          summary = old?.querySelector("summary");
+          summary = old?.querySelector("button");
         return (
           items.length === 1 &&
           omissions.length === 272 &&
@@ -679,12 +650,12 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     );
   } catch (error) {
     await readingDiagnostic(
-      "bound-head-history-settlement-failed",
+      "bound-head-timeline-settlement-failed",
       phoneReadingY,
     );
     throw error;
   }
-  await readingDiagnostic("bound-head-history-settled", phoneReadingY);
+  await readingDiagnostic("bound-head-timeline-settled", phoneReadingY);
   assert.equal(
     await page
       .locator("#review")
@@ -698,7 +669,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   );
   stage("bound-head-read-complete");
   stage("intentional-scroll-begin");
-  const oldSummary = oldRecord.locator("summary");
+  const oldSummary = oldRecord.getByRole("button", { name: /^Details/ });
   await oldSummary.scrollIntoViewIfNeeded();
   await oldSummary.focus();
   assert.equal(
@@ -706,19 +677,19 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     true,
   );
   stage("intentional-scroll-complete");
-  let releaseIntentionalHistory!: () => void;
-  const intentionalHistory = new Promise<void>((resolve) => {
-    releaseIntentionalHistory = resolve;
+  let releaseIntentionalTimeline!: () => void;
+  const intentionalTimeline = new Promise<void>((resolve) => {
+    releaseIntentionalTimeline = resolve;
   });
   const intentionalEntered = page.waitForRequest(
     (request) =>
       new URL(request.url()).pathname ===
-      `/api/operator/assignments/${a.assignmentId}/history`,
+      `/api/operator/tasks/${a.taskId}/timeline`,
   );
   await page.route(
-    `**/api/operator/assignments/${a.assignmentId}/history**`,
+    `**/api/operator/tasks/${a.taskId}/timeline**`,
     async (route) => {
-      await intentionalHistory;
+      await intentionalTimeline;
       await route.continue();
     },
     { times: 1 },
@@ -728,27 +699,27 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     await page.clock.fastForward(15000);
     await intentionalEntered;
     assert.equal(await singleItem.count(), 1);
-    await openTaskTab(page, "Overview");
     await page.getByLabel("Editable reply").focus();
     await readingDiagnostic("intentional-control-focus-pending");
     await page.clock.fastForward(15000);
   } finally {
-    releaseIntentionalHistory();
+    releaseIntentionalTimeline();
   }
   try {
     await page.waitForFunction(
-      ({ itemId }) =>
+      () =>
         document.activeElement?.id === "workspace-reply" &&
-        document.querySelectorAll(`[data-record-id="${itemId}"]`).length ===
-          1 &&
-        document.querySelectorAll('[data-record-id^="turn-omission:"]')
-          .length === 272 &&
+        [...document.querySelectorAll("[role=log] .conv-agent")].filter((e) =>
+          e.textContent?.includes("Only retained item"),
+        ).length === 1 &&
+        [...document.querySelectorAll("[role=log] .conv-gap")].filter((e) =>
+          e.textContent?.includes("capture buffer"),
+        ).length === 272 &&
         (
           document.querySelector(
             "#workspace-reply",
           ) as HTMLTextAreaElement | null
         )?.value === "Retained exact old draft",
-      readingArgs,
     );
   } catch (error) {
     await readingDiagnostic("intentional-control-focus-failed");
@@ -758,7 +729,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   stage("journey-complete");
 }
 
-test("historical Search opens exact old evidence and independently pages all retained omission turns with refresh and reading state", async (_t, j) =>
+test("historical Search opens exact old evidence and pages all retained omission turns with refresh and reading state", async (_t, j) =>
   retainedJourney(j, false));
-test("retained omission chronology phone head observations and intentional focus remain exact after refresh", async (_t, j) =>
+test("retained omission pages, phone head observations and intentional focus remain exact after refresh", async (_t, j) =>
   retainedJourney(j, true));

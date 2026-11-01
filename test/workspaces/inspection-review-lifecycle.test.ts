@@ -6,18 +6,10 @@ import { test } from "node:test";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { until } from "../fixtures/until.js";
 
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex");
-
-async function until(check: () => boolean, description: string) {
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for ${description}`);
-}
 
 // The deterministic shape of the bounded #782 live journey: exactly three turn
 // starts (initial, automatic reporting repair, review delivery), a review queued

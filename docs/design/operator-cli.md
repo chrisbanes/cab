@@ -39,8 +39,7 @@ Remote clients use the running service for task controls and diagnostics;
 they cannot restart, upgrade or restore the service itself.
 
 The CLI is an operator interface, separate from assignment-bound coordination
-tools. This work does not reopen the deferred ChatGPT plugin, public MCP endpoint
-or native Codex handover in [ADR-1006](../adr/1006-chatgpt-and-native-codex.md).
+tools.
 
 ## Existing foundations and gaps
 
@@ -284,6 +283,9 @@ HTTP clients. Do not claim the CLI prevents a same-user agent from accessing an
 explicitly available host credential.
 
 ## Command surface
+
+The [command inventory](operator-cli-inventory.json) records each command's
+qualification state and evidence; a test keeps it equal to the command registry.
 
 Command names follow cab's domain: task, assignment, agent profile and
 execution. There is no workflow graph or new assignment-stage system.

@@ -1,0 +1,21 @@
+{"event": "versions", "codex": "codex-cli 0.164.0", "model": "gpt-6-luna", "effort": "low"}
+{"event": "account", "present": true}
+{"facet": "S1", "disposition": "demonstrated", "userSkills": ["other-skill", "probe-skill"], "bundledSkills": ["imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer"], "pluginsFeature": "disabled"}
+{"event": "home-discovery", "skillsFromRealHome": 0}
+{"facet": "S5", "after": "thread A", "linkIntact": true, "inode": 93589025}
+{"facet": "S2", "disposition": "demonstrated", "threadASkills": ["probe-skill"], "threadAProbeRan": true, "threadAOtherRan": false, "threadBSkills": ["imagegen", "openai-docs", "other-skill", "probe-skill", "skill-creator", "skill-installer"], "threadBOtherRan": true}
+{"event": "server-exit", "pid": 11598, "exit": -9, "gone": true}
+{"event": "unsubscribe-not-loaded", "status": "notLoaded"}
+{"facet": "S3", "disposition": "demonstrated", "resumedWithConfigSkills": ["probe-skill"], "resumedWithConfigOtherRan": false}
+{"facet": "S5", "after": "resume", "linkIntact": true, "inode": 93589025}
+{"facet": "S3b", "disposition": "demonstrated", "beforeResume": ["imagegen", "openai-docs", "other-skill", "probe-skill", "skill-creator", "skill-installer"], "afterPlainResume": ["imagegen", "openai-docs", "other-skill", "probe-skill", "skill-creator", "skill-installer"], "afterUnsubscribeAndResume": ["probe-skill"]}
+{"facet": "S3c", "disposition": "demonstrated", "threadABeforeRefresh": ["probe-skill", "third-skill"], "threadAAfterRefresh": ["probe-skill"]}
+{"facet": "S4", "disposition": "demonstrated", "shellHomeIsRealHome": true, "skillsFromRealHome": 0, "shellOutput": "HOME=<real-home>", "itemKinds": ["agentMessage", "commandExecution", "userMessage"], "reply": "```text\nHOME=<real-home>\n```"}
+{"facet": "S5", "after": "all turns", "linkIntact": true, "inode": 93589025}
+{"facet": "S5", "disposition": "demonstrated", "inodeUnchanged": true}
+{"event": "server-exit", "pid": 13480, "exit": -9, "gone": true}
+{"facet": "S6", "disposition": "demonstrated-subagent-activity", "subagentToolItems": true, "itemKinds": ["agentMessage", "commandExecution", "reasoning", "subAgentActivity", "userMessage"], "outsideWriteLanded": false, "interrupted": true, "processesBelowServerDuringTurn": 2, "survivorsAfterInterrupt": 2, "note": "recorded only; cab keeps Codex subagents disabled"}
+{"event": "server-exit", "pid": 14622, "exit": -9, "gone": true}
+{"facet": "S5", "after": "subagent probe", "linkIntact": true}
+{"event": "result", "outcome": "passed"}
+{"event": "cleanup", "directory_removed": true}
