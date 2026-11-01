@@ -10,6 +10,7 @@ import {
   type Locator,
   type Page,
   type Response,
+  type Request,
 } from "playwright";
 import {
   browserSuite,
@@ -23,6 +24,7 @@ import {
   leadResumeNotice,
 } from "../../web/src/lead-feedback.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { until } from "../fixtures/until.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
@@ -168,6 +170,7 @@ async function startReview(
     viewport,
   });
   j.observe(page);
+  observePreviews(page);
   page.setDefaultTimeout(15_000);
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
@@ -406,6 +409,64 @@ test("production local review composes exact multi-origin anchors and sends one 
   assert.deepEqual(pageErrors, []);
 });
 
+/** Synthetic preview identities only: never retain authentication headers or command payloads. */
+const previewDiagnostics = new WeakMap<Page, string[]>();
+function observePreviews(page: Page) {
+  const events: string[] = [];
+  const requests = new WeakMap<Request, number>();
+  let nextRequest = 0;
+  const startedAt = performance.now();
+  previewDiagnostics.set(page, events);
+  const record = (request: Request, outcome: string) => {
+    const url = new URL(request.url());
+    if (!url.pathname.endsWith("/preview")) return;
+    if (!requests.has(request)) requests.set(request, ++nextRequest);
+    if (events.length === 40) events.shift();
+    events.push(
+      JSON.stringify({
+        request: requests.get(request),
+        elapsedMs: Math.round(performance.now() - startedAt),
+        task: url.pathname.split("/").at(-2),
+        scope: url.searchParams.get("scope"),
+        repository: url.searchParams.get("repositoryId"),
+        path: url.searchParams.get("path"),
+        ignored: url.searchParams.get("showIgnored"),
+        method: request.method(),
+        outcome,
+      }),
+    );
+  };
+  const start = (request: Request) => record(request, "started");
+  const failed = (request: Request) =>
+    record(request, `failed: ${request.failure()?.errorText}`);
+  const finished = (request: Request) => record(request, "finished");
+  const response = (response: Response) =>
+    record(response.request(), `HTTP ${response.status()}`);
+  page.on("request", start);
+  page.on("requestfailed", failed);
+  page.on("requestfinished", finished);
+  page.on("response", response);
+  page.once("close", () => {
+    page.off("request", start);
+    page.off("requestfailed", failed);
+    page.off("requestfinished", finished);
+    page.off("response", response);
+  });
+}
+
+async function previewDiagnostic(page: Page) {
+  const state = await page
+    .locator("#files .file-reading-area")
+    .evaluate((element) => ({
+      ...(element as HTMLElement).dataset,
+      text: element.textContent?.slice(0, 500),
+    }));
+  return JSON.stringify({
+    state,
+    requests: previewDiagnostics.get(page) ?? [],
+  });
+}
+
 /**
  * Opens a file in Files and waits for its preview to settle. The service bounds its Git ignore
  * check, so under load a read can answer "Preview is unavailable" or fail outright ("File preview
@@ -416,8 +477,14 @@ test("production local review composes exact multi-origin anchors and sends one 
 async function openFile(page: Page, name: RegExp) {
   const files = page.locator("#files");
   let lastPreview = "no preview response";
-  const isPreview = (response: Response) =>
-    new URL(response.url()).pathname.endsWith("/preview");
+  const taskId = new URL(page.url()).pathname.split("/").at(-1);
+  const isPreview = (response: Response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith(`/tasks/${taskId}/preview`) &&
+      name.test(url.searchParams.get("path")?.split("/").at(-1) ?? "")
+    );
+  };
   const onResponse = (response: Response) => {
     if (isPreview(response)) lastPreview = `HTTP ${response.status()}`;
   };
@@ -452,10 +519,14 @@ async function openFile(page: Page, name: RegExp) {
         pending ||
         refreshes === 2 ||
         !(refreshFailed || text?.startsWith("Preview is unavailable"))
-      )
+      ) {
+        const diagnostic = await previewDiagnostic(page);
+        console.error(`preview-not-ready ${diagnostic}`);
+        await captureBrowserEvidence(page, "preview-not-ready");
         throw new Error(
-          `The preview of ${name} did not become ready: ${text}; last preview response: ${lastPreview}`,
+          `The preview of ${name} did not become ready: ${text}; last preview response: ${lastPreview}; ${diagnostic}`,
         );
+      }
       const read = page.waitForResponse(isPreview);
       await files.getByRole("button", { name: "Refresh", exact: true }).click();
       await read;
@@ -2022,4 +2093,74 @@ test("a stored comment without line context can be removed so the review can be 
   await review.getByText("Anchored comment").waitFor();
   assert.equal(await send.isEnabled(), true);
   assert.deepEqual(pageErrors, []);
+});
+
+test("preview diagnostics distinguish a held read, an obsolete selection and an aborted read", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const entered = deferred();
+  const release = deferred();
+  const settled = deferred();
+  await page.route("**/preview?**", async (route) => {
+    if (
+      new URL(route.request().url()).searchParams.get("path") !== "review.txt"
+    )
+      return route.continue();
+    const response = await route.fetch();
+    entered.resolve();
+    await release.promise;
+    try {
+      await route.fulfill({ response });
+    } catch {
+      // Selecting diff.txt may abort the obsolete request before its route is fulfilled.
+    } finally {
+      settled.resolve();
+    }
+  });
+  try {
+    await signIn(
+      page,
+      web.origin,
+      `/app/tasks/${task.taskId}?section=files`,
+      web.password,
+    );
+    const files = page.locator("#files");
+    await files.getByRole("button", { name: /review\.txt/ }).click();
+    await entered.promise;
+    const pending = await previewDiagnostic(page);
+    assert.match(pending, /started/);
+    assert.doesNotMatch(pending, /HTTP 200/);
+    assert.match(pending, /loading/);
+    await openFile(page, /diff\.txt/);
+    release.resolve();
+    await settled.promise;
+    // A late review.txt response must never replace the selected diff.txt preview.
+    await files.getByRole("button", { name: "Line 1: keep" }).waitFor();
+    const selected = await previewDiagnostic(page);
+    assert.match(selected, /diff.txt/);
+    assert.equal(
+      await files.getByRole("button", { name: "Line 1: first" }).count(),
+      0,
+    );
+    await page.route("**/preview?**", (route) => route.abort("failed"));
+    await files.getByRole("button", { name: "Refresh", exact: true }).click();
+    await until(
+      () =>
+        previewDiagnostics
+          .get(page)
+          ?.some(
+            (event) =>
+              event.includes('"path":"diff.txt"') && event.includes("failed:"),
+          ),
+      "preview request failure",
+    );
+    await files
+      .getByRole("alert")
+      .filter({ hasText: /^File preview refresh failed/ })
+      .waitFor();
+    const aborted = await previewDiagnostic(page);
+    assert.match(aborted, /failed:/);
+    assert.match(aborted, /diff.txt/);
+  } finally {
+    release.resolve();
+  }
 });

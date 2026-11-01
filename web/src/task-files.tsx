@@ -1452,6 +1452,11 @@ export function TaskFiles({
         </aside>
         <div
           className="file-reading-area"
+          data-task-id={taskId}
+          data-active-tab-key={activeTab?.key ?? ""}
+          data-preview-key={previewKey}
+          data-committed-preview-key={activeTab?.previewKey ?? ""}
+          data-preview-status={previewResource.state.status}
           data-mobile-hidden={state.mobileView === "list"}
         >
           {activeTab && (

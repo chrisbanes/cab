@@ -118,6 +118,65 @@ jobs:
           path: ${{ runner.temp }}/cab-test-evidence
           retention-days: 3
           if-no-files-found: error
+  # Temporary bounded Linux reproduction for #1406; remove after diagnosis.
+  preview-diagnostics:
+    if: github.event_name == 'pull_request' && github.head_ref == 'cb/deliver-spec-1406'
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm install --global "$(node -p 'require("./package.json").packageManager')"
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: cab-build
+          path: dist
+      - run: npx playwright install --with-deps chromium
+      - name: Reproduce preview readiness under service load
+        env:
+          CAB_TEST_PROFILE: chromium
+          CAB_TEST_EVIDENCE_DIR: ${{ runner.temp }}/preview-diagnostics/evidence
+          DIAGNOSTICS_DIR: ${{ runner.temp }}/preview-diagnostics
+          TMPDIR: ${{ runner.temp }}/preview-fixtures
+        run: |
+          mkdir -p "$CAB_TEST_EVIDENCE_DIR" "$DIAGNOSTICS_DIR" "$TMPDIR"
+          npm run test:built -- --profile=service --shard=1/2 > "$DIAGNOSTICS_DIR/load-1.log" 2>&1 &
+          load1=$!
+          npm run test:built -- --profile=service --shard=2/2 > "$DIAGNOSTICS_DIR/load-2.log" 2>&1 &
+          load2=$!
+          result=0
+          for iteration in $(seq 1 30); do
+            overlap=true
+            kill -0 "$load1" 2>/dev/null && kill -0 "$load2" 2>/dev/null || overlap=false
+            echo "iteration=$iteration service_load_overlap=$overlap" | tee -a "$DIAGNOSTICS_DIR/results.log"
+            if node --test --test-name-pattern='a comment save whose response is lost|a stage replay stays held' dist/test/workspaces/operator-local-review-browser.test.js > "$DIAGNOSTICS_DIR/target-$iteration.log" 2>&1; then
+              echo "iteration=$iteration exit=0" | tee -a "$DIAGNOSTICS_DIR/results.log"
+            else
+              result=$?
+              echo "iteration=$iteration exit=$result" | tee -a "$DIAGNOSTICS_DIR/results.log"
+              cat "$DIAGNOSTICS_DIR/target-$iteration.log"
+              break
+            fi
+          done
+          load1_result=0
+          load2_result=0
+          wait "$load1" || load1_result=$?
+          wait "$load2" || load2_result=$?
+          echo "load1_exit=$load1_result load2_exit=$load2_result target_exit=$result" | tee -a "$DIAGNOSTICS_DIR/results.log"
+          test "$result" -eq 0 && test "$load1_result" -eq 0 && test "$load2_result" -eq 0
+      - name: Upload preview investigation evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: preview-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preview-diagnostics
+          retention-days: 7
+          if-no-files-found: error
   check:
     name: check
     if: always()
