@@ -1680,6 +1680,7 @@ async function linkedReadyCheck(
   journey: Parameters<typeof setupJourney>[0],
   options: {
     viewport?: { width: number; height: number };
+    prepare?: (page: Page) => Promise<void>;
     /** Readiness checks that fail, which also offers Check again. */
     failing?: Parameters<typeof stubReadiness>[1];
   } = {},
@@ -1691,6 +1692,7 @@ async function linkedReadyCheck(
     readerFactory: atlasIssueReader,
     ...(options.viewport ? { viewport: options.viewport } : {}),
   });
+  await options.prepare?.(s.page);
   await stubReadiness(s.page, options.failing);
   const sent = sentCommands(s.page);
   const steps: string[] = [];
@@ -1859,6 +1861,196 @@ test("Setup's ready check offers Refresh again for an unconfirmed refresh withou
   await t.ready.getByRole("link", { name: "View imported tasks" }).waitFor();
   assert.deepEqual(t.steps, ["preview", "refresh", "refresh"]);
 });
+
+function responseGate() {
+  let release!: () => void;
+  const promise = new Promise<void>((done) => {
+    release = done;
+  });
+  return { promise, resolve: release };
+}
+
+for (const schedule of [
+  "private-before-save",
+  "private-after-conflict",
+  "operator-refresh",
+] as const)
+  test(`Setup's ready check reviews a source saved elsewhere before importing again: chronology ${schedule}`, async (_t, journey) => {
+    const release = responseGate();
+    const requested = responseGate();
+    journey.cleanup(async () => release.resolve(), "release-private-read");
+    const chronology: Array<{
+      event: string;
+      version?: number;
+      observedAt?: number;
+      connected?: boolean;
+      previews?: unknown;
+      steps?: string[];
+    }> = [];
+    let initialConfiguration: unknown;
+    let equivalent = false;
+    const t = await linkedReadyCheck(journey, {
+      failing: { "codex-login": "fail" },
+      prepare: async (page) => {
+        await page.route(
+          "**/api/operator/projects/*/private-values",
+          async (route) => {
+            chronology.push({ event: "private-start" });
+            requested.resolve();
+            if (schedule === "private-after-conflict") await release.promise;
+            const response = await route.fetch();
+            const body = await response.json();
+            chronology.push({
+              event: "private-response",
+              version: body.data.source.version,
+              observedAt: body.observedAt,
+            });
+            await route.fulfill({ response });
+          },
+        );
+        await page.route(
+          "**/api/operator/projects/*/configuration",
+          async (route) => {
+            const response = await route.fetch();
+            const current = await response.json();
+            initialConfiguration ??= current;
+            const body = equivalent
+              ? (initialConfiguration as typeof current)
+              : current;
+            chronology.push({
+              event: "configuration-response",
+              version: body.data.source.version,
+              observedAt: body.observedAt,
+            });
+            await route.fulfill({ response, json: body });
+          },
+        );
+      },
+    });
+    try {
+      await t.importButton.waitFor();
+      await requested.promise;
+      if (schedule !== "private-after-conflict") {
+        await until(
+          () => chronology.some((e) => e.event === "private-response"),
+          "private response",
+        );
+        await t.page.evaluate(
+          () =>
+            new Promise<void>((done) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => done())),
+            ),
+        );
+      }
+      await new OperatorApi(t.f.service, [t.f.directory]).execute({
+        type: "github.configure",
+        key: randomUUID(),
+        projectId: t.projectId,
+        expectedVersion: 1,
+        selections: [{ id: "S-1", keep: true }],
+        readiness: {
+          mode: "all",
+          conditions: [{ kind: "label", operator: "has", name: "ready" }],
+        },
+      } as never);
+      chronology.push({ event: "external-save", version: 2 });
+      await t.importButton.click();
+      const warning = outcomeMessages(t.ready).filter({
+        hasText: "Nothing was refreshed.",
+      });
+      await warning.waitFor();
+      const panel = await t.panel.elementHandle();
+      assert.ok(panel);
+      const button = await warning
+        .getByRole("button", { name: "Review changes" })
+        .elementHandle();
+      assert.ok(button);
+      chronology.push({
+        event: "conflict",
+        previews: t
+          .previews()
+          .map(({ key, expectedVersion }) => ({ key, expectedVersion })),
+        connected: await button.evaluate((el) => el.isConnected),
+      });
+      // Equivalent reads must keep both the outcome and its action, even under real refresh.
+      if (schedule !== "private-after-conflict") {
+        equivalent = true;
+        const outcome = await warning.elementHandle();
+        assert.ok(outcome);
+        for (let i = 0; i < 2; i++) {
+          const reread = t.page.waitForResponse((r) =>
+            r
+              .url()
+              .endsWith(`/api/operator/projects/${t.projectId}/configuration`),
+          );
+          await t.ready.getByRole("button", { name: "Check again" }).click();
+          await reread;
+          await t.page.evaluate(
+            () =>
+              new Promise<void>((done) =>
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => done()),
+                ),
+              ),
+          );
+          chronology.push({
+            event: "equivalent-read",
+            version: 1,
+            connected: await button.evaluate((el) => el.isConnected),
+          });
+          assert.equal(await outcome.evaluate((el) => el.isConnected), true);
+          assert.equal(await button.evaluate((el) => el.isConnected), true);
+        }
+        equivalent = false;
+      }
+      if (schedule === "private-after-conflict") release.resolve();
+      if (schedule === "operator-refresh")
+        await t.ready.getByRole("button", { name: "Check again" }).click();
+      if (schedule !== "private-before-save") {
+        await until(
+          () =>
+            chronology.some(
+              (e) => e.event === "configuration-response" && e.version === 2,
+            ),
+          "configuration version 2",
+        );
+        await warning.waitFor({ state: "detached" });
+        chronology.push({
+          event: "version-transition",
+          connected: await button.evaluate((el) => el.isConnected),
+          steps: t.steps,
+        });
+        assert.equal(await button.evaluate((el) => el.isConnected), false);
+        assert.equal(await panel.evaluate((el) => el.isConnected), true);
+        chronology.push({ event: "panel-retained", connected: true });
+      } else {
+        chronology.push({
+          event: "before-review",
+          connected: await button.evaluate((el) => el.isConnected),
+        });
+        const reread = t.page.waitForResponse((r) =>
+          r
+            .url()
+            .endsWith(`/api/operator/projects/${t.projectId}/configuration`),
+        );
+        await warning.getByRole("button", { name: "Review changes" }).click();
+        await reread;
+        await warning.waitFor({ state: "detached" });
+        await t.panel.getByRole("heading", { name: "Import issues" }).waitFor();
+      }
+      assert.deepEqual(t.steps, ["preview"]);
+      assert.equal(t.f.service.domain().project(t.projectId).paused, 1);
+      assert.equal(t.f.service.domain().tasks(t.projectId).length, 0);
+      assert.deepEqual(
+        t.f.service.domain().githubActiveSelectionIds(t.projectId),
+        [],
+      );
+      await t.page.unrouteAll({ behavior: "wait" });
+    } finally {
+      release.resolve();
+      _t.diagnostic(JSON.stringify({ schedule, chronology }));
+    }
+  });
 
 test("Setup's ready check reviews a source saved elsewhere before importing again", async (_t, journey) => {
   const t = await linkedReadyCheck(journey);
