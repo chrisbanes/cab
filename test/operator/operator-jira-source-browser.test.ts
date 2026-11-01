@@ -82,8 +82,8 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
   const closedIssues = page.getByLabel("Closed Jira issues");
   assert.equal(await closedIssues.inputValue(), "skip");
   await closedIssues.focus();
-  await page.keyboard.press("d");
-  await closedIssues.selectOption("done");
+  await closedIssues.press("t");
+  assert.equal(await closedIssues.inputValue(), "done");
   assert.equal(
     await closedIssues.evaluate((el) => el === document.activeElement),
     true,

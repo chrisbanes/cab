@@ -460,10 +460,10 @@ export function JiraSourceTab(
                 ))}
               </DraftField>
               <p className="metadata muted">
-                Treat closure as Done marks the task closed on Jira once its
-                work has stopped and source checks allow completion. Task
-                history is kept. Switching to Skip reopens tasks completed by
-                Jira closure.
+                When an issue closes in Jira, Treat closure as Done completes
+                its cab task once execution settles and source checks allow
+                completion. Task history is kept. Switching to Skip reopens
+                tasks completed by Jira closure.
               </p>
               <div className="settings-actions">
                 <Button
