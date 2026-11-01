@@ -4,7 +4,8 @@ import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Page, type Response } from "playwright";
+import { workspacePreviewReadSchema } from "../../src/operator/contracts.js";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -1293,11 +1294,13 @@ async function startMarkedFiles(
     repositories,
     viewport = { width: 1280, height: 900 },
     path = "?section=files",
+    locale,
     prepare,
   }: {
     repositories: Array<{ id: string; ref?: string }>;
     viewport?: { width: number; height: number };
     path?: string;
+    locale?: string;
     /** Adds files to the task workspaces before the page opens. */
     prepare?: (workspaces: Record<string, string>) => void;
   },
@@ -1334,7 +1337,10 @@ async function startMarkedFiles(
   prepare?.(workspaces);
   const web = await j.start("fixture.web", () => fixture.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({
+    viewport,
+    ...(locale === undefined ? {} : { locale }),
+  });
   j.observe(page);
   page.setDefaultTimeout(15_000);
   const comparisonRequests: string[] = [];
@@ -1622,18 +1628,15 @@ const clock = (at: number) => {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 };
 
-test("Files shows a one-line file header with hash and read times under Provenance & limits", async (_t, j) => {
+async function fileHeaderJourney(j: BrowserJourney, locale: string) {
+  const pixelBytes = pngImage(3, 2);
+  const paperBytes = pdf(1, 200, 200);
   const s = await startMarkedFiles(j, {
     repositories: [{ id: "alpha", ref: "main" }],
+    locale,
     prepare: (workspaces) => {
-      writeFileSync(
-        join(workspaces.alpha as string, "pixel.png"),
-        pngImage(3, 2),
-      );
-      writeFileSync(
-        join(workspaces.alpha as string, "paper.pdf"),
-        pdf(1, 200, 200),
-      );
+      writeFileSync(join(workspaces.alpha as string, "pixel.png"), pixelBytes);
+      writeFileSync(join(workspaces.alpha as string, "paper.pdf"), paperBytes);
     },
   });
   const { page, files } = s;
@@ -1719,19 +1722,84 @@ test("Files shows a one-line file header with hash and read times under Provenan
     createHash("sha256").update("changed on disk\n").digest("hex"),
   );
 
-  // Raster and PDF headers carry their type and size; only the raster adds its pixels.
+  // Use fixture bytes and the actual read time, formatting in the browser locale.
+  // An exact header still checks MIME, size, dimensions, separators and HH:MM.
+  const binaryHeader = async (
+    response: Response,
+    name: string,
+    mime: string,
+    size: number,
+    pixels?: string,
+  ) => {
+    assert.equal(response.status(), 200, `Preview for ${name}`);
+    const read = workspacePreviewReadSchema.parse(await response.json());
+    assert.equal(
+      read.data.state,
+      "ready",
+      JSON.stringify({
+        name,
+        state: read.data.state,
+        reason: read.data.metadata?.reason,
+      }),
+    );
+    assert.equal(read.data.preview?.mime, mime);
+    assert.equal(read.data.preview?.size, size);
+    const formatted = await page.evaluate(
+      ({ size, at }) => {
+        const date = new Date(at);
+        return {
+          size: size.toLocaleString(),
+          time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`,
+        };
+      },
+      { size, at: read.observedAt },
+    );
+    const expected = [
+      name,
+      mime,
+      `${formatted.size} bytes`,
+      ...(pixels ? [pixels] : []),
+      formatted.time,
+    ].join(" · ");
+    try {
+      await line.getByText(expected, { exact: true }).waitFor();
+    } catch (cause) {
+      const actual = await line.allTextContents().catch(() => []);
+      throw new Error(
+        `File header mismatch: ${JSON.stringify({ locale, expected, actual, state: read.data.state, observedAt: read.observedAt })}`,
+        { cause },
+      );
+    }
+    assert.equal(await line.innerText(), expected);
+  };
+  const pixelRead = previewRead("pixel.png");
   await open(/^pixel\.png,/);
-  await line
-    .getByText(
-      /^pixel\.png · image\/png · [\d,]+ bytes · 3 × 2 px · \d{2}:\d{2}$/,
-    )
-    .waitFor();
+  await binaryHeader(
+    await pixelRead,
+    "pixel.png",
+    "image/png",
+    pixelBytes.byteLength,
+    "3 × 2 px",
+  );
+  const paperRead = previewRead("paper.pdf");
   await open(/^paper\.pdf,/);
-  await line
-    .getByText(/^paper\.pdf · application\/pdf · [\d,]+ bytes · \d{2}:\d{2}$/)
-    .waitFor();
+  await binaryHeader(
+    await paperRead,
+    "paper.pdf",
+    "application/pdf",
+    paperBytes.byteLength,
+  );
+  assert.equal(
+    await page.evaluate(() => Intl.NumberFormat().resolvedOptions().locale),
+    locale,
+  );
   assert.deepEqual(s.consoleErrors, []);
-});
+}
+
+test("Files shows a one-line file header with hash and read times under Provenance & limits", async (_t, j) =>
+  fileHeaderJourney(j, "en-US"));
+test("Files shows a one-line file header with hash and read times under Provenance & limits (fr-FR)", async (_t, j) =>
+  fileHeaderJourney(j, "fr-FR"));
 
 test("Files keeps one toolbar Refresh, a reversible Show ignored checkbox and a primary Add review comment", async (_t, j) => {
   const s = await startMarkedFiles(j, {
