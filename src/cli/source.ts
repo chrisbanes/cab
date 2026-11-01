@@ -288,6 +288,7 @@ const editSchema = z
     jira: z
       .object({
         instance: jiraInstanceSchema,
+        closedIssues: closedIssuesSchema.optional(),
         selections: z
           .array(z.object({ jql: z.string().trim().min(1).max(4096) }).strict())
           .max(30),
@@ -396,6 +397,9 @@ function jiraEditCommand(
   // Only a Jira project's own rule is kept; a GitHub project's is dropped on the switch.
   const savedRule =
     source.tracker === "jira" ? source.readiness : { kind: "none" as const };
+  const savedMode = source.tracker === "jira" ? source.closedIssues : "skip";
+  const modeChanged =
+    jira.closedIssues !== undefined && jira.closedIssues !== savedMode;
   return {
     command: {
       type: "jira.configure",
@@ -404,8 +408,20 @@ function jiraEditCommand(
       instance: jira.instance,
       selections,
       ...(jira.readiness === undefined ? {} : { readiness: jira.readiness }),
+      ...(jira.closedIssues === undefined
+        ? {}
+        : { closedIssues: jira.closedIssues }),
     },
     changes: [
+      ...(modeChanged
+        ? [
+            {
+              field: "closedIssues",
+              from: savedMode,
+              to: jira.closedIssues,
+            },
+          ]
+        : []),
       {
         field: "instance",
         from: source.instance ?? null,
@@ -430,6 +446,11 @@ function jiraEditCommand(
     ] as Change[],
     // Queries are never shown; Jira checks each new or changed one before anything is saved.
     diff: [
+      ...(modeChanged
+        ? [
+            `Closed issues: ${closedIssueLabels[savedMode]} → ${closedIssueLabels[jira.closedIssues ?? savedMode]}`,
+          ]
+        : []),
       ...selections.map((s) => `${s.id} · Jira JQL (query private) · active`),
       ...(jira.readiness === undefined
         ? []
@@ -457,7 +478,7 @@ export function sourceEditCommand(
     if (!jira || Object.keys(others).length)
       throw bad(
         isJira
-          ? 'A Jira project\'s source is edited with only "jira": {"instance", "selections", "readiness"}.'
+          ? 'A Jira project\'s source is edited with only "jira": {"instance", "selections", "readiness", "closedIssues"}.'
           : 'A "jira" edit carries no other key.',
       );
     return jiraEditCommand(projectId, source, jira);
