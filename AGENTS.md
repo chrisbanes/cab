@@ -90,7 +90,7 @@ imports, executable paths and preflight selection, and verify full-suite discove
 preserves every test exactly once, including in a checkout with stale build output.
 Register browser-dependent cases through `browserSuite` or `browserTest`, with an
 explicit engine for WebKit. Keep non-browser cases independently runnable in mixed
-files; Node 26 service CI deliberately has no browser executables.
+files; the service CI jobs deliberately have no browser executables.
 
 Test each layer for what only it can show. Test a server rule once, at the service or
 API level. CLI tests cover argument parsing, exit codes, rendered output and the CLI

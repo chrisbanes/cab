@@ -54,7 +54,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
   suites:
-    name: node24-${{ matrix.lane }}-${{ matrix.shard }}
+    name: ${{ matrix.lane }}-${{ matrix.shard }}
     needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -107,13 +107,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: evidence-node24-${{ matrix.lane }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: evidence-${{ matrix.lane }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cab-test-evidence
           retention-days: 3
           if-no-files-found: error
-  service-node26:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')
-    name: node26-service-${{ matrix.shard }}
+  service:
+    name: service-${{ matrix.shard }}
     needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -125,8 +124,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: "26"
-          check-latest: true
+          node-version-file: .nvmrc
           cache: npm
       - run: npm install --global "$(node -p 'require("./package.json").packageManager')"
       - run: node --version && npm --version
@@ -150,56 +148,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: evidence-node26-service-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/cab-test-evidence
-          retention-days: 3
-          if-no-files-found: error
-  compatibility-node26:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-    name: node26-full-compatibility
-    needs: quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "26"
-          check-latest: true
-          cache: npm
-      - run: npm install --global "$(node -p 'require("./package.json").packageManager')"
-      - run: node --version && npm --version
-      - run: npm ci
-      - name: Prepare writable test directories
-        env:
-          TMPDIR: ${{ runner.temp }}/cab-fixture-tmp
-          CAB_TEST_EVIDENCE_DIR: ${{ runner.temp }}/cab-test-evidence
-        run: |
-          mkdir -p "$TMPDIR" "$CAB_TEST_EVIDENCE_DIR"
-          test -w "$TMPDIR" && test -w "$CAB_TEST_EVIDENCE_DIR"
-          printf 'TMPDIR=%s\nCAB_TEST_EVIDENCE_DIR=%s\n' "$TMPDIR" "$CAB_TEST_EVIDENCE_DIR" >> "$GITHUB_ENV"
-      - run: npx playwright install --with-deps chromium webkit
-      # Also qualify the build tools under Node 26 on the complete compatibility run.
-      - run: npm run build
-      - run: npm run test:built -- --fixture-preflight
-      - run: npm run test:built
-      - name: Upload synthetic test evidence
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: evidence-node26-full-${{ github.run_id }}-${{ github.run_attempt }}
+          name: evidence-service-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/cab-test-evidence
           retention-days: 3
           if-no-files-found: error
   check:
     name: check
     if: always()
-    needs: [changes, quality, suites, service-node26, compatibility-node26]
+    needs: [changes, quality, suites, service]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
       RESULTS: ${{ toJSON(needs) }}
-      FULL_COMPATIBILITY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
       RUN_CHECKS: ${{ needs.changes.outputs.run }}
     steps:
       - uses: actions/checkout@v7

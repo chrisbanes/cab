@@ -1065,7 +1065,7 @@ personal instance. A local build is for testing and evidence; it is not the Haze
 cutover and must not take over projects the prototype owns. Cite the commit with
 any evidence it produces.
 
-Run it from a checkout on an Apple silicon Mac with any Node 24 or later:
+Run it from a checkout on an Apple silicon Mac with any Node 26 or later:
 
 ```sh
 node scripts/package-release.mjs build COMMIT
