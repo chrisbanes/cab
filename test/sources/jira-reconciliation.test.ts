@@ -437,3 +437,51 @@ test("Jira Done imports first-seen closed issues only from complete reads", () =
     "done",
   );
 });
+
+for (const missing of ["partial", "missing", "stale"] as const)
+  test(`Jira provider completion refuses ${missing} membership evidence`, () => {
+    const w = setup();
+    policy(w, "done");
+    for (const selection of ["S-1", "S-2"])
+      w.sources.reconcileSelection(
+        w.projectId,
+        selection,
+        complete(issue()),
+        w.config(),
+      );
+    w.sources.reconcileSelection(
+      w.projectId,
+      "S-1",
+      complete(issue({ state: "closed" })),
+      w.config(),
+    );
+    const taskId = String(w.sources.issue("10001")?.taskId);
+    if (missing === "partial")
+      w.sources.reconcileSelection(
+        w.projectId,
+        "S-2",
+        { complete: false, issues: [], reason: "failed" },
+        w.config(),
+      );
+    if (missing === "missing")
+      w.db
+        .prepare("DELETE FROM source_memberships WHERE projectId = ?")
+        .run(w.projectId);
+    if (missing === "stale") policy(w);
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    assert.equal(w.domain.task(taskId).state, "open");
+    for (const selection of ["S-1", "S-2"])
+      w.sources.reconcileSelection(
+        w.projectId,
+        selection,
+        complete(issue({ state: "closed" })),
+        w.config(),
+      );
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      true,
+    );
+  });

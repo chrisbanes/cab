@@ -214,7 +214,7 @@ membership satisfies readiness whatever its labels or Project fields. Absence of
 rule is stored explicitly (`null`), never as an empty condition list, and a rule
 withheld from a read is shown as unavailable, never as no rule. Readiness alone is
 not admission: activation, complete source observations, placement, repository
-access, dependencies, approvals, holds, pauses and capacity still apply. Each GitHub source also has a closed-issue mode, changed only through
+access, dependencies, approvals, holds, pauses and capacity still apply. Each GitHub or Jira source also has a closed-issue mode, changed only through
 its versioned configuration: **Skip closed issues** (the default) never imports an
 issue first observed closed, and **Treat closure as Done** imports one as Done from a
 complete read only. Membership in another source cannot grant admission. Each selection's
@@ -267,7 +267,7 @@ that lists the issue again while the task is Ready, since the source has recover
 releases nothing, and every other source hold, including changed text and closure, still needs
 operator resolution. External closure
 after import holds the task in both closed-issue modes, whatever its readiness. Under
-Treat closure as Done, the service then completes it once current membership evidence
+Treat closure as Done, startup and recurring reconciliation complete it once current membership evidence
 is complete and its execution has settled, with no writer, ambiguity or unfinished
 execution; provider closure never resolves uncertain execution or clears other holds.
 Reopening returns a provider-completed task to open and recomputes readiness from the
@@ -278,10 +278,12 @@ once settled; switching the source to Skip keeps it open; no mode or switch
 deletes tasks or history. Once an issue this task's delivery closed is reopened, that
 own closure is superseded: a later closure, by anyone but a new confirmed cab
 closure, is provider closure in both modes. Supersession keeps the delivery history
-and any closure hold. When GitHub shows the issue closed but not provably by the
+and any closure hold. When GitHub or Jira shows the issue closed but not provably by the
 task's own delivery, the task keeps the explained `closure-attribution-unproved`
 hold, never a pending read, and is never completed by that closure; reopening the
-issue supersedes the own closure, then the operator resolves the source hold. Harmless edits
+issue supersedes the own closure, then the operator resolves the source hold. A different later
+closure event after a confirmed own closure has been pinned also supersedes that own closure;
+the later closure follows the provider-completion gates. Harmless edits
 can be incorporated; materially changed scope holds work for clarification.
 
 ## Execution and recovery
@@ -2141,7 +2143,9 @@ confirmed only when the issue is Done and exactly one status entry in its change
 made by the credential account, moves it to that status. A rejection of the single request (400, 401,
 403, 404 or 429) is a confirmed failure; any other failure after the request is sent is uncertain,
 kept across restart and never resent. A Done transition by anyone else, or by GitLab's Jira
-integration, is an external closure, which holds the task. A task imported from Jira has a task branch
+integration, is an external closure, which holds the task. With explicit Treat closure as Done,
+startup and recurring reconciliation may then complete it under the current membership,
+execution-settlement and independent-hold gates described above; Skip remains the default. A task imported from Jira has a task branch
 named `<prefix><KEY>-<task id>-<slug>`, assigned once like every task branch, and its change request
 title must start with the issue key. In a Jira project, change request titles and text with a closing
 keyword (close, fix, resolve or implement, in any form) followed by a Jira issue key on the same line
