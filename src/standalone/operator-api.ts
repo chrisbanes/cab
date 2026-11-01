@@ -6402,7 +6402,7 @@ export class OperatorApi {
             excluded,
             () => projectId,
           ),
-          closedIssues: g.closedIssues,
+          closedIssues: jira?.closedIssues ?? g.closedIssues,
         },
       },
       observedAt: Date.now(),

@@ -339,3 +339,101 @@ test("an existing database gains the observed status column once, keeping its ro
     { externalId: "I_1", observedStatus: null },
   );
 });
+
+function policy(
+  w: ReturnType<typeof setup>,
+  closedIssues?: "skip" | "done",
+  selections = w.domain.jiraConfiguration(w.projectId)!.selections,
+) {
+  return w.domain.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.projectId,
+    expectedVersion: w.config().configVersion,
+    instance,
+    selections,
+    ...(closedIssues === undefined ? {} : { closedIssues }),
+  });
+}
+
+test("Jira policy defaults to Skip, preserves omissions and fences stale edits", () => {
+  const w = setup();
+  assert.equal(w.domain.jiraConfiguration(w.projectId)?.closedIssues, "skip");
+  policy(w, "done");
+  policy(w);
+  assert.equal(w.domain.jiraConfiguration(w.projectId)?.closedIssues, "done");
+  assert.throws(
+    () =>
+      w.domain.execute({
+        type: "jira.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: w.projectId,
+        expectedVersion: 2,
+        instance,
+        selections: [],
+        closedIssues: "skip",
+      }),
+    /version/i,
+  );
+  assert.equal(w.domain.jiraConfiguration(w.projectId)?.closedIssues, "done");
+  policy(w, "skip");
+  assert.equal(w.domain.jiraConfiguration(w.projectId)?.closedIssues, "skip");
+});
+
+for (const remove of [false, true])
+  test(`Jira Done to Skip immediately reverses provider completion with selections removed=${remove}`, () => {
+    const w = setup();
+    policy(w, "done");
+    for (const selection of ["S-1", "S-2"])
+      w.sources.reconcileSelection(
+        w.projectId,
+        selection,
+        complete(issue()),
+        w.config(),
+      );
+    for (const selection of ["S-1", "S-2"])
+      w.sources.reconcileSelection(
+        w.projectId,
+        selection,
+        complete(issue({ state: "closed" })),
+        w.config(),
+      );
+    const taskId = String(w.sources.issue("10001")?.taskId);
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      true,
+    );
+    assert.ok(w.sources.providerCompletion(taskId));
+    policy(w, "skip", remove ? [] : undefined);
+    assert.equal(w.domain.task(taskId).state, "open");
+    assert.equal(w.sources.providerCompletion(taskId), undefined);
+    assert.ok(w.sources.hold("10001")?.active);
+  });
+
+test("Jira Done imports first-seen closed issues only from complete reads", () => {
+  const w = setup();
+  policy(w, "done");
+  w.sources.reconcileSelection(
+    w.projectId,
+    "S-1",
+    {
+      complete: false,
+      issues: [issue({ state: "closed" })],
+      reason: "partial",
+    },
+    w.config(),
+  );
+  assert.equal(w.domain.tasks(w.projectId).length, 0);
+  w.sources.reconcileSelection(
+    w.projectId,
+    "S-1",
+    complete(issue({ state: "closed" })),
+    w.config(),
+  );
+  assert.equal(
+    w.domain.task(String(w.sources.issue("10001")?.taskId)).state,
+    "done",
+  );
+});
