@@ -56,6 +56,14 @@ settle the exact lead work's pending result effect, complete that lead assignmen
 mark the task done, and finalize the request in one `BEGIN IMMEDIATE`
 transaction.
 
+A successful final completion also covers pending assignment-result markers from
+earlier successfully completed turns of the same lead assignment version and
+conversation. These completed turns have no remaining execution to report; the
+final lead outcome covers their outstanding result obligation. Only successful
+finalization settles those markers. Failed or held turns, other callback effects,
+and another assignment version or conversation remain blocking. External delivery
+actions do not gain this completion-only exception.
+
 If a successfully completed lead generation fails a gate, its request becomes
 terminally `rejected` with bounded reasons, its exact work effect is settled with
 a bounded diagnostic reason, and the assignment remains running while the task
@@ -74,10 +82,18 @@ An assignment-result effect belongs to one work generation. A successful
 generation with a durable result or waiting action settles only that generation's
 effect, except while an exact completion request remains pending; that request's
 finalizer owns its effect so restart reconciliation can require it pending.
-Settling a lead generation's effect does not complete the lead assignment.
-Worker assignments become completed only when their exact `cab_report_result`
-is recorded; a result-free worker turn follows the bounded reporting-repair and
-hold path instead.
+Recording `cab_report_result` persists its immutable result, evidence and receipt;
+it does not complete the assignment while its runtime turn can still act. A result
+addressed to its own assignment is retained without a redundant inbox event.
+After the exact successful terminal and ended callbacks, the assignment completes
+only when it has a result and no open question or approval, unfinished delegated
+work, pending inbox delivery or waiting PR. Those continuations keep the assignment
+active so an operator answer or delegate result can be delivered normally. A task
+completion request owns the lead's assignment finalization and result effect; a
+same-work reported result does not bypass that finalizer, and a rejected completion
+leaves the assignment active. Failure and uncertain execution retain the existing
+ownership holds even when a result was saved. A result-free worker turn follows the
+bounded reporting-repair and hold path instead.
 
 ## Routing and admission boundary
 

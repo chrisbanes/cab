@@ -168,6 +168,20 @@ function fixture() {
     ).run(assignmentId);
   }
 
+  function finishSuccessfulWork(
+    workId: string,
+    threadId: string,
+    turnId: string,
+  ) {
+    const intent = db
+      .prepare("SELECT id FROM execution_intents WHERE workId = ?")
+      .get(workId) as { id: string };
+    state.complete(intent.id, threadId, turnId);
+    if (coordination.deliveryForWork(workId))
+      coordination.completeDeliveryBatch(workId);
+    return coordination.recordSuccessfulTerminal(workId);
+  }
+
   addWork(childA, "work-child-a", "thread-child-a", "turn-child-a");
   addWork(nestedA, "work-nested-a", "thread-nested-a", "turn-nested-a");
   addWork(childB, "work-child-b", "thread-child-b", "turn-child-b");
@@ -189,6 +203,7 @@ function fixture() {
       return domain.ensureLeadAssignment(taskId);
     },
     addWork,
+    finishSuccessfulWork,
     close() {
       db.close();
       rmSync(directory, { recursive: true, force: true });
@@ -246,6 +261,7 @@ test("results route to same-task lead or requester and histories stay isolated",
     const nested = f.coordination.recordResult(
       report("thread-nested-a", "turn-nested-a", "call-nested"),
     );
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     const childDelivery = f.coordination.bindDeliveryBatch(
       childA,
       "work-child-a",
@@ -321,6 +337,11 @@ test("requesters wait for descendants and consume exact-work inbox batches", () 
     const grandchildResult = f.coordination.recordResult(
       report("thread-grandchild-a", "turn-grandchild-a", "call-grandchild"),
     ).result;
+    f.finishSuccessfulWork(
+      "work-grandchild-a",
+      "thread-grandchild-a",
+      "turn-grandchild-a",
+    );
     assert.equal(grandchildResult.recipientAssignmentId, nestedA);
     const nestedDelivery = f.coordination.bindDeliveryBatch(
       nestedA,
@@ -333,6 +354,7 @@ test("requesters wait for descendants and consume exact-work inbox batches", () 
     const nestedResult = f.coordination.recordResult(
       report("thread-nested-a", "turn-nested-a", "call-nested"),
     ).result;
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     assert.equal(nestedResult.recipientAssignmentId, childA);
 
     const parentDelivery = f.coordination.bindDeliveryBatch(
@@ -417,6 +439,11 @@ test("requesters wait for descendants and consume exact-work inbox batches", () 
         "call-parent-after-restart",
       ),
     ).result;
+    f.finishSuccessfulWork(
+      "work-child-a-continuation",
+      "thread-child-a-continuation",
+      "turn-child-a-continuation",
+    );
     assert.equal(
       parentResult.recipientAssignmentId,
       f.domain.ensureLeadAssignment(taskA)?.id,
@@ -524,17 +551,11 @@ test("exact receipts replay after completion before live binding checks", () => 
     f.coordination.recordResult(
       report("thread-nested-a", "turn-nested-a", "call-replay-nested"),
     );
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
     const call = report("thread-child-a", "turn-child-a", "call-replay");
     const first = f.coordination.recordResult(call);
-    f.db
-      .prepare(
-        "UPDATE execution_intents SET state = 'completed' WHERE workId = ?",
-      )
-      .run("work-child-a");
-    f.db
-      .prepare("UPDATE domain_assignments SET state = 'completed' WHERE id = ?")
-      .run(childA);
+    f.finishSuccessfulWork("work-child-a", "thread-child-a", "turn-child-a");
     const replay = f.coordination.recordResult(call);
     assert.equal(replay.replayed, true);
     assert.deepEqual(replay.response, first.response);
@@ -640,6 +661,11 @@ test("result and inbox or unresolved hold commit atomically", () => {
       if (table === "coordination_inbox_events") {
         f.coordination.recordResult(
           report("thread-nested-a", "turn-nested-a", "call-fail-nested"),
+        );
+        f.finishSuccessfulWork(
+          "work-nested-a",
+          "thread-nested-a",
+          "turn-nested-a",
         );
         assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
       }
@@ -1402,10 +1428,12 @@ test("follow-up reuses the completed assignment and binds the exact result", () 
     f.coordination.recordResult(
       report("thread-nested-a", "turn-nested-a", "call-follow-up-nested"),
     );
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
     const result = f.coordination.recordResult(
       report("thread-child-a", "turn-child-a", "call-follow-up-result"),
     ).result;
+    f.finishSuccessfulWork("work-child-a", "thread-child-a", "turn-child-a");
     const leadId = String(f.leadAssignment(taskA)?.id);
     f.addWork(leadId, "work-lead-a", "thread-lead-a", "turn-lead-a");
     const call = {
@@ -1464,6 +1492,7 @@ function completeLead(f: ReturnType<typeof fixture>) {
   const { result } = f.coordination.recordResult(
     report("thread-lead-a", "turn-lead-a", "call-lead-result"),
   );
+  f.finishSuccessfulWork("work-lead-a", "thread-lead-a", "turn-lead-a");
   const version = Number(f.domain.assignment(lead).version);
   assert.equal(f.domain.assignment(lead).state, "completed");
   const message = (
@@ -1559,6 +1588,7 @@ test("a message composed while the lead ran becomes a follow-up after it complet
     f.coordination.recordResult(
       report("thread-lead-a", "turn-lead-a", "call-lead-result"),
     );
+    f.finishSuccessfulWork("work-lead-a", "thread-lead-a", "turn-lead-a");
     const event = f.coordination.postOperatorMessage({
       actor: "operator",
       key: nextCommand(),
@@ -1722,11 +1752,7 @@ function replaceLeadConversation(f: ReturnType<typeof fixture>) {
   f.coordination.recordResult(
     report("thread-lead-old", "turn-lead-old", "call-lead-old"),
   );
-  f.db
-    .prepare(
-      "UPDATE execution_intents SET state = 'completed' WHERE workId = 'work-lead-old'",
-    )
-    .run();
+  f.finishSuccessfulWork("work-lead-old", "thread-lead-old", "turn-lead-old");
   f.state.replaceConversation(lead);
   return lead;
 }
@@ -1737,12 +1763,13 @@ test("a completed lead resumes from its current conversation after a replacement
     const lead = replaceLeadConversation(f);
     // The new conversation restarts at work revision 1, below the old 5.
     f.addWork(lead, "work-lead-new", "thread-lead-new", "turn-lead-new");
-    // The old result's self-addressed event is delivered with the new work.
+    // The old result is delivered with the new work.
     if (f.coordination.bindDeliveryBatch(lead, "work-lead-new"))
       f.coordination.completeDeliveryBatch("work-lead-new");
     const { result } = f.coordination.recordResult(
       report("thread-lead-new", "turn-lead-new", "call-lead-new"),
     );
+    f.finishSuccessfulWork("work-lead-new", "thread-lead-new", "turn-lead-new");
     const version = Number(f.domain.assignment(lead).version);
     assert.equal(
       f.coordination.feedbackRecipient(taskA, lead)?.mode,
@@ -1795,12 +1822,8 @@ function replaceLeadAtRevisionOne(f: ReturnType<typeof fixture>) {
   const old = f.coordination.recordResult(
     report("thread-lead-old", "turn-lead-old", "call-lead-old"),
   );
+  f.finishSuccessfulWork("work-lead-old", "thread-lead-old", "turn-lead-old");
   const inboxPerResult = f.coordination.inboxEvents(lead).length - inboxBefore;
-  f.db
-    .prepare(
-      "UPDATE execution_intents SET state = 'completed' WHERE workId = 'work-lead-old'",
-    )
-    .run();
   f.state.replaceConversation(lead);
   f.addWork(lead, "work-lead-new", "thread-lead-new", "turn-lead-new");
   if (f.coordination.bindDeliveryBatch(lead, "work-lead-new"))
@@ -1932,6 +1955,7 @@ test("same-work retries reuse the exact work result", () => {
     f.coordination.recordResult(
       report("thread-nested-a", "turn-nested-a", "call-retry-nested"),
     );
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
     const lead = String(f.leadAssignment(taskA)?.id);
     const first = f.coordination.recordResult(
@@ -1976,6 +2000,7 @@ test("a stored-result retry records the selected result's receipt identity", () 
     f.coordination.recordResult(
       report("thread-nested-a", "turn-nested-a", "call-retry-nested"),
     );
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
     const lead = String(f.leadAssignment(taskA)?.id);
     const first = f.coordination.recordResult(
@@ -2218,6 +2243,7 @@ test("legacy result uniqueness migrates on reopen preserving rows and replay", (
     f.coordination.recordResult(
       report("thread-nested-a", "turn-nested-a", "call-legacy-nested"),
     );
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
     const first = f.coordination.recordResult(call);
     // Spread rowids so preservation is observable.
@@ -2364,6 +2390,7 @@ test("completion requires current lead work and all durable task gates", () => {
     const nestedResult = f.coordination.recordResult(
       report("thread-nested-a", "turn-nested-a", "call-completion-nested"),
     ).result;
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     const childDelivery = f.coordination.bindDeliveryBatch(
       childA,
       "delivery-child-result",
@@ -2373,6 +2400,7 @@ test("completion requires current lead work and all durable task gates", () => {
     const workerResult = f.coordination.recordResult(
       report("thread-child-a", "turn-child-a", "call-completion-child"),
     ).result;
+    f.finishSuccessfulWork("work-child-a", "thread-child-a", "turn-child-a");
     assert.equal(
       (
         f.db
@@ -2391,11 +2419,6 @@ test("completion requires current lead work and all durable task gates", () => {
     );
     assert.ok(leadDelivery);
     f.coordination.completeDeliveryBatch(leadDelivery.deliveryWorkId);
-    f.db
-      .prepare(
-        "UPDATE execution_intents SET state = 'completed' WHERE workId IN (?, ?)",
-      )
-      .run("work-child-a", "work-nested-a");
     f.addWork(leadId, "work-lead-completion", "thread-lead", "turn-lead");
     const call = {
       threadId: "thread-lead",
@@ -2599,6 +2622,140 @@ test("completion requires current lead work and all durable task gates", () => {
   }
 });
 
+for (const prior of [
+  "completed",
+  "held",
+  "failed",
+  "other-callback",
+  "other-conversation",
+  "other-assignment-version",
+] as const)
+  test(`lead completion covers only successful prior result markers: ${prior}`, () => {
+    const f = fixture();
+    try {
+      const reviewedResultIds: string[] = [];
+      for (const name of ["nested", "child"] as const) {
+        const result = f.coordination.recordResult(
+          report(`thread-${name}-a`, `turn-${name}-a`, `report-${name}`),
+        ).result;
+        reviewedResultIds.push(result.resultId);
+        f.finishSuccessfulWork(
+          `work-${name}-a`,
+          `thread-${name}-a`,
+          `turn-${name}-a`,
+        );
+        const recipient =
+          name === "nested" ? childA : String(f.leadAssignment(taskA)?.id);
+        const delivery = f.coordination.bindDeliveryBatch(
+          recipient,
+          `deliver-${name}`,
+        );
+        assert.ok(delivery);
+        f.coordination.completeDeliveryBatch(delivery.deliveryWorkId);
+      }
+      const lead = String(f.leadAssignment(taskA)?.id);
+      f.addWork(lead, "prior-lead", "prior-thread", "prior-turn");
+      f.db
+        .prepare(
+          "UPDATE task_work_revisions SET workRevision = 2 WHERE workId = 'prior-lead'",
+        )
+        .run();
+      f.db
+        .prepare(
+          "UPDATE execution_intents SET state = ? WHERE workId = 'prior-lead'",
+        )
+        .run(
+          prior === "failed"
+            ? "resolved-failed"
+            : prior === "held"
+              ? "held"
+              : "completed",
+        );
+      if (prior === "other-callback")
+        f.db
+          .prepare(`INSERT INTO execution_pending_effects (workId,effectKey,state,reason)
+          VALUES ('prior-lead','external-callback','pending','Callback is unfinished')`)
+          .run();
+      if (prior === "other-conversation")
+        f.db
+          .prepare(
+            "UPDATE assignment_conversations SET revision = revision + 1 WHERE assignmentId = ?",
+          )
+          .run(lead);
+      if (prior === "other-assignment-version")
+        f.db
+          .prepare(
+            "UPDATE domain_assignments SET version = version + 1 WHERE id = ?",
+          )
+          .run(lead);
+      f.addWork(lead, "final-lead", "final-thread", "final-turn");
+      f.db
+        .prepare(
+          "UPDATE task_work_revisions SET workRevision = 3 WHERE workId = 'final-lead'",
+        )
+        .run();
+      const requested = f.coordination.requestTaskCompletion({
+        threadId: "final-thread",
+        turnId: "final-turn",
+        callId: "final-completion",
+        tool: "cab_request_completion",
+        arguments: { reviewedResultIds },
+      });
+      if (prior === "completed")
+        assert.ok(
+          f.coordination
+            .deliveryActionBlockers(
+              f.coordination.deliveryCaller({
+                threadId: "final-thread",
+                turnId: "final-turn",
+                callId: "external-action",
+                tool: "cab_external_action",
+                arguments: {},
+              }),
+              reviewedResultIds,
+              nextCommand(),
+            )
+            .includes("unfinished-callback-effect"),
+          "external actions retain their existing callback gate",
+        );
+      f.db
+        .prepare(
+          "UPDATE execution_intents SET state = 'completed' WHERE workId = 'final-lead'",
+        )
+        .run();
+      const outcome = f.coordination.finalizeTaskCompletion({
+        requestId: requested.text.split(" ").at(-1)!,
+        workId: "final-lead",
+        terminal: "completed",
+      });
+      const expected = prior === "completed";
+      assert.equal(outcome.completed, expected, outcome.reasons.join(", "));
+      assert.equal(f.domain.task(taskA).state, expected ? "done" : "open");
+      assert.equal(
+        f.db
+          .prepare(
+            "SELECT state FROM execution_pending_effects WHERE workId = 'prior-lead' AND effectKey = 'assignment-result'",
+          )
+          .get()?.state,
+        expected ? "settled" : "pending",
+        "failed completion must preserve historical effects",
+      );
+      if (!expected)
+        assert.ok(outcome.reasons.includes("unfinished-callback-effect"));
+      if (prior === "other-callback")
+        assert.equal(
+          f.db
+            .prepare(
+              "SELECT state FROM execution_pending_effects WHERE workId = 'prior-lead' AND effectKey = 'external-callback'",
+            )
+            .get()?.state,
+          "pending",
+        );
+    } finally {
+      f.close();
+    }
+  });
+
 test("stale lead completion is durably rejected and cannot finalize later", () => {
   const f = fixture();
   try {
@@ -2609,6 +2766,7 @@ test("stale lead completion is durably rejected and cannot finalize later", () =
         "call-stale-completion-nested",
       ),
     ).result;
+    f.finishSuccessfulWork("work-nested-a", "thread-nested-a", "turn-nested-a");
     const childDelivery = f.coordination.bindDeliveryBatch(
       childA,
       "delivery-stale-child",
@@ -2618,6 +2776,7 @@ test("stale lead completion is durably rejected and cannot finalize later", () =
     const workerResult = f.coordination.recordResult(
       report("thread-child-a", "turn-child-a", "call-stale-completion-child"),
     ).result;
+    f.finishSuccessfulWork("work-child-a", "thread-child-a", "turn-child-a");
     const leadId = String(f.leadAssignment(taskA)?.id);
     const leadDelivery = f.coordination.bindDeliveryBatch(
       leadId,
@@ -2625,11 +2784,6 @@ test("stale lead completion is durably rejected and cannot finalize later", () =
     );
     assert.ok(leadDelivery);
     f.coordination.completeDeliveryBatch(leadDelivery.deliveryWorkId);
-    f.db
-      .prepare(
-        "UPDATE execution_intents SET state = 'completed' WHERE workId IN (?, ?)",
-      )
-      .run("work-child-a", "work-nested-a");
     f.addWork(
       leadId,
       "work-stale-lead",
@@ -2759,14 +2913,12 @@ test("a successful durable delegation settles only that work effect without comp
       arguments: { profileId: workerProfile, brief: "Check the parser." },
     });
     assert.equal(delegation.success, true);
-    f.db
-      .prepare(
-        "UPDATE execution_intents SET state = 'completed' WHERE workId = ?",
-      )
-      .run("work-lead-delegate");
-
     assert.equal(
-      f.coordination.recordSuccessfulTerminal("work-lead-delegate"),
+      f.finishSuccessfulWork(
+        "work-lead-delegate",
+        "thread-lead-delegate",
+        "turn-lead-delegate",
+      ),
       undefined,
     );
     assert.equal(

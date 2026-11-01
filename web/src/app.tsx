@@ -222,7 +222,7 @@ function ProjectNavigation({
         )}
       <h2 className="nav-heading">Projects</h2>
       {workspace?.data.projects.length === 0 && (
-        <p className="body muted">No projects yet.</p>
+        <p className="nav-empty body muted">No projects yet.</p>
       )}
       {workspace?.data.projects.map((p) =>
         link(

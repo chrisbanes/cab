@@ -1098,7 +1098,11 @@ export class CoordinationStore {
             recipient.id,
             recipient.resolved ? "resolved" : "unresolved",
           );
-        if (recipient.resolved && recipient.id) {
+        if (
+          recipient.resolved &&
+          recipient.id &&
+          recipient.id !== binding.assignmentId
+        ) {
           this.db
             .prepare(`INSERT INTO coordination_inbox_events
             (eventId, taskId, recipientAssignmentId, eventType, resultId, payload)
@@ -1116,7 +1120,7 @@ export class CoordinationStore {
                 summary: call.arguments.summary,
               }),
             );
-        } else {
+        } else if (!recipient.resolved) {
           this.db
             .prepare(`INSERT INTO coordination_unresolved_result_destinations
             (resultId, taskId, assignmentId, originalDestination, reason, revision, status)
@@ -1131,11 +1135,6 @@ export class CoordinationStore {
               recipient.reason,
             );
         }
-        this.db
-          .prepare(
-            "UPDATE domain_assignments SET state = 'completed' WHERE id = ? AND version = ?",
-          )
-          .run(String(binding.assignmentId), Number(binding.assignmentVersion));
         this.db
           .prepare(`UPDATE coordination_reporting_repairs
           SET state = 'resolved', reason = NULL, updatedAt = unixepoch()
@@ -1198,6 +1197,10 @@ export class CoordinationStore {
         .prepare(`UPDATE execution_pending_effects
         SET state = 'settled', reason = NULL
         WHERE workId = ? AND effectKey = 'assignment-result' AND state = 'pending'
+          AND NOT EXISTS (
+            SELECT 1 FROM coordination_completion_requests completion
+            WHERE completion.leadWorkId = ? AND completion.status = 'pending'
+          )
           AND EXISTS (
             SELECT 1 FROM task_execution_bindings exact
             WHERE exact.workId = ? AND exact.taskId = ?
@@ -1205,6 +1208,7 @@ export class CoordinationStore {
           )
         RETURNING workId`)
         .get(
+          String(binding.workId),
           String(binding.workId),
           String(binding.workId),
           String(binding.taskId),
@@ -2508,6 +2512,20 @@ export class CoordinationStore {
           Number(lead.taskVersion),
           JSON.stringify(reviewed),
         );
+      this.db
+        .prepare(`UPDATE execution_pending_effects SET state = 'pending',
+          reason = 'Lead completion has not been finalized'
+        WHERE workId = ? AND effectKey = 'assignment-result' AND state = 'settled'
+          AND EXISTS (
+            SELECT 1 FROM coordination_results result
+            WHERE result.workId = execution_pending_effects.workId
+              AND result.assignmentId = ? AND result.assignmentVersion = ?
+          )`)
+        .run(
+          String(lead.workId),
+          String(lead.assignmentId),
+          Number(lead.assignmentVersion),
+        );
       const response = {
         text: `Completion requested ${requestId}`,
         success: true,
@@ -2624,11 +2642,12 @@ export class CoordinationStore {
 
       const assignmentId = String(binding.assignmentId);
       const assignmentVersion = Number(binding.assignmentVersion);
+      const reportedResult = this.one(
+        "SELECT 1 AS found FROM coordination_results WHERE workId = ?",
+        work,
+      );
       const hasResult = Boolean(
-        this.one(
-          "SELECT 1 AS found FROM coordination_results WHERE workId = ?",
-          work,
-        ) ||
+        reportedResult ||
           this.one(
             "SELECT 1 AS found FROM task_execution_results WHERE workId = ?",
             work,
@@ -2646,10 +2665,10 @@ export class CoordinationStore {
       ) {
         const completionRequest = this.one(
           `SELECT status FROM coordination_completion_requests
-          WHERE leadWorkId = ? AND status IN ('pending', 'finalized') LIMIT 1`,
+          WHERE leadWorkId = ? LIMIT 1`,
           work,
         );
-        if (!completionRequest) {
+        if (!completionRequest || completionRequest.status === "rejected") {
           const settledEffect = this.db
             .prepare(`UPDATE execution_pending_effects
             SET state = 'settled',
@@ -2674,6 +2693,15 @@ export class CoordinationStore {
           SET state = 'resolved', reason = NULL, updatedAt = unixepoch()
           WHERE assignmentId = ? AND assignmentVersion = ? AND state = 'queued'`)
           .run(assignmentId, assignmentVersion);
+        if (
+          reportedResult &&
+          !completionRequest &&
+          !this.hasOutstandingAssignmentWork(work, assignmentId)
+        )
+          this.db
+            .prepare(`UPDATE domain_assignments SET state = 'completed'
+              WHERE id = ? AND version = ? AND state = 'running'`)
+            .run(assignmentId, assignmentVersion);
         return undefined;
       }
 
@@ -2850,6 +2878,12 @@ export class CoordinationStore {
         throw new Error(
           "Lead completion result effect changed during finalization",
         );
+      for (const workId of this.completedPriorLeadResultEffects(request))
+        this.db
+          .prepare(`UPDATE execution_pending_effects
+          SET state = 'settled', reason = 'Covered by successful lead completion'
+          WHERE workId = ? AND effectKey = 'assignment-result' AND state = 'pending'`)
+          .run(workId);
       const leadBinding = this.one(
         `SELECT binding.assignmentVersion
         FROM task_execution_bindings binding
@@ -3190,6 +3224,38 @@ export class CoordinationStore {
       z.string().min(1).max(512).parse(deliveryWorkId),
     );
     return row ? this.delivery(String(row.batchId)) : undefined;
+  }
+
+  private hasOutstandingAssignmentWork(
+    work: string,
+    assignment: string,
+  ): boolean {
+    return Boolean(
+      new DeliveryStore(this.db).hasWaitingPr(work) ||
+        this.one(
+          `SELECT 1 FROM coordination_interactions
+          WHERE requestingAssignmentId = ? AND status = 'open' LIMIT 1`,
+          assignment,
+        ) ||
+        this.one(
+          `SELECT 1 FROM domain_assignments
+          WHERE requesterAssignmentId = ? AND state <> 'completed' LIMIT 1`,
+          assignment,
+        ) ||
+        this.one(
+          `SELECT 1 FROM coordination_inbox_events event
+          LEFT JOIN coordination_delivery_events delivery ON delivery.eventId = event.eventId
+          WHERE event.recipientAssignmentId = ? AND event.eventType <> 'source-hold'
+            AND delivery.eventId IS NULL LIMIT 1`,
+          assignment,
+        ) ||
+        this.one(
+          `SELECT 1 FROM coordination_delivery_batches
+          WHERE recipientAssignmentId = ? AND state = 'queued' AND deliveryWorkId <> ? LIMIT 1`,
+          assignment,
+          work,
+        ),
+    );
   }
 
   hasDurableWaitingAction(workId: string, assignmentId: string): boolean {
@@ -4492,6 +4558,35 @@ export class CoordinationStore {
     };
   }
 
+  /** A final lead outcome covers earlier successful turns in the same assignment conversation. */
+  private completedPriorLeadResultEffects(
+    request: TaskCompletionRequest,
+  ): string[] {
+    return (
+      this.db
+        .prepare(`SELECT prior.workId FROM task_execution_bindings current
+        JOIN task_work_revisions currentRevision ON currentRevision.workId = current.workId
+        JOIN task_execution_bindings prior ON prior.taskId = current.taskId
+          AND prior.assignmentId = current.assignmentId
+          AND prior.assignmentVersion = current.assignmentVersion
+          AND prior.conversationRevision = current.conversationRevision
+        JOIN task_work_revisions priorRevision ON priorRevision.workId = prior.workId
+        JOIN execution_intents intent ON intent.workId = prior.workId
+        JOIN execution_pending_effects effect ON effect.workId = prior.workId
+        WHERE current.workId = ? AND current.taskId = ? AND current.assignmentId = ?
+          AND currentRevision.workRevision = ?
+          AND priorRevision.workRevision < currentRevision.workRevision
+          AND intent.state = 'completed'
+          AND effect.effectKey = 'assignment-result' AND effect.state = 'pending'`)
+        .all(
+          request.leadWorkId,
+          request.taskId,
+          request.leadAssignmentId,
+          request.leadWorkRevision,
+        ) as Array<{ workId: string }>
+    ).map((row) => row.workId);
+  }
+
   private completionBlockers(
     request: TaskCompletionRequest,
     terminal: "completed" | "failed",
@@ -4706,16 +4801,32 @@ export class CoordinationStore {
       )
     )
       reasons.push("task-archival-hold");
-    if (
-      this.one(
-        `SELECT 1 AS pending FROM execution_pending_effects effect
+    const coveredLeadResults = new Set(
+      lead && !externalAction
+        ? this.completedPriorLeadResultEffects(request)
+        : [],
+    );
+    const pendingEffects = this.db
+      .prepare(
+        `SELECT effect.workId, effect.effectKey FROM execution_pending_effects effect
       JOIN task_execution_bindings binding ON binding.workId = effect.workId
       WHERE binding.taskId = ? AND effect.state = 'pending'
         AND NOT (effect.workId = ? AND effect.effectKey = 'assignment-result'
-          AND binding.assignmentId = ?) LIMIT 1`,
+          AND binding.assignmentId = ?)`,
+      )
+      .all(
         request.taskId,
         request.leadWorkId,
         request.leadAssignmentId,
+      ) as Array<{
+      workId: string;
+      effectKey: string;
+    }>;
+    if (
+      pendingEffects.some(
+        (effect) =>
+          effect.effectKey !== "assignment-result" ||
+          !coveredLeadResults.has(effect.workId),
       )
     )
       reasons.push("unfinished-callback-effect");

@@ -366,6 +366,10 @@ nav {
   line-height: var(--leading-1-25);
 }
 
+.nav-empty {
+  padding-inline: var(--space-8);
+}
+
 .nav-link {
   display: flex;
   align-items: center;

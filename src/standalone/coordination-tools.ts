@@ -53,7 +53,8 @@ export const coordinationTools: readonly RuntimeToolDefinition[] = [
   {
     type: "function",
     name: "cab_report_result",
-    description: "Persist the result of this assignment for its requester.",
+    description:
+      "Persist the assignment's final result for its requester. This is not a progress update: finish work and ask any needed cab questions before reporting. Result persistence does not end the runtime turn; the assignment completes only after a successful terminal with no outstanding questions or delegated work. End your turn after reporting unless you still need a durable cab action. Use cab_ask_question for questions, never native asynchronous input tools.",
     inputSchema: object(
       { summary: text, review: z.toJSONSchema(reviewMetadataSchema) },
       ["summary"],

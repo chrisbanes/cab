@@ -1721,10 +1721,14 @@ test("task threads receive scoped tools and delivery resumes the exact lead conv
     assert.equal(reported.success, true);
     assert.equal(
       service.domain().assignment(childAssignmentId).state,
-      "completed",
+      "running",
     );
     runtime.complete(3);
     await runtime.waitForTurnNumber(4);
+    assert.equal(
+      service.domain().assignment(childAssignmentId).state,
+      "completed",
+    );
     assert.equal(runtime.resumed.includes(leadThread), true);
     assert.match(runtime.prompts[3] ?? "", /Implemented the feature/);
     const deliveredWorkId = service

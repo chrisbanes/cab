@@ -387,9 +387,22 @@ a revision changes or a conversation gets a new thread.
 Record results and handoffs through coordination commands, not transcript inference.
 A successful process exit is not a task outcome. One reporting prompt may repair a
 completed turn with neither result nor waiting reason; then hold for attention.
-Persist that allowance and apply normal admission controls. Results arriving while
-their recipient is active wait for its next turn; coalesce continuation wakeups while
-retaining individual acknowledgements. Paused/stopped recipients retain their inbox.
+Persist that allowance and apply normal admission controls.
+
+Reporting a result does not finish its still-running assignment. The result and
+evidence are saved immediately; assignment completion waits for the exact successful
+terminal and ended callbacks, and for outstanding questions, approvals, delegated
+work, inbox deliveries and PR waits to settle. A result addressed to its own
+assignment creates no redundant inbox event. Task completion still goes through the
+lead's separate completion request and all its gates. Failed or uncertain turns
+keep their ownership holds regardless of a saved result. Each assignment turn
+receives its current cab identities, permitted profile IDs and summaries, and public
+delivery policy; that context grants no additional permission and tool admission
+rechecks the current policy.
+
+Results arriving while their recipient is active wait for its next turn; coalesce
+continuation wakeups while retaining individual acknowledgements. Paused/stopped
+recipients retain their inbox.
 Operator messages may target pending or running assignments, and the task's current
 lead when its assignment is completed and the task is open: that message is an
 [operator follow-up to a completed lead](#operator-follow-up-to-a-completed-lead).

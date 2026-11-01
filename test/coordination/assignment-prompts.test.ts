@@ -157,6 +157,8 @@ test("task turns include their captured instructions and lead accountability con
   const root = mkdtempSync(join(tmpdir(), "cab-s05-prompt-context-"));
   const projectId = randomUUID();
   const leadProfileId = randomUUID();
+  const permittedProfileId = randomUUID();
+  const unrelatedProfileId = randomUUID();
   const workerTaskId = randomUUID();
   const leadTaskId = randomUUID();
   const workerAssignmentId = randomUUID();
@@ -193,6 +195,15 @@ test("task turns include their captured instructions and lead accountability con
       name: "S05 prompt context project",
       leadProfileId,
     });
+    for (const profileId of [permittedProfileId, unrelatedProfileId])
+      command(service, {
+        type: "profile.create",
+        profileId,
+        name: `Profile ${profileId}`,
+        summary: "Review scoped implementation work",
+        instructions: "OTHER_PROFILE_PRIVATE_INSTRUCTIONS",
+        capabilities: "review",
+      });
     command(service, {
       type: "project.configure",
       projectId,
@@ -206,7 +217,7 @@ test("task turns include their captured instructions and lead accountability con
       expectedVersion: 1,
       enabled: false,
       guidance: "",
-      candidateProfileIds: [],
+      candidateProfileIds: [permittedProfileId],
     });
     const tasks: Array<[string, string, string]> = [
       [workerTaskId, "S05 worker prompt task", "S05_WORKER_BRIEF_SENTINEL"],
@@ -235,6 +246,14 @@ test("task turns include their captured instructions and lead accountability con
     });
 
     runtime.mutateAfterInitialPrompts = () => {
+      command(currentService(), {
+        type: "routing.configure",
+        projectId,
+        expectedVersion: 2,
+        enabled: false,
+        guidance: "",
+        candidateProfileIds: [],
+      });
       command(currentService(), {
         type: "profile.configure",
         profileId: leadProfileId,
@@ -343,6 +362,30 @@ test("task turns include their captured instructions and lead accountability con
     assert.match(leadPrompt, /Assignment role: project lead/i);
     assert.match(leadPrompt, /project lead/i);
     assert.match(leadPrompt, /accountable/i);
+    const contextFor = (prompt: string) =>
+      JSON.parse(
+        prompt
+          .split("Current cab coordination context (JSON): ")[1]!
+          .split("\n")[0]!,
+      );
+    const context = contextFor(workerPrompt);
+    assert.equal(context.taskId, workerTaskId);
+    assert.equal(context.projectId, projectId);
+    assert.equal(context.assignmentId, workerAssignmentId);
+    assert.equal(context.leadProfileId, leadProfileId);
+    assert.deepEqual(
+      context.permittedProfiles.map((profile: { id: string }) => profile.id),
+      [leadProfileId, permittedProfileId],
+    );
+    assert.equal(
+      context.permittedProfiles[1].summary,
+      "Review scoped implementation work",
+    );
+    assert.equal(context.deliveryPolicy.mode, "reviewable-pr");
+    assert.equal("credentialRef" in context.deliveryPolicy, false);
+    assert.doesNotMatch(workerPrompt, /OTHER_PROFILE_PRIVATE_INSTRUCTIONS/);
+    assert.ok(!workerPrompt.includes(unrelatedProfileId));
+    assert.match(workerPrompt, /cab_ask_question, never native asynchronous/);
     assert.ok(
       service
         .turnRequests()
@@ -401,6 +444,13 @@ test("task turns include their captured instructions and lead accountability con
         prompt.includes("S05_OPERATOR_ANSWER_REVISION_TWO"),
     );
     assert.ok(workerFollowUpPrompt);
+    assert.deepEqual(
+      contextFor(workerFollowUpPrompt).permittedProfiles.map(
+        (profile: { id: string }) => profile.id,
+      ),
+      [leadProfileId],
+      "continuations receive the current permitted roster",
+    );
     assert.match(
       workerFollowUpPrompt,
       /Updated project instructions\. These replace all project instructions given earlier in this conversation:\nS05_PROJECT_INSTRUCTIONS_REVISION_TWO/,
