@@ -351,4 +351,8 @@ test("local capability shares route authority and known secrets remain excluded 
     sanitizeConversationText(`copied ${material.secret}`, []),
     "copied [redacted]",
   );
+  assert.equal(
+    sanitizeConversationText(`prefix${material.secret}suffix`, []),
+    "prefix[redacted]suffix",
+  );
 });

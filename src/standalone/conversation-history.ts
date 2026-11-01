@@ -53,7 +53,7 @@ const urlCredentials = /\b([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi;
 const patterns: readonly (readonly [RegExp, number])[] = [
   [authorizationHeader, 0],
   [bearerToken, 0],
-  [/(\b)cab_local_[a-f0-9]{64}/g, 0],
+  [/cab_local_[a-f0-9]{64}/g, 0],
   [sensitiveAssignment, 0],
   [urlCredentials, 1],
 ];
