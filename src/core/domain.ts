@@ -243,6 +243,7 @@ const commandSchema = z.discriminatedUnion("type", [
       projectId: id,
       expectedVersion: z.number().int().positive(),
       ...jiraConfigurationSchema.shape,
+      closedIssues: closedIssuesSchema.optional(),
       /** Omitted keeps the saved rule, so commands recorded before it existed still replay. */
       readiness: jiraConfigurationSchema.shape.readiness.optional(),
     })
@@ -1357,18 +1358,20 @@ export class DomainStore {
   jiraConfiguration(projectId: string): {
     version: number;
     instance: string;
+    closedIssues: z.output<typeof closedIssuesSchema>;
     selections: z.output<typeof jiraSelectionSchema>[];
     readiness: z.output<typeof jiraReadinessSchema> | null;
   } | null {
     this.project(projectId);
     const row = this.required(
-      "SELECT provider, instance, version, selections, readiness FROM project_task_sources WHERE projectId = ?",
+      "SELECT provider, instance, version, selections, readiness, closedIssues FROM project_task_sources WHERE projectId = ?",
       id.parse(projectId),
     );
     return row.provider === "jira"
       ? {
           version: Number(row.version),
           instance: String(row.instance),
+          closedIssues: closedIssuesSchema.parse(row.closedIssues),
           selections: z
             .array(jiraSelectionSchema)
             .parse(JSON.parse(String(row.selections))),
@@ -2726,7 +2729,7 @@ export class DomainStore {
       case "jira.configure": {
         this.operator(command);
         const row = this.required(
-          "SELECT provider, instance, version, readiness FROM project_task_sources WHERE projectId = ?",
+          "SELECT provider, instance, version, readiness, closedIssues FROM project_task_sources WHERE projectId = ?",
           command.projectId,
         );
         this.version({ version: Number(row.version) }, command.expectedVersion);
@@ -2750,14 +2753,20 @@ export class DomainStore {
           )
         )
           throw new DomainConflictError("Jira site has no credential");
+        const closedIssues =
+          command.closedIssues ??
+          (row.provider === "jira"
+            ? closedIssuesSchema.parse(row.closedIssues)
+            : "skip");
         this.db
           .prepare(
-            "UPDATE project_task_sources SET provider = 'jira', instance = ?, version = version + 1, credentialRef = NULL, selections = ?, readiness = ?, closedIssues = 'skip' WHERE projectId = ?",
+            "UPDATE project_task_sources SET provider = 'jira', instance = ?, version = version + 1, credentialRef = NULL, selections = ?, readiness = ?, closedIssues = ? WHERE projectId = ?",
           )
           .run(
             command.instance,
             JSON.stringify(command.selections),
             JSON.stringify(readiness),
+            closedIssues,
             command.projectId,
           );
         const selectionIds = JSON.stringify(
@@ -2788,6 +2797,14 @@ export class DomainStore {
             .run(command.projectId, selection.id, Number(row.version) + 1);
         const sources = new GitHubSourceStore(this.db);
         for (const taskId of affectedTasks) sources.updateReadiness(taskId);
+        if (row.closedIssues === "done" && closedIssues === "skip")
+          for (const completed of this.db
+            .prepare(`SELECT p.taskId FROM source_completions p
+              JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
+            .all(command.projectId) as Row[])
+            sources
+              .forTracker({ provider: "jira", instance: command.instance })
+              .updateReadiness(String(completed.taskId));
         this.db
           .prepare(
             "UPDATE source_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",
@@ -2803,6 +2820,7 @@ export class DomainStore {
           instance: command.instance,
           selections: command.selections,
           readiness,
+          closedIssues,
         };
       }
       case "repositories.configure": {
