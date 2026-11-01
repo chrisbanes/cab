@@ -59,9 +59,13 @@ required host regression evidence.
 
 ## Handoff
 
-The operator must build/run the two focused commands above with permitted
-loopback access and commit the scoped repair in this preserved checkout, returning
-the frozen exact head and outcomes to Churchill. Watson must review that focused
+The operator committed the scoped repair as
+`20216193c8cbde5fc38eafbb756ee5c582327462`, built it, and ran both focused
+commands with permitted loopback access. The HTTP boundary suite passed all nine
+tests; the two selected token-status and local-foreground tests also passed.
+There were no failures or skips. These are operator-run results, distinct from
+the managed-stage socket denials above. The only subsequent source change is
+this evidence update. The frozen head and results return to Churchill. Watson must review that focused
 range before additional publication. Only Pat may later update existing PR #1422
 by approved ordinary branch push after SHIP; no new PR or force push is requested.
 This is the specific token-compatibility repair, not a new full-suite or CI pursuit.
