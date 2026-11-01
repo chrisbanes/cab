@@ -19,9 +19,9 @@ It changes `src/cli/main.ts`,
 `test/operator/operator-cli-local-access.test.ts` and
 `docs/design/operator-cli-inventory.json`. This evidence-only file follows those
 tests. No shared fixture, service rule, database schema or public contract changed.
-The repair is not yet committed: linked-worktree Git metadata remains outside
-the managed runtime's writable boundary. The previously established operator-owned
-Git handoff is required; unsupported Git writes were not retried.
+The operator committed the four-file repair as
+`596d0d1859149ab1c6b764f86d1e76a49192ed04` after the managed turn ended.
+The managed runtime did not retry unsupported Git metadata writes.
 
 ## Repair
 
@@ -75,9 +75,12 @@ evidence and runs affected CLI checks rather than a new full local check.
 
 ## Handoff
 
-The lead must arrange the existing operator-owned scoped commit and permitted
-execution of the affected HTTP cases against the resulting frozen SHA, then
-request Watson's affected-range re-review. Final-head required `check` CI remains
+The operator built commit `596d0d1859149ab1c6b764f86d1e76a49192ed04`
+and ran all four affected CLI files with permitted loopback access: all 50 tests
+passed, with no failures or skips. Operator typecheck, lint and format checks also passed. The isolated production
+foreground smoke passed read/write/restart and doctor on that same source commit,
+with zero model turns and owned-resource cleanup.
+Watson must perform the affected-range re-review before publication. Final-head required `check` CI remains
 a merge gate. No publication, provider mutation, service operation, delegation or
 deployment was performed; no acceptance criterion was waived. Same-account trust
 and sibling installed-service scope are unchanged.
