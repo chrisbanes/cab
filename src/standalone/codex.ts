@@ -107,6 +107,10 @@ const modelList = z.object({
   nextCursor: z.string().nullable().optional(),
 });
 const maxModelListPages = 8;
+const archivedThreadPage = z.object({
+  data: z.array(z.object({ id: z.string().min(1).max(512) })),
+  nextCursor: z.string().min(1).nullable(),
+});
 /** A safety margin under V8's ~512 Mi-character string limit, which would throw inside a stream handler. */
 export const maxAppServerLineBytes = 128 * 1024 * 1024;
 const defaultSettingsRetryMs = 30_000;
@@ -663,6 +667,8 @@ export interface Runtime {
     tools?: readonly RuntimeToolDefinition[],
     settings?: RuntimeTurnSettings,
   ): Promise<string>;
+  /** Idempotently archive or restore a stored thread. */
+  setThreadArchived?(threadId: string, archived: boolean): Promise<void>;
   resumeThread(
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
@@ -1473,7 +1479,7 @@ export class CodexRuntime implements Runtime {
       resolve(value: unknown): void;
       reject(error: Error): void;
       beforeResolve?(value: unknown): void;
-      timer: NodeJS.Timeout;
+      timer: NodeJS.Timeout | undefined;
       method: string;
       params: unknown;
       processIdentity: RuntimeProcessIdentity | null;
@@ -1973,6 +1979,40 @@ export class CodexRuntime implements Runtime {
     if (this.child !== expectedChild) throw new Error("Runtime stopped");
   }
 
+  async setThreadArchived(threadId: string, archived: boolean): Promise<void> {
+    if ((await this.threadArchived(threadId)) === archived) return;
+    // A timeout cannot prove a metadata mutation stopped; keep resumes behind its acknowledgement.
+    z.object({}).parse(
+      await this.request(
+        archived ? "thread/archive" : "thread/unarchive",
+        { threadId },
+        undefined,
+        { timeout: false },
+      ),
+    );
+  }
+
+  private async threadArchived(threadId: string): Promise<boolean> {
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const page = archivedThreadPage.parse(
+        await this.request("thread/list", {
+          archived: true,
+          sourceKinds: ["cli", "vscode", "appServer", "exec", "unknown"],
+          limit: 100,
+          cursor,
+        }),
+      );
+      if (page.data.some((thread) => thread.id === threadId)) return true;
+      cursor = page.nextCursor;
+      if (cursor && seen.has(cursor))
+        throw new Error("Archived thread pagination did not advance");
+      if (cursor) seen.add(cursor);
+    } while (cursor);
+    return false;
+  }
+
   /** Runs thread start/resume one at a time, so a scope is computed and applied against one root set. */
   private exclusive<T>(work: () => Promise<T>): Promise<T> {
     const run = this.scopeQueue.then(work, work);
@@ -2305,17 +2345,20 @@ export class CodexRuntime implements Runtime {
     method: string,
     params: unknown,
     beforeResolve?: (value: unknown) => void,
+    { timeout = true }: { timeout?: boolean } = {},
   ): Promise<unknown> {
     const child = this.child;
     if (!child) return Promise.reject(new Error("Runtime unavailable"));
     if (this.failure) return Promise.reject(this.failure);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        this.threadSnapshots.trimSettledEntries();
-        reject(new Error(`${method} timed out`));
-      }, 15000);
+      const timer = timeout
+        ? setTimeout(() => {
+            this.pending.delete(id);
+            this.threadSnapshots.trimSettledEntries();
+            reject(new Error(`${method} timed out`));
+          }, 15000)
+        : undefined;
       this.pending.set(id, {
         resolve,
         reject,

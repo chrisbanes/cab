@@ -323,6 +323,24 @@ state, and the runtime refuses the resume before any App Server request.
 Sessions are not linked or copied, and captured history stays readable. Finish or
 restart open Codex work before upgrading to the first release with this home.
 
+**Conversation archival.** cab archives finished Codex conversations in its own
+Codex home after executions settle, at startup and on a one-minute sweep. A
+conversation is finished when its assignment has completed, its task is done or
+cancelled, its conversation revision has been replaced, or its direct or drafting
+run has ended. A successful turn alone does not finish an open assignment.
+Unresolved executions, queued continuations, active callbacks, capacity ownership,
+pending effects and task or recovery holds prevent archival. Cleanup failures are
+retried without changing the work's outcome. History is retained; nothing is deleted.
+Before resuming a conversation recorded by this cleanup, cab waits for any archive
+in flight and restores the stored thread. Archive requests survive service restart,
+including requests whose runtime acknowledgement was lost. An archive or restore
+whose acknowledgement is delayed remains in flight until its response or runtime
+loss; a continuation cannot overtake the mutation. If the runtime stays alive
+without replying, that conversation waits until a runtime or service restart.
+Existing finished cab threads already archived are included in this lifecycle;
+unrelated threads and conversations from the previous Codex home are left alone.
+cab's captured history remains readable through the operator UI.
+
 cab owns capacity admission with both a global active-turn cap and a cap for
 each project. Waiting for workers, people or external feedback
 releases an execution slot; capacity one must not deadlock delegation. Default

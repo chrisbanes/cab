@@ -143,6 +143,7 @@ import {
   prepareExclusions,
   sanitizeConversationText,
 } from "./conversation-history.js";
+import { ConversationArchival } from "./conversation-archival.js";
 import { type SanitizedError, sanitizeError } from "./service-log.js";
 import {
   coordinationTools,
@@ -605,6 +606,7 @@ interface ServiceGeneration {
 
 /** Every component operations use; published whole once start-up can admit work. */
 interface Started {
+  conversationArchival: ConversationArchival;
   state: ExecutionState;
   domain: DomainStore;
   githubSources: GitHubSourceStore;
@@ -1603,6 +1605,12 @@ export class StandaloneService {
       );
       // Admission begins here: scheduler drains and wakes need the whole record.
       this.current = {
+        conversationArchival: new ConversationArchival(
+          db,
+          state,
+          (workId) => this.activeByWorkId.has(workId),
+          () => this.generation === generation && generation.accepting,
+        ),
         state,
         domain,
         githubSources,
@@ -1650,6 +1658,13 @@ export class StandaloneService {
         this.armRuntimeRestart(harness);
       scheduler.start();
       await this.wakeScheduler();
+      this.sweepConversationArchives(generation);
+      this.timers.add(
+        setInterval(
+          () => this.sweepConversationArchives(generation),
+          60_000,
+        ).unref(),
+      );
       this.timers.add(
         setInterval(() => {
           this.observeBackgroundFailure(generation, "github-poll", () =>
@@ -6443,6 +6458,21 @@ export class StandaloneService {
     return undefined;
   }
 
+  private sweepConversationArchives(generation: ServiceGeneration): void {
+    if (
+      this.generation !== generation ||
+      !generation.accepting ||
+      !this.current
+    )
+      return;
+    const operation = this.current.conversationArchival
+      .sweep(this.runtimes.get("codex"))
+      ?.catch(() => {});
+    if (!operation) return;
+    this.backgroundRuns.add(operation);
+    void operation.finally(() => this.backgroundRuns.delete(operation));
+  }
+
   private async wakeScheduler(
     refusalRebindPass = 0,
     generation = this.generation,
@@ -7756,6 +7786,7 @@ export class StandaloneService {
       .finally(() => {
         this.active.delete(action);
         this.activeByWorkId.delete(request.workId);
+        if (generation) this.sweepConversationArchives(generation);
         if (generation)
           this.observeBackgroundFailure(generation, "post-turn-wake", () =>
             this.wakeScheduler(0, generation),
@@ -7878,6 +7909,13 @@ export class StandaloneService {
         if (state.get(intent.id).state !== "submitting")
           throw new Error("Execution admission was held");
         submissionStage = "resume";
+        if (harness === "codex")
+          await guard(
+            this.started().conversationArchival.restore(
+              runtime,
+              previous.threadId,
+            ),
+          );
         // Settings or not, the runtime scopes the thread's skills to what its profile enables.
         await guard(
           runtime.resumeThread(

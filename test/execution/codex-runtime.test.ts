@@ -3519,3 +3519,105 @@ test("the catalogue's default entry is not a model name", async () => {
     await cleanup();
   }
 });
+
+test("thread archival reconciles stored status across pages and validates RPC responses", async () => {
+  const runtime = newTestRuntime();
+  const internals = runtime as unknown as {
+    request(
+      method: string,
+      params: unknown,
+      beforeResolve?: unknown,
+      options?: { timeout?: boolean },
+    ): Promise<unknown>;
+  };
+  let archived = false;
+  const calls: string[] = [];
+  internals.request = async (method, params, _beforeResolve, options) => {
+    calls.push(method);
+    const input = params as {
+      threadId?: string;
+      cursor?: string;
+      sourceKinds?: string[];
+    };
+    if (method === "thread/list") {
+      assert.ok(input.sourceKinds?.includes("appServer"));
+      if (!input.cursor)
+        return { data: [{ id: "other-thread" }], nextCursor: "page2" };
+      return { data: archived ? [{ id: "cab-thread" }] : [], nextCursor: null };
+    }
+    assert.equal(input.threadId, "cab-thread");
+    assert.deepEqual(options, { timeout: false });
+    archived = method === "thread/archive";
+    return {};
+  };
+  await runtime.setThreadArchived("cab-thread", true);
+  await runtime.setThreadArchived("cab-thread", true);
+  await runtime.setThreadArchived("cab-thread", false);
+  await runtime.setThreadArchived("cab-thread", false);
+  assert.equal(calls.filter((method) => method === "thread/archive").length, 1);
+  assert.equal(
+    calls.filter((method) => method === "thread/unarchive").length,
+    1,
+  );
+  internals.request = async () => ({ data: [{ id: 42 }], nextCursor: null });
+  await assert.rejects(runtime.setThreadArchived("cab-thread", true));
+  internals.request = async () => ({ data: [], nextCursor: "repeated" });
+  await assert.rejects(
+    runtime.setThreadArchived("cab-thread", true),
+    /did not advance/,
+  );
+  internals.request = async (method) =>
+    method === "thread/list" ? { data: [], nextCursor: null } : null;
+  await assert.rejects(runtime.setThreadArchived("cab-thread", true));
+});
+
+test("archive mutations keep their ordering fence beyond the RPC timeout and stop rejects them", async (t) => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  t.after(() => mock.timers.reset());
+  const runtime = newTestRuntime();
+  const child = {
+    stdin: {
+      write: (_line: string, callback: (error: Error | null) => void) => {
+        callback(null);
+        return true;
+      },
+    },
+  } as unknown as ChildProcessWithoutNullStreams;
+  const internal = runtime as unknown as {
+    child: ChildProcessWithoutNullStreams;
+    pending: Map<number, unknown>;
+    request(
+      method: string,
+      params: unknown,
+      beforeResolve: undefined,
+      options: { timeout: boolean },
+    ): Promise<unknown>;
+    receive(child: ChildProcessWithoutNullStreams, line: string): void;
+  };
+  internal.child = child;
+  let settled = false;
+  const archive = internal
+    .request("thread/archive", { threadId: "cab-thread" }, undefined, {
+      timeout: false,
+    })
+    .then(() => {
+      settled = true;
+    });
+  mock.timers.tick(60_000);
+  await Promise.resolve();
+  assert.equal(settled, false);
+  const id = [...internal.pending.keys()][0]!;
+  internal.receive(child, JSON.stringify({ id, result: {} }));
+  await archive;
+  const restore = internal.request(
+    "thread/unarchive",
+    { threadId: "cab-thread" },
+    undefined,
+    { timeout: false },
+  );
+  const rejected = assert.rejects(restore, /Runtime stopped/);
+  mock.timers.tick(60_000);
+  assert.equal(internal.pending.size, 1);
+  await runtime.stop();
+  await rejected;
+});
