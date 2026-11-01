@@ -1236,22 +1236,6 @@ export function TaskFiles({
               </Fragment>
             ))}
           </nav>
-          {listed && markers && (
-            <p className="file-observation">
-              Changes marked from the Branch comparison
-              {markers.baseBranch ? ` against ${markers.baseBranch}` : ""} read
-              at {clockLabel(markers.observedAt)}.
-              {markers.truncated
-                ? " It lists only part of the changes, so some changed files may not be marked."
-                : ""}
-            </p>
-          )}
-          {markersUnusable && (
-            <p className="file-observation">
-              Changed files aren't marked: the Changes tab has no complete
-              Branch comparison for this repository.
-            </p>
-          )}
           {directory?.state === "ready" ? (
             <ul
               className="file-entry-list"
@@ -1426,6 +1410,23 @@ export function TaskFiles({
               {directory?.state
                 ? `This location is ${directory.state}; file bytes are not available.`
                 : "Loading this location…"}
+            </p>
+          )}
+          {/* Late comparison reads must not move file rows during pointer activation. */}
+          {listed && markers && (
+            <p className="file-observation">
+              Changes marked from the Branch comparison
+              {markers.baseBranch ? ` against ${markers.baseBranch}` : ""} read
+              at {clockLabel(markers.observedAt)}.
+              {markers.truncated
+                ? " It lists only part of the changes, so some changed files may not be marked."
+                : ""}
+            </p>
+          )}
+          {markersUnusable && (
+            <p className="file-observation">
+              Changed files aren't marked: the Changes tab has no complete
+              Branch comparison for this repository.
             </p>
           )}
           <div className="file-rail-footer">

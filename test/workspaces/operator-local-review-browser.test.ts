@@ -2164,3 +2164,53 @@ test("preview diagnostics distinguish a held read, an obsolete selection and an 
     release.resolve();
   }
 });
+
+test("a comparison settling during a file click keeps the file under the pointer", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const release = deferred();
+  await page.route("**/comparisons?**", async (route) => {
+    const response = await route.fetch();
+    await release.promise;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  try {
+    await signIn(
+      page,
+      web.origin,
+      `/app/tasks/${task.taskId}?section=files`,
+      web.password,
+    );
+    const files = page.locator("#files");
+    const file = files.getByRole("button", { name: /^review\.txt,/ });
+    await file.waitFor();
+    assert.equal(await files.locator(".file-observation").count(), 0);
+    const bounds = await file.boundingBox();
+    assert.ok(bounds);
+    await page.mouse.move(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2,
+    );
+    await page.mouse.down();
+    release.resolve();
+    await files.locator(".file-observation").waitFor();
+    await page.mouse.up();
+    const after = await file.boundingBox();
+    const diagnostic = await previewDiagnostic(page);
+    console.log(
+      `comparison-click ${JSON.stringify({ before: bounds, after })}; ${diagnostic}`,
+    );
+    assert.equal(
+      after?.y,
+      bounds.y,
+      "the comparison notice moved the file during activation",
+    );
+    await files.getByRole("button", { name: "Line 1: first" }).waitFor();
+    await captureBrowserEvidence(
+      page,
+      "stable-file-selection-after-comparison",
+    );
+  } finally {
+    release.resolve();
+    await page.mouse.up();
+  }
+});
