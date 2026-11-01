@@ -17,8 +17,20 @@ npm ci
 npm run check
 ```
 
-`check` runs strict type checking, lint, formatting, compilation and tests,
-including deterministic scheduler, supervision, recovery, power and
+`check` runs `check:static`, then tests only after every static task succeeds.
+`check:static` runs service compilation, web type checking, web bundling and
+Biome lint/format checks concurrently. Service compilation also checks its types,
+so it does not repeat the standalone `typecheck:service` command. Biome assists
+are disabled to keep the combined check equivalent to the separate lint and
+format commands. Parallel tasks group their output by command and stop on failure.
+
+`build` compiles the service and bundles the web app concurrently. `typecheck`
+checks the service and web app concurrently without emitting JavaScript. Each
+TypeScript operation keeps a separate incremental cache under `dist/`; deleting
+`dist/` clears those caches for a clean build. CI builds from a clean checkout
+without restoring TypeScript caches.
+
+Tests include deterministic scheduler, supervision, recovery, power and
 service-integration fixtures, coordination, routing, inbox, interaction and
 completion tests, and the operator auth, HTTP and browser tests. CI
 builds once and runs eight test jobs on PRs and main pushes: six Node 24 Chromium
@@ -73,8 +85,8 @@ successful receipt keeps its old weight, and weights for files no longer in
 `test/` are dropped. It skips unsuccessful or invalid receipts and rejects a
 duplicate receipt for one file. A stale weight only unbalances shards; the runner
 falls back to the median for a file without one.
-Committed initial weights are measured locally; hosted CI receipts can refresh
-them as runner performance changes.
+The Chromium and service weights use hosted CI receipts; the `all` profile uses
+local measurements. Refresh each profile as runner performance changes.
 
 `test:built` and `check` run the tests under a per-run `cab-run-*` directory in the
 OS temp root, passed to the test process tree as `TMPDIR`, so fixtures that call

@@ -45,7 +45,7 @@ jobs:
       - run: npm install --global "$(node -p 'require("./package.json").packageManager')"
       - run: node --version && npm --version
       - run: npm ci
-      - run: npm run typecheck && npm run lint && npm run format:check && npm run build
+      - run: npm run check:static
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: cab-build

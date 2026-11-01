@@ -7,6 +7,8 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
+    "incremental": true,
+    "tsBuildInfoFile": "dist/service.tsbuildinfo",
     "outDir": "dist",
     "rootDir": ".",
     "types": ["node"]
