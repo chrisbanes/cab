@@ -23,6 +23,80 @@ import { sanitizeConversationText } from "../../src/standalone/conversation-hist
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 
+test("empty connection selections refuse reads, writes and login before local discovery or HTTP", async (t) => {
+  let requests = 0;
+  const h = harness(t, {
+    fetch: async () => {
+      requests++;
+      throw Error("Invalid selections must not send HTTP requests");
+    },
+    keychain: () => {
+      throw Error("Invalid selections must not read credentials");
+    },
+  });
+  const state = join(h.dir, "data");
+  const access = await LocalAccess.create(state, randomUUID());
+  await access.publish("http://127.0.0.1:8787");
+  const env = { CAB_CLI_CONFIG_DIR: h.configDir, CAB_LOCAL_STATE: state };
+  // Valid material would reach HTTP on fallback; malformed material would expose
+  // a local-access error if resolution tried reading it before refusing the name.
+  for (const malformed of [false, true]) {
+    if (malformed)
+      await writeFile(
+        join(localAccessDirectory(state), "connection.json"),
+        "{}",
+      );
+    for (const command of [
+      ["auth", "status"],
+      ["project", "list"],
+      ["task", "stop", randomUUID()],
+      ["auth", "login"],
+    ]) {
+      for (const selection of ["explicit", "environment"] as const) {
+        const r = await h.run(
+          [
+            ...command,
+            ...(selection === "explicit" ? ["--connection", ""] : []),
+            "--output",
+            "json",
+          ],
+          {
+            env: {
+              ...env,
+              ...(selection === "environment" ? { CAB_CONNECTION: "" } : {}),
+            },
+          },
+        );
+        const context = `${command.join(" ")} ${selection} malformed=${malformed}`;
+        assert.equal(r.code, 2, `${context}: ${r.out}`);
+        assert.equal(
+          r.json().error.code,
+          command[1] === "login" ? "usage" : "connection-not-found",
+          context,
+        );
+        assert.equal(requests, 0, context);
+      }
+    }
+    for (const options of [
+      ["--local", "--connection", ""],
+      ["--url", ""],
+      ["--token-file", ""],
+      ["--local", "--url", ""],
+      ["--local", "--token-file", ""],
+      ["--local-state", ""],
+    ]) {
+      const r = await h.run(["auth", "login", ...options, "--output", "json"], {
+        env,
+      });
+      assert.equal(r.code, 2, r.out);
+      assert.equal(r.json().error.code, "usage");
+      if (options.includes("--connection"))
+        assert.match(r.json().error.message, /Choose --local or --connection/);
+      assert.equal(requests, 0);
+    }
+  }
+});
+
 test("service local material rotates under one installation and refuses unsafe or foreign retained state", async (t) => {
   const h = harness(t),
     state = join(h.dir, "data"),

@@ -463,15 +463,18 @@ export async function main(
       deps.stdout.write(help);
       return 0;
     }
-    if (values.local && (values.url || values["token-file"]))
+    if (
+      values.local &&
+      (values.url !== undefined || values["token-file"] !== undefined)
+    )
       throw new CliError(
         "usage",
         "--local cannot be combined with token login options.",
       );
-    if (values.local && values.connection)
+    if (values.local && values.connection !== undefined)
       throw new CliError("usage", "Choose --local or --connection, not both.");
     if (
-      values["local-state"] &&
+      values["local-state"] !== undefined &&
       !values.local &&
       positionals.slice(0, 2).join(" ") !== "connection local"
     )
@@ -657,12 +660,12 @@ async function run(
   if (key === "auth login") {
     expectArgs(positionals, 2);
     rejectManaged(deps.env);
-    if (!values.url && !values["token-file"]) {
+    if (values.url === undefined && values["token-file"] === undefined) {
       const current = await config.read();
       let local =
         deps.forceLocal ||
-        (!requested &&
-          !current.default &&
+        (requested === undefined &&
+          current.default === undefined &&
           !Object.keys(current.connections).length);
       if (!local) {
         try {
@@ -940,8 +943,8 @@ async function selectConnection(
 ) {
   rejectManaged(deps.env);
   const fallback =
-    !requested &&
-    !current.default &&
+    requested === undefined &&
+    current.default === undefined &&
     Object.keys(current.connections).length === 0;
   if (deps.forceLocal || fallback) {
     const state = resolve(
