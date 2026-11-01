@@ -4116,11 +4116,12 @@ export class StandaloneService {
     githubSources,
     state,
   }: Pick<Started, "githubSources" | "state">): void {
-    for (const hold of githubSources.activeHolds())
-      if (hold.reason === "closed")
-        githubSources.completeFromProviderClosure(hold.taskId, () =>
-          state.taskExecutionSettled(hold.taskId),
-        );
+    for (const sources of [githubSources, ...githubSources.jiraStores()])
+      for (const hold of sources.activeHolds())
+        if (hold.reason === "closed")
+          sources.completeFromProviderClosure(hold.taskId, () =>
+            state.taskExecutionSettled(hold.taskId),
+          );
   }
 
   private emitSourceHoldNotices({
