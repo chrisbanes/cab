@@ -152,6 +152,8 @@ test("login, status and task get through a token file against the live service",
     installationId: s.f.service.operatorCredentials().installationId(),
     origin: s.authOrigin,
     apiVersion: 1,
+    url: s.origin,
+    accessMode: "token",
   });
   assert.equal(envelope.data.task.id, s.taskId);
   assert.equal(typeof envelope.observedAt, "number");
@@ -1372,9 +1374,9 @@ test("defaults name a runnable command for auth and cursor failures", async (t) 
 
   // No saved connection at all.
   let r = await h.run(["task", "get", s.taskId]);
-  assert.equal(r.code, 2);
-  assert.match(r.err, /\(connection-not-found\)/);
-  assert.match(fix(r.err), /cab auth login --connection NAME --url ORIGIN/);
+  assert.equal(r.code, 3);
+  assert.match(r.err, /\(local-access-unavailable\)/);
+  assert.match(fix(r.err), /--local.*--local-state/);
 
   // A revoked credential.
   const revoked = await s.issue("read", "revoked");
