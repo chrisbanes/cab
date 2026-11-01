@@ -6,7 +6,6 @@ export function ciFailures(jobs, run = true) {
     changes: "success",
     quality: result,
     suites: result,
-    service: result,
   };
   if (!jobs || typeof jobs !== "object" || Array.isArray(jobs))
     return ["CI needs must be an object"];

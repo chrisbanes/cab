@@ -238,8 +238,8 @@ each acceptance scenario to its evidence and disposition.
 ## Development
 
 Use the Node and npm versions pinned in [`.nvmrc`](.nvmrc) and
-`packageManager` in [`package.json`](package.json); CI tests that Node version.
-`engines.node` is `>=26` as permissive metadata; later majors are not qualified.
+`packageManager` in [`package.json`](package.json); see the
+[development reference](docs/development.md) for supported runtimes and CI.
 
 ```sh
 npm ci

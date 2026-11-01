@@ -975,10 +975,10 @@ cab snapshot verify "$STATE/snapshots/manual-<date>"
 `npm run operations -- backup|verify|restore` runs the same operations.
 
 The snapshot is a private directory containing only `standalone.sqlite` and a
-strict `manifest.json` commit marker. Node's SQLite backup API (qualified on
-Node 24.21.0 and 26.9.0) captures the whole database without table-specific
-export. The manifest records the creating Node version as provenance; snapshots
-from Node 24 or later verify and restore on any supported runtime. Verification
+strict `manifest.json` commit marker. Node's SQLite backup API captures the
+whole database without table-specific export. The manifest records the creating
+Node version as provenance; snapshots from Node 24 or later, including those made
+before Node 26 became the minimum, verify and restore on any supported runtime. Verification
 checks SQLite integrity, schema version/fingerprint, database bytes, and a deterministic
 typed logical-content digest. A database owner lock is required; no process ID
 or timestamp is treated as ownership evidence. The owner must already be a

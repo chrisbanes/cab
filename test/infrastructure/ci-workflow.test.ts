@@ -171,20 +171,17 @@ test("pull requests skip checks only when every change is untested documentation
       doc,
     );
 });
-function successful() {
-  return {
-    changes: { result: "success" },
-    quality: { result: "success" },
-    suites: { result: "success" },
-    service: { result: "success" },
-  };
-}
+const successful = {
+  changes: { result: "success" },
+  quality: { result: "success" },
+  suites: { result: "success" },
+};
 test("aggregate check accepts a complete run", () => {
-  assert.deepEqual(ciFailures(successful()), []);
+  assert.deepEqual(ciFailures(successful), []);
 });
 test("unchanged nightly and documentation-only skips require a successful change gate and every test job skipped", () => {
   const skipped = Object.fromEntries(
-    Object.keys(successful()).map((name) => [
+    Object.keys(successful).map((name) => [
       name,
       { result: name === "changes" ? "success" : "skipped" },
     ]),
@@ -200,7 +197,7 @@ test("unchanged nightly and documentation-only skips require a successful change
   }
 });
 test("failed, cancelled, missing and unexpectedly skipped applicable jobs cannot pass check", () => {
-  const expected = successful();
+  const expected = successful;
   for (const name of Object.keys(expected)) {
     for (const result of ["failure", "cancelled", "skipped", "pending"])
       assert.ok(
