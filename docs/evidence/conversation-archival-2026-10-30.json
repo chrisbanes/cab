@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-30",
+  "codexVersion": "codex-cli 0.164.0",
+  "modelTurns": 0,
+  "checks": [
+    "Production setThreadArchived moves the stored thread into archived listings",
+    "Repeated archive succeeds",
+    "Restore and repeated restore succeed",
+    "Restored thread resumes with same identity",
+    "Stored thread remains readable"
+  ],
+  "source": "vscode",
+  "scope": "Production archive/restore method against a disposable local stdio App Server, with injected user input and no model turn.",
+  "limits": [
+    "No live operator UI or ChatGPT synchronization assertion.",
+    "An injected-input-only thread was absent from the active listing even before archival; archive listings, restore, read and resume were verified."
+  ]
+}

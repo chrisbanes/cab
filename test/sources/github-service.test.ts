@@ -1423,12 +1423,12 @@ test("GitHub refresh defaults to five minutes", async () => {
   const root = realpathSync(
     mkdtempSync(join(tmpdir(), "cab-github-default-interval-")),
   );
-  const delays: unknown[] = [];
+  const intervals: { delay: number | undefined; callback: () => void }[] = [];
   const realSetInterval = globalThis.setInterval;
   const spy = mock.method(globalThis, "setInterval", ((
     ...args: Parameters<typeof setInterval>
   ) => {
-    delays.push(args[1]);
+    intervals.push({ delay: args[1], callback: args[0] as () => void });
     return realSetInterval(...args);
   }) as typeof setInterval);
   const service = new StandaloneService(
@@ -1437,12 +1437,25 @@ test("GitHub refresh defaults to five minutes", async () => {
     undefined,
     { power: { enabled: false } },
   );
+  const refresh = mock.method(service, "refreshGitHub", async () => {});
   try {
     await service.start();
-    assert.ok(delays.includes(300_000), `intervals: ${delays.join(",")}`);
-    assert.ok(!delays.includes(60_000));
+    assert.ok(intervals.some(({ delay }) => delay === 300_000));
+    for (const interval of intervals.filter(({ delay }) => delay === 60_000))
+      interval.callback();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(
+      refresh.mock.callCount(),
+      0,
+      "one-minute maintenance does not refresh GitHub",
+    );
+    for (const interval of intervals.filter(({ delay }) => delay === 300_000))
+      interval.callback();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(refresh.mock.callCount(), 1);
   } finally {
     spy.mock.restore();
+    refresh.mock.restore();
     await service.stop();
     rmSync(root, { recursive: true, force: true });
   }
