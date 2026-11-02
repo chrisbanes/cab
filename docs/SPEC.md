@@ -376,10 +376,11 @@ observed text, releases only `changed-text` holds and keeps earlier decisions. A
 that a `changed-text` hold once replaced cannot be recovered from the old single hold
 row; the next authoritative sync re-establishes structural holds. Finished work handed
 back before the upgrade anchors at the text observed then. The upgrade is one-way.
-The task read's `source.hold` carries `active`, the hold's `revision` (it rises each time a hold is
-set again, with no change to the task version) and its `reason`, or null when the hold is inactive or
-the stored reason is not one the read names. The task workspace shows Resume source hold again when a
-hold with a higher revision than the one a recorded resume answered is active.
+The task read's `source.hold` is null when the task has no hold row. Otherwise it carries `active`,
+the hold's `revision`, which rises when a hold is set while inactive or with a different reason (this
+can happen without a change to the task version), and `reason`, null when the hold is inactive or the
+stored reason is not one the read names. The task workspace shows Resume source hold again when an
+active hold has a higher revision than the one a recorded resume answered.
 
 ## Execution and recovery
 
