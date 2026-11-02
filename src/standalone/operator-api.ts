@@ -1,3 +1,4 @@
+import type { RecoveryRecord } from "./recovery-types.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   issueBodyLimit,
@@ -3994,6 +3995,8 @@ export class OperatorApi {
         const b = d.task(id);
         return { id, title: this.safe(b.title, excluded), state: b.state };
       }),
+      executionRecovery: this.taskRecovery(taskId, assignments, excluded),
+      dependencyCandidates: await this.dependencyCandidates(taskId, projectId),
       source: identity
         ? this.source(identity, issue, projectId, excluded)
         : null,
@@ -6877,8 +6880,6 @@ export class OperatorApi {
         taskRecords.some((r) => r.holds.task !== null),
     };
     const visible = records.slice(-20);
-    const intentStates = new Set<string>(executionIntentStateSchema.options),
-      requestStates = new Set(["queued", "active", "completed", "held"]);
     this.requireWorkspaceSnapshot(snapshot);
     return assignmentRecoverySchema.parse({
       data: {
@@ -6892,66 +6893,132 @@ export class OperatorApi {
         holds,
         evidenceAvailable: records.length > 0,
         omittedCount: records.length - visible.length,
-        records: visible.map((r) => ({
-          workId: this.safe(r.workId, excluded),
-          generation: r.generation,
-          binding: r.binding
-            ? {
-                assignmentId: r.binding.assignmentId,
-                assignmentVersion: r.binding.assignmentVersion,
-                instructionsRevision: r.binding.instructionsRevision,
-                profileRevision: r.binding.profileRevision,
-              }
-            : null,
-          intentState: intentStates.has(r.intent.state)
-            ? r.intent.state
-            : "unknown",
-          requestState: r.request
-            ? requestStates.has(r.request.state)
-              ? r.request.state
-              : "unknown"
-            : null,
-          holds: {
-            stop: r.holds.stop,
-            writer: r.holds.writer,
-            capacity: r.holds.capacity,
-            uncertainty: r.holds.uncertainty,
-            task: r.holds.task !== null,
-          },
-          observations: [
-            ...new Set(
-              r.observations.map((o) => {
-                const parsed = recoveryObservationSchema.safeParse(o.kind);
-                return parsed.success ? parsed.data : "unknown";
-              }),
-            ),
-          ],
-          pendingEffectCount: r.pendingEffects.length,
-          ...(r.noTurnSubmission
-            ? { noTurnSubmission: r.noTurnSubmission }
-            : {}),
-          ...(r.preTurnRejection
-            ? {
-                preTurnRejection: {
-                  ...r.preTurnRejection,
-                  predecessorThreadId: this.safe(
-                    r.preTurnRejection.predecessorThreadId,
-                    excluded,
-                  ),
-                },
-              }
-            : {}),
-          receiptRecorded: r.receipt !== null,
-          workspace:
-            r.receipt?.workspaceDisposition === "preserved"
-              ? "preserved"
-              : r.receipt?.workspaceDisposition === "reconciled"
-                ? "reconciled"
-                : "unknown",
-        })),
+        records: visible.map((r) => this.recoveryRecord(r, excluded)),
       },
       observedAt: Date.now(),
     });
+  }
+  /** The task's verified recovery records across its assignments, scoped before the newest 20 are kept. */
+  private taskRecovery(
+    taskId: string,
+    assignments: readonly Row[],
+    excluded: readonly string[] | undefined,
+  ) {
+    const known = new Set(assignments.map((a) => String(a.id)));
+    const records = this.service
+      .recoveryForTask(taskId)
+      .filter(
+        (r) =>
+          r.binding?.taskId === taskId &&
+          known.has(r.binding.assignmentId) &&
+          uuid.safeParse(r.binding.assignmentId).success,
+      );
+    const visible = records.slice(-20),
+      taskHold = this.service.taskHold(taskId);
+    return {
+      holds: {
+        stop:
+          this.service.isTaskStopped(taskId) ||
+          records.some((r) => r.holds.stop),
+        writer: records.some((r) => r.holds.writer),
+        capacity: records.some((r) => r.holds.capacity),
+        uncertainty: records.some((r) => r.holds.uncertainty),
+        task:
+          taskHold !== undefined || records.some((r) => r.holds.task !== null),
+      },
+      evidenceAvailable: records.length > 0,
+      omittedCount: records.length - visible.length,
+      records: visible.map((r) => this.recoveryRecord(r, excluded)),
+    };
+  }
+  /**
+   * The project's tasks that could become a local blocker: not this task or a current one, each
+   * title under its own exclusions. An imported task cannot own a local edge, so it has none.
+   */
+  private async dependencyCandidates(taskId: string, projectId: string) {
+    const d = this.domain();
+    if (d.importedTask(taskId)) return [];
+    const current = new Set(d.dependencies(taskId).map(String)),
+      base = this.exclusionBase(),
+      excluded = await this.exclusions(projectId, undefined, [], [], base),
+      candidates = [];
+    for (const [i, t] of d.tasks(projectId).entries()) {
+      const id = String(t.id);
+      if (id === taskId || current.has(id)) continue;
+      candidates.push({
+        id,
+        title: this.safe(
+          t.title,
+          await this.exclusions(projectId, id, [], [], base, excluded),
+        ),
+        state: t.state,
+      });
+      if (i % 20 === 19) await yieldTraversal();
+    }
+    return candidates;
+  }
+  /** One verified recovery record as the operator reads it: redacted, with unknown states mapped. */
+  private recoveryRecord(
+    r: RecoveryRecord,
+    excluded: readonly string[] | undefined,
+  ) {
+    const intentStates = new Set<string>(executionIntentStateSchema.options),
+      requestStates = new Set(["queued", "active", "completed", "held"]);
+    return {
+      workId: this.safe(r.workId, excluded),
+      generation: r.generation,
+      binding: r.binding
+        ? {
+            assignmentId: r.binding.assignmentId,
+            assignmentVersion: r.binding.assignmentVersion,
+            instructionsRevision: r.binding.instructionsRevision,
+            profileRevision: r.binding.profileRevision,
+          }
+        : null,
+      intentState: intentStates.has(r.intent.state)
+        ? r.intent.state
+        : "unknown",
+      requestState: r.request
+        ? requestStates.has(r.request.state)
+          ? r.request.state
+          : "unknown"
+        : null,
+      holds: {
+        stop: r.holds.stop,
+        writer: r.holds.writer,
+        capacity: r.holds.capacity,
+        uncertainty: r.holds.uncertainty,
+        task: r.holds.task !== null,
+      },
+      observations: [
+        ...new Set(
+          r.observations.map((o) => {
+            const parsed = recoveryObservationSchema.safeParse(o.kind);
+            return parsed.success ? parsed.data : "unknown";
+          }),
+        ),
+      ],
+      pendingEffectCount: r.pendingEffects.length,
+      ...(r.noTurnSubmission ? { noTurnSubmission: r.noTurnSubmission } : {}),
+      ...(r.preTurnRejection
+        ? {
+            preTurnRejection: {
+              ...r.preTurnRejection,
+              predecessorThreadId: this.safe(
+                r.preTurnRejection.predecessorThreadId,
+                excluded,
+              ),
+            },
+          }
+        : {}),
+      receiptRecorded: r.receipt !== null,
+      workspace:
+        r.receipt?.workspaceDisposition === "preserved"
+          ? "preserved"
+          : r.receipt?.workspaceDisposition === "reconciled"
+            ? "reconciled"
+            : "unknown",
+    };
   }
   async readSourceObservations() {
     return this.readWithSourceFence(() => this.readSourceObservationsOnce());
