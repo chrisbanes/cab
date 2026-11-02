@@ -793,6 +793,17 @@ export class DomainStore {
       );
       migrateSourceStorage(this.db);
       this.db.exec(stackingTables);
+      // Stacked dependencies written before numbered restack notices have none yet.
+      if (
+        !(
+          this.db
+            .prepare("PRAGMA table_info(stacked_dependencies)")
+            .all() as Row[]
+        ).some((column) => column.name === "restackSeq")
+      )
+        this.db.exec(
+          "ALTER TABLE stacked_dependencies ADD COLUMN restackSeq INTEGER NOT NULL DEFAULT 0",
+        );
       const seedRecords = !this.one(
         "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'task_dependency_records'",
       );

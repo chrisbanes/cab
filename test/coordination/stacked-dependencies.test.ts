@@ -647,3 +647,22 @@ test("a local dependent's operator-set imported-blocker flag still holds a stack
   f.domain.recordStackedDependency(D);
   assert.deepEqual(f.reasons(D), ["imported-blockers-blocked"]);
 });
+
+test("a stacked-dependency table without restack numbers gains them on migrate", (t) => {
+  const f = fixture(t);
+  f.stacking(true);
+  f.depend(D, B);
+  f.publish(B);
+  f.domain.recordStackedDependency(D);
+  f.domain.ensureLeadAssignment(D);
+  f.db.exec("ALTER TABLE stacked_dependencies DROP COLUMN restackSeq");
+  f.domain.migrate();
+  const queued: string[] = [];
+  f.publish(B, { pushed: head("b") });
+  f.domain.reconcileRestacks({
+    queue: (_task, _reason, identity) => queued.push(identity),
+    advance: () => {},
+  });
+  assert.deepEqual(queued, [`restack:R1:1:${head("b")}`]);
+  f.domain.migrate();
+});
