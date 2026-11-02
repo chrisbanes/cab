@@ -514,17 +514,16 @@ test("Chromium verifies the independent login and guarded browser session", asyn
 
   assert.equal(domain.tasks(browserProjectId).length, 2);
 
-  await page.goto(`${origin}/task/${taskId}`);
-  const taskHtml = await page.locator("body").innerText();
-  assert.match(taskHtml, /Deliver the operator form journey/);
-  assert.match(taskHtml, /eligibility only/i);
-  assert.match(taskHtml, /do not confirm runtime admission or execution/i);
-  const taskConfigure = page.locator('form[data-command="task.configure"]');
-  await taskConfigure
-    .locator('input[name="title"]')
-    .fill("Browser-edited task");
-  await taskConfigure.locator('input[name="ready"]').check();
-  await save(page, taskConfigure);
+  // The task page is gone; the edit is the JSON command the task workspace sends.
+  await api.execute({
+    type: "task.configure",
+    key: randomUUID(),
+    projectId: browserProjectId,
+    taskId,
+    expectedVersion: Number(domain.task(taskId).version),
+    title: "Browser-edited task",
+    ready: true,
+  });
   assert.equal(domain.task(taskId).title, "Browser-edited task");
   assert.equal(domain.task(taskId).ready, 1);
   assert.deepEqual(domain.admission(taskId).reasons, ["project-paused"]);

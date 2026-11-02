@@ -353,20 +353,10 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     4,
     "lead and three delegated assignments",
   );
-  // The retained task editor is one inspector link, not a header button; the coordination pages are gone.
-  const forms = page.getByRole("link", {
-    name: "Edit task and review source",
-    exact: true,
-  });
-  assert.equal(await forms.count(), 1);
-  assert.equal(await forms.getAttribute("href"), `/task/${a.taskId}`);
+  // The retired task page and the coordination pages have no link left.
+  assert.equal(await page.locator('a[href^="/task/"]').count(), 0);
   assert.equal(await page.locator('a[href^="/coordination/"]').count(), 0);
   await openTaskTab(page, "Files");
-  assert.equal(
-    await forms.isVisible(),
-    false,
-    "Files does not repeat the link",
-  );
   await page.evaluate(() => scrollTo(0, 0));
   await captureBrowserEvidence(page, "task-detail-desktop", {
     fullPage: false,

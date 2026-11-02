@@ -350,10 +350,20 @@ async function createTask(projectId, title, outcome) {
 }
 
 async function markTaskReady(taskId) {
-  await page.goto(`${origin}/task/${taskId}`);
-  const form = page.locator('form[data-command="task.configure"]');
-  await form.locator('input[name="ready"]').setChecked(true);
-  await submitCommand(form);
+  // The task page is gone: Ready is the JSON `task.configure` command the task workspace sends.
+  const read = await page
+    .context()
+    .request.get(`${origin}/api/operator/tasks/${taskId}`);
+  assert.equal(read.status(), 200);
+  const { task } = (await read.json()).data;
+  await postCommand({
+    type: "task.configure",
+    key: randomUUID(),
+    projectId: task.projectId,
+    taskId,
+    expectedVersion: task.version,
+    ready: true,
+  });
 }
 
 function routedView(taskId) {

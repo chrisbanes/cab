@@ -15,7 +15,7 @@ function form(html: string, command: string): string {
   return html.slice(start, end);
 }
 
-test("operator project, profile, routing, and task views render scoped editable forms", async () => {
+test("operator home, profile and assignment views render scoped editable forms", async () => {
   const db = new DatabaseSync(":memory:");
   try {
     db.exec("PRAGMA foreign_keys = ON");
@@ -56,11 +56,9 @@ test("operator project, profile, routing, and task views render scoped editable 
 
     const home = ui.home(csrfToken);
     const profilePage = ui.profile(profile.id, csrfToken);
-    const taskPage = ui.task(task.id, csrfToken);
     for (const [page, commands] of [
       [home, ["project.create", "profile.create"]],
       [profilePage, ["profile.configure"]],
-      [taskPage, ["task.configure"]],
     ] as const) {
       for (const command of commands) {
         assert.ok(
@@ -71,20 +69,6 @@ test("operator project, profile, routing, and task views render scoped editable 
         );
       }
     }
-    assert.ok(taskPage.includes("Local task title"));
-    assert.ok(taskPage.includes("Local task outcome"));
-    assert.ok(!taskPage.includes(assignment.id));
-    assert.ok(
-      !/data-command="(?:assignment|dependency|imported-blockers)/.test(
-        taskPage,
-      ),
-    );
-    assert.match(
-      taskPage,
-      /Readiness and configuration eligibility do not confirm runtime admission or execution\./,
-    );
-    assert.ok(taskPage.includes(`/app/tasks/${task.id}?section=execution`));
-    assert.ok(!taskPage.includes("/coordination/"));
     const assignmentPage = ui.assignment(assignment.id);
     assert.match(assignmentPage, /Assignment lifecycle state: pending/);
     assert.ok(assignmentPage.includes(`/runtime/assignment/${assignment.id}`));

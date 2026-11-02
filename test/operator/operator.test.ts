@@ -81,10 +81,6 @@ test("local forms submit versioned commands and render secret-safe views", async
     assert.equal(task.ready, 0);
     assert.match(ui.home(), /&lt;Builder&gt;/);
     assert.doesNotMatch(ui.home(), /<Builder>/);
-    assert.match(
-      ui.task(task.id),
-      /Configuration eligibility only: held: project-paused, task-unready\./,
-    );
     domain.execute({
       actor: "operator",
       key: randomUUID(),
@@ -95,19 +91,15 @@ test("local forms submit versioned commands and render secret-safe views", async
       instructions: "Instructions",
       paused: false,
     });
-    await ui.submit({
+    domain.execute({
+      actor: "operator",
+      key: randomUUID(),
       type: "task.configure",
       projectId: project.id,
       taskId: task.id,
-      expectedVersion: "1",
-      title: "First",
-      outcome: "Ship",
-      ready: "1",
+      expectedVersion: 1,
+      ready: true,
     });
-    assert.ok(
-      /eligible for future admission/i.test(ui.task(task.id)),
-      "eligible means configuration eligibility only",
-    );
     const assignment = (await ui.submit({
       type: "assignment.create",
       projectId: project.id,
@@ -116,8 +108,6 @@ test("local forms submit versioned commands and render secret-safe views", async
       brief: "Build",
       resultDestination: "lead:task",
     })) as { id: string };
-    assert.doesNotMatch(ui.task(task.id), new RegExp(assignment.id));
-    assert.match(ui.task(task.id), /eligibility only/i);
     assert.match(
       ui.assignment(assignment.id),
       /does not confirm runtime admission or execution/i,
@@ -250,19 +240,6 @@ test("rendered form retries replay one receipt and retain create IDs", async () 
     assert.equal((await post(task)).status, 303);
     assert.equal(domain.tasks(projectId).length, 1);
 
-    const taskHtml = await page(`/task/${taskId}`);
-    assert.ok(
-      /Readiness and configuration eligibility do not confirm runtime admission or execution\./.test(
-        taskHtml,
-      ),
-      "task view distinguishes configuration from execution status",
-    );
-    assert.ok(
-      !/data-command="(?:assignment|dependency|imported-blockers)/.test(
-        taskHtml,
-      ),
-      "task page omits deferred action forms",
-    );
     assert.equal(
       (
         await post({

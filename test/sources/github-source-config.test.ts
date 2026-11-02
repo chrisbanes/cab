@@ -26,7 +26,6 @@ import { DomainCommands, DomainStore } from "../../src/core/domain.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
 import { restorePreviousSourceSchema } from "../fixtures/previous-source-schema.js";
-import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 
 test("operator-owned GitHub configuration survives restart and rejects stale or agent changes", () => {
@@ -259,30 +258,11 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
       ],
       reason: null,
     });
-    const taskId = String(sources.issue("I_1")?.taskId);
-    const localId = randomUUID();
-    domain.execute({
-      type: "task.create",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      taskId: localId,
-      title: "Independent local task",
-      outcome: "Local",
-      ready: false,
-    });
     sources.reconcileBlockers("I_1", {
       complete: false,
       blockers: [],
       reason: "http-403",
     });
-    const ui = new LocalOperatorUi(domain, undefined, sources);
-    const task = ui.task(taskId);
-    assert.match(task, /github\.com|org\/repo/);
-    assert.match(task, /imported-blockers-unknown/);
-    assert.match(task, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
-    assert.doesNotMatch(task, /<script>|<img src=x/);
-    assert.doesNotMatch(task, /CAB_TEST_GITHUB|fixture-token/);
     // The label is removed on GitHub: nothing matches and the task names why.
     sources.reconcileSelection(projectId, "repo", {
       complete: true,
@@ -302,8 +282,6 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
       ],
       reason: null,
     });
-    assert.match(ui.task(taskId), /Not ready \(needs any of label `ready`\)/);
-    assert.doesNotMatch(ui.task(localId), /needs any of/);
     sources.reconcileSelection(projectId, "repo", {
       complete: false,
       issues: [],

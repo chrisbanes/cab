@@ -349,23 +349,21 @@ async function seedPublicState(session) {
 }
 
 async function readRestoredPublicState(session, records) {
-  for (const [kind, id, expected] of [
-    ["profile", records.profileId, "S08a disposable profile"],
-    ["task", records.taskId, "S08a unready fixture task"],
-  ]) {
-    const response = await fetch(`${origin}/${kind}/${id}`, {
-      headers: { cookie: session.cookie },
-      signal: AbortSignal.timeout(5_000),
-    });
-    assert.equal(response.status, 200);
-    assert.match(await response.text(), new RegExp(expected));
-  }
-  const task = await fetch(`${origin}/task/${records.taskId}`, {
+  const profile = await fetch(`${origin}/profile/${records.profileId}`, {
     headers: { cookie: session.cookie },
     signal: AbortSignal.timeout(5_000),
   });
-  const taskHtml = await task.text();
-  assert.match(taskHtml, /Not ready/);
+  assert.equal(profile.status, 200);
+  assert.match(await profile.text(), /S08a disposable profile/);
+  // The task page is gone: the task read carries the title and the unready state.
+  const task = await fetch(`${origin}/api/operator/tasks/${records.taskId}`, {
+    headers: { cookie: session.cookie },
+    signal: AbortSignal.timeout(5_000),
+  });
+  assert.equal(task.status, 200);
+  const taskRead = (await task.json()).data.task;
+  assert.match(taskRead.title, /S08a unready fixture task/);
+  assert.equal(taskRead.ready, false);
   const project = await fetch(
     `${origin}/api/operator/projects/${records.projectId}/configuration`,
     {

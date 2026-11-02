@@ -6,7 +6,6 @@ import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { derivedUuid } from "../../src/cli/write.js";
-import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { completedLead, configure, until } from "../fixtures/completed-lead.js";
 import { stdinOf } from "../fixtures/cli-harness.js";
@@ -810,15 +809,6 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
     const list = await o.h.run(["task", "list", "--connection", "ro"]);
     assert.equal(list.code, 0, list.err);
     assert.ok(list.out.includes(state), list.out);
-    const page = new LocalOperatorUi(d, undefined, sources).task(taskId);
-    assert.ok(
-      page.includes(
-        closure === "held"
-          ? "Held · closed on GitHub"
-          : "Done · closed on GitHub, not delivered by cab",
-      ),
-      page,
-    );
   };
   observe();
   await agree("held", "Paused (closed on GitHub; held)");
@@ -853,9 +843,9 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
   await agree("completed", "Done (closed on GitHub)");
 });
 
-test("a pending own-delivery closure proof is not shown as GitHub closure on any task view", async (t) => {
+test("a pending own-delivery closure proof is not shown as GitHub closure in the task read, list and CLI", async (t) => {
   const o = await startCliOperator(t);
-  const { d, s } = o;
+  const { s } = o;
   const taskId = seedImported(o);
   const sources = s.f.service.githubSources();
   sources.recordDeliveryClosureUnavailable("I1");
@@ -893,21 +883,11 @@ test("a pending own-delivery closure proof is not shown as GitHub closure on any
     assert.equal(human.code, 0, human.err);
     assert.ok(!human.out.includes("closed on GitHub"), human.out);
   }
-  const ui = new LocalOperatorUi(d, undefined, sources);
-  for (const [page, marker] of [
-    [ui.task(taskId), "Source hold: closure-read-unavailable"],
-  ] as const) {
-    assert.ok(page.includes(marker), marker);
-    assert.ok(
-      !/closed on GitHub|issue reopens/.test(page),
-      "no reopen guidance for a pending own-delivery proof",
-    );
-  }
 });
 
-test("an unproved own-delivery closure attribution is explained on every task view", async (t) => {
+test("an unproved own-delivery closure attribution is shown as unattributed in the task read, list and CLI", async (t) => {
   const o = await startCliOperator(t);
-  const { d, s } = o;
+  const { s } = o;
   const taskId = seedImported(o);
   const sources = s.f.service.githubSources();
   sources.recordDeliveryClosureAttributionUnproved("I1");
@@ -948,14 +928,6 @@ test("an unproved own-delivery closure attribution is explained on every task vi
     assert.equal(human.code, 0, human.err);
     assert.ok(human.out.includes("closure not attributed to cab"), human.out);
   }
-  const ui = new LocalOperatorUi(d, undefined, sources);
-  const page = ui.task(taskId);
-  for (const marker of [
-    "could not prove",
-    "Reopen the issue on GitHub",
-    "Source hold: closure-attribution-unproved",
-  ])
-    assert.ok(page.includes(marker), marker);
 });
 
 test("task get names an imported Draft task's unmet readiness condition", async (t) => {

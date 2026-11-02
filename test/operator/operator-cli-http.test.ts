@@ -276,7 +276,6 @@ test("bearer credentials read through the service under server-side route author
     ["POST", `/api/operator/credentials/${read.credential.id}/rotate`, {}],
     ["POST", `/api/operator/credentials/${read.credential.id}/revoke`, {}],
     ["GET", "/"],
-    ["GET", `/task/${s.taskId}`],
     ["GET", "/app"],
     ["GET", "/assets/main.js"],
     ["POST", "/command", {}],

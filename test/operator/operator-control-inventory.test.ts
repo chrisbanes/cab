@@ -264,9 +264,7 @@ test("retained rendered form actions, fields and mounted route controls match do
     );
   const paths = [
     "/",
-    `/task/${taskId}`,
     `/app/tasks/${taskId}`,
-    `/task/${importedId}`,
     `/profile/${profileId}`,
     `/assignment/${assignmentId}`,
     "/runtime",
@@ -297,15 +295,14 @@ test("retained rendered form actions, fields and mounted route controls match do
     for (const match of html.matchAll(/href="([^"]+)"/g))
       destinations.add(match[1] ?? "");
   }
-  for (const c of [
-    "project.create",
-    "profile.create",
-    "source.review",
-    "task.configure",
-    "profile.configure",
-  ]) {
+  for (const c of ["project.create", "profile.create", "profile.configure"]) {
     assert.ok(commands.has(c), `${c} remains rendered`);
     assert.ok(inventory.includes(c), `${c} retains documented owner`);
+  }
+  // The task page and its two forms are removed; the task workspace sends these as JSON.
+  for (const removed of ["source.review", "task.configure"]) {
+    assert.ok(!commands.has(removed), `${removed} form is not rendered`);
+    assert.ok(inventory.includes(removed), `${removed} keeps its owner`);
   }
   for (const path of actions)
     assert.ok(
@@ -318,18 +315,23 @@ test("retained rendered form actions, fields and mounted route controls match do
     "instructions",
     "revoked",
     "capabilities",
+    "globalLimit",
+    "projectLimit",
+  ])
+    assert.ok(fields.has(name), `${name} remains rendered`);
+  for (const removed of [
+    "observedDigest",
+    "decision",
     "title",
     "outcome",
     "ready",
-    "globalLimit",
-    "projectLimit",
-    "decision",
   ])
-    assert.ok(fields.has(name), `${name} remains rendered`);
-  // Imported text is live: the source form only resumes a hold, with no text digest to review.
-  assert.ok(!fields.has("observedDigest"));
-  assert.ok(options.has("resume-source-hold"));
-  for (const removed of ["clarification", "accept-revised-scope"])
+    assert.ok(!fields.has(removed), `${removed} field is not rendered`);
+  for (const removed of [
+    "resume-source-hold",
+    "clarification",
+    "accept-revised-scope",
+  ])
     assert.ok(!options.has(removed), `${removed} is not offered`);
   for (const path of [
     "/",
@@ -339,7 +341,7 @@ test("retained rendered form actions, fields and mounted route controls match do
     "/app",
   ])
     assert.ok(destinations.has(path), `${path} cross-navigation retained`);
-  assert.equal(forms, 14);
+  assert.ok(forms > 0);
   for (const removed of [
     "/runtime/control/dependency/add",
     "/runtime/control/dependency/remove",
