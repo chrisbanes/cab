@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import type { Page, Route } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -9,6 +10,16 @@ import { savedOutcome } from "../fixtures/operator-settings.js";
 import { commandRequest, setupJourney } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-jira-source-browser");
+
+/** The public form is usable before its session-only saved query read has hydrated it. */
+const waitForQueries = (page: Page, expected: string) =>
+  page.waitForFunction(
+    (value) =>
+      document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="JQL queries, one per line"]',
+      )?.value === value,
+    expected,
+  );
 
 const site = "example.atlassian.net";
 const variables = {
@@ -112,7 +123,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
   await savedOutcome(page);
   // Reopening the editor loads the saved query through the private read.
   await page.reload();
-  await page.getByLabel("JQL queries, one per line").waitFor();
+  await waitForQueries(page, "project = ABC");
   assert.equal(
     await page.getByLabel("JQL queries, one per line").inputValue(),
     "project = ABC",
@@ -178,12 +189,47 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
       { id: "S-1", kind: "jql", jql: "project = ABC\nAND status != Done" },
     ],
   });
-  await page.reload();
-  await page.getByLabel("JQL queries, one per line").waitFor();
-  assert.equal(
-    await page.getByLabel("JQL queries, one per line").inputValue(),
-    "project = ABC AND status != Done",
-  );
+  let releaseQueries!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseQueries = resolve;
+  });
+  let receivedQueries!: (value: { jql: { jql: string }[] }) => void;
+  const received = new Promise<{ jql: { jql: string }[] }>((resolve) => {
+    receivedQueries = resolve;
+  });
+  const privatePath = `**/api/operator/projects/${projectId}/private-values`;
+  const holdQueries = async (route: Route) => {
+    const response = await route.fetch();
+    receivedQueries((await response.json()).data.source);
+    await gate;
+    await route.fulfill({ response });
+  };
+  await page.route(privatePath, holdQueries);
+  try {
+    await page.reload();
+    const privateSource = await received;
+    await page.getByLabel("JQL queries, one per line").waitFor();
+    assert.equal(
+      privateSource.jql[0]?.jql,
+      "project = ABC\nAND status != Done",
+    );
+    assert.equal(
+      await page.getByLabel("JQL queries, one per line").inputValue(),
+      "",
+    );
+    await page
+      .getByRole("button", { name: "Remove unavailable source 1", exact: true })
+      .waitFor();
+    releaseQueries();
+    await waitForQueries(page, "project = ABC AND status != Done");
+    assert.equal(
+      await page.getByLabel("JQL queries, one per line").inputValue(),
+      "project = ABC AND status != Done",
+    );
+  } finally {
+    releaseQueries();
+    await page.unroute(privatePath, holdQueries);
+  }
   // A failed private read leaves the credentials, sync and refresh in place, and Retry loads it.
   let failed = false;
   await page.route("**/api/operator/projects/*/private-values", (route) => {
@@ -192,11 +238,15 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     return route.fulfill({ status: 503, body: "{}" });
   });
   await page.reload();
-  await page.getByText("Saved queries unavailable.").waitFor();
+  await page
+    .getByText("Saved queries unavailable; kept as unavailable rows.")
+    .waitFor();
   await page.getByRole("region", { name: "Jira credentials" }).waitFor();
   await page.getByRole("button", { name: "Refresh now" }).waitFor();
-  await page.getByRole("button", { name: "Retry" }).click();
-  await page.getByLabel("JQL queries, one per line").waitFor();
+  await page
+    .getByRole("button", { name: "Retry saved queries", exact: true })
+    .click();
+  await waitForQueries(page, "project = ABC AND status != Done");
   assert.equal(
     await page.getByLabel("JQL queries, one per line").inputValue(),
     "project = ABC AND status != Done",
