@@ -46,12 +46,21 @@ import {
 } from "../operator/diagnostic-retention.js";
 import { connectionNameSchema } from "./connections.js";
 import {
+  type Configuration,
+  defaultInstallationRecord,
+  type InstallRecord,
+  installationRecordPath,
+  processIdentitySchema,
+  STATE_DIR,
+  RECORD_SCHEMA,
+  recordSchema,
+} from "./installation-record.js";
+import {
   type DaemonFacts,
   type Job,
   type Listener,
   type Observed,
   daemonDecision,
-  MAX_OBSERVED_PROCESSES,
   refineObserved,
   type ProcessIdentity as ObservedIdentity,
   sameIdentity,
@@ -64,7 +73,7 @@ import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
 
-const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--node PATH] [--connection NAME] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
+const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--node PATH] [--connection NAME] [--access local|token] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
   service upgrade [VERSION_DIR] [--node PATH] [--connection NAME] [SERVICE_OPTIONS]
   service uninstall [SERVICE_OPTIONS]
   service init-auth [AUTH_FILE] [--state-dir DIR]
@@ -88,11 +97,17 @@ The diagnostic options (install and upgrade) are written into the LaunchAgent;
 upgrade keeps the recorded values unless an option changes them, and default
 clears one. To change a value, run upgrade with the installed release directory.
 install binds the LaunchAgent to the release it runs from (STATE/versions/V), or
-to TARBALL unpacked into STATE/versions. It asks once for the operator password
-(creating the auth file when it is missing), then signs the CLI in with a read
-credential (90 days, kept in the Keychain or --token-file), runs doctor and opens
-the app. Those steps never undo a started service; if one fails, install prints
-the manual login line. --connection defaults to local; --no-open skips the browser.
+to TARBALL unpacked into STATE/versions. It asks for a new operator password only
+when the auth file is missing. The CLI then uses local access through this OS
+account: no token, login or Keychain. A saved CLI connection is used unchanged
+(--connection NAME selects one); with none, a bare command finds the default
+installation from its record, and another label or state directory is selected
+with --local --local-installation STATE/launchd/LABEL.json. Install then runs
+doctor and opens the app. --access token (or --token-file PATH) instead asks for the
+operator password and saves a 90-day read credential in the Keychain or the file,
+under --connection NAME (default local), never replacing a saved connection. Those
+steps never undo a started service; if one fails, install prints what to run.
+--no-open skips the browser.
 Run from a global npm installation (npm install -g @chrisbanes/cab), install copies
 that package into STATE/versions/V and binds the service to the Node.js that runs it,
 or to --node PATH: an absolute path to an even-numbered release at or above the
@@ -102,13 +117,15 @@ install --mode daemon prepares a LaunchDaemon that starts at boot, before anyone
 in. It runs as you, never as root: it renders and records the plist, then prints the
 sudo commands that install and start it; run them, then run the same install command
 again, with the same options and no TARBALL, to verify; it reports started only when the
-job's own process serves the port. It does not sign in or run doctor. The two modes are
+job's own process serves the port, then runs doctor with local access; it never issues a token. The two modes are
 never both installed; uninstall prints the matching sudo commands for a daemon and clears
 its record only once every service process it saw has exited. upgrade
 refuses a daemon install; see the macOS operations guide for the switch-back procedure.
 upgrade stops the job, starts VERSION_DIR (or, with no VERSION_DIR, the global npm
 installation it runs from, copied into STATE/versions/V first) and checks readiness
-through a logged-in CLI connection with a read credential. The service takes and
+through the selected CLI connection, before stopping and after starting: a saved token
+connection must still be valid (nothing renews it), and with no saved connection it uses
+local access to the installation being upgraded. The service takes and
 verifies its own snapshot before it migrates older data, and refuses to start without
 one. A failed upgrade leaves the job stopped and reports the snapshot and logs; recover with
 a fixed release and another upgrade, or snapshot restore. uninstall removes the
@@ -147,8 +164,6 @@ export const serviceHelp = (area: LocalArea) =>
     ? `Usage: cab service <command> [options]\n\n${SERVICE_COMMANDS}${SERVICE_NOTES}`
     : `Usage: cab snapshot <command>\n\n${SNAPSHOT_COMMANDS}`;
 
-const STATE_DIR = "Library/Application Support/cab";
-const RECORD_SCHEMA = "cab.service/v1";
 const NPM_STAGE_SCHEMA = "cab.npm-stage/v1";
 const SDK_PLATFORM_PACKAGE = /^claude-agent-sdk-/;
 const NOT_LOADED = 113;
@@ -206,9 +221,21 @@ export type ServiceHost = {
 export type GhTokenStorage = "keyring" | "file" | "unknown";
 export type ServiceMode = "agent" | "daemon";
 
+/** A saved connection as install completion sees it; never its credential. */
+export type SavedSelection = {
+  name: string;
+  url: string;
+  accessMode: "local" | "token";
+};
+
 /** The interactive CLI work around install; absent when a caller cannot sign in. */
 export type InstallCli = {
   interactive: boolean;
+  /**
+   * The saved connection a bare command (or `requested`) selects, read without its credential;
+   * null when nothing is saved or requested. Throws when the selection is ambiguous or invalid.
+   */
+  selection(requested: string | undefined): Promise<SavedSelection | null>;
   /** Rejects when `signal` aborts. */
   readPassword(prompt: string, signal?: AbortSignal): Promise<string>;
   login(
@@ -219,8 +246,15 @@ export type InstallCli = {
     /** Aborts the identity check and the storage; the caller then revokes the credential. */
     signal: AbortSignal,
   ): Promise<void>;
-  /** Stops reading when `signal` aborts. */
-  doctor(connection: string, signal: AbortSignal): Promise<void>;
+  /**
+   * Runs doctor through the saved `connection`, else with local access to the installation
+   * `record` names. Stops reading when `signal` aborts.
+   */
+  doctor(
+    connection: string | undefined,
+    signal: AbortSignal,
+    record: string,
+  ): Promise<void>;
 };
 
 /** What install adds beyond the LaunchAgent: unpack or stage, password, login, doctor, open. */
@@ -229,7 +263,15 @@ export type FirstRun = {
   /** The Node.js an npm installation binds; defaults to the one running the CLI. */
   node?: string | undefined;
   cli?: InstallCli | undefined;
-  connection: string;
+  /** --connection: the saved connection to use, or the name a token is saved under (default local). */
+  connection?: string | undefined;
+  /**
+   * CLI access after install. Local (the default) mints nothing; token issues a 90-day read
+   * credential. Undefined is the local default; "local" was chosen explicitly.
+   */
+  access?: "local" | "token" | undefined;
+  /** Whether a bare CLI command discovers this installation by its record. */
+  discoverable?: boolean | undefined;
   tokenFile?: string | undefined;
   open: boolean;
   /** Defaults to the LaunchAgent. */
@@ -264,75 +306,6 @@ export type OperatorConnection = {
   /** One authenticated readiness read, after the installation identity check; `signal` aborts it. */
   readiness(signal: AbortSignal): Promise<{ id: string; status: string }[]>;
 };
-
-const boundedInteger = (bound: Parameters<typeof isInBound>[1]) =>
-  z.number().refine((value) => isInBound(value, bound));
-
-const configurationSchema = z
-  .object({
-    label: z.string(),
-    nodePath: z.string(),
-    cliPath: z.string(),
-    dataDirectory: z.string(),
-    authFile: z.string(),
-    origin: z.string(),
-    port: z.number().int(),
-    stdoutPath: z.string(),
-    stderrPath: z.string(),
-    diagnosticRetentionDays: boundedInteger(diagnosticRetentionDays).optional(),
-    diagnosticStorageMib: boundedInteger(diagnosticStorageMib).optional(),
-    /** LaunchDaemon only. */
-    userName: z.string().optional(),
-    home: z.string().optional(),
-  })
-  .strict();
-type Configuration = z.infer<typeof configurationSchema>;
-
-/** What `captureIdentity` returns on macOS: pid, start time and boot session of the service. */
-const processIdentitySchema = z
-  .object({
-    processId: z.string().regex(/^[1-9][0-9]{0,8}$/),
-    processStartedAt: z.string().min(1).max(128),
-    bootId: z.string().min(1).max(128),
-  })
-  .strict();
-
-const observedSchema = z
-  .object({
-    processes: z.array(processIdentitySchema).max(MAX_OBSERVED_PROCESSES),
-    unidentified: z.boolean(),
-    identified: z.boolean(),
-  })
-  .strict();
-
-const recordSchema = z
-  .object({
-    schema: z.literal(RECORD_SCHEMA),
-    // A record without `mode` is a LaunchAgent written before daemon mode; an older CLI
-    // refuses one with it (strict), so it cannot act on a daemon install.
-    mode: z.enum(["agent", "daemon"]).default("agent"),
-    label: z.string(),
-    version: z.string(),
-    plistSha256: z.string().regex(/^[0-9a-f]{64}$/),
-    configuration: configurationSchema,
-    /**
-     * Daemon only: what the service has seen of its process under launchd. Absent
-     * means launchd was never seen running it. Uninstall clears the record only once
-     * every process recorded here is confirmed gone (see daemon-ownership.ts).
-     */
-    observed: observedSchema.optional(),
-  })
-  .strict()
-  .refine(
-    ({ mode, configuration: { userName, home }, observed }) =>
-      mode === "daemon"
-        ? userName !== undefined && home !== undefined
-        : userName === undefined &&
-          home === undefined &&
-          observed === undefined,
-    "daemon fields do not match the mode",
-  );
-type InstallRecord = z.infer<typeof recordSchema>;
 
 /** The Node.js a record binds when it runs an npm release; a tarball release bundles its own. */
 const boundNode = ({ configuration: { nodePath, cliPath } }: InstallRecord) =>
@@ -1228,10 +1201,10 @@ class Service {
     ]);
     try {
       await bounded(connection.readiness(signal), signal);
-    } catch {
+    } catch (error) {
       this.checkInterrupt();
       throw refuse(
-        "The CLI connection cannot read readiness; run `cab auth login` with a read credential first",
+        `The selected CLI connection cannot read readiness: ${connectionMessage(error)} A token connection needs \`cab auth login\` with a read credential; local access needs the running service's own state`,
       );
     }
   }
@@ -1356,6 +1329,9 @@ function portIsFree(port: number): Promise<boolean> {
 
 const message = (error: unknown) =>
   error instanceof ServiceFailure ? error.message : "operation failed";
+/** A CLI connection failure: its own message (never a secret) names the mode-specific remedy. */
+const connectionMessage = (error: unknown) =>
+  error instanceof Error && "code" in error ? error.message : message(error);
 
 /**
  * Sign in with the operator password over the session API the UI uses, issue one 90-day read
@@ -1517,7 +1493,7 @@ export async function installService(
   releaseRoot: string,
   host: ServiceHost,
   io: ServiceIo,
-  first: FirstRun = { connection: "local", open: false },
+  first: FirstRun = { open: false },
 ): Promise<number> {
   const refused = await refusedAsRoot(host, io, "install");
   if (refused !== null) return refused;
@@ -1574,6 +1550,19 @@ async function installServiceLocked(
       if (!statSync(tarball).isFile())
         throw refuse(`${tarball} is not a readable file`);
     }
+    const token = first.access === "token";
+    if (cli && token && (await savedName(cli, tokenName(first))))
+      throw refuse(
+        `Connection ${tokenName(first)} is already saved; install never replaces a saved connection or its credential. Pass --connection NEW_NAME to save the new token under another name`,
+      );
+    if (cli && first.access === "local") {
+      // An explicit local choice never silently overrides a selected token connection.
+      const selected = await savedSelection(cli, first.connection);
+      if (selected?.accessMode === "token")
+        throw refuse(
+          `Connection ${selected.name} uses a token; --access local does not convert it. Adopt local access deliberately with \`cab connection local ${selected.name} --local-installation ${service.recordPath}\`, or drop --access local to use it unchanged`,
+        );
+    }
     if (cli && first.tokenFile) {
       // Found only after the mint it would waste a credential.
       if (lstatSync(first.tokenFile, { throwIfNoEntry: false }))
@@ -1620,8 +1609,8 @@ async function installServiceLocked(
     // is needed to create the auth file.
     let password: string | undefined;
     service.checkInterrupt();
-    // A daemon install signs in nowhere, so it asks only to create a missing auth file.
-    if (cli?.interactive && (!daemon || authMissing))
+    // Only a token install signs in, so the others ask only to create a missing auth file.
+    if (cli?.interactive && ((token && !daemon) || authMissing))
       try {
         password =
           (await cli.readPassword(
@@ -1685,6 +1674,26 @@ async function installServiceLocked(
     stage = "health";
     await service.waitForApp(service.origin);
     // From here the service stays installed whatever happens: nothing below may throw.
+    if (!token) {
+      const choice = await localCompletion(service, first);
+      const { selected } = choice;
+      service.write("stdout", {
+        ok: true,
+        operation: "install",
+        mode: "agent",
+        label: options.label,
+        version,
+        origin: service.origin,
+        plist: service.activation,
+        logs,
+        accessMode: selected?.accessMode ?? "local",
+        connection: selected?.name ?? null,
+        credentialActive: false,
+        sessionOpen: false,
+      });
+      await finishLocalInstall(service, first, choice);
+      return 0;
+    }
     const signInResult = await signIn(service, first, password);
     const { connection, credentialActive, sessionOpen } = signInResult;
     service.write("stdout", {
@@ -1696,6 +1705,7 @@ async function installServiceLocked(
       origin: service.origin,
       plist: service.activation,
       logs,
+      accessMode: "token",
       connection,
       credentialActive,
       sessionOpen,
@@ -1788,15 +1798,11 @@ async function finishDaemonInstall(
   await warnGhKeychain(service, record.configuration);
   if (started) {
     // Verifying never opens the browser; the app URL is still printed.
-    await finishInstall(
+    const verified = { ...first, open: false };
+    await finishLocalInstall(
       service,
-      { ...first, open: false },
-      {
-        connection: null,
-        credentialName: "",
-        credentialActive: false,
-        sessionOpen: false,
-      },
+      verified,
+      await localCompletion(service, verified),
     );
     return;
   }
@@ -1933,7 +1939,7 @@ async function signIn(
       name,
       (token, storing) =>
         cli.login(
-          first.connection,
+          tokenName(first),
           service.origin,
           token,
           first.tokenFile,
@@ -1942,13 +1948,119 @@ async function signIn(
       service.io.signal,
     );
     return {
-      connection: issued.outcome === "stored" ? first.connection : null,
+      connection: issued.outcome === "stored" ? tokenName(first) : null,
       credentialName: name,
       credentialActive: issued.credentialActive,
       sessionOpen: issued.sessionOpen,
     };
   } catch {
     return none;
+  }
+}
+
+/** The connection name an explicit token install saves its credential under. */
+const tokenName = (first: FirstRun) => first.connection ?? "local";
+
+/** The saved selection, for a preflight refusal: an unreadable selection refuses. */
+async function savedSelection(cli: InstallCli, requested: string | undefined) {
+  try {
+    return await cli.selection(requested);
+  } catch (error) {
+    throw refuse(connectionMessage(error));
+  }
+}
+
+async function savedName(cli: InstallCli, name: string) {
+  try {
+    return (await cli.selection(name)) !== null;
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "connection-not-found")
+      return false;
+    throw refuse(connectionMessage(error));
+  }
+}
+
+/** What a local install completes with: the saved selection, unchanged, or none. */
+type LocalChoice = {
+  selected: SavedSelection | null;
+  /** Why the saved selection cannot be used; nothing was changed. */
+  problem?: string;
+};
+
+/** Reads the saved selection without its credential. Never throws. */
+async function localCompletion(
+  service: Service,
+  first: FirstRun,
+): Promise<LocalChoice> {
+  if (!first.cli) return { selected: null };
+  try {
+    const selected = await first.cli.selection(first.connection);
+    return selected?.accessMode === "token" && selected.url !== service.origin
+      ? {
+          selected,
+          problem: `connection ${selected.name} points at ${selected.url}, not ${service.origin}`,
+        }
+      : { selected };
+  } catch (error) {
+    return { selected: null, problem: connectionMessage(error) };
+  }
+}
+
+/**
+ * A local install's doctor and app URL. Doctor runs through the saved selection unchanged, or,
+ * with nothing saved, through local access to this install's own record; a selection that
+ * cannot be used is reported, never replaced. Human lines go to stderr; never throws.
+ */
+async function finishLocalInstall(
+  service: Service,
+  first: FirstRun,
+  { selected, problem }: LocalChoice,
+) {
+  const app = `${service.origin}/app`;
+  const line = (text: string) => service.io.stderr.write(`${text}\n`);
+  const interrupted = () => service.io.signal?.aborted === true;
+  const local = `--local --local-installation ${shellWord(service.recordPath)}`;
+  try {
+    if (problem === undefined && first.cli && !interrupted()) {
+      const stop = AbortSignal.any([
+        service.host.timeout(DOCTOR_MS),
+        ...(service.io.signal ? [service.io.signal] : []),
+      ]);
+      await bounded(
+        first.cli.doctor(selected?.name, stop, service.recordPath),
+        stop,
+      );
+    }
+  } catch {
+    // The lines below are still printed.
+  }
+  try {
+    if (problem !== undefined) {
+      line(
+        `The saved CLI connection was not used or changed: ${problem}. Check this service with local access: cab doctor ${local}`,
+      );
+      line(
+        `To save local access deliberately: cab connection local NAME --local-installation ${shellWord(service.recordPath)}`,
+      );
+    } else if (selected)
+      line(
+        `The CLI uses connection ${selected.name} (${selected.accessMode} access), unchanged.`,
+      );
+    else {
+      line(
+        "The CLI uses local access through this OS account: no token, login or Keychain.",
+      );
+      line(
+        first.discoverable
+          ? "Then run: cab doctor"
+          : `Then run: cab doctor ${local}`,
+      );
+    }
+    line(`Open ${app}`);
+    if (first.open && !interrupted())
+      await service.host.open(app, service.io.signal);
+  } catch {
+    // Install already succeeded; a doctor or open failure is not an install failure.
   }
 }
 
@@ -1968,7 +2080,10 @@ async function finishInstall(
         ...(service.io.signal ? [service.io.signal] : []),
       ]);
       // Doctor stops its own reads on `stop`; `bounded` only backs that up.
-      await bounded(first.cli.doctor(connection, stop), stop);
+      await bounded(
+        first.cli.doctor(connection, stop, service.recordPath),
+        stop,
+      );
     }
   } catch {
     // The URL below is still printed.
@@ -1984,7 +2099,7 @@ async function finishInstall(
       );
     if (connection === null) {
       line(
-        `Log in the CLI with a read credential from Settings → CLI credentials: cab auth login --connection ${first.connection} --url ${service.origin}`,
+        `Log in the CLI with a read credential from Settings → CLI credentials: cab auth login --connection ${tokenName(first)} --url ${service.origin}`,
       );
       line("Then run: cab doctor");
     }
@@ -2083,14 +2198,15 @@ async function upgradeServiceLocked(
     };
     service.requireOwned(record, await service.loadedJob());
     let origin: string | undefined;
+    let unusable: unknown;
     try {
       origin = await connection.origin();
-    } catch {
-      origin = undefined;
+    } catch (error) {
+      unusable = error;
     }
     if (origin === undefined)
       throw refuse(
-        "No usable CLI connection; run `cab auth login` with a read credential first",
+        `No usable CLI connection: ${connectionMessage(unusable)} Nothing was stopped`,
       );
     if (origin !== record.configuration.origin)
       throw refuse(
@@ -2503,6 +2619,7 @@ export const LIFECYCLE_OPTIONS = {
   label: { type: "string" },
   port: { type: "string" },
   connection: { type: "string" },
+  access: { type: "string" },
   "token-file": { type: "string" },
   "no-open": { type: "boolean" },
   "diagnostic-retention-days": { type: "string" },
@@ -2529,6 +2646,8 @@ export const VERIFY_OPTIONS: Record<
   connection: "carried",
   mode: "carried",
   "token-file": "rejected",
+  // A daemon never issues a token; verifying uses local access whatever was chosen.
+  access: "irrelevant",
   "no-open": "irrelevant",
   // A re-run takes the installed release and its recorded binding.
   node: "irrelevant",
@@ -2552,7 +2671,7 @@ export function daemonVerifyCommand(
     "launch-agents-dir": options.agentsDir,
     label: options.label,
     port: options.port,
-    connection: first.connection,
+    ...(first.connection === undefined ? {} : { connection: first.connection }),
     mode: "daemon",
   };
   const release = join(options.stateDir, "versions", version);
@@ -2658,6 +2777,7 @@ export function lifecycleOptions(
     options,
     positionals,
     connection: values.connection,
+    access: values.access,
     tokenFile: values["token-file"],
     node: values.node,
     noOpen: values["no-open"] === true,
@@ -2674,7 +2794,11 @@ const releaseRoot = () =>
 export async function serviceCommand(
   argv: string[],
   deps: CliDeps,
-  operatorConnection: (name: string | undefined) => OperatorConnection,
+  /** The selected CLI connection; with none saved, local access to `record`. */
+  operatorConnection: (
+    name: string | undefined,
+    record: string,
+  ) => OperatorConnection,
   host: () => ServiceHost = defaultServiceHost,
   cli?: InstallCli,
 ): Promise<number> {
@@ -2697,9 +2821,15 @@ export async function serviceCommand(
         parsed.positionals.length > 0) ||
       (command !== "install" &&
         (parsed.tokenFile !== undefined ||
+          parsed.access !== undefined ||
           parsed.noOpen ||
           parsed.modeGiven)) ||
-      (parsed.mode === "daemon" && parsed.tokenFile !== undefined) ||
+      (parsed.access !== undefined &&
+        parsed.access !== "local" &&
+        parsed.access !== "token") ||
+      (parsed.access === "local" && parsed.tokenFile !== undefined) ||
+      (parsed.mode === "daemon" &&
+        (parsed.tokenFile !== undefined || parsed.access === "token")) ||
       (parsed.connection !== undefined &&
         command === "install" &&
         !connectionNameSchema.safeParse(parsed.connection).success) ||
@@ -2713,7 +2843,15 @@ export async function serviceCommand(
         tarball: parsed.positionals[0] && resolve(parsed.positionals[0]),
         node: parsed.node,
         cli,
-        connection: parsed.connection ?? "local",
+        connection: parsed.connection,
+        // A token file is an explicit token install.
+        access:
+          parsed.tokenFile !== undefined
+            ? "token"
+            : (parsed.access as FirstRun["access"]),
+        discoverable:
+          installationRecordPath(options.stateDir, options.label) ===
+          defaultInstallationRecord(deps.env),
         tokenFile: parsed.tokenFile && resolve(parsed.tokenFile),
         open: !parsed.noOpen,
         mode: parsed.mode,
@@ -2724,7 +2862,10 @@ export async function serviceCommand(
     return upgradeService(
       options,
       versionDir ? resolve(versionDir) : releaseRoot(),
-      operatorConnection(parsed.connection),
+      operatorConnection(
+        parsed.connection,
+        installationRecordPath(options.stateDir, options.label),
+      ),
       serviceHost,
       deps,
       { node: parsed.node, implicit: !versionDir },

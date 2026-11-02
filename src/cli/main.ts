@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import {
-  defaultLocalState,
   readLocalAccess,
   localOrigin,
   LocalAccessError,
 } from "../operator/local-access.js";
 import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { readinessSchema } from "../operator/readiness.js";
@@ -26,6 +25,12 @@ import {
   KeychainCredentialStore,
   readTokenFile,
 } from "./connections.js";
+import {
+  defaultInstallationRecord,
+  defaultStateDirectory,
+  readInstallationRecord,
+  recordExists,
+} from "./installation-record.js";
 import { coverage, uuidArg } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
 import {
@@ -122,7 +127,10 @@ export const BUILTIN_USAGE = new Map([
   ["auth login", AUTH_LOGIN_USAGE],
   ["auth status", "auth status [--connection NAME]"],
   ["auth logout", "auth logout [--connection NAME]"],
-  ["connection local", "connection local NAME [--local-state DATA_DIR]"],
+  [
+    "connection local",
+    "connection local NAME [--local-state DATA_DIR | --local-installation RECORD_FILE]",
+  ],
   ["connection list", "connection list"],
   ["connection use", "connection use NAME"],
   ["connection remove", "connection remove NAME"],
@@ -151,6 +159,7 @@ const indented = (lines: Iterable<string>) =>
 const OPTIONS_HELP = `Options:
   --local               Same-OS-account local read/write access
   --local-state DATA_DIR  Custom foreground data directory (with --local)
+  --local-installation RECORD_FILE  Installed service by its record (with --local)
   --output human|json   Result format (default human)
   --limit N             Page size, 1-200 (default 50; some reads cap lower)
   --cursor TOKEN        Continue from the More: line of the previous page
@@ -201,13 +210,18 @@ dispatches work; continue with a new task message after replacement. Adoption
 here records evidence and is unrelated to assignment apply-current.`;
 
 /** The prose notes that name an area's commands. */
-const LOCAL_ACCESS_NOTE = `Local access: cab auth status --local --local-state /absolute/private/cab-data
-uses this OS account with read/write CLI authority, without a token or Keychain.
+const LOCAL_ACCESS_NOTE = `Local access uses this OS account with read/write CLI authority, without a token
+or Keychain. With no saved connection, commands find the default installed service
+from its record (~/Library/Application Support/cab/launchd/local.cab.service.json),
+else the default foreground data directory. Select another installation by its
+record or a foreground service by its data directory:
+  cab auth status --local --local-installation /absolute/state/launchd/LABEL.json
+  cab auth status --local --local-state /absolute/private/cab-data
 Saved token selections keep their scope, expiry and logout; they never fall back.
-cab connection local NAME --local-state DATA_DIR deliberately saves local access
-after checking the installation. Local login/logout explain OS-account access;
-logout cannot disable it. This does not isolate same-account processes.
-Installed-service discovery and lifecycle integration remain outstanding.`;
+cab connection local NAME [--local-state DATA_DIR | --local-installation RECORD_FILE]
+deliberately saves local access after checking the installation. Local
+login/logout explain OS-account access; logout cannot disable it. This does not
+isolate same-account processes.`;
 
 const AREA_NOTES: Record<string, string[]> = {
   auth: [LOCAL_ACCESS_NOTE],
@@ -245,6 +259,7 @@ Options:
   --local               Use same-OS-account local read/write access
   --local-state DATA_DIR  Select a foreground data directory (with --local)
                          Example: cab auth status --local --local-state /private/cab/data
+  --local-installation RECORD_FILE  Select an installed service by its record (with --local)
   --output human|json   Result format (default human)
   --help [--all]        Show help
   --version             Show the installed version
@@ -303,6 +318,7 @@ const defaultDeps = (): CliDeps => ({
 export const OPTIONS = {
   local: { type: "boolean" },
   "local-state": { type: "string" },
+  "local-installation": { type: "string" },
   connection: { type: "string" },
   url: { type: "string" },
   "token-file": { type: "string" },
@@ -400,7 +416,7 @@ export async function main(
     return serviceCommand(
       argv.slice(1),
       deps,
-      (name) => operatorConnection(deps, name),
+      (name, record) => operatorConnection(deps, name, record),
       defaultServiceHost,
       installCli(deps),
     );
@@ -475,19 +491,32 @@ export async function main(
       );
     if (values.local && values.connection !== undefined)
       throw new CliError("usage", "Choose --local or --connection, not both.");
-    if (
-      values["local-state"] !== undefined &&
-      !values.local &&
-      positionals.slice(0, 2).join(" ") !== "connection local"
-    )
+    const adopting = positionals.slice(0, 2).join(" ") === "connection local";
+    if (values["local-state"] !== undefined && !values.local && !adopting)
       throw new CliError(
         "usage",
         "--local-state requires --local or connection local.",
       );
+    if (values["local-installation"] !== undefined) {
+      if (!values.local && !adopting)
+        throw new CliError(
+          "usage",
+          "--local-installation requires --local or connection local.",
+        );
+      if (values["local-state"] !== undefined)
+        throw new CliError(
+          "usage",
+          "Choose --local-state or --local-installation, not both.",
+        );
+      if (!values["local-installation"])
+        throw new CliError("usage", "--local-installation needs a file.");
+    }
     const result = await run(positionals, values, {
       ...deps,
       forceLocal: values.local,
       localState: values["local-state"],
+      localInstallation:
+        values["local-installation"] && resolve(values["local-installation"]),
     });
     if (result.streamed) return 0;
     if (json)
@@ -625,13 +654,19 @@ async function run(
         "NAME must be a connection name (letters, digits, . _ -).",
       );
     const name = parsedName.data;
-    const state = resolve(values["local-state"] ?? defaultLocalState());
     const session = await connect(
       config,
       undefined,
-      { ...deps, forceLocal: true, localState: state },
+      {
+        ...deps,
+        forceLocal: true,
+        localState: values["local-state"] && resolve(values["local-state"]),
+      },
       ["cli.identity"],
     );
+    if (session.connection.credential?.kind !== "local")
+      throw new CliError("local-access-unavailable", "Local access failed.");
+    const { state } = session.connection.credential;
     const current = await config.read();
     const prior = current.connections[name];
     if (
@@ -890,22 +925,30 @@ async function run(
   return { ...session?.result, ...output };
 }
 
-/** The upgrade's readiness reads through the operator's own CLI connection. */
+/**
+ * The upgrade's readiness reads through the operator's own CLI connection, selected once for
+ * the whole operation: a restart rotates local material, which every read loads again, but
+ * never changes the selected connection, mode or installation. With no saved connection, the
+ * managed installation's own record is the local fallback.
+ */
 export function operatorConnection(
   deps: CliDeps,
   name: string | undefined,
+  record?: string,
 ): OperatorConnection {
   const config = new ConnectionConfig(configDirectory(deps.env));
   const requested = name ?? deps.env.CAB_CONNECTION;
+  let selected: ReturnType<typeof selectConnection> | undefined;
+  const select = async () =>
+    (selected ??= config
+      .read()
+      .then((current) =>
+        selectConnection(config, current, requested, deps, record),
+      ));
   return {
     async origin() {
       rejectManaged(deps.env);
-      const { name, connection } = await selectConnection(
-        config,
-        await config.read(),
-        requested,
-        deps,
-      );
+      const { name, connection } = await select();
       await loadToken(name, connection, deps);
       return connection.url;
     },
@@ -919,7 +962,7 @@ export function operatorConnection(
             signal,
           }),
       };
-      const session = await connect(config, requested, bound, [
+      const session = await connectSelected(await select(), bound, [
         "cli.identity",
         "diagnostics.read",
       ]);
@@ -943,31 +986,62 @@ async function localMaterial(state: string, deps: CliDeps) {
   }
 }
 
+/**
+ * The local installation to use, in order: --local-installation, --local-state, the managed
+ * record of a lifecycle command, CAB_LOCAL_STATE, the default installation record, and only
+ * when that record is absent, the default foreground data directory. A present record must be
+ * valid and match the material its service published; nothing falls through to another one.
+ */
+async function localSelection(deps: CliDeps, managed: string | undefined) {
+  const explicitState = deps.localState ?? deps.env.CAB_LOCAL_STATE;
+  let record = deps.localInstallation;
+  if (record === undefined && deps.localState === undefined) record = managed;
+  if (record === undefined && explicitState === undefined) {
+    const automatic = defaultInstallationRecord(deps.env);
+    if (await recordExists(automatic)) record = automatic;
+  }
+  let state = resolve(
+    explicitState ?? join(defaultStateDirectory(deps.env), "data"),
+  );
+  let origin: string | undefined;
+  if (record !== undefined) {
+    const installation = await readInstallationRecord(record, deps.uid);
+    state = installation.dataDirectory;
+    origin = installation.origin;
+  }
+  const material = await localMaterial(state, deps);
+  if (origin !== undefined && material.origin !== origin)
+    throw new CliError(
+      "local-access-unavailable",
+      `The service for ${record} published ${material.origin}, not its recorded ${origin}; no other installation was tried.`,
+      {
+        fix: "Restart the installed service with its lifecycle command, or select the intended installation with --local --local-installation RECORD_FILE.",
+      },
+    );
+  return {
+    name: "local",
+    connection: {
+      url: material.origin,
+      installationId: material.installationId,
+      credential: { kind: "local" as const, state },
+    } satisfies Connection,
+  };
+}
+
 async function selectConnection(
   config: ConnectionConfig,
   current: CliConfig,
   requested: string | undefined,
   deps: CliDeps,
+  /** A lifecycle command's own install record, used only when nothing else is selected. */
+  managed?: string,
 ) {
   rejectManaged(deps.env);
   const fallback =
     requested === undefined &&
     current.default === undefined &&
     Object.keys(current.connections).length === 0;
-  if (deps.forceLocal || fallback) {
-    const state = resolve(
-      deps.localState ?? deps.env.CAB_LOCAL_STATE ?? defaultLocalState(),
-    );
-    const material = await localMaterial(state, deps);
-    return {
-      name: "local",
-      connection: {
-        url: material.origin,
-        installationId: material.installationId,
-        credential: { kind: "local" as const, state },
-      },
-    };
-  }
+  if (deps.forceLocal || fallback) return localSelection(deps, managed);
   const selected = config.select(current, requested);
   if (selected.connection.credential?.kind === "local") {
     const material = await localMaterial(
@@ -994,12 +1068,18 @@ async function connect(
   capabilities: readonly string[],
 ) {
   rejectManaged(deps.env);
-  const { name, connection } = await selectConnection(
-    config,
-    await config.read(),
-    requested,
+  return connectSelected(
+    await selectConnection(config, await config.read(), requested, deps),
     deps,
+    capabilities,
   );
+}
+
+async function connectSelected(
+  { name, connection }: { name: string; connection: Connection },
+  deps: CliDeps,
+  capabilities: readonly string[],
+) {
   const token = await loadToken(name, connection, deps);
   const accessMode =
     connection.credential?.kind === "local" ? "local" : "token";
@@ -1053,6 +1133,7 @@ async function connect(
   return {
     name,
     accessMode,
+    connection,
     url: connection.url,
     client,
     identity,
@@ -1206,8 +1287,46 @@ export function installCli(deps: CliDeps): InstallCli {
         throw error;
       }
     },
-    doctor: async (name, signal) => {
-      await main(["doctor", "--connection", name], {
+    selection: async (requested) => {
+      const config = new ConnectionConfig(configDirectory(deps.env));
+      const current = await config.read();
+      const name = requested ?? deps.env.CAB_CONNECTION;
+      if (
+        name === undefined &&
+        current.default === undefined &&
+        !Object.keys(current.connections).length
+      )
+        return null;
+      const selected = config.select(current, name);
+      return {
+        name: selected.name,
+        url: selected.connection.url,
+        accessMode:
+          selected.connection.credential?.kind === "local" ? "local" : "token",
+      };
+    },
+    doctor: async (name, signal, record) => {
+      // The service publishes its endpoint just after it starts answering; wait (bounded by
+      // `signal`) for this installation's own publication so doctor does not race it.
+      const installation = await readInstallationRecord(record, deps.uid).catch(
+        () => undefined,
+      );
+      for (let attempt = 0; installation && attempt < 100; attempt += 1) {
+        const published = await readLocalAccess(
+          installation.dataDirectory,
+          deps.uid,
+        ).then(
+          ({ origin }) => origin === installation.origin,
+          () => false,
+        );
+        if (published || signal.aborted) break;
+        await new Promise((done) => setTimeout(done, 100));
+      }
+      const selection =
+        name === undefined
+          ? ["--local", "--local-installation", record]
+          : ["--connection", name];
+      await main(["doctor", ...selection], {
         ...deps,
         stdout: deps.stderr,
         signal,

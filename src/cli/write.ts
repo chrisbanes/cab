@@ -48,6 +48,7 @@ export const ALWAYS_ALLOWED = [
   "help",
   "local",
   "local-state",
+  "local-installation",
 ];
 export function rejectUnusedFlags(values: Values, flags: readonly string[]) {
   for (const [name, value] of Object.entries(values))

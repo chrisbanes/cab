@@ -207,7 +207,7 @@ test("installCli doctor writes the readiness table to stderr only", async (t) =>
   } as unknown as CliDeps;
   const cli = installCli(deps);
   await cli.login("local", f.origin, issued.token, undefined, never);
-  await cli.doctor("local", never);
+  await cli.doctor("local", never, "/unused");
   assert.equal(out, "");
   assert.match(err, /Check\s+Status\s+Reason/);
 });
@@ -647,7 +647,7 @@ test("installCli doctor stops reading when its signal aborts", async (t) => {
   const cli = installCli(deps);
   await cli.login("local", f.origin, issued.token, undefined, never);
   const started = Date.now();
-  await cli.doctor("local", stop.signal);
+  await cli.doctor("local", stop.signal, "/unused");
   assert.equal(requests.length, 1, "the readiness read was in flight");
   assert.ok(Date.now() - started < 5000, "doctor returned on the abort");
 });

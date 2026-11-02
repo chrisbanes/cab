@@ -4,6 +4,8 @@ import type { Coverage, Pagination } from "./browse.js";
 export type CliDeps = {
   env: NodeJS.ProcessEnv;
   localState?: string | undefined;
+  /** An installed service's record, from --local-installation. */
+  localInstallation?: string | undefined;
   forceLocal?: boolean | undefined;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WritableStream;
@@ -56,6 +58,7 @@ export type RequestIdentity = {
 export type Values = {
   local?: boolean | undefined;
   "local-state"?: string | undefined;
+  "local-installation"?: string | undefined;
   connection?: string | undefined;
   url?: string | undefined;
   "token-file"?: string | undefined;

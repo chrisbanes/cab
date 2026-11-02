@@ -24,6 +24,7 @@ import { treeDigest } from "../../src/cli/release-tree.js";
 import {
   type CliDeps,
   installCli,
+  main,
   operatorConnection,
 } from "../../src/cli/main.js";
 import {
@@ -279,7 +280,26 @@ async function sandbox(
     now: Date.now,
   } satisfies CliDeps;
   const origin = `http://127.0.0.1:${options.port}`;
+  const recordPath = join(stateDir, "launchd", `${LABEL}.json`);
+  // What install's own doctor writes (the CLI's stderr).
+  let cliErr = "";
+  deps.stderr.on("data", (chunk) => {
+    cliErr += chunk;
+  });
+  /** The operator CLI in this sandbox's HOME and config; output is returned, not printed. */
+  const cab = async (args: string[]) => {
+    const stdout = new PassThrough();
+    let text = "";
+    stdout.on("data", (chunk) => {
+      text += chunk;
+    });
+    const code = await main(args, { ...deps, stdout });
+    return { code, stdout: text };
+  };
   return {
+    recordPath,
+    cab,
+    cliErr: () => cliErr,
     dir,
     home,
     prefix,
@@ -293,8 +313,9 @@ async function sandbox(
     install: async (root: string, tokenFile?: string) => {
       const out = capture();
       const code = await installService(options, root, launchd.host(), out.io, {
-        connection: "local",
         open: false,
+        // A token file is an explicit token install; otherwise the local default.
+        ...(tokenFile ? { access: "token", connection: "local" } : {}),
         tokenFile,
         cli: {
           ...installCli(deps),
@@ -304,12 +325,15 @@ async function sandbox(
       });
       return { code, stdout: out.stdout(), stderr: out.stderr() };
     },
-    upgrade: async (root: string) => {
+    upgrade: async (
+      root: string,
+      connection = operatorConnection(deps, undefined, recordPath),
+    ) => {
       const out = capture();
       const code = await upgradeService(
         options,
         root,
-        operatorConnection(deps, "local"),
+        connection,
         launchd.host(),
         out.io,
         { implicit: true },
@@ -373,6 +397,16 @@ async function signIn(origin: string, password: string) {
       assert.equal(response.status, 200);
       return ((await response.json()) as { token: string }).token;
     },
+    /** Revokes the credential of `token` (its id is the token's second part). */
+    revoke: async (token: string) => {
+      const response = await call(
+        "POST",
+        `/api/operator/credentials/${token.split("_")[1]}/revoke`,
+        session.csrfToken,
+        {},
+      );
+      assert.equal(response.status, 200);
+    },
   };
 }
 
@@ -405,10 +439,8 @@ test("a service installed from a global npm package keeps running from its own c
   const b = await packCab(packages, "0.2.0");
   const root = await installGlobal(s.prefix, a.tarball, s.home);
   assert.equal(root, globalPackage(s.prefix));
-  const tokenFile = join(s.dir, "local.token");
-
   // Calibration: the first install serves the app from a process run from the staged copy.
-  const installed = await s.install(root, tokenFile);
+  const installed = await s.install(root);
   assert.equal(installed.code, 0, installed.stderr);
   assert.equal(JSON.parse(installed.stdout).version, "0.1.0");
   const stageA = join(s.stateDir, "versions", "0.1.0");
@@ -421,14 +453,39 @@ test("a service installed from a global npm package keeps running from its own c
   assert.equal((await fetch(`${s.origin}/app`)).status, 200);
   assert.equal(await assetStatus(s.origin), 200);
 
+  const local = ["--local", "--local-installation", s.recordPath];
+  /** The CLI's local status for this installation, by its record. */
+  const localStatus = async () => {
+    const r = await s.cab(["auth", "status", ...local, "--output", "json"]);
+    assert.equal(r.code, 0, r.stdout);
+    const { data } = JSON.parse(r.stdout);
+    assert.equal(data.accessMode, "local");
+    assert.equal(data.credential.scope, "read-write");
+    assert.equal(data.credential.expiresAt, null);
+    return data.service.installationId as string;
+  };
+  let installationId = "";
   await t.test(
-    "the install authenticates the CLI and refuses an unauthenticated read",
+    "the install gives the CLI local access with no token, login or saved connection, and refuses an unauthenticated read",
     async () => {
-      assert.ok(existsSync(tokenFile));
-      const checks = await operatorConnection(s.deps, "local").readiness(
-        AbortSignal.timeout(30_000),
-      );
+      const report = JSON.parse(installed.stdout);
+      assert.equal(report.accessMode, "local");
+      assert.equal(report.connection, null);
+      assert.equal(report.credentialActive, false);
+      assert.equal(existsSync(join(s.configDir, "connections.json")), false);
+      // Install ran doctor through local access to its own record, without a login.
+      assert.match(s.cliErr(), /Check\s+Status\s+Reason/);
+      assert.doesNotMatch(s.cliErr(), /cab: /);
+      assert.ok(installed.stderr.includes(s.recordPath));
+      installationId = await localStatus();
+      const checks = await operatorConnection(
+        s.deps,
+        undefined,
+        s.recordPath,
+      ).readiness(AbortSignal.timeout(30_000));
       assert.ok(checks.every((check) => check.status !== "fail"));
+      const doctor = await s.cab(["doctor", ...local]);
+      assert.equal(doctor.code, 0);
       const browser = await signIn(s.origin, PASSWORD);
       assert.equal((await browser.session()).authenticated, true);
       assert.equal(
@@ -462,6 +519,14 @@ test("a service installed from a global npm package keeps running from its own c
         join(s.options.agentsDir, `${LABEL}.plist`),
       ]);
       await appServed(s.origin);
+      // The restart rotated the material; the same selection works without a login. The
+      // service publishes its endpoint just after it starts listening, so wait for that.
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const r = await s.cab(["auth", "status", ...local, "--output", "json"]);
+        if (r.code === 0 || !r.stdout.includes("has not published")) break;
+        await new Promise((done) => setTimeout(done, 100));
+      }
+      assert.equal(await localStatus(), installationId);
     },
   );
 
@@ -484,6 +549,51 @@ test("a service installed from a global npm package keeps running from its own c
       assert.ok(existsSync(stageA), "the old stage stays");
       assert.equal(s.record().version, "0.2.0");
       assert.equal((await fetch(`${s.origin}/app`)).status, 200);
+      // Readiness ran through local access before and after the restart: same installation.
+      assert.equal(await localStatus(), installationId);
+      assert.equal(existsSync(join(s.configDir, "connections.json")), false);
+    },
+  );
+
+  await t.test(
+    "a selected token connection that was revoked refuses the upgrade before anything stops, and is never replaced",
+    async () => {
+      const browser = await signIn(s.origin, PASSWORD);
+      const token = await browser.mint();
+      const tokenFile = join(s.dir, "work.token");
+      writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+      const login = await s.cab([
+        "auth",
+        "login",
+        "--connection",
+        "work",
+        "--url",
+        s.origin,
+        "--token-file",
+        tokenFile,
+      ]);
+      assert.equal(login.code, 0);
+      await browser.revoke(token);
+      const config = readFileSync(join(s.configDir, "connections.json"));
+      const pid = s.launchd.jobs.get(LABEL)?.child.pid;
+      const refused = await s.upgrade(
+        globalPackage(s.prefix),
+        // The saved token connection is the selection; the record fallback is not used.
+        operatorConnection(s.deps, undefined, s.recordPath),
+      );
+      assert.equal(refused.code, 1);
+      const report = JSON.parse(refused.stderr);
+      assert.equal(report.stage, "preflight");
+      assert.equal(report.jobStopped, null);
+      assert.match(report.error, /readiness/);
+      assert.equal(s.launchd.jobs.get(LABEL)?.child.pid, pid);
+      assert.deepEqual(
+        readFileSync(join(s.configDir, "connections.json")),
+        config,
+      );
+      assert.equal(readFileSync(tokenFile, "utf8"), `${token}\n`);
+      const removed = await s.cab(["connection", "remove", "work"]);
+      assert.equal(removed.code, 0);
     },
   );
 
@@ -521,6 +631,10 @@ test("a service installed from a global npm package keeps running from its own c
       );
       assert.equal(again.code, 0, again.stderr);
       assert.equal(JSON.parse(again.stdout).version, "0.2.0");
+      // An explicit token install still saves its 90-day read credential.
+      assert.equal(JSON.parse(again.stdout).accessMode, "token");
+      assert.equal(JSON.parse(again.stdout).connection, "local");
+      assert.ok(existsSync(join(s.dir, "again.token")));
       assert.deepEqual(
         readFileSync(authFile),
         authBytes,

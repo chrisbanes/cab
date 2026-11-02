@@ -1,7 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, realpath, rename, unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, join, parse, resolve } from "node:path";
 import { z } from "zod";
 
@@ -24,8 +23,6 @@ export class LocalAccessError extends Error {
   }
 }
 
-export const defaultLocalState = () =>
-  join(homedir(), "Library", "Application Support", "cab", "data");
 export const localAccessDirectory = (dataDir: string) =>
   `${resolve(dataDir)}.local-access`;
 
@@ -49,7 +46,10 @@ export function localOrigin(value: string): string {
 }
 
 /** Reject substituted parents as well as the final file. macOS temporary aliases are OS-owned. */
-async function checkPath(path: string, uid: number | undefined): Promise<void> {
+export async function checkPrivateDirectory(
+  path: string,
+  uid: number | undefined,
+): Promise<void> {
   if (uid === undefined || !isAbsolute(path) || resolve(path) !== path)
     throw new LocalAccessError(
       "use an absolute canonical state path on a supported OS",
@@ -91,7 +91,7 @@ async function readLocalRecord(
 ): Promise<LocalAccessRecord> {
   const directory = localAccessDirectory(dataDir);
   try {
-    await checkPath(directory, uid);
+    await checkPrivateDirectory(directory, uid);
     const canonical = await realpath(directory);
     const directoryBefore = await lstat(directory);
     const file = join(directory, "connection.json");
@@ -118,7 +118,7 @@ async function readLocalRecord(
       text = await handle.readFile("utf8");
       if ((await realpath(directory)) !== canonical)
         throw new LocalAccessError("the state path changed while reading");
-      await checkPath(directory, uid);
+      await checkPrivateDirectory(directory, uid);
       const directoryAfter = await lstat(directory);
       const after = await lstat(file);
       if (
@@ -170,7 +170,7 @@ export class LocalAccess {
         if (error.code !== "EEXIST") throw error;
       },
     );
-    await checkPath(directory, process.getuid?.());
+    await checkPrivateDirectory(directory, process.getuid?.());
     const existing = await lstat(join(directory, "connection.json")).catch(
       (error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;
@@ -218,7 +218,7 @@ export class LocalAccess {
     };
   }
   private async write(): Promise<void> {
-    await checkPath(this.directory, process.getuid?.());
+    await checkPrivateDirectory(this.directory, process.getuid?.());
     const target = join(this.directory, "connection.json");
     try {
       const before = await lstat(target);
