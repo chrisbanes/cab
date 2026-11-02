@@ -707,6 +707,26 @@ test("an edit after a provider-completed or imported Done flags the issue as cha
   }
 });
 
+test("a provider closure after an edit that followed a lead's handback keeps the flag", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const leadText = new LeadTextStore(w.db);
+    const taskId = String(w.observe({})?.id);
+    leadText.recordHandback(taskId, "handback");
+    w.observe({ body: "Edited after handback" });
+    assert.equal(leadText.changedSinceHandback(taskId), true);
+    w.observe({ state: "closed", body: "Edited after handback" });
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      true,
+    );
+    assert.equal(w.domain.task(taskId).state, "done");
+    assert.equal(leadText.changedSinceHandback(taskId), true);
+  } finally {
+    w.close();
+  }
+});
+
 test("switching done to skip reopens a provider-completed task under a closure hold", () => {
   const w = closedIssueWorld("done");
   try {

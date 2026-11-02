@@ -327,7 +327,7 @@ test("a lead turn whose start response is lost does not count as seen", async (t
     "first turn end",
   );
   const lead = w.lead();
-  assert.equal(w.service.leadText().confirmed(lead)?.title, "Original title");
+  assert.equal(w.service.leadText().confirmed(lead, "thread")?.title, "Original title");
   await w.edit("Changed title", "Original body");
   w.loseNextResponse();
   await w.message("Continue.");
@@ -335,7 +335,7 @@ test("a lead turn whose start response is lost does not count as seen", async (t
   await w.settle();
   assert.match(w.prompts[1] ?? "", /\+ Changed title/);
   // The submission is uncertain, so the lead's last seen text is still the original.
-  assert.equal(w.service.leadText().confirmed(lead)?.title, "Original title");
+  assert.equal(w.service.leadText().confirmed(lead, "thread")?.title, "Original title");
 });
 
 test("a queued lead follow-up survives a text edit and is refused after a readiness change", async (t) => {

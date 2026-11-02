@@ -72,11 +72,11 @@ const submit = (
 test("only a confirmed submission defines the lead's last seen text", () => {
   const w = world();
   try {
-    assert.equal(w.store.confirmed("lead"), undefined);
+    assert.equal(w.store.confirmed("lead", "thread"), undefined);
     submit(w, "w1", 1);
-    assert.equal(w.store.confirmed("lead"), undefined);
+    assert.equal(w.store.confirmed("lead", "thread"), undefined);
     assert.equal(w.store.confirm("w1", "thread", "turn-1"), true);
-    assert.deepEqual(w.store.confirmed("lead"), {
+    assert.deepEqual(w.store.confirmed("lead", "thread"), {
       title: "A",
       outcome: "Body A",
       sourceRevision: 1,
@@ -84,11 +84,11 @@ test("only a confirmed submission defines the lead's last seen text", () => {
     // A later submission whose response was lost stays unconfirmed: A remains seen.
     w.edit("B", "Body B");
     submit(w, "w2", 2);
-    assert.equal(w.store.confirmed("lead")?.title, "A");
+    assert.equal(w.store.confirmed("lead", "thread")?.title, "A");
     // The candidate keeps the text it carried, whatever later syncs bring.
     w.edit("C", "Body C");
     assert.equal(w.store.confirm("w2", "thread", "turn-2"), true);
-    assert.deepEqual(w.store.confirmed("lead"), {
+    assert.deepEqual(w.store.confirmed("lead", "thread"), {
       title: "B",
       outcome: "Body B",
       sourceRevision: 2,
@@ -111,13 +111,13 @@ test("a wrong thread, a different turn, a replay or an older confirmation cannot
     assert.equal(w.store.confirm("w2", "thread", "turn-2"), true);
     // The older work confirms late: it never regresses the newer text.
     assert.equal(w.store.confirm("w1", "thread", "turn-1"), false);
-    assert.equal(w.store.confirmed("lead")?.title, "B");
+    assert.equal(w.store.confirmed("lead", "thread")?.title, "B");
     // Another assignment's work is its own.
     w.edit("C", "Body C");
     submit(w, "w3", 3, "other-lead");
     w.store.confirm("w3", "thread", "turn-3");
-    assert.equal(w.store.confirmed("lead")?.title, "B");
-    assert.equal(w.store.confirmed("other-lead")?.title, "C");
+    assert.equal(w.store.confirmed("lead", "thread")?.title, "B");
+    assert.equal(w.store.confirmed("other-lead", "thread")?.title, "C");
   } finally {
     w.db.close();
   }
@@ -140,9 +140,9 @@ test("the handback flag follows source revisions, including an edit that is reve
     w.edit("C", "Body C");
     w.edit("B", "Body B");
     assert.equal(w.store.changedSinceHandback(w.taskId), true);
-    // A Done transition without lead work anchors the text observed then.
+    // A Done transition does not move the handback anchor: the flag stays.
     w.store.recordHandback(w.taskId, "done");
-    assert.equal(w.store.changedSinceHandback(w.taskId), false);
+    assert.equal(w.store.changedSinceHandback(w.taskId), true);
     // A local task never flags.
     w.db.prepare("DELETE FROM imported_tasks").run();
     w.edit("D", "Body D");
@@ -256,4 +256,60 @@ test("the issue diff is capped by lines and bytes with a visible marker, and a h
   assert.ok(performance.now() - started < 1000);
   assert.deepEqual(bounded.slice(0, 3), ["Outcome:", "- a0", "- a1"]);
   assert.equal(bounded.at(-1), issueDiffTruncated);
+});
+
+test("last seen text belongs to its conversation: a replaced conversation starts without a diff", () => {
+  const w = world();
+  try {
+    submit(w, "w1", 1);
+    w.store.confirm("w1", "thread", "turn-1");
+    assert.equal(w.store.confirmed("lead", "thread")?.title, "A");
+    // A new conversation never saw the text its predecessor carried.
+    assert.equal(w.store.confirmed("lead", "replacement-thread"), undefined);
+    w.edit("B", "Body B");
+    w.store.prepare({
+      workId: "w2",
+      taskId: w.taskId,
+      assignmentId: "lead",
+      requestSequence: 2,
+      threadId: "replacement-thread",
+      text: w.store.current(w.taskId),
+    });
+    w.store.confirm("w2", "replacement-thread", "turn-2");
+    assert.equal(w.store.confirmed("lead", "replacement-thread")?.title, "B");
+    // The superseded confirmed submission is pruned; the confirmed one stays.
+    assert.deepEqual(
+      w.db
+        .prepare("SELECT workId FROM lead_text_submissions ORDER BY workId")
+        .all()
+        .map((row) => row.workId),
+      ["w2"],
+    );
+  } finally {
+    w.db.close();
+  }
+});
+
+test("a Done transition never moves a lead's handback anchor", () => {
+  const w = world();
+  try {
+    w.edit("B", "Body B");
+    submit(w, "w1", 1);
+    w.store.recordHandback(w.taskId, "handback", "w1");
+    w.edit("C", "Body C");
+    assert.equal(w.store.changedSinceHandback(w.taskId), true);
+    // Closed outside cab afterwards: the edit after the handback stays flagged.
+    w.store.recordHandback(w.taskId, "done");
+    assert.equal(w.store.changedSinceHandback(w.taskId), true);
+    assert.equal(
+      (
+        w.db.prepare("SELECT basis FROM task_handback_text").get() as {
+          basis: string;
+        }
+      ).basis,
+      "handback",
+    );
+  } finally {
+    w.db.close();
+  }
 });

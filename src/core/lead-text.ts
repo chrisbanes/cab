@@ -142,18 +142,30 @@ export class LeadTextStore {
           "INSERT INTO lead_text_confirmed (assignmentId, workId) VALUES (?, ?) ON CONFLICT(assignmentId) DO UPDATE SET workId = excluded.workId",
         )
         .run(candidate.assignmentId, workId);
+      // Earlier confirmed text is superseded; candidates stay until their own outcome.
+      this.db
+        .prepare(
+          `DELETE FROM lead_text_submissions WHERE assignmentId = ? AND turnId IS NOT NULL
+            AND requestSequence < ? AND workId <> ?`,
+        )
+        .run(candidate.assignmentId, candidate.requestSequence, workId);
       return true;
     });
   }
 
-  /** The text the assignment's last confirmed turn carried; undefined before any. */
-  confirmed(assignmentId: string): LeadText | undefined {
+  /**
+   * The text the assignment's last confirmed turn carried in this conversation; undefined
+   * before any, or when that turn was in a conversation `threadId` has not seen (a replaced
+   * or new one).
+   */
+  confirmed(assignmentId: string, threadId: string): LeadText | undefined {
     const row = this.db
       .prepare(
         `SELECT s.title, s.outcome, s.sourceRevision FROM lead_text_confirmed c
-        JOIN lead_text_submissions s ON s.workId = c.workId WHERE c.assignmentId = ?`,
+        JOIN lead_text_submissions s ON s.workId = c.workId
+        WHERE c.assignmentId = ? AND s.threadId = ?`,
       )
-      .get(assignmentId);
+      .get(assignmentId, threadId);
     return row ? textRow.parse(row) : undefined;
   }
 
@@ -178,8 +190,12 @@ export class LeadTextStore {
       submitted?.sourceRevision ?? this.current(taskId).sourceRevision;
     if (revision === null) return;
     this.db
+      // A Done transition anchors only a task no lead handed back: it never moves an earlier
+      // handback (or upgrade baseline), so an edit after that handback stays flagged.
       .prepare(
-        "INSERT INTO task_handback_text (taskId, sourceRevision, basis) VALUES (?, ?, ?) ON CONFLICT(taskId) DO UPDATE SET sourceRevision = excluded.sourceRevision, basis = excluded.basis",
+        `INSERT INTO task_handback_text (taskId, sourceRevision, basis) VALUES (?, ?, ?)
+        ON CONFLICT(taskId) DO UPDATE SET sourceRevision = excluded.sourceRevision, basis = excluded.basis
+        WHERE excluded.basis = 'handback' OR task_handback_text.basis = 'done'`,
       )
       .run(taskId, revision, basis);
   }

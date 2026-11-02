@@ -7277,7 +7277,7 @@ export class StandaloneService {
       return undefined;
     const store = this.leadText();
     const current = store.current(taskId);
-    const confirmed = store.confirmed(assignmentId);
+    const confirmed = store.confirmed(assignmentId, threadId);
     store.prepare({
       workId: request.workId,
       taskId,
