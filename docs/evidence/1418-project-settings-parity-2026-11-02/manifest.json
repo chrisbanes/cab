@@ -1,6 +1,6 @@
 {
   "record": "../1418-project-settings-parity-2026-11-02.md",
-  "status": "additive parity qualified locally on audited source; maintainer approved unchanged T6 removal scope; removal and whole-issue acceptance pending",
+  "status": "T6 locally qualified candidate; fresh independent removal review, root publication and final-head CI pending",
   "auditedImplementationCommit": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
   "auditedImplementationTree": "a0fa24563ec2b5fb82899aba51e0faa1c5db834d",
   "integratedMain": "a4cc5f7de6a78a184ddd70fabcfeb6ae0965c269",
@@ -1308,7 +1308,177 @@
     "source": "Explicit user reply in active root invocation, approving concrete parity record3013c808 and T6 route/four-link/exclusive-handler removal scope",
     "approvedRecordCommit": "3013c808a412c7517afad56df9b7e6a126919971",
     "scopePreserved": "Fresh audit9148101b confirms Jira corrections do not alter legacy inventory or promised removal scope",
-    "release": "Root evidence acceptance, fresh lease/base/head verification and verified authority-resume required before assigning T6; no removal performed by this checkpoint"
+    "release": "Root explicitly released T6 after evidence acceptance and verified authority-resume; scope unchanged from approved record3013."
   },
-  "verificationRecordedAt": "2026-11-02T04:03:30.936659+00:00"
+  "verificationRecordedAt": "2026-11-02T04:03:30.936659+00:00",
+  "t6": {
+    "sourceCommit": "1f053d81eff88f33b333888703444d6947b065c8",
+    "sourceTree": "1af0048effdbaef2b5d89dab2b9c9f10cbd26148",
+    "base": "1e2b88875f877602f486a21d7d5c31e0be2fc37e",
+    "authorityResume": "https://github.com/chrisbanes/cab/issues/1418#issuecomment-6568790471",
+    "authorityPayloadSha256": "d3887aa19d88de8de2c08492525fe0601f0e7fcc07710a05d603e6210df176b3",
+    "state": "candidate-needs-independent-review",
+    "sourceBlobs": {
+      "docs/SPEC.md": "2500b9e9392d2625c0208f76026f18aa47b2df15",
+      "docs/design/ui02-foundation.md": "ab64d01dac87160e63a5030f943a775e4e5e9370",
+      "docs/design/ui06-configuration.md": "472c0a2382784cd05827b2da23f5549f17673e7b",
+      "src/standalone/operator.ts": "3088cf2536449da80da60d81cb29c3135fa072b3",
+      "test/coordination/live-qualification/live-journey-ui.mjs": "bc545654519c15a485d7293e883497606c48f598",
+      "test/coordination/live-qualification/live-routing.mjs": "f8eabda9ff1f67b3149a76db899c27af2d969fb8",
+      "test/coordination/operator-cli-task.test.ts": "73e88364a93949324ac25187eb7465cb448a3297",
+      "test/delivery/delivery-operator.test.ts": "cbdede4c0bcd4aa5f655893bbd5eb5bcc45309d9",
+      "test/operations/live-qualification/live-operations.mjs": "7468045ba306a5454d839efa429af758462d690d",
+      "test/operations/private-access-qualification/private-access.mjs": "80f307e184c961715ad931c403093a697f1a4ef4",
+      "test/operator/operator-browser.test.ts": "300bfe0e7629b903bfeb93476a883112700e0508",
+      "test/operator/operator-control-inventory.test.ts": "5fcf51a14e0d4351bcb69f2497490ed88e2c46c2",
+      "test/operator/operator-foundation-browser.test.ts": "b7cef5ad3d21336fa054fcc6ce9a50b7e6854dcc",
+      "test/operator/operator-http.test.ts": "08f159efd3ab5aaae8974eafdacbf28532b2b624",
+      "test/operator/operator-project-config-browser.test.ts": "7608b23346668b51d54ef79ec9ec1127078585fc",
+      "test/operator/operator-settings-browser.test.ts": "fbcf8a1628d7bcc16d4dfcfd987279b71c0a5130",
+      "test/operator/operator-view.test.ts": "dc3a261f78b8e9893d79d4d732b15d43f181af4a",
+      "test/operator/operator-web-browser.test.ts": "e5b05ffa5019a439eb96d78fb8f5570146880442",
+      "test/operator/operator-web-integration.test.ts": "33f088c624bae8b7b91702ff8cc0b82a06f5b153",
+      "test/operator/operator.test.ts": "fdf545a34d8ae1a43830a0ab3aed680399d3870d",
+      "test/sources/github-qualification/live-github-source.mjs": "042cb0fe23ec38993f7d2ac62cfc6fc0f1e0bd7c",
+      "test/sources/github-reconciliation.test.ts": "20a713fd77b220aa342da0c1f8e6e0c602ab8716",
+      "test/sources/github-source-config.test.ts": "33a10f2be2c2e8db319f9fa8128ff50e38a41e38",
+      "test/sources/operator-cli-source-activation.test.ts": "cd0c5ae89bade7e1a1671e1c8a2f7c3881d2f9d1",
+      "test/sources/source-credential-exclusion.test.ts": "6cc05193e539f830719dcec6e2118a4b5f7cd2ac",
+      "web/src/project-config.tsx": "52d8fbb159962c2fc914fcc7b1b76e1d9af24258",
+      "web/src/routing-config.tsx": "36eb9329861b4564f7ab66d29061322196261ce7",
+      "web/src/source-config.tsx": "8e8965bdf182dbc85d2e7f25bc0b00ca200155e0"
+    },
+    "removedFormDiscriminants": [
+      "project.configure",
+      "routing.configure",
+      "delivery.configure",
+      "github.configure",
+      "repositories.configure",
+      "github.preview",
+      "github.refresh",
+      "github.place"
+    ],
+    "retainedFormCapabilities": [
+      "project.create",
+      "profile.create",
+      "profile.configure",
+      "task.create",
+      "task.configure",
+      "source.review",
+      "assignment.create",
+      "assignment.apply",
+      "dependency.add",
+      "dependency.remove",
+      "imported-blockers.set"
+    ],
+    "inventory": {
+      "logicalControls": 86,
+      "reachableDestinations": 18,
+      "renderedForms": 20,
+      "renderedDiscriminants": 5,
+      "formActions": 8,
+      "extensionRoutes": 14
+    },
+    "verification": {
+      "command": "node /tmp/cab-pinned-npm/node_modules/npm/bin/npm-cli.js run check",
+      "nodeVersion": "v26.13.0",
+      "npmVersion": "12.2.1",
+      "exitCode": 0,
+      "summary": {
+        "tests": 4408,
+        "pass": 4407,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 1,
+        "todo": 0,
+        "durationMs": 476265.352
+      },
+      "skip": "Existing macOS Keychain live opt-in; CAB_KEYCHAIN_LIVE not enabled",
+      "selection": "all/all shard1/1 files392",
+      "log": {
+        "path": "/tmp/cab-1418-t6-final-check-1f053d81.log",
+        "bytes": 484895,
+        "sha256": "02d6e6d16f6b4f14aea309fb19533bf87a987c936ffd9cd796debaed4f18a72f"
+      }
+    },
+    "discovery": {
+      "discovery": "test/**/*.test.ts mapped to compiled output; stale dist without source is excluded",
+      "sourceFiles": 392,
+      "unique": 392,
+      "allFiles": 392,
+      "affectedFiles": 258,
+      "missing": [],
+      "duplicate": []
+    },
+    "focusedLogs": [
+      {
+        "path": "/tmp/cab-1418-t6-focused.log",
+        "bytes": 40179,
+        "sha256": "1640e0d8681abd87840e5e282198f91cc662bbac5536152bd03dc552e47f6e6d"
+      },
+      {
+        "path": "/tmp/cab-1418-t6-focused-repair.log",
+        "bytes": 4504,
+        "sha256": "05eff90d29130caaa0ded37c4d3f9f79cd112c7746bc5fee2ca99f0caa58ec62"
+      },
+      {
+        "path": "/tmp/cab-1418-t6-focused-repair-2.log",
+        "bytes": 1204,
+        "sha256": "9ffd0f0e2000528cfcc4aeb6b476bf768ada480f614d3431bea9ec5bffbf1332"
+      },
+      {
+        "path": "/tmp/cab-1418-t6-focused-final.log",
+        "bytes": 496,
+        "sha256": "9dc7d8fecec7d23dc4b11efb5acbe17037e555ccb9adc9eee34a5574dbe6f0b2"
+      }
+    ],
+    "staticLogs": [
+      {
+        "path": "/tmp/cab-1418-t6-typecheck.log",
+        "bytes": 347,
+        "sha256": "9b431940dab8e89877ce1a53827761f2b2866e7c26b581befb9ee02d901c8160"
+      },
+      {
+        "path": "/tmp/cab-1418-t6-lint.log",
+        "bytes": 2675,
+        "sha256": "be92b896afa296e5b0cb681e7be74867f796c89a612401637a67a1385ef75106"
+      },
+      {
+        "path": "/tmp/cab-1418-t6-format.log",
+        "bytes": 761,
+        "sha256": "ba669bb73ed155564acbe9c511381c09c9eaa590740b07024ea183386a6a2a9a"
+      },
+      {
+        "path": "/tmp/cab-1418-t6-style-final.log",
+        "bytes": 676,
+        "sha256": "a2ca666dbe0336ceb210f06f70fba458e6aeb1cac807f3d76dc37f69096a438d"
+      }
+    ],
+    "offlineScripts": [
+      "test/coordination/live-qualification/live-routing.mjs",
+      "test/coordination/live-qualification/live-journey-ui.mjs",
+      "test/sources/github-qualification/live-github-source.mjs",
+      "test/operations/live-qualification/live-operations.mjs",
+      "test/operations/private-access-qualification/private-access.mjs"
+    ],
+    "offlineScriptsValidation": "node --check passed for all five changed scripts; no harness execution, live calls or grant/budget change",
+    "productionBundle": [
+      {
+        "path": "dist/operator/assets/index-9aozEC6U.js",
+        "bytes": 1329124,
+        "sha256": "c381a3b54211ebdfbeec6aabcc021d02b0cd023c029f71b6511bc218e1082cbc"
+      },
+      {
+        "path": "dist/operator/assets/index-w3zpctNj.css",
+        "bytes": 122045,
+        "sha256": "994b2173f212b24fc2d08f078ec31c0284634184aba0929f1958ebda71facd96"
+      }
+    ],
+    "captureAttribution": "All four old capture hashes verified unchanged; no new screenshot or relabelled provenance.",
+    "remainingGates": [
+      "fresh independent removal/connected-consumer review",
+      "root publication",
+      "final-head remote CI and review acceptance"
+    ]
+  }
 }
