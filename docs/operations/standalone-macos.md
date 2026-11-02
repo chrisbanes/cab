@@ -567,11 +567,12 @@ again once on the same thread, so the next start resumes it without a hold and
 without using retries. Anything it could not see end keeps the hold described under
 recovery, as does a crash or kill. That includes a runtime that stays silent and a
 turn so new that App Server still refuses the interrupt ("no active turn to
-interrupt"). Drafting runs and direct `run` turns keep that hold too. So, for now,
-does the requeued turn of a task imported from a source, which still holds after the
-restart with `task-revision-changed`
-([#1454](https://github.com/chrisbanes/cab/issues/1454)). The wait plus runtime
-stop stays under launchd's default 20-second exit timeout.
+interrupt"). Drafting runs and direct `run` turns keep that hold too.
+A requeued turn of a task imported from a source resumes after the restart once the
+startup re-read shows the task still ready, unblocked and selected. If readiness, a
+blocker or the selection changed while the service was down, the requeue holds with
+that reason instead; a paused project or an incomplete read keeps it waiting.
+The wait plus runtime stop stays under launchd's default 20-second exit timeout.
 
 Runtime and probe children own isolated process groups with piped stdio; cab keeps
 handles and awaits exit. Ctrl-C cannot directly fan out to those children before
