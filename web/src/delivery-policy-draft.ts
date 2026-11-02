@@ -4,6 +4,12 @@ import type {
   statusMappingViewSchema,
 } from "../../src/operator/contracts.js";
 import type { Values } from "./settings-changes.js";
+import {
+  repositoryDeliveryLevel,
+  repositoryLevelActions,
+  repositoryLevelGrants,
+  type RepositoryDeliveryLevel,
+} from "../../src/core/delivery-levels.js";
 export const deliveryActionKinds = [
   "issue.comment",
   "issue.labels",
@@ -40,6 +46,88 @@ export type DeliveryPolicyDraft = DeliveryPolicyValues & {
   grantKeys: string[];
   requiredCheckKeys: string[];
 };
+
+export type { RepositoryDeliveryLevel };
+export type DeliveryLevelView = RepositoryDeliveryLevel | "unavailable";
+export function deliveryLevelView(
+  grants: DeliveryPolicyValues["grants"],
+  repositoryId: string | null,
+): DeliveryLevelView {
+  if (repositoryId === null || grants.some((row) => "savedRow" in row))
+    return "unavailable";
+  return repositoryDeliveryLevel(grants as DeliveryGrant[], repositoryId);
+}
+export type DeliveryLevelResult =
+  | { kind: "applied"; draft: DeliveryPolicyDraft }
+  | { kind: "unavailable"; message: string }
+  | { kind: "invalid"; message: string };
+
+export function applyRepositoryDeliveryLevel(
+  draft: DeliveryPolicyDraft,
+  repositoryIds: readonly (string | null)[],
+  level: Exclude<RepositoryDeliveryLevel, "not-set-up" | "custom">,
+): DeliveryLevelResult {
+  if (
+    repositoryIds.some((id) => id === null) ||
+    draft.grants.some((row) => "savedRow" in row)
+  )
+    return {
+      kind: "unavailable",
+      message:
+        "Complete repository and grant details are required to apply a level.",
+    };
+  const targets = new Set(repositoryIds as string[]);
+  if (!targets.size)
+    return {
+      kind: "invalid",
+      message: "Choose at least one linked repository.",
+    };
+  const changed = new Set(
+    [...targets].filter(
+      (id) =>
+        repositoryDeliveryLevel(draft.grants as DeliveryGrant[], id) !== level,
+    ),
+  );
+  const grants: DeliveryGrant[] = [];
+  const grantKeys: string[] = [];
+  draft.grants.forEach((row, index) => {
+    const grant = row as DeliveryGrant;
+    if (
+      changed.has(grant.repositoryId) &&
+      (repositoryLevelActions as readonly string[]).includes(grant.action)
+    )
+      return;
+    grants.push(grant);
+    grantKeys.push(draft.grantKeys[index]!);
+  });
+  for (const id of changed) grants.push(...repositoryLevelGrants(id, level));
+  if (grants.length > 256)
+    return {
+      kind: "invalid",
+      message:
+        "This level would exceed 256 grants. Remove grants or select fewer repositories.",
+    };
+  const used = new Set(draft.grantKeys);
+  for (let index = grantKeys.length; index < grants.length; index++) {
+    let key = `level-grant-${index}`;
+    while (used.has(key)) key += "-new";
+    used.add(key);
+    grantKeys.push(key);
+  }
+  const mode = [...new Set(grants.map((g) => g.repositoryId))].some((id) => {
+    const derived = repositoryDeliveryLevel(grants, id);
+    return derived === "merge-with-approval" || derived === "merge-when-ready";
+  })
+    ? "through-merge"
+    : "reviewable-pr";
+  return {
+    kind: "applied",
+    draft:
+      !changed.size && mode === draft.mode
+        ? draft
+        : { ...draft, grants, grantKeys, mode },
+  };
+}
 
 export function deliveryPolicyDraft(
   seed: DeliveryPolicySeed,
