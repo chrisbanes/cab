@@ -31,6 +31,8 @@ type Tracker = "github" | "jira";
 interface World {
   ready: boolean;
   blocked: boolean;
+  /** The GitHub issue's title, when edited from the fixture's. */
+  title?: string;
 }
 
 const githubIssue: IssueSnapshot = {
@@ -84,6 +86,7 @@ class Turns implements Runtime {
   auto = false;
   startedTurns = 0;
   readonly resumed: string[] = [];
+  readonly prompts: string[] = [];
   private readonly waits = new Map<
     string,
     ReturnType<typeof deferred<"completed" | "failed">>
@@ -106,7 +109,8 @@ class Turns implements Runtime {
   async resumeThread(threadId: string) {
     this.resumed.push(threadId);
   }
-  async startTurn() {
+  async startTurn(_threadId: string, _workspace: string, prompt: string) {
+    this.prompts.push(prompt);
     const turnId = `turn-${++this.startedTurns}`;
     if (this.auto) this.wait(turnId).resolve("completed");
     return turnId;
@@ -188,7 +192,13 @@ async function importedFixture(
     async readSelection() {
       return {
         complete: true as const,
-        issues: [{ ...githubIssue, labels: world.ready ? ["ready"] : [] }],
+        issues: [
+          {
+            ...githubIssue,
+            title: world.title ?? githubIssue.title,
+            labels: world.ready ? ["ready"] : [],
+          },
+        ],
         reason: null,
       };
     },
@@ -495,6 +505,20 @@ test("a GitHub-imported lead requeue resumes once after an unchanged restart", a
 
 test("a Jira-imported lead requeue resumes once after an unchanged restart", async (t) => {
   await assertResumedOnce(await importedFixture(t, "jira"));
+});
+
+test("a GitHub text edit while down is no admission reason: the requeue resumes once with the current text and diff", async (t) => {
+  const f = await importedFixture(t, "github");
+  f.world.title = "Edited while down";
+  const started = f.restart(true);
+  await assertResumedOnce(f, started);
+  const { service, runtime } = await started;
+  // Text is live and bumps no revision of its own: only the re-observation was absorbed.
+  assert.equal(service.domain().task(f.taskId).title, "Edited while down");
+  assert.match(
+    runtime.prompts[0] ?? "",
+    /^Task: Edited while down\n[\s\S]*\nTitle:\n- Imported\n\+ Edited while down\n/,
+  );
 });
 
 test("a GitHub readiness loss while down holds the requeue with its own reason", async (t) => {
