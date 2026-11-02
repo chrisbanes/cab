@@ -10,15 +10,15 @@ Each semicolon-separated control is individually retained at the listed destinat
 | --- | --- | --- | --- | --- |
 | / | project.create | create project; name; lead | Settings | no |
 | / | profile.create | create profile; name; instructions; capabilities | Settings | no |
-| /project/:id | project.configure | name; lead; instructions; pause | Settings | no |
+| /project/:id | project.configure | name; lead; instructions; pause | `/app/projects/:id/settings` | yes |
 | /profile/:id | profile.configure | name; instructions; capabilities; revoke | Settings | no |
-| /project/:id | routing.configure | enable; guidance; candidates; set/clear credential reference | Settings | no |
-| /project/:id | github.configure | selections; readiness; closed-issue mode; set/clear credential reference | Settings | no |
-| /project/:id | repositories.configure | repositories | Settings | no |
-| /project/:id | github.preview | preview selections; activation via preview receipt | Settings | no |
-| /project/:id | github.refresh | refresh observation | Settings | no |
-| /project/:id | github.place | conflicting placement | Settings | no |
-| /project/:id | delivery.configure | completion mode; scoped grants; required checks; set/clear credential reference | Retained exact editor; Settings links it | no |
+| /project/:id | routing.configure | enable; guidance; candidates; set/clear credential reference | `/app/projects/:id/settings?tab=routing` | yes |
+| /project/:id | github.configure | selections; readiness; closed-issue mode; set/clear credential reference | `/app/projects/:id/settings?tab=github` | yes |
+| /project/:id | repositories.configure | repositories | `/app/projects/:id/settings?tab=repositories` | yes |
+| /project/:id | github.preview | preview selections; activation via preview receipt | `/app/projects/:id/settings?tab=sync` | yes |
+| /project/:id | github.refresh | refresh observation | `/app/projects/:id/settings?tab=sync` | guarded observation POST |
+| /project/:id | github.place | conflicting placement | `/app/projects/:id/settings?tab=sync` | yes |
+| /project/:id | delivery.configure | completion mode; branch prefix; scoped grants; required checks; set/clear credential reference | `/app/projects/:id/settings?tab=delivery`; original editor retained | yes |
 | /app/tasks/:id | delivery.read | issue observation; Project field observations; PR identity/head/state; provider feedback; external action states; local task state; delivery holds | Task Changes tab | yes |
 | /app/tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard | Task Changes tab | yes |
 | /app/tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
@@ -42,7 +42,9 @@ Each semicolon-separated control is individually retained at the listed destinat
 | all views | navigation | delivered overview/project List/Board/composer; retained task/profile/assignment/Runtime destinations | App shell and retained destinations | curated reads |
 | /assignment/:id | read | captured instructions/profile revision and result destination | Retained assignment page | curated subset |
 
-The delivery rows cover the existing delivery controls: the exact policy/authority editor is retained, and the task delivery facts, guarded handback settlement (`delivery.settle`) and observation refresh (`delivery.refresh`) live in the task's Changes tab. Policy editing has no JSON delivery adapter. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
+The delivery rows cover the retained policy editor and the additive structured Delivery tab, with curated JSON reads, `delivery.configure` and minimal receipts. All 17 action kinds, optional scopes, required-check app bindings and absent versus empty prefixes retain their existing meanings. Unavailable saved rows and prefix are preserved without revealing them. The task delivery facts, guarded handback settlement (`delivery.settle`) and observation refresh (`delivery.refresh`) live in the task's Changes tab. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
+
+Jira source definitions and readiness use the existing source Settings section, selected by the saved tracker or `?tab=github&tracker=jira`; the retained project renderer has no Jira form. Source and repository rows withheld by exclusions remain keep/remove placeholders bound to project, section, version and ordinal. An unsafe optional status-mapping view is omitted as a whole, leaving the persisted mapping unchanged. Delivery reductions still warn conservatively when mapping details are unavailable. A missing view is not an editable empty mapping. The retained route, all four Settings links and their form handlers remain available pending explicit approval of the [project parity record](../evidence/1418-project-settings-parity-2026-11-02.md).
 
 Advanced authenticated recovery routes have no rendered form or React control. The host operator supplies the reviewed evidence and exact command material under the existing Origin, session and CSRF checks; model tools have no adoption authority. The operator CLI reaches the same service methods through receipted `recovery.*` commands on `/api/operator/commands`; a command key recorded through either entry point replays through the other, and these session routes stay closed to bearer credentials.
 

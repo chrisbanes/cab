@@ -1,0 +1,1214 @@
+{
+  "record": "../1418-project-settings-parity-2026-11-02.md",
+  "status": "additive parity checkpoint; local integrated check passed; removal and whole-issue acceptance remain pending",
+  "auditedImplementationCommit": "187f0db77eee9736713c3c807a1462b2e5171158",
+  "auditedImplementationTree": "9393b315321865c8ffec2c0951ecdad34b3d3916",
+  "integratedMain": "d7d6e091190c4621bad3f106e78bdb18d9d761ed",
+  "planComment": "6565226423",
+  "planSemanticDigest": "5651549f1d4fe1a6f0049b42a49a6e35fae8b5261aab2c3f76f633f0f5daf30f",
+  "capturePrivacy": "Only synthetic visible repository/Project/check labels; no reference names, credentials, query text, withheld identity or private fixture paths. Copies are byte-identical.",
+  "captures": [
+    {
+      "file": "delivery-desktop.png",
+      "sha256": "cb0d833b8e7339906dd5538b431e411e20eb5e6f3c9222db70eb394a0de5cfd8",
+      "viewport": {
+        "width": 1366,
+        "height": 900
+      },
+      "raster": {
+        "width": 1366,
+        "height": 1971
+      },
+      "capturedAt": "2026-11-02T01:29:21.773548+00:00",
+      "origin": "T4 operator-delivery-config-browser production-bundle synthetic fixture; preserve-reference state; no revealed private values",
+      "captureCheckoutHead": "29e9a49896d7d6439ed04d0c5c164f41eb459303",
+      "sourceScope": "Uncommitted T4 production changes subsequently committed unchanged in 8bc463370818859c44d8956678b0759b730cd6d2. No claim that the capture ran at that later commit."
+    },
+    {
+      "file": "delivery-390x844.png",
+      "sha256": "48ebed1381a060879002e8f8d0c0bf6bfec562f5f769169edda21ec298b1b1bd",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "raster": {
+        "width": 390,
+        "height": 2804
+      },
+      "capturedAt": "2026-11-02T01:29:22.290399+00:00",
+      "origin": "T4 operator-delivery-config-browser production-bundle synthetic fixture; preserve-reference state; no revealed private values",
+      "captureCheckoutHead": "29e9a49896d7d6439ed04d0c5c164f41eb459303",
+      "sourceScope": "Uncommitted T4 production changes subsequently committed unchanged in 8bc463370818859c44d8956678b0759b730cd6d2. No claim that the capture ran at that later commit."
+    },
+    {
+      "file": "delivery-390x480.png",
+      "sha256": "df0f67ee7592fa2dd337e3f80e91a991bb893f159d57919f03bed0f0e97bc47c",
+      "viewport": {
+        "width": 390,
+        "height": 480
+      },
+      "raster": {
+        "width": 390,
+        "height": 2804
+      },
+      "capturedAt": "2026-11-02T01:29:22.340159+00:00",
+      "origin": "T4 operator-delivery-config-browser production-bundle synthetic fixture; preserve-reference state; no revealed private values",
+      "captureCheckoutHead": "29e9a49896d7d6439ed04d0c5c164f41eb459303",
+      "sourceScope": "Uncommitted T4 production changes subsequently committed unchanged in 8bc463370818859c44d8956678b0759b730cd6d2. No claim that the capture ran at that later commit."
+    },
+    {
+      "file": "delivery-withheld-mapping-warning.png",
+      "sha256": "498d415c346bf0ed5159e59b9b0cc339b54d79c11a62fcc5354d24a0a81823e2",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "raster": {
+        "width": 390,
+        "height": 2415
+      },
+      "capturedAt": "2026-11-02T02:08:02.988510+00:00",
+      "origin": "Root follow-up production-bundle synthetic fixture, public grant reduced while mapping view stays withheld; no private values shown",
+      "captureCheckoutHead": "eece91de71ebecf1dcb5691e7fd31fa60ebf6fa5",
+      "sourceScope": "Production source committed in eece91de; two uncommitted capture-only test lines subsequently committed in 187f0db7. Web bundle was built before eece91de from the same production changes. No claim that this capture ran at the later commit."
+    }
+  ],
+  "historicalT4ProductionBundle": [
+    {
+      "sha256": "644d89a3068fa7173c6986c5bbbcb5acbc6b2cc6d880a899e4401d2543fc4861",
+      "bytes": 1328336,
+      "inT4BuildLog": true,
+      "inIntegratedBuildLog": true,
+      "buildOutputPath": "dist/operator/assets/index-BN23Ht47.js",
+      "retainedInPacket": false,
+      "scope": "Historical T4 build-log identity; this output path is not a durable capture file."
+    },
+    {
+      "sha256": "ba1d5342f0b84dded9090f97270357d47a8fd8764586ce94798e57cafbeb723d",
+      "bytes": 122023,
+      "inT4BuildLog": true,
+      "inIntegratedBuildLog": true,
+      "buildOutputPath": "dist/operator/assets/index-CNNRCM0P.css",
+      "retainedInPacket": false,
+      "scope": "Historical T4 build-log identity; this output path is not a durable capture file."
+    }
+  ],
+  "productionBundleBeforeFinalCheck": [
+    {
+      "sha256": "a49dd2bb41cc0210f7e5759013d4e83b41e18927fb13c134aa870b6ce683e3b5",
+      "bytes": 1328908,
+      "sourceScope": "Production build from root follow-up changes later committed in eece91de; 187f0db7 has identical production source.",
+      "buildOutputPath": "dist/operator/assets/index-Bv2Thfmf.js"
+    },
+    {
+      "sha256": "ba1d5342f0b84dded9090f97270357d47a8fd8764586ce94798e57cafbeb723d",
+      "bytes": 122023,
+      "sourceScope": "Production build from root follow-up changes later committed in eece91de; 187f0db7 has identical production source.",
+      "buildOutputPath": "dist/operator/assets/index-CNNRCM0P.css"
+    }
+  ],
+  "sourceBlobs": {
+    "src/standalone/operator.ts": "4d1994ec7ee587b00b8b875e148c968ed33457e9",
+    "src/operator/contracts.ts": "a93e5a406317278a3a1d33488631192c5d245be1",
+    "src/standalone/operator-api.ts": "26ed688ff28d035cda3e93f180d730f2d70a9d1f",
+    "web/src/delivery-config.tsx": "7d525b2842e44bbc3a2399e962c8776586f0f00e",
+    "web/src/delivery-policy-draft.ts": "419b517403c90b4fb163af956863954c77dae3d3",
+    "web/src/settings-state.ts": "b95506dcecb3537d9b79f8cb53ccbe65313e7860",
+    "web/src/project-config.tsx": "da27212fe5116afc6c5b0ac8e4db05e4feece0e2",
+    "web/src/routing-config.tsx": "121471e6f0ef0a674f639716ef01d7387df35b45",
+    "web/src/source-config.tsx": "a65a4bb5d0b945f33ca1dfeaede81e9f19fc610e",
+    "web/src/jira-source.tsx": "b6af0ef5f673ca75288333099de3a663cab92e8a",
+    "web/src/repository-config.tsx": "da5fe9513b9b89ca96ca4f2e9e0e224e2657f87e",
+    "web/src/settings-changes.ts": "268aee0b4064d3521c0b4089ebda82409ac936a4",
+    "web/src/settings-view.ts": "c99074ba15703da513945646712d54c868a65eb4",
+    "test/operator/operator-delivery-config-browser.test.ts": "6e8abf92473c9473d315e611227ef1b62a697245",
+    "test/operator/operator-project-config-browser.test.ts": "c7b94333e9cb7722b083d18b3c4339e666574fe7",
+    "scripts/run-tests.mjs": "455b6f228f2a73dade764885bdf9ba9d16ec25ed",
+    "test/fixtures/browser-engines.ts": "13668e5937c13c9bb26e31ec35b9ff3224eae45e",
+    "test/operator/operator-jira-source-browser.test.ts": "b5279acc3aded7bb8fc96ad20c7bd125a096711b",
+    "test/operator/operator-configuration.test.ts": "c49d7a0ee07a2464b3f5cb4d4f415fb050f9ea7b",
+    "test/operator/delivery-policy-draft.test.ts": "5183db520a6b909cec79e4656c1db812318e5ac5",
+    "package.json": "42d6e2e1d91277f065773cee10a149c7065c9025",
+    "package-lock.json": "330a2d4b5f5ffc58f620d5116a17e4273dc122a4",
+    ".nvmrc": "1dda03ddb06ad1c7da5b913539290187eb7fc5aa"
+  },
+  "renderedControls": {
+    "method": "actual LocalOperatorUi.project HTML; field names only, no values or identities",
+    "populated": {
+      "sourceSelections": 3,
+      "placementConflicts": 1,
+      "refreshCallback": true,
+      "forms": 11,
+      "commandDiscriminants": [
+        "task.create",
+        "project.configure",
+        "routing.configure",
+        "delivery.configure",
+        "github.configure",
+        "repositories.configure",
+        "github.preview",
+        "github.refresh",
+        "github.place"
+      ],
+      "formActions": ["/command"],
+      "editableFields": 26,
+      "submitButtons": 11,
+      "formDetails": [
+        {
+          "command": "task.create",
+          "fields": [
+            "type",
+            "key",
+            "taskId",
+            "csrfToken",
+            "projectId",
+            "title",
+            "outcome",
+            "ready"
+          ],
+          "editableFields": ["title", "outcome", "ready"],
+          "submitButtons": 1
+        },
+        {
+          "command": "project.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "instructionsRevision",
+            "name",
+            "leadProfileId",
+            "instructions",
+            "paused"
+          ],
+          "editableFields": ["name", "leadProfileId", "instructions", "paused"],
+          "submitButtons": 1
+        },
+        {
+          "command": "routing.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "enabled",
+            "guidance",
+            "credentialRef",
+            "clearCredentialRef",
+            "candidateProfileIds"
+          ],
+          "editableFields": [
+            "enabled",
+            "guidance",
+            "credentialRef",
+            "clearCredentialRef",
+            "candidateProfileIds"
+          ],
+          "submitButtons": 1
+        },
+        {
+          "command": "delivery.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "mode",
+            "credentialRef",
+            "clearCredentialRef",
+            "branchPrefix",
+            "grants",
+            "requiredChecks"
+          ],
+          "editableFields": [
+            "mode",
+            "credentialRef",
+            "clearCredentialRef",
+            "branchPrefix",
+            "grants",
+            "requiredChecks"
+          ],
+          "submitButtons": 1
+        },
+        {
+          "command": "github.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "sourceCredentialMode",
+            "credentialRef",
+            "clearCredentialRef",
+            "selections",
+            "readiness",
+            "closedIssues"
+          ],
+          "editableFields": [
+            "sourceCredentialMode",
+            "credentialRef",
+            "clearCredentialRef",
+            "selections",
+            "readiness",
+            "closedIssues"
+          ],
+          "submitButtons": 1
+        },
+        {
+          "command": "repositories.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "repositories"
+          ],
+          "editableFields": ["repositories"],
+          "submitButtons": 1
+        },
+        {
+          "command": "github.preview",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "selectionId",
+            "expectedVersion"
+          ],
+          "editableFields": [],
+          "submitButtons": 1
+        },
+        {
+          "command": "github.preview",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "selectionId",
+            "expectedVersion"
+          ],
+          "editableFields": [],
+          "submitButtons": 1
+        },
+        {
+          "command": "github.preview",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "selectionId",
+            "expectedVersion"
+          ],
+          "editableFields": [],
+          "submitButtons": 1
+        },
+        {
+          "command": "github.refresh",
+          "fields": ["type", "key", "csrfToken", "projectId"],
+          "editableFields": [],
+          "submitButtons": 1
+        },
+        {
+          "command": "github.place",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "taskId",
+            "expectedVersion",
+            "chosenProjectId"
+          ],
+          "editableFields": ["chosenProjectId"],
+          "submitButtons": 1
+        }
+      ]
+    },
+    "empty": {
+      "sourceSelections": 0,
+      "placementConflicts": 0,
+      "refreshCallback": true,
+      "forms": 7,
+      "commandDiscriminants": [
+        "task.create",
+        "project.configure",
+        "routing.configure",
+        "delivery.configure",
+        "github.configure",
+        "repositories.configure",
+        "github.refresh"
+      ],
+      "formActions": ["/command"],
+      "editableFields": 25,
+      "submitButtons": 7,
+      "formDetails": [
+        {
+          "command": "task.create",
+          "fields": [
+            "type",
+            "key",
+            "taskId",
+            "csrfToken",
+            "projectId",
+            "title",
+            "outcome",
+            "ready"
+          ],
+          "editableFields": ["title", "outcome", "ready"],
+          "submitButtons": 1
+        },
+        {
+          "command": "project.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "instructionsRevision",
+            "name",
+            "leadProfileId",
+            "instructions",
+            "paused"
+          ],
+          "editableFields": ["name", "leadProfileId", "instructions", "paused"],
+          "submitButtons": 1
+        },
+        {
+          "command": "routing.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "enabled",
+            "guidance",
+            "credentialRef",
+            "clearCredentialRef",
+            "candidateProfileIds"
+          ],
+          "editableFields": [
+            "enabled",
+            "guidance",
+            "credentialRef",
+            "clearCredentialRef",
+            "candidateProfileIds"
+          ],
+          "submitButtons": 1
+        },
+        {
+          "command": "delivery.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "mode",
+            "credentialRef",
+            "clearCredentialRef",
+            "branchPrefix",
+            "grants",
+            "requiredChecks"
+          ],
+          "editableFields": [
+            "mode",
+            "credentialRef",
+            "clearCredentialRef",
+            "branchPrefix",
+            "grants",
+            "requiredChecks"
+          ],
+          "submitButtons": 1
+        },
+        {
+          "command": "github.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "sourceCredentialMode",
+            "credentialRef",
+            "clearCredentialRef",
+            "selections",
+            "readiness",
+            "closedIssues"
+          ],
+          "editableFields": [
+            "sourceCredentialMode",
+            "credentialRef",
+            "clearCredentialRef",
+            "selections",
+            "readiness",
+            "closedIssues"
+          ],
+          "submitButtons": 1
+        },
+        {
+          "command": "repositories.configure",
+          "fields": [
+            "type",
+            "key",
+            "csrfToken",
+            "projectId",
+            "expectedVersion",
+            "repositories"
+          ],
+          "editableFields": ["repositories"],
+          "submitButtons": 1
+        },
+        {
+          "command": "github.refresh",
+          "fields": ["type", "key", "csrfToken", "projectId"],
+          "editableFields": [],
+          "submitButtons": 1
+        }
+      ]
+    },
+    "providerCalls": 0,
+    "refreshCalls": 0,
+    "fakeRuntimeTurns": 0
+  },
+  "renderAuditSource": {
+    "head": "187f0db77eee9736713c3c807a1462b2e5171158",
+    "operatorRendererBlobUnchangedFromT4": true,
+    "log": "/tmp/cab-1418-t5-final-render-counts.log",
+    "valuesStored": false
+  },
+  "callerSearch": {
+    "command": "rg -n '/project/|projectWithCredentialStatus|ui\\.project' src web test",
+    "matches": [
+      {
+        "file": "test/operator/operator-foundation-browser.test.ts",
+        "line": 111
+      },
+      {
+        "file": "test/operator/operator-foundation-browser.test.ts",
+        "line": 118
+      },
+      {
+        "file": "test/operator/operator-foundation-browser.test.ts",
+        "line": 193
+      },
+      {
+        "file": "test/operator/operator-control-inventory.test.ts",
+        "line": 270
+      },
+      {
+        "file": "test/operator/operator-control-inventory.test.ts",
+        "line": 354
+      },
+      {
+        "file": "test/operator/operator-http.test.ts",
+        "line": 263
+      },
+      {
+        "file": "test/operator/operator-http.test.ts",
+        "line": 1224
+      },
+      {
+        "file": "test/operator/operator-view.test.ts",
+        "line": 68
+      },
+      {
+        "file": "test/operator/operator-project-config-browser.test.ts",
+        "line": 156
+      },
+      {
+        "file": "test/operator/operator.test.ts",
+        "line": 92
+      },
+      {
+        "file": "test/operator/operator.test.ts",
+        "line": 251
+      },
+      {
+        "file": "test/operator/operator.test.ts",
+        "line": 297
+      },
+      {
+        "file": "test/operator/operator.test.ts",
+        "line": 348
+      },
+      {
+        "file": "test/operator/operator-web-integration.test.ts",
+        "line": 44
+      },
+      {
+        "file": "web/src/source-config.tsx",
+        "line": 701
+      },
+      {
+        "file": "web/src/routing-config.tsx",
+        "line": 237
+      },
+      {
+        "file": "web/src/project-config.tsx",
+        "line": 475
+      },
+      {
+        "file": "web/src/project-config.tsx",
+        "line": 544
+      },
+      {
+        "file": "test/operator/operator-settings-browser.test.ts",
+        "line": 860
+      },
+      {
+        "file": "test/operator/operator-web-browser.test.ts",
+        "line": 384
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 309
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 310
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 415
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 491
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 512
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 534
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 570
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 584
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 748
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 760
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 780
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 819
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 878
+      },
+      {
+        "file": "test/operator/operator-browser.test.ts",
+        "line": 1279
+      },
+      {
+        "file": "src/standalone/operator.ts",
+        "line": 193
+      },
+      {
+        "file": "src/standalone/operator.ts",
+        "line": 213
+      },
+      {
+        "file": "src/standalone/operator.ts",
+        "line": 1459
+      },
+      {
+        "file": "src/standalone/operator.ts",
+        "line": 1542
+      },
+      {
+        "file": "test/sources/github-qualification/live-github-source.mjs",
+        "line": 181
+      },
+      {
+        "file": "test/delivery/delivery-operator.test.ts",
+        "line": 31
+      },
+      {
+        "file": "test/delivery/delivery-operator.test.ts",
+        "line": 44
+      },
+      {
+        "file": "test/delivery/delivery-operator.test.ts",
+        "line": 45
+      },
+      {
+        "file": "test/delivery/delivery-operator.test.ts",
+        "line": 47
+      },
+      {
+        "file": "test/delivery/jira-delivery-live-harness.test.ts",
+        "line": 372
+      },
+      {
+        "file": "test/fixtures/fake-jira-site.ts",
+        "line": 131
+      },
+      {
+        "file": "test/delivery/jira-qualification/jira-journey.ts",
+        "line": 304
+      },
+      {
+        "file": "test/delivery/jira-qualification/jira-guard.ts",
+        "line": 236
+      },
+      {
+        "file": "test/sources/github-reconciliation.test.ts",
+        "line": 336
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 388
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 418
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 431
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 433
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 436
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 637
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 664
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 760
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 1250
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 1252
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 1273
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 1279
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 1306
+      },
+      {
+        "file": "test/sources/github-source-config.test.ts",
+        "line": 1404
+      },
+      {
+        "file": "test/sources/source-credential-exclusion.test.ts",
+        "line": 374
+      },
+      {
+        "file": "test/sources/source-credential-exclusion.test.ts",
+        "line": 972
+      },
+      {
+        "file": "test/sources/source-credential-exclusion.test.ts",
+        "line": 1180
+      },
+      {
+        "file": "test/sources/source-credential-exclusion.test.ts",
+        "line": 1184
+      },
+      {
+        "file": "test/sources/source-credential-exclusion.test.ts",
+        "line": 1254
+      },
+      {
+        "file": "test/sources/operator-cli-source-activation.test.ts",
+        "line": 94
+      },
+      {
+        "file": "test/sources/operator-cli-source-activation.test.ts",
+        "line": 578
+      },
+      {
+        "file": "test/coordination/operator-cli-task.test.ts",
+        "line": 899
+      },
+      {
+        "file": "test/coordination/operator-cli-task.test.ts",
+        "line": 960
+      },
+      {
+        "file": "test/coordination/live-qualification/live-routing.mjs",
+        "line": 277
+      },
+      {
+        "file": "test/coordination/live-qualification/live-routing.mjs",
+        "line": 289
+      },
+      {
+        "file": "test/coordination/live-qualification/live-routing.mjs",
+        "line": 300
+      },
+      {
+        "file": "test/coordination/live-qualification/live-journey-ui.mjs",
+        "line": 732
+      },
+      {
+        "file": "test/coordination/live-qualification/live-journey-ui.mjs",
+        "line": 751
+      },
+      {
+        "file": "test/coordination/live-qualification/live-journey-ui.mjs",
+        "line": 761
+      },
+      {
+        "file": "test/coordination/live-qualification/live-journey-ui.mjs",
+        "line": 797
+      },
+      {
+        "file": "test/coordination/live-qualification/live-journey-ui.mjs",
+        "line": 1961
+      },
+      {
+        "file": "test/operations/live-qualification/live-operations.mjs",
+        "line": 370
+      },
+      {
+        "file": "test/operations/private-access-qualification/private-access.mjs",
+        "line": 74
+      }
+    ],
+    "includesProviderRestFalsePositives": true,
+    "classification": "See record caller table; Jira provider /project/.../statuses paths are not local editor routes."
+  },
+  "suiteInclusion": {
+    "full": {
+      "suite": "all",
+      "profile": "all",
+      "fileCount": 392
+    },
+    "planned": {
+      "suite": "operator,delivery,sources,coordination",
+      "profile": "chromium",
+      "fileCount": 258
+    },
+    "missing": [],
+    "files": [
+      "dist/test/coordination/assignment-prompts.test.js",
+      "dist/test/coordination/capture-observer.test.js",
+      "dist/test/coordination/command-results.test.js",
+      "dist/test/coordination/conversation-history-batching.test.js",
+      "dist/test/coordination/conversation-history-read.test.js",
+      "dist/test/coordination/conversation-history.test.js",
+      "dist/test/coordination/coordination-live-harness.test.js",
+      "dist/test/coordination/coordination-tool-descriptions.test.js",
+      "dist/test/coordination/coordination-view.test.js",
+      "dist/test/coordination/coordination.test.js",
+      "dist/test/coordination/database-cache.test.js",
+      "dist/test/coordination/domain.test.js",
+      "dist/test/coordination/draft-turn-previous-codex-home.test.js",
+      "dist/test/coordination/draft-turn-rules.test.js",
+      "dist/test/coordination/draft-turn-store.test.js",
+      "dist/test/coordination/draft-turn.test.js",
+      "dist/test/coordination/operator-cli-assignment.test.js",
+      "dist/test/coordination/operator-cli-attention.test.js",
+      "dist/test/coordination/operator-cli-comments.test.js",
+      "dist/test/coordination/operator-cli-follow.test.js",
+      "dist/test/coordination/operator-cli-result-delivery.test.js",
+      "dist/test/coordination/operator-cli-routing-capacity.test.js",
+      "dist/test/coordination/operator-cli-task-control.test.js",
+      "dist/test/coordination/operator-cli-task.test.js",
+      "dist/test/coordination/operator-comments-browser.test.js",
+      "dist/test/coordination/operator-coordination.test.js",
+      "dist/test/coordination/operator-follow-up.test.js",
+      "dist/test/coordination/operator-question-browser.test.js",
+      "dist/test/coordination/operator-question-cards-browser.test.js",
+      "dist/test/coordination/operator-task-control.test.js",
+      "dist/test/coordination/project-name-uniqueness.test.js",
+      "dist/test/coordination/project-names.test.js",
+      "dist/test/coordination/question-forms.test.js",
+      "dist/test/coordination/question-response-state.test.js",
+      "dist/test/coordination/readiness-http.test.js",
+      "dist/test/coordination/readiness.test.js",
+      "dist/test/coordination/result-lifecycle.test.js",
+      "dist/test/coordination/retry.test.js",
+      "dist/test/coordination/routing-coordination-integration.test.js",
+      "dist/test/coordination/routing-settlement.test.js",
+      "dist/test/coordination/routing.test.js",
+      "dist/test/coordination/scheduler-drain.test.js",
+      "dist/test/coordination/scheduler-wake-queries.test.js",
+      "dist/test/coordination/scheduler-wake.test.js",
+      "dist/test/coordination/scheduler.test.js",
+      "dist/test/coordination/store-bindings.test.js",
+      "dist/test/coordination/structured-question-service.test.js",
+      "dist/test/coordination/structured-question-store.test.js",
+      "dist/test/coordination/task-comments.test.js",
+      "dist/test/coordination/task-coordination-actions-browser.test.js",
+      "dist/test/coordination/task-feedback.test.js",
+      "dist/test/coordination/task-writer.test.js",
+      "dist/test/delivery/branch-ownership.test.js",
+      "dist/test/delivery/branch-publication.test.js",
+      "dist/test/delivery/branch-recovery.test.js",
+      "dist/test/delivery/delivery-feedback.test.js",
+      "dist/test/delivery/delivery-integration.test.js",
+      "dist/test/delivery/delivery-operator.test.js",
+      "dist/test/delivery/delivery-policy.test.js",
+      "dist/test/delivery/delivery-service.test.js",
+      "dist/test/delivery/delivery-store.test.js",
+      "dist/test/delivery/github-delivery-live-harness.test.js",
+      "dist/test/delivery/github-delivery-provider.test.js",
+      "dist/test/delivery/github-review-regressions.test.js",
+      "dist/test/delivery/gitlab-branch-delivery.test.js",
+      "dist/test/delivery/gitlab-delivery-live-harness.test.js",
+      "dist/test/delivery/gitlab-delivery-provider.test.js",
+      "dist/test/delivery/gitlab-merge-request-delivery.test.js",
+      "dist/test/delivery/gitlab-rate-limit.test.js",
+      "dist/test/delivery/gitlab-read-cache.test.js",
+      "dist/test/delivery/gitlab-through-merge.test.js",
+      "dist/test/delivery/jira-delivery-live-harness.test.js",
+      "dist/test/delivery/jira-issue-delivery-provider.test.js",
+      "dist/test/delivery/jira-issue-delivery-service.test.js",
+      "dist/test/delivery/jira-issue-delivery.test.js",
+      "dist/test/delivery/operator-cli-delivery.test.js",
+      "dist/test/delivery/operator-cli-source-delivery-journey.test.js",
+      "dist/test/delivery/operator-comment-policy.test.js",
+      "dist/test/delivery/operator-delivery-integration-browser.test.js",
+      "dist/test/delivery/operator-issue-edit.test.js",
+      "dist/test/delivery/pr-completion.test.js",
+      "dist/test/delivery/publication-live-harness.test.js",
+      "dist/test/delivery/status-mapping-jira-service.test.js",
+      "dist/test/delivery/status-mapping-jira-store.test.js",
+      "dist/test/delivery/status-mapping-live-harness.test.js",
+      "dist/test/delivery/status-mapping-service.test.js",
+      "dist/test/delivery/status-mapping-store.test.js",
+      "dist/test/delivery/task-publication-live-harness.test.js",
+      "dist/test/delivery/task-publication.test.js",
+      "dist/test/operator/composer-drafting-model.test.js",
+      "dist/test/operator/composer-release.test.js",
+      "dist/test/operator/delivery-policy-draft.test.js",
+      "dist/test/operator/issue-improve-model.test.js",
+      "dist/test/operator/live-call-budget.test.js",
+      "dist/test/operator/operator-account-browser.test.js",
+      "dist/test/operator/operator-action-feedback-browser.test.js",
+      "dist/test/operator/operator-add-claude-browser.test.js",
+      "dist/test/operator/operator-answer-question-browser.test.js",
+      "dist/test/operator/operator-api.test.js",
+      "dist/test/operator/operator-approve-action-browser.test.js",
+      "dist/test/operator/operator-browse-pages.test.js",
+      "dist/test/operator/operator-browser.test.js",
+      "dist/test/operator/operator-claude-token-browser.test.js",
+      "dist/test/operator/operator-cli-adopt.test.js",
+      "dist/test/operator/operator-cli-browse.test.js",
+      "dist/test/operator/operator-cli-config-journey.test.js",
+      "dist/test/operator/operator-cli-credentials-browser.test.js",
+      "dist/test/operator/operator-cli-doctor.test.js",
+      "dist/test/operator/operator-cli-help.test.js",
+      "dist/test/operator/operator-cli-http.test.js",
+      "dist/test/operator/operator-cli-inventory.test.js",
+      "dist/test/operator/operator-cli-journey-harness.test.js",
+      "dist/test/operator/operator-cli-local-access.test.js",
+      "dist/test/operator/operator-cli-operate-journey.test.js",
+      "dist/test/operator/operator-cli-options.test.js",
+      "dist/test/operator/operator-cli-qualification-inventory.test.js",
+      "dist/test/operator/operator-cli-runtime.test.js",
+      "dist/test/operator/operator-cli-write.test.js",
+      "dist/test/operator/operator-cli.test.js",
+      "dist/test/operator/operator-client.test.js",
+      "dist/test/operator/operator-command-lifecycle.test.js",
+      "dist/test/operator/operator-command-network.test.js",
+      "dist/test/operator/operator-composer-drafting-browser.test.js",
+      "dist/test/operator/operator-composer-layout-browser.test.js",
+      "dist/test/operator/operator-config-impact.test.js",
+      "dist/test/operator/operator-configuration.test.js",
+      "dist/test/operator/operator-contracts.test.js",
+      "dist/test/operator/operator-control-inventory.test.js",
+      "dist/test/operator/operator-delivery-config-browser.test.js",
+      "dist/test/operator/operator-delivery-presentation.test.js",
+      "dist/test/operator/operator-diagnostic-capture.test.js",
+      "dist/test/operator/operator-drafting-api.test.js",
+      "dist/test/operator/operator-exclusion-preparation.test.js",
+      "dist/test/operator/operator-first-run-browser.test.js",
+      "dist/test/operator/operator-foundation-browser.test.js",
+      "dist/test/operator/operator-getting-started-model.test.js",
+      "dist/test/operator/operator-gitlab-setup-browser.test.js",
+      "dist/test/operator/operator-harness-assignment-browser.test.js",
+      "dist/test/operator/operator-harness-status-browser.test.js",
+      "dist/test/operator/operator-http.test.js",
+      "dist/test/operator/operator-inbox-background-refresh-browser.test.js",
+      "dist/test/operator/operator-inbox-browser.test.js",
+      "dist/test/operator/operator-inbox-presentation.test.js",
+      "dist/test/operator/operator-inbox.test.js",
+      "dist/test/operator/operator-inspect-changes-browser.test.js",
+      "dist/test/operator/operator-instructions.test.js",
+      "dist/test/operator/operator-integrated-browser.test.js",
+      "dist/test/operator/operator-issue-edit-api.test.js",
+      "dist/test/operator/operator-issue-improve-browser.test.js",
+      "dist/test/operator/operator-jira-readiness-lines.test.js",
+      "dist/test/operator/operator-jira-source-browser.test.js",
+      "dist/test/operator/operator-journey-live-harness.test.js",
+      "dist/test/operator/operator-neutral-copy-browser.test.js",
+      "dist/test/operator/operator-notification-close-browser.test.js",
+      "dist/test/operator/operator-notifications-browser.test.js",
+      "dist/test/operator/operator-notifications-model.test.js",
+      "dist/test/operator/operator-observation-browser.test.js",
+      "dist/test/operator/operator-observation.test.js",
+      "dist/test/operator/operator-overview-model.test.js",
+      "dist/test/operator/operator-presentation.test.js",
+      "dist/test/operator/operator-private-values.test.js",
+      "dist/test/operator/operator-profile-config-browser.test.js",
+      "dist/test/operator/operator-project-config-browser.test.js",
+      "dist/test/operator/operator-project-labels-browser.test.js",
+      "dist/test/operator/operator-project-labels.test.js",
+      "dist/test/operator/operator-project-names.test.js",
+      "dist/test/operator/operator-push-service-worker.test.js",
+      "dist/test/operator/operator-push.test.js",
+      "dist/test/operator/operator-readiness-browser.test.js",
+      "dist/test/operator/operator-readiness-picker-model.test.js",
+      "dist/test/operator/operator-readiness-text.test.js",
+      "dist/test/operator/operator-resource-polling.test.js",
+      "dist/test/operator/operator-responsive-browser.test.js",
+      "dist/test/operator/operator-review-result-browser.test.js",
+      "dist/test/operator/operator-runtime-task-controls.test.js",
+      "dist/test/operator/operator-search-browser.test.js",
+      "dist/test/operator/operator-search.test.js",
+      "dist/test/operator/operator-settings-browser.test.js",
+      "dist/test/operator/operator-settings-layout-browser.test.js",
+      "dist/test/operator/operator-settings-presentation.test.js",
+      "dist/test/operator/operator-settings-sections-browser.test.js",
+      "dist/test/operator/operator-settings-sections.test.js",
+      "dist/test/operator/operator-settings-state.test.js",
+      "dist/test/operator/operator-setup-api.test.js",
+      "dist/test/operator/operator-setup-browser.test.js",
+      "dist/test/operator/operator-setup-model.test.js",
+      "dist/test/operator/operator-setup-picker-browser.test.js",
+      "dist/test/operator/operator-shell-browser.test.js",
+      "dist/test/operator/operator-source-import-browser.test.js",
+      "dist/test/operator/operator-targeted-exclusions.test.js",
+      "dist/test/operator/operator-targeted-lookups.test.js",
+      "dist/test/operator/operator-targeted-reads.test.js",
+      "dist/test/operator/operator-task-background-refresh-browser.test.js",
+      "dist/test/operator/operator-task-browser.test.js",
+      "dist/test/operator/operator-task-composer.test.js",
+      "dist/test/operator/operator-task-conversation-browser.test.js",
+      "dist/test/operator/operator-task-detail-browser.test.js",
+      "dist/test/operator/operator-task-draft-turn-browser.test.js",
+      "dist/test/operator/operator-task-list.test.js",
+      "dist/test/operator/operator-task-overview.test.js",
+      "dist/test/operator/operator-task-publish-api.test.js",
+      "dist/test/operator/operator-task-publish-browser.test.js",
+      "dist/test/operator/operator-task-restart-browser.test.js",
+      "dist/test/operator/operator-task-stop-browser.test.js",
+      "dist/test/operator/operator-task-strip.test.js",
+      "dist/test/operator/operator-task-tabs.test.js",
+      "dist/test/operator/operator-triage-uncertainty-browser.test.js",
+      "dist/test/operator/operator-unblock-work-browser.test.js",
+      "dist/test/operator/operator-view.test.js",
+      "dist/test/operator/operator-wait-reasons.test.js",
+      "dist/test/operator/operator-web-browser.test.js",
+      "dist/test/operator/operator-web-http.test.js",
+      "dist/test/operator/operator-web-integration.test.js",
+      "dist/test/operator/operator-work-browser.test.js",
+      "dist/test/operator/operator-work-presentation.test.js",
+      "dist/test/operator/operator.test.js",
+      "dist/test/operator/project-setup.test.js",
+      "dist/test/operator/sleep-live-harness.test.js",
+      "dist/test/operator/status-mapping-draft.test.js",
+      "dist/test/operator/targeted-read-stores.test.js",
+      "dist/test/operator/task-conversation-model.test.js",
+      "dist/test/operator/task-publish-model.test.js",
+      "dist/test/operator/task-timeline.test.js",
+      "dist/test/operator/web-push.test.js",
+      "dist/test/sources/discovery-credential-exclusion.test.js",
+      "dist/test/sources/gh-credential.test.js",
+      "dist/test/sources/github-dependencies.test.js",
+      "dist/test/sources/github-discovery.test.js",
+      "dist/test/sources/github-readiness-explanation.test.js",
+      "dist/test/sources/github-reconciliation.test.js",
+      "dist/test/sources/github-service.test.js",
+      "dist/test/sources/github-source-config.test.js",
+      "dist/test/sources/github-source-credential.test.js",
+      "dist/test/sources/github-source-reader.test.js",
+      "dist/test/sources/github-source-sweep-scope.test.js",
+      "dist/test/sources/github-sync-race.test.js",
+      "dist/test/sources/gitlab-credential-exclusion.test.js",
+      "dist/test/sources/gitlab-credential-service.test.js",
+      "dist/test/sources/gitlab-discovery.test.js",
+      "dist/test/sources/glab-credential.test.js",
+      "dist/test/sources/jira-adf-markdown.test.js",
+      "dist/test/sources/jira-closure-service.test.js",
+      "dist/test/sources/jira-credential-exclusion.test.js",
+      "dist/test/sources/jira-credential.test.js",
+      "dist/test/sources/jira-readiness.test.js",
+      "dist/test/sources/jira-reconciliation.test.js",
+      "dist/test/sources/jira-service.test.js",
+      "dist/test/sources/jira-source-reader.test.js",
+      "dist/test/sources/operator-cli-jira-source.test.js",
+      "dist/test/sources/operator-cli-source-activation.test.js",
+      "dist/test/sources/operator-cli-source.test.js",
+      "dist/test/sources/operator-discovery-credential-browser.test.js",
+      "dist/test/sources/operator-gitlab-credential-browser.test.js",
+      "dist/test/sources/operator-source-credential-browser.test.js",
+      "dist/test/sources/repository-verification.test.js",
+      "dist/test/sources/source-credential-exclusion.test.js",
+      "dist/test/sources/source-credential-qualification.test.js",
+      "dist/test/sources/source-storage-migration.test.js"
+    ],
+    "verification": "Every planned affected file is included in the executed 392-file all/all selection; engine all includes Chromium. No duplicate narrower runtime command was run."
+  },
+  "priorLogs": {
+    "/tmp/cab-1418-review-red-build.log": "b344505d1073bf83c9a9ccb51ed9102388904ba3543a39eb46d4283a64f6fd75",
+    "/tmp/cab-1418-review-red-tests.log": "928b5a159fa585d3c2c4d685d830c9a13b83dc5f12575f51026c485de4fc0756",
+    "/tmp/cab-1418-review-final-build.log": "1da39f2ae0b54f73136d2258f6fef77c54de2922cd2f4c20dc5a5249db1fba1c",
+    "/tmp/cab-1418-review-final-service-build.log": "111a089398c6807ef2b783d2b4650adf20452526fd854873e402e12de48cc2be",
+    "/tmp/cab-1418-review-api.log": "29b3d85d67dc755c1cbea785f8bb2aa0985f65a762849ad770ae0aab6569d00c",
+    "/tmp/cab-1418-review-browser.log": "365db8392a82be02fbbea64d87c9e08edfeaedcd8e9d021c937456b187448c9d",
+    "/tmp/cab-1418-review-typecheck.log": "9b431940dab8e89877ce1a53827761f2b2866e7c26b581befb9ee02d901c8160",
+    "/tmp/cab-1418-review-lint.log": "99d9b7b93b4304fe6023cf08995a4cb4c828cbd853109dd4cdef0c6a270741c7",
+    "/tmp/cab-1418-review-format-check.log": "15eebaf165a743b92424924fb41be1ce8d26f217793b02ba278d8f2de9d88386",
+    "/tmp/cab-1418-review-spec-format.log": "5ea0c6784b36869bdcf1c5b6bb4c9cba2804b2d3549f9a61a9185fa2c0741e4a",
+    "/tmp/cab-1418-t5-check.log": "f32fa8d09623302e97c2188e9592736042549354361daa9272417df742e068be",
+    "/tmp/cab-1418-warning-routing-red.log": "59b7a460b36eed1eb12f38b485794529656501a4b869a80a93fad756b8fbaea9",
+    "/tmp/cab-1418-routing-calibrated-red.log": "2c2b5533fc2a158116fcb22014beebe2a2f7c724ed44f72d3b371f53398ad77a",
+    "/tmp/cab-1418-warning-routing-build.log": "b86aa816b324b550b9b111e44c43483519a583a9db319744c4325750e6f32a02",
+    "/tmp/cab-1418-warning-routing-tests.log": "cc24eb97728a72254b166e6e76535af4c86dcc24eda446a3a0dfeb04b446ebd1",
+    "/tmp/cab-1418-warning-browser.log": "36da76261a17d6214e223be0c23ea188a82168fcf21a8264295822b6ac5b309f",
+    "/tmp/cab-1418-warning-routing-typecheck.log": "41f71b8b4a461ddc381403083a79cab4d6bdd7af99ad7f22c3d8636e39b8058c",
+    "/tmp/cab-1418-warning-routing-lint.log": "c9146f07d25500d8da346031ac8c35413fb5d0c9628605b279aa2563ee72ed5f",
+    "/tmp/cab-1418-warning-routing-format-check.log": "386587f02ae96edd3b145cd19dfe2cd55fe39266d5d8a8792a0f10869096d347",
+    "/tmp/cab-1418-warning-global-style.log": "7e31f2a200278674366463599abe9024bce3b4186d9922d96acefeec9bb5505d",
+    "/tmp/cab-1418-warning-visual-final.log": "008223287220ccb2c2ed38ad6a88f24df1a2495d53479380f380f82a971166a1",
+    "/tmp/cab-1418-t5-repaired-check-static-artifact-failure.log": "955cfe4239f266aafb238ac1e60c514164830abd1efa953931fe54fe08652b29",
+    "/tmp/cab-1418-t5-final-render-counts.log": "5d7951af34f3007876ac35f420fd7f0ee7b5651f833d929f562ed494634ca5e0",
+    "/tmp/cab-1418-t5-routing-bound-probe.log": "58d9e29fb68751114fbf194ebf34e7f5d0f487595280785a8ec9922a5bf680b4",
+    "/tmp/cab-1418-t5-final-callers.txt": "1c4d7d1e0328c809fc9b558a4c6f23026d4dff0454f9669d3dc6fbe60f7d187c"
+  },
+  "priorResults": {
+    "8bcFullCheck": {
+      "exitCode": 1,
+      "tests": 4390,
+      "pass": 4388,
+      "fail": 1,
+      "skipped": 1,
+      "durationMs": 477979.659917,
+      "disposition": "Jira test waited on field visibility rather than private hydration; repaired test only in eb1827df. Keychain live opt-in remains skipped."
+    },
+    "ebStaticAttempt": {
+      "exitCode": 1,
+      "runtimeTestsStarted": false,
+      "disposition": "Owned untracked workflow/evidence style artifacts corrected, no production/test workload reduced."
+    },
+    "rootProjectionRepair": {
+      "focusedTests": 129,
+      "browserTests": 10,
+      "fail": 0,
+      "skip": 0
+    },
+    "rootWarningRoutingRepair": {
+      "focusedTests": 136,
+      "deliveryBrowserTests": 8,
+      "finalCaptureRenewal": 1,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "verification": {
+    "state": "passed; no removal approval",
+    "command": "node /tmp/cab-pinned-npm/node_modules/npm/bin/npm-cli.js run check",
+    "nodeVersion": "v26.13.0",
+    "npmVersion": "12.2.1",
+    "sourceCommit": "187f0db77eee9736713c3c807a1462b2e5171158",
+    "logArtifact": "/tmp/cab-1418-t5-final-check-187f0db7.log",
+    "runCount": 1,
+    "expectedSelection": "suite=all profile=all shard=1/1 files=392",
+    "scope": "Synthetic fixtures only; no live scripts/provider/model runtime qualification, installed service or Haze access.",
+    "startedAt": "2026-11-02T02:19:45.539012+00:00",
+    "exitCode": 0,
+    "completedAt": "2026-11-02T02:30:18.279176+00:00",
+    "summary": {
+      "tests": 4400,
+      "pass": 4399,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 1,
+      "todo": 0,
+      "durationMs": 477164.282125
+    },
+    "skips": [
+      "\ufe63 the macOS Keychain stores, reads and deletes a token without exposing it in argv (0.397208ms) # set CAB_KEYCHAIN_LIVE=1 on macOS"
+    ],
+    "logSha256": "d0b0e26b4083fb5cb765110b6e9e2b948cd5550df9ac609c4745b5a6f05aafa1",
+    "logBytes": 482318,
+    "actualSelection": "suite=all profile=all shard=1/1 files=392",
+    "frozenInputSha256": {
+      "docs/design/ui02-foundation.md": "29736af6c580431032ed555d1404eac8e14dbd8ba0a45a81631a39e276e95bd8",
+      "docs/design/ui06-configuration.md": "0350468c06a4fc6c60ae78c04a5717ab631af9f2efc1e1bf2f1c4c38344ffeba",
+      "docs/evidence/1418-project-settings-parity-2026-11-02.md": "fc391ef63015bc287815de6d1be941020c90ffdb67da849c68735bd020795a66",
+      "docs/evidence/1418-project-settings-parity-2026-11-02/manifest.json": "77bf8098c6deb387c3af11a9be9920ce600e54059bbeedcb24dbb5d8ccbb3703",
+      ".scratch/1418/t5-retained-counts.mjs": "10a660d897d2360711a0728e6a1fc5001a13b2bc24934ffb45c76206d986990b",
+      ".scratch/1418/retained-controls.json": "f6d5b4eab02dfe630e3bede110a261bec2ac25cb9f0d173523c01f00f887037d",
+      ".scratch/1418/planned-suite-inclusion.json": "98a536cc0649c4961457275ff5f9743491a2511b1457f833578e8090adcec463"
+    },
+    "finalProductionBundle": [
+      {
+        "buildOutputPath": "dist/operator/assets/index-Bv2Thfmf.js",
+        "sha256": "a49dd2bb41cc0210f7e5759013d4e83b41e18927fb13c134aa870b6ce683e3b5",
+        "bytes": 1328908,
+        "matchesRootFollowUpBuild": true
+      },
+      {
+        "buildOutputPath": "dist/operator/assets/index-CNNRCM0P.css",
+        "sha256": "ba1d5342f0b84dded9090f97270357d47a8fd8764586ce94798e57cafbeb723d",
+        "bytes": 122023,
+        "matchesRootFollowUpBuild": true
+      }
+    ],
+    "inventoryResults": {
+      "logicalControls": 86,
+      "reachableDestinations": 18,
+      "broaderRenderedForms": 30,
+      "broaderDiscriminants": 14,
+      "broaderFormActions": 8,
+      "extensionRoutes": 14
+    },
+    "postRunChanges": "Only qualification metadata, the source-backed submit-only branch note and the owner ledger were completed after the run. Inventory dispositions, production and test files were unchanged."
+  },
+  "captureCopiesInspectedAt": "2026-11-02T02:19:45.539012+00:00",
+  "captureCopiesInspected": true
+}
