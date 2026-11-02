@@ -766,9 +766,11 @@ transient failures.
 The operator UI is a React application at `/app`, served with same-origin
 `/api/operator` JSON by the production `operator` command. Approval decisions, handback
 settlement, result-destination reconciliation and messages to delegated assignments
-are task-view controls, and the CLI offers the same commands. Controls the app does not offer remain on retained
-server-rendered routes: local task edits and Resume source hold on `/task/:id`,
-reached from a task's inspector. A task's Execution tab (`/app/tasks/:id?section=execution`)
+are task-view controls, and the CLI offers the same commands. A local task's title, outcome
+and Ready are edited from Edit task… in the task header, and an imported task's active source hold
+is resumed from the decision card in its Overview, through the receipted `task.configure` and
+`source.review` JSON commands. The retained server-rendered `/task/:id` page offers the same two
+controls until its removal; it is reached from a task's inspector. A task's Execution tab (`/app/tasks/:id?section=execution`)
 shows its execution status, admission gates, lead, holds, task-wide recovery evidence and
 local dependencies, with Add and Remove; the task header offers Stop… and, while the task
 is stopped, Resume…, and a stale row of a started assignment applies current instructions

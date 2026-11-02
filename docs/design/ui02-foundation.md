@@ -23,8 +23,8 @@ Each semicolon-separated control has an individual disposition. Project controls
 | /app/tasks/:id | delivery.settle | Accept handback; Settle as closed; task/delivery/policy revisions; head guard | Task Changes tab | yes |
 | /app/tasks/:id | delivery.refresh | refresh delivery observations | Task Changes tab | yes |
 | Task composer | task.create | draft; create and start; shared task creation capability | Task composer (`/app/tasks/new`) | yes |
-| /task/:id | task.configure | local title; outcome; readiness | Retained task page | yes |
-| /task/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Retained task page | no |
+| /task/:id | task.configure | local title; outcome; readiness | Task header Edit task… (`/app/tasks/:id`) and the retained task page until its removal | yes |
+| /task/:id | source.review | source identity; body; status; Project fields; native blockers; review history; Resume source hold | Task Overview decision card and inspector (`/app/tasks/:id`) and the retained task page until its removal | yes |
 | /runtime | /runtime/control/capacity | global capacity; project override; remove override | Settings (Runtime) | no |
 | /app/tasks/:id | dependency.add | local dependency add | Task Execution tab | yes |
 | /app/tasks/:id | dependency.remove | local dependency remove | Task Execution tab | yes |
@@ -82,4 +82,4 @@ Provider timestamps are stored observations; unavailable successful sync/history
 
 ## Client
 
-The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, whose Execution tab (`?section=execution`) holds execution status, holds, recovery evidence and local dependencies, and which links, from its inspector, the retained task page (`/task/:id`, Edit task and review source). First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.
+The React client supplies login, session lifecycle, project navigation and shared controls. [UI03](ui03-tasks.md) describes the attention overview, project and cross-project List/Board views and the local composer. Task cards open the task workspace at `/app/tasks/:id`, whose Execution tab (`?section=execution`) holds execution status, holds, recovery evidence and local dependencies, whose header offers Edit task… for a local task and whose Overview decision card offers Resume source hold for an active source hold; its inspector still links the retained task page (`/task/:id`, Edit task and review source) until that page's removal. First load, stale refresh, invalid responses, session expiry and command outcome unknown remain distinct. Lost write responses retain the exact key and payload for deliberate reconciliation. No credential/API persistence or automatic write replay.
