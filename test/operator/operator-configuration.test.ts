@@ -4038,3 +4038,32 @@ test("a retried per-repository save replays its receipt, and the same key with o
   );
   assert.deepEqual(await kept(), keptFirst);
 });
+
+test("a retried per-repository save replays only with the credential reference its first run saved", async (t) => {
+  const { f, api, projectId, visible } = await hiddenRepositoryFixture(t);
+  const key = randomUUID();
+  const expectedVersion = f.service.delivery().configuration(projectId).version;
+  const send = (credentialRef: string | null) =>
+    api.execute(
+      deliveryInput(projectId, {
+        key,
+        expectedVersion,
+        credentialRef,
+        repositories: [visible],
+      }),
+    );
+  const first = await send("env:DELIVERY_RETRY_FIRST");
+  const after = f.service.delivery().configuration(projectId);
+  assert.deepEqual(await send("env:DELIVERY_RETRY_FIRST"), first);
+  for (const other of ["env:DELIVERY_RETRY_OTHER", null])
+    await assert.rejects(send(other), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.deepEqual([error.status, error.code], [409, "conflict"]);
+      return true;
+    });
+  assert.deepEqual(f.service.delivery().configuration(projectId), after);
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_RETRY_FIRST",
+  );
+});

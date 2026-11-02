@@ -8645,7 +8645,15 @@ export class OperatorApi {
     if (prior !== undefined) {
       const excluded = await this.exclusions(c.projectId);
       if (!excluded) throw new OperatorApiError(503, "unavailable");
+      // The receipt records only whether a credential is configured, so an explicit reference is
+      // checked against the saved one, and only while the policy is still the one that run saved.
+      const sameCredential =
+        c.credentialRef === undefined ||
+        (domain.deliveryConfiguration(c.projectId).version ===
+          prior.result.version &&
+          domain.deliveryCredentialReference(c.projectId) === c.credentialRef);
       if (
+        !sameCredential ||
         !deliveryRetryMatches(c, prior.result, (id) =>
           this.disclosable(id, excluded),
         )
