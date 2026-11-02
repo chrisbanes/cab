@@ -13,10 +13,7 @@ import { seedReviewTask } from "../fixtures/task-review.js";
 
 type Operator = Awaited<ReturnType<typeof startCliOperator>>;
 /** The app's own Stop or Resume: a session JSON command with a fresh key. */
-const sessionCommand = (
-  s: Operator["s"],
-  type: "task.stop" | "task.resume",
-) =>
+const sessionCommand = (s: Operator["s"], type: "task.stop" | "task.resume") =>
   s.sessionPost("/api/operator/commands", {
     type,
     key: randomUUID(),
@@ -218,10 +215,7 @@ test("repeated and replayed Stop and Resume follow the unresolved-key rule", asy
   // The mirror: a lost Resume, a session Stop, then `task resume`.
   r = await cli("rw", ["task", "resume", s.taskId], { fetch: lostReply });
   assert.equal(r.code, 6);
-  assert.equal(
-    (await sessionCommand(s, "task.stop")).status,
-    200,
-  );
+  assert.equal((await sessionCommand(s, "task.stop")).status, 200);
   r = await cli("rw", ["task", "resume", s.taskId]);
   assert.equal(r.json().data.reusedRequest, true);
   assert.equal(r.json().data.stopInEffect, true);
@@ -231,10 +225,7 @@ test("repeated and replayed Stop and Resume follow the unresolved-key rule", asy
 test("CLI and session commands share the Stop hold and the session projection", async (t) => {
   const o = await startCliOperator(t);
   const { cli, s } = o;
-  assert.equal(
-    (await sessionCommand(s, "task.stop")).status,
-    200,
-  );
+  assert.equal((await sessionCommand(s, "task.stop")).status, 200);
   let r = await cli("rw", ["task", "resume", s.taskId]);
   assert.equal(r.json().data.receipt.stopCleared, true);
   r = await cli("rw", ["task", "stop", s.taskId]);
@@ -245,10 +236,7 @@ test("CLI and session commands share the Stop hold and the session projection", 
   };
   r = await cli("rw", ["task", "get", s.taskId]);
   assert.deepEqual(r.json().data.execution.holds, session.data.execution.holds);
-  assert.equal(
-    (await sessionCommand(s, "task.resume")).status,
-    200,
-  );
+  assert.equal((await sessionCommand(s, "task.resume")).status, 200);
   assert.equal(stopped(o, s.taskId), false);
   await cli("rw", ["task", "stop", s.taskId]);
   await s.f.service.resumeTask(s.taskId);
