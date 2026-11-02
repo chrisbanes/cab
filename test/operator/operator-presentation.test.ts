@@ -126,6 +126,8 @@ test("every wait label reads right mid-sentence, keeping proper nouns", () => {
     "assignment-held": "assignment held",
     "assignment-recovery-unresolved": "assignment recovery unresolved",
     "local-dependency": "blocked by a task dependency",
+    "stacked-blocker-unpublished": "waiting for the blocker's change request",
+    "stacked-blocker-unknown": "blocker's change request unconfirmed",
     "imported-blockers-blocked": "blocked by a GitHub dependency",
     "imported-blockers-unknown": "GitHub dependencies unconfirmed",
     "source-held": "held by the source",

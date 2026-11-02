@@ -578,12 +578,15 @@ export type BackgroundFailureOperation =
   | "domain-wake"
   | "post-turn-wake"
   | "scheduler-drain"
+  /** Not fatal: the failing stacked dependency is retried on the next wake. */
+  | "restack-reconcile"
   | "safe-shutdown";
 
 export type BackgroundFailureCode =
   | "unexpected-background-failure"
   | "shutdown-failed"
-  | "diagnostic-writer-failed";
+  | "diagnostic-writer-failed"
+  | "restack-reconcile-failed";
 
 export interface BackgroundFailureDiagnostic {
   serviceId: string;
@@ -830,6 +833,8 @@ export class StandaloneService {
   /** Ends the waits of GitLab requests being retried after a 429 when the service stops. */
   private retryWaits: AbortController | undefined;
   private readonly backgroundRuns = new Set<Promise<void>>();
+  /** The restack failures last reported, by stacked dependent, so a wake repeats none. */
+  private restackFailures = new Map<string, string>();
   private readonly generationsByNotification = new WeakMap<
     Promise<BackgroundFailureDiagnostic>,
     ServiceGeneration
@@ -1118,7 +1123,10 @@ export class StandaloneService {
       const taskPublications = new TaskPublicationStore(db);
       // Read by activationAllowed and the Claude turn environment; set by spawnEnvironment.
       let runtimeSpawnSnapshot: NodeJS.ProcessEnv | undefined;
-      /** The task worktree of a repository and the base commit it was provisioned at. */
+      /**
+       * The task worktree of a repository and the base its pushes must descend from: the commit
+       * it was provisioned at, or a stacked dependent's current parent head.
+       */
       const taskWorkspace = async (
         taskId: string,
         repositoryId: string,
@@ -1130,10 +1138,14 @@ export class StandaloneService {
                   (r) => r.repositoryId === repositoryId,
                 )
               : undefined;
+        const stacked = domain.stackedDependency(taskId);
         return repository
           ? {
               workspacePath: repository.workspacePath,
-              baseCommit: repository.commit,
+              baseCommit:
+                stacked?.repositoryId === repositoryId
+                  ? stacked.parentHead
+                  : repository.commit,
             }
           : null;
       };
@@ -1274,6 +1286,12 @@ export class StandaloneService {
             identity,
           ),
         taskWorkspace,
+        stackedBase: (taskId, repositoryId) => {
+          const stacked = domain.stackedDependency(taskId);
+          return stacked?.repositoryId === repositoryId
+            ? stacked.parentHead
+            : null;
+        },
         verifyPush: async ({
           taskId,
           repositoryId,
@@ -6526,8 +6544,47 @@ export class StandaloneService {
       routingAttempts,
       wakeQueries: queries,
       inboxStartup,
+      workspaceBindings,
     } = this.current;
     this.flushRuntimeAnswers();
+    // Every confirmed push wakes the scheduler, and start-up ends with a wake. A dependency that
+    // fails is reported and retried on the next wake; the others and the wake go on.
+    const restackFailures = new Map<string, string>();
+    const reportRestack = (taskId: string, error: unknown) => {
+      const sanitized = sanitizeError(error, this.failureExclusions());
+      // The stack differs by what woke the scheduler; the failure is the same.
+      const key = JSON.stringify([
+        sanitized.name,
+        sanitized.code,
+        sanitized.message,
+      ]);
+      restackFailures.set(taskId, key);
+      if (this.restackFailures.get(taskId) === key) return;
+      void this.writeBackgroundDiagnostic(generation, {
+        serviceId: generation.id,
+        incident: generation.incident,
+        operation: "restack-reconcile",
+        errorCode: "restack-reconcile-failed",
+        error: sanitized,
+      }).catch(() => {});
+    };
+    try {
+      domain.reconcileRestacks({
+        queue: (taskId, reason, identity) =>
+          coordination.ensureDeliveryEventWithinTransaction(
+            taskId,
+            reason,
+            identity,
+          ),
+        advance: (taskId, repositoryId, commit) =>
+          workspaceBindings.advanceCommit(taskId, repositoryId, commit),
+        failed: reportRestack,
+      });
+    } catch (error) {
+      reportRestack("", error);
+    }
+    // Logged once per distinct failure; a dependency that recovers is logged again if it fails.
+    this.restackFailures = restackFailures;
     const deliveryWorkCompleted = (delivery: InboxDelivery): boolean => {
       const intent = state.byWorkId(delivery.deliveryWorkId);
       const binding = state.taskBinding(delivery.deliveryWorkId);
@@ -7298,6 +7355,23 @@ export class StandaloneService {
    * after which the scheduler wake re-captures the request.
    */
   private async firstWorkspaceRepositories(
+    request: TurnRequest,
+  ): Promise<TaskWorkspaceRepositoryInput[]> {
+    const repositories = await this.linkedWorkspaceRepositories(request);
+    // A stacked dependent's decision is fixed here; it starts at the blocker's last push.
+    const stacked = this.domain().recordStackedDependency(
+      String(request.taskId),
+    );
+    return stacked
+      ? repositories.map((repository) =>
+          repository.repositoryId === stacked.repositoryId
+            ? { ...repository, commit: stacked.parentHead }
+            : repository,
+        )
+      : repositories;
+  }
+
+  private async linkedWorkspaceRepositories(
     request: TurnRequest,
   ): Promise<TaskWorkspaceRepositoryInput[]> {
     const taskId = String(request.taskId);

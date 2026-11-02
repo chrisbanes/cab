@@ -20,6 +20,7 @@ import {
 import {
   Panel,
   ChangeList,
+  DraftCheck,
   DraftOutcome,
   DraftField,
   ReferenceInput,
@@ -31,6 +32,11 @@ import {
   useLoadedDraft,
   key,
 } from "./settings.js";
+import {
+  stackingAppliesNote,
+  stackingDisclosure,
+  stackingLine,
+} from "../../src/operator/stacking-copy.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
@@ -53,8 +59,77 @@ const presets: Preset[] = [
   "merge-when-ready",
 ];
 
-/** Structured policy editing uses the same receipt, draft and authentication lifecycle as Settings. */
 export function DeliveryTab(p: TabProps) {
+  return (
+    <>
+      <DeliveryPolicyForm {...p} />
+      <StackingPanel {...p} />
+    </>
+  );
+}
+
+/** The project's stacking switch saves its own project.configure, so it never touches the policy draft. */
+function StackingPanel(p: TabProps) {
+  const d = useDraft(p.drafts, `project.stacking:${p.projectId}`);
+  const saved = p.data.stacking;
+  const initial =
+    saved === undefined
+      ? null
+      : { stacking: saved, expectedVersion: String(p.data.project.version) };
+  useLoadedDraft(d, initial, p.loadedAt);
+  if (saved === undefined || !initial) return null;
+  const on = Boolean(d.values.stacking);
+  const changed = on !== saved;
+  return (
+    <div className="settings-split">
+      <div className="settings-column">
+        <Panel title="Stacked dependencies" description={stackingLine(saved)}>
+          <form
+            onSubmit={(event) =>
+              void submitDraft(
+                event,
+                d,
+                p.client,
+                p.session,
+                {
+                  type: "project.configure",
+                  key: d.values.key,
+                  projectId: p.projectId,
+                  expectedVersion: Number(d.values.expectedVersion),
+                  stacking: on,
+                },
+                p.refreshConfiguration,
+              )
+            }
+          >
+            <DraftCheck
+              draft={d}
+              field="stacking"
+              label="Start dependents on their blocker's change request"
+              toggle
+            />
+            <p className="metadata muted">
+              {stackingDisclosure} {stackingAppliesNote}
+            </p>
+            <DraftOutcome
+              draft={d}
+              client={p.client}
+              session={p.session}
+              label="Save stacking"
+              saveDisabled={!changed}
+              discard={() => reloadDraft(d, initial)}
+              refresh={p.refreshConfiguration}
+              review={() => d.adoptLatest(p.data.project.version, initial)}
+            />
+          </form>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+/** Structured policy editing uses the same receipt, draft and authentication lifecycle as Settings. */
+function DeliveryPolicyForm(p: TabProps) {
   const d = useDraft(p.drafts, `delivery.configure:${p.projectId}`);
   const form = useRef<HTMLFormElement>(null);
   const origin = useRef<HTMLElement | null>(null);

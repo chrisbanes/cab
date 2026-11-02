@@ -55,6 +55,7 @@ import { taskColumnOf } from "../operator/task-presentation.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
+import { stackSummary } from "../operator/stacking-copy.js";
 
 export type { CliDeps } from "./types.js";
 
@@ -338,6 +339,7 @@ export const OPTIONS = {
   "lead-profile": { type: "string" },
   "diagnostic-capture": { type: "string" },
   "command-network-access": { type: "string" },
+  stacking: { type: "string" },
   id: { type: "string" },
   enabled: { type: "string" },
   "guidance-file": { type: "string" },
@@ -841,6 +843,9 @@ async function run(
         `Next:    ${next.text}${next.operator ? ` (cab inbox list --project ${task.projectId})` : ""}`,
         ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
+        ...(stackSummary(read.data.stack)
+          ? [`Stack:   ${stackSummary(read.data.stack)}`]
+          : []),
         ...read.data.unresolvedResults.map((r) =>
           r.availability === "available"
             ? `Undelivered result ${r.resultId}: cab result deliver ${task.id} ${r.resultId}`

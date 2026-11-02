@@ -252,6 +252,20 @@ unknown. Unknown or incomplete state holds dispatch even on first
 observation or after prior clearance. Current turns may finish when a new blocker
 appears; results and ownership remain. Clearance rechecks every other control.
 
+A project can turn on stacking (off by default; [ADR-1023](adr/1023-stacked-dependencies.md)).
+In a stacking project, a dependent with exactly one blocker, a task in the same project whose
+change request is in a repository the dependent works in, is a stacked dependency when no other
+dependent of that blocker is stacked (the first recorded edge wins) and the dependent has no
+workspace yet. Its blocker gate is the blocker's open change request whose head is the blocker's
+task branch at its last cab push; an unpublished, unread or outside-moved head keeps it waiting,
+and every other control still applies. Every other shape waits until Done, with the reason shown.
+The decision is fixed when the first workspace is provisioned: it starts at the blocker's last
+pushed commit, and branch proofs check against it. When the blocker's last pushed head moves,
+cab queues a restack for the dependent's lead, published with `branch.force-push` under the
+project's grant; restacks run bottom-up, and the starting point moves once the dependent's push
+lands. Turning stacking off affects only dependents that have not started; merges cannot be
+undone.
+
 External identity includes provider instance and is independent of source query.
 Multiple sources in one project produce one task with multiple memberships.
 Cross-project overlap requires operator placement: preserve existing project

@@ -108,6 +108,12 @@ export interface DeliveryCoordinatorOptions {
     commitSha: string;
     lastPushedSha: string | null;
   }) => Promise<PushVerification | null>;
+  /**
+   * A stacked dependent's current parent head in the repository, the base its branch proofs use;
+   * null when the task does not stack there. Read synchronously so the final pre-push check
+   * can refuse a push whose proof base moved during the awaits.
+   */
+  stackedBase?: (taskId: string, repositoryId: string) => string | null;
   /** The repository's task worktree and the base it was provisioned at; null when unavailable. */
   taskWorkspace?: (
     taskId: string,
@@ -408,6 +414,12 @@ export class DeliveryCoordinator {
     const assigned = action.kind.startsWith("branch.")
       ? this.store.taskBranch(caller.taskId, action.target.repositoryId)
       : null;
+    // Read before any proof: a proof made against a base that has since moved is refused below.
+    const stackedBase = () =>
+      this.options.stackedBase?.(caller.taskId, action.target.repositoryId) ??
+      null;
+    const provedBase = assigned ? stackedBase() : null;
+    let baseMoved = false;
     if (action.kind === "branch.adopt" && assigned) {
       const workspace = await this.options
         .taskWorkspace?.(caller.taskId, action.target.repositoryId)
@@ -556,6 +568,10 @@ export class DeliveryCoordinator {
             current.lastPushedSha !== assigned.lastPushedSha
           )
             throw new Error("Task branch changed during publication");
+          if (stackedBase() !== provedBase) {
+            baseMoved = true;
+            throw new Error("Stacked parent head moved during publication");
+          }
         }
         if (this.stopped || this.options.activationAllowed?.(policy) === false)
           throw new Error(
@@ -570,11 +586,22 @@ export class DeliveryCoordinator {
         );
       });
     } catch {
-      return this.store.recordObservation(record.operationId, {
-        state: "confirmed-failure",
-        reason: "delivery-authority-stale-or-held",
-        receipt: null,
-      });
+      // Nothing was sent; a retry proves the commit against the new parent head.
+      return this.store.recordObservation(
+        record.operationId,
+        baseMoved
+          ? {
+              state: "confirmed-failure",
+              reason: "push-base-moved",
+              receipt: null,
+              retryable: true,
+            }
+          : {
+              state: "confirmed-failure",
+              reason: "delivery-authority-stale-or-held",
+              receipt: null,
+            },
+      );
     }
     let observation: ProviderActionObservation;
     try {

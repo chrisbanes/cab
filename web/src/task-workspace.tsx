@@ -131,6 +131,7 @@ import {
 } from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
+import { stackSummary } from "../../src/operator/stacking-copy.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
 const sectionIds = [
@@ -2236,6 +2237,9 @@ export function TaskWorkspace({
                   executionHref={`/runtime/task/${taskId}`}
                   assignments={data.assignments}
                 />
+                {stackSummary(data.stack) && (
+                  <p className="metadata muted">{stackSummary(data.stack)}</p>
+                )}
               </section>
               <TaskConversation
                 client={client}

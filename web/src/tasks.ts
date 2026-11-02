@@ -179,6 +179,8 @@ export const reasonLabels = {
   "task-unready": "Draft: not Ready",
   "task-not-open": "Task closed",
   "local-dependency": "Waiting on a task dependency",
+  "stacked-blocker-unpublished": "Waiting for the blocker's change request",
+  "stacked-blocker-unknown": "Blocker's change request unconfirmed",
   "imported-blockers-unknown": "GitHub dependencies unavailable",
   "imported-blockers-blocked": "Waiting on a GitHub dependency",
   "source-held": "Source requires review",

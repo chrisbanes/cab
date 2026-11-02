@@ -45,6 +45,12 @@ external work item. It is distinct from readiness, source membership, and
 dependencies between assignments within a task.
 _Avoid_: Assignment dependency when referring to a relationship between tasks
 
+**Stacked dependency**:
+A task dependency, in a project with stacking on, where the dependent starts on its single
+blocker's last pushed commit while the blocker's change request is open, and is restacked
+when that head moves. Fixed when the dependent's first workspace is provisioned.
+_Avoid_: Stacked PR when referring to the dependency rather than the code host's stack
+
 **Project pause**:
 An operator hold on a project that lets active turns finish while holding its
 queued and new turns. Pause belongs to the project; a task has no pause of its own.

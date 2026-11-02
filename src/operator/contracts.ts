@@ -11,6 +11,7 @@ import {
   publicationTargetReasonCodes,
 } from "./github-reasons.js";
 import { publicationStates } from "../core/task-publication-contracts.js";
+import { stackReasons } from "../core/stacked-dependencies.js";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import {
@@ -924,6 +925,8 @@ function taskSchemaAdmission() {
           "task-unready",
           "task-not-open",
           "local-dependency",
+          "stacked-blocker-unpublished",
+          "stacked-blocker-unknown",
           "imported-blockers-unknown",
           "imported-blockers-blocked",
           "source-held",
@@ -1727,6 +1730,8 @@ export const taskSchema = envelope(
               "task-unready",
               "task-not-open",
               "local-dependency",
+              "stacked-blocker-unpublished",
+              "stacked-blocker-unknown",
               "imported-blockers-unknown",
               "imported-blockers-blocked",
               "source-held",
@@ -1735,6 +1740,22 @@ export const taskSchema = envelope(
           ),
         })
         .strict(),
+      /** Whether the task stacks on its single blocker (ADR-1023); optional so older services still parse. */
+      stack: z
+        .object({
+          state: z.enum(["stacked", "waiting"]),
+          reason: z.enum(stackReasons).nullable(),
+          blockerTaskId: uuid.nullable(),
+          repositoryId: z.string().min(1).max(512).nullable(),
+          parentHead: z
+            .string()
+            .regex(/^[0-9a-f]{40}$/)
+            .nullable(),
+          restack: z.enum(["current", "pending"]).nullable(),
+        })
+        .strict()
+        .nullable()
+        .optional(),
       waits: z.array(waitSchema).max(waitCodes.length),
       execution: executionSchema,
       // The recorded reason of a task hold other than Stop; null when there is none.
@@ -2539,6 +2560,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       instructions: text.optional(),
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
       commandNetworkAccess: z.boolean().optional(),
+      stacking: z.boolean().optional(),
     })
     .strict(),
   z
@@ -3555,6 +3577,7 @@ export const projectConfigurationSchema = envelope(
       /** Optional so older services still parse; absent means not reported. */
       diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
       commandNetworkAccess: z.boolean().optional(),
+      stacking: z.boolean().optional(),
       routing: z
         .object({
           version: revision,

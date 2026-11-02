@@ -165,6 +165,10 @@ function admissionReason(reason: string): string {
     "task-unready": "Task is not marked ready",
     "task-not-open": "Task is not open",
     "local-dependency": "A local dependency is incomplete",
+    "stacked-blocker-unpublished":
+      "The stacked blocker has no open change request at its last push",
+    "stacked-blocker-unknown":
+      "The stacked blocker's change request is unknown",
   };
   if (reason.startsWith("imported-blockers-"))
     return `Imported blockers are ${reason.slice("imported-blockers-".length)}`;

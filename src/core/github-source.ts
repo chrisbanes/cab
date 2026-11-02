@@ -13,6 +13,10 @@ import {
   sameItem,
   type SourceTracker,
 } from "./source-storage.js";
+import {
+  syncDependencyRecords,
+  syncDependentsOf,
+} from "./stacked-dependencies.js";
 import { transaction, type Database } from "./store.js";
 import {
   type ProjectFieldIds,
@@ -849,6 +853,7 @@ export class GitHubSourceStore {
               blocker.state,
             );
         }
+        syncDependencyRecords(this.db, String(issue.taskId));
       }
       this.db
         .prepare(
@@ -970,6 +975,7 @@ export class GitHubSourceStore {
               "INSERT INTO imported_tasks (taskId, provider, instance, externalId, containerId) VALUES (?, ?, ?, ?, ?)",
             )
             .run(taskId, ...this.key(issue.nodeId), issue.repositoryId);
+          syncDependentsOf(this.db, taskId);
           this.db
             .prepare(
               "INSERT INTO external_items (provider, instance, externalId, taskId, containerId, containerName, number, observedTitle, observedBody, observedState, labels, observedStatus, observedFields) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1224,6 +1230,7 @@ export class GitHubSourceStore {
         "INSERT INTO imported_tasks (taskId, provider, instance, externalId, containerId) VALUES (?, ?, ?, ?, ?)",
       )
       .run(input.taskId, ...this.key(input.nodeId), input.repositoryId);
+    syncDependentsOf(this.db, input.taskId);
     this.db
       .prepare(
         "INSERT INTO external_items (provider, instance, externalId, taskId, containerId, containerName, number, observedTitle, observedBody, observedState, labels) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",

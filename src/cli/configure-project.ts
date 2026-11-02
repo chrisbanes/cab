@@ -7,6 +7,10 @@ import {
   commandNetworkAppliesNote,
   commandNetworkDisclosure,
 } from "../operator/command-network-copy.js";
+import {
+  stackingAppliesNote,
+  stackingDisclosure,
+} from "../operator/stacking-copy.js";
 import { type CoverageGap, uuidArg } from "./browse.js";
 import {
   applyFile,
@@ -48,7 +52,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--command-network-access true|false] [--stacking true|false] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
       expects:
         "--expected-version: the project's version ('cab project get PROJECT_ID'); omitted, the version this command reads.",
@@ -60,6 +64,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "lead-profile",
         "diagnostic-capture",
         "command-network-access",
+        "stacking",
         "instructions",
         "instructions-file",
         "restore-revision",
@@ -87,6 +92,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           ctx.values["command-network-access"],
           "command-network-access",
         );
+        const stacking = boolFlag(ctx.values.stacking, "stacking");
         // Read once before connecting: standard input cannot be read again on a retried read.
         const given = await givenInstructions(ctx);
         const session = await ctx.connect([
@@ -174,6 +180,18 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             to: String(network),
           });
           notes.push(commandNetworkAppliesNote, commandNetworkDisclosure);
+        }
+        const currentStacking = config.data.stacking;
+        if (stacking !== undefined && stacking !== currentStacking) {
+          if (currentStacking === undefined) gaps.push("content-unavailable");
+          command.stacking = stacking;
+          changes.push({
+            field: "stacking",
+            from:
+              currentStacking === undefined ? null : String(currentStacking),
+            to: String(stacking),
+          });
+          notes.push(stackingAppliesNote, stackingDisclosure);
         }
         instructionChange(current, proposed, changes, diff, gaps, notes);
         if (proposed !== undefined) command.instructions = proposed;

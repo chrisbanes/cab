@@ -11,6 +11,17 @@ import {
   waitCodes,
   waitSchema,
 } from "../../src/operator/wait-reasons.js";
+import {
+  type StackFacts,
+  type StackReason,
+  stackReasons,
+} from "../../src/core/stacked-dependencies.js";
+import {
+  stackingAppliesNote,
+  stackingDisclosure,
+  stackReasonLabels,
+  stackSummary,
+} from "../../src/operator/stacking-copy.js";
 
 const projectId = "00000000-0000-4000-8000-000000000001",
   profileId = "00000000-0000-4000-8000-000000000002",
@@ -135,6 +146,28 @@ test("each wait code has one input producing exactly that wait, its Fix or its l
     ],
     [
       {
+        admissionReasons: ["stacked-blocker-unpublished"],
+        dependencies: [{ id: blockerId, label: "Set up CI" }],
+      },
+      {
+        code: "stacked-blocker-unpublished",
+        fix: null,
+        links: [{ kind: "task", id: blockerId, label: "Set up CI" }],
+      },
+    ],
+    [
+      {
+        admissionReasons: ["stacked-blocker-unknown"],
+        dependencies: [{ id: blockerId, label: "Set up CI" }],
+      },
+      {
+        code: "stacked-blocker-unknown",
+        fix: null,
+        links: [{ kind: "task", id: blockerId, label: "Set up CI" }],
+      },
+    ],
+    [
+      {
         admissionReasons: ["imported-blockers-blocked"],
         nativeBlockers: [
           { url: "https://github.com/o/r/issues/2", label: "o/r#2" },
@@ -213,6 +246,8 @@ test("every reason present returns the flow's fixed order, and holds never carry
       "source-held",
       "imported-blockers-unknown",
       "imported-blockers-blocked",
+      "stacked-blocker-unknown",
+      "stacked-blocker-unpublished",
       "local-dependency",
       "project-lead-revoked",
       "project-lead-unconfigured",
@@ -597,4 +632,59 @@ test("hold lines state what clears each hold, list Stop once and follow the reco
     holdLines(all, { reason: "x" }).map((line) => line.label),
     holdPills({ ...all, task: true }).map((pill) => pill.label),
   );
+});
+
+test("stack facts read as one sentence for each reason and restack state", () => {
+  const facts = (
+    state: "stacked" | "waiting",
+    reason: StackReason | null,
+    extra: Partial<StackFacts> = {},
+  ): StackFacts => ({
+    state,
+    reason,
+    blockerTaskId: blockerId,
+    repositoryId: "R1",
+    parentHead: null,
+    restack: null,
+    ...extra,
+  });
+  assert.equal(stackSummary(null), null);
+  assert.equal(
+    stackSummary(
+      facts("stacked", null, {
+        parentHead: "a".repeat(40),
+        restack: "current",
+      }),
+    ),
+    `Stacked on its blocker at ${"a".repeat(12)}.`,
+  );
+  assert.equal(
+    stackSummary(
+      facts("stacked", null, {
+        parentHead: "b".repeat(40),
+        restack: "pending",
+      }),
+    ),
+    `Stacked on its blocker at ${"b".repeat(12)}; a restack onto the new head is pending.`,
+  );
+  assert.equal(
+    stackSummary(
+      facts("stacked", "blocker-unpublished", { parentHead: "c".repeat(40) }),
+    ),
+    `Stacked on its blocker at ${"c".repeat(12)}; waiting because its blocker has no open change request at its last push.`,
+  );
+  for (const reason of ["blocker-unpublished", "blocker-unknown"] as const)
+    assert.equal(
+      stackSummary(facts("waiting", reason)),
+      `Will start stacked on its blocker; waiting because ${stackReasonLabels[reason]}.`,
+    );
+  for (const reason of stackReasons.filter((r) => !r.startsWith("blocker-")))
+    assert.equal(
+      stackSummary(facts("waiting", reason)),
+      `Not stacked: waits until its blocker is Done because ${stackReasonLabels[reason]}.`,
+      reason,
+    );
+  assert.match(stackingDisclosure, /unmerged work/);
+  assert.match(stackingDisclosure, /merge cannot be undone/);
+  assert.match(stackingAppliesNote, /not started/);
 });

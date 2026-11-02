@@ -75,6 +75,11 @@ const repositoryInputSchema = z.object({
   repositoryId: z.string().trim().min(1).max(512),
   path: z.string().trim().min(1),
   ref: z.string().trim().min(1).max(512).optional(),
+  /** Starts the worktree at this commit instead of `ref`'s, as a stacked dependent does. */
+  commit: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/)
+    .optional(),
 });
 
 export type TaskWorkspaceRepositoryInput = z.infer<
@@ -281,6 +286,27 @@ export class SqliteWorkspaceBindingStore implements WorkspaceBindingStore {
     });
   }
 
+  /** Moves a repository's recorded starting point forward, as after a restack; no transaction of its own. */
+  advanceCommit(taskId: string, repositoryId: string, commit: string): void {
+    const binding = this.get(taskId);
+    if (!binding) return;
+    this.db
+      .prepare(
+        `UPDATE ${this.table} SET repositories = ?, updatedAt = ? WHERE taskId = ?`,
+      )
+      .run(
+        JSON.stringify(
+          binding.repositories.map((repository) =>
+            repository.repositoryId === repositoryId
+              ? { ...repository, commit }
+              : repository,
+          ),
+        ),
+        new Date().toISOString(),
+        taskId,
+      );
+  }
+
   update(
     taskId: string,
     state: TaskWorkspaceBinding["state"],
@@ -392,7 +418,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           workspacePath: join(path, `repo-${index + 1}`),
           ref: repository.ref,
           gitCommonDir: null,
-          commit: null,
+          commit: repository.commit ?? null,
         }));
         binding = this.store.createOrGet(id, workspaceId, path, allocated);
       }
@@ -607,9 +633,10 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
         if (!repository) throw new Error("Repository binding disappeared");
 
         if (!repository.gitCommonDir || !repository.commit) {
+          // A requested commit must already be in the repository: it never falls back to `ref`.
           const source = await this.gitInfo(
             repository.sourcePath,
-            repository.ref,
+            repository.commit ?? repository.ref,
           );
           binding = this.store.bindRepository(
             binding.taskId,
@@ -962,7 +989,12 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
 
   private normalizeRepositories(
     repositories: TaskWorkspaceRepositoryInput[],
-  ): Array<{ repositoryId: string; path: string; ref: string }> {
+  ): Array<{
+    repositoryId: string;
+    path: string;
+    ref: string;
+    commit?: string;
+  }> {
     const parsed = z.array(repositoryInputSchema).parse(repositories);
     const normalized = parsed
       .map((repository) => {
@@ -972,6 +1004,7 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
           repositoryId: repository.repositoryId,
           path: resolve(repository.path),
           ref: repository.ref ?? "HEAD",
+          ...(repository.commit ? { commit: repository.commit } : {}),
         };
       })
       .sort((a, b) =>
@@ -1000,7 +1033,16 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
       path: repository.sourcePath,
       ref: repository.ref,
     }));
-    if (JSON.stringify(current) !== JSON.stringify(requested))
+    if (
+      JSON.stringify(current) !==
+      JSON.stringify(
+        requested.map(({ repositoryId, path, ref }) => ({
+          repositoryId,
+          path,
+          ref,
+        })),
+      )
+    )
       throw new Error(
         `Task ${binding.taskId} is already bound to a different repository set`,
       );
