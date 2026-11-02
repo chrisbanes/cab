@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
@@ -80,30 +81,19 @@ test("local forms submit versioned commands and render secret-safe views", async
     assert.equal(task.ready, 0);
     assert.match(ui.home(), /&lt;Builder&gt;/);
     assert.doesNotMatch(ui.home(), /<Builder>/);
-    await ui.submit({
-      type: "routing.configure",
-      projectId: project.id,
-      expectedVersion: "1",
-      enabled: "1",
-      guidance: "Find a coder",
-      credentialRef: "env:TYPESAFE_KEY",
-      candidateProfileIds: JSON.stringify([profile.id]),
-    });
-    const html = ui.project(project.id);
-    assert.match(html, /credential reference configured/);
-    assert.doesNotMatch(html, /TYPESAFE_KEY/);
-    assert.match(html, /task.create/);
     assert.match(
       ui.task(task.id),
       /Configuration eligibility only: held: project-paused, task-unready\./,
     );
-    await ui.submit({
+    domain.execute({
+      actor: "operator",
+      key: randomUUID(),
       type: "project.configure",
       projectId: project.id,
-      expectedVersion: "1",
+      expectedVersion: 1,
       name: "Sample",
       instructions: "Instructions",
-      paused: "",
+      paused: false,
     });
     await ui.submit({
       type: "task.configure",
@@ -247,14 +237,10 @@ test("rendered form retries replay one receipt and retain create IDs", async () 
       project.key,
     );
 
-    const taskForm = renderedForm(
-      await page(`/project/${projectId}`),
-      "task.create",
-    );
-    const taskId = formValue(taskForm, "taskId");
+    const taskId = randomUUID();
     const task = {
       type: "task.create",
-      key: formValue(taskForm, "key"),
+      key: randomUUID(),
       projectId,
       taskId,
       title: "First",
@@ -293,21 +279,28 @@ test("rendered form retries replay one receipt and retain create IDs", async () 
     );
     assert.equal(domain.assignments(taskId).length, 0);
 
-    const configureForm = renderedForm(
-      await page(`/project/${projectId}`),
+    const removedResponse = await fetch(`${base}/project/${projectId}`, {
+      headers: { cookie: authenticatedCookie },
+      redirect: "manual",
+    });
+    assert.equal(removedResponse.status, 404);
+    assert.equal(removedResponse.headers.get("location"), null);
+    assert.match(await removedResponse.text(), /Not found/);
+    for (const type of [
       "project.configure",
-    );
-    const configure = {
-      type: "project.configure",
-      key: formValue(configureForm, "key"),
-      projectId,
-      expectedVersion: formValue(configureForm, "expectedVersion"),
-      name: "Renamed",
-    };
-    assert.equal((await post(configure)).status, 303);
-    assert.equal((await post(configure)).status, 303);
-    assert.equal(domain.project(projectId).version, 2);
-    assert.equal((await post({ ...configure, name: "Changed" })).status, 409);
+      "routing.configure",
+      "delivery.configure",
+      "github.configure",
+      "repositories.configure",
+      "github.preview",
+      "github.refresh",
+      "github.place",
+    ])
+      assert.equal(
+        (await post({ type, key: randomUUID(), projectId })).status,
+        400,
+        type,
+      );
   } finally {
     await http?.stop();
     auth?.close();
@@ -335,30 +328,33 @@ test("draft project stays held until an active lead is selected in its form", as
       outcome: "Ship",
       ready: "1",
     })) as { id: string };
-    await ui.submit({
+    domain.execute({
+      actor: "operator",
+      key: randomUUID(),
       type: "project.configure",
       projectId: draft.id,
-      expectedVersion: "1",
+      expectedVersion: 1,
       name: "Draft",
-      paused: "",
+      paused: false,
     });
     assert.deepEqual(domain.admission(task.id).reasons, [
       "project-lead-unconfigured",
     ]);
-    assert.match(ui.project(draft.id), /name="leadProfileId"/);
     const lead = (await ui.submit({
       type: "profile.create",
       name: "Lead",
       instructions: "Own outcomes",
       capabilities: "coordinate",
     })) as { id: string };
-    await ui.submit({
+    domain.execute({
+      actor: "operator",
+      key: randomUUID(),
       type: "project.configure",
       projectId: draft.id,
-      expectedVersion: "2",
+      expectedVersion: 2,
       name: "Draft",
       leadProfileId: lead.id,
-      paused: "",
+      paused: false,
     });
     assert.deepEqual(domain.admission(task.id), {
       eligible: true,
@@ -382,13 +378,15 @@ test("draft project stays held until an active lead is selected in its form", as
       instructions: "Own outcomes",
       capabilities: "coordinate",
     })) as { id: string };
-    await ui.submit({
+    domain.execute({
+      actor: "operator",
+      key: randomUUID(),
       type: "project.configure",
       projectId: draft.id,
-      expectedVersion: "3",
+      expectedVersion: 3,
       name: "Draft",
       leadProfileId: replacement.id,
-      paused: "",
+      paused: false,
     });
     assert.deepEqual(domain.admission(task.id), {
       eligible: true,
@@ -405,7 +403,7 @@ test("standalone startup migrates and exposes the same local operator boundary",
   try {
     await service.start();
     const ui = new LocalOperatorUi(service.domain());
-    const project = (await ui.submit({
+    const _project = (await ui.submit({
       type: "project.create",
       name: "Persistent",
     })) as { id: string };
@@ -414,7 +412,7 @@ test("standalone startup migrates and exposes the same local operator boundary",
     try {
       await restarted.start();
       assert.match(
-        new LocalOperatorUi(restarted.domain()).project(project.id),
+        new LocalOperatorUi(restarted.domain()).home(),
         /Persistent/,
       );
     } finally {

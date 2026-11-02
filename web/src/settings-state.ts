@@ -160,6 +160,8 @@ const jsonFields = new Set([
   "repositories",
   "conditions",
   "rows",
+  "grants",
+  "requiredChecks",
 ]);
 /** A field only counts while the field that controls it is on (hidden residue is not input). */
 const noRows = (value: unknown) => {

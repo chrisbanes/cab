@@ -1674,17 +1674,18 @@ test("Jira placeholders coexist with visible query edits without importing withh
   assert.equal(loaded.jql, "project = VISIBLE");
   assert.deepEqual(loaded.jqlIds, ["visible"]);
   assert.equal(JSON.stringify(loaded).includes("PRIVATE"), false);
-  assert.deepEqual(
-    jiraSelections(source, {
-      ...loaded,
-      jql: "project = EDITED\nproject = NEW",
-    }),
-    [
-      { savedRow: reference, keep: true },
-      { id: "visible", kind: "jql", jql: "project = EDITED" },
-      { id: "S-1", kind: "jql", jql: "project = NEW" },
-    ],
-  );
+  const edited = jiraSelections(source, {
+    ...loaded,
+    jql: "project = EDITED\nproject = NEW",
+  });
+  const added = edited[2]!;
+  assert.ok("id" in added);
+  assert.match(added.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(edited, [
+    { savedRow: reference, keep: true },
+    { id: "visible", kind: "jql", jql: "project = EDITED" },
+    { id: added.id, kind: "jql", jql: "project = NEW" },
+  ]);
   assert.equal(parseRows(jiraRowsFrom(source).selections).length, 2);
   const removed = {
     ...loaded,
@@ -1711,6 +1712,219 @@ test("Jira placeholders coexist with visible query edits without importing withh
   assert.equal(adopted.dropped, 1);
   assert.equal(adopted.jql, "project = EDITED");
   assert.equal(parseRows(adopted.selections)[0]!.removed, undefined);
+});
+
+test("Jira review retains query deletions and edits while adding only newly saved identities", () => {
+  const source = {
+    ...config().source,
+    tracker: "jira" as const,
+    selections: ["S-1", "S-2", "S-3"].map((id) => ({
+      id,
+      kind: "jql" as const,
+      descriptor: null,
+      active: true,
+    })),
+  };
+  const known = {
+    jql: source.selections.map(({ id }) => ({ id, jql: `project = ${id}` })),
+  };
+  for (const jql of ["project = EDITED", ""]) {
+    const adopted = adoptJiraRows(
+      source,
+      {
+        selections: "[]",
+        jqlIds: ["S-1", "S-2"],
+        jql,
+      },
+      known,
+    );
+    assert.equal(
+      adopted.jql,
+      [jql, "project = S-3"].filter(Boolean).join("\n"),
+    );
+    assert.deepEqual(adopted.jqlIds, jql ? ["S-1", "S-3"] : ["S-3"]);
+    assert.equal(adopted.dropped, 0);
+  }
+});
+
+test("Jira deletion intent survives successive conflicts and still adopts newly saved queries", () => {
+  const source = {
+    ...config().source,
+    tracker: "jira" as const,
+    selections: ["S-1", "S-2"].map((id) => ({
+      id,
+      kind: "jql" as const,
+      descriptor: null,
+      active: true,
+    })),
+  };
+  const known = {
+    jql: source.selections.map(({ id }) => ({ id, jql: `project = ${id}` })),
+  };
+  for (const jql of ["project = EDITED", ""]) {
+    const { dropped: _firstDropped, ...first } = adoptJiraRows(
+      source,
+      {
+        selections: "[]",
+        jqlIds: ["S-1", "S-2"],
+        jql,
+      },
+      known,
+    );
+    const { dropped: _secondDropped, ...second } = adoptJiraRows(
+      source,
+      first,
+      known,
+    );
+    assert.deepEqual(second.jqlIds, first.jqlIds);
+    assert.equal(second.jql, jql);
+    const latest = {
+      ...source,
+      selections: [
+        ...source.selections,
+        { ...source.selections[0]!, id: "S-3" },
+      ],
+    };
+    const latestKnown = {
+      jql: [...known.jql, { id: "S-3", jql: "project = NEW" }],
+    };
+    const { dropped: _thirdDropped, ...third } = adoptJiraRows(
+      latest,
+      second,
+      latestKnown,
+    );
+    assert.deepEqual(third.jqlIds, jql ? ["S-1", "S-3"] : ["S-3"]);
+    assert.equal(third.jql, [jql, "project = NEW"].filter(Boolean).join("\n"));
+    const { dropped: _fourthDropped, ...fourth } = adoptJiraRows(
+      latest,
+      third,
+      latestKnown,
+    );
+    assert.deepEqual(
+      jiraSelections(latest, fourth),
+      jiraSelections(latest, third),
+    );
+  }
+});
+
+test("Jira review while private queries load does not keep an explicit identity twice or restore its deletion", () => {
+  const source = {
+    ...config().source,
+    tracker: "jira" as const,
+    selections: ["S-1", "S-2"].map((id, index) => ({
+      id,
+      kind: "jql" as const,
+      descriptor: null,
+      active: true,
+      savedRow: { projectId, section: "source" as const, version: 4, index },
+    })),
+  };
+  const { dropped: _dropped, ...adopted } = adoptJiraRows(source, {
+    selections: "[]",
+    jqlIds: ["S-1", "S-2"],
+    jql: "project = EDITED",
+  });
+  assert.deepEqual(jiraSelections(source, adopted), [
+    { id: "S-1", kind: "jql", jql: "project = EDITED" },
+  ]);
+  // A formerly public deletion cannot remove a now-opaque row by position.
+  const hidden = {
+    ...source,
+    selections: source.selections.map((row, index) =>
+      index === 1 ? { ...row, id: null } : row,
+    ),
+  };
+  const { dropped, ...reviewed } = adoptJiraRows(hidden, adopted);
+  assert.equal(dropped, 1);
+  assert.deepEqual(reviewed.removedJqlIds, []);
+  assert.deepEqual(jiraSelections(hidden, reviewed), [
+    { savedRow: source.selections[1]!.savedRow, keep: true },
+    { id: "S-1", kind: "jql", jql: "project = EDITED" },
+  ]);
+});
+
+test("source identity allocation stays independent of hidden IDs during additions and conflict renumbering", () => {
+  assert.match(nextSelectionId([null], []), /^[0-9a-f-]{36}$/);
+  const source = {
+    ...config().source,
+    selections: [
+      {
+        id: null,
+        kind: "search" as const,
+        descriptor: null,
+        active: false,
+        savedRow: {
+          projectId,
+          section: "source" as const,
+          version: 4,
+          index: 0,
+        },
+      },
+      { id: "S-1", kind: "search" as const, descriptor: null, active: false },
+    ],
+  };
+  const adopted = parseRows(
+    adoptSourceRows(source, {
+      selections: JSON.stringify([
+        { id: "S-1", kind: "search", query: "new query" },
+      ]),
+    }).selections,
+  );
+  const added = adopted.find((row) => row.query === "new query")!;
+  assert.match(String(added.id), /^[0-9a-f-]{36}$/);
+  assert.ok(adopted.some((row) => row.unavailable));
+  assert.ok(adopted.some((row) => row.keep && row.id === "S-1"));
+});
+
+test("conflict adoption reallocates unsaved identities when every latest identity is withheld", () => {
+  const source = {
+    ...config().source,
+    selections: [
+      {
+        id: null,
+        kind: "search" as const,
+        descriptor: null,
+        active: false,
+        savedRow: {
+          projectId,
+          section: "source" as const,
+          version: 4,
+          index: 0,
+        },
+      },
+    ],
+  };
+  let values = {
+    selections: JSON.stringify([
+      { id: "S-1", kind: "search", query: "first", rowKey: "first" },
+      { id: "S-2", kind: "search", query: "second", rowKey: "second" },
+    ]),
+  };
+  for (const version of [4, 5]) {
+    const latest = {
+      ...source,
+      version,
+      selections: source.selections.map((row) => ({
+        ...row,
+        savedRow: { ...row.savedRow, version },
+      })),
+    };
+    values = { selections: adoptSourceRows(latest, values).selections };
+    const rows = parseRows(values.selections);
+    const unsaved = rows.filter((row) => !row.keep);
+    assert.equal(unsaved.length, 2);
+    assert.deepEqual(
+      unsaved.map((row) => row.rowKey),
+      ["first", "second"],
+    );
+    assert.deepEqual(
+      unsaved.map((row) => row.query),
+      ["first", "second"],
+    );
+    for (const row of unsaved) assert.match(String(row.id), /^[0-9a-f-]{36}$/);
+    assert.equal(new Set(unsaved.map((row) => row.id)).size, 2);
+    assert.equal(rows.filter((row) => row.unavailable && row.keep).length, 1);
+  }
 });
 
 test("opaque row identity cannot alias a visible id containing the serialized reference", () => {

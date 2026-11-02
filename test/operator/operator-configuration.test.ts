@@ -2866,6 +2866,68 @@ test("opaque source references reject foreign tracker section ordinal duplicates
   assert.equal(domain.githubConfiguration(projectId).version, 3);
 });
 
+test("a Jira query added beside a hidden sequential identity round trips through the editor command", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const previous = process.env.JIRA_HIDDEN_SELECTION;
+  process.env.JIRA_HIDDEN_SELECTION = "S-1";
+  t.after(() => {
+    if (previous === undefined) delete process.env.JIRA_HIDDEN_SELECTION;
+    else process.env.JIRA_HIDDEN_SELECTION = previous;
+  });
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:JIRA_HIDDEN_SELECTION",
+  });
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: "example.atlassian.net",
+    credential: {
+      siteRef: "env:JIRA_SITE",
+      emailRef: "env:JIRA_EMAIL",
+      tokenRef: "env:JIRA_TOKEN",
+    },
+  });
+  const hidden = { id: "S-1", kind: "jql" as const, jql: "project = PRIVATE" };
+  domain.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    instance: "example.atlassian.net",
+    selections: [hidden],
+  });
+  f.service.jiraJqlErrors = async () => [];
+  const { jiraRowsFrom, jiraSelections } = await import(
+    "../../web/src/settings-changes.js"
+  );
+  const source = (await api.readProjectConfiguration(projectId)).data.source;
+  assert.equal(source.selections[0]!.id, null);
+  const selections = jiraSelections(source, {
+    ...jiraRowsFrom(source),
+    jql: "project = NEW",
+  });
+  await api.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: source.version,
+    selections,
+  });
+  const saved = domain.jiraConfiguration(projectId)!;
+  assert.deepEqual(saved.selections[0], hidden);
+  assert.equal(saved.selections[1]!.jql, "project = NEW");
+  assert.notEqual(saved.selections[1]!.id, hidden.id);
+  const read = await api.readProjectConfiguration(projectId);
+  assert.equal(read.data.source.selections.length, 2);
+  assert.equal(JSON.stringify(read).includes("S-1"), false);
+});
+
 test("opaque Jira selections preserve hidden IDs JQL readiness closed mode and instance beside visible edits", async (t) => {
   const { f, api, projectId } = await deliveryFixture(t);
   const domain = f.service.domain();
@@ -3351,4 +3413,291 @@ test("opaque source reads fail closed without exclusion evidence and refuse keep
   } finally {
     DomainStore.prototype.deliveryCredentialReference = original;
   }
+});
+
+test("credential exclusions protect the entire configuration including status mapping scopes", async (t) => {
+  for (const tracker of ["github", "jira"] as const)
+    await t.test(tracker, async (t) => {
+      const { f, api, projectId } = await deliveryFixture(t);
+      const domain = f.service.domain();
+      const envKey = "STATUS_MAPPING_PRIVATE_REFERENCE";
+      const privateValue = "STATUS_MAPPING_PRIVATE_VALUE";
+      const previous = process.env[envKey];
+      process.env[envKey] = privateValue;
+      t.after(() => {
+        if (previous === undefined) delete process.env[envKey];
+        else process.env[envKey] = previous;
+      });
+      if (tracker === "github")
+        domain.execute({
+          type: "github.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId,
+          expectedVersion: 1,
+          selections: [
+            {
+              id: envKey,
+              kind: "project",
+              projectNodeId: privateValue,
+              filter: "",
+            },
+          ],
+          readiness: null,
+        });
+      else {
+        domain.execute({
+          type: "issue-tracker-credential.configure",
+          actor: "operator",
+          key: randomUUID(),
+          issueTracker: "jira",
+          instance: "example.atlassian.net",
+          credential: {
+            siteRef: "env:JIRA_SITE",
+            emailRef: "env:JIRA_EMAIL",
+            tokenRef: "env:JIRA_TOKEN",
+          },
+        });
+        domain.execute({
+          type: "jira.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId,
+          expectedVersion: 1,
+          instance: "example.atlassian.net",
+          selections: [
+            { id: "visible", kind: "jql", jql: "project = VISIBLE" },
+          ],
+          readiness: null,
+        });
+      }
+      const grant =
+        tracker === "github"
+          ? {
+              action: "project.field" as const,
+              repositoryId: "R",
+              mode: "allow" as const,
+              projectNodeId: privateValue,
+              fieldNodeId: envKey,
+              optionNodeIds: [envKey, privateValue],
+            }
+          : {
+              action: "issue.status" as const,
+              repositoryId: "R",
+              mode: "allow" as const,
+              statusIds: [envKey, privateValue],
+            };
+      domain.execute({
+        ...deliveryInput(projectId),
+        actor: "operator",
+        credentialRef: `env:${envKey}`,
+        grants: [grant],
+      });
+      const withoutMapping = await api.readProjectConfiguration(projectId);
+      for (const secret of [envKey, `env:${envKey}`, privateValue])
+        assert.equal(JSON.stringify(withoutMapping).includes(secret), false);
+      assert.equal(withoutMapping.data.statusMapping, undefined);
+      const mapping =
+        tracker === "github"
+          ? {
+              selectionId: envKey,
+              projectNodeId: privateValue,
+              fieldNodeId: envKey,
+              events: {
+                turnStarted: null,
+                handedBack: null,
+                held: null,
+                done: privateValue,
+              },
+            }
+          : {
+              tracker: "jira" as const,
+              events: {
+                turnStarted: null,
+                handedBack: null,
+                held: null,
+                done: privateValue,
+              },
+            };
+      domain.execute({
+        type: "status-mapping.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: 1,
+        mapping,
+      });
+      for (const removeGrant of [false, true]) {
+        if (removeGrant)
+          domain.execute({
+            ...deliveryInput(projectId),
+            expectedVersion: 2,
+            actor: "operator",
+            credentialRef: `env:${envKey}`,
+            grants: [],
+          });
+        const read = await api.readProjectConfiguration(projectId);
+        for (const secret of [envKey, `env:${envKey}`, privateValue])
+          assert.equal(JSON.stringify(read).includes(secret), false);
+        assert.equal(
+          read.data.statusMapping,
+          undefined,
+          "a withheld mapping must not become an editable empty mapping",
+        );
+        if (!removeGrant)
+          assert.equal("savedRow" in read.data.delivery!.grants[0]!, true);
+        assert.deepEqual(
+          domain.statusMapping(projectId).mapping,
+          mapping,
+          "read projection never changes persisted mapping",
+        );
+      }
+      assert.equal(f.runtime.turns, 0);
+    });
+});
+
+test("delivery policies with 257 Project options save and preserve the full configuration read", async (t) => {
+  for (const duplicates of [false, true])
+    await t.test(duplicates ? "duplicates" : "distinct", async (t) => {
+      const { f, api, projectId } = await deliveryFixture(t);
+      const grant = {
+        action: "project.field" as const,
+        repositoryId: "R",
+        mode: "allow" as const,
+        projectNodeId: "P",
+        fieldNodeId: "F",
+        optionNodeIds: Array.from({ length: 257 }, (_, index) =>
+          duplicates ? "option" : `option-${index}`,
+        ),
+      };
+      const input = deliveryInput(projectId, { grants: [grant] });
+      assert.ok(Buffer.byteLength(JSON.stringify(input)) < 64 * 1024);
+      await api.execute(input);
+      const read = await api.readProjectConfiguration(projectId);
+      assert.deepEqual(read.data.delivery!.grants, [grant]);
+      const mapping = read.data.statusMapping;
+      assert.ok(mapping && !("tracker" in mapping));
+      assert.deepEqual(mapping.granted, [
+        {
+          projectNodeId: "P",
+          fieldNodeId: "F",
+          optionNodeIds: grant.optionNodeIds,
+        },
+      ]);
+      assert.deepEqual(f.service.delivery().configuration(projectId).grants, [
+        grant,
+      ]);
+      assert.equal(f.runtime.turns, 0);
+    });
+});
+
+test("a withheld Project selection leaves public grant reductions warnable without disclosing its id", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const envKey = "PRIVATE_MAPPING_SELECTION";
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [
+      { id: envKey, kind: "project", projectNodeId: "P", filter: "" },
+    ],
+    readiness: null,
+  });
+  const grant = {
+    action: "project.field" as const,
+    repositoryId: "R",
+    mode: "allow" as const,
+    projectNodeId: "P",
+    fieldNodeId: "F",
+    optionNodeIds: ["O"],
+  };
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: `env:${envKey}`,
+    grants: [grant],
+  });
+  domain.execute({
+    type: "status-mapping.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    mapping: {
+      selectionId: envKey,
+      projectNodeId: "P",
+      fieldNodeId: "F",
+      events: { turnStarted: null, handedBack: null, held: null, done: "O" },
+    },
+  });
+  const read = await api.readProjectConfiguration(projectId);
+  assert.equal(JSON.stringify(read).includes(envKey), false);
+  assert.equal(read.data.statusMapping, undefined);
+  const saved = read.data.delivery!;
+  assert.deepEqual(saved.grants, [grant]);
+  const { deliveryMappingCoverageWarning } = await import(
+    "../../web/src/delivery-policy-draft.js"
+  );
+  for (const grants of [[], [{ ...grant, mode: "approval" as const }]])
+    assert.match(
+      deliveryMappingCoverageWarning(
+        saved,
+        { ...saved, grants },
+        read.data.statusMapping,
+      ) ?? "",
+      /may remove status-mapping authority/,
+    );
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("routing Settings partial edits preserve an existing 129-candidate domain configuration", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const ids = Array.from({ length: 129 }, () => randomUUID()).sort();
+  for (const profileId of ids)
+    domain.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name: "Candidate",
+      instructions: "Routing candidate",
+      capabilities: "Work",
+    });
+  domain.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: true,
+    guidance: "Original",
+    candidateProfileIds: ids,
+  });
+  const read = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(read.data.routing.candidateProfileIds, ids);
+  const { routingCommand } = await import("../../web/src/settings-changes.js");
+  const command = routingCommand(
+    projectId,
+    {
+      key: randomUUID(),
+      expectedVersion: "2",
+      enabled: true,
+      candidateProfileIds: ids,
+      guidance: "Updated",
+      referenceMode: "preserve",
+    },
+    read.data,
+    "Original",
+  );
+  assert.ok(Buffer.byteLength(JSON.stringify(command)) < 64 * 1024);
+  await api.execute(command);
+  const after = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(after.data.routing.candidateProfileIds, ids);
+  assert.equal(domain.routing(projectId).guidance, "Updated");
+  assert.equal(domain.routing(projectId).enabled, 1);
+  assert.equal(f.runtime.turns, 0);
 });

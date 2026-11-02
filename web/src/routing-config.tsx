@@ -231,14 +231,6 @@ export function RoutingTab(p: TabProps) {
             "In-scope repairs keep their assignee. Routing never grants readiness or authorises execution.",
           ]}
         />
-        <Aside
-          title="Related"
-          items={[
-            <a key="advanced" href={`/project/${projectId}`}>
-              Advanced routing editor (partial edits)
-            </a>,
-          ]}
-        />
       </div>
     </div>
   );

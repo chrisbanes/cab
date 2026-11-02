@@ -444,9 +444,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                   onClick={() =>
                     add("selections", {
                       id: nextSelectionId(
-                        data.source.selections.flatMap((s) =>
-                          s.id ? [s.id] : [],
-                        ),
+                        data.source.selections.map((s) => s.id),
                         selections.map((s) => String(s.id)),
                       ),
                       kind: "repository",
@@ -698,9 +696,6 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
               "Saving replaces configuration only. It imports no tasks, activates no selection and resumes no work.",
               "Preview and import now previews and activates the saved sources, then refreshes them from GitHub. Sync & placement keeps later refreshes and placement, and offers Preview and import now again after a later save.",
               "GitHub Project filters stay hidden; remove a source and add a new one to change them.",
-              <a key="advanced" href={`/project/${projectId}`}>
-                Open advanced source editor
-              </a>,
             ]}
           />
         </div>

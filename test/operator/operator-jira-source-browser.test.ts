@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import type { Page, Route } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -10,12 +11,211 @@ import { commandRequest, setupJourney } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-jira-source-browser");
 
+/** The public form is usable before its session-only saved query read has hydrated it. */
+const waitForQueries = (page: Page, expected: string) =>
+  page.waitForFunction(
+    (value) =>
+      document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="JQL queries, one per line"]',
+      )?.value === value,
+    expected,
+  );
+
 const site = "example.atlassian.net";
 const variables = {
   FIXTURE_JIRA_BROWSER_SITE: `https://${site}`,
   FIXTURE_JIRA_BROWSER_EMAIL: "chris@example.test",
   FIXTURE_JIRA_BROWSER_TOKEN: "jira-browser-token-canary-1318",
 };
+
+for (const schedule of [
+  "deleted query",
+  "untouched query",
+  "private read pending",
+  "two partial conflicts",
+  "two complete conflicts",
+] as const) {
+  test(`Jira conflict review preserves query intent: ${schedule}`, async (_t, journey) => {
+    for (const [name, value] of Object.entries(variables)) {
+      const previous = process.env[name];
+      journey.cleanup(async () => {
+        if (previous === undefined) delete process.env[name];
+        else process.env[name] = previous;
+      }, `restore-${name}`);
+      process.env[name] = value;
+    }
+    const jira = fakeJira((request) =>
+      request.url.pathname.endsWith("/myself")
+        ? json({ accountId: "acct-1", displayName: "Chris Example" })
+        : json({ issues: [] }),
+    );
+    const { f, web, page } = await setupJourney(journey, {
+      discovery: false,
+      projects: true,
+      jiraFetcher: jira.fetcher,
+    });
+    const domain = f.service.domain();
+    const projectId = String(domain.projects()[0]?.id);
+    domain.execute({
+      type: "issue-tracker-credential.configure",
+      actor: "operator",
+      key: randomUUID(),
+      issueTracker: "jira",
+      instance: site,
+      credential: {
+        siteRef: "env:FIXTURE_JIRA_BROWSER_SITE",
+        emailRef: "env:FIXTURE_JIRA_BROWSER_EMAIL",
+        tokenRef: "env:FIXTURE_JIRA_BROWSER_TOKEN",
+      },
+    });
+    const original = [
+      { id: "S-1", kind: "jql" as const, jql: "project = FIRST" },
+      { id: "S-2", kind: "jql" as const, jql: "project = SECOND" },
+    ];
+    domain.execute({
+      type: "jira.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      instance: site,
+      selections: original,
+    });
+    f.service.jiraJqlErrors = async () => [];
+    await page.goto(
+      `${web.origin}/app/projects/${projectId}/settings?tab=github&tracker=jira`,
+    );
+    await waitForQueries(page, original.map((row) => row.jql).join("\n"));
+    if (schedule === "untouched query")
+      await page.getByLabel("Closed Jira issues").selectOption("done");
+    else
+      await page
+        .getByLabel("JQL queries, one per line")
+        .fill(schedule === "two complete conflicts" ? "" : "project = EDITED");
+    const latest = original.map((row, index) =>
+      index === 0 ? { ...row, jql: "project = LATEST" } : row,
+    );
+    domain.execute({
+      type: "jira.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      instance: site,
+      selections: latest,
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    journey.cleanup(async () => release(), "release-private-queries");
+    let received!: () => void;
+    const privateRead = new Promise<void>((resolve) => {
+      received = resolve;
+    });
+    let finished!: () => void;
+    const fulfilled = new Promise<void>((resolve) => {
+      finished = resolve;
+    });
+    let holding = false;
+    const path = `**/api/operator/projects/${projectId}/private-values`;
+    const hold = async (route: Route) => {
+      if (holding) return route.continue();
+      holding = true;
+      try {
+        const response = await route.fetch();
+        received();
+        if (schedule === "private read pending") await gate;
+        await route.fulfill({ response });
+      } finally {
+        finished();
+      }
+    };
+    await page.route(path, hold);
+    try {
+      const settled =
+        schedule === "private read pending"
+          ? undefined
+          : page.waitForResponse((r) =>
+              r.url().endsWith(`/projects/${projectId}/private-values`),
+            );
+      await page
+        .getByRole("button", { name: "Save Jira source", exact: true })
+        .click();
+      await page
+        .getByText("A newer version was saved elsewhere.", { exact: true })
+        .waitFor();
+      await privateRead;
+      if (settled) await (await settled).finished();
+      await page
+        .getByRole("button", { name: "Review changes", exact: true })
+        .click();
+      const expected =
+        schedule === "untouched query"
+          ? "project = LATEST\nproject = SECOND"
+          : schedule === "two complete conflicts"
+            ? ""
+            : "project = EDITED";
+      await waitForQueries(page, expected);
+      if (
+        schedule === "two partial conflicts" ||
+        schedule === "two complete conflicts"
+      ) {
+        domain.execute({
+          type: "jira.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId,
+          expectedVersion: 3,
+          instance: site,
+          selections: latest,
+        });
+        const nextRead = page.waitForResponse((r) =>
+          r.url().endsWith(`/projects/${projectId}/private-values`),
+        );
+        const conflict = page.waitForResponse(
+          (r) =>
+            r.url().endsWith("/api/operator/commands") &&
+            r.request().method() === "POST",
+        );
+        await page
+          .getByRole("button", { name: "Save Jira source", exact: true })
+          .click();
+        assert.equal((await conflict).status(), 409);
+        await (await nextRead).finished();
+        await page
+          .getByRole("button", { name: "Review changes", exact: true })
+          .click();
+        await waitForQueries(page, expected);
+      }
+      const saved = page.waitForResponse(
+        (r) =>
+          r.url().endsWith("/api/operator/commands") &&
+          r.request().method() === "POST",
+      );
+      await page
+        .getByRole("button", { name: "Save Jira source", exact: true })
+        .click();
+      assert.equal((await saved).status(), 200);
+      assert.deepEqual(
+        domain.jiraConfiguration(projectId)!.selections,
+        schedule === "untouched query"
+          ? latest
+          : schedule === "two complete conflicts"
+            ? []
+            : [{ ...original[0]!, jql: "project = EDITED" }],
+      );
+      assert.equal(
+        domain.jiraConfiguration(projectId)!.closedIssues,
+        schedule === "untouched query" ? "done" : "skip",
+      );
+    } finally {
+      release();
+      await fulfilled;
+      await page.unroute(path, hold);
+    }
+  });
+}
 
 test("a project is set up on Jira: credential, rejected and previewed JQL, sync, task detail and unavailable actions", async (_t, journey) => {
   for (const [name, value] of Object.entries(variables)) {
@@ -112,7 +312,7 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
   await savedOutcome(page);
   // Reopening the editor loads the saved query through the private read.
   await page.reload();
-  await page.getByLabel("JQL queries, one per line").waitFor();
+  await waitForQueries(page, "project = ABC");
   assert.equal(
     await page.getByLabel("JQL queries, one per line").inputValue(),
     "project = ABC",
@@ -178,12 +378,47 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
       { id: "S-1", kind: "jql", jql: "project = ABC\nAND status != Done" },
     ],
   });
-  await page.reload();
-  await page.getByLabel("JQL queries, one per line").waitFor();
-  assert.equal(
-    await page.getByLabel("JQL queries, one per line").inputValue(),
-    "project = ABC AND status != Done",
-  );
+  let releaseQueries!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseQueries = resolve;
+  });
+  let receivedQueries!: (value: { jql: { jql: string }[] }) => void;
+  const received = new Promise<{ jql: { jql: string }[] }>((resolve) => {
+    receivedQueries = resolve;
+  });
+  const privatePath = `**/api/operator/projects/${projectId}/private-values`;
+  const holdQueries = async (route: Route) => {
+    const response = await route.fetch();
+    receivedQueries((await response.json()).data.source);
+    await gate;
+    await route.fulfill({ response });
+  };
+  await page.route(privatePath, holdQueries);
+  try {
+    await page.reload();
+    const privateSource = await received;
+    await page.getByLabel("JQL queries, one per line").waitFor();
+    assert.equal(
+      privateSource.jql[0]?.jql,
+      "project = ABC\nAND status != Done",
+    );
+    assert.equal(
+      await page.getByLabel("JQL queries, one per line").inputValue(),
+      "",
+    );
+    await page
+      .getByRole("button", { name: "Remove unavailable source 1", exact: true })
+      .waitFor();
+    releaseQueries();
+    await waitForQueries(page, "project = ABC AND status != Done");
+    assert.equal(
+      await page.getByLabel("JQL queries, one per line").inputValue(),
+      "project = ABC AND status != Done",
+    );
+  } finally {
+    releaseQueries();
+    await page.unroute(privatePath, holdQueries);
+  }
   // A failed private read leaves the credentials, sync and refresh in place, and Retry loads it.
   let failed = false;
   await page.route("**/api/operator/projects/*/private-values", (route) => {
@@ -192,11 +427,15 @@ test("a project is set up on Jira: credential, rejected and previewed JQL, sync,
     return route.fulfill({ status: 503, body: "{}" });
   });
   await page.reload();
-  await page.getByText("Saved queries unavailable.").waitFor();
+  await page
+    .getByText("Saved queries unavailable; kept as unavailable rows.")
+    .waitFor();
   await page.getByRole("region", { name: "Jira credentials" }).waitFor();
   await page.getByRole("button", { name: "Refresh now" }).waitFor();
-  await page.getByRole("button", { name: "Retry" }).click();
-  await page.getByLabel("JQL queries, one per line").waitFor();
+  await page
+    .getByRole("button", { name: "Retry saved queries", exact: true })
+    .click();
+  await waitForQueries(page, "project = ABC AND status != Done");
   assert.equal(
     await page.getByLabel("JQL queries, one per line").inputValue(),
     "project = ABC AND status != Done",

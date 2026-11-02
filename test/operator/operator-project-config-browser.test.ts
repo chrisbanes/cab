@@ -93,7 +93,7 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
   });
-  assert.equal(await tabs.getByRole("link").count(), 5);
+  assert.equal(await tabs.getByRole("link").count(), 6);
   assert.equal(
     await tabs
       .getByRole("link", { name: "General" })
@@ -151,9 +151,9 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
   );
   assert.equal(
     await references
-      .getByRole("link", { name: "Open advanced editor" })
+      .getByRole("link", { name: "Change in Delivery" })
       .getAttribute("href"),
-    `/project/${ids.atlas}`,
+    `/app/projects/${ids.atlas}/settings?tab=delivery`,
   );
   assert.equal(
     await page
@@ -1988,7 +1988,7 @@ test("empty and very large instructions reveal and save exactly", async (_t, jou
   assert.equal(await outcomeMessages(page).count(), 0);
   assert.equal(await saveProject(page).isDisabled(), true);
 
-  const large = "日本é".repeat(5333) + "x";
+  const large = `${"日本é".repeat(5333)}x`;
   assert.equal(large.length, 16000);
   set(large);
   await page.reload();
@@ -2883,7 +2883,9 @@ test("GitHub source shows no readiness rule, saves an added rule, removes it, an
   });
   await page.reload();
   await page
-    .getByText("Saved readiness is unavailable; add a condition to replace it.")
+    .getByText(
+      "Saved readiness is unavailable and is kept when saving. Add a condition to replace it.",
+    )
     .waitFor();
   assert.equal(await noRule.count(), 0);
   assert.equal(await save.isDisabled(), true);
@@ -4943,7 +4945,111 @@ test("Status mapping is keyboard operable at phone width", async (_t, journey) =
   await noPageOverflow(page);
 });
 
+test("source conflict review replaces an unsaved ID when a concurrent saved identity is withheld", async (_t, journey) => {
+  const previous = process.env.HIDDEN_REVIEW_SOURCE;
+  process.env.HIDDEN_REVIEW_SOURCE = "S-1";
+  journey.cleanup(async () => {
+    if (previous === undefined) delete process.env.HIDDEN_REVIEW_SOURCE;
+    else process.env.HIDDEN_REVIEW_SOURCE = previous;
+  }, "restore-review-source-exclusion");
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [],
+    readiness: null,
+  });
+  await refresh(page);
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
+  await page
+    .getByLabel("Selection kind", { exact: true })
+    .selectOption("search");
+  await page
+    .getByLabel("Search query", { exact: true })
+    .fill("is:open unsaved query");
+  d.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: "env:HIDDEN_REVIEW_SOURCE",
+    grants: [],
+    requiredChecks: [],
+  });
+  const hidden = {
+    id: "S-1",
+    kind: "search" as const,
+    query: "private concurrent query",
+  };
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [hidden],
+    readiness: null,
+  });
+  const read = page.waitForResponse((r) =>
+    r.url().endsWith(`/projects/${ids.atlas}/configuration`),
+  );
+  const conflict = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/operator/commands") &&
+      r.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  const failed = await conflict;
+  assert.equal(failed.request().postDataJSON().selections[0].id, "S-1");
+  assert.equal(failed.status(), 409);
+  assert.equal((await (await read).json()).data.source.selections[0].id, null);
+  await page
+    .getByRole("button", { name: "Review changes", exact: true })
+    .click();
+  const saved = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/operator/commands") &&
+      r.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  const response = await saved;
+  assert.equal(response.status(), 200);
+  assert.equal(
+    JSON.stringify(response.request().postDataJSON()).includes('"S-1"'),
+    false,
+  );
+  await savedOutcome(page);
+  const selections = d.githubConfiguration(ids.atlas).selections;
+  assert.deepEqual(
+    selections.find((row) => row.id === "S-1"),
+    hidden,
+  );
+  const added = selections.find((row) => row.id !== "S-1")!;
+  assert.match(added.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(added, {
+    id: added.id,
+    kind: "search",
+    query: "is:open unsaved query",
+  });
+  assert.deepEqual(d.githubActiveSelectionIds(ids.atlas), []);
+});
+
 test("opaque saved rows support keyboard remove undo and discard while a visible source change keeps them", async (_t, journey) => {
+  const previous = process.env.HIDDEN_UI_SOURCE;
+  process.env.HIDDEN_UI_SOURCE = "S-1";
+  journey.cleanup(async () => {
+    if (previous === undefined) delete process.env.HIDDEN_UI_SOURCE;
+    else process.env.HIDDEN_UI_SOURCE = previous;
+  }, "restore-hidden-source-exclusion");
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/projects/:atlas/settings?tab=github",
@@ -4951,7 +5057,7 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
   );
   const d = f.service.domain();
   const hidden = {
-    id: "HIDDEN_UI_SOURCE",
+    id: "S-1",
     kind: "search" as const,
     query: "private saved query",
   };
@@ -5008,6 +5114,24 @@ test("opaque saved rows support keyboard remove undo and discard while a visible
   await savedOutcome(page);
   assert.deepEqual(d.githubConfiguration(ids.atlas).selections, [hidden]);
   assert.equal(d.githubConfiguration(ids.atlas).closedIssues, "done");
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
+  await page
+    .getByLabel("Selection kind", { exact: true })
+    .selectOption("search");
+  await page
+    .getByLabel("Search query", { exact: true })
+    .fill("is:open added query");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  const savedSources = d.githubConfiguration(ids.atlas).selections;
+  assert.deepEqual(savedSources[0], hidden);
+  assert.match(savedSources[1]!.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(savedSources[1], {
+    id: savedSources[1]!.id,
+    kind: "search",
+    query: "is:open added query",
+  });
+  assert.deepEqual(d.githubActiveSelectionIds(ids.atlas), []);
   const api = new OperatorApi(f.service, [f.directory]);
   await api.execute({
     type: "repositories.configure",

@@ -2585,7 +2585,6 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .optional(),
       candidateProfileIds: z
         .array(uuid)
-        .max(128)
         .refine((ids) => new Set(ids).size === ids.length),
     })
     .strict(),
@@ -3542,7 +3541,7 @@ const githubStatusMappingViewSchema = z
           .object({
             projectNodeId: text,
             fieldNodeId: text,
-            optionNodeIds: z.array(text).max(256),
+            optionNodeIds: z.array(text),
           })
           .strict(),
       )

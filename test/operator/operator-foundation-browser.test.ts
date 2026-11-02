@@ -108,14 +108,8 @@ test("retained HTML routes share the production foundation and native interactio
       .count(),
     0,
   );
-  await desktop.goto(`${web.origin}/project/${projectId}`);
-  await desktop
-    .getByRole("heading", { name: "Foundation project", exact: true })
-    .waitFor();
-
   const destinations = [
     "/",
-    `/project/${projectId}`,
     `/profile/${profileId}`,
     `/task/${taskId}`,
     `/assignment/${assignmentId}`,
@@ -190,7 +184,7 @@ test("retained HTML routes share the production foundation and native interactio
     }
     if (stylesheetHref) assert.equal(style.href, stylesheetHref);
     stylesheetHref = style.href;
-    if (path === `/project/${projectId}`) {
+    if (path === `/profile/${profileId}`) {
       const input = desktop
         .locator('body.legacy-operator input:not([type="hidden"])')
         .first();
@@ -200,7 +194,7 @@ test("retained HTML routes share the production foundation and native interactio
       }));
       assert.equal(inputStyle.height, "32px");
       assert.match(inputStyle.family, /Geist/);
-      await captureBrowserEvidence(desktop, "1366-retained-project-editor");
+      await captureBrowserEvidence(desktop, "1366-retained-profile-editor");
     }
   }
   const cssResponse = await desktop.request.get(web.origin + stylesheetHref);

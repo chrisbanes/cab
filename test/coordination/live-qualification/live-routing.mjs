@@ -273,11 +273,41 @@ async function createProject(name, leadProfileId) {
   return projectId;
 }
 
+async function readConfiguration(projectId) {
+  const response = await page
+    .context()
+    .request.get(`${origin}/api/operator/projects/${projectId}/configuration`);
+  assert.equal(response.status(), 200);
+  return (await response.json()).data;
+}
+
+async function postCommand(command) {
+  const sessionResponse = await page
+    .context()
+    .request.get(`${origin}/api/operator/session`);
+  assert.equal(sessionResponse.status(), 200);
+  const session = await sessionResponse.json();
+  assert.equal(session.authenticated, true);
+  const response = await page
+    .context()
+    .request.post(`${origin}/api/operator/commands`, {
+      headers: { origin, "x-csrf-token": session.csrfToken },
+      data: command,
+    });
+  assert.equal(response.status(), 200);
+  return response.json();
+}
+
 async function configureProject(projectId, paused) {
-  await page.goto(`${origin}/project/${projectId}`);
-  const form = page.locator('form[data-command="project.configure"]');
-  await form.locator('input[name="paused"]').setChecked(paused);
-  await submitCommand(form);
+  const data = await readConfiguration(projectId);
+  await postCommand({
+    type: "project.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: data.project.version,
+    paused,
+  });
+  assert.equal((await readConfiguration(projectId)).project.paused, paused);
 }
 
 async function configureRouting(
@@ -286,24 +316,36 @@ async function configureRouting(
   candidateProfileIds,
   credentialRef,
 ) {
-  await page.goto(`${origin}/project/${projectId}`);
-  const form = page.locator('form[data-command="routing.configure"]');
-  await form.locator('input[name="enabled"]').setChecked(enabled);
-  await form
-    .locator('textarea[name="candidateProfileIds"]')
-    .fill(JSON.stringify(candidateProfileIds));
-  await form.locator('input[name="credentialRef"]').fill(credentialRef ?? "");
-  await submitCommand(form);
+  const data = await readConfiguration(projectId);
+  await postCommand({
+    type: "routing.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: data.routing.version,
+    enabled,
+    candidateProfileIds,
+    credentialRef: credentialRef ?? null,
+  });
+  const saved = (await readConfiguration(projectId)).routing;
+  assert.equal(saved.enabled, enabled);
+  assert.deepEqual(
+    saved.candidateProfileIds,
+    [...new Set(candidateProfileIds)].sort(),
+  );
+  assert.equal(saved.credentialConfigured, Boolean(credentialRef));
 }
 
 async function createTask(projectId, title, outcome) {
-  await page.goto(`${origin}/project/${projectId}`);
-  const form = page.locator('form[data-command="task.create"]');
-  const taskId = await form.locator('input[name="taskId"]').inputValue();
-  await form.locator('input[name="title"]').fill(title);
-  await form.locator('textarea[name="outcome"]').fill(outcome);
-  await form.locator('input[name="ready"]').setChecked(false);
-  await submitCommand(form);
+  const taskId = randomUUID();
+  await postCommand({
+    type: "task.create",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title,
+    outcome,
+    ready: false,
+  });
   return taskId;
 }
 

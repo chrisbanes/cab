@@ -1,3 +1,9 @@
+import type { z } from "zod";
+import type {
+  deliveryConfigurationSchema,
+  statusMappingViewSchema,
+} from "../../src/operator/contracts.js";
+import type { Values } from "./settings-changes.js";
 export const deliveryActionKinds = [
   "issue.comment",
   "issue.labels",
@@ -20,8 +26,8 @@ export const deliveryActionKinds = [
 export type DeliveryAction = DeliveryPolicy["grants"][number]["action"];
 export type DeliveryGrant = DeliveryPolicy["grants"][number];
 export type DeliveryPolicyValues = Omit<
-  DeliveryPolicy,
-  "version" | "credentialRef"
+  z.infer<typeof deliveryConfigurationSchema>,
+  "version" | "credentialConfigured"
 >;
 export type DeliveryPolicySeed = DeliveryPolicyValues & {
   version: number;
@@ -51,7 +57,7 @@ export function deliveryPolicyDraft(
 
 export function addGrantRow(
   draft: DeliveryPolicyDraft,
-  grant: DeliveryGrant,
+  grant: DeliveryPolicyValues["grants"][number],
   key: string,
 ): DeliveryPolicyDraft {
   if (!key || draft.grantKeys.includes(key))
@@ -90,7 +96,7 @@ export function addRequiredCheckRow(
   };
 }
 
-/** Produces the unchanged domain policy shape; a credential value exists only for a Set submission. */
+/** Builds JSON input with opaque keep references; credential input exists only for an explicit Set. */
 export function deliveryPolicySubmission(draft: DeliveryPolicyDraft) {
   const {
     version: _version,
@@ -98,8 +104,24 @@ export function deliveryPolicySubmission(draft: DeliveryPolicyDraft) {
     credentialInput,
     grantKeys: _grantKeys,
     requiredCheckKeys: _requiredCheckKeys,
-    ...values
+    branchPrefixUnavailable: _prefixUnavailable,
+    branchPrefix,
+    ...policy
   } = draft;
+  const values = {
+    ...policy,
+    ...(branchPrefix === null
+      ? { preserveBranchPrefix: true as const }
+      : branchPrefix !== undefined
+        ? { branchPrefix }
+        : {}),
+    grants: policy.grants.map((row) =>
+      "savedRow" in row ? { savedRow: row.savedRow, keep: true as const } : row,
+    ),
+    requiredChecks: policy.requiredChecks.map((row) =>
+      "savedRow" in row ? { savedRow: row.savedRow, keep: true as const } : row,
+    ),
+  };
   if (credentialIntent === "set") {
     if (!credentialInput || !/^env:[A-Z][A-Z0-9_]*$/.test(credentialInput))
       throw new Error("Enter a valid delivery credential reference.");
@@ -133,10 +155,19 @@ export function validateDeliveryPolicyDraft(
     add("requiredChecks", "At most 100 required checks are allowed.");
   if (
     draft.branchPrefix !== undefined &&
+    draft.branchPrefix !== null &&
     !branchPrefixValid(draft.branchPrefix)
   )
     add("branchPrefix", "Enter a valid branch prefix.");
   draft.grants.forEach((grant, index) => {
+    if ("savedRow" in grant) {
+      if (grant.savedRow.version !== draft.version)
+        add(
+          `grants.${draft.grantKeys[index] ?? index}.savedRow`,
+          "This unavailable row belongs to an older version. Remove it or discard changes to load the latest saved rows.",
+        );
+      return;
+    }
     const at = `grants.${draft.grantKeys[index] ?? index}`;
     if (!identityValid(grant.repositoryId))
       add(`${at}.repositoryId`, "Enter a repository or tracker container ID.");
@@ -162,6 +193,9 @@ export function validateDeliveryPolicyDraft(
         add(`${at}.statusIds`, "At most 256 statuses are allowed.");
     } else if (grant.statusIds !== undefined)
       add(`${at}.statusIds`, "Only issue status grants can include statuses.");
+    for (const field of ["projectNodeId", "fieldNodeId"] as const)
+      if (grant[field] !== undefined && !identityValid(grant[field]))
+        add(`${at}.${field}`, "Enter a valid ID.");
     for (const [field, ids] of [
       ["optionNodeIds", grant.optionNodeIds],
       ["statusIds", grant.statusIds],
@@ -172,11 +206,19 @@ export function validateDeliveryPolicyDraft(
       });
   });
   draft.requiredChecks.forEach((check, index) => {
+    if ("savedRow" in check) {
+      if (check.savedRow.version !== draft.version)
+        add(
+          `requiredChecks.${draft.requiredCheckKeys[index] ?? index}.savedRow`,
+          "This unavailable row belongs to an older version. Remove it or discard changes to load the latest saved rows.",
+        );
+      return;
+    }
     const at = `requiredChecks.${draft.requiredCheckKeys[index] ?? index}`;
     if (!identityValid(check.name)) add(`${at}.name`, "Enter a check name.");
     if (
       check.appId !== undefined &&
-      (!Number.isInteger(check.appId) || check.appId <= 0)
+      (!Number.isSafeInteger(check.appId) || check.appId <= 0)
     )
       add(`${at}.appId`, "Enter a positive integer app ID.");
   });
@@ -219,6 +261,7 @@ function coveredStatusOptions(
   return new Set(
     values.grants.flatMap((grant) => {
       if (
+        "savedRow" in grant ||
         grant.mode !== "allow" ||
         grant.repositoryId !== coverage.repositoryId
       )
@@ -274,3 +317,191 @@ export function deliveryPolicyChangeText(
   return changes;
 }
 import type { DeliveryPolicy } from "../../src/core/delivery.js";
+
+/** Stable UI keys never enter the submitted policy or indexed API paths. */
+export function deliveryFieldErrors(
+  draft: DeliveryPolicyDraft,
+): Record<string, string> {
+  return Object.fromEntries(
+    validateDeliveryPolicyDraft(draft).map(({ path, message }) => {
+      const parts = path.split(".");
+      if (
+        parts[0] === "grants" &&
+        parts[1] &&
+        draft.grantKeys.includes(parts[1])
+      )
+        parts[1] = String(draft.grantKeys.indexOf(parts[1]));
+      if (
+        parts[0] === "requiredChecks" &&
+        parts[1] &&
+        draft.requiredCheckKeys.includes(parts[1])
+      )
+        parts[1] = String(draft.requiredCheckKeys.indexOf(parts[1]));
+      if (path === "credentialInput") parts[0] = "credentialRef";
+      return [parts.join("."), message];
+    }),
+  );
+}
+export function deliveryEditorValues(seed: DeliveryPolicySeed): Values {
+  const draft = deliveryPolicyDraft(seed);
+  return {
+    expectedVersion: String(seed.version),
+    mode: seed.mode,
+    prefixMode:
+      seed.branchPrefix === null
+        ? "preserve"
+        : seed.branchPrefix === undefined
+          ? "default"
+          : "set",
+    branchPrefix: seed.branchPrefix ?? "",
+    referenceMode: "preserve",
+    credentialRef: "",
+    grants: JSON.stringify(
+      draft.grants.map((row, index) => ({
+        ...row,
+        rowKey: draft.grantKeys[index],
+      })),
+    ),
+    requiredChecks: JSON.stringify(
+      draft.requiredChecks.map((row, index) => ({
+        ...row,
+        ...(!("savedRow" in row) && row.appId !== undefined
+          ? { appId: String(row.appId) }
+          : {}),
+        rowKey: draft.requiredCheckKeys[index],
+      })),
+    ),
+  };
+}
+type Keyed<T> = T & { rowKey: string };
+export type GrantRow = Keyed<DeliveryPolicyValues["grants"][number]>;
+type VisibleCheck = Extract<
+  DeliveryPolicyValues["requiredChecks"][number],
+  { name: string }
+>;
+export type CheckRow = Keyed<
+  | Extract<
+      DeliveryPolicyValues["requiredChecks"][number],
+      { kind: "unavailable" }
+    >
+  | (Omit<VisibleCheck, "appId"> & { appId?: VisibleCheck["appId"] | string })
+>;
+export function deliveryRows<T>(value: Values[string] | undefined): T[] {
+  return typeof value === "string" ? JSON.parse(value) : [];
+}
+export function deliveryEditorDraft(values: Values): DeliveryPolicyDraft {
+  const grants = deliveryRows<GrantRow>(values.grants);
+  const checks = deliveryRows<CheckRow>(values.requiredChecks);
+  return {
+    version: Number(values.expectedVersion),
+    mode: values.mode === "through-merge" ? "through-merge" : "reviewable-pr",
+    ...(values.prefixMode === "preserve"
+      ? { branchPrefix: null, branchPrefixUnavailable: true as const }
+      : values.prefixMode === "set"
+        ? { branchPrefix: String(values.branchPrefix ?? "") }
+        : {}),
+    credentialIntent:
+      values.referenceMode === "set"
+        ? "set"
+        : values.referenceMode === "clear"
+          ? "clear"
+          : "preserve",
+    ...(values.referenceMode === "set"
+      ? { credentialInput: String(values.credentialRef ?? "") }
+      : {}),
+    grantKeys: grants.map((row) => row.rowKey),
+    requiredCheckKeys: checks.map((row) => row.rowKey),
+    grants: grants.map(({ rowKey: _key, ...row }) => row),
+    requiredChecks: checks.map(({ rowKey: _key, ...row }) => {
+      if ("savedRow" in row) return row;
+      const { appId, ...check } = row;
+      return {
+        ...check,
+        ...(appId === undefined
+          ? {}
+          : { appId: String(appId).trim() === "" ? NaN : Number(appId) }),
+      };
+    }),
+  };
+}
+
+/** Compare only configured mapping targets, independently in each exact tracker container scope. */
+export function deliveryMappingCoverageLoss(
+  saved: DeliveryPolicyValues,
+  proposed: DeliveryPolicyValues,
+  view: z.infer<typeof statusMappingViewSchema> | undefined,
+): boolean {
+  if (view?.availability !== "available" || !view.mapping) return false;
+  const mapping = view.mapping;
+  const options = Object.values(mapping.events).filter(
+    (id): id is string => id !== null,
+  );
+  return [
+    ...new Set(
+      saved.grants.flatMap((grant) =>
+        "savedRow" in grant ? [] : [grant.repositoryId],
+      ),
+    ),
+  ].some(
+    (repositoryId) =>
+      statusMappingCoverageLoss(
+        saved,
+        proposed,
+        "tracker" in mapping
+          ? { tracker: "jira", repositoryId, granted: options }
+          : {
+              tracker: "github",
+              repositoryId,
+              granted: [
+                {
+                  projectNodeId: mapping.projectNodeId,
+                  fieldNodeId: mapping.fieldNodeId,
+                  optionNodeIds: options,
+                },
+              ],
+            },
+      ).length > 0,
+  );
+}
+
+/** Distinguish confirmed mapped-target loss from a conservative warning when that view is withheld. */
+export function deliveryMappingCoverageWarning(
+  saved: DeliveryPolicyValues,
+  proposed: DeliveryPolicyValues,
+  view: z.infer<typeof statusMappingViewSchema> | undefined,
+): string | null {
+  if (deliveryMappingCoverageLoss(saved, proposed, view))
+    return "Previously allowed mapped status changes lose authority in a saved tracker scope. The status mapping is unchanged.";
+  if (view !== undefined) return null;
+  const reduced = saved.grants.some((grant) => {
+    if ("savedRow" in grant || grant.mode !== "allow") return false;
+    let coverage: StatusMappingCoverage;
+    if (grant.action === "issue.status")
+      coverage = {
+        tracker: "jira",
+        repositoryId: grant.repositoryId,
+        granted: grant.statusIds ?? [],
+      };
+    else if (
+      grant.action === "project.field" &&
+      grant.projectNodeId &&
+      grant.fieldNodeId
+    )
+      coverage = {
+        tracker: "github",
+        repositoryId: grant.repositoryId,
+        granted: [
+          {
+            projectNodeId: grant.projectNodeId,
+            fieldNodeId: grant.fieldNodeId,
+            optionNodeIds: grant.optionNodeIds ?? [],
+          },
+        ],
+      };
+    else return false;
+    return statusMappingCoverageLoss(saved, proposed, coverage).length > 0;
+  });
+  return reduced
+    ? "Status-mapping details are unavailable. These changes may remove status-mapping authority. The saved mapping is unchanged."
+    : null;
+}

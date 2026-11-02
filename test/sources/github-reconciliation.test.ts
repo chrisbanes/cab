@@ -18,7 +18,6 @@ import {
   previousSchemaDatabase,
   seedPreviousIssue,
 } from "../fixtures/previous-source-schema.js";
-import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import type { IssueSnapshot } from "../../src/standalone/github-source.js";
 
 const issue: IssueSnapshot = {
@@ -332,18 +331,14 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
         }),
       /operator/i,
     );
-    const ui = new LocalOperatorUi(domain, undefined, sources);
-    const html = ui.project(first, "test-csrf");
-    assert.match(html, /data-command="github.place"/);
-    assert.match(html, new RegExp(`name="taskId"[^>]*value="${taskId}"`));
-    assert.match(html, /name="chosenProjectId"/);
-    await ui.submit({
+    domain.execute({
+      actor: "operator",
       type: "github.place",
       key: randomUUID(),
       projectId: first,
       taskId,
       chosenProjectId: second,
-      expectedVersion: String(version),
+      expectedVersion: version,
     });
     assert.throws(
       () => domain.execute(originalProjectConfigure),
@@ -361,14 +356,17 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
     );
     await assert.rejects(
       () =>
-        ui.submit({
-          type: "github.place",
-          key: randomUUID(),
-          projectId: first,
-          taskId,
-          chosenProjectId: second,
-          expectedVersion: String(version),
-        }),
+        Promise.resolve().then(() =>
+          domain.execute({
+            actor: "operator",
+            type: "github.place",
+            key: randomUUID(),
+            projectId: first,
+            taskId,
+            chosenProjectId: second,
+            expectedVersion: version,
+          }),
+        ),
       /project|version/i,
     );
     assert.equal(sources.conflicts().length, 0);

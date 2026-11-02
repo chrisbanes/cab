@@ -294,12 +294,13 @@ export function repositoryRowsFrom(saved: Repositories) {
   };
 }
 
-/** The next free `S-<n>` above every saved or drafted id, so no removed id is reused. */
-export function nextSelectionId(saved: string[], drafted: string[]) {
+/** Hidden saved IDs require independent allocation; otherwise keep sequential IDs above removed rows. */
+export function nextSelectionId(saved: (string | null)[], drafted: string[]) {
+  if (saved.includes(null)) return crypto.randomUUID();
   const highest = Math.max(
     0,
     ...[...saved, ...drafted].map((id) =>
-      Number(/^S-(\d+)$/.exec(id)?.[1] ?? 0),
+      Number(/^S-(\d+)$/.exec(id ?? "")?.[1] ?? 0),
     ),
   );
   return `S-${highest + 1}`;
@@ -489,14 +490,15 @@ const mergeRows = (
 /**
  * Rows for a newly adopted revision. Kept rows take the latest saved definition; rows saved
  * elsewhere join as kept rows; kept rows removed elsewhere are dropped; a new selection whose
- * id was saved elsewhere takes the next free id.
+ * id was saved elsewhere or cannot be checked against withheld identities gets a fresh id.
  */
 export function adoptSourceRows(source: Source, v: Values) {
   const loaded = sourceRowsFrom(source);
-  const saved = source.selections.flatMap((x) => (x.id ? [x.id] : []));
+  const saved = source.selections.map((x) => x.id);
   const taken = parseRows(v.selections).map((x) => String(x.id));
   const selections = parseRows(v.selections).map((r) => {
-    if (r.keep || !saved.includes(String(r.id))) return r;
+    if (r.keep || (!saved.includes(null) && !saved.includes(String(r.id))))
+      return r;
     const id = nextSelectionId(saved, taken);
     taken.push(id);
     return { ...r, id };
@@ -740,9 +742,7 @@ export function jiraRowsFrom(
 export function jiraSelections(source: Source, values: Values) {
   const kept = live(parseRows(values.selections)).map(keepOpaque);
   const ids = Array.isArray(values.jqlIds) ? [...values.jqlIds] : [];
-  const taken = source.selections.flatMap((row) =>
-    row.id === null ? [] : [row.id],
-  );
+  const taken = source.selections.map((row) => row.id);
   const queries = String(values.jql ?? "")
     .split("\n")
     .map((line) => line.trim())
@@ -772,31 +772,57 @@ export function adoptJiraRows(
     row.id === null ? [] : [row.id],
   );
   let dropped = 0;
-  const drafted = String(values.jql ?? "")
+  const queries = String(values.jql ?? "")
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean)
-    .flatMap((jql, index) => {
-      const id = ids[index] ?? "";
-      if (id && !visible.includes(id)) {
-        dropped++;
-        return [];
-      }
-      return [{ id, jql }];
-    });
+    .filter(Boolean);
+  // Positional ids shrink on review; deletion intent must survive the next conflict.
+  const removedIds = new Set(
+    Array.isArray(values.removedJqlIds) ? values.removedJqlIds : [],
+  );
+  for (const id of ids.slice(queries.length)) if (id) removedIds.add(id);
+  for (const id of removedIds) {
+    if (!visible.includes(id)) {
+      removedIds.delete(id);
+      dropped++;
+    }
+  }
+  const drafted = queries.flatMap((jql, index) => {
+    const id = ids[index] ?? "";
+    if (id && !visible.includes(id)) {
+      dropped++;
+      return [];
+    }
+    return [{ id, jql }];
+  });
+  for (const row of drafted) removedIds.delete(row.id);
   const latest = loaded.jql
     .split("\n")
     .filter(Boolean)
     .flatMap((jql, index) => {
       const id = loaded.jqlIds[index]!;
-      return drafted.some((row) => row.id === id) ? [] : [{ id, jql }];
+      // An original id without a draft query was deliberately removed.
+      return removedIds.has(id) || drafted.some((row) => row.id === id)
+        ? []
+        : [{ id, jql }];
     });
   const previous = parseRows(values.selections);
-  const placeholders = parseRows(loaded.selections).map((row) =>
-    previous.some((old) => old.savedRow === row.savedRow && old.removed)
-      ? { ...row, removed: true }
-      : row,
-  );
+  const placeholders = parseRows(loaded.selections)
+    .filter((row) => {
+      const reference = JSON.parse(String(row.savedRow)) as { index: number };
+      const id = source.selections[reference.index]?.id;
+      // A still-public identity is already edited or removed in the query field.
+      return (
+        id === null ||
+        id === undefined ||
+        (!removedIds.has(id) && !drafted.some((entry) => entry.id === id))
+      );
+    })
+    .map((row) =>
+      previous.some((old) => old.savedRow === row.savedRow && old.removed)
+        ? { ...row, removed: true }
+        : row,
+    );
   dropped += previous.filter(
     (row) =>
       row.removed &&
@@ -807,5 +833,6 @@ export function adoptJiraRows(
     selections: JSON.stringify(placeholders),
     jql: [...drafted, ...latest].map((row) => row.jql).join("\n"),
     jqlIds: [...drafted, ...latest].map((row) => row.id),
+    removedJqlIds: [...removedIds],
   };
 }
