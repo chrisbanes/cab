@@ -461,6 +461,59 @@ test("pagination refuses endpoint changes, added filters and repeated pages", as
   }
 });
 
+test("pagination accepts GitHub's repository-ID next links for the queried repository only", async () => {
+  const endpoint =
+    "https://api.github.com/repos/chrisbanes/cab/actions/workflows/ci.yml/runs";
+  const transportFor = (id: number, nextPath: string) => {
+    const urls: string[] = [];
+    const transport = async (url: string) => {
+      urls.push(url);
+      if (url === "https://api.github.com/repos/chrisbanes/cab")
+        return {
+          ok: true,
+          status: 200,
+          headers: new Map(),
+          body: `{"id":${id}}`,
+        };
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map([
+          [
+            "link",
+            urls.length === 1
+              ? `<https://api.github.com${nextPath}?created=a..b&page=2>; rel="next"`
+              : "",
+          ],
+        ]),
+        body: JSON.stringify({ workflow_runs: [{ id: urls.length }] }),
+      };
+    };
+    return transport;
+  };
+  const ok = await api.paginateActions(
+    `${endpoint}?created=a..b`,
+    transportFor(
+      1194815584,
+      "/repositories/1194815584/actions/workflows/ci.yml/runs",
+    ),
+    { queryKind: "workflow-runs" },
+  );
+  assert.equal(ok.items.length, 2);
+  for (const nextPath of [
+    "/repositories/999/actions/workflows/ci.yml/runs",
+    "/repositories/1194815584/actions/workflows/release.yml/runs",
+  ])
+    await assert.rejects(
+      api.paginateActions(
+        `${endpoint}?created=a..b`,
+        transportFor(1194815584, nextPath),
+        { queryKind: "workflow-runs" },
+      ),
+      /escaped repository API/,
+    );
+});
+
 test("Renovate exclusion requires exact guard evidence", () => {
   const line = { name: "the pinned SDK is the qualified version" };
   assert.equal(
