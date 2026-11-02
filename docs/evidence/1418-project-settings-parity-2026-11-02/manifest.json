@@ -1,6 +1,6 @@
 {
   "record": "../1418-project-settings-parity-2026-11-02.md",
-  "status": "additive parity checkpoint; local integrated check passed; removal and whole-issue acceptance remain pending",
+  "status": "additive parity qualified locally on audited source; maintainer approved unchanged T6 removal scope; removal and whole-issue acceptance pending",
   "auditedImplementationCommit": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
   "auditedImplementationTree": "a0fa24563ec2b5fb82899aba51e0faa1c5db834d",
   "integratedMain": "a4cc5f7de6a78a184ddd70fabcfeb6ae0965c269",
@@ -95,16 +95,16 @@
   ],
   "productionBundleBeforeFinalCheck": [
     {
-      "sha256": "a49dd2bb41cc0210f7e5759013d4e83b41e18927fb13c134aa870b6ce683e3b5",
-      "bytes": 1328908,
-      "sourceScope": "Production build from root follow-up changes later committed in eece91de; 187f0db7 has identical production source.",
-      "buildOutputPath": "dist/operator/assets/index-Bv2Thfmf.js"
+      "buildOutputPath": "dist/operator/assets/index-BKGcK-xW.js",
+      "sha256": "d5f02175977ab00369655150e9c0c4efa5c7f8fcfdffa9c2d43415c2c7add16e",
+      "bytes": 1329410,
+      "sourceScope": "Built by successful full check at4224181; implementation bytes identical to auditeda548; old captures retain their own earlier build provenance"
     },
     {
-      "sha256": "ba1d5342f0b84dded9090f97270357d47a8fd8764586ce94798e57cafbeb723d",
-      "bytes": 122023,
-      "sourceScope": "Production build from root follow-up changes later committed in eece91de; 187f0db7 has identical production source.",
-      "buildOutputPath": "dist/operator/assets/index-CNNRCM0P.css"
+      "buildOutputPath": "dist/operator/assets/index-w3zpctNj.css",
+      "sha256": "994b2173f212b24fc2d08f078ec31c0284634184aba0929f1958ebda71facd96",
+      "bytes": 122045,
+      "sourceScope": "Built by successful full check at4224181; implementation bytes identical to auditeda548; old captures retain their own earlier build provenance"
     }
   ],
   "sourceBlobs": {
@@ -1117,7 +1117,9 @@
     "/tmp/cab-1418-t5-repaired-check-static-artifact-failure.log": "955cfe4239f266aafb238ac1e60c514164830abd1efa953931fe54fe08652b29",
     "/tmp/cab-1418-t5-final-render-counts.log": "5d7951af34f3007876ac35f420fd7f0ee7b5651f833d929f562ed494634ca5e0",
     "/tmp/cab-1418-t5-routing-bound-probe.log": "58d9e29fb68751114fbf194ebf34e7f5d0f487595280785a8ec9922a5bf680b4",
-    "/tmp/cab-1418-t5-final-callers.txt": "1c4d7d1e0328c809fc9b558a4c6f23026d4dff0454f9669d3dc6fbe60f7d187c"
+    "/tmp/cab-1418-t5-final-callers.txt": "1c4d7d1e0328c809fc9b558a4c6f23026d4dff0454f9669d3dc6fbe60f7d187c",
+    "/tmp/cab-1418-t5-final-check-a5484c0.log": "137577236d6ddea1ea2ccdd7ac92919278ef1d77497c261243e26e7a9beeb241",
+    "/tmp/cab-1418-t5-final-check-4224181-unsandboxed.log": "990dfe2c282810a09be03e754e0689f79eaf28d9b0e363c26a9e2b8d61599921"
   },
   "priorResults": {
     "8bcFullCheck": {
@@ -1207,40 +1209,68 @@
         "extensionRoutes": 14
       },
       "postRunChanges": "Only qualification metadata, the source-backed submit-only branch note and the owner ledger were completed after the run. Inventory dispositions, production and test files were unchanged."
+    },
+    "sandboxA548Check": {
+      "state": "failed; no retry; no qualification credit",
+      "command": "node /tmp/cab-pinned-npm/node_modules/npm/bin/npm-cli.js run check",
+      "nodeVersion": "v26.13.0",
+      "npmVersion": "12.2.1",
+      "sourceCommit": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
+      "sourceTree": "a0fa24563ec2b5fb82899aba51e0faa1c5db834d",
+      "runCount": 1,
+      "logArtifact": "/tmp/cab-1418-t5-final-check-a5484c0.log",
+      "logBytes": 2421935,
+      "logSha256": "137577236d6ddea1ea2ccdd7ac92919278ef1d77497c261243e26e7a9beeb241",
+      "exitCode": 1,
+      "summary": {
+        "tests": 4411,
+        "pass": 3101,
+        "fail": 1309,
+        "cancelled": 0,
+        "skipped": 1,
+        "todo": 0,
+        "durationMs": 249720.676042
+      },
+      "observedErrors": [
+        "listen EPERM: operation not permitted 127.0.0.1",
+        "spawnSync ps EPERM"
+      ],
+      "setupFailures": [
+        "Setup replaces the form with the ready check, focuses it and keeps the first-project heading",
+        "Setup after Create shows a blank second-project form on reload, without the ready check or a leave prompt",
+        "Setup keeps the form and every value when Create is refused, and sends one create for a double submit",
+        "Setup keeps Create focusable with its reason while the lead profile is being created"
+      ],
+      "disposition": "Preserve complete failed run; no retry and no source/test changes."
     }
   },
   "verification": {
-    "state": "failed; no retry; no qualification credit",
+    "state": "passed after controller-authorized exact-command retry outside sandbox",
     "command": "node /tmp/cab-pinned-npm/node_modules/npm/bin/npm-cli.js run check",
     "nodeVersion": "v26.13.0",
     "npmVersion": "12.2.1",
-    "sourceCommit": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
-    "sourceTree": "a0fa24563ec2b5fb82899aba51e0faa1c5db834d",
+    "sourceCommit": "4224181bcfa5f9c2bf6c443c6a8c637e309c9b22",
+    "sourceTree": "2be155b4b5b9e40d29ddee429f3c78be2eafd829",
+    "implementationCommit": "a5484c0fa0a3b2819ec5b73335646ab610890eb7",
+    "implementationTree": "a0fa24563ec2b5fb82899aba51e0faa1c5db834d",
     "runCount": 1,
-    "logArtifact": "/tmp/cab-1418-t5-final-check-a5484c0.log",
-    "logBytes": 2421935,
-    "logSha256": "137577236d6ddea1ea2ccdd7ac92919278ef1d77497c261243e26e7a9beeb241",
-    "exitCode": 1,
+    "renewalAttempt": 2,
+    "executionContext": "requires_escalated after concrete loopback-listener/process/npm-cache permission failures; existing local fixtures, no live opt-in",
+    "logArtifact": "/tmp/cab-1418-t5-final-check-4224181-unsandboxed.log",
+    "logBytes": 487555,
+    "logSha256": "990dfe2c282810a09be03e754e0689f79eaf28d9b0e363c26a9e2b8d61599921",
+    "exitCode": 0,
     "summary": {
-      "tests": 4411,
-      "pass": 3101,
-      "fail": 1309,
+      "tests": 4415,
+      "pass": 4414,
+      "fail": 0,
       "cancelled": 0,
       "skipped": 1,
       "todo": 0,
-      "durationMs": 249720.676042
+      "durationMs": 502834.637458
     },
-    "observedErrors": [
-      "listen EPERM: operation not permitted 127.0.0.1",
-      "spawnSync ps EPERM"
-    ],
-    "setupFailures": [
-      "Setup replaces the form with the ready check, focuses it and keeps the first-project heading",
-      "Setup after Create shows a blank second-project form on reload, without the ready check or a leave prompt",
-      "Setup keeps the form and every value when Create is refused, and sends one create for a double submit",
-      "Setup keeps Create focusable with its reason while the lead profile is being created"
-    ],
-    "disposition": "Preserve complete failed run; no retry and no source/test changes."
+    "skip": "Unchanged opt-in macOS Keychain case; CAB_KEYCHAIN_LIVE not enabled",
+    "disposition": "Source/tests unchanged from a548 audited implementation; exact same full selection all/all392files; preserve sandbox failure independently. Four additional nested tests ran after fixture startup succeeded, without changing source selection."
   },
   "captureCopiesInspectedAt": "2026-11-02T02:19:45.539012+00:00",
   "captureCopiesInspected": true,
@@ -1258,5 +1288,27 @@
     "independentAudit": "Fresh boundary audit 9148101b shipped the full Jira identity/adoption/private-read/lifecycle/wire contract against exact main a4cc5f7; previous findings resolved, no new blockers.",
     "evidenceManifest": ".scratch/1418/root-jira-repeat-repair/manifest.json"
   },
-  "captureScopeNote": "Existing four Delivery captures are preserved byte-for-byte with original capture checkout heads and source scopes. No new visual capture was made; Jira repair and main integration do not change the Delivery renderer."
+  "captureScopeNote": "Existing four Delivery captures are preserved byte-for-byte with original capture checkout heads and source scopes. No new visual capture was made; Jira repair and main integration do not change the Delivery renderer.",
+  "historical187fProductionBundle": [
+    {
+      "sha256": "a49dd2bb41cc0210f7e5759013d4e83b41e18927fb13c134aa870b6ce683e3b5",
+      "bytes": 1328908,
+      "sourceScope": "Production build from root follow-up changes later committed in eece91de; 187f0db7 has identical production source.",
+      "buildOutputPath": "dist/operator/assets/index-Bv2Thfmf.js"
+    },
+    {
+      "sha256": "ba1d5342f0b84dded9090f97270357d47a8fd8764586ce94798e57cafbeb723d",
+      "bytes": 122023,
+      "sourceScope": "Production build from root follow-up changes later committed in eece91de; 187f0db7 has identical production source.",
+      "buildOutputPath": "dist/operator/assets/index-CNNRCM0P.css"
+    }
+  ],
+  "removalAuthority": {
+    "instruction": "Approve record and removal",
+    "source": "Explicit user reply in active root invocation, approving concrete parity record3013c808 and T6 route/four-link/exclusive-handler removal scope",
+    "approvedRecordCommit": "3013c808a412c7517afad56df9b7e6a126919971",
+    "scopePreserved": "Fresh audit9148101b confirms Jira corrections do not alter legacy inventory or promised removal scope",
+    "release": "Root evidence acceptance, fresh lease/base/head verification and verified authority-resume required before assigning T6; no removal performed by this checkpoint"
+  },
+  "verificationRecordedAt": "2026-11-02T04:03:30.936659+00:00"
 }
