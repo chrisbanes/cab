@@ -620,8 +620,21 @@ function reviewedTextDatabase() {
           index + 2,
         );
     });
+  // A level-4 store also holds #1434's stacking records, restack columns included.
+  const [dependent, blocker] = tasks as [string, string];
+  db.prepare(
+    "INSERT INTO task_dependency_records (taskId, blockerTaskId) VALUES (?, ?)",
+  ).run(dependent, blocker);
+  db.prepare(
+    "INSERT INTO stacked_dependencies (taskId, blockerTaskId, repositoryId, parentHead, settledHead, restack, restackFromSha, restackSeq, recordedAt) VALUES (?, ?, 'R_1', 'head-2', 'head-1', 'pending', 'head-1', 3, 1)",
+  ).run(dependent, blocker);
   return { ...world, tasks };
 }
+
+const stackingRows = (db: DatabaseSync) => ({
+  stacked: rows(db, "SELECT * FROM stacked_dependencies ORDER BY taskId"),
+  records: rows(db, "SELECT * FROM task_dependency_records ORDER BY seq"),
+});
 
 const holdRows = (db: DatabaseSync) =>
   rows(
@@ -639,6 +652,8 @@ test("an upgrade from reviewed source text adopts observed text and releases onl
   try {
     const holdsBefore = holdRows(db);
     const tasksBefore = taskRows(db);
+    const stackingBefore = stackingRows(db);
+    assert.equal(stackingBefore.stacked.length, 1);
     const expectedHolds = holdsBefore.map((hold) =>
       hold.reason === "changed-text" ? { ...hold, active: 0 } : hold,
     );
@@ -657,6 +672,7 @@ test("an upgrade from reviewed source text adopts observed text and releases onl
       domain.migrate();
       assert.deepEqual(holdRows(db), expectedHolds);
       assert.deepEqual(taskRows(db), expectedTasks);
+      assert.deepEqual(stackingRows(db), stackingBefore);
       assert.equal(tableNames(db).includes("source_reviews"), false);
       assert.deepEqual(
         rows(
