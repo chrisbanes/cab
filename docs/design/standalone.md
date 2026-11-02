@@ -472,8 +472,8 @@ still gate Done. Provider-only changes and post-await local revisions reject sta
 settlement or completion. GitHub is not atomically locked by a local transaction.
 
 Own closure uses fresh identity-checked issue metadata and exact merge ClosedEvent
-attribution through `GitHubSourceStore`, preserving source text review and other
-admission holds. Repository selection and current label predicates can prove
+attribution through `GitHubSourceStore`, preserving the other admission holds;
+issue text itself is live and holds nothing. Repository selection and current label predicates can prove
 closure-derived withdrawal. Unproved field/search cases stay held. An explicit
 close must have observed open before its write; simultaneous independent closure
 within that remote read/write interval remains an accepted attribution limit.

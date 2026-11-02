@@ -278,8 +278,8 @@ and notifies the lead and active assignees to reach a safe stopping point. Opera
 to resume, except confirmed closure from this task's own delivery and the two source-caused holds
 that clear themselves: a readiness-lost or withdrawn hold (omitted, or leaving all selections) is released by a later complete read
 that lists the issue again while the task is Ready, since the source has recovered. A partial read
-releases nothing, and every other source hold, including changed text and closure, still needs
-operator resolution. External closure
+releases nothing, and every other source hold, including closure, still needs
+the operator to resume it. External closure
 after import holds the task in both closed-issue modes, whatever its readiness. Under
 Treat closure as Done, startup and recurring reconciliation complete it once current membership evidence
 is complete and its execution has settled, with no writer, ambiguity or unfinished
@@ -297,8 +297,49 @@ task's own delivery, the task keeps the explained `closure-attribution-unproved`
 hold, never a pending read, and is never completed by that closure; reopening the
 issue supersedes the own closure, then the operator resolves the source hold. A different later
 closure event after a confirmed own closure has been pinned also supersedes that own closure;
-the later closure follows the provider-completion gates. Harmless edits
-can be incorporated; materially changed scope holds work for clarification.
+the later closure follows the provider-completion gates.
+
+**Live source text.** An imported task's title and outcome are always its issue's latest
+synced title and body, for GitHub and Jira, at every stage: unstarted, running, handed
+back and Done. Each distinct revision is captured in source history. A text change is not
+structure: it sets no source hold, adds no admission reason, never releases or replaces
+another hold and leaves the task version unchanged, so queued turn requests, pending
+routing choices and handback settlements stay valid. Readiness, membership, closure,
+blocker and placement changes still invalidate them. Accepted limit: anyone who can
+edit the issue, including its author, can change a Ready task's scope before or while it
+runs; cab does not check who edited it, and issue text grants no cab permission.
+
+Each lead turn is built when it is submitted from the task's current title and outcome,
+followed by the material already bound to that work (its inbox batch, a draft turn's
+operator message, a reporting repair); the lead's frozen assignment brief is not used.
+When the text differs from what the lead's last confirmed turn carried, the turn adds a
+line diff (`- ` before, `+ ` now, by field) capped at 200 lines and 8,000 UTF-8 bytes,
+ending with `[… issue diff truncated …]` when cut; the full current text is never cut. A
+turn is confirmed once `startTurn` returned and its exact execution identity bound the
+turn. A submission left uncertain by a crash or a lost response does not count, so the
+next turn repeats the diff; a turn after no change carries none. A text change creates no
+inbox event, wakes no assignment and does not block `cab_report_result`: the lead sees it
+on its next turn, whatever starts that turn. A routed or delegated assignment keeps the
+brief its lead wrote and is not told. An Improve draft turn queued before an edit is
+refused, and `issue.edit` keeps its expected-text guard. An assignment that has never
+started a turn shows no instructions or profile staleness wait, since its first turn takes
+both as they are then.
+
+After the lead hands work back (a completion request, or a reported result settled by its
+successful turn) or the task becomes Done without a lead turn (provider completion,
+import as Done), a later source revision sets `issueChangedSinceHandback` on the task
+read; the task view and the Settle handback review show it. An edit that is reverted
+still counts. It is informational: it reopens nothing, creates no inbox item and changes
+no settlement, completion or admission. A later handback anchors again.
+
+`source.review` has one decision, `resume-source-hold`: operator-only, at the expected
+task version, for an imported task with an active hold, an open issue and current
+complete source and readiness evidence. Each recorded decision is kept in source
+history. Upgrading a store that held text for review adopts every imported task's
+observed text, releases only `changed-text` holds and keeps earlier decisions. A hold
+that a `changed-text` hold once replaced cannot be recovered from the old single hold
+row; the next authoritative sync re-establishes structural holds. Finished work handed
+back before the upgrade anchors at the text observed then. The upgrade is one-way.
 
 ## Execution and recovery
 
@@ -472,8 +513,8 @@ assignment revision mismatch before runtime admission can be continued by postin
 fresh operator message through the existing task inbox. The original held request,
 intent and refusal remain immutable history; no replacement initial request is created
 automatically. The fresh inbox work captures the current task revision and includes its
-current title/outcome alongside the preserved assignment brief and instruction/profile
-snapshots. Current admission, permissions, dependency, Stop and execution/effect holds
+current title/outcome (a lead's turn carries it in place of its brief; a delegated
+assignment's alongside its preserved brief) and instruction/profile snapshots. Current admission, permissions, dependency, Stop and execution/effect holds
 still apply. Runtime identity, writer admission, capacity reservation, recovery
 identity, pending effects or a Stop target disqualify the historical refusal exemption.
 Any initial inbox batch stays bound unless the existing narrow stale-delivery withdrawal
@@ -690,7 +731,7 @@ The operator UI is a React application at `/app`, served with same-origin
 `/api/operator` JSON by the production `operator` command. Approval decisions, handback
 settlement, result-destination reconciliation and messages to delegated assignments
 are task-view controls, and the CLI offers the same commands. Controls the app does not offer remain on retained
-server-rendered routes: local task edits and source review decisions on `/task/:id`;
+server-rendered routes: local task edits and Resume source hold on `/task/:id`;
 Stop/Resume and recovery on
 `/runtime/task/:id`. They are reached from a task's inspector and Execution link. Project Settings edits delivery policy at `/app/projects/:id/settings?tab=delivery`. The technical
 contracts are the [foundation](design/ui02-foundation.md),
@@ -1256,8 +1297,8 @@ and is unavailable while an earlier GitHub action on the task has an unknown out
 task read gives the first reason that applies, in that order: no source issue, task not
 open, no edit grant, no project lead, an unresolved action, no delivery credential.
 cab keeps no copy of the edited text and no local override: the edit goes to
-GitHub, and the next sync observes the new title and body like a hand edit, including
-any source review that raises. Nothing is sent without the operator reviewing it.
+GitHub, and the next sync observes the new title and body like a hand edit: the task takes
+them without a hold. Nothing is sent without the operator reviewing it.
 
 **Publish to GitHub.** The operator can turn a local task into a GitHub issue
 ([ADR-1018](adr/1018-task-publication-in-place.md)). It is initiated only from task detail
