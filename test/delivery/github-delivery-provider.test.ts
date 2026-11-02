@@ -583,6 +583,29 @@ test("a merge with no required checks is held, and a code-host check removed bet
   ]);
   assert.equal(f.getWrites(), 0);
 });
+test("a classic protection rule GitHub reports but cab cannot read holds the merge", async () => {
+  // GraphQL shows a classic rule, so the protection read's 404 proves nothing: the gate must not treat it as none.
+  const f = prProviderFixture({
+    baseRef: {
+      target: { oid: "2".repeat(40) },
+      branchProtectionRule: {
+        requiresDeployments: false,
+        requiredDeploymentEnvironments: [],
+        requiresStrictStatusChecks: false,
+      },
+    },
+  });
+  assert.ok(
+    (await f.provider.inspectPr(f.identity, f.policy)).mergeBlockers.includes(
+      "classic-protection-unproved",
+    ),
+  );
+  await assert.rejects(
+    f.provider.preflight(mergeAction("squash"), f.policy),
+    /gates-held/,
+  );
+  assert.equal(f.getWrites(), 0);
+});
 test("a merge whose method is not the repository's configured method is held before any write", async () => {
   const f = prProviderFixture();
   for (const repositories of [

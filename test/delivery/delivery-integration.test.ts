@@ -1443,6 +1443,24 @@ test("the configuration read reports each linked repository's code-host requirem
   }
 });
 
+test("a repository whose code host has no usable credential reads as credential-missing", async (t) => {
+  const w = await gitlabWorld(t, "allow", { credential: false });
+  try {
+    const read = (
+      await new OperatorApi(w.f.service, [
+        w.f.directory,
+      ]).readProjectConfiguration(w.f.projectId)
+    ).data.delivery!;
+    assert.deepEqual(read.repositories?.[0]?.codeHost, {
+      status: "unavailable",
+      reason: "credential-missing",
+    });
+    assert.equal(read.repositories?.[0]?.noRequiredChecks, null);
+  } finally {
+    await w.f.close();
+  }
+});
+
 test("a code-host requirements read that does not answer in time is unavailable with a timeout", async () => {
   const db = new DatabaseSync(":memory:");
   try {
