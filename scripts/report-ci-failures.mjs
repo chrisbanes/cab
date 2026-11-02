@@ -801,7 +801,8 @@ async function verifiedRenovateSdkBump({
         if (pr.user?.login !== "renovate[bot]" || pr.user?.type !== "Bot")
           continue;
         const matchesHead = pr.head?.sha === sha;
-        const matchesMerge = pr.merged === true && pr.merge_commit_sha === sha;
+        const matchesMerge =
+          validTimestamp(pr.merged_at) && pr.merge_commit_sha === sha;
         if (!matchesHead && !matchesMerge) continue;
         if (
           !Number.isSafeInteger(pr.number) ||
@@ -839,6 +840,7 @@ async function verifiedRenovateSdkBump({
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
+let allowEscapeSequencesSupported = true;
 
 function ghTransport(
   url,
@@ -851,12 +853,15 @@ function ghTransport(
   const parsed = new URL(url);
   if (parsed.origin !== API || !parsed.pathname.startsWith("/repos/"))
     throw Error("Refusing GitHub API URL outside repository API");
+  const startedAt = Date.now();
   return new Promise((resolve, reject) => {
     const args = ["api", "--include", "--method", "GET"];
-    if (rawLogs) args.push("--allow-escape-sequences");
+    const usesEscapeFlag = rawLogs && allowEscapeSequencesSupported;
+    if (usesEscapeFlag) args.push("--allow-escape-sequences");
     args.push(`${parsed.pathname}${parsed.search}`);
     const child = spawn("gh", args, { stdio: ["ignore", "pipe", "pipe"] });
     const stdout = [];
+    const stderr = [];
     let bytes = 0;
     let settled = false;
     const finish = (error, result) => {
@@ -876,9 +881,36 @@ function ghTransport(
         finish(Error("GitHub API response exceeded the byte limit"));
       } else stdout.push(chunk);
     });
-    child.stderr.on("data", () => {});
+    child.stderr.on("data", (chunk) => {
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        child.kill("SIGTERM");
+        finish(Error("GitHub API response exceeded the byte limit"));
+      } else stderr.push(chunk);
+    });
     child.on("error", () => finish(Error("Unable to start gh api")));
     child.on("close", (code) => {
+      if (settled) return;
+      if (
+        code !== 0 &&
+        usesEscapeFlag &&
+        stdout.length === 0 &&
+        /^unknown flag: --allow-escape-sequences(?:\r?\n|$)/.test(
+          Buffer.concat(stderr).toString("utf8"),
+        )
+      ) {
+        allowEscapeSequencesSupported = false;
+        const remaining = timeoutMs - (Date.now() - startedAt);
+        if (remaining <= 0)
+          return finish(Error("GitHub API request timed out"));
+        clearTimeout(timer);
+        ghTransport(url, {
+          rawLogs,
+          timeoutMs: remaining,
+          maxBytes: maxBytes - bytes,
+        }).then((result) => finish(null, result), finish);
+        return;
+      }
       if (code !== 0)
         return finish(Error(`gh api failed (${code ?? "signal"})`));
       const output = Buffer.concat(stdout).toString("utf8");

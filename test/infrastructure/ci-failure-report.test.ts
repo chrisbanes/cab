@@ -2,10 +2,110 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const api = await import(
   pathToFileURL(resolve("scripts/report-ci-failures.mjs")).href
 );
+
+test("real report CLI supports old and new gh log options without retrying other errors", async (t) => {
+  const directory = await mkdtemp(resolve(tmpdir(), "cab-report-gh-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const executable = resolve(directory, "gh");
+  await writeFile(
+    executable,
+    `#!${process.execPath}\n${String.raw`
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.CAB_FAKE_GH_JOURNAL, JSON.stringify(args) + "\n");
+if (args[0] !== "api" || args[args.indexOf("--method") + 1] !== "GET") process.exit(90);
+const endpoint = args.at(-1);
+const raw = /\/jobs\/\d+\/logs$/.test(endpoint);
+const flag = args.includes("--allow-escape-sequences");
+const mode = process.env.CAB_FAKE_GH_MODE;
+if (raw && mode === "old" && flag) { process.stderr.write("unknown flag: --allow-escape-sequences\n\nUsage: gh api <endpoint> [flags]\n"); process.exit(1); }
+if (raw && mode === "new" && !flag) { process.stderr.write("required escape safety flag missing\n"); process.exit(1); }
+if (raw && mode === "auth") { process.stderr.write("authentication required: do-not-print\n"); process.exit(1); }
+if (raw && mode === "network") { process.stderr.write("error connecting to api.github.com: do-not-print\n"); process.exit(1); }
+if (raw && mode === "http") { process.stdout.write("HTTP/2.0 403 Forbidden\r\n\r\n{}"); process.stderr.write("gh: forbidden: do-not-print\n"); process.exit(1); }
+let body;
+if (endpoint.includes("head_sha=")) body = { workflow_runs: [] };
+else if (endpoint.includes("/workflows/ci.yml/runs")) body = { workflow_runs: [{ id: 1, head_branch: "main", event: "push", head_sha: "abc", created_at: "2026-10-20T10:00:00Z", status: "completed", conclusion: "failure", run_attempt: 1, html_url: "https://github.com/chrisbanes/cab/actions/runs/1" }] };
+else if (endpoint.includes("/attempts/1/jobs")) body = { jobs: [11,12].map(id => ({ id, name: "shard-" + id, status: "completed", conclusion: "failure", html_url: "https://github.com/chrisbanes/cab/actions/runs/1/job/" + id })) };
+else if (raw) body = "\x1b[31m✖ failure " + endpoint.match(/jobs\/(\d+)/)[1] + " (1ms)\x1b[0m\n";
+else process.exit(91);
+process.stdout.write("HTTP/2.0 200 OK\r\nContent-Type: " + (raw ? "text/plain" : "application/json") + "\r\n\r\n" + (raw ? body : JSON.stringify(body)));
+`}`,
+    { mode: 0o755 },
+  );
+  for (const mode of ["old", "new", "auth", "network", "http"]) {
+    const journal = resolve(directory, `${mode}.jsonl`);
+    const result = await promisify(execFile)(
+      process.execPath,
+      [
+        resolve("scripts/report-ci-failures.mjs"),
+        "--since",
+        "2026-10-19",
+        "--until",
+        "2026-11-01",
+        "--top",
+        "5",
+      ],
+      {
+        env: {
+          ...process.env,
+          PATH: `${directory}:${process.env.PATH ?? ""}`,
+          CAB_FAKE_GH_MODE: mode,
+          CAB_FAKE_GH_JOURNAL: journal,
+        },
+        timeout: 15_000,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    const report = JSON.parse(result.stdout);
+    const calls = (await readFile(journal, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    const logs = calls.filter((args) =>
+      /\/jobs\/\d+\/logs$/.test(args.at(-1) ?? ""),
+    );
+    assert.equal(
+      report.top.length,
+      mode === "old" || mode === "new" ? 2 : 0,
+      mode,
+    );
+    assert.equal(logs.length, mode === "old" ? 3 : 2, mode);
+    assert.equal(
+      logs.filter((args) => args.includes("--allow-escape-sequences")).length,
+      mode === "old" ? 1 : 2,
+      mode,
+    );
+    assert.ok(
+      calls.every((args) => args[args.indexOf("--method") + 1] === "GET"),
+    );
+    assert.ok(
+      !result.stdout.includes("do-not-print") &&
+        !result.stderr.includes("do-not-print"),
+    );
+    if (mode === "old" || mode === "new")
+      assert.deepEqual(
+        report.top.map((entry: { test: string }) => entry.test).sort(),
+        ["failure 11", "failure 12"],
+      );
+    else
+      assert.equal(
+        report.coverageRuns[0].coverage.filter(
+          (entry: { reason: string }) =>
+            entry.reason === "failed-job-log-unavailable",
+        ).length,
+        2,
+      );
+  }
+});
 
 test("log parsing strips terminal controls and collapses repeated test summary lines", () => {
   const line = "✖ 1 test failed (test/foo.test.ts:4:9)";
@@ -627,7 +727,8 @@ test("only an exact guard with positively verified Renovate SDK upgrade is exclu
     html_url: "https://github.com/chrisbanes/cab/pull/77",
     user: { login: "renovate[bot]", type: "Bot" },
     head: { sha: "guard-sha" },
-    merged: false,
+    merged_at: null,
+    merge_commit_sha: null,
   };
   const patchText =
     '-    "@anthropic-ai/claude-agent-sdk": "0.3.300",\n+    "@anthropic-ai/claude-agent-sdk": "0.3.301",';
@@ -671,7 +772,29 @@ test("only an exact guard with positively verified Renovate SDK upgrade is exclu
           variant === "ordinary"
             ? { login: "someone", type: "User" }
             : validPr.user,
-        head: { sha: variant === "changed-head" ? "other" : "guard-sha" },
+        head: {
+          sha: [
+            "changed-head",
+            "merged-main",
+            "unmerged-main",
+            "bad-merge-time",
+          ].includes(variant)
+            ? "other"
+            : "guard-sha",
+        },
+        merged_at:
+          variant === "merged-main"
+            ? "2026-10-19T00:00:00Z"
+            : variant === "bad-merge-time"
+              ? "invalid"
+              : null,
+        merge_commit_sha: [
+          "merged-main",
+          "unmerged-main",
+          "bad-merge-time",
+        ].includes(variant)
+          ? "guard-sha"
+          : null,
       };
       return apiResponse([pr]);
     }
@@ -695,6 +818,8 @@ test("only an exact guard with positively verified Renovate SDK upgrade is exclu
     "missing-pr",
     "changed-head",
     "files-unavailable",
+    "unmerged-main",
+    "bad-merge-time",
     "mixed",
   ]) {
     const report = await api.renderReport({
@@ -726,6 +851,13 @@ test("only an exact guard with positively verified Renovate SDK upgrade is exclu
   assert.equal(verified.excludedEvidence.length, 1);
   assert.equal(verified.observedFailures, 0);
   assert.equal(verified.confirmedUnrelated, 0);
+  const merged = await api.renderReport({
+    since: "2026-10-19",
+    until: "2026-11-01",
+    transport: makeTransport("merged-main"),
+  });
+  assert.equal(merged.excludedEvidence.length, 1);
+  assert.equal(merged.observedFailures, 0);
 });
 
 test("same-SHA report separates later runs and later attempts within the inclusive horizon", async () => {
