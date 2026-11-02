@@ -101,7 +101,7 @@ const Labelled = ({
   </div>
 );
 
-const unavailableCopy = (reason: string) =>
+export const gitLabUnavailableCopy = (reason: string) =>
   reason === "unconfigured"
     ? "No GitLab credential is configured for this host."
     : `GitLab projects can't be listed: ${reason.replaceAll("-", " ")}.`;
@@ -269,7 +269,7 @@ export function GitLabSetupRows({
               </Labelled>
               <p className="metadata muted">
                 {list?.state === "unavailable"
-                  ? unavailableCopy(list.reason)
+                  ? gitLabUnavailableCopy(list.reason)
                   : ready
                     ? `Discovered from ${row.host} · ${ready.projects.length} projects${ready.truncated ? " (more exist; the first are listed)" : ""}`
                     : "Loading projects…"}

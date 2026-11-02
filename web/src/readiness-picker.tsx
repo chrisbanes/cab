@@ -38,6 +38,7 @@ import {
 } from "./readiness-discovery.js";
 import { useOperatorResource } from "./resource.js";
 import type { SourceRow } from "./settings-changes.js";
+import { ListedChoice } from "./settings-rows.js";
 import {
   DraftMessage,
   key,
@@ -61,6 +62,8 @@ export function useReadinessDiscovery(p: {
   enabled: boolean;
   /** Whether a label condition exists. */
   labels: boolean;
+  /** Whether a new repository source needs the repository list. */
+  repositories?: boolean;
   saved: { repositoryId: string }[];
   projectIds: string[];
 }) {
@@ -70,7 +73,7 @@ export function useReadinessDiscovery(p: {
   >({});
   const [fieldReads, setFieldReads] = useState<Record<string, FieldsRead>>({});
   const [labelReads, setLabelReads] = useState<Record<string, LabelsRead>>({});
-  const on = p.enabled || p.labels;
+  const on = p.enabled || p.labels || Boolean(p.repositories);
   // Counts the rounds started on request; a new one forgets every read, so typed fallbacks end.
   const [generation, setGeneration] = useState(0);
   const requested = useRef(new Set<string>());
@@ -179,6 +182,7 @@ export function useReadinessDiscovery(p: {
   }, [wanted.join("\n"), p.client]);
 
   return {
+    repositories,
     choices,
     fieldReads,
     labels: labelChoices(repositories, p.saved, labelReads),
@@ -231,9 +235,6 @@ export function ProjectFieldOptions(p: {
   );
 }
 
-/** The select value that reveals the text input for a label not on the repositories. */
-const otherLabel = " other";
-
 /**
  * The Ready label select: the source repositories' labels, a saved label they no longer list,
  * and "Other…" for a name that doesn't exist yet. When labels can't be listed, a text input.
@@ -248,51 +249,21 @@ export function ReadyLabelPicker(p: {
   input: (label: string) => ReactNode;
 }) {
   const { labels } = p.discovery;
-  const [other, setOther] = useState(false);
-  // Until the labels are listed (or when they can't be) the text input stands alone.
-  if (labels.state !== "ready")
-    return (
-      <>
-        {p.input("Ready label")}
-        {labels.state === "typed" && labels.note && (
-          <p className="metadata muted">{labels.note}</p>
-        )}
-      </>
-    );
-  // The id a row error focuses; the revealed text input takes it over under "Other…".
-  const id = `source-conditions-${p.index}-${other ? "name-select" : "name"}`;
-  const unlisted = p.value !== "" && !other && !labels.labels.includes(p.value);
+  const ready = labels.state === "ready";
   return (
-    <>
-      <label className="field body" htmlFor={id}>
-        Ready label
-        <NativeSelect
-          className="control"
-          id={id}
-          aria-label="Ready label"
-          aria-invalid={p.invalid}
-          aria-describedby={p.invalid ? "source-conditions-error" : undefined}
-          value={other ? otherLabel : p.value}
-          onChange={(e) => {
-            setOther(e.target.value === otherLabel);
-            if (e.target.value !== otherLabel) p.onChange(e.target.value);
-          }}
-        >
-          <option value="">Choose a label</option>
-          {labels.labels.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-          {unlisted && <option value={p.value}>{p.value}</option>}
-          <option value={otherLabel}>Other…</option>
-        </NativeSelect>
-      </label>
-      {unlisted && labels.labels.length > 0 && (
-        <p className="metadata muted">{unlistedLabelNote}</p>
-      )}
-      {other && p.input("Other label")}
-    </>
+    <ListedChoice
+      id={`source-conditions-${p.index}-name`}
+      label="Ready label"
+      empty="Choose a label"
+      value={p.value}
+      options={ready ? labels.labels : null}
+      note={labels.state === "typed" ? labels.note : undefined}
+      unlistedNote={unlistedLabelNote}
+      invalid={p.invalid}
+      describedBy="source-conditions-error"
+      onChoose={p.onChange}
+      typed={p.input(ready ? "Other label" : "Ready label")}
+    />
   );
 }
 
