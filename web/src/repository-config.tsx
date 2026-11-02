@@ -1,4 +1,10 @@
-import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
+import { useCallback } from "react";
+import {
+  codeHostCredentialsSchema,
+  discoveryBranchesSchema,
+  gitLabProjectsSchema,
+  projectPrivateValuesSchema,
+} from "../../src/operator/contracts.js";
 import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
@@ -27,13 +33,20 @@ import {
   usePrivateValues,
 } from "./settings.js";
 import {
+  ListedChoice,
   useDropMatchedEdits,
+  useKeyedReads,
   useSettingsRows,
   withKeys,
 } from "./settings-rows.js";
+import { gitLabUnavailableCopy } from "./gitlab-setup.js";
+import { useReadinessDiscovery } from "./readiness-picker.js";
+import { discoveryReasonCopy } from "./setup-model.js";
 import { Alert } from "./ui/alert.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { codeHostName, type CodeHost } from "./delivery-presentation.js";
+import { FolderPicker } from "./folder-picker.js";
+import { useOperatorResource } from "./resource.js";
 
 /** The project's repository links: the checkouts workspaces, delivery and setup use. */
 export function RepositoryTab(p: TabProps) {
@@ -70,6 +83,63 @@ export function RepositoryTab(p: TabProps) {
   const v = d.values,
     repositories = parseRows(v.repositories),
     isLocked = locked(d);
+  const fresh = repositories.filter((r) => !r.keep && !r.removed);
+  // GitHub repositories are listed only while a new GitHub row needs one.
+  const discovered = useReadinessDiscovery({
+      client: p.client,
+      csrfToken: p.session.csrfToken,
+      enabled: false,
+      labels: false,
+      repositories: fresh.some((r) => r.codeHost !== "gitlab"),
+      saved: [],
+      projectIds: [],
+    }).repositories,
+    listed = discovered?.state === "ready" ? discovered : null;
+  const chosenOf = (r: (typeof repositories)[number]) =>
+    r.codeHost === "gitlab"
+      ? undefined
+      : listed?.repositories.find((x) => x.repositoryId === r.repositoryId);
+  const branchReads = useKeyedReads(
+    p.client,
+    fresh.flatMap((r) => {
+      const x = chosenOf(r);
+      return x ? [`${x.owner}/${x.name}`] : [];
+    }),
+    (repo) =>
+      `/api/operator/discovery/branches?repository=${encodeURIComponent(repo)}`,
+    discoveryBranchesSchema,
+  );
+  // GitLab rows choose among the hosts with a configured credential, then that host's projects.
+  const hosts = useOperatorResource(
+    fresh.some((r) => r.codeHost === "gitlab") ? p.session.csrfToken : null,
+    useCallback(
+      (signal: AbortSignal) =>
+        p.client.read(
+          "/api/operator/code-host-credentials",
+          codeHostCredentialsSchema,
+          signal,
+        ),
+      [p.client],
+    ),
+  );
+  const gitlabHosts =
+    hosts.state.data?.data.credentials.map((c) => c.host) ?? [];
+  const gitlabProjectReads = useKeyedReads(
+    p.client,
+    [
+      ...new Set(
+        fresh.flatMap((r) =>
+          // Only a configured host is read, never text as it is typed.
+          r.codeHost === "gitlab" && gitlabHosts.includes(String(r.host))
+            ? [String(r.host)]
+            : [],
+        ),
+      ),
+    ],
+    (host) =>
+      `/api/operator/discovery/gitlab-projects?host=${encodeURIComponent(host)}`,
+    gitLabProjectsSchema,
+  );
   // A retained path edit is compared with the saved value before it is sent.
   const holdSave =
     known === undefined &&
@@ -191,6 +261,24 @@ export function RepositoryTab(p: TabProps) {
                 const name = r.unavailable
                   ? `Unavailable saved repository link ${i + 1}`
                   : String(r.repositoryId || `row ${i + 1}`);
+                const chosen = chosenOf(r);
+                // Branches are listed for a new row's chosen GitHub repository, as in setup.
+                const branches =
+                  !r.keep && chosen
+                    ? branchReads[`${chosen.owner}/${chosen.name}`]
+                    : undefined;
+                const gitlabProjects =
+                  !r.keep &&
+                  r.codeHost === "gitlab" &&
+                  gitlabHosts.includes(String(r.host))
+                    ? gitlabProjectReads[String(r.host)]
+                    : undefined;
+                const readyProjects =
+                  gitlabProjects?.state === "ready"
+                    ? gitlabProjects.projects
+                    : null;
+                const invalid = (field: string) =>
+                  Boolean(edit.rowError("repositories", i, field));
                 return (
                   <div className="settings-row" key={String(r.rowKey)}>
                     {r.keep ? (
@@ -259,38 +347,147 @@ export function RepositoryTab(p: TabProps) {
                                 <option value="gitlab">GitLab</option>
                               </NativeSelect>
                             </label>
-                            {r.codeHost === "gitlab" && (
+                            {r.codeHost === "gitlab" ? (
                               <>
-                                {edit.input(
-                                  "repositories",
-                                  i,
-                                  "host",
-                                  "GitLab host",
-                                )}
-                                {edit.input(
-                                  "repositories",
-                                  i,
-                                  "projectPath",
-                                  "GitLab project path",
-                                )}
+                                <ListedChoice
+                                  id={`repository-${i}-hostChoice`}
+                                  label="GitLab host"
+                                  empty="Choose a host"
+                                  value={String(r.host ?? "")}
+                                  options={
+                                    gitlabHosts.length ? gitlabHosts : null
+                                  }
+                                  onChoose={(host) =>
+                                    edit.update("repositories", i, {
+                                      host,
+                                      repositoryId: "",
+                                      projectPath: "",
+                                    })
+                                  }
+                                  typed={edit.input(
+                                    "repositories",
+                                    i,
+                                    "host",
+                                    gitlabHosts.length
+                                      ? "Other GitLab host"
+                                      : "GitLab host",
+                                  )}
+                                />
+                                <ListedChoice
+                                  id={`repository-${i}-projectChoice`}
+                                  label="GitLab project"
+                                  empty="Choose a project"
+                                  value={String(r.repositoryId ?? "")}
+                                  options={
+                                    readyProjects?.map((x) => ({
+                                      value: x.repositoryId,
+                                      label: x.projectPath,
+                                    })) ?? null
+                                  }
+                                  note={
+                                    // A failed read is unreadable, as setup reports it.
+                                    gitlabProjects === null ||
+                                    gitlabProjects?.state === "unavailable"
+                                      ? gitLabUnavailableCopy(
+                                          gitlabProjects?.reason ??
+                                            "unreadable",
+                                        )
+                                      : undefined
+                                  }
+                                  invalid={invalid("repositoryId")}
+                                  onChoose={(id) => {
+                                    const x = readyProjects?.find(
+                                      (x) => x.repositoryId === id,
+                                    );
+                                    edit.update("repositories", i, {
+                                      repositoryId: id,
+                                      projectPath: x?.projectPath ?? "",
+                                      ...(x ? { ref: x.defaultBranch } : {}),
+                                    });
+                                  }}
+                                  typed={
+                                    <>
+                                      {edit.input(
+                                        "repositories",
+                                        i,
+                                        "projectPath",
+                                        "GitLab project path",
+                                      )}
+                                      {edit.input(
+                                        "repositories",
+                                        i,
+                                        "repositoryId",
+                                        "GitLab project ID",
+                                      )}
+                                    </>
+                                  }
+                                />
                               </>
-                            )}
-                            {edit.input(
-                              "repositories",
-                              i,
-                              "repositoryId",
-                              r.codeHost === "gitlab"
-                                ? "GitLab project ID"
-                                : "Linked repository ID",
+                            ) : (
+                              <ListedChoice
+                                id={`repository-${i}-repositoryChoice`}
+                                label="Repository"
+                                empty="Choose a repository"
+                                value={String(r.repositoryId ?? "")}
+                                options={
+                                  listed?.repositories.map((x) => ({
+                                    value: x.repositoryId,
+                                    label: `${x.owner}/${x.name}`,
+                                  })) ?? null
+                                }
+                                note={
+                                  discovered?.state === "unavailable"
+                                    ? `${
+                                        // Setup's unconfigured copy asks for owner/name; this field takes the node ID.
+                                        discovered.reason === "unconfigured"
+                                          ? "GitHub discovery is unavailable: no discovery credential is configured."
+                                          : discoveryReasonCopy(
+                                              discovered.reason,
+                                            )
+                                      } Enter the repository's node ID.`
+                                    : undefined
+                                }
+                                invalid={invalid("repositoryId")}
+                                onChoose={(id) => {
+                                  const x = listed?.repositories.find(
+                                    (x) => x.repositoryId === id,
+                                  );
+                                  edit.update("repositories", i, {
+                                    repositoryId: id,
+                                    ...(x ? { ref: x.defaultBranch } : {}),
+                                  });
+                                }}
+                                typed={edit.input(
+                                  "repositories",
+                                  i,
+                                  "repositoryId",
+                                  "Linked repository ID",
+                                )}
+                              />
                             )}
                           </>
                         )}
-                        {edit.input(
-                          "repositories",
-                          i,
-                          "ref",
-                          "Linked repository ref",
-                        )}
+                        <ListedChoice
+                          id={`repository-${i}-refChoice`}
+                          label="Ref"
+                          empty="Choose a branch"
+                          value={String(r.ref ?? "")}
+                          options={
+                            branches?.state === "ready"
+                              ? branches.branches
+                              : null
+                          }
+                          invalid={invalid("ref")}
+                          onChoose={(ref) =>
+                            edit.update("repositories", i, { ref })
+                          }
+                          typed={edit.input(
+                            "repositories",
+                            i,
+                            "ref",
+                            "Linked repository ref",
+                          )}
+                        />
                         {r.keep
                           ? edit.savedValue(
                               "repositories",
@@ -308,6 +505,33 @@ export function RepositoryTab(p: TabProps) {
                               "path",
                               "New local repository path",
                             )}
+                        {!r.keep && (
+                          <div>
+                            <FolderPicker
+                              client={p.client}
+                              csrfToken={p.session.csrfToken}
+                              path={String(r.path ?? "")}
+                              disabled={isLocked}
+                              expected={
+                                chosen
+                                  ? {
+                                      owner: chosen.owner,
+                                      name: chosen.name,
+                                      ref: String(r.ref ?? ""),
+                                    }
+                                  : null
+                              }
+                              onUse={(path) =>
+                                edit.update("repositories", i, { path })
+                              }
+                              trigger={
+                                <Button type="button" variant="secondary">
+                                  Choose folder…
+                                </Button>
+                              }
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

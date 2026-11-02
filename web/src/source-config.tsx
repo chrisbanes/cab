@@ -49,6 +49,7 @@ import {
   sourceDetails,
 } from "./source-names.js";
 import {
+  ListedChoice,
   useDropMatchedEdits,
   useSettingsRows,
   withKeys,
@@ -142,8 +143,10 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     // A saved Project source is named by the title discovery lists for it.
     enabled:
       conditions.some((r) => r.kind === "project-field") ||
-      hasProjectSource(data.source),
+      hasProjectSource(data.source) ||
+      selections.some((r) => !r.keep && r.kind === "project"),
     labels: conditions.some((r) => r.kind === "label"),
+    repositories: selections.some((r) => !r.keep && r.kind === "repository"),
     saved: data.repositories.links.map((r) => ({
       repositoryId: r.repositoryId ?? "",
     })),
@@ -153,6 +156,10 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
         : [],
     ),
   });
+  const listedRepositories =
+    readinessDiscovery.repositories?.state === "ready"
+      ? readinessDiscovery.repositories.repositories
+      : null;
   const adopt = () => {
     // An unsettled save keeps its own message; nothing is loaded or discarded then.
     if (locked(d)) return;
@@ -410,24 +417,90 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                         </NativeSelect>
                       </label>
                       {r.kind === "repository" ? (
-                        <>
-                          {input(
-                            "selections",
-                            i,
-                            "repositoryId",
-                            "Repository ID",
+                        <ListedChoice
+                          id={`source-selections-${i}-repositoryChoice`}
+                          label="Repository"
+                          empty="Choose a repository"
+                          value={String(r.repositoryId ?? "")}
+                          options={
+                            listedRepositories?.map((x) => ({
+                              value: x.repositoryId,
+                              label: `${x.owner}/${x.name}`,
+                            })) ?? null
+                          }
+                          invalid={Boolean(
+                            rowError("selections", i, "repositoryId"),
                           )}
-                          {input("selections", i, "owner", "Repository owner")}
-                          {input("selections", i, "name", "Repository name")}
-                        </>
+                          describedBy="source-selections-error"
+                          onChoose={(id) => {
+                            const x = listedRepositories?.find(
+                              (x) => x.repositoryId === id,
+                            );
+                            update("selections", i, {
+                              repositoryId: id,
+                              owner: x?.owner ?? "",
+                              name: x?.name ?? "",
+                            });
+                          }}
+                          typed={
+                            <>
+                              {input(
+                                "selections",
+                                i,
+                                "repositoryId",
+                                "Repository ID",
+                              )}
+                              {input(
+                                "selections",
+                                i,
+                                "owner",
+                                "Repository owner",
+                              )}
+                              {input(
+                                "selections",
+                                i,
+                                "name",
+                                "Repository name",
+                              )}
+                            </>
+                          }
+                        />
                       ) : r.kind === "project" ? (
                         <>
-                          {input(
-                            "selections",
-                            i,
-                            "projectNodeId",
-                            "GitHub Project node ID",
-                          )}
+                          <ListedChoice
+                            id={`source-selections-${i}-projectChoice`}
+                            label="GitHub Project"
+                            empty="Choose a GitHub Project"
+                            value={String(r.projectNodeId ?? "")}
+                            options={
+                              readinessDiscovery.choices.state === "ready"
+                                ? readinessDiscovery.choices.projects.map(
+                                    (x) => ({
+                                      value: x.projectNodeId,
+                                      label: x.label,
+                                    }),
+                                  )
+                                : null
+                            }
+                            note={
+                              readinessDiscovery.choices.state === "typed"
+                                ? readinessDiscovery.choices.note
+                                : undefined
+                            }
+                            invalid={Boolean(
+                              rowError("selections", i, "projectNodeId"),
+                            )}
+                            describedBy="source-selections-error"
+                            onChoose={(projectNodeId) =>
+                              update("selections", i, { projectNodeId })
+                            }
+                            typed={input(
+                              "selections",
+                              i,
+                              "projectNodeId",
+                              "GitHub Project node ID",
+                            )}
+                          />
                           {input("selections", i, "filter", "Project filter")}
                         </>
                       ) : (

@@ -1,9 +1,12 @@
-import { useEffect } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import type { z } from "zod";
+import type { OperatorClient } from "./api.js";
 import { Button } from "./components.js";
 import { parseRows, type SourceRow } from "./settings-changes.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 import { key } from "./settings.js";
 import { Input } from "./ui/input.js";
+import { NativeSelect } from "./ui/native-select.js";
 
 export const withKeys = (rows: object[]) =>
   JSON.stringify(rows.map((r) => ({ ...r, rowKey: key() })));
@@ -215,4 +218,104 @@ export function useDropMatchedEdits(
       ),
     );
   }, [matchedSaved, read]);
+}
+
+/** The select value that reveals the typed inputs for a value not listed. */
+const otherValue = "\u0000other";
+
+/**
+ * A select of discovered values, as guided setup offers, with "Other…" revealing the typed
+ * inputs for a value not listed. Until values are listed (or when they can't be), the typed
+ * inputs stand alone. Under "Other…" the select gives up `id` to the typed input a row error
+ * focuses.
+ */
+export function ListedChoice(p: {
+  id: string;
+  label: string;
+  empty: string;
+  value: string;
+  /** `null` while nothing is listed; a string is its own label. */
+  options: readonly (string | { value: string; label: string })[] | null;
+  /** Why nothing is listed, shown under the typed inputs. */
+  note?: string | undefined;
+  /** Shown when the current value is not among the listed ones. */
+  unlistedNote?: string;
+  invalid?: boolean;
+  describedBy?: string;
+  onChoose: (value: string) => void;
+  typed: ReactNode;
+}) {
+  const [other, setOther] = useState(false);
+  if (!p.options)
+    return (
+      <>
+        {p.typed}
+        {p.note && <p className="metadata muted">{p.note}</p>}
+      </>
+    );
+  const options = p.options.map((o) =>
+    typeof o === "string" ? { value: o, label: o } : o,
+  );
+  const unlisted =
+    p.value !== "" && !other && !options.some((o) => o.value === p.value);
+  const id = other ? `${p.id}-select` : p.id;
+  return (
+    <>
+      <label className="field body" htmlFor={id}>
+        {p.label}
+        <NativeSelect
+          className="control"
+          id={id}
+          aria-label={p.label}
+          aria-invalid={Boolean(p.invalid)}
+          aria-describedby={p.invalid ? p.describedBy : undefined}
+          value={other ? otherValue : p.value}
+          onChange={(e) => {
+            const value = e.target.value;
+            setOther(value === otherValue);
+            if (value !== otherValue) p.onChoose(value);
+          }}
+        >
+          <option value="">{p.empty}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+          {unlisted && <option value={p.value}>{p.value}</option>}
+          <option value={otherValue}>Other…</option>
+        </NativeSelect>
+      </label>
+      {unlisted && options.length > 0 && p.unlistedNote && (
+        <p className="metadata muted">{p.unlistedNote}</p>
+      )}
+      {other && p.typed}
+    </>
+  );
+}
+
+/**
+ * One read per key, made once while the form is mounted; a failed read is `null`. There is
+ * no retry round: a failed read stays failed until the form mounts again.
+ */
+export function useKeyedReads<D>(
+  client: OperatorClient,
+  keys: string[],
+  path: (key: string) => string,
+  schema: z.ZodType<{ data: D }>,
+) {
+  const [reads, setReads] = useState<Record<string, D | null>>({});
+  const requested = useRef(new Set<string>());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the joined key list; each key is requested once.
+  useEffect(() => {
+    for (const k of keys) {
+      if (requested.current.has(k)) continue;
+      requested.current.add(k);
+      client.read(path(k), schema).then(
+        (r) => setReads((x) => ({ ...x, [k]: r.data })),
+        () => setReads((x) => ({ ...x, [k]: null })),
+      );
+    }
+  }, [keys.join("\n"), client]);
+  return reads;
 }

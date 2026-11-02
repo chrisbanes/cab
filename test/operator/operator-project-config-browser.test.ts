@@ -7,6 +7,7 @@ import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { browserSuite } from "../fixtures/browser-diagnostics.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
+import { createFakeGlab } from "../fixtures/fake-glab.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import { checkout, fakeDiscovery } from "../fixtures/setup-home.js";
 import {
@@ -2806,6 +2807,146 @@ test("repository errors name the exact row without echo", async (_t, journey) =>
   assert.equal(f.service.domain().repositoryLinks(ids.atlas).links.length, 2);
 });
 
+test("a new GitHub repository link is chosen from discovered repositories and a picked folder", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, {}, "repositories");
+  await page.getByRole("button", { name: "Add repository" }).click();
+  const choice = page.getByLabel("Repository", { exact: true });
+  await choice.selectOption({ label: "acme/relay" });
+  assert.equal(
+    await page.getByLabel("Linked repository ID", { exact: true }).count(),
+    0,
+  );
+  // As in setup, the chosen repository's branches are listed with its default preselected.
+  const ref = page.getByLabel("Ref", { exact: true });
+  await ref
+    .locator("option", { hasText: "develop" })
+    .waitFor({ state: "attached" });
+  assert.equal(await ref.inputValue(), "main");
+  // The folder picker fills the new row's path.
+  const checkout = await createCheckout(f.directory, "relay-checkout");
+  await page.getByRole("button", { name: "Choose folder…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Choose repository folder" });
+  await dialog.getByLabel("Or enter a path").fill(checkout);
+  await dialog.getByRole("button", { name: "Use this folder" }).click();
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(
+    await page
+      .getByLabel("New local repository path", { exact: true })
+      .inputValue(),
+    checkout,
+  );
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  const relay = f.service
+    .domain()
+    .repositoryLinks(ids.atlas)
+    .links.find((l) => l.repositoryId === "R_relay");
+  assert.equal(relay?.ref, "main");
+});
+
+test("a new GitLab repository link is chosen from configured hosts and their projects", async (_t, journey) => {
+  const glab = createFakeGlab();
+  journey.cleanup(async () => glab.close(), "fake-glab.close");
+  const host = "gitlab.example.com";
+  const { f, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=repositories",
+    undefined,
+    undefined,
+    {
+      setup: {
+        glabExecutable: glab.executable,
+        gitlab: () => ({
+          user: async () => ({ username: "fake-user" }),
+          projects: async () => ({
+            projects: [
+              {
+                repositoryId: "42",
+                projectPath: "group/app",
+                defaultBranch: "trunk",
+              },
+            ],
+            truncated: false,
+          }),
+        }),
+      },
+    },
+  );
+  f.service.domain().execute({
+    type: "code-host-credential.configure",
+    key: randomUUID(),
+    actor: "operator",
+    codeHost: "gitlab",
+    host,
+    credentialRef: `glab:${host}`,
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Add repository" }).click();
+  await page.getByLabel("Code host", { exact: true }).selectOption("gitlab");
+  await page
+    .getByRole("combobox", { name: "GitLab host", exact: true })
+    .selectOption(host);
+  const project = page.getByLabel("GitLab project", { exact: true });
+  await project
+    .locator("option", { hasText: "group/app" })
+    .waitFor({ state: "attached" });
+  await project.selectOption({ label: "group/app" });
+  assert.equal(
+    await page.getByLabel("GitLab project path", { exact: true }).count(),
+    0,
+  );
+  await page
+    .getByLabel("New local repository path", { exact: true })
+    .fill("~/gl/app");
+  const body = commandBody(page);
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  assert.deepEqual(((await body).repositories as unknown[]).at(-1), {
+    codeHost: "gitlab",
+    host,
+    repositoryId: "42",
+    ref: "trunk",
+    projectPath: "group/app",
+    path: "~/gl/app",
+  });
+});
+
+test("new repository and GitHub Project sources are chosen from discovery", async (_t, journey) => {
+  const { page } = await startDiscovery(journey, {});
+  const kind = page.getByLabel("Selection kind", { exact: true });
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "acme/relay" });
+  assert.equal(
+    await page.getByLabel("Repository owner", { exact: true }).count(),
+    0,
+  );
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
+  await kind.last().selectOption({ label: "GitHub Project" });
+  // Projects linked to the project's repositories, as the readiness picker lists them.
+  await page
+    .getByLabel("GitHub Project", { exact: true })
+    .selectOption({ label: "Atlas roadmap" });
+  await page.getByLabel("Project filter", { exact: true }).fill("is:open");
+  const body = commandBody(page);
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  const added = (
+    (await body).selections as { id: string; keep?: boolean }[]
+  ).filter((s: { keep?: boolean }) => !s.keep);
+  assert.deepEqual(
+    added.map(({ id: _id, ...s }) => s),
+    [
+      {
+        kind: "repository",
+        repositoryId: "R_relay",
+        owner: "acme",
+        name: "relay",
+      },
+      { kind: "project", projectNodeId: "PVT_atlas", filter: "is:open" },
+    ],
+  );
+});
+
 test("GitHub source readiness errors focus the exact row without echo", async (_t, journey) => {
   const { page } = await startSettings(
     journey,
@@ -2897,14 +3038,15 @@ test("GitHub source shows no readiness rule, saves an added rule, removes it, an
   assert.equal(await save.isDisabled(), false);
 });
 
-/** Settings on Atlas's GitHub tab with fake GitHub discovery configured. */
+/** Settings on an Atlas tab (GitHub by default) with fake GitHub discovery configured. */
 async function startDiscovery(
   journey: Parameters<typeof startSettings>[0],
   state: { failure?: Error; calls?: string[]; truncated?: boolean },
+  tab = "github",
 ) {
   const started = await startSettings(
     journey,
-    "/app/projects/:atlas/settings?tab=github",
+    `/app/projects/:atlas/settings?tab=${tab}`,
     undefined,
     undefined,
     { setup: { discovery: fakeDiscovery(state) } },
