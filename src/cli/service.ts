@@ -44,7 +44,7 @@ import {
   diagnosticStorageMib,
   isInBound,
 } from "../operator/diagnostic-retention.js";
-import { connectionNameSchema } from "./connections.js";
+import { CliError, connectionNameSchema } from "./connections.js";
 import {
   type Configuration,
   defaultInstallationRecord,
@@ -1331,7 +1331,7 @@ const message = (error: unknown) =>
   error instanceof ServiceFailure ? error.message : "operation failed";
 /** A CLI connection failure: its own message (never a secret) names the mode-specific remedy. */
 const connectionMessage = (error: unknown) =>
-  error instanceof Error && "code" in error ? error.message : message(error);
+  error instanceof CliError ? error.message : message(error);
 
 /**
  * Sign in with the operator password over the session API the UI uses, issue one 90-day read
@@ -1995,7 +1995,8 @@ async function localCompletion(
   if (!first.cli) return { selected: null };
   try {
     const selected = await first.cli.selection(first.connection);
-    return selected?.accessMode === "token" && selected.url !== service.origin
+    // Either mode: doctor must never check a different service than the one installed.
+    return selected && selected.url !== service.origin
       ? {
           selected,
           problem: `connection ${selected.name} points at ${selected.url}, not ${service.origin}`,

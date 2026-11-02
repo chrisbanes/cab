@@ -5,8 +5,8 @@ import {
   appendFileSync,
   chmodSync,
   closeSync,
-  copyFileSync,
   constants,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -24,26 +24,27 @@ import {
 } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
-import { PassThrough } from "node:stream";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { z } from "zod";
+import { CliError } from "../../src/cli/connections.js";
 import {
   compareReleaseVersions,
-  defaultServiceHost,
   daemonVerifyCommand,
-  ghTokenStorage,
+  defaultServiceHost,
   type FirstRun,
   type GhTokenStorage,
+  ghTokenStorage,
   type InstallCli,
-  type SavedSelection,
   installService,
   LIFECYCLE_OPTIONS,
   lifecycleOptions,
   type OperatorConnection,
+  type SavedSelection,
+  SERVICE_USAGE,
   type ServiceHost,
   type ServiceOptions,
-  SERVICE_USAGE,
   serviceCommand,
   uninstallService,
   upgradeService,
@@ -1044,9 +1045,10 @@ test("upgrade preflight refusals make no launchd change", async (t) => {
     [
       () =>
         f.setOrigin(
-          Object.assign(new Error("This connection is logged out."), {
-            code: "credential-not-found",
-          }),
+          new CliError(
+            "credential-not-found",
+            "This connection is logged out.",
+          ),
         ),
       f.releaseB,
       /No usable CLI connection: This connection is logged out\. Nothing was stopped/,
@@ -1783,6 +1785,8 @@ test("a local install uses a saved selection unchanged and reports one it cannot
   // no substitution, and the remedy names local access to this installation.
   for (const saved of [
     { name: "remote", url: "https://cab.example", accessMode: "token" },
+    // A saved local connection for another installation is not this service either.
+    { name: "other", url: "http://127.0.0.1:1", accessMode: "local" },
     Object.assign(new Error("Choose a connection: a, b"), {
       code: "connection-ambiguous",
     }),

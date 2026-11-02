@@ -713,3 +713,32 @@ test("every state-changing request reports what it may have left behind when its
     assert.equal(result.sessionOpen, open, name);
   }
 });
+
+test("installCli doctor refuses a managed assignment before reading the install record or local material", async (t) => {
+  const h = harness(t);
+  let reads = 0;
+  const deps = {
+    env: { CAB_CLI_CONFIG_DIR: h.configDir, CAB_MANAGED_ASSIGNMENT: "1" },
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    fetch: () => {
+      throw Error("no request");
+    },
+    platform: "darwin",
+    keychain: () => {
+      throw Error("no Keychain");
+    },
+    // The record lookup reads the uid first; a managed refusal comes before it.
+    get uid() {
+      reads += 1;
+      return process.getuid?.();
+    },
+    now: Date.now,
+  } as unknown as CliDeps;
+  await assert.rejects(
+    installCli(deps).doctor(undefined, never, join(h.dir, "record.json")),
+    (error: { code?: string }) => error.code === "managed-assignment",
+  );
+  assert.equal(reads, 0);
+});

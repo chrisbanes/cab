@@ -1100,7 +1100,7 @@ async function connectSelected(
     )
       throw new CliError(
         "local-access-unavailable",
-        "The service refused stale or wrong-installation local material. Restart the intended service and check --local-state DATA_DIR.",
+        "The service refused stale or wrong-installation local material. Restart the intended service and check --local-state DATA_DIR or --local-installation RECORD_FILE.",
       );
     if (
       accessMode === "local" &&
@@ -1112,7 +1112,7 @@ async function connectSelected(
         "The selected local service is unavailable or its material is stale.",
         {
           ...error.extra,
-          fix: "Restart the intended service and check --local --local-state DATA_DIR; no other connection was tried.",
+          fix: "Restart the intended service and check --local --local-state DATA_DIR or --local --local-installation RECORD_FILE; no other connection was tried.",
         },
       );
     throw error;
@@ -1121,12 +1121,12 @@ async function connectSelected(
     throw new CliError(
       "service-identity-changed",
       accessMode === "local"
-        ? `The service at ${connection.url} does not match the selected local installation. Check --local-state DATA_DIR.`
+        ? `The service at ${connection.url} does not match the selected local installation. Check --local-state DATA_DIR or --local-installation RECORD_FILE.`
         : `The service at ${connection.url} is a different installation than when ${name} logged in. Run 'cab auth login' again if this is expected.`,
       {
         fix:
           accessMode === "local"
-            ? "Check the selected data directory and restart the intended service. Adopt another installation under a new connection name with cab connection local NAME --local-state DATA_DIR."
+            ? "Check the selected data directory or install record and restart the intended service. Adopt another installation under a new connection name with cab connection local NAME --local-state DATA_DIR or --local-installation RECORD_FILE."
             : `If the reinstall is expected, run 'cab auth login --connection ${name} --url ${connection.url}'; otherwise check the URL with 'cab connection list'.`,
       },
     );
@@ -1306,6 +1306,8 @@ export function installCli(deps: CliDeps): InstallCli {
       };
     },
     doctor: async (name, signal, record) => {
+      // Before the record or local material is read.
+      rejectManaged(deps.env);
       // The service publishes its endpoint just after it starts answering; wait (bounded by
       // `signal`) for this installation's own publication so doctor does not race it.
       const installation = await readInstallationRecord(record, deps.uid).catch(
