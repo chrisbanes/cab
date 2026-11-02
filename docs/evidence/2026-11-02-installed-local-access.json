@@ -161,11 +161,7 @@
         "label": "local.cab.validation-1414-cdd67ad6",
         "installed": true
       },
-      "kept": [
-        "data",
-        "auth",
-        "versions"
-      ]
+      "kept": ["data", "auth", "versions"]
     },
     "8-foreground": {
       "localStatus": "read-write, no expiry",
