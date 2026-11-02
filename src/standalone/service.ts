@@ -345,10 +345,15 @@ import {
   type WorkspaceManagerOptions,
 } from "./workspaces.js";
 
-/** Admission reasons a later provider read clears; a re-observed requeue waits on these. */
-const reobservationPending = new Set([
+/** Admission reasons a later provider read clears. */
+const incompleteSourceRead = new Set([
   "imported-blockers-unknown",
   "source-unknown",
+]);
+
+/** What a re-observed requeue waits on, keeping its allowance. */
+const reobservationPending = new Set([
+  ...incompleteSourceRead,
   "project-paused",
 ]);
 
@@ -7545,8 +7550,7 @@ export class StandaloneService {
       .reasons.every(
         (reason) =>
           immutableRevisionMismatches.has(reason) ||
-          reason === "imported-blockers-unknown" ||
-          reason === "source-unknown" ||
+          incompleteSourceRead.has(reason) ||
           (request.draftTurn && reason === "task-unready"),
       );
   }
@@ -7956,6 +7960,8 @@ export class StandaloneService {
                   (reason) =>
                     immutableRevisionMismatches.has(reason) &&
                     !this.firstTurnResolves(request, reason) &&
+                    // Sole reason only when nothing structural remains: the next attempt
+                    // re-captures the requeue, so it waits rather than being refused.
                     !(
                       reason === "task-revision-changed" &&
                       this.reobservedAllowance(request)
