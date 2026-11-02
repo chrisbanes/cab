@@ -344,6 +344,8 @@ issue brief (in its own section after the outcome),
 followed by the material already bound to that work (its inbox batch, a draft turn's
 operator message, a reporting repair), including when the turn is a retry or a
 planned-shutdown requeue of that request; the lead's frozen assignment brief is not used.
+The inbox batch moves with that retry or requeue and completes when the newest generation
+completes.
 When the text differs from what the lead's last confirmed turn in the same conversation
 carried (a replaced or new conversation has none), the turn adds a
 line diff (`- ` before, `+ ` now, by field, the issue brief included) capped at 200 lines and 8,000 UTF-8 bytes,

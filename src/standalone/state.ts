@@ -1257,6 +1257,88 @@ export class ExecutionState {
   }
 
   /**
+   * Once per store: a queued inbox batch left under a work that a retry replaced follows that
+   * work's newest generation (completing if it already completed), as a retry now carries it.
+   * A batch whose newest generation is missing, ambiguous or in another state is left alone.
+   */
+  repairRetriedDeliveryBatches(): void {
+    const marker = "retried-delivery-batches-v1";
+    if (!this.hasTable("coordination_delivery_batches")) return;
+    const done = () =>
+      this.db
+        .prepare(
+          "SELECT 1 FROM runtime_retention_migrations WHERE migrationId = ?",
+        )
+        .get(marker) !== undefined;
+    if (done()) return;
+    transaction(this.db, () => {
+      if (done()) return;
+      const stuck = this.db
+        .prepare(`SELECT batchId, deliveryWorkId, taskId, recipientAssignmentId
+          FROM coordination_delivery_batches
+          WHERE state = 'queued' AND deliveryWorkId IN
+            (SELECT failedWorkId FROM execution_retry_resolutions)`)
+        .all() as {
+        batchId: string;
+        deliveryWorkId: string;
+        taskId: string;
+        recipientAssignmentId: string;
+      }[];
+      // Works that replaced another and were never replaced themselves.
+      const leaves = this.db
+        .prepare(`SELECT successor.workId, intent.state, binding.taskId, binding.assignmentId
+          FROM (SELECT retryWorkId AS workId FROM execution_retry_resolutions
+            UNION SELECT requeueWorkId FROM execution_shutdown_resolutions) successor
+          JOIN execution_intents intent ON intent.workId = successor.workId
+          JOIN task_execution_bindings binding ON binding.workId = successor.workId
+          WHERE successor.workId NOT IN (SELECT failedWorkId FROM execution_retry_resolutions)
+            AND successor.workId NOT IN (SELECT interruptedWorkId FROM execution_shutdown_resolutions)`)
+        .all() as {
+        workId: string;
+        state: string;
+        taskId: string;
+        assignmentId: string;
+      }[];
+      for (const batch of stuck) {
+        const newest = leaves.filter(
+          (leaf) =>
+            leaf.taskId === batch.taskId &&
+            leaf.assignmentId === batch.recipientAssignmentId &&
+            this.workLineage(leaf.workId).includes(batch.deliveryWorkId),
+        );
+        const leaf = newest.length === 1 ? newest[0] : undefined;
+        if (leaf?.state === "completed")
+          this.db
+            .prepare(`UPDATE coordination_delivery_batches
+              SET state = 'completed', completedAt = unixepoch()
+              WHERE batchId = ? AND state = 'queued'`)
+            .run(batch.batchId);
+        else if (
+          leaf &&
+          [
+            "ready",
+            "capacity-waiting",
+            "held",
+            "submitting",
+            "running",
+          ].includes(leaf.state)
+        )
+          this.db
+            .prepare(`UPDATE coordination_delivery_batches SET deliveryWorkId = ?
+              WHERE batchId = ? AND state = 'queued'
+                AND NOT EXISTS (SELECT 1 FROM coordination_delivery_batches
+                  WHERE deliveryWorkId = ?)`)
+            .run(leaf.workId, batch.batchId, leaf.workId);
+      }
+      this.db
+        .prepare(
+          "INSERT INTO runtime_retention_migrations (migrationId) VALUES (?)",
+        )
+        .run(marker);
+    });
+  }
+
+  /**
    * This work, then the works it replaced as a transient-failure retry or a planned-shutdown
    * requeue, back to the request that was first queued. Material bound to that request (its
    * inbox batch, reporting repair or explicit prompt) belongs to every successor.

@@ -1116,6 +1116,7 @@ export class StandaloneService {
         (workId) => state.refusedBeforeStart(workId),
       );
       coordination.migrate();
+      state.repairRetriedDeliveryBatches();
       // After every table the wake queries read has migrated.
       const wakeQueries = new SchedulerWakeQueries(db);
       wakeQueries.ensureIndexes();
