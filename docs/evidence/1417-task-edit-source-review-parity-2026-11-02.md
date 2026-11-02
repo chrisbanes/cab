@@ -36,8 +36,8 @@ The audit reads `LocalOperatorUi.task()`, the `task.configure` and `source.revie
 - The provider instance and node id prose are dropped; the identity label and URL stay.
 - The raw `projectId/selectionId` membership pairs are replaced by field names and values; sync status stays summarized in the inspector's sync line.
 - The digest-based source decisions were removed by #1432 and are not restored. `source.review` accepts only `resume-source-hold`.
-- The Edit dialog is offered for a local task of any state, as the retained page was, and not for an imported task (its title and outcome are source-owned). A task whose title or outcome the read withholds or redacts (`task.textExact` is false) is not offered it, and the dialog sends only the fields the operator changed, so a projection is never written back. Such a task has no Edit task… at all, so its Ready is changed through `cab task configure --ready`.
-- The dialog requires a non-empty title and outcome, as the retained form did. The JSON command accepts an empty outcome; the form-level rule is kept.
+- The Edit dialog is offered for a local task of any state, as the retained page was, and not for an imported task (its title and outcome are source-owned). A task whose title or outcome the read withholds or redacts (`task.textExact` is false) is not offered it, and the dialog sends only the fields the operator changed, so a projection is never written back. Such a task has no Edit task… at all, so its Ready is changed through `cab task configure TASK_ID --ready true|false`.
+- A changed title or outcome must be non-empty, as on the retained form; an untouched one is not sent.
 - A stale version, an imported task, no active hold, or incomplete source or readiness evidence is a definite `409 conflict`; the web shows its conflict line and rereads. The domain message text is not carried.
 - The brief mentions the legacy home's task list. `home()` no longer renders one, so that part is a no-op.
 
