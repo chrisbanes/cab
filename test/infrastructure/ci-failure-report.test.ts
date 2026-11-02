@@ -642,6 +642,18 @@ test("only an exact guard with positively verified Renovate SDK upgrade is exclu
             name: "shard",
             status: "completed",
             conclusion: "failure",
+            steps: [
+              {
+                name: "Run logical suite",
+                status: "completed",
+                conclusion: "failure",
+              },
+              {
+                name: "Upload synthetic test evidence",
+                status: "completed",
+                conclusion: "success",
+              },
+            ],
             html_url:
               "https://github.com/chrisbanes/cab/actions/runs/30/job/301",
           },
@@ -1110,7 +1122,20 @@ function completeAggregateJobs() {
               conclusion: "success",
             },
           ]
-        : [],
+        : name === "execution-2"
+          ? [
+              {
+                name: "Run logical suite",
+                status: "completed",
+                conclusion: "failure",
+              },
+              {
+                name: "Upload synthetic test evidence",
+                status: "completed",
+                conclusion: "success",
+              },
+            ]
+          : [],
   }));
 }
 
@@ -1131,10 +1156,20 @@ test("aggregate failure accounting follows complete dependencies and retains own
     "unexpected-diagnostic",
     "unexpected-step",
     "malformed-step",
+    "guard-upload-failure",
+    "guard-steps-missing",
+    "guard-step-unresolved",
   ]) {
     const jobs = completeAggregateJobs();
     const check = jobs.find((job) => job.name === "check");
     assert.ok(check);
+    const owning = jobs.find((job) => job.name === "execution-2");
+    assert.ok(owning);
+    if (variant === "guard-upload-failure")
+      owning.steps[1]!.conclusion = "failure";
+    if (variant === "guard-steps-missing") owning.steps = [];
+    if (variant === "guard-step-unresolved")
+      owning.steps[1]!.conclusion = "unknown-result";
     if (variant === "checkout") {
       check.steps[0]!.conclusion = "failure";
       check.steps[1]!.conclusion = "success";
@@ -1211,14 +1246,31 @@ test("aggregate failure accounting follows complete dependencies and retains own
       },
     });
     const positive = ["guard", "ordinary", "mixed"].includes(variant);
+    const aggregateAccounted = positive || variant.startsWith("guard-");
     const aggregate = report.runs[0].attempts[0].jobs.find(
       (job: { name: string }) => job.name === "check",
     );
-    assert.equal(Boolean(aggregate.accountedFor), positive, variant);
+    assert.equal(Boolean(aggregate.accountedFor), aggregateAccounted, variant);
     assert.equal(report.observedFailures, variant === "guard" ? 0 : 1, variant);
     assert.equal(report.incomplete, positive ? 0 : 1, variant);
     assert.equal(report.confirmedUnrelated, 0, variant);
-    if (positive) {
+    if (variant.startsWith("guard-") && variant !== "guard") {
+      assert.equal(report.excludedEvidence.length, 1, variant);
+      assert.notEqual(
+        report.runs[0].classification,
+        "excluded-evidence",
+        variant,
+      );
+      assert.ok(
+        report.coverageRuns[0].coverage.some(
+          (entry: { reason: string; jobId?: number; jobUrl?: string }) =>
+            entry.reason.startsWith("guard-job-") &&
+            entry.jobId === owning.id &&
+            entry.jobUrl === owning.html_url,
+        ),
+      );
+    }
+    if (aggregateAccounted) {
       assert.deepEqual(aggregate.accountedFor.diagnostics, [
         "suites: expected success, observed failure",
       ]);

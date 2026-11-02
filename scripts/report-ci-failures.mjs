@@ -239,6 +239,52 @@ function validTimestamp(value) {
   );
 }
 
+function guardJobStepGap(job) {
+  const steps = job.steps;
+  if (
+    !Array.isArray(steps) ||
+    !steps.length ||
+    !steps.every(
+      (step) =>
+        step &&
+        typeof step === "object" &&
+        typeof step.name === "string" &&
+        typeof step.status === "string" &&
+        typeof step.conclusion === "string",
+    )
+  )
+    return { reason: "guard-job-step-evidence-unavailable" };
+  const unresolved = steps.filter(
+    (step) =>
+      step.status !== "completed" ||
+      !["success", "failure", "skipped"].includes(step.conclusion),
+  );
+  if (unresolved.length)
+    return {
+      reason: "guard-job-step-outcome-unresolved",
+      steps: unresolved.map(({ name, status, conclusion }) => ({
+        name,
+        status,
+        conclusion,
+      })),
+    };
+  const failed = steps.filter((step) => step.conclusion === "failure");
+  if (
+    failed.length !== 1 ||
+    failed[0].name !== "Run logical suite" ||
+    steps.filter((step) => step.name === "Run logical suite").length !== 1
+  )
+    return {
+      reason: "guard-job-independent-step-failure",
+      steps: failed.map(({ name, status, conclusion }) => ({
+        name,
+        status,
+        conclusion,
+      })),
+    };
+  return null;
+}
+
 function attemptChronology(attempt) {
   const jobs = attempt.jobs;
   return (
@@ -1222,8 +1268,24 @@ export async function renderReport({
             });
             return false;
           });
-          for (const job of attempt.jobs)
+          for (const job of attempt.jobs) {
+            const containedGuard = job.failures.some(
+              (failure) => failure.name === guard && !failure.unknown,
+            );
             job.failures = classifyRunEvidence({}, job.failures, true).failures;
+            if (containedGuard) {
+              const gap = guardJobStepGap(job);
+              if (gap) {
+                job.coverage.push(gap);
+                run.coverage.push({
+                  ...gap,
+                  attempt: attempt.number,
+                  jobId: job.id,
+                  jobUrl: job.url,
+                });
+              }
+            }
+          }
         }
       } else {
         run.coverage.push({
