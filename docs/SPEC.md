@@ -311,8 +311,10 @@ runs; cab does not check who edited it, and issue text grants no cab permission.
 
 Each lead turn is built when it is submitted from the task's current title and outcome,
 followed by the material already bound to that work (its inbox batch, a draft turn's
-operator message, a reporting repair); the lead's frozen assignment brief is not used.
-When the text differs from what the lead's last confirmed turn carried, the turn adds a
+operator message, a reporting repair), including when the turn is a retry or a
+planned-shutdown requeue of that request; the lead's frozen assignment brief is not used.
+When the text differs from what the lead's last confirmed turn in the same conversation
+carried (a replaced or new conversation has none), the turn adds a
 line diff (`- ` before, `+ ` now, by field) capped at 200 lines and 8,000 UTF-8 bytes,
 ending with `[… issue diff truncated …]` when cut; the full current text is never cut. A
 turn is confirmed once `startTurn` returned and its exact execution identity bound the
@@ -328,8 +330,8 @@ both as they are then.
 After the lead hands work back (a completion request, or a reported result settled by its
 successful turn) or the task becomes Done without a lead turn (provider completion,
 import as Done), a later source revision sets `issueChangedSinceHandback` on the task
-read; the task view and the Settle handback review show it. An edit that is reverted
-still counts. It is informational: it reopens nothing, creates no inbox item and changes
+read; the task view, the Settle handback review and `cab task get` show it. An edit that
+is reverted still counts, and a later Done transition does not clear it. It is informational: it reopens nothing, creates no inbox item and changes
 no settlement, completion or admission. A later handback anchors again.
 
 `source.review` has one decision, `resume-source-hold`: operator-only, at the expected
