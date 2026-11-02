@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { tmpdir } from "../fixtures/temp.js";
+import { checkout } from "../fixtures/setup-home.js";
+import { repositoryLevelGrants } from "../../src/core/delivery-levels.js";
 import type {
   RoutingChoiceClient,
   RoutingChoiceRequest,
@@ -465,6 +467,211 @@ test("task turns include their captured instructions and lead accountability con
         prompt,
         /Captured (project|profile) instructions|instructions \(revision/,
       );
+  } finally {
+    await service?.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("project lead prompt states each linked repository's delivery level and follows policy changes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-lead-delivery-guidance-"));
+  const projectId = randomUUID();
+  const leadProfileId = randomUUID();
+  const leadTaskId = randomUUID();
+  const workerTaskId = randomUUID();
+  const workerAssignmentId = randomUUID();
+  const names = ["a", "b", "c", "d", "e"];
+  const ids = Object.fromEntries(names.map((n) => [n, `repo-${n}`]));
+  let service: StandaloneService | undefined;
+  const runtime = new JourneyRuntime();
+
+  try {
+    service = new StandaloneService(
+      join(root, "data"),
+      () => runtime,
+      undefined,
+      { power: { enabled: false }, routingClient: null },
+    );
+    runtime.observe(service, leadTaskId);
+    await service.start();
+    command(service, {
+      type: "profile.create",
+      profileId: leadProfileId,
+      name: "Guidance lead",
+      instructions: "GUIDANCE_PROFILE_INSTRUCTIONS",
+      capabilities: "task coordination",
+    });
+    command(service, {
+      type: "project.create",
+      projectId,
+      name: "Guidance project",
+      leadProfileId,
+    });
+    command(service, {
+      type: "project.configure",
+      projectId,
+      expectedVersion: 1,
+      paused: false,
+      instructions: "GUIDANCE_PROJECT_INSTRUCTIONS",
+    });
+    for (const n of names)
+      await checkout(
+        join(root, n),
+        `https://github.com/acme/guidance-${n}.git`,
+      );
+    await service.domain().configureRepositories({
+      type: "repositories.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      repositories: names.map((n) => ({
+        codeHost: "github" as const,
+        host: "github.com",
+        repositoryId: ids[n]!,
+        path: join(root, n),
+        ref: "main",
+      })),
+    });
+    const configureDelivery = (
+      expectedVersion: number,
+      grants: ReturnType<typeof repositoryLevelGrants>,
+    ) =>
+      command(service!, {
+        type: "delivery.configure",
+        projectId,
+        expectedVersion,
+        mode: "through-merge",
+        credentialRef: null,
+        grants,
+        requiredChecks: [],
+      });
+    configureDelivery(1, [
+      ...repositoryLevelGrants(ids.a!, "open-prs"),
+      ...repositoryLevelGrants(ids.b!, "merge-with-approval"),
+      ...repositoryLevelGrants(ids.c!, "merge-when-ready"),
+      { action: "branch.push", repositoryId: ids.e!, mode: "allow" },
+    ]);
+    for (const [taskId, title, outcome] of [
+      [leadTaskId, "Guidance lead task", "GUIDANCE_LEAD_BRIEF"],
+      [workerTaskId, "Guidance worker task", "GUIDANCE_WORKER_BRIEF"],
+    ] as const) {
+      command(service, {
+        type: "task.create",
+        projectId,
+        taskId,
+        title,
+        outcome,
+        ready: false,
+      });
+      await service.provisionTask(taskId);
+    }
+    command(service, {
+      type: "assignment.create",
+      projectId,
+      taskId: workerTaskId,
+      assignmentId: workerAssignmentId,
+      profileId: leadProfileId,
+      brief: "GUIDANCE_WORKER_ASSIGNMENT_BRIEF",
+      resultDestination: "lead",
+      requesterAssignmentId: null,
+    });
+    runtime.handleTurn = async (threadId, turnId) => {
+      await runtime.callTool({
+        threadId,
+        turnId,
+        callId: `guidance-question-${turnId}`,
+        tool: "cab_ask_question",
+        arguments: { question: `GUIDANCE_QUESTION_${turnId}` },
+      });
+    };
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 2 });
+    for (const taskId of [workerTaskId, leadTaskId])
+      command(service, {
+        type: "task.configure",
+        projectId,
+        taskId,
+        expectedVersion: 1,
+        ready: true,
+      });
+    await service.provisionTask(workerTaskId);
+    await service.provisionTask(leadTaskId);
+    const find = (marker: string) =>
+      runtime.prompts.find((prompt) => prompt.includes(marker));
+    await waitUntil(
+      () => !!find("GUIDANCE_LEAD_BRIEF") && !!find("GUIDANCE_WORKER_ASSIGN"),
+      "lead and worker turns",
+    );
+    const leadPrompt = find("GUIDANCE_LEAD_BRIEF")!;
+    const workerPrompt = find("GUIDANCE_WORKER_ASSIGN")!;
+    const line = (prompt: string, repo: string) =>
+      prompt.match(new RegExp(`^- ${repo}: .*$`, "m"))?.[0] ?? "";
+    assert.match(
+      line(leadPrompt, ids.a!),
+      /stop at a green PR, because the operator merges/,
+    );
+    assert.match(
+      line(leadPrompt, ids.b!),
+      /request pr\.merge, which waits for operator approval/,
+    );
+    assert.match(
+      line(leadPrompt, ids.c!),
+      /once the PR has no merge blockers, perform pr\.merge/,
+    );
+    assert.match(line(leadPrompt, ids.d!), /no code-host actions are granted/);
+    assert.match(line(leadPrompt, ids.e!), /branch\.push \(allow\)/);
+    assert.equal(
+      leadPrompt.match(/three unsuccessful repairs of the same failure/g)
+        ?.length,
+      1,
+    );
+    assert.match(leadPrompt, /GUIDANCE_PROJECT_INSTRUCTIONS/);
+    assert.doesNotMatch(workerPrompt, /Delivery levels for linked/);
+    assert.match(workerPrompt, /Assignment role: project assignee/);
+
+    // The lead's next wake rebuilds the guidance from the current policy.
+    configureDelivery(2, [
+      ...repositoryLevelGrants(ids.a!, "merge-when-ready"),
+      ...repositoryLevelGrants(ids.b!, "merge-with-approval"),
+      ...repositoryLevelGrants(ids.c!, "merge-when-ready"),
+      { action: "branch.push", repositoryId: ids.e!, mode: "allow" },
+    ]);
+    const leadAssignmentId = service
+      .domain()
+      .leadBindings()
+      .find((binding) => binding.taskId === leadTaskId)?.assignmentId;
+    await waitUntil(
+      () =>
+        service!
+          .coordinationView()
+          .readTask(leadTaskId)
+          .questions.some((q) => q.requestingAssignmentId === leadAssignmentId),
+      "lead question",
+    );
+    const question = service
+      .coordinationView()
+      .readTask(leadTaskId)
+      .questions.find((q) => q.requestingAssignmentId === leadAssignmentId)!;
+    await service.coordinationView().answerQuestion({
+      key: randomUUID(),
+      taskId: leadTaskId,
+      interactionId: question.interactionId,
+      expectedRevision: question.revision,
+      answer: "GUIDANCE_OPERATOR_ANSWER",
+    });
+    await waitUntil(
+      () => !!find("GUIDANCE_OPERATOR_ANSWER"),
+      "lead's next turn",
+    );
+    const nextLeadPrompt = find("GUIDANCE_OPERATOR_ANSWER")!;
+    assert.match(
+      line(nextLeadPrompt, ids.a!),
+      /once the PR has no merge blockers, perform pr\.merge/,
+    );
+    assert.doesNotMatch(
+      line(nextLeadPrompt, ids.a!),
+      /stop at a green PR, because/,
+    );
   } finally {
     await service?.stop();
     rmSync(root, { recursive: true, force: true });

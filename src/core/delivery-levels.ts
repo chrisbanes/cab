@@ -55,7 +55,7 @@ const levels = {
   readonly (readonly [Grant["action"], Grant["mode"]])[]
 >;
 
-const isCodeHostGrant = (grant: Grant) =>
+export const isCodeHostGrant = (grant: Grant) =>
   !grant.action.startsWith("issue.") && !grant.action.startsWith("project.");
 
 export function repositoryDeliveryLevel(
