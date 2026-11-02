@@ -3662,3 +3662,17 @@ for await (const line of createInterface({ input: process.stdin })) {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("stop during a failed spawn does not wait for an exit event", {
+  timeout: 6000,
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), "cab-codex-failed-spawn-"));
+  const runtime = newTestRuntime(join(root, "missing-codex"));
+  const rejected = assert.rejects(runtime.start(), /ENOENT|Runtime stopped/);
+  try {
+    await bounded(Promise.all([runtime.stop(), rejected]), 1000);
+  } finally {
+    await runtime.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

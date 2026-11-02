@@ -1981,7 +1981,11 @@ export class CodexRuntime implements Runtime {
     this.invalidNativeTurns.clear();
     this.nativeReadbacks.clear();
     this.clearConversationCaptures();
-    if (child.exitCode === null && child.signalCode === null) {
+    if (
+      child.pid !== undefined &&
+      child.exitCode === null &&
+      child.signalCode === null
+    ) {
       const exited = new Promise<void>((resolve) =>
         child.once("exit", () => resolve()),
       );
