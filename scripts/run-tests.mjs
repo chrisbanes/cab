@@ -11,14 +11,16 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { readdir, readlink, realpath } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { profileTimings } from "./test-timings.mjs";
-import { availableParallelism, constants, tmpdir } from "node:os";
+import { availableParallelism, constants, homedir, tmpdir } from "node:os";
 import {
   createTestEvidenceDirectory,
   writeTestEvidence,
 } from "../dist/test/fixtures/browser-diagnostics.js";
+import { operatorAuthFile } from "../dist/src/standalone/codex-home.js";
 
 function diagnosticStream() {
   const result = { lines: [], omitted: 0, truncated: 0 };
@@ -234,7 +236,12 @@ export function runnerStatus(result) {
     : 125;
 }
 
-export async function recordRunnerEvidence(result, name, evidenceRoot) {
+export async function recordRunnerEvidence(
+  result,
+  name,
+  evidenceRoot,
+  guard = { links: [], incomplete: null },
+) {
   let timer;
   try {
     return await Promise.race([
@@ -251,7 +258,9 @@ export async function recordRunnerEvidence(result, name, evidenceRoot) {
           JSON.stringify(
             {
               ...manifest,
-              wrapperStatus: runnerStatus(result),
+              wrapperStatus: guardedStatus(result, guard),
+              operatorLoginLinks: guard.links,
+              guardScanIncomplete: guard.incomplete,
               nodeVersion: process.version,
               exitProof: "owned root child only",
             },
@@ -458,15 +467,193 @@ export function selectTestFiles(files, options, timings = {}) {
   return result;
 }
 
-async function main() {
+/**
+ * Points `CODEX_HOME` at an absent directory inside the run root, so a service started by a
+ * test links its Codex login to a dangling target there. Returns every Codex home the service
+ * could otherwise link, for the link guard: the inherited `CODEX_HOME`, `$HOME/.codex` and the
+ * account's `~/.codex`, which a host that scrubs the environment falls back to.
+ */
+export function isolateOperatorCodex(root, environment) {
+  const homes = new Set(
+    [environment, { HOME: environment.HOME }, { HOME: homedir() }].map(
+      (source) => dirname(operatorAuthFile(source)),
+    ),
+  );
+  environment.CODEX_HOME = join(root, "operator-codex");
+  return [...homes];
+}
+
+const within = (path, directory) =>
+  path === directory || path.startsWith(directory + sep);
+
+/**
+ * Root-relative paths of symlinks that expose the operator's Codex login: any link into an
+ * operator Codex home (a path or an array of them), or a `codex/home/auth.json` link leaving the root. Reads link targets
+ * only, never follows links or opens the login file.
+ */
+// Entries that vanish, or that this user cannot read, are skipped rather than failing the run.
+const skippable = (error) =>
+  ["ENOENT", "ENOTDIR", "EACCES", "EPERM", "EINVAL"].includes(error?.code);
+
+export async function findOperatorLoginLinks(
+  root,
+  operatorCodexHomes,
+  maxDepth = Infinity,
+) {
+  const homes = [operatorCodexHomes].flat();
+  const operatorHomes = new Set(homes.map((home) => resolve(home)));
+  const roots = new Set([resolve(root)]);
+  // Targets are compared by path and, where the path exists, by realpath (macOS aliases /var).
+  for (const [paths, path] of [
+    ...homes.map((home) => [operatorHomes, home]),
+    [roots, root],
+  ])
+    try {
+      paths.add(await realpath(path));
+    } catch {}
+  const found = [];
+  const walk = async (directory, depth) => {
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (skippable(error)) return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        let target;
+        try {
+          target = resolve(directory, await readlink(path));
+        } catch (error) {
+          if (skippable(error)) continue;
+          throw error;
+        }
+        let canonical = target;
+        try {
+          canonical = join(await realpath(dirname(target)), basename(target));
+        } catch {}
+        const targets = [target, canonical];
+        const name = relative(root, path);
+        if (
+          targets.some((t) =>
+            [...operatorHomes].some((home) => within(t, home)),
+          ) ||
+          (name.endsWith(`${sep}codex${sep}home${sep}auth.json`) &&
+            !targets.some((t) => [...roots].some((base) => within(t, base))))
+        )
+          found.push(name);
+      } else if (entry.isDirectory() && depth < maxDepth)
+        await walk(path, depth + 1);
+    }
+  };
+  await walk(root, 1);
+  return found.sort();
+}
+
+/**
+ * Runs `run()` while scanning the root once a second for operator-login links, then once more
+ * after it ends, because tests remove their own roots and an end-only scan would miss most links.
+ */
+export async function guardRunLinks(
+  root,
+  operatorCodexHome,
+  run,
+  scanLinks = findOperatorLoginLinks,
+) {
+  const links = new Set();
+  let scan = Promise.resolve();
+  let scanning = false;
+  const timer = setInterval(() => {
+    if (scanning) return;
+    scanning = true;
+    // Depth 6 reaches <test-root>/<dir>/data/codex/home/auth.json; the final scan is unbounded.
+    scan = scanLinks(root, operatorCodexHome, 6)
+      .then((found) => {
+        for (const link of found) links.add(link);
+      })
+      .catch(() => {})
+      .finally(() => (scanning = false));
+  }, 1000);
+  let result;
+  try {
+    result = await run();
+  } finally {
+    clearInterval(timer);
+    await scan;
+  }
+  // A failed final scan must not replace the run's own status; report it as incomplete.
+  let incomplete = null;
+  try {
+    for (const link of await scanLinks(root, operatorCodexHome))
+      links.add(link);
+  } catch (error) {
+    incomplete = String(error?.code ?? error?.name ?? "Error");
+  }
+  return { result, links: [...links].sort(), incomplete };
+}
+
+/** The runner's exit status: the run's own, else 1 when the guard found an operator-login link. */
+export const guardedStatus = (result, guard) =>
+  runnerStatus(result) || (guard.links.length ? 1 : 0);
+
+/** Reports the guard outcome, records evidence and returns the exit status for the run. */
+export async function finishRun(
+  result,
+  guard,
+  name,
+  { evidenceRoot, stderr = process.stderr } = {},
+) {
+  if (guard.links.length)
+    stderr.write(
+      `Test run linked the operator Codex login inside its temp root:\n${guard.links.map((link) => `  ${link}\n`).join("")}`,
+    );
+  if (guard.incomplete)
+    stderr.write(`Codex login guard scan incomplete (${guard.incomplete})\n`);
+  const status = guardedStatus(result, guard);
+  try {
+    await recordRunnerEvidence(result, name, evidenceRoot, guard);
+  } catch {
+    stderr.write("Runner evidence incomplete\n");
+    return status || 1;
+  }
+  return status;
+}
+
+/** Runs the test process under the link guard and returns the exit status. */
+export async function runGuarded(
+  root,
+  operatorCodexHome,
+  args,
+  env,
+  name,
+  options = {},
+) {
+  const guard = await guardRunLinks(root, operatorCodexHome, () =>
+    runTestProcess(args, {
+      env,
+      forwardOutput: true,
+      forwardSignals: true,
+      ...options.process,
+    }),
+  );
+  return finishRun(guard.result, guard, name, options);
+}
+
+export async function main(
+  base = realpathSync(tmpdir()),
+  environment = process.env,
+  run = runSelected,
+) {
   // shortcut: TMPDIR is the POSIX temp root; Windows is not a supported test platform.
-  await withRunTempRoot(realpathSync(tmpdir()), (root) => {
-    process.env.TMPDIR = root;
-    return runSelected();
+  await withRunTempRoot(base, (root) => {
+    environment.TMPDIR = root;
+    return run(root, isolateOperatorCodex(root, environment));
   });
 }
 
-async function runSelected() {
+async function runSelected(root, operatorCodexHome) {
   const options = parseTestOptions(process.argv.slice(2));
   const preflight = options.preflight;
   const files = preflight
@@ -518,8 +705,11 @@ async function runSelected() {
     );
     process.stdout.write(`Test timings: ${destination}\n`);
   }
-  const result = await runTestProcess(args, {
-    env: {
+  process.exitCode = await runGuarded(
+    root,
+    operatorCodexHome,
+    args,
+    {
       ...process.env,
       CAB_TEST_PROFILE: options.profile,
       CAB_TEST_BROWSER_ENGINE: {
@@ -528,22 +718,10 @@ async function runSelected() {
         service: "none",
       }[options.profile],
     },
-    forwardOutput: true,
-    forwardSignals: true,
-  });
-  try {
-    await recordRunnerEvidence(
-      result,
-      preflight
-        ? "fixture preflight"
-        : `${options.suite} ${options.profile} shard ${options.shard}/${options.shards}`,
-    );
-  } catch {
-    process.stderr.write("Runner evidence incomplete\n");
-    process.exitCode = runnerStatus(result) || 1;
-    return;
-  }
-  process.exitCode = runnerStatus(result);
+    preflight
+      ? "fixture preflight"
+      : `${options.suite} ${options.profile} shard ${options.shard}/${options.shards}`,
+  );
 }
 if (
   process.argv[1] &&
