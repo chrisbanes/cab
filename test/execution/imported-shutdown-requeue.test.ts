@@ -156,6 +156,7 @@ function sourceRepository(root: string) {
 async function importedFixture(
   t: { after(fn: () => unknown): void },
   tracker: Tracker,
+  options: { pausedAtStop?: boolean } = {},
 ) {
   const box = sandbox(t);
   const world: World = { ready: true, blocked: false };
@@ -265,18 +266,21 @@ async function importedFixture(
       },
     ],
   });
-  const refresh = async () => {
-    if (tracker === "github") await service.refreshGitHub();
+  const refreshOf = async (running: StandaloneService) => {
+    if (tracker === "github") await running.refreshGitHub();
     else
-      await new OperatorApi(service, [join(box.root, "data")]).refreshSources();
+      await new OperatorApi(running, [join(box.root, "data")]).refreshSources();
   };
-  if (tracker === "github") {
-    domain.execute({
+  const refresh = () => refreshOf(service);
+  /** The same GitHub selection and rule, saved again and re-activated. */
+  const reconfigureGitHub = (running: StandaloneService) => {
+    const d = running.domain();
+    d.execute({
       type: "github.configure",
       actor: "operator",
       key: randomUUID(),
       projectId,
-      expectedVersion: Number(domain.githubConfiguration(projectId).version),
+      expectedVersion: Number(d.githubConfiguration(projectId).version),
       credentialRef: "env:TEST_GITHUB",
       selections: [
         {
@@ -292,15 +296,17 @@ async function importedFixture(
         conditions: [{ kind: "label", operator: "has", name: "ready" }],
       },
     });
-    domain.execute({
+    d.execute({
       type: "github.activate",
       actor: "operator",
       key: randomUUID(),
       projectId,
       selectionId: "repo",
-      expectedVersion: Number(domain.githubConfiguration(projectId).version),
+      expectedVersion: Number(d.githubConfiguration(projectId).version),
     });
-  } else {
+  };
+  if (tracker === "github") reconfigureGitHub(service);
+  else {
     const api = new OperatorApi(service, [join(box.root, "data")]);
     await api.execute({
       type: "issue-tracker-credential.configure",
@@ -340,6 +346,7 @@ async function importedFixture(
     .list()
     .find((item) => item.threadId)?.threadId;
   assert.ok(interruptedThread);
+  if (options.pausedAtStop) setPaused(service, projectId, true);
   await service.stop();
   const closed = <T>(sql: string, ...params: string[]) => {
     const db = new DatabaseSync(join(box.root, "data", "standalone.sqlite"), {
@@ -376,7 +383,10 @@ async function importedFixture(
     taskId,
     requeue,
     interruptedThread,
+    projectId,
     taskVersionAtShutdown: before,
+    refresh: refreshOf,
+    reconfigureGitHub,
     /** Restarts on the same data root with whatever `world` now reports. */
     async restart(auto: boolean) {
       const runtime = new Turns();
@@ -390,6 +400,22 @@ async function importedFixture(
       return { service: restarted, runtime };
     },
   };
+}
+
+function setPaused(
+  service: StandaloneService,
+  projectId: string,
+  paused: boolean,
+) {
+  const domain = service.domain();
+  domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(domain.project(projectId).version),
+    paused,
+  } as never);
 }
 
 const stateOf = (service: StandaloneService, workId: string) =>
@@ -408,8 +434,9 @@ const refusals = (service: StandaloneService) =>
 /** The restart resumes the interrupted thread once, on the re-observed revision. */
 async function assertResumedOnce(
   f: Awaited<ReturnType<typeof importedFixture>>,
+  started: ReturnType<typeof f.restart> = f.restart(true),
 ) {
-  const { service, runtime } = await f.restart(true);
+  const { service, runtime } = await started;
   await waitUntil(
     () => stateOf(service, f.requeue)?.state === "completed",
     describe(service),
@@ -492,6 +519,59 @@ test("a Jira blocker opened while down holds the requeue as blocked", async (t) 
   const f = await importedFixture(t, "jira");
   f.world.blocked = true;
   await assertHeld(f, /imported-blockers-blocked/);
+});
+
+// -- Waiting while paused ---------------------------------------------------
+
+/** A project paused at stop keeps the restarted requeue waiting, allowance intact. */
+async function restartPaused(f: Awaited<ReturnType<typeof importedFixture>>) {
+  const restarted = await f.restart(true);
+  await waitUntil(
+    () =>
+      /project-paused/.test(
+        String(stateOf(restarted.service, f.requeue)?.reason),
+      ),
+    describe(restarted.service),
+  );
+  assert.equal(stateOf(restarted.service, f.requeue)?.state, "ready");
+  assert.equal(restarted.runtime.startedTurns, 0);
+  return restarted;
+}
+
+test("a paused project keeps an unchanged imported requeue waiting, then it resumes once when resumed", async (t) => {
+  const f = await importedFixture(t, "github", { pausedAtStop: true });
+  const restarted = await restartPaused(f);
+  setPaused(restarted.service, f.projectId, false);
+  await assertResumedOnce(f, Promise.resolve(restarted));
+});
+
+test("readiness lost while a paused requeue waits holds it with its own reason", async (t) => {
+  const f = await importedFixture(t, "github", { pausedAtStop: true });
+  const { service, runtime } = await restartPaused(f);
+  f.world.ready = false;
+  await f.refresh(service);
+  await waitUntil(
+    () => stateOf(service, f.requeue)?.state === "held",
+    describe(service),
+  );
+  const reason = String(stateOf(service, f.requeue)?.reason);
+  assert.match(reason, /task-unready|source-hold/);
+  assert.doesNotMatch(reason, /task-revision-changed/);
+  assert.equal(runtime.startedTurns, 0);
+});
+
+test("a clean re-observation while a paused requeue waits is absorbed and the requeue is admitted", async (t) => {
+  const f = await importedFixture(t, "github", { pausedAtStop: true });
+  const restarted = await restartPaused(f);
+  const before = Number(restarted.service.domain().task(f.taskId).version);
+  f.reconfigureGitHub(restarted.service);
+  await f.refresh(restarted.service);
+  assert.ok(
+    Number(restarted.service.domain().task(f.taskId).version) > before,
+    "the reconfiguration revised the task again",
+  );
+  setPaused(restarted.service, f.projectId, false);
+  await assertResumedOnce(f, Promise.resolve(restarted));
 });
 
 // -- Local control ---------------------------------------------------------
