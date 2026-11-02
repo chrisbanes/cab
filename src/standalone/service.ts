@@ -1118,7 +1118,10 @@ export class StandaloneService {
       const taskPublications = new TaskPublicationStore(db);
       // Read by activationAllowed and the Claude turn environment; set by spawnEnvironment.
       let runtimeSpawnSnapshot: NodeJS.ProcessEnv | undefined;
-      /** The task worktree of a repository and the base commit it was provisioned at. */
+      /**
+       * The task worktree of a repository and the base its pushes must descend from: the commit
+       * it was provisioned at, or a stacked dependent's current parent head.
+       */
       const taskWorkspace = async (
         taskId: string,
         repositoryId: string,
@@ -1130,10 +1133,14 @@ export class StandaloneService {
                   (r) => r.repositoryId === repositoryId,
                 )
               : undefined;
+        const stacked = domain.stackedDependency(taskId);
         return repository
           ? {
               workspacePath: repository.workspacePath,
-              baseCommit: repository.commit,
+              baseCommit:
+                stacked?.repositoryId === repositoryId
+                  ? stacked.parentHead
+                  : repository.commit,
             }
           : null;
       };
@@ -6526,8 +6533,20 @@ export class StandaloneService {
       routingAttempts,
       wakeQueries: queries,
       inboxStartup,
+      workspaceBindings,
     } = this.current;
     this.flushRuntimeAnswers();
+    // Every confirmed push wakes the scheduler, and start-up ends with a wake.
+    domain.reconcileRestacks({
+      queue: (taskId, reason, identity) =>
+        coordination.ensureDeliveryEventWithinTransaction(
+          taskId,
+          reason,
+          identity,
+        ),
+      advance: (taskId, repositoryId, commit) =>
+        workspaceBindings.advanceCommit(taskId, repositoryId, commit),
+    });
     const deliveryWorkCompleted = (delivery: InboxDelivery): boolean => {
       const intent = state.byWorkId(delivery.deliveryWorkId);
       const binding = state.taskBinding(delivery.deliveryWorkId);
@@ -7298,6 +7317,23 @@ export class StandaloneService {
    * after which the scheduler wake re-captures the request.
    */
   private async firstWorkspaceRepositories(
+    request: TurnRequest,
+  ): Promise<TaskWorkspaceRepositoryInput[]> {
+    const repositories = await this.linkedWorkspaceRepositories(request);
+    // A stacked dependent's decision is fixed here; it starts at the blocker's last push.
+    const stacked = this.domain().recordStackedDependency(
+      String(request.taskId),
+    );
+    return stacked
+      ? repositories.map((repository) =>
+          repository.repositoryId === stacked.repositoryId
+            ? { ...repository, commit: stacked.parentHead }
+            : repository,
+        )
+      : repositories;
+  }
+
+  private async linkedWorkspaceRepositories(
     request: TurnRequest,
   ): Promise<TaskWorkspaceRepositoryInput[]> {
     const taskId = String(request.taskId);
