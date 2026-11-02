@@ -2123,7 +2123,7 @@ const deliveryCheckSchema = z
     appId: z.number().int().positive().optional(),
   })
   .strict();
-const deliverySavedRowSchema = z
+const savedRowSchema = z
   .object({
     projectId: uuid,
     section: z.enum(["delivery-grants", "delivery-checks"]),
@@ -2131,7 +2131,13 @@ const deliverySavedRowSchema = z
     index: z.number().int().nonnegative().safe(),
   })
   .strict();
-export const savedConfigurationRowSchema = deliverySavedRowSchema
+const deliverySavedRowSchema = savedRowSchema
+  .extend({
+    /** A repository's additional check: `index` is into that repository's effective cab checks. */
+    repositoryId: deliveryIdentity.optional(),
+  })
+  .strict();
+export const savedConfigurationRowSchema = savedRowSchema
   .extend({
     section: z.enum(["source", "repositories"]),
   })
@@ -2175,9 +2181,61 @@ export const deliveryConfigurationSchema = z
     grants: z
       .array(z.union([deliveryGrantSchema, unavailableDeliveryRowSchema]))
       .max(256),
+    /** The legacy project-wide list; it applies to every repository until the next save. */
     requiredChecks: z
       .array(z.union([deliveryCheckSchema, unavailableDeliveryRowSchema]))
       .max(100),
+    /** One entry per visible linked repository; absent from older servers. */
+    repositories: z
+      .array(
+        z
+          .object({
+            repositoryId: deliveryIdentity,
+            mergeMethod: z.enum(["merge", "squash", "rebase"]).nullable(),
+            /** cab's checks for this repository, including the legacy project-wide list. */
+            additionalChecks: z
+              .array(
+                z.union([deliveryCheckSchema, unavailableDeliveryRowSchema]),
+              )
+              .max(200),
+            codeHost: z.discriminatedUnion("status", [
+              z
+                .object({
+                  status: z.literal("live"),
+                  checks: z
+                    .array(
+                      z.union([
+                        deliveryCheckSchema,
+                        z.object({ kind: z.literal("unavailable") }).strict(),
+                      ]),
+                    )
+                    .max(200),
+                  allowedMethods: z
+                    .array(z.enum(["merge", "squash", "rebase"]))
+                    .max(3),
+                })
+                .strict(),
+              z
+                .object({
+                  status: z.literal("unavailable"),
+                  reason: z.enum([
+                    "credential-missing",
+                    "provider-error",
+                    "timeout",
+                    "unsupported",
+                  ]),
+                })
+                .strict(),
+            ]),
+            /** Check names seen on this repository's PRs and not yet required. */
+            suggestions: z.array(deliveryIdentity).max(50),
+            /** Whether neither the code host nor cab requires a check; null when the code host is unavailable. */
+            noRequiredChecks: z.boolean().nullable(),
+          })
+          .strict(),
+      )
+      .max(256)
+      .optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -2625,9 +2683,39 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       requiredChecks: z
         .array(z.union([deliveryCheckSchema, keptDeliveryRowSchema]))
         .max(100),
+      /** Per-repository settings; when present they replace the project-wide check list. */
+      repositories: z
+        .array(
+          z
+            .object({
+              repositoryId: deliveryIdentity,
+              mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
+              requiredChecks: z
+                .array(z.union([deliveryCheckSchema, keptDeliveryRowSchema]))
+                .max(100),
+            })
+            .strict(),
+        )
+        .max(256)
+        .optional(),
     })
     .strict()
     .superRefine((value, context) => {
+      if (value.repositories) {
+        const ids = value.repositories.map((r) => r.repositoryId);
+        if (new Set(ids).size !== ids.length)
+          context.addIssue({
+            code: "custom",
+            path: ["repositories"],
+            message: "Each repository appears once.",
+          });
+        if (value.requiredChecks.length)
+          context.addIssue({
+            code: "custom",
+            path: ["requiredChecks"],
+            message: "Per-repository settings replace the project-wide checks.",
+          });
+      }
       if (value.preserveBranchPrefix && value.branchPrefix !== undefined)
         context.addIssue({
           code: "custom",

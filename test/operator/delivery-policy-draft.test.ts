@@ -65,7 +65,11 @@ test("all domain actions round-trip public fields exactly and remain domain-sche
         { name: "Build", appId: 42 },
       ],
     });
-    const { credentialRef: _savedReference, ...publicPolicy } = policy;
+    const {
+      credentialRef: _savedReference,
+      repositories: _repositories,
+      ...publicPolicy
+    } = policy;
     const publicSeed = {
       ...publicPolicy,
       credentialConfigured: true,

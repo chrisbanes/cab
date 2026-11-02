@@ -194,6 +194,7 @@ export function deliveryPolicySubmission(draft: DeliveryPolicyDraft) {
     requiredCheckKeys: _requiredCheckKeys,
     branchPrefixUnavailable: _prefixUnavailable,
     branchPrefix,
+    repositories: _repositories,
     ...policy
   } = draft;
   const values = {

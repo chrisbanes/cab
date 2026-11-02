@@ -36,6 +36,7 @@ import {
   isOperatorDeliveryCaller,
   isRecoveryAction,
   materialDigest,
+  repositoryDeliverySettings,
 } from "../core/delivery.js";
 import {
   redactionExclusionLimits,
@@ -969,23 +970,82 @@ export class OperatorApi {
     const safe = this.safe(value, excluded, limit);
     return safe === String(value) ? safe : null;
   }
-  private safeDeliveryConfiguration(
+  private async safeDeliveryConfiguration(
     projectId: string,
     configuration: ReturnType<
       ReturnType<StandaloneService["delivery"]>["publicConfiguration"]
     >,
+    linkedRepositoryIds: readonly string[],
     excluded: readonly string[] | undefined,
   ) {
     const unavailable = (
       section: "delivery-grants" | "delivery-checks",
       index: number,
+      repositoryId?: string,
     ) => ({
       kind: "unavailable" as const,
       label: "Unavailable saved row" as const,
-      savedRow: { projectId, section, version: configuration.version, index },
+      savedRow: {
+        projectId,
+        section,
+        version: configuration.version,
+        index,
+        ...(repositoryId === undefined ? {} : { repositoryId }),
+      },
     });
     const { repositories: _repositories, ...policy } = configuration;
+    // Each visible linked repository is read from its code host in parallel; a failure never fails the read.
+    const repositories = await Promise.all(
+      linkedRepositoryIds
+        .filter((id) => this.disclosable(id, excluded))
+        .map(async (repositoryId) => {
+          const { mergeMethod, cabChecks } = repositoryDeliverySettings(
+            configuration,
+            repositoryId,
+          );
+          const live = await this.service.repositoryRequirements(
+            projectId,
+            repositoryId,
+          );
+          const hostChecks = live.status === "live" ? live.hostChecks : [];
+          const required = new Set(
+            [...hostChecks, ...cabChecks].map((c) => c.name),
+          );
+          return {
+            repositoryId,
+            mergeMethod: mergeMethod ?? null,
+            additionalChecks: cabChecks.map((check, index) =>
+              this.deliveryRowDisclosable(check, excluded)
+                ? check
+                : unavailable("delivery-checks", index, repositoryId),
+            ),
+            codeHost:
+              live.status === "live"
+                ? {
+                    status: "live" as const,
+                    checks: hostChecks.map((check) =>
+                      this.deliveryRowDisclosable(check, excluded)
+                        ? check
+                        : { kind: "unavailable" as const },
+                    ),
+                    allowedMethods: live.allowedMethods,
+                  }
+                : live,
+            suggestions: this.service
+              .delivery()
+              .checkSuggestions(projectId, repositoryId)
+              .filter(
+                (name) =>
+                  !required.has(name) && this.disclosable(name, excluded, 512),
+              )
+              .slice(0, 50),
+            noRequiredChecks:
+              live.status === "live" ? required.size === 0 : null,
+          };
+        }),
+    );
     return {
+      repositories,
       ...policy,
       ...(configuration.branchPrefix !== undefined &&
       !this.disclosable(configuration.branchPrefix, excluded)
@@ -6424,9 +6484,10 @@ export class OperatorApi {
           availability:
             this.service.routingAvailability(projectId).reason ?? "available",
         },
-        delivery: this.safeDeliveryConfiguration(
+        delivery: await this.safeDeliveryConfiguration(
           projectId,
           this.service.delivery().publicConfiguration(projectId),
+          links.links.map((link) => link.repositoryId),
           excluded,
         ),
         statusMapping: this.statusMappingView(
@@ -8499,6 +8560,7 @@ export class OperatorApi {
     // Explicit legacy commands replay their original hash before current policy/privacy checks.
     if (
       c.credentialRef !== undefined &&
+      c.repositories === undefined &&
       !c.preserveBranchPrefix &&
       explicitGrants.length === c.grants.length &&
       explicitChecks.length === c.requiredChecks.length
@@ -8540,8 +8602,13 @@ export class OperatorApi {
       section: Reference["section"],
       length: number,
       path: string,
+      repositoryId?: string,
     ) => {
-      if (reference.projectId !== c.projectId || reference.section !== section)
+      if (
+        reference.projectId !== c.projectId ||
+        reference.section !== section ||
+        reference.repositoryId !== repositoryId
+      )
         throw new DomainPolicyError(
           "invalid-input",
           "Saved row belongs to another policy section",
@@ -8549,7 +8616,7 @@ export class OperatorApi {
         );
       if (reference.version !== c.expectedVersion)
         throw new DomainConflictError("Saved row policy version changed");
-      const identity = `${section}:${reference.index}`;
+      const identity = `${section}:${repositoryId ?? ""}:${reference.index}`;
       if (reference.index >= length || seen.has(identity))
         throw new DomainPolicyError(
           "invalid-input",
@@ -8595,6 +8662,54 @@ export class OperatorApi {
         );
       return row;
     });
+    const repositories = c.repositories
+      ? [
+          ...c.repositories.map((entry, r) => {
+            if (!this.disclosable(entry.repositoryId, excluded))
+              throw new DomainPolicyError(
+                "invalid-input",
+                "Repository is unavailable",
+                [`repositories.${r}.repositoryId`],
+              );
+            const effective = repositoryDeliverySettings(
+              current,
+              entry.repositoryId,
+            ).cabChecks;
+            return {
+              repositoryId: entry.repositoryId,
+              ...(entry.mergeMethod ? { mergeMethod: entry.mergeMethod } : {}),
+              requiredChecks: entry.requiredChecks.map((row, index) => {
+                const path = `repositories.${r}.requiredChecks.${index}`;
+                if ("savedRow" in row)
+                  return effective[
+                    indexOf(
+                      row.savedRow,
+                      "delivery-checks",
+                      effective.length,
+                      `${path}.savedRow`,
+                      entry.repositoryId,
+                    )
+                  ]!;
+                if (!this.deliveryRowDisclosable(row, excluded))
+                  throw new DomainPolicyError(
+                    "invalid-input",
+                    "Check text is unavailable",
+                    [`${path}.name`],
+                  );
+                return row;
+              }),
+            };
+          }),
+          // A repository the operator cannot see keeps its saved entry.
+          ...(current.repositories ?? []).filter(
+            (entry) =>
+              !this.disclosable(entry.repositoryId, excluded) &&
+              !c.repositories?.some(
+                (r) => r.repositoryId === entry.repositoryId,
+              ),
+          ),
+        ]
+      : current.repositories;
     if (
       !c.preserveBranchPrefix &&
       c.branchPrefix !== undefined &&
@@ -8615,7 +8730,9 @@ export class OperatorApi {
       mode: c.mode,
       ...retainedPrefix,
       grants,
-      requiredChecks,
+      // The first save with per-repository settings moves the project-wide list into them.
+      requiredChecks: c.repositories ? [] : requiredChecks,
+      repositories,
       credentialRef:
         c.credentialRef === undefined
           ? domain.deliveryCredentialReference(c.projectId)

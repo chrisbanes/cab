@@ -2601,6 +2601,20 @@ export class DeliveryStore {
       )
       .at(-1);
   }
+  /** Check names recorded on the project's PR observations for one repository, most recent first. */
+  checkSuggestions(projectId: string, repositoryId: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT json_extract(c.value, '$.name') AS name, MAX(o.createdAt) AS at
+           FROM delivery_observations o JOIN domain_tasks t ON t.id = o.taskId,
+             json_each(o.observationJson, '$.checks') c
+           WHERE t.projectId = ? AND json_extract(o.observationJson, '$.repositoryId') = ?
+           GROUP BY name ORDER BY at DESC, name LIMIT 200`,
+        )
+        .all(projectId, repositoryId) as Array<{ name: unknown }>
+    ).flatMap((r) => (typeof r.name === "string" ? [r.name] : []));
+  }
   hasWaitingPr(workId: string): boolean {
     return Boolean(
       this.db

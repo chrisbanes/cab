@@ -3508,6 +3508,15 @@ export class StandaloneService {
     return this.jiraReader(() => this.domain(), instance).preview(jql);
   }
 
+  /** What a linked repository's code host requires, read fresh; unavailable before the service starts. */
+  async repositoryRequirements(projectId: string, repositoryId: string) {
+    if (!this.current)
+      return { status: "unavailable" as const, reason: "unsupported" as const };
+    return this.current.deliveryCoordinator.repositoryRequirements(
+      projectId,
+      repositoryId,
+    );
+  }
   async gitHubSourceCredentialStatus(projectId: string, scope?: GhLoginScope) {
     const config = this.domain().githubConfiguration(projectId);
     const reference = config.credentialRef;

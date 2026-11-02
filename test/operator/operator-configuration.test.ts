@@ -1723,6 +1723,7 @@ test("delivery JSON preserves every accepted action, supplemental scope and opti
     credentialConfigured: false,
     grants,
     requiredChecks,
+    repositories: [],
   });
   assert.equal(Object.hasOwn(visible, "branchPrefix"), false);
   await api.execute(
@@ -1862,6 +1863,7 @@ test("delivery excluded rows and prefix expose only version-bound references and
     branchPrefix: "private-prefix/",
     grants: [hiddenGrant, visibleGrant],
     requiredChecks: [visibleCheck, hiddenCheck],
+    repositories: [],
   });
   assert.equal(JSON.stringify(receipt).includes(envKey), false);
   f.seedPersistedState((db) => {
