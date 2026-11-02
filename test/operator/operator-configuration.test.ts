@@ -3701,3 +3701,140 @@ test("routing Settings partial edits preserve an existing 129-candidate domain c
   assert.equal(domain.routing(projectId).enabled, 1);
   assert.equal(f.runtime.turns, 0);
 });
+
+import { repositoryLevelGrants } from "../../src/core/delivery-levels.js";
+import {
+  applyRepositoryDeliveryLevel,
+  deliveryPolicyDraft,
+  deliveryPolicySubmission,
+} from "../../web/src/delivery-policy-draft.js";
+
+test("repository preset submissions persist complete policy atomically through the keyed API", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const retained = [
+    {
+      action: "issue.comment",
+      repositoryId: "R",
+      mode: "allow",
+      optionNodeIds: ["O", "O"],
+    },
+    {
+      action: "branch.adopt",
+      repositoryId: "R",
+      mode: "approval",
+      projectNodeId: "P",
+    },
+    {
+      action: "issue.comment",
+      repositoryId: "R",
+      mode: "allow",
+      optionNodeIds: ["O", "O"],
+    },
+  ];
+  const requiredChecks = [{ name: "build", appId: 42 }, { name: "build" }];
+  await api.execute(
+    deliveryInput(projectId, {
+      credentialRef: "env:PRESET_CREDENTIAL",
+      branchPrefix: "",
+      requiredChecks,
+      grants: [
+        ...retained,
+        ...repositoryLevelGrants("unlinked", "merge-with-approval"),
+      ],
+    }),
+  );
+  for (const [targets, level, mode] of [
+    [["R", "42"], "open-prs", "through-merge"],
+    [["R"], "merge-with-approval", "through-merge"],
+    [["R"], "merge-when-ready", "through-merge"],
+    [["unlinked", "R"], "open-prs", "reviewable-pr"],
+  ] as const) {
+    const saved = (await api.readProjectConfiguration(projectId)).data
+      .delivery!;
+    const result = applyRepositoryDeliveryLevel(
+      deliveryPolicyDraft(saved),
+      targets,
+      level,
+    );
+    assert.equal(result.kind, "applied");
+    if (result.kind !== "applied") throw Error("Preset unexpectedly refused");
+    const command = {
+      type: "delivery.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: saved.version,
+      ...deliveryPolicySubmission(result.draft),
+    };
+    await api.execute(command);
+    const read = (await api.readProjectConfiguration(projectId)).data.delivery!;
+    assert.equal(read.version, saved.version + 1);
+    assert.equal(read.mode, mode);
+    assert.deepEqual(read.grants, result.draft.grants);
+    assert.deepEqual(read.grants.slice(0, 3), retained);
+    for (const id of targets)
+      assert.deepEqual(
+        read.grants.filter(
+          (g) =>
+            !("savedRow" in g) &&
+            g.repositoryId === id &&
+            !g.action.startsWith("issue.") &&
+            g.action !== "branch.adopt",
+        ),
+        repositoryLevelGrants(id, level),
+      );
+    assert.equal(read.branchPrefix, "");
+    assert.deepEqual(read.requiredChecks, requiredChecks);
+    assert.equal(
+      f.service.domain().deliveryCredentialReference(projectId),
+      "env:PRESET_CREDENTIAL",
+    );
+  }
+  assert.equal(f.runtime.turns, 0);
+  assert.deepEqual(f.service.delivery().actions(), []);
+});
+
+test("advanced submission preserves opaque grants checks and prefix alongside public edits", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const hidden = "PRESET_PRIVATE_MATERIAL";
+  const grants: import("../../src/core/delivery.js").DeliveryPolicy["grants"] =
+    [
+      { action: "issue.comment", repositoryId: hidden, mode: "approval" },
+      { action: "issue.labels", repositoryId: "public", mode: "allow" },
+    ];
+  f.service.domain().execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: `env:${hidden}`,
+    branchPrefix: hidden,
+    grants,
+    requiredChecks: [{ name: hidden }],
+  });
+  const saved = (await api.readProjectConfiguration(projectId)).data.delivery!;
+  assert.ok(saved.grants.some((row) => "savedRow" in row));
+  assert.equal(saved.branchPrefix, null);
+  const draft = deliveryPolicyDraft(saved);
+  draft.grants.push({
+    action: "issue.comment",
+    repositoryId: "public",
+    mode: "allow",
+  });
+  draft.grantKeys.push("public-edit");
+  const submission = deliveryPolicySubmission(draft);
+  assert.doesNotMatch(JSON.stringify(submission), new RegExp(hidden));
+  await api.execute({
+    type: "delivery.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: saved.version,
+    ...submission,
+  });
+  const persisted = f.service.delivery().configuration(projectId);
+  assert.deepEqual(persisted.grants, [
+    ...grants,
+    { action: "issue.comment", repositoryId: "public", mode: "allow" },
+  ]);
+  assert.deepEqual(persisted.requiredChecks, [{ name: hidden }]);
+  assert.equal(persisted.branchPrefix, hidden);
+  assert.equal(persisted.version, saved.version + 1);
+  assert.equal(f.runtime.turns, 0);
+});

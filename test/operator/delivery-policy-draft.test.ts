@@ -745,3 +745,149 @@ test("withheld mapping warns conservatively when public status authority is redu
     null,
   );
 });
+
+import {
+  applyRepositoryDeliveryLevel,
+  deliveryLevelView,
+} from "../../web/src/delivery-policy-draft.js";
+import { repositoryLevelGrants } from "../../src/core/delivery-levels.js";
+
+test("bulk presets preserve unrelated rows and keys, derive mode over unlinked IDs and are idempotent", () => {
+  const retained = [
+    {
+      action: "issue.comment" as const,
+      repositoryId: "R",
+      mode: "allow" as const,
+      optionNodeIds: ["O", "O"],
+    },
+    {
+      action: "branch.adopt" as const,
+      repositoryId: "R",
+      mode: "approval" as const,
+    },
+  ];
+  const draft = deliveryPolicyDraft(
+    seed({
+      grants: [
+        ...retained,
+        ...retained,
+        ...repositoryLevelGrants("unlinked", "merge-with-approval"),
+        {
+          action: "pr.merge",
+          repositoryId: "R",
+          mode: "allow",
+          fieldNodeId: "F",
+        },
+      ],
+    }),
+  );
+  const before = structuredClone(draft);
+  const result = applyRepositoryDeliveryLevel(
+    draft,
+    ["R", "42", "R"],
+    "open-prs",
+  );
+  assert.equal(result.kind, "applied");
+  if (result.kind !== "applied") return;
+  assert.equal(result.draft.mode, "through-merge");
+  assert.deepEqual(result.draft.grants.slice(0, 12), draft.grants.slice(0, 12));
+  assert.deepEqual(
+    result.draft.grantKeys.slice(0, 12),
+    draft.grantKeys.slice(0, 12),
+  );
+  assert.deepEqual(result.draft.grants.slice(12), [
+    ...repositoryLevelGrants("R", "open-prs"),
+    ...repositoryLevelGrants("42", "open-prs"),
+  ]);
+  assert.equal(
+    new Set(result.draft.grantKeys).size,
+    result.draft.grants.length,
+  );
+  assert.deepEqual(draft, before);
+  assert.deepEqual(
+    applyRepositoryDeliveryLevel(result.draft, ["R", "42"], "open-prs"),
+    result,
+  );
+  assert.equal(deliveryLevelView(result.draft.grants, "R"), "open-prs");
+  const down = applyRepositoryDeliveryLevel(
+    result.draft,
+    ["unlinked"],
+    "open-prs",
+  );
+  assert.equal(down.kind === "applied" && down.draft.mode, "reviewable-pr");
+  const custom = applyRepositoryDeliveryLevel(
+    deliveryPolicyDraft(
+      seed({
+        grants: [{ action: "pr.merge", repositoryId: "custom", mode: "allow" }],
+      }),
+    ),
+    ["R"],
+    "open-prs",
+  );
+  assert.equal(custom.kind === "applied" && custom.draft.mode, "reviewable-pr");
+});
+
+test("unavailable facts and oversized bulk proposals refuse without mutating the draft", () => {
+  const opaque = {
+    kind: "unavailable" as const,
+    label: "Unavailable saved row" as const,
+    savedRow: {
+      projectId: "P",
+      section: "delivery-grants" as const,
+      version: 7,
+      index: 0,
+    },
+  };
+  const draft = deliveryPolicyDraft(seed({ grants: [opaque] }));
+  const before = structuredClone(draft);
+  assert.equal(deliveryLevelView(draft.grants, "R"), "unavailable");
+  assert.equal(
+    applyRepositoryDeliveryLevel(draft, ["R"], "open-prs").kind,
+    "unavailable",
+  );
+  assert.deepEqual(draft, before);
+  const publicDraft = deliveryPolicyDraft(
+    seed({
+      branchPrefix: null,
+      branchPrefixUnavailable: true,
+      requiredChecks: [
+        {
+          ...opaque,
+          savedRow: { ...opaque.savedRow, section: "delivery-checks" },
+        },
+      ],
+    }),
+  );
+  assert.equal(
+    applyRepositoryDeliveryLevel(publicDraft, [null], "open-prs").kind,
+    "unavailable",
+  );
+  const valid = applyRepositoryDeliveryLevel(
+    publicDraft,
+    ["R"],
+    "merge-when-ready",
+  );
+  assert.equal(valid.kind, "applied");
+  if (valid.kind === "applied") {
+    assert.deepEqual(valid.draft.requiredChecks, publicDraft.requiredChecks);
+    assert.equal(valid.draft.branchPrefix, null);
+    assert.equal(valid.draft.credentialIntent, "preserve");
+  }
+  const full = deliveryPolicyDraft(
+    seed({
+      grants: Array.from({ length: 250 }, () => ({
+        action: "issue.comment",
+        repositoryId: "T",
+        mode: "allow",
+      })),
+    }),
+  );
+  const snapshot = structuredClone(full);
+  const rejected = applyRepositoryDeliveryLevel(
+    full,
+    ["R", "42"],
+    "merge-when-ready",
+  );
+  assert.equal(rejected.kind, "invalid");
+  assert.deepEqual(full, snapshot);
+});
