@@ -13,13 +13,14 @@ import {
 } from "node:fs";
 import { readdir, readlink, realpath } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { profileTimings } from "./test-timings.mjs";
 import { availableParallelism, constants, homedir, tmpdir } from "node:os";
 import {
   createTestEvidenceDirectory,
   writeTestEvidence,
 } from "../dist/test/fixtures/browser-diagnostics.js";
+import { operatorAuthFile } from "../dist/src/standalone/codex-home.js";
 
 function diagnosticStream() {
   const result = { lines: [], omitted: 0, truncated: 0 };
@@ -468,22 +469,26 @@ export function selectTestFiles(files, options, timings = {}) {
 
 /**
  * Points `CODEX_HOME` at an absent directory inside the run root, so a service started by a
- * test links its Codex login to a dangling target there. Returns the operator's own Codex
- * home, resolved as `operatorAuthFile` does, for the link guard.
+ * test links its Codex login to a dangling target there. Returns every Codex home the service
+ * could otherwise link, for the link guard: the inherited `CODEX_HOME`, `$HOME/.codex` and the
+ * account's `~/.codex`, which a host that scrubs the environment falls back to.
  */
 export function isolateOperatorCodex(root, environment) {
-  const operatorHome =
-    environment.CODEX_HOME || join(environment.HOME || homedir(), ".codex");
+  const homes = new Set(
+    [environment, { HOME: environment.HOME }, { HOME: homedir() }].map(
+      (source) => dirname(operatorAuthFile(source)),
+    ),
+  );
   environment.CODEX_HOME = join(root, "operator-codex");
-  return operatorHome;
+  return [...homes];
 }
 
 const within = (path, directory) =>
   path === directory || path.startsWith(directory + sep);
 
 /**
- * Root-relative paths of symlinks that expose the operator's Codex login: any link into the
- * operator Codex home, or a `codex/home/auth.json` link leaving the root. Reads link targets
+ * Root-relative paths of symlinks that expose the operator's Codex login: any link into an
+ * operator Codex home (a path or an array of them), or a `codex/home/auth.json` link leaving the root. Reads link targets
  * only, never follows links or opens the login file.
  */
 // Entries that vanish, or that this user cannot read, are skipped rather than failing the run.
@@ -492,13 +497,15 @@ const skippable = (error) =>
 
 export async function findOperatorLoginLinks(
   root,
-  operatorCodexHome,
+  operatorCodexHomes,
   maxDepth = Infinity,
 ) {
-  const operatorHomes = new Set([resolve(operatorCodexHome)]);
+  const homes = [operatorCodexHomes].flat();
+  const operatorHomes = new Set(homes.map((home) => resolve(home)));
   const roots = new Set([resolve(root)]);
+  // Targets are compared by path and, where the path exists, by realpath (macOS aliases /var).
   for (const [paths, path] of [
-    [operatorHomes, operatorCodexHome],
+    ...homes.map((home) => [operatorHomes, home]),
     [roots, root],
   ])
     try {
@@ -523,11 +530,18 @@ export async function findOperatorLoginLinks(
           if (skippable(error)) continue;
           throw error;
         }
+        let canonical = target;
+        try {
+          canonical = join(await realpath(dirname(target)), basename(target));
+        } catch {}
+        const targets = [target, canonical];
         const name = relative(root, path);
         if (
-          [...operatorHomes].some((home) => within(target, home)) ||
+          targets.some((t) =>
+            [...operatorHomes].some((home) => within(t, home)),
+          ) ||
           (name.endsWith(`${sep}codex${sep}home${sep}auth.json`) &&
-            ![...roots].some((base) => within(target, base)))
+            !targets.some((t) => [...roots].some((base) => within(t, base))))
         )
           found.push(name);
       } else if (entry.isDirectory() && depth < maxDepth)

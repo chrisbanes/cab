@@ -12,6 +12,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -66,10 +67,10 @@ const runner = (await import(
     body: (root: string) => Promise<T>,
   ): Promise<T>;
   createRunTempRoot(base: string): string;
-  isolateOperatorCodex(root: string, environment: NodeJS.ProcessEnv): string;
+  isolateOperatorCodex(root: string, environment: NodeJS.ProcessEnv): string[];
   findOperatorLoginLinks(
     root: string,
-    operatorCodexHome: string,
+    operatorCodexHomes: string | string[],
     maxDepth?: number,
   ): Promise<string[]>;
   guardRunLinks(
@@ -103,7 +104,7 @@ const runner = (await import(
   main(
     base: string,
     environment: NodeJS.ProcessEnv,
-    run: (root: string, operatorCodexHome: string) => Promise<void>,
+    run: (root: string, operatorCodexHomes: string[]) => Promise<void>,
   ): Promise<void>;
   sweepStaleRunTempRoots(base: string, alive?: (pid: number) => boolean): void;
   runnerStatus(
@@ -653,15 +654,20 @@ test("the guard accepts a link to the disposable Codex home", () =>
 
 test("the runner points CODEX_HOME at an absent directory inside the run root", () =>
   withLoginRoot(async ({ root, operator }) => {
-    const environment: NodeJS.ProcessEnv = { CODEX_HOME: operator };
-    assert.equal(runner.isolateOperatorCodex(root, environment), operator);
+    const environment: NodeJS.ProcessEnv = {
+      CODEX_HOME: operator,
+      HOME: "/home/operator",
+    };
+    assert.deepEqual(runner.isolateOperatorCodex(root, environment), [
+      operator,
+      "/home/operator/.codex",
+      join(homedir(), ".codex"),
+    ]);
     assert.equal(environment.CODEX_HOME, join(root, "operator-codex"));
     await assert.rejects(stat(environment.CODEX_HOME), { code: "ENOENT" });
-    const fallback: NodeJS.ProcessEnv = { HOME: "/home/operator" };
-    assert.equal(
-      runner.isolateOperatorCodex(root, fallback),
-      "/home/operator/.codex",
-    );
+    assert.deepEqual(runner.isolateOperatorCodex(root, {}), [
+      join(homedir(), ".codex"),
+    ]);
   }));
 
 const captured = () => {
@@ -780,12 +786,15 @@ test("a failed final scan reports an incomplete guard and keeps the run status",
 
 test("main gives the test tree a disposable CODEX_HOME and TMPDIR inside the run root", () =>
   withBase(async (base) => {
-    const environment: NodeJS.ProcessEnv = { CODEX_HOME: join(base, "real") };
+    const environment: NodeJS.ProcessEnv = {
+      CODEX_HOME: join(base, "real"),
+      HOME: join(base, "user"),
+    };
     let seen:
-      | { root: string; home: string; environment: NodeJS.ProcessEnv }
+      | { root: string; homes: string[]; environment: NodeJS.ProcessEnv }
       | undefined;
-    await runner.main(base, environment, async (root, home) => {
-      seen = { root, home, environment: { ...environment } };
+    await runner.main(base, environment, async (root, homes) => {
+      seen = { root, homes, environment: { ...environment } };
     });
     assert.ok(seen);
     assert.equal(seen.environment.TMPDIR, seen.root);
@@ -793,6 +802,31 @@ test("main gives the test tree a disposable CODEX_HOME and TMPDIR inside the run
       seen.environment.CODEX_HOME,
       join(seen.root, "operator-codex"),
     );
-    assert.equal(seen.home, join(base, "real"));
+    assert.deepEqual(seen.homes, [
+      join(base, "real"),
+      join(base, "user", ".codex"),
+      join(homedir(), ".codex"),
+    ]);
     assert.deepEqual(await readdir(base), []);
+  }));
+
+test("the link scanner also catches links to the account home, including through an alias", () =>
+  withLoginRoot(async ({ root, operator }) => {
+    const base = join(root, "..");
+    const account = join(base, "account", ".codex");
+    await mkdir(account, { recursive: true });
+    await symlink(join(base, "account"), join(base, "alias"));
+    for (const [dir, target] of [
+      ["d", join(account, "auth.json")],
+      ["e", join(base, "alias", ".codex", "auth.json")],
+      ["f", join(root, "operator-codex", "auth.json")],
+    ] as const) {
+      await mkdir(join(root, dir));
+      await symlink(target, join(root, dir, "link"));
+    }
+    assert.deepEqual(await runner.findOperatorLoginLinks(root, operator), []);
+    assert.deepEqual(
+      await runner.findOperatorLoginLinks(root, [operator, account]),
+      ["d/link", "e/link"],
+    );
   }));
