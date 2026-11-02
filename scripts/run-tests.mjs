@@ -11,10 +11,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { readdir, readlink, realpath } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { join, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { profileTimings } from "./test-timings.mjs";
-import { availableParallelism, constants, tmpdir } from "node:os";
+import { availableParallelism, constants, homedir, tmpdir } from "node:os";
 import {
   createTestEvidenceDirectory,
   writeTestEvidence,
@@ -458,15 +459,114 @@ export function selectTestFiles(files, options, timings = {}) {
   return result;
 }
 
+/**
+ * Points `CODEX_HOME` at an absent directory inside the run root, so a service started by a
+ * test links its Codex login to a dangling target there. Returns the operator's own Codex
+ * home, resolved as `operatorAuthFile` does, for the link guard.
+ */
+export function isolateOperatorCodex(root, environment) {
+  const operatorHome =
+    environment.CODEX_HOME || join(environment.HOME || homedir(), ".codex");
+  environment.CODEX_HOME = join(root, "operator-codex");
+  return operatorHome;
+}
+
+const within = (path, directory) =>
+  path === directory || path.startsWith(directory + sep);
+
+/**
+ * Root-relative paths of symlinks that expose the operator's Codex login: any link into the
+ * operator Codex home, or a `codex/home/auth.json` link leaving the root. Reads link targets
+ * only, never follows links or opens the login file.
+ */
+export async function findOperatorLoginLinks(
+  root,
+  operatorCodexHome,
+  maxDepth = Infinity,
+) {
+  const operatorHomes = new Set([resolve(operatorCodexHome)]);
+  const roots = new Set([resolve(root)]);
+  for (const [paths, path] of [
+    [operatorHomes, operatorCodexHome],
+    [roots, root],
+  ])
+    try {
+      paths.add(await realpath(path));
+    } catch {}
+  const found = [];
+  const walk = async (directory, depth) => {
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        let target;
+        try {
+          target = resolve(directory, await readlink(path));
+        } catch (error) {
+          if (error?.code === "ENOENT" || error?.code === "ENOTDIR") continue;
+          throw error;
+        }
+        const name = relative(root, path);
+        if (
+          [...operatorHomes].some((home) => within(target, home)) ||
+          (name.endsWith(`${sep}codex${sep}home${sep}auth.json`) &&
+            ![...roots].some((base) => within(target, base)))
+        )
+          found.push(name);
+      } else if (entry.isDirectory() && depth < maxDepth)
+        await walk(path, depth + 1);
+    }
+  };
+  await walk(root, 1);
+  return found.sort();
+}
+
+/**
+ * Runs `run()` while scanning the root once a second for operator-login links, then once more
+ * after it ends, because tests remove their own roots and an end-only scan would miss most links.
+ */
+export async function guardRunLinks(root, operatorCodexHome, run) {
+  const links = new Set();
+  let scan = Promise.resolve();
+  let scanning = false;
+  const timer = setInterval(() => {
+    if (scanning) return;
+    scanning = true;
+    // Depth 6 reaches <test-root>/<dir>/data/codex/home/auth.json; the final scan is unbounded.
+    scan = findOperatorLoginLinks(root, operatorCodexHome, 6)
+      .then((found) => {
+        for (const link of found) links.add(link);
+      })
+      .catch(() => {})
+      .finally(() => (scanning = false));
+  }, 1000);
+  let result;
+  try {
+    result = await run();
+  } finally {
+    clearInterval(timer);
+    await scan;
+  }
+  for (const link of await findOperatorLoginLinks(root, operatorCodexHome))
+    links.add(link);
+  return { result, links: [...links].sort() };
+}
+
 async function main() {
   // shortcut: TMPDIR is the POSIX temp root; Windows is not a supported test platform.
   await withRunTempRoot(realpathSync(tmpdir()), (root) => {
     process.env.TMPDIR = root;
-    return runSelected();
+    return runSelected(root, isolateOperatorCodex(root, process.env));
   });
 }
 
-async function runSelected() {
+async function runSelected(root, operatorCodexHome) {
   const options = parseTestOptions(process.argv.slice(2));
   const preflight = options.preflight;
   const files = preflight
@@ -518,19 +618,26 @@ async function runSelected() {
     );
     process.stdout.write(`Test timings: ${destination}\n`);
   }
-  const result = await runTestProcess(args, {
-    env: {
-      ...process.env,
-      CAB_TEST_PROFILE: options.profile,
-      CAB_TEST_BROWSER_ENGINE: {
-        all: "all",
-        chromium: "chromium",
-        service: "none",
-      }[options.profile],
-    },
-    forwardOutput: true,
-    forwardSignals: true,
-  });
+  const { result, links } = await guardRunLinks(root, operatorCodexHome, () =>
+    runTestProcess(args, {
+      env: {
+        ...process.env,
+        CAB_TEST_PROFILE: options.profile,
+        CAB_TEST_BROWSER_ENGINE: {
+          all: "all",
+          chromium: "chromium",
+          service: "none",
+        }[options.profile],
+      },
+      forwardOutput: true,
+      forwardSignals: true,
+    }),
+  );
+  if (links.length)
+    process.stderr.write(
+      `Test run linked the operator Codex login inside its temp root:\n${links.map((link) => `  ${link}\n`).join("")}`,
+    );
+  const status = runnerStatus(result) || (links.length ? 1 : 0);
   try {
     await recordRunnerEvidence(
       result,
@@ -540,10 +647,10 @@ async function runSelected() {
     );
   } catch {
     process.stderr.write("Runner evidence incomplete\n");
-    process.exitCode = runnerStatus(result) || 1;
+    process.exitCode = status || 1;
     return;
   }
-  process.exitCode = runnerStatus(result);
+  process.exitCode = status;
 }
 if (
   process.argv[1] &&

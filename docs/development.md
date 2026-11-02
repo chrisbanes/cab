@@ -130,8 +130,13 @@ whose recorded owner process has exited, which covers a runner killed outright;
 directories with a live, missing or unreadable owner are kept. Test evidence
 outlives the run only when `CAB_TEST_EVIDENCE_DIR` is set, as in CI. Harnesses run
 directly (the `*:live` commands) and `node --test` invocations bypass the runner and
-manage their own temp directories. The per-run override applies to POSIX `TMPDIR`
-only. A direct `node --test` of a suite that starts a service, such as
+manage their own temp directories. The runner also points `CODEX_HOME` at an absent
+directory inside the run root, so a service started by a test links its Codex login to
+a dangling target there, never to the operator's own login. It scans the run root every
+second and once after the run, and fails the run if any link into the operator's Codex
+home, or any `codex/home/auth.json` link leaving the root, ever appears. A direct
+`node --test` run bypasses both and must set `CODEX_HOME` to a disposable directory
+itself. The per-run override applies to POSIX `TMPDIR` only. A direct `node --test` of a suite that starts a service, such as
 `dist/test/execution/process-signal-shutdown.test.js`, needs a symlink-free
 `TMPDIR`. On macOS the default `/var/folders/...` resolves through `/var`, and
 the service refuses that data directory, so pass the resolved `/private/var/...`
