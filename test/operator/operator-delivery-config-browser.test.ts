@@ -36,7 +36,15 @@ const body = (page: Page) =>
 const grant = (page: Page, index = 1) =>
   page.getByRole("region", { name: `Grant ${index}`, exact: true });
 const check = (page: Page, index = 1) =>
-  page.getByRole("region", { name: `Check ${index}`, exact: true });
+  page.getByRole("region", {
+    name: `Additional check ${index} for acme/atlas`,
+    exact: true,
+  });
+const addCheck = (page: Page) =>
+  page.getByRole("button", {
+    name: "Add additional check for acme/atlas",
+    exact: true,
+  });
 
 test("Delivery edits exact scopes and checks with keyboard focus, discard, credential intents and readback", async (_t, journey) => {
   const { page, f, ids } = await startSettings(journey, path);
@@ -74,7 +82,7 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
   await grant(page)
     .getByLabel("Option IDs (one per line)")
     .fill("Ready\nReady");
-  await page.getByRole("button", { name: "Add required check" }).click();
+  await addCheck(page).click();
   assert.equal(
     await check(page)
       .getByLabel("Check name")
@@ -100,13 +108,21 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
       optionNodeIds: ["Ready", "Ready"],
     },
   ]);
-  assert.deepEqual(sent.requiredChecks, [{ name: "Build", appId: 42 }]);
+  assert.deepEqual(sent.requiredChecks, []);
+  assert.deepEqual(sent.repositories, [
+    {
+      repositoryId: "acme/atlas",
+      requiredChecks: [{ name: "Build", appId: 42 }],
+    },
+  ]);
   assert.doesNotMatch(JSON.stringify(sent), /rowKey|grant-0|check-0/);
   await savedOutcome(page);
-  assert.deepEqual(
-    f.service.delivery().configuration(ids.atlas).requiredChecks,
-    [{ name: "Build", appId: 42 }],
-  );
+  assert.deepEqual(f.service.delivery().configuration(ids.atlas).repositories, [
+    {
+      repositoryId: "acme/atlas",
+      requiredChecks: [{ name: "Build", appId: 42 }],
+    },
+  ]);
   await page.getByLabel("Credential reference change").selectOption("set");
   await page
     .getByLabel("New environment reference")
@@ -129,11 +145,9 @@ test("Delivery edits exact scopes and checks with keyboard focus, discard, crede
     f.service.delivery().configuration(ids.atlas).credentialRef,
     null,
   );
-  await page.getByRole("button", { name: "Remove check 1" }).click();
+  await page.getByRole("button", { name: "Remove additional check 1" }).click();
   assert.equal(
-    await page
-      .getByRole("button", { name: "Add required check" })
-      .evaluate((el) => el === document.activeElement),
+    await addCheck(page).evaluate((el) => el === document.activeElement),
     true,
   );
   await page.getByRole("button", { name: "Remove grant 1" }).click();
@@ -254,7 +268,7 @@ test("Delivery opaque rows and prefix are kept by default, removable and restore
     true,
   );
   await page
-    .getByRole("button", { name: "Remove check 1", exact: true })
+    .getByRole("button", { name: "Remove additional check 1", exact: true })
     .click();
   await page.getByRole("button", { name: "Discard changes" }).click();
   await grant(page)
@@ -264,13 +278,19 @@ test("Delivery opaque rows and prefix are kept by default, removable and restore
     .getByRole("button", { name: "Remove grant 1", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Remove check 1", exact: true })
+    .getByRole("button", { name: "Remove additional check 1", exact: true })
     .click();
   await save(page).click();
   await savedOutcome(page);
   assert.equal(f.service.delivery().configuration(ids.atlas).grants.length, 1);
+  // The first save moved the legacy list, the withheld check included, into the repository's entry.
   assert.deepEqual(
     f.service.delivery().configuration(ids.atlas).requiredChecks,
+    [],
+  );
+  assert.deepEqual(
+    f.service.delivery().configuration(ids.atlas).repositories?.[0]
+      ?.requiredChecks,
     [{ name: "Build" }],
   );
 });
@@ -818,4 +838,108 @@ test("the stacking switch states what it risks and saves without resetting the p
     "through-merge",
   );
   assert.equal(await save(page).isDisabled(), false);
+});
+
+test("each repository edits its merge method and additional checks, with suggestions and a no-checks warning", async (_t, journey) => {
+  const { page, f, ids } = await startSettings(
+    journey,
+    path,
+    undefined,
+    undefined,
+    {
+      serviceOptions: {
+        delivery: {
+          providerFactories: {
+            github: () =>
+              ({
+                repositoryRequirements: async () => ({
+                  hostChecks: [],
+                  allowedMethods: ["merge", "squash"],
+                }),
+              }) as never,
+          },
+        },
+      },
+    },
+  );
+  // A PR observation on the repository names a check cab doesn't require yet.
+  const taskId = randomUUID();
+  f.service.domain().execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    taskId,
+    title: "Observed",
+    outcome: "O",
+  });
+  f.seedPersistedState((db) =>
+    db.prepare("INSERT INTO delivery_observations VALUES (?, ?, ?, ?)").run(
+      taskId,
+      "d".repeat(64),
+      JSON.stringify({
+        repositoryId: "acme/atlas",
+        checks: [{ name: "lint" }, { name: "build" }],
+      }),
+      1,
+    ),
+  );
+  await read(page);
+  const settings = page.getByRole("group", {
+    name: "Merge settings for acme/atlas",
+  });
+  const warning = settings.getByRole("alert");
+  await warning.waitFor();
+  assert.match(
+    await warning.innerText(),
+    /^No required checks: neither GitHub nor cab/,
+  );
+  await settings
+    .getByText("GitHub requires no checks before merging.", { exact: true })
+    .waitFor();
+  const method = page.getByLabel("Merge method for acme/atlas", {
+    exact: true,
+  });
+  assert.deepEqual(await method.locator("option").allTextContents(), [
+    "Not set",
+    "Merge commit",
+    "Squash",
+  ]);
+  await settings
+    .getByText(
+      "No merge method is set, so cab holds every merge for this repository.",
+    )
+    .waitFor();
+  await method.selectOption("squash");
+  await page.getByRole("button", { name: "Add lint", exact: true }).click();
+  assert.equal(await check(page).getByLabel("Check name").inputValue(), "lint");
+  assert.equal(await warning.count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Add lint" }).count(), 0);
+  const command = body(page);
+  await save(page).click();
+  const sent = await command;
+  assert.deepEqual(sent.repositories, [
+    {
+      repositoryId: "acme/atlas",
+      mergeMethod: "squash",
+      requiredChecks: [{ name: "lint" }],
+    },
+  ]);
+  await savedOutcome(page);
+  const saved = f.service.delivery().configuration(ids.atlas);
+  assert.deepEqual(saved.requiredChecks, []);
+  assert.deepEqual(saved.repositories, [
+    {
+      repositoryId: "acme/atlas",
+      mergeMethod: "squash",
+      requiredChecks: [{ name: "lint" }],
+    },
+  ]);
+  for (const other of [ids.relay, ids.fieldnotes])
+    assert.deepEqual(
+      f.service.delivery().configuration(other).repositories,
+      [],
+    );
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await captureBrowserEvidence(page, "delivery-repository-checks");
 });

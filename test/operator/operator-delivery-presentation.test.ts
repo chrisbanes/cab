@@ -3,6 +3,8 @@ import { test } from "node:test";
 import {
   checkStatusWord,
   codeHostActionLabel,
+  codeHostChecksSummary,
+  noRequiredChecksWarning,
   deliveryActionLine,
   deliveryBlockerSentence,
   mergeBlockerText,
@@ -305,5 +307,30 @@ test("repository levels describe exact authority without crossing repository or 
   assert.equal(
     deliveryMergeWarning,
     "The lead will merge without asking once the merge gate reports no blockers. cab can't unmerge or revert a merge.",
+  );
+});
+
+test("a repository's code-host checks read live, absent or unavailable, and no checks at all is a warning", () => {
+  assert.equal(
+    codeHostChecksSummary("github", { status: "live", checks: [{}] }),
+    "GitHub requires these checks before merging:",
+  );
+  assert.equal(
+    codeHostChecksSummary("gitlab", { status: "live", checks: [] }),
+    "GitLab requires no checks before merging.",
+  );
+  for (const [reason, text] of [
+    ["credential-missing", "no credential can read them"],
+    ["provider-error", "the last read failed"],
+    ["timeout", "the read took too long"],
+    ["unsupported", "cab can't read them for this repository"],
+  ] as const)
+    assert.equal(
+      codeHostChecksSummary(undefined, { status: "unavailable", reason }),
+      `GitHub's required checks are unavailable: ${text}.`,
+    );
+  assert.equal(
+    noRequiredChecksWarning("gitlab"),
+    "No required checks: neither GitLab nor cab requires a check, so cab holds every merge for this repository. Add an additional required check or a code-host rule.",
   );
 });

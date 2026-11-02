@@ -180,3 +180,35 @@ export const deliveryLevelLabels = {
 };
 export const deliveryMergeWarning =
   "The lead will merge without asking once the merge gate reports no blockers. cab can't unmerge or revert a merge.";
+
+export const mergeMethodLabels = {
+  merge: "Merge commit",
+  squash: "Squash",
+  rebase: "Rebase",
+} as const;
+export const mergeMethodUnsetNote =
+  "No merge method is set, so cab holds every merge for this repository.";
+const requirementUnavailable = {
+  "credential-missing": "no credential can read them",
+  "provider-error": "the last read failed",
+  timeout: "the read took too long",
+  unsupported: "cab can't read them for this repository",
+} as const;
+/** What the code host requires before a merge, as one line; the check names are listed separately. */
+export function codeHostChecksSummary(
+  codeHost: CodeHost | undefined,
+  read:
+    | { status: "live"; checks: readonly unknown[] }
+    | { status: "unavailable"; reason: keyof typeof requirementUnavailable },
+): string {
+  const name = codeHostName(codeHost);
+  if (read.status === "unavailable")
+    return `${name}'s required checks are unavailable: ${requirementUnavailable[read.reason]}.`;
+  return read.checks.length
+    ? `${name} requires these checks before merging:`
+    : `${name} requires no checks before merging.`;
+}
+export const noRequiredChecksWarning = (codeHost: CodeHost | undefined) =>
+  `No required checks: neither ${codeHostName(codeHost)} nor cab requires a check, so cab holds every merge for this repository. Add an additional required check or a code-host rule.`;
+export const unconfirmedChecksNote =
+  "Whether any check is required can't be confirmed until the code host's requirements can be read.";
