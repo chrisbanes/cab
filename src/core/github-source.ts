@@ -13,6 +13,7 @@ import {
   sameItem,
   type SourceTracker,
 } from "./source-storage.js";
+import { syncDependencyRecords } from "./stacked-dependencies.js";
 import { transaction, type Database } from "./store.js";
 import {
   type ProjectFieldIds,
@@ -849,6 +850,7 @@ export class GitHubSourceStore {
               blocker.state,
             );
         }
+        syncDependencyRecords(this.db, String(issue.taskId));
       }
       this.db
         .prepare(
