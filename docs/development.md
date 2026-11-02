@@ -72,8 +72,8 @@ remain explicit coverage gaps.
 
 Runs from before 2026-11-01T14:44Z (#1411) used a different workflow job layout, so
 their aggregate `check` failures are never accounted for and stay `incomplete`. A
-window that includes such a run reports `insufficient-evidence`, not `met` or
-`not-met`. Start a measurement window after #1411 to get a verdict.
+window that includes such a failure reports `insufficient-evidence`, not `met` or
+`not-met`. Start a measurement window after #1411 to avoid this limit.
 
 The lower rate bound is confirmed unrelated failures divided by the denominator;
 confirmed unrelated defaults to zero without positive causal evidence. The upper
