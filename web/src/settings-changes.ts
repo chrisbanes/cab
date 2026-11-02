@@ -743,6 +743,7 @@ export function jiraSelections(source: Source, values: Values) {
   const taken = source.selections.flatMap((row) =>
     row.id === null ? [] : [row.id],
   );
+  const hiddenIds = source.selections.some((row) => row.id === null);
   const queries = String(values.jql ?? "")
     .split("\n")
     .map((line) => line.trim())
@@ -750,7 +751,10 @@ export function jiraSelections(source: Source, values: Values) {
   return [
     ...kept,
     ...queries.map((jql, index) => {
-      const id = ids[index] || nextSelectionId(taken, ids);
+      // An opaque row may already own any sequential id.
+      const id =
+        ids[index] ||
+        (hiddenIds ? crypto.randomUUID() : nextSelectionId(taken, ids));
       ids[index] = id;
       return { id, kind: "jql", jql };
     }),
@@ -789,14 +793,24 @@ export function adoptJiraRows(
     .filter(Boolean)
     .flatMap((jql, index) => {
       const id = loaded.jqlIds[index]!;
-      return drafted.some((row) => row.id === id) ? [] : [{ id, jql }];
+      // An original id without a draft query was deliberately removed.
+      return ids.includes(id) || drafted.some((row) => row.id === id)
+        ? []
+        : [{ id, jql }];
     });
   const previous = parseRows(values.selections);
-  const placeholders = parseRows(loaded.selections).map((row) =>
-    previous.some((old) => old.savedRow === row.savedRow && old.removed)
-      ? { ...row, removed: true }
-      : row,
-  );
+  const placeholders = parseRows(loaded.selections)
+    .filter((row) => {
+      const reference = JSON.parse(String(row.savedRow)) as { index: number };
+      const id = source.selections[reference.index]?.id;
+      // A still-public identity is already edited or removed in the query field.
+      return id === null || id === undefined || !ids.includes(id);
+    })
+    .map((row) =>
+      previous.some((old) => old.savedRow === row.savedRow && old.removed)
+        ? { ...row, removed: true }
+        : row,
+    );
   dropped += previous.filter(
     (row) =>
       row.removed &&

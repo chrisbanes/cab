@@ -2866,6 +2866,68 @@ test("opaque source references reject foreign tracker section ordinal duplicates
   assert.equal(domain.githubConfiguration(projectId).version, 3);
 });
 
+test("a Jira query added beside a hidden sequential identity round trips through the editor command", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const previous = process.env.JIRA_HIDDEN_SELECTION;
+  process.env.JIRA_HIDDEN_SELECTION = "S-1";
+  t.after(() => {
+    if (previous === undefined) delete process.env.JIRA_HIDDEN_SELECTION;
+    else process.env.JIRA_HIDDEN_SELECTION = previous;
+  });
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:JIRA_HIDDEN_SELECTION",
+  });
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: "example.atlassian.net",
+    credential: {
+      siteRef: "env:JIRA_SITE",
+      emailRef: "env:JIRA_EMAIL",
+      tokenRef: "env:JIRA_TOKEN",
+    },
+  });
+  const hidden = { id: "S-1", kind: "jql" as const, jql: "project = PRIVATE" };
+  domain.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    instance: "example.atlassian.net",
+    selections: [hidden],
+  });
+  f.service.jiraJqlErrors = async () => [];
+  const { jiraRowsFrom, jiraSelections } = await import(
+    "../../web/src/settings-changes.js"
+  );
+  const source = (await api.readProjectConfiguration(projectId)).data.source;
+  assert.equal(source.selections[0]!.id, null);
+  const selections = jiraSelections(source, {
+    ...jiraRowsFrom(source),
+    jql: "project = NEW",
+  });
+  await api.execute({
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: source.version,
+    selections,
+  });
+  const saved = domain.jiraConfiguration(projectId)!;
+  assert.deepEqual(saved.selections[0], hidden);
+  assert.equal(saved.selections[1]!.jql, "project = NEW");
+  assert.notEqual(saved.selections[1]!.id, hidden.id);
+  const read = await api.readProjectConfiguration(projectId);
+  assert.equal(read.data.source.selections.length, 2);
+  assert.equal(JSON.stringify(read).includes("S-1"), false);
+});
+
 test("opaque Jira selections preserve hidden IDs JQL readiness closed mode and instance beside visible edits", async (t) => {
   const { f, api, projectId } = await deliveryFixture(t);
   const domain = f.service.domain();

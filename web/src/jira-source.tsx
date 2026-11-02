@@ -553,8 +553,10 @@ export function JiraSourceTab(
               discard={() => reloadDraft(d, initial)}
               review={() => {
                 if (locked(d)) return;
+                d.adoptLatest(data.source.version, initial, [
+                  ["jql", "jqlIds"],
+                ]);
                 const adopted = adoptJiraRows(data.source, d.values, known);
-                d.adoptLatest(data.source.version, initial);
                 d.set("selections", adopted.selections);
                 d.set("jql", adopted.jql);
                 d.set("jqlIds", adopted.jqlIds);

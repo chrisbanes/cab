@@ -1674,17 +1674,18 @@ test("Jira placeholders coexist with visible query edits without importing withh
   assert.equal(loaded.jql, "project = VISIBLE");
   assert.deepEqual(loaded.jqlIds, ["visible"]);
   assert.equal(JSON.stringify(loaded).includes("PRIVATE"), false);
-  assert.deepEqual(
-    jiraSelections(source, {
-      ...loaded,
-      jql: "project = EDITED\nproject = NEW",
-    }),
-    [
-      { savedRow: reference, keep: true },
-      { id: "visible", kind: "jql", jql: "project = EDITED" },
-      { id: "S-1", kind: "jql", jql: "project = NEW" },
-    ],
-  );
+  const edited = jiraSelections(source, {
+    ...loaded,
+    jql: "project = EDITED\nproject = NEW",
+  });
+  const added = edited[2]!;
+  assert.ok("id" in added);
+  assert.match(added.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(edited, [
+    { savedRow: reference, keep: true },
+    { id: "visible", kind: "jql", jql: "project = EDITED" },
+    { id: added.id, kind: "jql", jql: "project = NEW" },
+  ]);
   assert.equal(parseRows(jiraRowsFrom(source).selections).length, 2);
   const removed = {
     ...loaded,
@@ -1711,6 +1712,61 @@ test("Jira placeholders coexist with visible query edits without importing withh
   assert.equal(adopted.dropped, 1);
   assert.equal(adopted.jql, "project = EDITED");
   assert.equal(parseRows(adopted.selections)[0]!.removed, undefined);
+});
+
+test("Jira review retains query deletions and edits while adding only newly saved identities", () => {
+  const source = {
+    ...config().source,
+    tracker: "jira" as const,
+    selections: ["S-1", "S-2", "S-3"].map((id) => ({
+      id,
+      kind: "jql" as const,
+      descriptor: null,
+      active: true,
+    })),
+  };
+  const known = {
+    jql: source.selections.map(({ id }) => ({ id, jql: `project = ${id}` })),
+  };
+  for (const jql of ["project = EDITED", ""]) {
+    const adopted = adoptJiraRows(
+      source,
+      {
+        selections: "[]",
+        jqlIds: ["S-1", "S-2"],
+        jql,
+      },
+      known,
+    );
+    assert.equal(
+      adopted.jql,
+      [jql, "project = S-3"].filter(Boolean).join("\n"),
+    );
+    assert.deepEqual(adopted.jqlIds, jql ? ["S-1", "S-3"] : ["S-3"]);
+    assert.equal(adopted.dropped, 0);
+  }
+});
+
+test("Jira review while private queries load does not keep an explicit identity twice or restore its deletion", () => {
+  const source = {
+    ...config().source,
+    tracker: "jira" as const,
+    selections: ["S-1", "S-2"].map((id, index) => ({
+      id,
+      kind: "jql" as const,
+      descriptor: null,
+      active: true,
+      savedRow: { projectId, section: "source" as const, version: 4, index },
+    })),
+  };
+  const { dropped: _dropped, ...adopted } = adoptJiraRows(source, {
+    selections: "[]",
+    jqlIds: ["S-1", "S-2"],
+    jql: "project = EDITED",
+  });
+  assert.deepEqual(jiraSelections(source, adopted), [
+    { id: "S-1", kind: "jql", jql: "project = EDITED" },
+  ]);
 });
 
 test("opaque row identity cannot alias a visible id containing the serialized reference", () => {
