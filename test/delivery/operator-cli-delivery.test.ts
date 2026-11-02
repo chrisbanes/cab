@@ -54,6 +54,38 @@ test("delivery get shows the PR, actions and comment policy without provider acc
   assert.equal(w.scripted.requests.length, requests);
 });
 
+test("delivery get shows what holds the merge, including no required checks", async (t) => {
+  const w = await deliveryWorld(t);
+  const delivery = w.f.service.delivery();
+  w.f.service.domain().execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: w.f.projectId,
+    expectedVersion: delivery.configuration(w.f.projectId).version,
+    mode: "through-merge",
+    credentialRef: null,
+    grants: delivery.configuration(w.f.projectId).grants,
+    requiredChecks: [],
+    repositories: [
+      { repositoryId: "R1", mergeMethod: "squash", requiredChecks: [] },
+    ],
+  });
+  await w.f.register();
+  const json = await w.ok("ro", ["delivery", "get", w.f.taskId]);
+  assert.deepEqual(json.data.delivery.binding.mergeBlockers, [
+    "no-required-checks",
+  ]);
+  const human = await w.h.run([
+    "delivery",
+    "get",
+    w.f.taskId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /Merge blockers:\n {2}no-required-checks\n/);
+});
+
 test("delivery refresh is a receipted write that reports partial outcomes", async (t) => {
   const w = await deliveryWorld(t);
   await w.f.register();

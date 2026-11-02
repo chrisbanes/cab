@@ -335,6 +335,7 @@ export function scriptedDeliveryProvider() {
           allow_merge_commit: false,
           allow_squash_merge: true,
           allow_rebase_merge: false,
+          default_branch: "main",
         });
       case "/repos/org/repo/pulls/7":
         return Response.json({
@@ -619,6 +620,13 @@ export async function createReleaseDeliveryFixture(
     credentialRef: null,
     grants: [{ action: "pr.merge", repositoryId: "R1", mode: "allow" }],
     requiredChecks: [{ name: "build", appId: 17 }],
+    repositories: [
+      {
+        repositoryId: gitlab?.repositoryId ?? "R1",
+        mergeMethod: "squash",
+        requiredChecks: [],
+      },
+    ],
   });
   await f.service.provisionTask(
     taskId,
@@ -720,6 +728,8 @@ export async function createReleaseDeliveryFixture(
         })) as never,
         requiredChecks: f.service.delivery().configuration(projectId)
           .requiredChecks,
+        repositories: f.service.delivery().configuration(projectId)
+          .repositories,
       });
     },
     async threadAction(

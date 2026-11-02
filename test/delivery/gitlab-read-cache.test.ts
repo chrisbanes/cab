@@ -19,7 +19,16 @@ const identity = {
   expectedPrNodeId: "9001",
   expectedHeadSha: "2".repeat(40),
 };
-const policy = { requiredChecks: [] } as unknown as DeliveryPolicy;
+const policy = {
+  requiredChecks: [],
+  repositories: [
+    {
+      repositoryId: "42",
+      mergeMethod: "squash",
+      requiredChecks: [{ name: "pipeline" }],
+    },
+  ],
+} as unknown as DeliveryPolicy;
 
 test("the cache reuses a read for its lifetime, shares one in flight, and forgets failures and refused results", async () => {
   let now = 1_000;
@@ -69,7 +78,17 @@ function world(now: () => number) {
   const remote = scriptedGitLabRemote({ repositoryId: "42" });
   remote.state.project = { id: 42, path_with_namespace: "group/sub/app" };
   remote.state.head = "2".repeat(40);
-  remote.state.mergeRequests.push(gitLabMergeRequest());
+  remote.state.mergeRequests.push(
+    gitLabMergeRequest({
+      head_pipeline: {
+        id: 5,
+        sha: "2".repeat(40),
+        status: "success",
+        started_at: null,
+        finished_at: null,
+      },
+    }),
+  );
   const cache = new TtlCache(now);
   const provider = new GitLabHttpDeliveryProvider({
     host,

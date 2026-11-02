@@ -36,6 +36,18 @@ export const deliveryBlockerSentence = (code: string, codeHost?: CodeHost) =>
     "Delivery is waiting on a condition this version can't describe.",
   );
 
+const mergeBlockerSentences: Record<string, string> = {
+  "no-required-checks":
+    "No required checks: neither the code host nor cab requires a check, so the merge is held.",
+  "merge-method-not-configured":
+    "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
+};
+/** A merge-gate code as a sentence when it has one; any other code is shown as it is. */
+export const mergeBlockerText = (code: string) =>
+  Object.hasOwn(mergeBlockerSentences, code)
+    ? mergeBlockerSentences[code]!
+    : code;
+
 /** What a code-host action acts on, named for its host; null for an action that is not one. */
 export function codeHostActionLabel(
   action: string,
@@ -168,3 +180,55 @@ export const deliveryLevelLabels = {
 };
 export const deliveryMergeWarning =
   "The lead will merge without asking once the merge gate reports no blockers. cab can't unmerge or revert a merge.";
+
+export const mergeMethodLabels = {
+  merge: "Merge commit",
+  squash: "Squash",
+  rebase: "Rebase",
+} as const;
+/** The methods cab can merge with on each code host; GitLab's rebase is a separate API cab does not call. */
+export const codeHostMergeMethods = {
+  github: ["merge", "squash", "rebase"],
+  gitlab: ["merge", "squash"],
+} as const;
+/** The default branch's methods are guidance: a PR into another branch follows that branch's rules. */
+export const defaultBranchMethodsNote = (
+  allowed: readonly (keyof typeof mergeMethodLabels)[],
+) =>
+  `The default branch allows: ${
+    allowed.length
+      ? allowed
+          .map((method) => mergeMethodLabels[method].toLowerCase())
+          .join(", ")
+      : "no method cab can use"
+  }. Merges into other branches follow their own rules.`;
+export const mergeMethodNotAllowedWarning = (
+  method: keyof typeof mergeMethodLabels,
+) =>
+  `The default branch doesn't allow ${mergeMethodLabels[method].toLowerCase()}, so cab holds merges into it until the method or the branch's rules change.`;
+export const mergeMethodUnsetNote =
+  "No merge method is set, so cab holds every merge for this repository.";
+const requirementUnavailable = {
+  "credential-missing": "no credential can read them",
+  "provider-error": "the last read failed",
+  timeout: "the read took too long",
+  unsupported: "cab can't read them for this repository",
+} as const;
+/** What the code host requires before a merge, as one line; the check names are listed separately. */
+export function codeHostChecksSummary(
+  codeHost: CodeHost | undefined,
+  read:
+    | { status: "live"; checks: readonly unknown[] }
+    | { status: "unavailable"; reason: keyof typeof requirementUnavailable },
+): string {
+  const name = codeHostName(codeHost);
+  if (read.status === "unavailable")
+    return `${name}'s required checks are unavailable: ${requirementUnavailable[read.reason]}.`;
+  return read.checks.length
+    ? `${name} requires these checks before merging:`
+    : `${name} requires no checks before merging.`;
+}
+export const noRequiredChecksWarning = (codeHost: CodeHost | undefined) =>
+  `No required checks: neither ${codeHostName(codeHost)} nor cab requires a check, so cab holds every merge for this repository. Add an additional required check or a code-host rule.`;
+export const unconfirmedChecksNote =
+  "Whether any check is required can't be confirmed until the code host's requirements can be read.";

@@ -5,6 +5,7 @@ import type {
   ExternalAction,
   PrDeliveryObservation,
   ProviderActionObservation,
+  RequiredCheck,
 } from "../core/delivery.js";
 import type { StoredRepositoryLink } from "../core/repository-links.js";
 import type {
@@ -35,6 +36,14 @@ export interface CodeHostDeliveryProvider {
     identity: PrIdentity,
     policy: DeliveryPolicy,
   ): Promise<PrDeliveryObservation>;
+  /** A fresh read of what the code host requires before merging into the repository's default branch. */
+  repositoryRequirements?(
+    repositoryId: string,
+  ): Promise<RepositoryRequirements>;
+}
+export interface RepositoryRequirements {
+  hostChecks: RequiredCheck[];
+  allowedMethods: PrDeliveryObservation["allowedMethods"];
 }
 /** Builds the provider for a project's repository on `host`. */
 export type CodeHostProviderFactory = (

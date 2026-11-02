@@ -99,6 +99,31 @@ export function safeBranchName(name: string): boolean {
     !name.startsWith("/")
   );
 }
+export const mergeMethods = ["merge", "squash", "rebase"] as const;
+const requiredCheckSchema = z
+  .object({
+    name: identity,
+    appId: z.number().int().positive().optional(),
+  })
+  .strict();
+/** Per-repository settings. Commands and their results leave it absent when it was absent, so recorded ones replay unchanged. */
+export const repositorySettingsSchema = z
+  .array(
+    z
+      .object({
+        repositoryId: identity,
+        mergeMethod: z.enum(mergeMethods).optional(),
+        /** cab's additional required checks, on top of the code host's. */
+        requiredChecks: z.array(requiredCheckSchema).max(100),
+      })
+      .strict(),
+  )
+  .max(256)
+  .refine(
+    (entries) =>
+      new Set(entries.map((e) => e.repositoryId)).size === entries.length,
+    "Each repository appears once",
+  );
 export const deliveryPolicySchema = z
   .object({
     mode: z.enum(["reviewable-pr", "through-merge"]),
@@ -129,21 +154,39 @@ export const deliveryPolicySchema = z
           ),
       )
       .max(256),
-    requiredChecks: z
-      .array(
-        z
-          .object({
-            name: identity,
-            appId: z.number().int().positive().optional(),
-          })
-          .strict(),
-      )
-      .max(100),
+    /** Project-wide checks from before per-repository settings: they apply to every repository until the next save. */
+    requiredChecks: z.array(requiredCheckSchema).max(100).default([]),
+    repositories: repositorySettingsSchema.default([]),
   })
   .strict();
-export type DeliveryPolicy = z.output<typeof deliveryPolicySchema> & {
-  version: number;
-};
+/** `repositories` is optional so policies built in code before it existed still type-check; parsing fills it. */
+export type DeliveryPolicy = Omit<
+  z.output<typeof deliveryPolicySchema>,
+  "repositories"
+> &
+  Partial<Pick<z.output<typeof deliveryPolicySchema>, "repositories">> & {
+    version: number;
+  };
+export type RequiredCheck = z.output<typeof requiredCheckSchema>;
+/** A repository's configured merge method and cab's checks: its own entry plus any legacy project-wide list. */
+export function repositoryDeliverySettings(
+  policy: Partial<Pick<DeliveryPolicy, "requiredChecks" | "repositories">>,
+  repositoryId: string,
+): {
+  mergeMethod: (typeof mergeMethods)[number] | undefined;
+  cabChecks: RequiredCheck[];
+} {
+  const entry = policy.repositories?.find(
+    (r) => r.repositoryId === repositoryId,
+  );
+  return {
+    mergeMethod: entry?.mergeMethod,
+    cabChecks: [
+      ...(entry?.requiredChecks ?? []),
+      ...(policy.requiredChecks ?? []),
+    ],
+  };
+}
 
 const targetSchema = z
   .object({
@@ -611,6 +654,14 @@ export const prObservationSchema = z
       )
       .optional(),
     mergeBlockers: z.array(identity),
+    /** The checks the merge gate required, by source. Absent on observations persisted before it was recorded. */
+    requiredChecks: z
+      .array(
+        requiredCheckSchema
+          .extend({ source: z.enum(["code-host", "cab"]) })
+          .strict(),
+      )
+      .optional(),
     closedIssueNodeIds: z.array(identity).default([]),
     allowedMethods: z.array(z.enum(["merge", "squash", "rebase"])),
   })
@@ -2553,6 +2604,20 @@ export class DeliveryStore {
       )
       .at(-1);
   }
+  /** Check names recorded on the project's PR observations for one repository, most recent first. */
+  checkSuggestions(projectId: string, repositoryId: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT json_extract(c.value, '$.name') AS name, MAX(o.createdAt) AS at
+           FROM delivery_observations o JOIN domain_tasks t ON t.id = o.taskId,
+             json_each(o.observationJson, '$.checks') c
+           WHERE t.projectId = ? AND json_extract(o.observationJson, '$.repositoryId') = ?
+           GROUP BY name ORDER BY at DESC, name LIMIT 200`,
+        )
+        .all(projectId, repositoryId) as Array<{ name: unknown }>
+    ).flatMap((r) => (typeof r.name === "string" ? [r.name] : []));
+  }
   hasWaitingPr(workId: string): boolean {
     return Boolean(
       this.db
@@ -2575,6 +2640,7 @@ export class DeliveryStore {
         credentialRef: null,
         grants: [],
         requiredChecks: [],
+        repositories: [],
       };
     try {
       return {
@@ -2599,7 +2665,14 @@ export class DeliveryStore {
       throw new DomainConflictError(
         "Version conflict: delivery policy changed",
       );
-    const policy = deliveryPolicySchema.parse(input);
+    // A command without per-repository settings keeps the saved ones; parsing alone would empty them.
+    const policy = deliveryPolicySchema.parse(
+      input &&
+        typeof input === "object" &&
+        !Object.hasOwn(input, "repositories")
+        ? { ...input, repositories: current.repositories ?? [] }
+        : input,
+    );
     for (const [index, grant] of policy.grants.entries()) {
       if (
         grant.action === "project.field" &&

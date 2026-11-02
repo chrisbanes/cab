@@ -1723,6 +1723,7 @@ test("delivery JSON preserves every accepted action, supplemental scope and opti
     credentialConfigured: false,
     grants,
     requiredChecks,
+    repositories: [],
   });
   assert.equal(Object.hasOwn(visible, "branchPrefix"), false);
   await api.execute(
@@ -1862,6 +1863,7 @@ test("delivery excluded rows and prefix expose only version-bound references and
     branchPrefix: "private-prefix/",
     grants: [hiddenGrant, visibleGrant],
     requiredChecks: [visibleCheck, hiddenCheck],
+    repositories: [],
   });
   assert.equal(JSON.stringify(receipt).includes(envKey), false);
   f.seedPersistedState((db) => {
@@ -3837,4 +3839,307 @@ test("advanced submission preserves opaque grants checks and prefix alongside pu
   assert.equal(persisted.branchPrefix, hidden);
   assert.equal(persisted.version, saved.version + 1);
   assert.equal(f.runtime.turns, 0);
+});
+
+/** A project with a linked repository the operator cannot see (its ID is a credential's name) and a visible one. */
+async function hiddenRepositoryFixture(t: TestContext) {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const hiddenPath = join(f.directory, "hidden-repository"),
+    visiblePath = join(f.directory, "visible-repository");
+  await checkout(hiddenPath, "https://github.com/acme/hidden.git");
+  await checkout(visiblePath, "https://github.com/acme/visible.git");
+  const hidden = "HIDDEN_REPOSITORY_ID",
+    previous = process.env[hidden];
+  process.env[hidden] = "hidden-repository-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env[hidden];
+    else process.env[hidden] = previous;
+  });
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: hidden,
+        path: hiddenPath,
+        ref: "main",
+      },
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "visible",
+        path: visiblePath,
+        ref: "main",
+      },
+    ],
+  });
+  const policy = (
+    requiredChecks: Array<{ name: string }>,
+    repositories?: unknown[],
+  ) =>
+    f.service.domain().execute({
+      ...deliveryInput(projectId, {
+        expectedVersion: f.service.delivery().configuration(projectId).version,
+        credentialRef: `env:${hidden}`,
+        requiredChecks,
+        ...(repositories ? { repositories } : {}),
+      }),
+      actor: "operator",
+    } as never);
+  const save = (repositories: unknown[], key = randomUUID()) =>
+    api.execute(
+      deliveryInput(projectId, {
+        key,
+        expectedVersion: f.service.delivery().configuration(projectId).version,
+        repositories,
+      }),
+    );
+  const visible = {
+    repositoryId: "visible",
+    mergeMethod: "squash",
+    requiredChecks: [{ name: "build" }],
+  };
+  return { f, api, projectId, hidden, policy, save, visible };
+}
+
+test("a per-repository save carries the project-wide list to repositories the operator cannot see", async (t) => {
+  const { f, projectId, hidden, policy, save, visible } =
+    await hiddenRepositoryFixture(t);
+  const saved = () => f.service.delivery().configuration(projectId);
+  // A hidden linked repository without an entry gets one carrying the list the save empties.
+  policy([{ name: "legacy" }]);
+  await save([visible]);
+  assert.deepEqual(saved().requiredChecks, []);
+  assert.deepEqual(saved().repositories, [
+    visible,
+    { repositoryId: hidden, requiredChecks: [{ name: "legacy" }] },
+  ]);
+  // A hidden repository's saved entry is kept, with a project-wide list re-added since appended to it.
+  policy(
+    [{ name: "late" }],
+    [
+      visible,
+      {
+        repositoryId: hidden,
+        mergeMethod: "merge",
+        requiredChecks: [{ name: "own" }],
+      },
+    ],
+  );
+  await save([visible]);
+  assert.deepEqual(saved().repositories, [
+    visible,
+    {
+      repositoryId: hidden,
+      mergeMethod: "merge",
+      requiredChecks: [{ name: "own" }, { name: "late" }],
+    },
+  ]);
+  // A command cannot name a repository the operator cannot see.
+  const version = saved().version;
+  await assert.rejects(
+    save([{ repositoryId: hidden, requiredChecks: [] }]),
+    (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, 400);
+      assert.deepEqual(error.fieldPaths, ["repositories.0.repositoryId"]);
+      return true;
+    },
+  );
+  assert.equal(saved().version, version);
+});
+
+test("a retried command without per-repository settings replays on a project that has them", async (t) => {
+  const { f, api, projectId, save, visible } = await hiddenRepositoryFixture(t);
+  await save([visible]);
+  const before = f.service.delivery().configuration(projectId);
+  const retry = deliveryInput(projectId, {
+    expectedVersion: before.version,
+    credentialRef: null,
+    requiredChecks: [{ name: "lint" }],
+  });
+  const first = await api.execute(retry);
+  const after = f.service.delivery().configuration(projectId);
+  assert.deepEqual(after.repositories, before.repositories);
+  assert.deepEqual(await api.execute(retry), first);
+  assert.equal(
+    f.service.delivery().configuration(projectId).version,
+    after.version,
+  );
+});
+
+test("a retried per-repository save replays its receipt, and the same key with other settings is refused", async (t) => {
+  const { f, api, projectId, hidden, policy, visible } =
+    await hiddenRepositoryFixture(t);
+  const key = randomUUID();
+  const expectedVersion = f.service.delivery().configuration(projectId).version;
+  const send = (repositories: unknown[]) =>
+    api.execute(
+      deliveryInput(projectId, { key, expectedVersion, repositories }),
+    );
+  const first = await send([visible]);
+  const after = f.service.delivery().configuration(projectId);
+  assert.equal(after.version, expectedVersion + 1);
+  // A lost response is retried with the version the first run started from: it replays, not conflicts.
+  assert.deepEqual(await send([visible]), first);
+  assert.deepEqual(f.service.delivery().configuration(projectId), after);
+  for (const changed of [
+    [{ ...visible, mergeMethod: "merge" }],
+    [{ ...visible, requiredChecks: [{ name: "lint" }] }],
+    [],
+  ])
+    await assert.rejects(send(changed), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.deepEqual([error.status, error.code], [409, "conflict"]);
+      return true;
+    });
+  assert.deepEqual(f.service.delivery().configuration(projectId), after);
+  // A kept row resolves against the policy the first run changed, so its retry replays by the recorded save.
+  policy([], [{ repositoryId: "visible", requiredChecks: [{ name: hidden }] }]);
+  const keptVersion = f.service.delivery().configuration(projectId).version;
+  const keptKey = randomUUID();
+  const kept = () =>
+    api.execute(
+      deliveryInput(projectId, {
+        key: keptKey,
+        expectedVersion: keptVersion,
+        repositories: [
+          {
+            repositoryId: "visible",
+            mergeMethod: "squash",
+            requiredChecks: [
+              {
+                savedRow: {
+                  projectId,
+                  section: "delivery-checks",
+                  version: keptVersion,
+                  index: 0,
+                  repositoryId: "visible",
+                },
+                keep: true,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+  const keptFirst = await kept();
+  assert.deepEqual(
+    f.service.delivery().configuration(projectId).repositories?.[0],
+    {
+      repositoryId: "visible",
+      mergeMethod: "squash",
+      requiredChecks: [{ name: hidden }],
+    },
+  );
+  assert.deepEqual(await kept(), keptFirst);
+});
+
+test("a retried per-repository save replays only with the credential reference its first run saved", async (t) => {
+  const { f, api, projectId, visible } = await hiddenRepositoryFixture(t);
+  const key = randomUUID();
+  const expectedVersion = f.service.delivery().configuration(projectId).version;
+  const send = (credentialRef: string | null) =>
+    api.execute(
+      deliveryInput(projectId, {
+        key,
+        expectedVersion,
+        credentialRef,
+        repositories: [visible],
+      }),
+    );
+  const first = await send("env:DELIVERY_RETRY_FIRST");
+  const after = f.service.delivery().configuration(projectId);
+  assert.deepEqual(await send("env:DELIVERY_RETRY_FIRST"), first);
+  for (const other of ["env:DELIVERY_RETRY_OTHER", null])
+    await assert.rejects(send(other), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.deepEqual([error.status, error.code], [409, "conflict"]);
+      return true;
+    });
+  assert.deepEqual(f.service.delivery().configuration(projectId), after);
+  assert.equal(
+    f.service.domain().deliveryCredentialReference(projectId),
+    "env:DELIVERY_RETRY_FIRST",
+  );
+});
+
+test("a retried per-repository save replays only the exact request, kept-row references included", async (t) => {
+  const { f, api, projectId, hidden } = await hiddenRepositoryFixture(t);
+  const withheld = [{ name: hidden }, { name: `env:${hidden}` }];
+  f.service.domain().execute({
+    ...deliveryInput(projectId, {
+      expectedVersion: f.service.delivery().configuration(projectId).version,
+      credentialRef: `env:${hidden}`,
+      grants: [
+        { action: "issue.comment", repositoryId: hidden, mode: "approval" },
+        { action: "issue.labels", repositoryId: hidden, mode: "approval" },
+      ],
+      requiredChecks: [],
+      repositories: [{ repositoryId: "visible", requiredChecks: withheld }],
+    }),
+    actor: "operator",
+  } as never);
+  const version = f.service.delivery().configuration(projectId).version;
+  const key = randomUUID();
+  const kept = (
+    section: "delivery-grants" | "delivery-checks",
+    index: number,
+  ) => ({
+    savedRow: {
+      projectId,
+      section,
+      version,
+      index,
+      ...(section === "delivery-checks" ? { repositoryId: "visible" } : {}),
+    },
+    keep: true,
+  });
+  const send = (grant: number, check: number) =>
+    api.execute(
+      deliveryInput(projectId, {
+        key,
+        expectedVersion: version,
+        preserveBranchPrefix: true,
+        grants: [kept("delivery-grants", grant)],
+        repositories: [
+          {
+            repositoryId: "visible",
+            mergeMethod: "squash",
+            requiredChecks: [kept("delivery-checks", check)],
+          },
+        ],
+      }),
+    );
+  const first = await send(0, 0);
+  const after = f.service.delivery().configuration(projectId);
+  assert.deepEqual(after.grants, [
+    { action: "issue.comment", repositoryId: hidden, mode: "approval" },
+  ]);
+  assert.deepEqual(after.repositories?.[0]?.requiredChecks, [withheld[0]]);
+  assert.deepEqual(await send(0, 0), first);
+  // Another saved row was never applied under this key, so pointing at it is a different request.
+  for (const [grant, check] of [
+    [1, 0],
+    [0, 1],
+  ] as const)
+    await assert.rejects(send(grant, check), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.deepEqual([error.status, error.code], [409, "conflict"]);
+      return true;
+    });
+  assert.deepEqual(f.service.delivery().configuration(projectId), after);
+  // The recorded receipt carries no request digest.
+  const recorded = await api.readOperation(
+    new URLSearchParams({
+      scope: `project:${projectId}`,
+      type: "delivery.configure",
+      key,
+    }),
+  );
+  assert.doesNotMatch(JSON.stringify(recorded), /requestDigest/);
 });

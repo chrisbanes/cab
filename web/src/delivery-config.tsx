@@ -16,6 +16,8 @@ import {
   deliveryMappingCoverageWarning,
   type GrantRow,
   type CheckRow,
+  type RepositoryRow,
+  type RepositoryDeliveryRead,
 } from "./delivery-policy-draft.js";
 import {
   Panel,
@@ -43,8 +45,17 @@ import { Textarea } from "./ui/textarea.js";
 import { Alert } from "./ui/alert.js";
 
 import {
+  codeHostChecksSummary,
   deliveryLevelLabels,
   deliveryMergeWarning,
+  mergeMethodLabels,
+  mergeMethodUnsetNote,
+  codeHostMergeMethods,
+  defaultBranchMethodsNote,
+  mergeMethodNotAllowedWarning,
+  noRequiredChecksWarning,
+  unconfirmedChecksNote,
+  type CodeHost,
 } from "./delivery-presentation.js";
 import {
   Dialog,
@@ -184,7 +195,8 @@ function DeliveryPolicyForm(p: TabProps) {
   const v = d.values;
   const draft = deliveryEditorDraft(v);
   const grants = deliveryRows<GrantRow>(v.grants);
-  const checks = deliveryRows<CheckRow>(v.requiredChecks);
+  const repositoryRows = deliveryRows<RepositoryRow>(v.repositories);
+  const requirements = saved.repositories ?? [];
   const lines = deliveryPolicyChangeText(saved, draft);
   if (draft.credentialIntent !== "preserve")
     lines.push(
@@ -193,6 +205,16 @@ function DeliveryPolicyForm(p: TabProps) {
         : "Credential reference: cleared",
     );
   const isLocked = locked(d);
+  const setRepository = (
+    index: number,
+    change: (row: RepositoryRow) => RepositoryRow,
+  ) => {
+    const rows = deliveryRows<RepositoryRow>(v.repositories);
+    const row = rows[index];
+    if (!row) return;
+    rows[index] = change(row);
+    d.set("repositories", JSON.stringify(rows));
+  };
   const setRow = (
     section: "grants" | "requiredChecks",
     index: number,
@@ -480,48 +502,74 @@ function DeliveryPolicyForm(p: TabProps) {
                         </option>
                       ))}
                     </Field>
+                    {(() => {
+                      const r = repositoryRows.findIndex(
+                        (row) => row.repositoryId === link.repositoryId,
+                      );
+                      const read = requirements.find(
+                        (row) => row.repositoryId === link.repositoryId,
+                      );
+                      const row = repositoryRows[r];
+                      return row && read ? (
+                        <RepositoryMergeSettings
+                          index={r}
+                          row={row}
+                          read={read}
+                          codeHost={link.codeHost}
+                          error={error}
+                          onChange={(change) => setRepository(r, change)}
+                          focus={focus}
+                        />
+                      ) : null;
+                    })()}
                   </section>
                 );
               })}
               {!links.length && <p>No linked repositories.</p>}
-              <Field
-                label="Level for all linked repositories"
-                value={bulk}
-                onChange={setBulk}
+              <section
+                className="settings-row"
+                aria-label="All linked repositories"
               >
-                <option value="" disabled>
-                  Choose a level
-                </option>
-                {presets.map((preset) => (
-                  <option key={preset} value={preset}>
-                    {deliveryLevelLabels[preset]}
+                <h3 className="small-heading">All linked repositories</h3>
+                <Field
+                  label="Level for all linked repositories"
+                  value={bulk}
+                  onChange={setBulk}
+                >
+                  <option value="" disabled>
+                    Choose a level
                   </option>
-                ))}
-              </Field>
-              <Button
-                id="shepherd-bulk"
-                type="button"
-                variant="secondary"
-                disabled={
-                  !bulk ||
-                  !links.length ||
-                  links.some(
-                    (link) =>
-                      deliveryLevelView(draft.grants, link.repositoryId) ===
-                      "unavailable",
-                  )
-                }
-                onClick={() =>
-                  choose(
-                    links.map((link) => link.repositoryId),
-                    bulk as Preset,
-                    "shepherd-bulk",
-                  )
-                }
-              >
-                Apply to all linked repositories
-              </Button>
-              {levelError && <Alert role="alert">{levelError}</Alert>}
+                  {presets.map((preset) => (
+                    <option key={preset} value={preset}>
+                      {deliveryLevelLabels[preset]}
+                    </option>
+                  ))}
+                </Field>
+                <Button
+                  id="shepherd-bulk"
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    !bulk ||
+                    !links.length ||
+                    links.some(
+                      (link) =>
+                        deliveryLevelView(draft.grants, link.repositoryId) ===
+                        "unavailable",
+                    )
+                  }
+                  onClick={() =>
+                    choose(
+                      links.map((link) => link.repositoryId),
+                      bulk as Preset,
+                      "shepherd-bulk",
+                    )
+                  }
+                >
+                  Apply to all linked repositories
+                </Button>
+                {levelError && <Alert role="alert">{levelError}</Alert>}
+              </section>
             </fieldset>
           </Panel>
           <Panel
@@ -651,81 +699,6 @@ function DeliveryPolicyForm(p: TabProps) {
               </Button>
             </fieldset>
           </Panel>
-          <Panel
-            title="Required checks"
-            description="Optional app IDs bind a check to a particular app. An absent app binding differs from a configured one."
-          >
-            <fieldset disabled={isLocked} className="settings-rows">
-              <legend className="sr-only">Required checks</legend>
-              {checks.map((row, index) => (
-                <section
-                  className="settings-row"
-                  key={row.rowKey}
-                  aria-label={`Check ${index + 1}`}
-                >
-                  <h3 className="small-heading">Check {index + 1}</h3>
-                  {"savedRow" in row ? (
-                    <p>Unavailable saved row · kept until removed</p>
-                  ) : (
-                    <>
-                      <Field
-                        id={row.rowKey}
-                        label="Check name"
-                        error={error(`requiredChecks.${index}.name`)}
-                        value={row.name}
-                        onChange={(value) =>
-                          setRow("requiredChecks", index, "name", value)
-                        }
-                      />
-                      <ScopeField
-                        label="App ID"
-                        value={
-                          row.appId === undefined
-                            ? undefined
-                            : String(row.appId)
-                        }
-                        error={error(`requiredChecks.${index}.appId`)}
-                        onChange={(value) =>
-                          setRow("requiredChecks", index, "appId", value)
-                        }
-                      />
-                    </>
-                  )}
-                  {error(`requiredChecks.${index}.savedRow`) && (
-                    <p role="alert">
-                      {error(`requiredChecks.${index}.savedRow`)}
-                    </p>
-                  )}
-                  <Button
-                    id={"savedRow" in row ? row.rowKey : undefined}
-                    aria-invalid={
-                      "savedRow" in row &&
-                      Boolean(error(`requiredChecks.${index}.savedRow`))
-                    }
-                    type="button"
-                    variant="secondary"
-                    onClick={() => remove("requiredChecks", index)}
-                  >
-                    Remove check {index + 1}
-                  </Button>
-                </section>
-              ))}
-              {error("requiredChecks") && (
-                <p role="alert" className="error-text">
-                  {error("requiredChecks")}
-                </p>
-              )}
-              <Button
-                id="add-requiredChecks"
-                type="button"
-                variant="secondary"
-                disabled={checks.length >= 100}
-                onClick={() => add("requiredChecks")}
-              >
-                Add required check
-              </Button>
-            </fieldset>
-          </Panel>
         </div>
         <aside className="settings-column">
           <ChangeList lines={lines} />
@@ -753,6 +726,196 @@ function DeliveryPolicyForm(p: TabProps) {
         </aside>
       </div>
     </form>
+  );
+}
+
+/** A repository's merge method, the code host's checks and cab's additional checks. */
+function RepositoryMergeSettings({
+  index,
+  row,
+  read,
+  codeHost,
+  error,
+  onChange,
+  focus,
+}: {
+  index: number;
+  row: RepositoryRow;
+  read: RepositoryDeliveryRead;
+  codeHost: CodeHost;
+  error: (path: string) => string | undefined;
+  onChange: (change: (row: RepositoryRow) => RepositoryRow) => void;
+  focus: (id: string) => void;
+}) {
+  const id = row.repositoryId;
+  const at = `repositories.${index}`;
+  const live = read.codeHost.status === "live" ? read.codeHost : null;
+  // Any method the host supports: a PR may target a branch whose rules differ from the default's.
+  const methods: readonly (keyof typeof mergeMethodLabels)[] =
+    codeHostMergeMethods[codeHost];
+  const checks = row.additionalChecks;
+  const setChecks = (next: CheckRow[]) =>
+    onChange((current) => ({ ...current, additionalChecks: next }));
+  const addCheck = (name: string) => {
+    const rowKey = key();
+    setChecks([...checks, { rowKey, name }]);
+    focus(rowKey);
+  };
+  const named = new Set(
+    checks.flatMap((check) => ("name" in check ? [check.name] : [])),
+  );
+  return (
+    <fieldset className="settings-rows">
+      <legend className="sr-only">Merge settings for {id}</legend>
+      <Field
+        id={`merge-method-${index}`}
+        label={`Merge method for ${id}`}
+        value={row.mergeMethod ?? ""}
+        error={error(`${at}.mergeMethod`)}
+        onChange={(value) =>
+          onChange((current) => ({
+            ...current,
+            mergeMethod:
+              value === "" ? null : (value as (typeof methods)[number]),
+          }))
+        }
+      >
+        <option value="">Not set</option>
+        {methods.map((method) => (
+          <option key={method} value={method}>
+            {mergeMethodLabels[method]}
+          </option>
+        ))}
+      </Field>
+      {!row.mergeMethod && <p>{mergeMethodUnsetNote}</p>}
+      {live && <p>{defaultBranchMethodsNote(live.allowedMethods)}</p>}
+      {live &&
+        row.mergeMethod &&
+        !live.allowedMethods.includes(row.mergeMethod) && (
+          <Alert role="alert">
+            {mergeMethodNotAllowedWarning(row.mergeMethod)}
+          </Alert>
+        )}
+      <p>{codeHostChecksSummary(codeHost, read.codeHost)}</p>
+      {live && live.checks.length > 0 && (
+        <ul aria-label={`Checks required by the code host for ${id}`}>
+          {live.checks.map((check, i) => (
+            <li
+              key={"name" in check ? `${check.name}:${check.appId ?? ""}` : i}
+            >
+              {"name" in check ? check.name : "Unavailable check"}
+              {"name" in check && check.appId !== undefined
+                ? ` (app ${check.appId})`
+                : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!live ? (
+        <p>{unconfirmedChecksNote}</p>
+      ) : (
+        !live.checks.length &&
+        !checks.length && (
+          <Alert role="alert">{noRequiredChecksWarning(codeHost)}</Alert>
+        )
+      )}
+      <h4 className="small-heading">Additional required checks</h4>
+      {checks.map((check, i) => (
+        <section
+          className="settings-row"
+          key={check.rowKey}
+          aria-label={`Additional check ${i + 1} for ${id}`}
+        >
+          {"savedRow" in check ? (
+            <p>Unavailable saved row · kept until removed</p>
+          ) : (
+            <>
+              <Field
+                id={check.rowKey}
+                label="Check name"
+                error={error(`${at}.requiredChecks.${i}.name`)}
+                value={check.name}
+                onChange={(name) =>
+                  setChecks(
+                    checks.map((c, j) => (j === i ? { ...c, name } : c)),
+                  )
+                }
+              />
+              <ScopeField
+                label="App ID"
+                value={
+                  check.appId === undefined ? undefined : String(check.appId)
+                }
+                error={error(`${at}.requiredChecks.${i}.appId`)}
+                onChange={(appId) =>
+                  setChecks(
+                    checks.map((c, j) => {
+                      if (j !== i || "savedRow" in c) return c;
+                      const { appId: _old, ...rest } = c;
+                      return appId === undefined
+                        ? rest
+                        : { ...rest, appId: String(appId) };
+                    }),
+                  )
+                }
+              />
+            </>
+          )}
+          {error(`${at}.requiredChecks.${i}.savedRow`) && (
+            <p role="alert">{error(`${at}.requiredChecks.${i}.savedRow`)}</p>
+          )}
+          <Button
+            id={"savedRow" in check ? check.rowKey : undefined}
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setChecks(checks.filter((_, j) => j !== i));
+              focus(
+                checks[i + 1]?.rowKey ??
+                  checks[i - 1]?.rowKey ??
+                  `add-check-${index}`,
+              );
+            }}
+          >
+            Remove additional check {i + 1}
+          </Button>
+        </section>
+      ))}
+      {error(`${at}.requiredChecks`) && (
+        <p role="alert" className="error-text">
+          {error(`${at}.requiredChecks`)}
+        </p>
+      )}
+      <Button
+        id={`add-check-${index}`}
+        type="button"
+        variant="secondary"
+        disabled={checks.length >= 100}
+        onClick={() => addCheck("")}
+      >
+        Add additional check for {id}
+      </Button>
+      {read.suggestions.some((name) => !named.has(name)) && (
+        <fieldset>
+          <legend className="metadata muted">
+            Suggested checks for {id}, seen on its PRs:
+          </legend>
+          {read.suggestions
+            .filter((name) => !named.has(name))
+            .map((name) => (
+              <Button
+                key={name}
+                type="button"
+                variant="secondary"
+                disabled={checks.length >= 100}
+                onClick={() => addCheck(name)}
+              >
+                Add {name}
+              </Button>
+            ))}
+        </fieldset>
+      )}
+    </fieldset>
   );
 }
 

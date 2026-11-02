@@ -101,6 +101,24 @@ A code host's request to merge a task branch into its base: a GitHub pull reques
 or a GitLab merge request.
 _Avoid_: PR or MR when not referring to a specific code host
 
+**Merge method**:
+How a change request merges on a repository: a merge commit, a squash or a rebase.
+Each linked repository has its own, which must be one the code host allows; until
+the operator sets it, the merge gate holds merges as `merge-method-not-configured`.
+
+**Code-host required checks**:
+The checks a code host itself requires before merging into a repository's base:
+GitHub ruleset and classic branch protection status checks, or GitLab's `pipeline`
+when the project's "Pipelines must succeed" setting is on. cab reads them fresh and
+never copies them into its own list.
+_Avoid_: Required checks when only one source is meant
+
+**Additional required checks**:
+The checks cab requires for a repository on top of the code host's, each a name and an
+optional GitHub App ID. A merge with no code-host required checks and no additional
+required checks is held as `no-required-checks`.
+_Avoid_: Project-wide checks; that list only survives in policies saved before per-repository settings
+
 **External reference**:
 The stable identity of a task's corresponding item in an external system, independent of which sources discover it.
 _Avoid_: Source configuration when referring to external task identity

@@ -62,6 +62,7 @@ import {
   deliveryActionLine,
   codeHostName,
   deliveryBlockerSentence,
+  mergeBlockerText,
   pullRequestReference,
   pullRequestStateLabel,
   safePullRequestUrl,
@@ -3216,6 +3217,22 @@ function Changes({
           ) : (
             <p>No repair owner is recorded for this pull request.</p>
           )}
+          {d.binding.mergeBlockers?.length ? (
+            <div>
+              <p>Merge blockers on the last read:</p>
+              <ul>
+                {[
+                  ...new Set(
+                    d.binding.mergeBlockers.map((code) =>
+                      code === null ? "Unavailable" : mergeBlockerText(code),
+                    ),
+                  ),
+                ].map((text) => (
+                  <li key={text}>{text}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {d.binding.omittedFeedbackCount > 0 && (
             <p>
               {d.binding.omittedFeedbackCount} retained provider feedback

@@ -13,10 +13,19 @@ import {
   gitlabCompareUrl,
   OperatorApi,
 } from "../../src/standalone/operator-api.js";
+import { DatabaseSync } from "node:sqlite";
 import {
   absentBranchHead,
   canonicalMaterial,
+  DeliveryStore,
 } from "../../src/core/delivery.js";
+import { DeliveryCoordinator } from "../../src/standalone/delivery.js";
+import {
+  gitlabWorld,
+  opened,
+  repositoryId,
+  token,
+} from "../fixtures/gitlab-delivery.js";
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {
   test(`assembled ${mode} uses production HTTP parsing, own closure, terminal completion and durable reopen`, async () => {
@@ -116,6 +125,8 @@ test("the delivery read links an imported task's pull request in its own reposit
     assert.equal(read?.binding?.url, "https://github.com/org/repo/pull/7");
     assert.equal(read.binding.repositoryName, "org/repo");
     assert.equal(read.binding.draft, false);
+    // The fixture's repository has a method and cab's check passed, so nothing holds the merge.
+    assert.deepEqual(read.binding.mergeBlockers, []);
   } finally {
     await f.close();
   }
@@ -1258,4 +1269,226 @@ test("a GitLab compare link names the link's verified project path and the outsi
     gitlabCompareUrl("group/app", last, absentBranchHead, host),
     null,
   );
+});
+
+test("the configuration read reports each linked repository's code-host requirements, cab's checks and suggestions, and saves them per repository", async (t) => {
+  const w = await gitlabWorld(t);
+  try {
+    const { f } = w;
+    const api = new OperatorApi(f.service, [f.directory]);
+    const read = async () =>
+      (await api.readProjectConfiguration(f.projectId)).data.delivery!;
+    const configuration = () => f.service.delivery().configuration(f.projectId);
+    // A policy stored with the legacy project-wide list and no repository entries.
+    f.service.domain().execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion: configuration().version,
+      mode: "through-merge",
+      credentialRef: null,
+      grants: configuration().grants,
+      requiredChecks: [{ name: "pipeline" }],
+      repositories: [],
+    });
+    assert.deepEqual(configuration().repositories, []);
+    const legacy = await read();
+    assert.deepEqual(legacy.requiredChecks, [{ name: "pipeline" }]);
+    assert.deepEqual(legacy.repositories, [
+      {
+        repositoryId,
+        mergeMethod: null,
+        additionalChecks: [{ name: "pipeline" }],
+        codeHost: {
+          status: "live",
+          checks: [],
+          allowedMethods: ["merge", "squash"],
+        },
+        suggestions: [],
+        noRequiredChecks: false,
+      },
+    ]);
+    w.remote.state.project = {
+      id: 42,
+      path_with_namespace: "group/sub/app",
+      only_allow_merge_if_pipeline_succeeds: true,
+      squash_option: "always",
+    };
+    assert.deepEqual((await read()).repositories?.[0]?.codeHost, {
+      status: "live",
+      checks: [{ name: "pipeline" }],
+      allowedMethods: ["squash"],
+    });
+    // The first save with per-repository settings moves the legacy list into the repository's entry.
+    const save = (
+      expectedVersion: number,
+      requiredChecks: Array<Record<string, unknown>>,
+    ) =>
+      api.execute({
+        type: "delivery.configure",
+        key: randomUUID(),
+        projectId: f.projectId,
+        expectedVersion,
+        mode: "through-merge",
+        grants: configuration().grants,
+        requiredChecks: [],
+        repositories: [{ repositoryId, mergeMethod: "squash", requiredChecks }],
+      });
+    await save(legacy.version, legacy.repositories![0]!.additionalChecks);
+    assert.equal(configuration().version, legacy.version + 1);
+    assert.deepEqual(configuration().requiredChecks, []);
+    assert.deepEqual(configuration().repositories, [
+      {
+        repositoryId,
+        mergeMethod: "squash",
+        requiredChecks: [{ name: "pipeline" }],
+      },
+    ]);
+    // A command without per-repository settings keeps the saved entries.
+    await api.execute({
+      type: "delivery.configure",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion: legacy.version + 1,
+      mode: "through-merge",
+      grants: configuration().grants,
+      requiredChecks: [{ name: "lint" }],
+    });
+    assert.deepEqual(configuration().requiredChecks, [{ name: "lint" }]);
+    assert.equal(configuration().repositories?.length, 1);
+    await save(legacy.version + 2, []);
+    // A recorded observation's check names become suggestions for that repository only.
+    f.grant(
+      { action: "branch.push", mode: "allow" },
+      { action: "pr.create", mode: "allow" },
+    );
+    await opened(w, false);
+    await f.service.coordinationView().refreshDelivery(f.taskId);
+    assert.deepEqual((await read()).repositories?.[0]?.suggestions, []);
+    w.remote.state.project = { id: 42, path_with_namespace: "group/sub/app" };
+    const unguarded = (await read()).repositories?.[0];
+    assert.deepEqual(unguarded?.suggestions, ["pipeline"]);
+    assert.equal(unguarded?.noRequiredChecks, true);
+    assert.deepEqual(
+      f.service.delivery().checkSuggestions(f.projectId, "43"),
+      [],
+    );
+    // A check the exclusion boundary withholds reads as an opaque row and is kept by reference.
+    f.service.domain().execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion: configuration().version,
+      mode: "through-merge",
+      credentialRef: null,
+      grants: configuration().grants,
+      requiredChecks: [],
+      repositories: [
+        {
+          repositoryId,
+          mergeMethod: "squash",
+          requiredChecks: [{ name: token }, { name: "visible" }],
+        },
+      ],
+    });
+    const withheld = await read();
+    assert.equal(JSON.stringify(withheld).includes(token), false);
+    const [hidden, visible] = withheld.repositories![0]!.additionalChecks;
+    assert.deepEqual(hidden, {
+      kind: "unavailable",
+      label: "Unavailable saved row",
+      savedRow: {
+        projectId: f.projectId,
+        section: "delivery-checks",
+        version: withheld.version,
+        index: 0,
+        repositoryId,
+      },
+    });
+    assert.ok(hidden && "savedRow" in hidden);
+    await save(withheld.version, [
+      visible!,
+      { savedRow: hidden.savedRow, keep: true },
+    ]);
+    assert.deepEqual(configuration().repositories?.[0]?.requiredChecks, [
+      { name: "visible" },
+      { name: token },
+    ]);
+    // A kept row must name the repository it was read for.
+    await assert.rejects(
+      save(withheld.version + 1, [
+        {
+          savedRow: {
+            ...hidden.savedRow,
+            version: withheld.version + 1,
+            repositoryId: "43",
+          },
+          keep: true,
+        },
+      ]),
+      /invalid-input/,
+    );
+    // A failing code host leaves the read intact and reports a fixed reason.
+    w.remote.state.project = null;
+    const failed = (await read()).repositories?.[0];
+    assert.deepEqual(failed?.codeHost, {
+      status: "unavailable",
+      reason: "provider-error",
+    });
+    assert.equal(failed?.noRequiredChecks, null);
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("a repository whose code host has no usable credential reads as credential-missing", async (t) => {
+  const w = await gitlabWorld(t, "allow", { credential: false });
+  try {
+    const read = (
+      await new OperatorApi(w.f.service, [
+        w.f.directory,
+      ]).readProjectConfiguration(w.f.projectId)
+    ).data.delivery!;
+    assert.deepEqual(read.repositories?.[0]?.codeHost, {
+      status: "unavailable",
+      reason: "credential-missing",
+    });
+    assert.equal(read.repositories?.[0]?.noRequiredChecks, null);
+  } finally {
+    await w.f.close();
+  }
+});
+
+test("a code-host requirements read that does not answer in time is unavailable with a timeout", async () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    const store = new DeliveryStore(db);
+    store.migrate();
+    const projectId = randomUUID();
+    const coordinator = new DeliveryCoordinator(store, {
+      providerFactories: {
+        github: () =>
+          ({
+            repositoryRequirements: () => new Promise(() => {}),
+          }) as never,
+        gitlab: () => ({}) as never,
+      },
+      codeHostOf: (_project: string, repositoryId: string) =>
+        repositoryId === "42"
+          ? { codeHost: "gitlab", host: "gitlab.example.com" }
+          : { codeHost: "github", host: "github.com" },
+    } as never);
+    assert.deepEqual(
+      await coordinator.repositoryRequirements(projectId, "R1", 10),
+      { status: "unavailable", reason: "timeout" },
+    );
+    assert.deepEqual(
+      await coordinator.repositoryRequirements(projectId, "42", 10),
+      { status: "unavailable", reason: "unsupported" },
+    );
+  } finally {
+    db.close();
+  }
 });

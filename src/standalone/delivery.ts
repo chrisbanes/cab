@@ -43,6 +43,7 @@ import type {
   CodeHost,
   CodeHostDeliveryProvider,
   CodeHostProviderFactories,
+  RepositoryRequirements,
 } from "./code-host.js";
 import {
   type IssueTracker,
@@ -346,6 +347,58 @@ export class DeliveryCoordinator {
         return this.store.recordObservation(operationId, observation, within);
       },
     );
+  }
+  /**
+   * A fresh read of what the repository's code host requires, bounded so a settings read never waits
+   * long. Failures are fixed codes: no provider text is disclosed.
+   */
+  async repositoryRequirements(
+    projectId: string,
+    repositoryId: string,
+    timeoutMs = 5000,
+  ): Promise<
+    | ({ status: "live" } & RepositoryRequirements)
+    | {
+        status: "unavailable";
+        reason:
+          | "credential-missing"
+          | "provider-error"
+          | "timeout"
+          | "unsupported";
+      }
+  > {
+    let provider: CodeHostDeliveryProvider;
+    try {
+      provider = this.provider(projectId, repositoryId);
+    } catch {
+      return { status: "unavailable", reason: "unsupported" };
+    }
+    if (!provider.repositoryRequirements)
+      return { status: "unavailable", reason: "unsupported" };
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    try {
+      const result = await Promise.race([
+        provider.repositoryRequirements(repositoryId),
+        timeout,
+      ]);
+      return result === "timeout"
+        ? { status: "unavailable", reason: "timeout" }
+        : { status: "live", ...result };
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reason:
+          error instanceof Error &&
+          error.message === "provider-credential-unavailable"
+            ? "credential-missing"
+            : "provider-error",
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
   /** What GitHub shows for an issue named to Link a publication; the caller judges it. */
   inspectPublishedIssue(

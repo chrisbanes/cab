@@ -23,11 +23,28 @@ test("actual classic queue, strict status, deployments and app identity hold mer
     checks: [
       { name: "build", appId: 17, sha: "1".repeat(40), status: "success" },
     ],
-    requiredChecks: [{ name: "build", appId: 17 }],
+    hostChecks: [],
+    cabChecks: [{ name: "build", appId: 17 }],
+    configuredMethod: "squash",
     unsupportedRules: [],
     allowedMethods: ["squash"],
   };
   assert.deepEqual(mergeGateReasons(baseline), []);
+  assert.deepEqual(mergeGateReasons({ ...baseline, cabChecks: [] }), [
+    "no-required-checks",
+  ]);
+  assert.deepEqual(
+    mergeGateReasons({
+      ...baseline,
+      hostChecks: [{ name: "build", appId: 17 }],
+      cabChecks: [],
+    }),
+    [],
+  );
+  for (const configuredMethod of [undefined, "merge"])
+    assert.deepEqual(mergeGateReasons({ ...baseline, configuredMethod }), [
+      "merge-method-not-configured",
+    ]);
   assert.deepEqual(mergeGateReasons({ ...baseline, queue: true }), [
     "merge-queue-required",
   ]);
@@ -67,7 +84,10 @@ import {
   GitHubHttpDeliveryProvider,
   IssueChangedRefusal,
 } from "../../src/standalone/github-delivery.js";
-import type { DeliveryActionRecord } from "../../src/core/delivery.js";
+import type {
+  DeliveryActionRecord,
+  DeliveryPolicy,
+} from "../../src/core/delivery.js";
 import { DomainPolicyError } from "../../src/core/domain.js";
 function commentRecord(): DeliveryActionRecord {
   const projectId = randomUUID(),
@@ -296,6 +316,7 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
         allow_merge_commit: true,
         allow_squash_merge: true,
         allow_rebase_merge: false,
+        default_branch: "main",
       });
     if (url.pathname.endsWith("/pulls/7")) return Response.json(raw);
     if (url.pathname.endsWith("/check-runs"))
@@ -321,12 +342,15 @@ function prProviderFixture(change: Record<string, unknown> = {}) {
       expectedPrNodeId: "P7",
       expectedHeadSha: head,
     };
-  const policy = {
+  const policy: DeliveryPolicy = {
     version: 2,
     mode: "through-merge" as const,
     credentialRef: null,
     grants: [],
     requiredChecks: [{ name: "build", appId: 17 }],
+    repositories: [
+      { repositoryId: "R1", mergeMethod: "squash", requiredChecks: [] },
+    ],
   };
   return {
     provider,
@@ -476,6 +500,137 @@ test("effective pull-request merge methods and conversation requirements constra
   assert.ok(p.mergeBlockers.includes("unresolved-review-thread"));
 });
 
+const mergeAction = (method: "merge" | "squash"): ExternalAction => ({
+  kind: "pr.merge",
+  target: {
+    repositoryId: "R1",
+    number: 7,
+    nodeId: "P7",
+    baseRef: "main",
+    headRef: "cb/change",
+    expectedHeadSha: "1".repeat(40),
+  },
+  method,
+  reviewedResultIds: [],
+});
+test("a merge with no required checks is held, and a code-host check removed between reads brings the hold back", async () => {
+  const f = prProviderFixture();
+  const policy: DeliveryPolicy = {
+    ...f.policy,
+    requiredChecks: [],
+    repositories: [
+      { repositoryId: "R1", mergeMethod: "squash", requiredChecks: [] },
+    ],
+  };
+  const none = await f.provider.inspectPr(f.identity, policy);
+  assert.deepEqual(none.mergeBlockers, ["no-required-checks"]);
+  assert.deepEqual(none.requiredChecks, []);
+  await assert.rejects(
+    f.provider.preflight(mergeAction("squash"), policy),
+    /gates-held/,
+  );
+  assert.deepEqual(await f.provider.repositoryRequirements("R1"), {
+    hostChecks: [],
+    allowedMethods: ["merge", "squash"],
+  });
+  const ruleset = {
+    type: "required_status_checks",
+    parameters: {
+      strict_required_status_checks_policy: false,
+      required_status_checks: [{ context: "build", integration_id: 17 }],
+    },
+  };
+  f.setRules([ruleset]);
+  const host = await f.provider.inspectPr(f.identity, policy);
+  assert.deepEqual(host.mergeBlockers, []);
+  assert.deepEqual(host.requiredChecks, [
+    { name: "build", appId: 17, source: "code-host" },
+  ]);
+  assert.deepEqual(await f.provider.repositoryRequirements("R1"), {
+    hostChecks: [{ name: "build", appId: 17 }],
+    allowedMethods: ["merge", "squash"],
+  });
+  f.setRules([]);
+  f.setProtection({
+    required_status_checks: {
+      strict: false,
+      checks: [{ context: "build", app_id: 17 }],
+    },
+  });
+  assert.deepEqual(
+    (await f.provider.inspectPr(f.identity, policy)).requiredChecks,
+    [{ name: "build", appId: 17, source: "code-host" }],
+  );
+  // Protection removed between saves: the next fresh read holds the merge again.
+  f.setProtection(null);
+  assert.deepEqual(
+    (await f.provider.inspectPr(f.identity, policy)).mergeBlockers,
+    ["no-required-checks"],
+  );
+  const cab = await f.provider.inspectPr(f.identity, {
+    ...policy,
+    repositories: [
+      {
+        repositoryId: "R1",
+        mergeMethod: "squash",
+        requiredChecks: [{ name: "build", appId: 17 }],
+      },
+    ],
+  });
+  assert.deepEqual(cab.mergeBlockers, []);
+  assert.deepEqual(cab.requiredChecks, [
+    { name: "build", appId: 17, source: "cab" },
+  ]);
+  assert.equal(f.getWrites(), 0);
+});
+test("a classic protection rule GitHub reports but cab cannot read holds the merge", async () => {
+  // GraphQL shows a classic rule, so the protection read's 404 proves nothing: the gate must not treat it as none.
+  const f = prProviderFixture({
+    baseRef: {
+      target: { oid: "2".repeat(40) },
+      branchProtectionRule: {
+        requiresDeployments: false,
+        requiredDeploymentEnvironments: [],
+        requiresStrictStatusChecks: false,
+      },
+    },
+  });
+  assert.ok(
+    (await f.provider.inspectPr(f.identity, f.policy)).mergeBlockers.includes(
+      "classic-protection-unproved",
+    ),
+  );
+  await assert.rejects(
+    f.provider.preflight(mergeAction("squash"), f.policy),
+    /gates-held/,
+  );
+  assert.equal(f.getWrites(), 0);
+});
+test("a merge whose method is not the repository's configured method is held before any write", async () => {
+  const f = prProviderFixture();
+  for (const repositories of [
+    [],
+    [{ repositoryId: "R1", requiredChecks: [] }],
+    [
+      {
+        repositoryId: "R1",
+        mergeMethod: "rebase" as const,
+        requiredChecks: [],
+      },
+    ],
+  ])
+    assert.ok(
+      (
+        await f.provider.inspectPr(f.identity, { ...f.policy, repositories })
+      ).mergeBlockers.includes("merge-method-not-configured"),
+    );
+  await assert.rejects(
+    f.provider.preflight(mergeAction("merge"), f.policy),
+    /gates-held/,
+  );
+  assert.equal(f.getWrites(), 0);
+  await f.provider.preflight(mergeAction("squash"), f.policy);
+});
 test("fresh closed-issue readback reports the latest ClosedEvent and its closer as facts", async () => {
   let state = "closed";
   let nodes: unknown[] = [];

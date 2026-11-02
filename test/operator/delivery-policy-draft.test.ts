@@ -12,6 +12,7 @@ import {
   statusMappingCoverageLoss,
   deliveryMappingCoverageWarning,
   type DeliveryPolicySeed,
+  type RepositoryDeliveryRead,
 } from "../../web/src/delivery-policy-draft.js";
 
 const seed = (
@@ -65,7 +66,11 @@ test("all domain actions round-trip public fields exactly and remain domain-sche
         { name: "Build", appId: 42 },
       ],
     });
-    const { credentialRef: _savedReference, ...publicPolicy } = policy;
+    const {
+      credentialRef: _savedReference,
+      repositories: _repositories,
+      ...publicPolicy
+    } = policy;
     const publicSeed = {
       ...publicPolicy,
       credentialConfigured: true,
@@ -890,4 +895,119 @@ test("unavailable facts and oversized bulk proposals refuse without mutating the
   );
   assert.equal(rejected.kind, "invalid");
   assert.deepEqual(full, snapshot);
+});
+
+test("a legacy read becomes per-repository rows, and every save sends the repositories with an empty project-wide list", async () => {
+  const { deliveryEditorValues, deliveryEditorDraft, deliveryFieldErrors } =
+    await import("../../web/src/delivery-policy-draft.js");
+  const read = (
+    mergeMethod: "merge" | "squash" | "rebase" | null,
+  ): RepositoryDeliveryRead => ({
+    repositoryId: "R1",
+    mergeMethod,
+    additionalChecks: [
+      { name: "build", appId: 7 },
+      {
+        kind: "unavailable",
+        label: "Unavailable saved row",
+        savedRow: {
+          projectId: "00000000-0000-4000-8000-000000000001",
+          section: "delivery-checks",
+          version: 7,
+          index: 1,
+          repositoryId: "R1",
+        },
+      },
+    ],
+    codeHost: { status: "live", checks: [], allowedMethods: ["squash"] },
+    suggestions: ["lint"],
+    noRequiredChecks: false,
+  });
+  const saved = seed({
+    requiredChecks: [{ name: "build", appId: 7 }],
+    repositories: [read(null)],
+  });
+  const draft = deliveryEditorDraft(deliveryEditorValues(saved));
+  assert.deepEqual(draft.repositories, [
+    {
+      repositoryId: "R1",
+      mergeMethod: null,
+      additionalChecks: read(null).additionalChecks,
+    },
+  ]);
+  // The legacy list moves on the first save, so the form offers it as a change.
+  assert.deepEqual(deliveryPolicyChangeText(saved, draft), [
+    "Project-wide required checks move into each repository's additional checks",
+  ]);
+  const sent = deliveryPolicySubmission(draft);
+  assert.deepEqual(sent.requiredChecks, []);
+  assert.deepEqual(sent.repositories, [
+    {
+      repositoryId: "R1",
+      requiredChecks: [
+        { name: "build", appId: 7 },
+        {
+          savedRow: (read(null).additionalChecks[1] as { savedRow: unknown })
+            .savedRow,
+          keep: true,
+        },
+      ],
+    },
+  ]);
+  const squash = {
+    ...draft,
+    repositories: [
+      { ...draft.repositories![0]!, mergeMethod: "squash" as const },
+    ],
+  };
+  assert.deepEqual(
+    deliveryPolicySubmission(squash).repositories?.[0]?.mergeMethod,
+    "squash",
+  );
+  assert.deepEqual(deliveryPolicyChangeText(saved, squash).slice(0, 1), [
+    "Merge method changed for R1",
+  ]);
+  assert.deepEqual(deliveryFieldErrors(squash), {});
+  // The default branch's methods are guidance: a PR may target a branch with other rules.
+  const rebase = {
+    ...draft,
+    repositories: [
+      { ...draft.repositories![0]!, mergeMethod: "rebase" as const },
+    ],
+  };
+  assert.deepEqual(deliveryFieldErrors(rebase), {});
+  assert.equal(
+    deliveryPolicySubmission(rebase).repositories?.[0]?.mergeMethod,
+    "rebase",
+  );
+  const blank = {
+    ...draft,
+    repositories: [
+      {
+        ...draft.repositories![0]!,
+        additionalChecks: [{ name: " " }, { name: "x", appId: Number.NaN }],
+      },
+    ],
+  };
+  assert.deepEqual(Object.keys(deliveryFieldErrors(blank)), [
+    "repositories.0.requiredChecks.0.name",
+    "repositories.0.requiredChecks.1.appId",
+  ]);
+  // With no visible repository, or from an older server, the project-wide list is sent as before.
+  const unlinked = deliveryEditorDraft(
+    deliveryEditorValues(
+      seed({ requiredChecks: [{ name: "build" }], repositories: [] }),
+    ),
+  );
+  assert.equal("repositories" in deliveryPolicySubmission(unlinked), false);
+  assert.deepEqual(deliveryPolicySubmission(unlinked).requiredChecks, [
+    { name: "build" },
+  ]);
+  const legacy = deliveryEditorDraft(
+    deliveryEditorValues(seed({ requiredChecks: [{ name: "build" }] })),
+  );
+  assert.equal("repositories" in deliveryPolicySubmission(legacy), false);
+  assert.deepEqual(deliveryPolicySubmission(legacy).requiredChecks, [
+    { name: "build" },
+  ]);
 });

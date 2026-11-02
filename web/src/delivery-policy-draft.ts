@@ -31,10 +31,29 @@ export const deliveryActionKinds = [
 ] as const;
 export type DeliveryAction = DeliveryPolicy["grants"][number]["action"];
 export type DeliveryGrant = DeliveryPolicy["grants"][number];
-export type DeliveryPolicyValues = Omit<
-  z.infer<typeof deliveryConfigurationSchema>,
-  "version" | "credentialConfigured"
+type DeliveryConfiguration = z.infer<typeof deliveryConfigurationSchema>;
+/** A linked repository as the server reads it: settings plus live code-host requirements. */
+export type RepositoryDeliveryRead = NonNullable<
+  DeliveryConfiguration["repositories"]
+>[number];
+/** The editable part of a repository's delivery settings. */
+export type RepositorySetting = Pick<
+  RepositoryDeliveryRead,
+  "repositoryId" | "mergeMethod" | "additionalChecks"
 >;
+export type DeliveryPolicyValues = Omit<
+  DeliveryConfiguration,
+  "version" | "credentialConfigured" | "repositories"
+> & { repositories?: RepositorySetting[] | undefined };
+const repositorySetting = ({
+  repositoryId,
+  mergeMethod,
+  additionalChecks,
+}: RepositorySetting): RepositorySetting => ({
+  repositoryId,
+  mergeMethod,
+  additionalChecks,
+});
 export type DeliveryPolicySeed = DeliveryPolicyValues & {
   version: number;
   credentialConfigured: boolean;
@@ -132,9 +151,12 @@ export function applyRepositoryDeliveryLevel(
 export function deliveryPolicyDraft(
   seed: DeliveryPolicySeed,
 ): DeliveryPolicyDraft {
-  const { credentialConfigured: _configured, ...values } = seed;
+  const { credentialConfigured: _configured, repositories, ...values } = seed;
   return {
     ...structuredClone(values),
+    ...(repositories
+      ? { repositories: structuredClone(repositories.map(repositorySetting)) }
+      : {}),
     credentialIntent: "preserve",
     grantKeys: values.grants.map((_, index) => `grant-${index}`),
     requiredCheckKeys: values.requiredChecks.map(
@@ -194,8 +216,15 @@ export function deliveryPolicySubmission(draft: DeliveryPolicyDraft) {
     requiredCheckKeys: _requiredCheckKeys,
     branchPrefixUnavailable: _prefixUnavailable,
     branchPrefix,
+    repositories,
     ...policy
   } = draft;
+  const keep = <T extends object>(row: T) =>
+    ("savedRow" in row
+      ? { savedRow: row.savedRow, keep: true }
+      : row) as T extends { savedRow: infer S }
+      ? { savedRow: S; keep: true }
+      : T;
   const values = {
     ...policy,
     ...(branchPrefix === null
@@ -203,12 +232,19 @@ export function deliveryPolicySubmission(draft: DeliveryPolicyDraft) {
       : branchPrefix !== undefined
         ? { branchPrefix }
         : {}),
-    grants: policy.grants.map((row) =>
-      "savedRow" in row ? { savedRow: row.savedRow, keep: true as const } : row,
-    ),
-    requiredChecks: policy.requiredChecks.map((row) =>
-      "savedRow" in row ? { savedRow: row.savedRow, keep: true as const } : row,
-    ),
+    grants: policy.grants.map(keep),
+    // Per-repository settings replace the project-wide list, which then saves empty. With no
+    // visible repository there is nothing to move it into, so it is kept as it is.
+    requiredChecks: repositories?.length ? [] : policy.requiredChecks.map(keep),
+    ...(repositories?.length
+      ? {
+          repositories: repositories.map((r) => ({
+            repositoryId: r.repositoryId,
+            ...(r.mergeMethod ? { mergeMethod: r.mergeMethod } : {}),
+            requiredChecks: r.additionalChecks.map(keep),
+          })),
+        }
+      : {}),
   };
   if (credentialIntent === "set") {
     if (!credentialInput || !/^env:[A-Z][A-Z0-9_]*$/.test(credentialInput))
@@ -310,6 +346,28 @@ export function validateDeliveryPolicyDraft(
     )
       add(`${at}.appId`, "Enter a positive integer app ID.");
   });
+  draft.repositories?.forEach((repository, r) => {
+    const at = `repositories.${r}`;
+    if (repository.additionalChecks.length > 100)
+      add(`${at}.requiredChecks`, "At most 100 additional checks are allowed.");
+    repository.additionalChecks.forEach((check, index) => {
+      const row = `${at}.requiredChecks.${index}`;
+      if ("savedRow" in check) {
+        if (check.savedRow.version !== draft.version)
+          add(
+            `${row}.savedRow`,
+            "This unavailable row belongs to an older version. Remove it or discard changes to load the latest saved rows.",
+          );
+        return;
+      }
+      if (!identityValid(check.name)) add(`${row}.name`, "Enter a check name.");
+      if (
+        check.appId !== undefined &&
+        (!Number.isSafeInteger(check.appId) || check.appId <= 0)
+      )
+        add(`${row}.appId`, "Enter a positive integer app ID.");
+    });
+  });
   if (
     draft.credentialIntent === "set" &&
     (!draft.credentialInput ||
@@ -402,6 +460,24 @@ export function deliveryPolicyChangeText(
     JSON.stringify(after.requiredChecks)
   )
     changes.push("Required checks changed");
+  for (const next of after.repositories ?? []) {
+    const prior = before.repositories?.find(
+      (r) => r.repositoryId === next.repositoryId,
+    );
+    if ((prior?.mergeMethod ?? null) !== next.mergeMethod)
+      changes.push(`Merge method changed for ${next.repositoryId}`);
+    if (
+      JSON.stringify(prior?.additionalChecks ?? []) !==
+      JSON.stringify(next.additionalChecks)
+    )
+      changes.push(
+        `Additional required checks changed for ${next.repositoryId}`,
+      );
+  }
+  if (after.repositories?.length && before.requiredChecks.length)
+    changes.push(
+      "Project-wide required checks move into each repository's additional checks",
+    );
   return changes;
 }
 import type { DeliveryPolicy } from "../../src/core/delivery.js";
@@ -452,15 +528,44 @@ export function deliveryEditorValues(seed: DeliveryPolicySeed): Values {
     ),
     requiredChecks: JSON.stringify(
       draft.requiredChecks.map((row, index) => ({
-        ...row,
-        ...(!("savedRow" in row) && row.appId !== undefined
-          ? { appId: String(row.appId) }
-          : {}),
+        ...checkInput(row),
         rowKey: draft.requiredCheckKeys[index],
       })),
     ),
+    ...(draft.repositories
+      ? {
+          repositories: JSON.stringify(
+            draft.repositories.map((r) => ({
+              ...r,
+              additionalChecks: r.additionalChecks.map((row, index) => ({
+                ...checkInput(row),
+                rowKey: `${r.repositoryId}-check-${index}`,
+              })),
+            })),
+          ),
+        }
+      : {}),
   };
 }
+type CheckValue = DeliveryPolicyValues["requiredChecks"][number];
+const checkInput = (row: CheckValue) =>
+  !("savedRow" in row) && row.appId !== undefined
+    ? { ...row, appId: String(row.appId) }
+    : row;
+const checkValue = ({ rowKey: _key, ...row }: CheckRow): CheckValue => {
+  if ("savedRow" in row) return row;
+  const { appId, ...check } = row;
+  return {
+    ...check,
+    ...(appId === undefined
+      ? {}
+      : { appId: String(appId).trim() === "" ? NaN : Number(appId) }),
+  };
+};
+/** A repository's settings as the editor holds them, with keyed check rows. */
+export type RepositoryRow = Omit<RepositorySetting, "additionalChecks"> & {
+  additionalChecks: CheckRow[];
+};
 type Keyed<T> = T & { rowKey: string };
 export type GrantRow = Keyed<DeliveryPolicyValues["grants"][number]>;
 type VisibleCheck = Extract<
@@ -500,16 +605,17 @@ export function deliveryEditorDraft(values: Values): DeliveryPolicyDraft {
     grantKeys: grants.map((row) => row.rowKey),
     requiredCheckKeys: checks.map((row) => row.rowKey),
     grants: grants.map(({ rowKey: _key, ...row }) => row),
-    requiredChecks: checks.map(({ rowKey: _key, ...row }) => {
-      if ("savedRow" in row) return row;
-      const { appId, ...check } = row;
-      return {
-        ...check,
-        ...(appId === undefined
-          ? {}
-          : { appId: String(appId).trim() === "" ? NaN : Number(appId) }),
-      };
-    }),
+    requiredChecks: checks.map(checkValue),
+    ...(values.repositories === undefined
+      ? {}
+      : {
+          repositories: deliveryRows<RepositoryRow>(values.repositories).map(
+            (r) => ({
+              ...r,
+              additionalChecks: r.additionalChecks.map(checkValue),
+            }),
+          ),
+        }),
   };
 }
 

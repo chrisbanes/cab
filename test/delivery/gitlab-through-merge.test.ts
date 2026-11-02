@@ -35,7 +35,11 @@ async function throughMerge(w: World, mergeTrains = false) {
     mode: "through-merge",
     credentialRef: null,
     grants: delivery.configuration(w.f.projectId).grants,
+    // The legacy project-wide list still applies; the repository's entry sets the method.
     requiredChecks: [{ name: "pipeline" }],
+    repositories: [
+      { repositoryId: "42", mergeMethod: "squash", requiredChecks: [] },
+    ],
   });
   w.remote.state.project = {
     id: 42,

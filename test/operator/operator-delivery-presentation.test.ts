@@ -3,8 +3,14 @@ import { test } from "node:test";
 import {
   checkStatusWord,
   codeHostActionLabel,
+  codeHostChecksSummary,
+  codeHostMergeMethods,
+  defaultBranchMethodsNote,
+  mergeMethodNotAllowedWarning,
+  noRequiredChecksWarning,
   deliveryActionLine,
   deliveryBlockerSentence,
+  mergeBlockerText,
   pullRequestReference,
   pullRequestRepository,
   pullRequestStateLabel,
@@ -33,6 +39,23 @@ test("delivery blockers read as sentences and unknown codes fall back", () => {
     assert.equal(deliveryBlockerSentence(code), sentence);
   for (const code of ["delivery-new-unknown-code", "constructor", ""])
     assert.equal(deliveryBlockerSentence(code), fallback);
+});
+
+test("merge blockers without a check or a method read as sentences, and other codes pass through", () => {
+  assert.equal(
+    mergeBlockerText("no-required-checks"),
+    "No required checks: neither the code host nor cab requires a check, so the merge is held.",
+  );
+  assert.equal(
+    mergeBlockerText("merge-method-not-configured"),
+    "No merge method: this repository has no configured merge method the code host allows, so the merge is held.",
+  );
+  for (const code of [
+    "check-build-unproved",
+    "merge-status-checking",
+    "constructor",
+  ])
+    assert.equal(mergeBlockerText(code), code);
 });
 
 test("pull request state labels cover open, draft, closed and merged", () => {
@@ -287,5 +310,47 @@ test("repository levels describe exact authority without crossing repository or 
   assert.equal(
     deliveryMergeWarning,
     "The lead will merge without asking once the merge gate reports no blockers. cab can't unmerge or revert a merge.",
+  );
+});
+
+test("a repository's code-host checks read live, absent or unavailable, and no checks at all is a warning", () => {
+  assert.equal(
+    codeHostChecksSummary("github", { status: "live", checks: [{}] }),
+    "GitHub requires these checks before merging:",
+  );
+  assert.equal(
+    codeHostChecksSummary("gitlab", { status: "live", checks: [] }),
+    "GitLab requires no checks before merging.",
+  );
+  for (const [reason, text] of [
+    ["credential-missing", "no credential can read them"],
+    ["provider-error", "the last read failed"],
+    ["timeout", "the read took too long"],
+    ["unsupported", "cab can't read them for this repository"],
+  ] as const)
+    assert.equal(
+      codeHostChecksSummary(undefined, { status: "unavailable", reason }),
+      `GitHub's required checks are unavailable: ${text}.`,
+    );
+  assert.equal(
+    noRequiredChecksWarning("gitlab"),
+    "No required checks: neither GitLab nor cab requires a check, so cab holds every merge for this repository. Add an additional required check or a code-host rule.",
+  );
+});
+
+test("the default branch's merge methods are guidance, and a method it doesn't allow is a warning", () => {
+  assert.deepEqual(codeHostMergeMethods.github, ["merge", "squash", "rebase"]);
+  assert.deepEqual(codeHostMergeMethods.gitlab, ["merge", "squash"]);
+  assert.equal(
+    defaultBranchMethodsNote(["squash"]),
+    "The default branch allows: squash. Merges into other branches follow their own rules.",
+  );
+  assert.equal(
+    defaultBranchMethodsNote([]),
+    "The default branch allows: no method cab can use. Merges into other branches follow their own rules.",
+  );
+  assert.equal(
+    mergeMethodNotAllowedWarning("merge"),
+    "The default branch doesn't allow merge commit, so cab holds merges into it until the method or the branch's rules change.",
   );
 });
