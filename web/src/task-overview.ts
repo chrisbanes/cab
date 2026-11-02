@@ -1,4 +1,7 @@
-import type { TaskRead } from "../../src/operator/contracts.js";
+import type {
+  SourceHoldReason,
+  TaskRead,
+} from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
@@ -169,6 +172,35 @@ export const jiraFacts = (source: NonNullable<Data["source"]>) => ({
 /** The issue tracker a task was imported from, as the operator reads it. */
 export const trackerName = (source: Data["source"]) =>
   source?.identity.tracker === "jira" ? "Jira" : "GitHub";
+
+/** The imported issue's Project field values as `field: option`, falling back to the option's ID. */
+export const projectFieldRows = (source: NonNullable<Data["source"]>) =>
+  source.memberships.flatMap((m) =>
+    m.projectFields.map((f, i) => ({
+      key: `${m.selectionId}:${i}`,
+      text: `${f.fieldName ?? f.fieldNodeId}: ${f.optionName ?? f.optionNodeId}`,
+    })),
+  );
+
+const sourceHoldReasons: Record<SourceHoldReason, string> = {
+  closed: "The issue was closed after import. Reopen it first, then resume.",
+  withdrawn:
+    "The issue is no longer selected for this project. Select it again first, then resume.",
+  "readiness-lost":
+    "The issue no longer meets the project's readiness rule. Make it ready again; a complete sync then releases this hold, or resume once it is ready.",
+  "closure-read-unavailable":
+    "cab could not read whether it closed the issue itself. Reopen the issue first, then resume.",
+  "closure-attribution-unproved":
+    "The issue was closed and cab could not show that its own delivery closed it. Reopen the issue first, then resume.",
+};
+
+/** Why the source holds the task, in provider-neutral words; null is a reason the read does not name. */
+export const sourceHoldReasonText = (reason: SourceHoldReason | null) =>
+  reason ? sourceHoldReasons[reason] : "The source holds this task.";
+
+/** What resuming a source hold does and does not mean. */
+export const sourceHoldResumeCaveat =
+  "Resuming clears only this source hold. Readiness and configuration eligibility do not confirm runtime admission or execution.";
 
 const syncProblems = {
   "sync-unavailable": "sync unavailable",

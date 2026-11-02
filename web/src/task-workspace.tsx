@@ -9,6 +9,7 @@ import {
   SendFeedback,
 } from "./coordination-actions.js";
 import { QuestionHolds, QuestionResponse } from "./question-response.js";
+import { SourceHoldCard } from "./source-hold.js";
 import { StartAgainAction, taskChangedEvent } from "./task-restart.js";
 import { CommandNetworkLine, PolicyDisclosure } from "./execution-notice.js";
 import { executionSummary } from "./execution-runtime.js";
@@ -755,6 +756,7 @@ export function TaskWorkspace({
     onRefresh?.();
   };
   const [startedAgain, setStartedAgain] = useState<string | null>(null);
+  const [resumedSource, setResumedSource] = useState<string | null>(null);
   // The header's Reset task sits outside this page and asks it to reread.
   const refreshRef = useRef(refreshAll);
   refreshRef.current = refreshAll;
@@ -2204,6 +2206,16 @@ export function TaskWorkspace({
                     onChanged={refreshAll}
                   />
                 )}
+                {/* Kept once sent, so the answer outlives the hold it cleared. */}
+                {(data.source?.hold?.active || resumedSource === taskId) && (
+                  <SourceHoldCard
+                    client={client}
+                    session={session}
+                    task={data}
+                    onSend={() => setResumedSource(taskId)}
+                    onChanged={refreshAll}
+                  />
+                )}
                 {nextActor.code === "execution-uncertain" &&
                   !data.execution.holds.uncertainty && (
                     <ActionLink
@@ -2231,6 +2243,7 @@ export function TaskWorkspace({
                   />
                 )}
                 {!nextActor.operator &&
+                  !data.source?.hold?.active &&
                   !data.completionRequests.some(
                     (r) => r.status === "pending",
                   ) &&

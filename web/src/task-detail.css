@@ -337,6 +337,11 @@ a.task-source-chip:hover {
   padding-top: var(--space-12);
 }
 
+/* The source-hold decision keeps its distance from the waits listed after it. */
+.decision-card [data-source-hold] {
+  margin-bottom: var(--space-12);
+}
+
 /* Overview: one main column of cards beside the inspector from 1024px; stacked below. */
 .task-overview {
   display: grid;
