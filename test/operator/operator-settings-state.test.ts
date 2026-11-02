@@ -1801,3 +1801,147 @@ test("delivery typed operation read recovers the original version after lost sav
   );
   assert.equal(f.runtime.turns, 0);
 });
+
+test("normalized source and link Check uses receipt readback first while explicit legacy forms still resend", async () => {
+  const projectId = randomUUID();
+  const reference = (section: "source" | "repositories") => ({
+    savedRow: { projectId, section, version: 2, index: 0 },
+    keep: true,
+  });
+  const cases = [
+    {
+      command: { type: "github.configure", selections: [reference("source")] },
+      result: {
+        commandType: "github.configure",
+        credentialConfigured: true,
+        selectionCount: 1,
+      },
+    },
+    {
+      command: { type: "jira.configure", selections: [reference("source")] },
+      result: { commandType: "jira.configure", selectionCount: 1 },
+    },
+    {
+      command: {
+        type: "repositories.configure",
+        repositories: [reference("repositories")],
+      },
+      result: { commandType: "repositories.configure", repositoryCount: 1 },
+    },
+  ];
+  for (const entry of cases) {
+    const command = {
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      ...entry.command,
+    };
+    const receipt = {
+      kind: "configuration",
+      key: command.key,
+      recorded: true,
+      result: { resourceId: projectId, version: 3, ...entry.result },
+    };
+    const calls: string[] = [],
+      bodies: string[] = [];
+    let recorded = false;
+    const client = new OperatorClient(async (path, init) => {
+      if (init?.method === "POST") {
+        calls.push("POST");
+        bodies.push(String(init.body));
+        throw Error("unknown");
+      }
+      calls.push("GET");
+      const query = new URL(String(path), "http://fixture").searchParams;
+      assert.equal(query.get("type"), command.type);
+      assert.equal(query.get("scope"), `project:${projectId}`);
+      assert.equal(query.get("key"), command.key);
+      return Response.json(
+        recorded ? recordedOperation(receipt) : missingOperation,
+      );
+    });
+    const draft = new ConfigurationDraft();
+    await draft.submit(client, command, "csrf");
+    await draft.reconcile(client, "csrf");
+    assert.equal(draft.phase, "unknown");
+    assert.deepEqual(calls, ["POST", "GET", "POST"]);
+    assert.deepEqual(bodies, [draft.bytes, draft.bytes]);
+    recorded = true;
+    await draft.reconcile(client, "csrf");
+    assert.equal(draft.phase, "recorded");
+    assert.deepEqual(calls, ["POST", "GET", "POST", "GET"]);
+  }
+});
+
+test("opaque source unknown save recovers original receipt after later replacement and SQLite restart without resolving the new ordinal", async (t) => {
+  const { createOperatorFixture } = await import("../fixtures/operator-web.js");
+  const { OperatorApi } = await import("../../src/standalone/operator-api.js");
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  let api = new OperatorApi(f.service, [f.directory]);
+  const projectId = randomUUID();
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Source",
+    leadProfileId: null,
+  });
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [{ id: "original", kind: "search", query: "original query" }],
+    readiness: null,
+  });
+  const command = {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    selections: [
+      {
+        savedRow: { projectId, section: "source", version: 2, index: 0 },
+        keep: true,
+      },
+    ],
+  };
+  const calls: string[] = [];
+  const client = new OperatorClient(async (path, init) => {
+    if (init?.method === "POST") {
+      calls.push("POST");
+      await api.execute(JSON.parse(String(init.body)));
+      throw Error("lost");
+    }
+    calls.push("GET");
+    return Response.json(
+      await api.readOperation(
+        new URL(String(path), "http://fixture").searchParams,
+      ),
+    );
+  });
+  const draft = new ConfigurationDraft();
+  await draft.submit(client, command, "csrf");
+  assert.equal(draft.phase, "unknown");
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 3,
+    selections: [{ id: "replacement", kind: "search", query: "later query" }],
+    readiness: null,
+  });
+  await f.reopen();
+  api = new OperatorApi(f.service, [f.directory]);
+  await draft.reconcile(client, "csrf");
+  assert.equal(draft.phase, "recorded");
+  assert.equal(draft.details.version, 3);
+  assert.deepEqual(calls, ["POST", "GET"]);
+  assert.deepEqual(
+    f.service.domain().githubConfiguration(projectId).selections,
+    [{ id: "replacement", kind: "search", query: "later query" }],
+  );
+  assert.equal(f.service.domain().githubConfiguration(projectId).version, 4);
+  assert.equal(f.runtime.turns, 0);
+});

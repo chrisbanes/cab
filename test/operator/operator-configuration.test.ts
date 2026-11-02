@@ -2634,3 +2634,721 @@ test("delivery unknown normalized save is recovered by original operation after 
   );
   assert.equal(f.runtime.turns, 0);
 });
+
+test("opaque GitHub selections retain definitions readiness and closed mode with visible edits without activating", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:HIDDEN_SELECTION",
+  });
+  const hidden = {
+    id: "HIDDEN_SELECTION",
+    kind: "search" as const,
+    query: "is:open private query",
+  };
+  const visible = {
+    id: "visible",
+    kind: "repository" as const,
+    repositoryId: "R",
+    owner: "acme",
+    name: "app",
+  };
+  const readiness = {
+    mode: "all" as const,
+    conditions: [
+      {
+        kind: "label" as const,
+        operator: "has" as const,
+        name: "HIDDEN_SELECTION",
+      },
+    ],
+  };
+  domain.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    expectedVersion: 1,
+    selections: [hidden, visible],
+    readiness,
+    closedIssues: "done",
+  });
+  const read = (await api.readProjectConfiguration(projectId)).data.source;
+  assert.equal(read.selections[0]!.id, null);
+  assert.deepEqual(read.selections[0]!.savedRow, {
+    projectId,
+    section: "source",
+    version: 2,
+    index: 0,
+  });
+  assert.equal(read.readiness.kind, "unavailable");
+  assert.equal(JSON.stringify(read).includes(hidden.id), false);
+  const kept = { savedRow: read.selections[0]!.savedRow, keep: true };
+  const added = { id: "new", kind: "search", query: "new private query" };
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    selections: [kept, { id: visible.id, keep: true }, added],
+  });
+  assert.deepEqual(domain.githubConfiguration(projectId).selections, [
+    hidden,
+    visible,
+    added,
+  ]);
+  assert.deepEqual(domain.githubConfiguration(projectId).readiness, readiness);
+  assert.equal(domain.githubConfiguration(projectId).closedIssues, "done");
+  assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 3,
+    selections: [{ id: visible.id, keep: true }],
+  });
+  assert.deepEqual(domain.githubConfiguration(projectId).selections, [visible]);
+  assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("opaque source references reject foreign tracker section ordinal duplicates collisions and limits without writes", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:HIDDEN_SELECTION",
+  });
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [{ id: "HIDDEN_SELECTION", kind: "search", query: "query" }],
+    readiness: null,
+  });
+  const savedRow = { projectId, section: "source", version: 2, index: 0 };
+  const keep = { savedRow, keep: true };
+  const base = {
+    type: "github.configure",
+    projectId,
+    expectedVersion: 2,
+    selections: [keep],
+  };
+  const matrix: [object, number, string?][] = [
+    [{ selections: [keep, keep] }, 400, "selections.1.savedRow"],
+    [
+      {
+        selections: [
+          { savedRow: { ...savedRow, projectId: randomUUID() }, keep: true },
+        ],
+      },
+      400,
+      "selections.0.savedRow",
+    ],
+    [
+      {
+        selections: [
+          { savedRow: { ...savedRow, section: "repositories" }, keep: true },
+        ],
+      },
+      400,
+      "selections.0.savedRow",
+    ],
+    [
+      { selections: [{ savedRow: { ...savedRow, index: 1 }, keep: true }] },
+      400,
+      "selections.0.savedRow",
+    ],
+    [
+      { selections: [{ savedRow: { ...savedRow, version: 1 }, keep: true }] },
+      409,
+    ],
+    [
+      { type: "jira.configure", instance: "example.atlassian.net" },
+      400,
+      "selections.0.savedRow",
+    ],
+    [
+      {
+        selections: [
+          keep,
+          { id: "HIDDEN_SELECTION", kind: "search", query: "replacement" },
+        ],
+      },
+      400,
+      "selections.1.id",
+    ],
+    [
+      {
+        selections: [
+          { id: "HIDDEN_SELECTION", kind: "search", query: "replacement" },
+        ],
+      },
+      400,
+      "selections.0.id",
+    ],
+    [
+      {
+        selections: [
+          ...Array.from({ length: 30 }, (_, i) => ({
+            id: `new-${i}`,
+            kind: "search",
+            query: "query",
+          })),
+          keep,
+        ],
+      },
+      400,
+      "selections",
+    ],
+  ];
+  for (const [extra, status, path] of matrix) {
+    const input = { ...base, key: randomUUID(), ...extra };
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, status);
+      if (path)
+        assert.ok(
+          error.fieldPaths?.includes(path),
+          JSON.stringify(error.fieldPaths),
+        );
+      assert.equal(JSON.stringify(error).includes("HIDDEN_SELECTION"), false);
+      return true;
+    });
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type:
+              input.type === "jira.configure"
+                ? "jira.configure"
+                : "github.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+  // A selection that became withheld since the read must be reviewed, not substituted by its old visible id.
+  const visible = { id: "BECOMES_HIDDEN", kind: "search", query: "query" };
+  await api.execute({
+    ...base,
+    key: randomUUID(),
+    selections: [keep, visible],
+  });
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    expectedVersion: 2,
+    credentialRef: "env:BECOMES_HIDDEN",
+  });
+  await assert.rejects(
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 3,
+      selections: [{ id: visible.id, keep: true }],
+    }),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 400 &&
+      error.fieldPaths?.[0] === "selections.0.id",
+  );
+  assert.equal(domain.githubConfiguration(projectId).version, 3);
+});
+
+test("opaque Jira selections preserve hidden IDs JQL readiness closed mode and instance beside visible edits", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const domain = f.service.domain();
+  const previousSite = process.env.HIDDEN_JIRA_ID;
+  process.env.HIDDEN_JIRA_ID = "example.atlassian.net";
+  t.after(() => {
+    if (previousSite === undefined) delete process.env.HIDDEN_JIRA_ID;
+    else process.env.HIDDEN_JIRA_ID = previousSite;
+  });
+  domain.execute({
+    type: "issue-tracker-credential.configure",
+    actor: "operator",
+    key: randomUUID(),
+    issueTracker: "jira",
+    instance: "example.atlassian.net",
+    credential: {
+      siteRef: "env:JIRA_SITE",
+      emailRef: "env:JIRA_EMAIL",
+      tokenRef: "env:JIRA_TOKEN",
+    },
+  });
+  domain.execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: "env:HIDDEN_JIRA_ID",
+  });
+  const hidden = {
+    id: "HIDDEN_JIRA_ID",
+    kind: "jql" as const,
+    jql: "project = PRIVATE",
+  };
+  const readiness = {
+    mode: "all" as const,
+    conditions: [
+      {
+        kind: "status" as const,
+        operator: "in" as const,
+        statusIds: ["ready"],
+      },
+    ],
+  };
+  domain.execute({
+    type: "jira.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    instance: "example.atlassian.net",
+    selections: [
+      hidden,
+      { id: "visible", kind: "jql", jql: "project = VISIBLE" },
+    ],
+    readiness,
+    closedIssues: "done",
+  });
+  let queries = 0;
+  f.service.jiraJqlErrors = async () => {
+    queries++;
+    return [];
+  };
+  const source = (await api.readProjectConfiguration(projectId)).data.source;
+  assert.equal(source.selections[0]!.id, null);
+  assert.equal(source.instance, null);
+  const input = {
+    type: "jira.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    selections: [
+      { savedRow: source.selections[0]!.savedRow, keep: true },
+      { id: "visible", kind: "jql", jql: "project = CHANGED" },
+    ],
+  };
+  const receipt = await api.execute(input);
+  const saved = domain.jiraConfiguration(projectId)!;
+  assert.equal(queries, 1);
+  assert.deepEqual(saved.selections, [
+    hidden,
+    { id: "visible", kind: "jql", jql: "project = CHANGED" },
+  ]);
+  assert.deepEqual(saved.readiness, readiness);
+  assert.equal(saved.closedIssues, "done");
+  assert.equal(saved.instance, "example.atlassian.net");
+  assert.equal(JSON.stringify(receipt).includes(hidden.id), false);
+  const wrongKind = {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 3,
+    selections: [
+      {
+        savedRow: { projectId, section: "source", version: 3, index: 0 },
+        keep: true,
+      },
+    ],
+  };
+  await assert.rejects(
+    api.execute(wrongKind),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 400,
+  );
+  await assert.rejects(
+    api.execute({
+      type: "jira.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 3,
+      instance: "other.atlassian.net",
+      selections: [
+        {
+          savedRow: { projectId, section: "source", version: 3, index: 0 },
+          keep: true,
+        },
+      ],
+    }),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 400 &&
+      error.fieldPaths?.[0] === "instance",
+  );
+  assert.equal(queries, 1);
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(
+    (
+      await reopened.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "jira.configure",
+          key: input.key,
+        }),
+      )
+    ).data,
+    { state: "recorded", receipt },
+  );
+  await assert.rejects(
+    reopened.execute(input),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.equal(f.service.domain().jiraConfiguration(projectId)!.version, 3);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("opaque GitHub and GitLab links preserve exact path ref host project path and still verify every checkout", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const github = join(f.directory, "opaque-gh"),
+    gitlab = join(f.directory, "opaque-gl"),
+    visible = join(f.directory, "visible-link");
+  await checkout(github, "https://github.com/acme/app.git");
+  await checkout(gitlab, "https://secret.example.com/group/app.git");
+  await checkout(visible, "https://github.com/acme/visible.git");
+  const envKey = "OPAQUE_LINK_ID",
+    previous = process.env[envKey];
+  process.env[envKey] = "secret.example.com";
+  t.after(() => {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  });
+  f.service.domain().execute({
+    ...deliveryInput(projectId),
+    actor: "operator",
+    credentialRef: `env:${envKey}`,
+  });
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: envKey,
+        path: github,
+        ref: "main",
+      },
+      {
+        codeHost: "gitlab",
+        host: "secret.example.com",
+        repositoryId: "42",
+        projectPath: "group/app",
+        path: gitlab,
+        ref: "main",
+      },
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "visible",
+        path: visible,
+        ref: "main",
+      },
+    ],
+  });
+  const saved = f.service.domain().repositoryLinks(projectId);
+  const read = (await api.readProjectConfiguration(projectId)).data
+    .repositories;
+  assert.ok(
+    read.links
+      .slice(0, 2)
+      .every(
+        (row) =>
+          row.repositoryId === null &&
+          row.host === null &&
+          row.ref === null &&
+          row.savedRow,
+      ),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(read),
+    /OPAQUE_LINK_ID|secret.example.com|group\/app|opaque-gh|opaque-gl/,
+  );
+  // The whole link is opaque when its host is withheld, even if its numeric ID alone is public.
+  const collision = {
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    repositories: [
+      {
+        codeHost: "gitlab",
+        host: "secret.example.com",
+        repositoryId: "42",
+        projectPath: "group/app",
+        path: gitlab,
+        ref: "main",
+      },
+    ],
+  };
+  await assert.rejects(
+    api.execute(collision),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 400 &&
+      error.fieldPaths?.[0] === "repositories.0.repositoryId",
+  );
+  assert.equal(f.service.domain().repositoryLinks(projectId).version, 2);
+  const originalKeep = {
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    repositories: [
+      ...read.links
+        .slice(0, 2)
+        .map((row) => ({ savedRow: row.savedRow, keep: true })),
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "visible",
+        ref: "HEAD",
+      },
+    ],
+  };
+  const originalReceipt = await api.execute(originalKeep);
+  assert.deepEqual(
+    f.service.domain().repositoryLinks(projectId).links,
+    saved.links.map((row, index) =>
+      index === 2 ? { ...row, ref: "HEAD" } : row,
+    ),
+  );
+  const current = (await api.readProjectConfiguration(projectId)).data
+    .repositories;
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 3,
+    repositories: [{ savedRow: current.links[1]!.savedRow, keep: true }],
+  });
+  assert.deepEqual(f.service.domain().repositoryLinks(projectId).links, [
+    saved.links[1],
+  ]);
+  // A retained link is not a verification bypass: changing its actual origin refuses the next save.
+  await promisify(execFile)("git", [
+    "-C",
+    gitlab,
+    "remote",
+    "set-url",
+    "origin",
+    "https://secret.example.com/group/other.git",
+  ]);
+  const last = (await api.readProjectConfiguration(projectId)).data
+    .repositories;
+  const bad = {
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 4,
+    repositories: [{ savedRow: last.links[0]!.savedRow, keep: true }],
+  };
+  await assert.rejects(
+    api.execute(bad),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 400 &&
+      error.fieldPaths?.[0] === "repositories.0.path",
+  );
+  assert.equal(f.service.domain().repositoryLinks(projectId).version, 4);
+  assert.deepEqual(
+    (
+      await api.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "repositories.configure",
+          key: bad.key,
+        }),
+      )
+    ).data,
+    { state: "not-recorded" },
+  );
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  await assert.rejects(
+    reopened.execute(originalKeep),
+    (error: unknown) =>
+      error instanceof OperatorApiError && error.status === 409,
+  );
+  assert.deepEqual(
+    (
+      await reopened.readOperation(
+        new URLSearchParams({
+          scope: `project:${projectId}`,
+          type: "repositories.configure",
+          key: originalKeep.key,
+        }),
+      )
+    ).data,
+    { state: "recorded", receipt: originalReceipt },
+  );
+  assert.deepEqual(f.service.domain().repositoryLinks(projectId).links, [
+    saved.links[1],
+  ]);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("opaque repository handles reject section project ordinal duplicates stale versions and expanded limits", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  const path = join(f.directory, "kept-link");
+  await checkout(path, "https://github.com/acme/app.git");
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: "R",
+        path,
+        ref: "main",
+      },
+    ],
+  });
+  const savedRow = { projectId, section: "repositories", version: 2, index: 0 };
+  const keep = { savedRow, keep: true };
+  for (const [rows, status, field] of [
+    [[keep, keep], 400, "repositories.1.savedRow"],
+    [
+      [{ savedRow: { ...savedRow, section: "source" }, keep: true }],
+      400,
+      "repositories.0.savedRow",
+    ],
+    [
+      [{ savedRow: { ...savedRow, projectId: randomUUID() }, keep: true }],
+      400,
+      "repositories.0.savedRow",
+    ],
+    [
+      [{ savedRow: { ...savedRow, index: 1 }, keep: true }],
+      400,
+      "repositories.0.savedRow",
+    ],
+    [[{ savedRow: { ...savedRow, version: 1 }, keep: true }], 409, undefined],
+    [
+      [
+        keep,
+        {
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: "R",
+          path,
+          ref: "main",
+        },
+      ],
+      400,
+      "repositories.1.repositoryId",
+    ],
+    [
+      [
+        keep,
+        ...Array.from({ length: 20 }, (_, index) => ({
+          codeHost: "github",
+          host: "github.com",
+          repositoryId: `R-${index}`,
+          path,
+          ref: "main",
+        })),
+      ],
+      400,
+      "repositories",
+    ],
+  ] as const) {
+    const input = {
+      type: "repositories.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      repositories: rows,
+    };
+    await assert.rejects(api.execute(input), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.equal(error.status, status);
+      if (field)
+        assert.ok(
+          error.fieldPaths?.includes(field),
+          JSON.stringify(error.fieldPaths),
+        );
+      return true;
+    });
+    assert.equal(f.service.domain().repositoryLinks(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "repositories.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  }
+});
+
+test("opaque source reads fail closed without exclusion evidence and refuse keep normalization without mutations", async (t) => {
+  const { f, api, projectId } = await deliveryFixture(t);
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    selections: [
+      { id: "saved-private", kind: "search", query: "private query" },
+    ],
+    readiness: null,
+  });
+  const original = DomainStore.prototype.deliveryCredentialReference;
+  DomainStore.prototype.deliveryCredentialReference = () => {
+    throw new Error("private exclusion lookup unavailable");
+  };
+  try {
+    const read = (await api.readProjectConfiguration(projectId)).data.source;
+    assert.equal(read.selections[0]!.id, null);
+    assert.equal(JSON.stringify(read).includes("saved-private"), false);
+    const input = {
+      type: "github.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      selections: [{ savedRow: read.selections[0]!.savedRow, keep: true }],
+    };
+    await assert.rejects(
+      api.execute(input),
+      (error: unknown) =>
+        error instanceof OperatorApiError && error.status === 503,
+    );
+    assert.equal(f.service.domain().githubConfiguration(projectId).version, 2);
+    assert.deepEqual(
+      (
+        await api.readOperation(
+          new URLSearchParams({
+            scope: `project:${projectId}`,
+            type: "github.configure",
+            key: input.key,
+          }),
+        )
+      ).data,
+      { state: "not-recorded" },
+    );
+  } finally {
+    DomainStore.prototype.deliveryCredentialReference = original;
+  }
+});

@@ -101,6 +101,16 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
   return "expectedVersion" in c && result.version === c.expectedVersion + 1;
 }
 
+/** Only translated settings writes need receipt readback before their frozen command can be retried. */
+const translatedConfiguration = (command: OperatorCommand) =>
+  command.type === "delivery.configure" ||
+  ((command.type === "github.configure" || command.type === "jira.configure") &&
+    command.selections.some((row) => "savedRow" in row)) ||
+  (command.type === "github.configure" && command.readiness === undefined) ||
+  (command.type === "jira.configure" && command.instance === undefined) ||
+  (command.type === "repositories.configure" &&
+    command.repositories.some((row) => "savedRow" in row));
+
 /** A UUID record key, such as a project override, kept so the error names its own field. */
 const uuidSegment =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -520,9 +530,16 @@ export class ConfigurationDraft {
     this.changed();
     if (generation !== this.generation) return;
     let result: CommandState;
-    if (c.type === "delivery.configure" && !currentAuthentication()) {
+    if (translatedConfiguration(c) && !currentAuthentication()) {
       result = { state: "unknown", command: c, code: "unauthenticated" };
-    } else if (checkReceipt && c.type === "delivery.configure") {
+    } else if (
+      checkReceipt &&
+      (c.type === "delivery.configure" ||
+        c.type === "github.configure" ||
+        c.type === "jira.configure" ||
+        c.type === "repositories.configure") &&
+      translatedConfiguration(c)
+    ) {
       try {
         const operation = await client.operation({
           scope: `project:${c.projectId}`,
@@ -549,7 +566,7 @@ export class ConfigurationDraft {
       result = await client.command(c, csrf);
     }
     if (generation !== this.generation) return;
-    if (c.type === "delivery.configure" && !currentAuthentication())
+    if (translatedConfiguration(c) && !currentAuthentication())
       result = { state: "unknown", command: c, code: "unauthenticated" };
     const disposition = this.lifecycle.settle(
       result,

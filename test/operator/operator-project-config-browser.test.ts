@@ -4942,3 +4942,111 @@ test("Status mapping is keyboard operable at phone width", async (_t, journey) =
   assert.ok((box?.height ?? 0) >= 32);
   await noPageOverflow(page);
 });
+
+test("opaque saved rows support keyboard remove undo and discard while a visible source change keeps them", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+    phone,
+  );
+  const d = f.service.domain();
+  const hidden = {
+    id: "HIDDEN_UI_SOURCE",
+    kind: "search" as const,
+    query: "private saved query",
+  };
+  d.execute({
+    type: "delivery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: f.service.delivery().configuration(ids.atlas).version,
+    mode: "reviewable-pr",
+    credentialRef: "env:HIDDEN_UI_SOURCE",
+    grants: [],
+    requiredChecks: [],
+  });
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [hidden],
+    readiness: null,
+    closedIssues: "skip",
+  });
+  await refresh(page);
+  const remove = () =>
+    page.getByRole("button", {
+      name: "Remove unavailable source 1",
+      exact: true,
+    });
+  await remove().focus();
+  await page.keyboard.press("Space");
+  const undo = page.getByRole("button", {
+    name: "Undo remove unavailable source 1",
+    exact: true,
+  });
+  await undo.waitFor();
+  assert.equal(
+    await undo.evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page.keyboard.press("Space");
+  await remove().waitFor();
+  await remove().click();
+  await page
+    .getByRole("button", { name: "Discard changes", exact: true })
+    .click();
+  await remove().waitFor();
+  assert.equal(await showsText(page, hidden.id), false);
+  await page
+    .getByLabel("Closed GitHub issues", { exact: true })
+    .selectOption("done");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.deepEqual(d.githubConfiguration(ids.atlas).selections, [hidden]);
+  assert.equal(d.githubConfiguration(ids.atlas).closedIssues, "done");
+  const api = new OperatorApi(f.service, [f.directory]);
+  await api.execute({
+    type: "repositories.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.repositoryLinks(ids.atlas).version,
+    repositories: [
+      {
+        codeHost: "github",
+        host: "github.com",
+        repositoryId: hidden.id,
+        path: ids.checkout,
+        ref: "main",
+      },
+    ],
+  });
+  await page.goto(
+    `${web.origin}/app/projects/${ids.atlas}/settings?tab=repositories`,
+  );
+  const linkRemove = () =>
+    page.getByRole("button", {
+      name: "Remove repository Unavailable saved repository link 1",
+      exact: true,
+    });
+  await linkRemove().focus();
+  await page.keyboard.press("Space");
+  await page
+    .getByRole("button", {
+      name: "Undo remove repository Unavailable saved repository link 1",
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Discard changes", exact: true })
+    .click();
+  await linkRemove().waitFor();
+  assert.equal(
+    await page.getByLabel("Linked repository ref", { exact: true }).count(),
+    0,
+  );
+  assert.equal(await showsText(page, hidden.id), false);
+});

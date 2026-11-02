@@ -8,7 +8,16 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
-import { gitLabHostSchema } from "../core/repository-links.js";
+import {
+  gitLabHostSchema,
+  repositoriesConfigurationCommandSchema,
+} from "../core/repository-links.js";
+import {
+  githubConfigurationCommandSchema,
+  githubConfigurationSchema,
+  jiraConfigurationSchema,
+  closedIssuesSchema,
+} from "../core/github-source-contracts.js";
 import {
   CommandResultValidationError,
   type DomainCommandResultMap,
@@ -121,6 +130,7 @@ import {
   operationScopeSchema,
   operationTypeSchema,
   operatorCommandSchema,
+  type savedConfigurationRowSchema,
   profileConfigurationSchema,
   profilePrivateValuesSchema,
   profileInstructionsSchema,
@@ -6424,19 +6434,34 @@ export class OperatorApi {
         ),
         repositories: {
           version: links.version,
-          links: links.links.map((r) => ({
-            repositoryId: this.safe(r.repositoryId, excluded),
-            codeHost: r.codeHost,
-            host: r.host,
-            ref: this.safe(r.ref, excluded),
-          })),
+          links: links.links.map((r, index) => {
+            const available = [r.repositoryId, r.host, r.ref].every((value) =>
+              this.disclosable(value, excluded),
+            );
+            return {
+              repositoryId: available ? r.repositoryId : null,
+              codeHost: r.codeHost,
+              host: available ? r.host : null,
+              ref: available ? r.ref : null,
+              ...(!available
+                ? {
+                    savedRow: {
+                      projectId,
+                      section: "repositories" as const,
+                      version: links.version,
+                      index,
+                    },
+                  }
+                : {}),
+            };
+          }),
         },
         source: {
           version: g.version,
           ...(jira
             ? {
                 tracker: "jira" as const,
-                instance: this.safe(jira.instance, excluded),
+                instance: this.exact(jira.instance, excluded),
               }
             : {}),
           credentialConfigured: jira
@@ -6446,23 +6471,42 @@ export class OperatorApi {
             : g.credentialRef !== null,
           ...(credential ? { credential } : {}),
           selections: [
-            ...(jira?.selections ?? []).map((s) => ({
+            ...(jira?.selections ?? []).map((s, index) => ({
               id: this.exact(s.id, excluded),
               kind: "jql" as const,
               descriptor: null,
               active: active.includes(s.id),
+              savedRow: {
+                projectId,
+                section: "source" as const,
+                version: jira!.version,
+                index,
+              },
             })),
-            ...g.selections.map((s) => ({
+            ...g.selections.map((s, index) => ({
               id: this.exact(s.id, excluded),
+              ...(this.exact(s.id, excluded) === null
+                ? {
+                    savedRow: {
+                      projectId,
+                      section: "source" as const,
+                      version: g.version,
+                      index,
+                    },
+                  }
+                : {}),
               kind: s.kind,
-              descriptor: this.safe(
-                s.kind === "repository"
-                  ? `${s.owner}/${s.name}`
-                  : s.kind === "project"
-                    ? s.projectNodeId
-                    : null,
-                excluded,
-              ),
+              descriptor:
+                this.exact(s.id, excluded) === null
+                  ? null
+                  : this.exact(
+                      s.kind === "repository"
+                        ? `${s.owner}/${s.name}`
+                        : s.kind === "project"
+                          ? s.projectNodeId
+                          : null,
+                      excluded,
+                    ),
               active: active.includes(s.id),
             })),
           ],
@@ -7218,10 +7262,7 @@ export class OperatorApi {
   }
   /** Refuses the whole save when Jira rejects any new or changed JQL. */
   private async verifyJiraSelections(
-    c: Extract<
-      z.infer<typeof operatorCommandSchema>,
-      { type: "jira.configure" }
-    >,
+    c: Extract<DomainCommand, { type: "jira.configure" }>,
   ) {
     const current = this.domain().jiraConfiguration(c.projectId),
       excluded = await this.exclusions(c.projectId);
@@ -8121,7 +8162,254 @@ export class OperatorApi {
     });
   }
 
-  private deliveryInputError(error: z.ZodError) {
+  private async normalizeConfigurationRows(
+    c: Extract<
+      z.output<typeof operatorCommandSchema>,
+      { type: "github.configure" | "jira.configure" | "repositories.configure" }
+    >,
+  ) {
+    this.requireProject(c.projectId);
+    const domain = this.domain();
+    const rows =
+      c.type === "repositories.configure" ? c.repositories : c.selections;
+    const hasReferences = rows.some((row) => "savedRow" in row);
+    const jira = domain.jiraConfiguration(c.projectId);
+    const source = domain.githubConfiguration(c.projectId);
+    const repositories = domain.repositoryLinks(c.projectId);
+    const version =
+      c.type === "repositories.configure"
+        ? repositories.version
+        : source.version;
+    // The same project/version/index cannot select a row from the other tracker.
+    if (
+      hasReferences &&
+      c.type !== "repositories.configure" &&
+      (c.type === "jira.configure") !== (jira !== null)
+    )
+      throw new DomainPolicyError(
+        "invalid-input",
+        "Saved source belongs to another tracker",
+        [`selections.${rows.findIndex((row) => "savedRow" in row)}.savedRow`],
+      );
+    const used = new Set<number>();
+    const resolve = (
+      reference: z.output<typeof savedConfigurationRowSchema>,
+      section: "source" | "repositories",
+      length: number,
+      path: string,
+    ) => {
+      if (reference.projectId !== c.projectId || reference.section !== section)
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Saved row belongs to another configuration",
+          [path],
+        );
+      if (
+        reference.version !== c.expectedVersion ||
+        version !== c.expectedVersion
+      )
+        throw new DomainConflictError("Saved configuration version changed");
+      if (reference.index >= length || used.has(reference.index))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Saved row is missing or repeated",
+          [path],
+        );
+      used.add(reference.index);
+      return reference.index;
+    };
+    const { key, projectId, expectedVersion } = c;
+    const base = {
+      key,
+      projectId,
+      expectedVersion,
+      actor: "operator" as const,
+    };
+    const normalized = (() => {
+      if (c.type === "repositories.configure") {
+        const expanded = c.repositories.map((row, index) => {
+          if (!("savedRow" in row)) return row;
+          const link =
+            repositories.links[
+              resolve(
+                row.savedRow,
+                "repositories",
+                repositories.links.length,
+                `repositories.${index}.savedRow`,
+              )
+            ]!;
+          // Reuse the domain's path/projectPath retention and verification; never copy storage-only metadata.
+          return {
+            codeHost: link.codeHost,
+            host: link.host,
+            repositoryId: link.repositoryId,
+            ref: link.ref,
+          };
+        });
+        this.uniqueConfigurationIds(
+          expanded.map((row) => row.repositoryId),
+          "repositories",
+          "repositoryId",
+        );
+        return {
+          ...base,
+          type: c.type,
+          ...repositoriesConfigurationCommandSchema.parse({
+            repositories: expanded,
+          }),
+        };
+      }
+      if (c.type === "github.configure") {
+        const {
+          type: _type,
+          key: _key,
+          projectId: _projectId,
+          expectedVersion: _version,
+          ...policy
+        } = c;
+        const expanded = c.selections.map((row, index) =>
+          "savedRow" in row
+            ? {
+                id: source.selections[
+                  resolve(
+                    row.savedRow,
+                    "source",
+                    source.selections.length,
+                    `selections.${index}.savedRow`,
+                  )
+                ]!.id,
+                keep: true as const,
+              }
+            : row,
+        );
+        this.uniqueConfigurationIds(
+          expanded.map((row) => row.id),
+          "selections",
+          "id",
+        );
+        return {
+          ...base,
+          type: c.type,
+          ...githubConfigurationCommandSchema
+            .extend({
+              credentialRef:
+                githubConfigurationSchema.shape.credentialRef.optional(),
+            })
+            .parse({
+              ...policy,
+              selections: expanded,
+              readiness:
+                c.readiness === undefined ? source.readiness : c.readiness,
+            }),
+        };
+      }
+      const {
+        type: _type,
+        key: _key,
+        projectId: _projectId,
+        expectedVersion: _version,
+        ...policy
+      } = c;
+      if (
+        hasReferences &&
+        c.instance !== undefined &&
+        c.instance !== jira?.instance
+      )
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Saved source belongs to another site",
+          ["instance"],
+        );
+      const expanded = c.selections.map((row, index) =>
+        "savedRow" in row
+          ? jira!.selections[
+              resolve(
+                row.savedRow,
+                "source",
+                jira!.selections.length,
+                `selections.${index}.savedRow`,
+              )
+            ]!
+          : row,
+      );
+      this.uniqueConfigurationIds(
+        expanded.map((row) => row.id),
+        "selections",
+        "id",
+      );
+      return {
+        ...base,
+        type: c.type,
+        ...jiraConfigurationSchema
+          .extend({
+            closedIssues: closedIssuesSchema.optional(),
+            readiness: jiraConfigurationSchema.shape.readiness.optional(),
+          })
+          .parse({
+            ...policy,
+            instance: c.instance === undefined ? jira?.instance : c.instance,
+            selections: expanded,
+          }),
+      };
+    })();
+    // Preserve exact legacy input and replay before current exclusion/version checks.
+    const recorded = !hasReferences
+      ? domain.recordedCommand(normalized)
+      : undefined;
+    if (recorded !== undefined) return normalized;
+    if (version !== c.expectedVersion)
+      throw new DomainConflictError("Configuration version changed");
+    const fence = this.configurationVisibility();
+    const excluded = await this.exclusions(c.projectId);
+    if (!excluded || fence === undefined)
+      throw new OperatorApiError(503, "unavailable");
+    if (fence !== this.configurationVisibility())
+      throw new DomainConflictError("Configuration changed during validation");
+    const hiddenIds =
+      c.type === "repositories.configure"
+        ? repositories.links
+            .filter(
+              (link) =>
+                ![link.repositoryId, link.host, link.ref].every((value) =>
+                  this.disclosable(value, excluded),
+                ),
+            )
+            .map((link) => link.repositoryId)
+        : (jira?.selections ?? source.selections)
+            .filter((row) => !this.disclosable(row.id, excluded))
+            .map((row) => row.id);
+    for (const [index, row] of rows.entries()) {
+      if ("savedRow" in row) continue;
+      const id = "repositoryId" in row ? row.repositoryId : row.id;
+      if (hiddenIds.includes(id))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "A saved unavailable identity cannot be replaced explicitly",
+          [
+            `${c.type === "repositories.configure" ? "repositories" : "selections"}.${index}.${c.type === "repositories.configure" ? "repositoryId" : "id"}`,
+          ],
+        );
+    }
+    return normalized;
+  }
+  private uniqueConfigurationIds(
+    ids: string[],
+    field: string,
+    identity: string,
+  ) {
+    const seen = new Set<string>();
+    for (const [index, id] of ids.entries()) {
+      if (seen.has(id))
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Configuration identities must be unique",
+          [`${field}.${index}.${identity}`],
+        );
+      seen.add(id);
+    }
+  }
+
+  private configurationInputError(error: z.ZodError) {
     const paths = (
       issues: z.ZodError["issues"],
       parent: PropertyKey[] = [],
@@ -8310,13 +8598,24 @@ export class OperatorApi {
         input &&
         typeof input === "object" &&
         "type" in input &&
-        input.type === "delivery.configure"
+        [
+          "delivery.configure",
+          "github.configure",
+          "jira.configure",
+          "repositories.configure",
+        ].includes(String(input.type))
       )
-        throw this.deliveryInputError(parsed.error);
+        throw this.configurationInputError(parsed.error);
       throw parsed.error;
     }
-    const c = parsed.data;
+    const inputCommand = parsed.data;
     try {
+      const c =
+        inputCommand.type === "github.configure" ||
+        inputCommand.type === "jira.configure" ||
+        inputCommand.type === "repositories.configure"
+          ? await this.normalizeConfigurationRows(inputCommand)
+          : inputCommand;
       if (
         c.type === "drafting.start" ||
         c.type === "drafting.stop" ||
@@ -8879,8 +9178,16 @@ export class OperatorApi {
         ...(saved.resumedLead ? { resumedLead: true } : {}),
       });
     } catch (error) {
-      if (c.type === "delivery.configure" && error instanceof z.ZodError)
-        throw this.deliveryInputError(error);
+      if (
+        [
+          "delivery.configure",
+          "github.configure",
+          "jira.configure",
+          "repositories.configure",
+        ].includes(inputCommand.type) &&
+        error instanceof z.ZodError
+      )
+        throw this.configurationInputError(error);
       if (error instanceof OperatorApiError || error instanceof z.ZodError)
         throw error;
       if (error instanceof LocalReviewAnchorRequiredError)

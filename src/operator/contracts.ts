@@ -2108,9 +2108,32 @@ const deliverySavedRowSchema = z
     index: z.number().int().nonnegative().safe(),
   })
   .strict();
+export const savedConfigurationRowSchema = deliverySavedRowSchema
+  .extend({
+    section: z.enum(["source", "repositories"]),
+  })
+  .strict();
+const keptConfigurationRowSchema = z
+  .object({ savedRow: savedConfigurationRowSchema, keep: z.literal(true) })
+  .strict();
 const keptDeliveryRowSchema = z
   .object({ savedRow: deliverySavedRowSchema, keep: z.literal(true) })
   .strict();
+const repositoryConfigurationRowSchema = z
+  .unknown()
+  .transform((input, context) => {
+    const parsed = repositoriesConfigurationCommandSchema.safeParse({
+      repositories: [input],
+    });
+    if (parsed.success) return parsed.data.repositories[0]!;
+    for (const issue of parsed.error.issues)
+      context.addIssue({
+        code: "custom",
+        path: issue.path.slice(2),
+        message: issue.message,
+      });
+    return z.NEVER;
+  });
 const unavailableDeliveryRowSchema = z
   .object({
     kind: z.literal("unavailable"),
@@ -2602,7 +2625,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       ...domainBase,
       type: z.literal("repositories.configure"),
       expectedVersion: revision,
-      ...repositoriesConfigurationCommandSchema.shape,
+      repositories: z
+        .array(
+          z.union([
+            repositoryConfigurationRowSchema,
+            keptConfigurationRowSchema,
+          ]),
+        )
+        .max(20),
     })
     .strict(),
   z
@@ -2611,6 +2641,21 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("jira.configure"),
       expectedVersion: revision,
       ...jiraConfigurationSchema.shape,
+      instance: jiraConfigurationSchema.shape.instance.optional(),
+      selections: z
+        .array(
+          z.union([
+            jiraConfigurationSchema.shape.selections.element,
+            keptConfigurationRowSchema,
+          ]),
+        )
+        .max(30)
+        .refine((rows) => {
+          const ids = rows.flatMap((row) =>
+            "savedRow" in row ? [] : [row.id],
+          );
+          return new Set(ids).size === ids.length;
+        }, "Selection IDs must be unique"),
       closedIssues: closedIssuesSchema.optional(),
       /** Omitted keeps the saved rule; `null` removes it. */
       readiness: jiraConfigurationSchema.shape.readiness.optional(),
@@ -2622,6 +2667,21 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("github.configure"),
       expectedVersion: revision,
       ...githubConfigurationCommandSchema.shape,
+      selections: z
+        .array(
+          z.union([
+            githubConfigurationCommandSchema.shape.selections.element,
+            keptConfigurationRowSchema,
+          ]),
+        )
+        .max(30)
+        .refine((rows) => {
+          const ids = rows.flatMap((row) =>
+            "savedRow" in row ? [] : [row.id],
+          );
+          return new Set(ids).size === ids.length;
+        }, "Selection IDs must be unique"),
+      readiness: githubConfigurationCommandSchema.shape.readiness.optional(),
       credentialRef: githubConfigurationSchema.shape.credentialRef.optional(),
     })
     .strict(),
@@ -3533,16 +3593,18 @@ export const projectConfigurationSchema = envelope(
                 .object({
                   repositoryId: safeText,
                   codeHost: z.literal("github"),
-                  host: z.literal("github.com"),
+                  host: z.literal("github.com").nullable(),
                   ref: safeText,
+                  savedRow: savedConfigurationRowSchema.optional(),
                 })
                 .strict(),
               z
                 .object({
                   repositoryId: safeText,
                   codeHost: z.literal("gitlab"),
-                  host: z.string().min(1).max(253),
+                  host: z.string().min(1).max(253).nullable(),
                   ref: safeText,
+                  savedRow: savedConfigurationRowSchema.optional(),
                 })
                 .strict(),
             ]),
@@ -3564,6 +3626,7 @@ export const projectConfigurationSchema = envelope(
                 kind: z.enum(["repository", "search", "project", "jql"]),
                 descriptor: safeText,
                 active: z.boolean(),
+                savedRow: savedConfigurationRowSchema.optional(),
               })
               .strict(),
           ),
