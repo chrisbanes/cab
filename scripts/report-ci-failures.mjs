@@ -300,7 +300,9 @@ async function collectSameShaCorroboration({
               laterAttempt.conclusion === "success" &&
               laterAttempt.startedAt &&
               laterAttempt.completedAt &&
-              laterAttempt.startedAt > attempt.completedAt
+              laterAttempt.completedAt.slice(0, 10) <= until &&
+              Date.parse(laterAttempt.startedAt) >
+                Date.parse(attempt.completedAt)
             )
               laterPasses.push({
                 kind: "later-attempt",
@@ -323,7 +325,9 @@ async function collectSameShaCorroboration({
             candidate.status !== "completed" ||
             !validTimestamp(candidate.created_at) ||
             candidate.created_at.slice(0, 10) > until ||
-            !(candidate.created_at > failedRun.createdAt) ||
+            !(
+              Date.parse(candidate.created_at) > Date.parse(failedRun.createdAt)
+            ) ||
             !safeGithubUrl(candidate.html_url, owner, repo)
           )
             continue;

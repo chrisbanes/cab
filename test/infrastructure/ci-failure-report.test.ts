@@ -780,6 +780,56 @@ test("same-SHA report separates later runs and later attempts within the inclusi
   assert.equal(report.observedFailures, 1);
 });
 
+test("later-pass chronology excludes future attempts and equal timestamps with different precision", async () => {
+  for (const startedAt of ["2026-11-02T00:01:00Z", "2026-11-01T22:02:00Z"]) {
+    const source = runRecord({
+      id: 42,
+      run_attempt: 2,
+      conclusion: "success",
+      created_at: "2026-11-01T22:00:00.000Z",
+    });
+    const report = await api.renderReport({
+      since: "2026-10-19",
+      until: "2026-11-01",
+      transport: async (url: string) => {
+        if (url.includes("created="))
+          return apiResponse({ workflow_runs: [source] });
+        if (url.includes("head_sha="))
+          return apiResponse({
+            workflow_runs: [
+              {
+                ...source,
+                id: 43,
+                created_at: "2026-11-01T22:00:00Z",
+                html_url: "https://github.com/chrisbanes/cab/actions/runs/43",
+              },
+            ],
+          });
+        if (url.includes("attempts/")) {
+          const passing = url.includes("attempts/2");
+          return apiResponse({
+            jobs: [
+              {
+                id: passing ? 2 : 1,
+                name: passing ? "check" : "operator-2",
+                status: "completed",
+                conclusion: passing ? "success" : "failure",
+                started_at: passing ? startedAt : "2026-11-01T22:01:00Z",
+                completed_at: passing
+                  ? startedAt.replace(":01:", ":03:").replace(":02:", ":03:")
+                  : "2026-11-01T22:02:00.000Z",
+                html_url: `https://github.com/chrisbanes/cab/actions/runs/42/job/${passing ? 2 : 1}`,
+              },
+            ],
+          });
+        }
+        return apiResponse("✖ example failure (5ms)");
+      },
+    });
+    assert.deepEqual(report.sameShaCorroboration[0].laterPasses, []);
+  }
+});
+
 test("same-run success with missing chronology is not reported as a later pass", async () => {
   const sourceRun = runRecord({
     id: 50,
