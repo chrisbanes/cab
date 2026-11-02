@@ -267,7 +267,6 @@ test("retained rendered form actions, fields and mounted route controls match do
     );
   const paths = [
     "/",
-    `/project/${projectId}`,
     `/task/${taskId}`,
     `/app/tasks/${taskId}`,
     `/task/${importedId}`,
@@ -302,14 +301,6 @@ test("retained rendered form actions, fields and mounted route controls match do
   for (const c of [
     "project.create",
     "profile.create",
-    "task.create",
-    "project.configure",
-    "delivery.configure",
-    "routing.configure",
-    "github.configure",
-    "github.preview",
-    "github.refresh",
-    "github.place",
     "source.review",
     "task.configure",
     "profile.configure",
@@ -326,18 +317,6 @@ test("retained rendered form actions, fields and mounted route controls match do
     "name",
     "leadProfileId",
     "instructions",
-    "paused",
-    "guidance",
-    "candidateProfileIds",
-    "credentialRef",
-    "clearCredentialRef",
-    "mode",
-    "grants",
-    "requiredChecks",
-    "selections",
-    "readiness",
-    "closedIssues",
-    "repositories",
     "revoked",
     "capabilities",
     "title",
@@ -351,14 +330,13 @@ test("retained rendered form actions, fields and mounted route controls match do
     assert.ok(fields.has(name), `${name} remains rendered`);
   for (const path of [
     "/",
-    `/project/${projectId}`,
-    `/app/tasks/${taskId}`,
+    `/app/projects/${projectId}/settings`,
     `/profile/${profileId}`,
     "/runtime",
     "/app",
   ])
     assert.ok(destinations.has(path), `${path} cross-navigation retained`);
-  assert.ok(forms >= 20);
+  assert.equal(forms, 20);
   assert.equal(
     f.service.delivery().delivery(taskId)?.registeredWorkId,
     deliveryCaller.workId,

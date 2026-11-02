@@ -3,54 +3,11 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { DomainStore } from "../../src/core/domain.js";
-import { Store } from "../../src/core/store.js";
-import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import {
   OperatorApi,
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
 import { deliveryFixture } from "../fixtures/delivery-fixture.js";
-
-test("operator policy form exposes current version and grants without credential reference names", async () => {
-  const db = new DatabaseSync(":memory:");
-  new Store(db).ensureHost("test");
-  const domain = new DomainStore(db);
-  domain.migrate();
-  const projectId = randomUUID();
-  try {
-    domain.execute({
-      type: "project.create",
-      actor: "operator",
-      key: randomUUID(),
-      projectId,
-      name: "P",
-      leadProfileId: null,
-    });
-    const ui = new LocalOperatorUi(domain);
-    assert.match(ui.project(projectId), /data-command="delivery.configure"/);
-    await ui.submit({
-      type: "delivery.configure",
-      key: randomUUID(),
-      projectId,
-      expectedVersion: "1",
-      mode: "reviewable-pr",
-      credentialRef: "env:PRIVATE_DELIVERY_KEY",
-      branchPrefix: "team/",
-      grants:
-        '[{"action":"issue.comment","repositoryId":"R1","mode":"approval"}]',
-      requiredChecks: "[]",
-    });
-    assert.doesNotMatch(ui.project(projectId), /PRIVATE_DELIVERY_KEY/);
-    assert.match(ui.project(projectId), /Credential reference configured/);
-    assert.match(
-      ui.project(projectId),
-      /name="branchPrefix"[^>]*value="team\/"/,
-    );
-  } finally {
-    db.close();
-  }
-});
 
 type Fixture = Awaited<ReturnType<typeof deliveryFixture>>;
 const conflict = (error: unknown) =>

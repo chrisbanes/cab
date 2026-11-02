@@ -728,18 +728,28 @@ async function createProject(page, origin, name, leadProfileId) {
   return projectId;
 }
 
+async function readProjectConfiguration(page, origin, projectId) {
+  const response = await page
+    .context()
+    .request.get(`${origin}/api/operator/projects/${projectId}/configuration`);
+  required(response.status() === 200, "project-configuration-read");
+  return (await response.json()).data;
+}
+
 async function configureProject(page, origin, projectId, instructions, paused) {
-  await page.goto(`${origin}/project/${projectId}`);
-  const form = page.locator('form[data-command="project.configure"]');
-  if (instructions !== undefined)
-    await form.locator('textarea[name="instructions"]').fill(instructions);
-  const pauseControl = form.locator('input[name="paused"]');
-  const currentlyPaused = await pauseControl.isChecked();
-  if (currentlyPaused !== paused) {
-    if (paused) await pauseControl.check();
-    else await pauseControl.uncheck();
-  }
-  await saveForm(page, form);
+  const data = await readProjectConfiguration(page, origin, projectId);
+  const result = await postOperatorCommand(
+    { origin, browserContext: page.context() },
+    {
+      type: "project.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: data.project.version,
+      paused,
+      ...(instructions === undefined ? {} : { instructions }),
+    },
+  );
+  required(result.status === 200, "project-configuration-saved");
 }
 
 async function configureRoutingCandidates(
@@ -748,38 +758,33 @@ async function configureRoutingCandidates(
   projectId,
   candidateProfileIds,
 ) {
-  await page.goto(`${origin}/project/${projectId}`);
-  let form = page.locator('form[data-command="routing.configure"]');
-  const enabled = form.locator('input[name="enabled"]');
-  if (await enabled.isChecked()) await enabled.uncheck();
-  await form.locator('input[name="credentialRef"]').fill("");
-  await form
-    .locator('textarea[name="candidateProfileIds"]')
-    .fill(JSON.stringify(candidateProfileIds));
-  await saveForm(page, form);
-
-  await page.goto(`${origin}/project/${projectId}`);
-  form = page.locator('form[data-command="routing.configure"]');
-  const savedCandidateProfileIds = JSON.parse(
-    await form.locator('textarea[name="candidateProfileIds"]').inputValue(),
+  const data = await readProjectConfiguration(page, origin, projectId);
+  const result = await postOperatorCommand(
+    { origin, browserContext: page.context() },
+    {
+      type: "routing.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: data.routing.version,
+      enabled: false,
+      credentialRef: null,
+      candidateProfileIds,
+    },
   );
-  const credentialReference = await form
-    .locator('input[name="credentialRef"]')
-    .inputValue();
-  const routingDisabled = !(await form
-    .locator('input[name="enabled"]')
-    .isChecked());
+  required(result.status === 200, "routing-candidates-saved");
+  const saved = (await readProjectConfiguration(page, origin, projectId))
+    .routing;
   required(
-    routingDisabled &&
-      credentialReference === "" &&
-      JSON.stringify(savedCandidateProfileIds) ===
+    !saved.enabled &&
+      !saved.credentialConfigured &&
+      JSON.stringify(saved.candidateProfileIds) ===
         JSON.stringify([...new Set(candidateProfileIds)].sort()),
     "candidate-profiles-saved-with-routing-disabled-and-no-credential",
   );
   return {
-    candidateProfileIds: savedCandidateProfileIds,
-    routingDisabled,
-    credentialReferenceEmpty: credentialReference === "",
+    candidateProfileIds: saved.candidateProfileIds,
+    routingDisabled: !saved.enabled,
+    credentialReferenceEmpty: !saved.credentialConfigured,
   };
 }
 
@@ -794,16 +799,25 @@ async function createTask(
   repositories = [],
   ready = true,
 ) {
-  await page.goto(`${origin}/project/${projectId}`);
-  const create = page.locator('form[data-command="task.create"]');
-  const taskId = await create.locator('input[name="taskId"]').inputValue();
-  await create.locator('input[name="title"]').fill(title);
-  await create.locator('textarea[name="outcome"]').fill(initialOutcome);
-  required(
-    !(await create.locator('input[name="ready"]').isChecked()),
-    "new-task-unready",
+  const taskId = randomUUID();
+  const created = await postOperatorCommand(
+    { origin, browserContext: page.context() },
+    {
+      type: "task.create",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      title,
+      outcome: initialOutcome,
+      ready: false,
+    },
   );
-  await saveForm(page, create);
+  required(created.status === 200, "new-task-created-unready");
+  const savedTask = await readOperatorTask(
+    { origin, browserContext: page.context() },
+    taskId,
+  );
+  required(!savedTask.task.ready, "new-task-unready");
 
   await page.goto(`${origin}/task/${taskId}`);
   let edit = page.locator('form[data-command="task.configure"]');
@@ -1958,24 +1972,23 @@ async function configureChangedRevision(
   projectId,
   nextInstructions,
 ) {
-  await page.goto(`${current.origin}/project/${projectId}`);
-  const form = page.locator('form[data-command="project.configure"]');
-  await form.locator('textarea[name="instructions"]').fill(nextInstructions);
-  await form.locator('input[name="paused"]').check();
-  const replayFields = await form.evaluate((element) => {
-    const data = new FormData(element);
-    return Object.fromEntries(data.entries());
-  });
-  await saveForm(page, form);
-  const response = await current.browserContext.request.post(
-    `${current.origin}/command`,
-    {
-      headers: { origin: current.origin },
-      form: replayFields,
-      maxRedirects: 0,
-    },
+  const data = await readProjectConfiguration(page, current.origin, projectId);
+  const command = {
+    type: "project.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: data.project.version,
+    instructions: nextInstructions,
+    paused: true,
+  };
+  required(
+    (await postOperatorCommand(current, command)).status === 200,
+    "changed-instruction-saved",
   );
-  required(response.status() === 303, "changed-instruction-keyed-replay");
+  required(
+    (await postOperatorCommand(current, command)).status === 200,
+    "changed-instruction-keyed-replay",
+  );
   return Number(
     current.service.domain().project(projectId).instructionsRevision,
   );

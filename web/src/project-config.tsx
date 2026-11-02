@@ -472,9 +472,6 @@ function GeneralTab(p: TabProps) {
             <a key="tasks" href={`/app/projects/${projectId}`}>
               Project tasks
             </a>,
-            <a key="advanced" href={`/project/${projectId}`}>
-              Open advanced project editor
-            </a>,
           ]}
         />
       </div>
@@ -539,10 +536,10 @@ function CredentialReferences({
       )}
       {row(
         "Delivery policy, authority grants and required checks",
-        "Not edited here",
+        "Edit policy and scoped authority in Delivery",
         null,
-        `/project/${projectId}`,
-        "Open advanced editor",
+        `${page}?tab=delivery`,
+        "Change in Delivery",
       )}
     </Panel>
   );

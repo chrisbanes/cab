@@ -188,15 +188,17 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
       title: "PRIVATE-TASK-MARKER",
       outcome: "PRIVATE-OUTCOME-MARKER",
     })) as { id: string };
-    await ui.submit({
-      key: randomUUID(),
+
+    domain.execute({
       type: "routing.configure",
+      actor: "operator",
+      key: randomUUID(),
       projectId: project.id,
-      expectedVersion: "1",
-      enabled: "1",
+      expectedVersion: 1,
+      enabled: true,
       guidance: "route safely",
       credentialRef: "env:PRIVATE_CREDENTIAL_REFERENCE",
-      candidateProfileIds: JSON.stringify([profile.id]),
+      candidateProfileIds: [profile.id],
     });
 
     const port = await unusedPort();
@@ -260,7 +262,6 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
 
     const privatePaths = [
       "/",
-      `/project/${project.id}`,
       `/task/${task.id}`,
       `/profile/${profile.id}`,
       "/assignment/not-a-public-run",
@@ -1221,7 +1222,7 @@ test("legacy awaited slots and extension publications reject expired or logged-o
       }
       return captured;
     };
-    const revoked = await fetch(`${origin}/project/${projectId}`, {
+    const revoked = await fetch(`${origin}/profile/${profileId}`, {
       headers: { cookie: synchronous.cookie },
     });
     assert.equal(revoked.status, 401);

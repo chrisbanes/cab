@@ -151,9 +151,9 @@ test("General tab edits in place with Kept · Reveal instructions, a change list
   );
   assert.equal(
     await references
-      .getByRole("link", { name: "Open advanced editor" })
+      .getByRole("link", { name: "Change in Delivery" })
       .getAttribute("href"),
-    `/project/${ids.atlas}`,
+    `/app/projects/${ids.atlas}/settings?tab=delivery`,
   );
   assert.equal(
     await page
@@ -1988,7 +1988,7 @@ test("empty and very large instructions reveal and save exactly", async (_t, jou
   assert.equal(await outcomeMessages(page).count(), 0);
   assert.equal(await saveProject(page).isDisabled(), true);
 
-  const large = "日本é".repeat(5333) + "x";
+  const large = `${"日本é".repeat(5333)}x`;
   assert.equal(large.length, 16000);
   set(large);
   await page.reload();

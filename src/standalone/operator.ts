@@ -31,17 +31,8 @@ import type { OperatorPush } from "./operator-push.js";
 import { PushError } from "./web-push.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import {
-  closedIssuesSchema,
-  type Readiness,
-} from "../core/github-source-contracts.js";
-import {
-  noRuleText,
-  ruleText,
-  selectionCountsText,
-  unmetText,
-  zeroMatchWarning,
-} from "../operator/readiness-text.js";
+import type { Readiness } from "../core/github-source-contracts.js";
+import { unmetText } from "../operator/readiness-text.js";
 import {
   createServer,
   type IncomingMessage,
@@ -57,16 +48,11 @@ import {
 import type { OperatorAuth, OperatorSession } from "./operator-auth.js";
 import type { GitHubSourceReader } from "./github-source.js";
 import {
-  CredentialGitHubSourceReader,
-  gitHubSourceCredentialStatus,
+  type gitHubSourceCredentialStatus,
   sourceCredentialExplanation,
   type SourceCredentialReason,
 } from "./github-source-credential.js";
-import { ghEnvironment } from "./gh-credential.js";
-import {
-  selectionSchema,
-  type GitHubSourceStore,
-} from "../core/github-source.js";
+import type { GitHubSourceStore } from "../core/github-source.js";
 import {
   containsControlCharacters,
   decodeSegment,
@@ -99,14 +85,6 @@ const ruleView = (rule: Readiness | null, sources?: GitHubSourceStore) =>
       }
     : { kind: "none" as const };
 
-const closureText = (closure: "held" | "completed" | "unattributed" | null) =>
-  closure === "held"
-    ? ", closed on GitHub; held"
-    : closure === "completed"
-      ? ", closed on GitHub"
-      : closure === "unattributed"
-        ? ", closed on GitHub; closure not attributed to cab; held"
-        : "";
 const closureDetail = {
   held: "Held · closed on GitHub. Resolve the source hold after the issue reopens.",
   completed: "Done · closed on GitHub, not delivered by cab.",
@@ -151,36 +129,14 @@ export class LocalOperatorUi {
 
   constructor(
     private readonly store: DomainStore,
-    private readonly githubPreviewReader: (
+    _githubPreviewReader?: (
       credentialRef: string,
-    ) => Pick<GitHubSourceReader, "readSelection"> = (credentialRef) =>
-      new CredentialGitHubSourceReader(credentialRef, {
-        gh: () => ({
-          environment: ghEnvironment(store, { reference: credentialRef }),
-        }),
-      }),
+    ) => Pick<GitHubSourceReader, "readSelection">,
     private readonly githubSources?: GitHubSourceStore,
-    private readonly githubRefresh?: () => Promise<void>,
-    private readonly credentialStatus = async (projectId: string) => {
-      const config = store.githubConfiguration(projectId);
-      const status = await gitHubSourceCredentialStatus(config.credentialRef, {
-        gh: () => ({
-          environment: ghEnvironment(store, {
-            reference: "gh:github.com",
-          }),
-        }),
-      });
-      if (status.reason)
-        githubSources?.invalidateCredentialFailure(
-          {
-            projectId,
-            configVersion: config.version,
-            credentialRef: config.credentialRef,
-          },
-          status.reason,
-        );
-      return status;
-    },
+    _githubRefresh?: () => Promise<void>,
+    _credentialStatus?: (
+      projectId: string,
+    ) => ReturnType<typeof gitHubSourceCredentialStatus>,
   ) {
     this.commands = new DomainCommands(store);
   }
@@ -190,7 +146,7 @@ export class LocalOperatorUi {
       .projects()
       .map(
         (project) =>
-          `<li><a href="/project/${escapeHtml(project.id)}">${escapeHtml(project.name)}</a> (${project.paused ? "paused" : "active"})</li>`,
+          `<li><a href="/app/projects/${escapeHtml(project.id)}/settings">${escapeHtml(project.name)}</a> (${project.paused ? "paused" : "active"})</li>`,
       )
       .join("");
     const profiles = this.store
@@ -208,205 +164,6 @@ export class LocalOperatorUi {
         label: String(profile.name),
       }));
     return `<main><h1>cab</h1><h2>Projects</h2><ul>${projects}</ul>${form("project.create", field("name") + selectField("leadProfileId", [{ value: "", label: "Unconfigured" }, ...leadProfiles], ""), "projectId", csrfToken)}<h2>Profiles</h2><ul>${profiles}</ul>${form("profile.create", field("name") + textarea("instructions") + textarea("capabilities"), "profileId", csrfToken)}</main>`;
-  }
-
-  async projectWithCredentialStatus(projectId: string, csrfToken = "") {
-    const fence = () => {
-      const configuration = this.store.githubConfiguration(projectId);
-      return JSON.stringify([
-        configuration.version,
-        configuration.credentialRef,
-        this.store.githubActiveSelectionIds(projectId).sort(),
-      ]);
-    };
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const source = fence();
-      const credential = await this.credentialStatus(projectId);
-      if (source === fence())
-        return this.project(projectId, csrfToken, credential);
-    }
-    throw new DomainConflictError(
-      "Source configuration changed during read; reload the project.",
-    );
-  }
-
-  project(
-    projectId: string,
-    csrfToken = "",
-    credential?: Awaited<ReturnType<typeof gitHubSourceCredentialStatus>>,
-  ): string {
-    const project = this.store.project(projectId);
-    const routing = this.store.routing(projectId);
-    const github = this.store.githubConfiguration(projectId);
-    const links = this.store.repositoryLinks(projectId);
-    const activeGithub = new Set(
-      this.store.githubActiveSelectionIds(projectId),
-    );
-    const rule = ruleView(
-        this.githubSources?.readinessRule(projectId) ?? null,
-        this.githubSources,
-      ),
-      counted = this.githubSources?.selectionCounts(projectId);
-    const previewForms = github.selections
-      .map((raw) => {
-        const selection = selectionSchema.parse(raw);
-        const sync = this.githubSources?.syncState(projectId, selection.id);
-        // An unusable credential claims no observation, so no counts either.
-        const counts =
-          credential?.usable === false
-            ? null
-            : (counted?.get(selection.id) ?? null);
-        const warning = zeroMatchWarning(counts, rule);
-        const items = counts
-          ? ` ${escapeHtml(selectionCountsText(counts, rule))}.${warning ? ` ${escapeHtml(warning)} <a href="#github-readiness">Check readiness conditions</a>` : ""}`
-          : "";
-        const status =
-          credential?.usable === false
-            ? escapeHtml(
-                sourceCredentialExplanation(
-                  credential.reason ?? "missing-credential",
-                ),
-              )
-            : !sync
-              ? "never synced"
-              : Number(sync.complete) === 1
-                ? "complete"
-                : `partial: ${escapeHtml(sync.reason)}`;
-        return `<li>${escapeHtml(selection.id)} (${escapeHtml(selection.kind)}; ${activeGithub.has(selection.id) ? "active" : "inactive"}; ${status}; ${escapeHtml(sync?.refreshedAt ?? "never")})${items}${credential?.usable === false ? '<a href="#github-source-credential">Set or change source credential</a>' : ""}${form("github.preview", field("projectId", projectId, "hidden") + field("selectionId", selection.id, "hidden") + field("expectedVersion", String(github.version), "hidden"), undefined, csrfToken)}</li>`;
-      })
-      .join("");
-    const conflicts =
-      this.githubSources
-        ?.conflicts()
-        .filter((conflict) => conflict.projectIds.includes(projectId))
-        .map((conflict) => {
-          const task = this.store.task(conflict.taskId);
-          return `<li>Issue ${escapeHtml(conflict.nodeId)}: unresolved placement among ${escapeHtml(conflict.projectIds.join(", "))}${form(
-            "github.place",
-            field("projectId", String(task.projectId), "hidden") +
-              field("taskId", conflict.taskId, "hidden") +
-              field("expectedVersion", String(task.version), "hidden") +
-              selectField(
-                "chosenProjectId",
-                conflict.projectIds.map((id) => ({ value: id, label: id })),
-                String(task.projectId),
-              ),
-            undefined,
-            csrfToken,
-          )}</li>`;
-        })
-        .join("") ?? "";
-    const profiles = this.store.profiles();
-    const currentLead = profiles.find(
-      (profile) => profile.id === project.leadProfileId,
-    );
-    const leadOptions = [
-      { value: "", label: "Unconfigured" },
-      ...(currentLead?.revoked
-        ? [
-            {
-              value: String(currentLead.id),
-              label: `${String(currentLead.name)} (revoked)`,
-              disabled: true,
-            },
-          ]
-        : []),
-      ...profiles
-        .filter((profile) => !profile.revoked)
-        .map((profile) => ({
-          value: String(profile.id),
-          label: String(profile.name),
-        })),
-    ];
-    const tasks = this.store
-      .tasks(projectId)
-      .map(
-        (task) =>
-          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}${closureText(this.store.providerClosure(String(task.id)))}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a></li>`,
-      )
-      .join("");
-    const candidateProfileIds = JSON.stringify(
-      JSON.parse(String(routing.candidateProfileIds)) as string[],
-      null,
-      2,
-    );
-    const delivery = this.store.deliveryConfiguration(projectId);
-    const credentialReferenceStatus = routing.credentialAvailable
-      ? "credential reference configured"
-      : "credential reference not configured";
-    return `<main><h1>${escapeHtml(project.name)}</h1><p>${project.paused ? "Paused" : "Active"}. Lead profile ${escapeHtml(project.leadProfileId ?? "unconfigured")}. Instructions revision ${escapeHtml(project.instructionsRevision)}.</p><h2>Tasks</h2><ul>${tasks}</ul>${form("task.create", field("projectId", projectId, "hidden") + field("title") + textarea("outcome") + field("ready", "1", "checkbox", false, "Create and start (mark Ready)"), "taskId", csrfToken)}<h2>Project configuration</h2>${form("project.configure", field("projectId", projectId, "hidden") + field("expectedVersion", String(project.version), "hidden") + field("instructionsRevision", String(project.instructionsRevision), "hidden") + field("name", String(project.name)) + selectField("leadProfileId", leadOptions, String(project.leadProfileId ?? "")) + textarea("instructions", String(project.instructions)) + field("paused", "1", "checkbox", Boolean(project.paused)), undefined, csrfToken)}<h2>Routing</h2><p>${routing.enabled ? "Enabled" : "Disabled"}; ${credentialReferenceStatus}</p>${form("routing.configure", field("projectId", projectId, "hidden") + field("expectedVersion", String(routing.version), "hidden") + field("enabled", "1", "checkbox", Boolean(routing.enabled)) + textarea("guidance", String(routing.guidance)) + field("credentialRef") + field("clearCredentialRef", "1", "checkbox") + textarea("candidateProfileIds", candidateProfileIds), undefined, csrfToken)}<h2>GitHub delivery</h2><p>${delivery.credentialConfigured ? "Credential reference configured" : "Credential reference not configured"}. Mode: ${escapeHtml(delivery.mode)}; external actions default to denied.</p>${form(
-      "delivery.configure",
-      hidden("projectId", projectId) +
-        hidden("expectedVersion", String(delivery.version)) +
-        selectField(
-          "mode",
-          [
-            { value: "reviewable-pr", label: "Reviewable PR" },
-            { value: "through-merge", label: "Through merge" },
-          ],
-          delivery.mode,
-        ) +
-        field("credentialRef") +
-        field("clearCredentialRef", "1", "checkbox") +
-        field("branchPrefix", delivery.branchPrefix ?? "") +
-        textarea("grants", JSON.stringify(delivery.grants, null, 2)) +
-        textarea(
-          "requiredChecks",
-          JSON.stringify(delivery.requiredChecks, null, 2),
-        ),
-      undefined,
-      csrfToken,
-    )}<h2 id="github-source-credential">GitHub source</h2><p>Credential: ${credential?.source === "gh" ? "GitHub CLI" : credential?.source === "env" ? "environment variable" : github.credentialRef ? "configured" : "not configured"}. ${credential ? (credential.usable ? "Usable." : escapeHtml(sourceCredentialExplanation(credential.reason ?? "missing-credential"))) : ""} ${credential?.gh.state === "signed-in" ? `Detected GitHub CLI account @${escapeHtml(credential.gh.login)}.` : ""} Selections require preview before activation at the current source version.</p><p>${github.readiness ? `Readiness rule: ${escapeHtml(ruleText(ruleView(github.readiness, this.githubSources)))}. Set readiness to null to remove it.` : noRuleText}</p>${form(
-      "github.configure",
-      field("projectId", projectId, "hidden") +
-        field("expectedVersion", String(github.version), "hidden") +
-        selectField(
-          "sourceCredentialMode",
-          [
-            { value: "keep", label: "Keep current" },
-            { value: "gh", label: "GitHub CLI" },
-            { value: "env", label: "Environment variable" },
-            { value: "clear", label: "Clear" },
-          ],
-          "keep",
-        ) +
-        field(
-          "credentialRef",
-          "",
-          "text",
-          false,
-          "Environment reference (env:NAME); values stay private",
-        ) +
-        field("clearCredentialRef", "1", "checkbox") +
-        textarea("selections", JSON.stringify(github.selections, null, 2)) +
-        `<div id="github-readiness">${textarea("readiness", JSON.stringify(github.readiness, null, 2))}</div>` +
-        selectField(
-          "closedIssues",
-          [
-            { value: "skip", label: "Skip closed issues" },
-            { value: "done", label: "Treat closure as Done" },
-          ],
-          github.closedIssues,
-        ),
-      undefined,
-      csrfToken,
-    )}<h2 id="repositories">Repositories</h2>${form(
-      "repositories.configure",
-      field("projectId", projectId, "hidden") +
-        field("expectedVersion", String(links.version), "hidden") +
-        textarea(
-          "repositories",
-          JSON.stringify(
-            links.links.map(
-              ({ gitCommonDirectory: _ignored, ...repository }) => repository,
-            ),
-            null,
-            2,
-          ),
-        ),
-      undefined,
-      csrfToken,
-    )}<ul>${previewForms}</ul>${this.githubRefresh ? form("github.refresh", field("projectId", projectId, "hidden"), undefined, csrfToken) : ""}<h3>Unresolved placement</h3><ul>${conflicts}</ul></main>`;
   }
 
   task(taskId: string, csrfToken = ""): string {
@@ -498,11 +255,6 @@ export class LocalOperatorUi {
   }
 
   async submit(fields: Record<string, string>): Promise<unknown> {
-    if (fields.type === "github.refresh") {
-      if (!this.githubRefresh) throw new Error("GitHub refresh unavailable");
-      await this.githubRefresh();
-      return { refreshed: true };
-    }
     const common = {
       key: fields.key || randomUUID(),
       actor: "operator" as const,
@@ -524,32 +276,6 @@ export class LocalOperatorUi {
           leadProfileId: fields.leadProfileId || null,
         };
         break;
-      case "project.configure": {
-        const projectId = required("projectId");
-        const instructions = fields.instructions;
-        const capturedRevision = Number(fields.instructionsRevision);
-        const capturedInstructions =
-          Number.isSafeInteger(capturedRevision) && capturedRevision > 0
-            ? this.store.instructionRevision(projectId, capturedRevision)
-            : undefined;
-        command = {
-          ...common,
-          type: "project.configure",
-          projectId,
-          expectedVersion: version(),
-          name: required("name"),
-          leadProfileId:
-            fields.leadProfileId === undefined
-              ? undefined
-              : fields.leadProfileId || null,
-          ...(instructions === undefined ||
-          instructions === capturedInstructions
-            ? {}
-            : { instructions }),
-          paused: fields.paused === "1",
-        };
-        break;
-      }
       case "task.create":
         command = {
           ...common,
@@ -595,150 +321,6 @@ export class LocalOperatorUi {
           revoked: fields.revoked === "1",
         };
         break;
-      case "routing.configure":
-        command = {
-          ...common,
-          type: "routing.configure",
-          projectId: required("projectId"),
-          expectedVersion: version(),
-          enabled: fields.enabled === "1",
-          guidance: fields.guidance ?? "",
-          credentialRef:
-            fields.clearCredentialRef === "1"
-              ? null
-              : fields.credentialRef || undefined,
-          candidateProfileIds: fields.candidateProfileIds
-            ? JSON.parse(fields.candidateProfileIds)
-            : [],
-        };
-        break;
-      case "delivery.configure": {
-        const projectId = required("projectId"),
-          current = this.store.deliveryCredentialReference(projectId);
-        command = {
-          ...common,
-          type: "delivery.configure",
-          projectId,
-          expectedVersion: version(),
-          mode: required("mode") as "reviewable-pr" | "through-merge",
-          credentialRef:
-            fields.clearCredentialRef === "1"
-              ? null
-              : fields.credentialRef || current,
-          ...(fields.branchPrefix ? { branchPrefix: fields.branchPrefix } : {}),
-          grants: JSON.parse(required("grants")),
-          requiredChecks: JSON.parse(required("requiredChecks")),
-        };
-        break;
-      }
-      case "github.configure": {
-        const mode =
-          fields.sourceCredentialMode === undefined
-            ? undefined
-            : z
-                .enum(["keep", "gh", "env", "clear"])
-                .parse(fields.sourceCredentialMode);
-        command = {
-          ...common,
-          type: "github.configure",
-          projectId: required("projectId"),
-          expectedVersion: version(),
-          ...(fields.clearCredentialRef === "1" || mode === "clear"
-            ? { credentialRef: null }
-            : mode === "gh"
-              ? { credentialRef: "gh:github.com" }
-              : mode === "env"
-                ? {
-                    credentialRef: z
-                      .string()
-                      .regex(/^env:[A-Z][A-Z0-9_]*$/)
-                      .parse(required("credentialRef")),
-                  }
-                : mode === "keep"
-                  ? {}
-                  : fields.credentialRef
-                    ? { credentialRef: fields.credentialRef }
-                    : {}),
-          selections: JSON.parse(required("selections")),
-          readiness: JSON.parse(required("readiness")),
-          ...(fields.closedIssues === undefined
-            ? {}
-            : { closedIssues: closedIssuesSchema.parse(fields.closedIssues) }),
-        };
-        break;
-      }
-      case "repositories.configure":
-        command = {
-          ...common,
-          type: "repositories.configure",
-          projectId: required("projectId"),
-          expectedVersion: version(),
-          repositories: JSON.parse(required("repositories")),
-        };
-        break;
-      case "github.preview": {
-        const projectId = required("projectId");
-        command = {
-          ...common,
-          type: "github.activate",
-          projectId,
-          selectionId: required("selectionId"),
-          expectedVersion: version(),
-        };
-        const recorded = this.store.recordedCommand(command);
-        if (recorded !== undefined) return recorded;
-        const config = this.store.githubConfiguration(projectId);
-        if (config.version !== version())
-          throw new DomainConflictError("Version conflict");
-        const selection = config.selections
-          .map((raw) => selectionSchema.parse(raw))
-          .find((item) => item.id === required("selectionId"));
-        if (!selection)
-          throw new DomainConflictError("Unknown GitHub selection");
-        if (!config.credentialRef) {
-          this.githubSources?.invalidateCredentialFailure(
-            {
-              projectId,
-              configVersion: config.version,
-              credentialRef: config.credentialRef,
-            },
-            "missing-credential",
-          );
-          throw new SourceCredentialConflictError(
-            "missing-credential",
-            projectId,
-          );
-        }
-        const preview = await this.githubPreviewReader(
-          config.credentialRef,
-        ).readSelection(selection);
-        if (!preview.complete) {
-          if (
-            [
-              "missing-credential",
-              "invalid-credential-reference",
-              "gh-not-installed",
-              "gh-not-signed-in",
-              "gh-unreadable",
-            ].includes(preview.reason)
-          ) {
-            this.githubSources?.invalidateCredentialFailure(
-              {
-                projectId,
-                configVersion: config.version,
-                credentialRef: config.credentialRef,
-              },
-              preview.reason as SourceCredentialReason,
-            );
-            throw new SourceCredentialConflictError(
-              preview.reason as SourceCredentialReason,
-              projectId,
-            );
-          }
-          throw new DomainConflictError("GitHub preview incomplete");
-        }
-        break;
-      }
       case "source.review":
         command = {
           ...common,
@@ -754,16 +336,6 @@ export class LocalOperatorUi {
               "resume-source-hold",
             ])
             .parse(required("decision")),
-        };
-        break;
-      case "github.place":
-        command = {
-          ...common,
-          type: "github.place",
-          projectId: required("projectId"),
-          taskId: required("taskId"),
-          chosenProjectId: required("chosenProjectId"),
-          expectedVersion: version(),
         };
         break;
       case "assignment.create":
@@ -844,16 +416,8 @@ const MAX_FORM_FIELDS = 128;
 const MAX_FORM_VALUE_LENGTH = 8 * 1024;
 const COMMANDS = new Set([
   "project.create",
-  "project.configure",
   "profile.create",
   "profile.configure",
-  "routing.configure",
-  "delivery.configure",
-  "github.configure",
-  "repositories.configure",
-  "github.preview",
-  "github.refresh",
-  "github.place",
   "source.review",
   "task.create",
   "task.configure",
@@ -1216,8 +780,7 @@ function isSafeRedirect(location: string): boolean {
 }
 
 // Pages of the server-rendered operator UI; only these may start a pre-login session.
-const LEGACY_PAGE =
-  /^\/(?:$|runtime(?:\/|$)|(?:project|task|profile|assignment)\/)/;
+const LEGACY_PAGE = /^\/(?:$|runtime(?:\/|$)|(?:task|profile|assignment)\/)/;
 
 /** Authenticated loopback HTTP server for the standalone operator surface. */
 export class LocalOperatorHttp {
@@ -1455,12 +1018,7 @@ export class LocalOperatorHttp {
             return;
           }
           let html: string | undefined;
-          if (kind === "project" && value)
-            html = await this.ui.projectWithCredentialStatus(
-              value,
-              authorized.csrfToken,
-            );
-          else if (kind === "task" && value)
+          if (kind === "task" && value)
             html = this.ui.task(value, authorized.csrfToken);
           else if (kind === "profile" && value)
             html = this.ui.profile(value, authorized.csrfToken);
@@ -1539,7 +1097,7 @@ export class LocalOperatorHttp {
                 : 400;
           const body =
             error instanceof SourceCredentialConflictError
-              ? `<main><h1>GitHub source credential unavailable</h1><p>${escapeHtml(sourceCredentialExplanation(error.reason))}</p><a href="/project/${encodeURIComponent(error.projectId)}#github-source-credential">Set or change source credential</a></main>`
+              ? `<main><h1>GitHub source credential unavailable</h1><p>${escapeHtml(sourceCredentialExplanation(error.reason))}</p><a href="/app/projects/${encodeURIComponent(error.projectId)}/settings?tab=github">Set or change source credential</a></main>`
               : error instanceof DomainConflictError
                 ? "<main><h1>Change conflict</h1><p>Saved state or a prior command conflicts with this request. Reload the page and review before retrying.</p></main>"
                 : "<main><h1>Request rejected</h1></main>";

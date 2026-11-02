@@ -381,9 +381,12 @@ for (const viewport of [
       true,
     );
     // The legacy project page keeps its zoom and styling coverage by direct navigation.
-    await page.goto(`${web.origin}/project/${projectId}`);
+    await page.goto(`${web.origin}/app/projects/${projectId}/settings`);
     await page
-      .getByRole("heading", { name: "Project configuration", exact: true })
+      .getByRole("navigation", {
+        name: "Project configuration sections",
+        exact: true,
+      })
       .waitFor();
     await page.goto(`${web.origin}/app`);
     await page

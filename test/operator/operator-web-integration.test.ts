@@ -41,7 +41,6 @@ test("built React assets, JSON and retained routes share one service listener an
   for (const asset of assets)
     assert.equal((await fetch(`${web.origin}${asset}`)).status, 200);
   for (const path of [
-    `/project/${projectId}`,
     "/runtime",
     "/app",
     `/app/projects/${projectId}`,

@@ -37,16 +37,6 @@ test("operator project, profile, routing, and task views render scoped editable 
       name: "Private operator project",
       leadProfileId: profile.id,
     })) as { id: string };
-    await ui.submit({
-      key: randomUUID(),
-      type: "routing.configure",
-      projectId: project.id,
-      expectedVersion: "1",
-      enabled: "1",
-      guidance: "Use the operator-selected profile",
-      credentialRef: "env:ROUTING_SECRET_REF",
-      candidateProfileIds: JSON.stringify([profile.id]),
-    });
     const task = (await ui.submit({
       key: randomUUID(),
       type: "task.create",
@@ -65,12 +55,10 @@ test("operator project, profile, routing, and task views render scoped editable 
     })) as { id: string };
 
     const home = ui.home(csrfToken);
-    const projectPage = ui.project(project.id, csrfToken);
     const profilePage = ui.profile(profile.id, csrfToken);
     const taskPage = ui.task(task.id, csrfToken);
     for (const [page, commands] of [
       [home, ["project.create", "profile.create"]],
-      [projectPage, ["project.configure", "task.create", "routing.configure"]],
       [profilePage, ["profile.configure"]],
       [taskPage, ["task.configure"]],
     ] as const) {
@@ -83,10 +71,6 @@ test("operator project, profile, routing, and task views render scoped editable 
         );
       }
     }
-    assert.ok(/name="credentialRef"/.test(projectPage));
-    assert.ok(/name="candidateProfileIds"/.test(projectPage));
-    assert.ok(projectPage.includes(profile.id));
-    assert.ok(!projectPage.includes("ROUTING_SECRET_REF"));
     assert.ok(taskPage.includes("Local task title"));
     assert.ok(taskPage.includes("Local task outcome"));
     assert.ok(!taskPage.includes(assignment.id));
@@ -100,9 +84,7 @@ test("operator project, profile, routing, and task views render scoped editable 
       /Readiness and configuration eligibility do not confirm runtime admission or execution\./,
     );
     assert.ok(taskPage.includes(`/runtime/task/${task.id}`));
-    assert.ok(projectPage.includes(`/runtime/task/${task.id}`));
     assert.ok(!taskPage.includes("/coordination/"));
-    assert.ok(!projectPage.includes("/coordination/"));
     const assignmentPage = ui.assignment(assignment.id);
     assert.match(assignmentPage, /Assignment lifecycle state: pending/);
     assert.ok(assignmentPage.includes(`/runtime/assignment/${assignment.id}`));

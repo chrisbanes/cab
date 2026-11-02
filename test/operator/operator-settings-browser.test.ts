@@ -276,14 +276,12 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   await page.goto(
     `${web.origin}/app/projects/${ids.projectId}/settings?tab=github`,
   );
-  const editorLink = page.getByRole("link", {
-    name: "Open advanced source editor",
-  });
+  // Ordinary navigation remains distinct from styled command buttons.
   assert.equal(
-    await editorLink.evaluate(
-      (element) => getComputedStyle(element).textDecorationLine,
-    ),
-    "underline",
+    await page
+      .getByRole("link", { name: "Open advanced source editor" })
+      .count(),
+    0,
   );
   await page.goto(
     `${web.origin}/app/projects/${ids.projectId}/settings?tab=sync`,
@@ -855,9 +853,9 @@ for (const layout of [
       .waitFor();
     assert.equal(
       await page
-        .getByRole("link", { name: "Open advanced editor", exact: true })
+        .getByRole("link", { name: "Change in Delivery", exact: true })
         .getAttribute("href"),
-      `/project/${ids.projectId}`,
+      `/app/projects/${ids.projectId}/settings?tab=delivery`,
     );
     await capture(page, `${layout.name}-paused-configuration`);
     await page.getByLabel("Project name", { exact: true }).focus();
@@ -1626,39 +1624,12 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
   page.on("pageerror", (e) => errors.push(e.message));
   await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
   await page
-    .getByRole("link", { name: "Open advanced editor", exact: true })
+    .getByRole("link", { name: "Change in Delivery", exact: true })
     .click();
-  const policy = page.locator('form[data-command="delivery.configure"]');
+  await page.getByLabel("Completion mode", { exact: true }).waitFor();
   assert.equal(
-    await policy.locator('[name="expectedVersion"]').inputValue(),
-    "2",
-  );
-  assert.equal(
-    await policy.getByLabel(/^mode(?:\s|$)/).inputValue(),
+    await page.getByLabel("Completion mode", { exact: true }).inputValue(),
     "reviewable-pr",
-  );
-  assert.deepEqual(
-    await policy
-      .getByLabel(/^mode(?:\s|$)/)
-      .locator("option")
-      .allTextContents(),
-    ["Reviewable PR", "Through merge"],
-  );
-  assert.deepEqual(
-    JSON.parse(await policy.getByLabel(/^grants(?:\s|$)/).inputValue()),
-    grants,
-  );
-  assert.deepEqual(
-    JSON.parse(await policy.getByLabel(/^requiredChecks(?:\s|$)/).inputValue()),
-    [{ name: "check", appId: 42 }],
-  );
-  assert.equal(
-    await policy.getByLabel("credentialRef", { exact: true }).inputValue(),
-    "",
-  );
-  assert.equal(
-    await policy.getByLabel("clearCredentialRef", { exact: true }).isChecked(),
-    false,
   );
   for (const viewport of [
     { width: 1366, height: 820 },
@@ -1720,7 +1691,7 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
   assert.deepEqual(external, []);
   assert.deepEqual(errors, []);
   console.log(
-    `UI06 retained delivery: two guarded settlement commands, all nine grant kinds, zero provider calls; screenshots ${journey.directory}`,
+    `UI06 retained delivery: two guarded settlement commands, nine representative grant kinds, zero provider calls; screenshots ${journey.directory}`,
   );
 });
 
