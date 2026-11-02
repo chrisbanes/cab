@@ -698,6 +698,8 @@ async function headerHoldCommand(page, kind) {
       (candidate.request().postData() ?? "").includes(`"task.${kind}"`),
     { timeout: 10_000 },
   );
+  // Decide on the phone disclosure only once the header has rendered.
+  await page.locator(".task-header-actions").waitFor({ state: "attached" });
   const toggle = page.locator(".task-header-overflow-toggle");
   if (await toggle.isVisible()) await toggle.click();
   await page
